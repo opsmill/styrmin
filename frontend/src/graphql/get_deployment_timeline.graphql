@@ -18,9 +18,17 @@ query GetDeploymentTimeline($deploymentId: UUID!) {
         endedAt
         durationSeconds
         attemptCount
+        errors {
+          attempt
+          message
+          occurredAt
+        }
         error
         detail
+        rolledBackAt
+        rollbackMessage
         hasOutput
+        outputTruncated
       }
     }
     applicationVersion

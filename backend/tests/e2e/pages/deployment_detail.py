@@ -8,12 +8,18 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, expect
 
 from tests.e2e.drivers.errors import ScenarioActionError, ScenarioTimeout
-from tests.e2e.drivers.refs import BackupRef, RestoreRef, StepRef, TimelineEntry
+from tests.e2e.drivers.refs import (
+    BackupRef,
+    RestoreRef,
+    StepErrorRef,
+    StepRef,
+    TimelineEntry,
+)
 
 # Shared with ``pages/environments.py`` — both read their state off ``data-*``
 # test hooks and must fail identically when one is missing.
@@ -38,6 +44,12 @@ _READ_STEP_ROWS_JS = """
 rows => rows.map(row => ({
   ...row.dataset,
   name: row.querySelector('[data-testid=step-name]')?.textContent ?? '',
+  errors: [...row.querySelectorAll('[data-testid=step-error]')].map(error => ({
+    attempt: error.dataset.attempt,
+    occurredAt: error.dataset.occurredAt,
+    message: error.querySelector('[data-testid=step-error-message]')?.textContent ?? '',
+  })),
+  detail: row.querySelector('[data-testid=step-detail]')?.textContent ?? null,
 }))
 """
 
@@ -49,35 +61,41 @@ def _iso_or_none(value: str | None) -> str | None:
     return datetime.fromisoformat(value).isoformat() if value else None
 
 
+def _step_ref_from_row(row: dict[str, Any], *, context: str) -> StepRef:
+    missing = [attr for attr in _STEP_REQUIRED_ATTRS if not row.get(attr)]
+    if missing:
+        raise ScenarioActionError(
+            f"{context} rendered a step row without {missing} "
+            "(frontend test-hook may have been removed or renamed)"
+        )
+    return StepRef(
+        id=row["stepId"],
+        key=row["stepKey"],
+        name=row["name"].strip(),
+        kind=row["stepKind"],
+        status=row["stepStatus"],
+        started_at=_iso_or_none(row.get("stepStartedAt")),
+        ended_at=_iso_or_none(row.get("stepEndedAt")),
+        attempt_count=int(row["stepAttempts"]),
+        # StepList shows the newest error first; the API lists the oldest first.
+        errors=tuple(
+            StepErrorRef(
+                attempt=int(error["attempt"]),
+                message=error["message"],
+                occurred_at=_iso_or_none(error.get("occurredAt")),
+            )
+            for error in reversed(row.get("errors") or [])
+        ),
+        detail=row.get("detail"),
+        has_output=row.get("stepHasOutput") == "true",
+    )
+
+
 async def _read_steps(entry: Locator, *, context: str) -> tuple[StepRef, ...]:
     rows = await entry.locator("[data-testid=step-row]").evaluate_all(
         _READ_STEP_ROWS_JS
     )
-    steps: list[StepRef] = []
-    for row in rows:
-        missing = [attr for attr in _STEP_REQUIRED_ATTRS if not row.get(attr)]
-        if missing:
-            raise ScenarioActionError(
-                f"{context} rendered a step row without {missing} "
-                "(frontend test-hook may have been removed or renamed)"
-            )
-        steps.append(
-            StepRef(
-                id=row["stepId"],
-                key=row["stepKey"],
-                name=row["name"].strip(),
-                kind=row["stepKind"],
-                status=row["stepStatus"],
-                started_at=_iso_or_none(row.get("stepStartedAt")),
-                ended_at=_iso_or_none(row.get("stepEndedAt")),
-                attempt_count=int(row["stepAttempts"]),
-                # StepList renders errors and FluxCD detail from T060.
-                errors=(),
-                detail=None,
-                has_output=row.get("stepHasOutput") == "true",
-            )
-        )
-    return tuple(steps)
+    return tuple(_step_ref_from_row(row, context=context) for row in rows)
 
 
 class DeploymentDetailPage:

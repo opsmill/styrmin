@@ -1,0 +1,7 @@
+query GetStepOutput($stepId: UUID!) {
+  step(stepId: $stepId) {
+    id
+    output
+    outputTruncated
+  }
+}

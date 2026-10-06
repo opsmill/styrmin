@@ -40,7 +40,7 @@ from tests.e2e.drivers.api_driver import (
 from tests.e2e.drivers.protocol import ScenarioDriver
 from tests.e2e.drivers.refs import TERMINAL_ENVIRONMENT_OPERATION_STATUSES
 from tests.e2e.drivers.ui_driver import UiScenarioDriver
-from tests.e2e.pages.deployment_detail import _iso_or_none
+from tests.e2e.pages.deployment_detail import _iso_or_none, _step_ref_from_row
 
 # The environment-level backup/restore surface (spec 001-env-backup-restore).
 # Spelled out rather than derived so a method silently dropped from the
@@ -431,3 +431,75 @@ def test_step_refs_use_the_values_the_step_rows_publish() -> None:
     assert ref.ended_at == _iso_or_none("2026-10-06T10:00:09Z")
     assert [(e.attempt, e.message) for e in ref.errors] == [(1, "quota exceeded")]
     assert _iso_or_none("") is None
+
+
+def test_ui_step_rows_with_failures_match_the_api_step_refs() -> None:
+    """Errors and FluxCD detail read from a step row equal the API driver's.
+
+    ``StepList`` lists errors newest first, so the UI driver reverses them back
+    to the API's oldest-first order.
+    """
+    errors = [
+        {
+            "attempt": 1,
+            "message": "quota exceeded",
+            "occurredAt": "2026-10-06T10:00:03+00:00",
+        },
+        {
+            "attempt": 2,
+            "message": "not ready\nPods not ready: app-1 (app: ImagePullBackOff)",
+            "occurredAt": "2026-10-06T10:00:07.500000Z",
+        },
+    ]
+    step = GetDeploymentTimelineDeploymentTimelineTaskSteps.model_validate(
+        {
+            "id": "7f6c1f3e-5d0b-4b8e-9a43-0c7c0b1d2e3f",
+            "key": "operator:helmrelease",
+            "name": "Install or upgrade the HelmRelease",
+            "kind": "OPERATOR_PHASE",
+            "status": "FAILED",
+            "startedAt": "2026-10-06T10:00:00+00:00",
+            "endedAt": "2026-10-06T10:00:09Z",
+            "durationSeconds": 9.0,
+            "attemptCount": 2,
+            "errors": errors,
+            "error": errors[-1]["message"],
+            "detail": "UpgradeFailed: Helm upgrade failed",
+            "hasOutput": True,
+        }
+    )
+    # What _READ_STEP_ROWS_JS returns for the row StepList renders.
+    row = {
+        "stepId": "7f6c1f3e-5d0b-4b8e-9a43-0c7c0b1d2e3f",
+        "stepKey": "operator:helmrelease",
+        "stepKind": "OPERATOR_PHASE",
+        "stepStatus": "FAILED",
+        "stepStartedAt": "2026-10-06T10:00:00+00:00",
+        "stepEndedAt": "2026-10-06T10:00:09Z",
+        "stepAttempts": "2",
+        "stepHasOutput": "true",
+        "name": "Install or upgrade the HelmRelease",
+        "errors": [
+            {**error, "attempt": str(error["attempt"])} for error in reversed(errors)
+        ],
+        "detail": "UpgradeFailed: Helm upgrade failed",
+    }
+
+    assert _step_ref_from_row(row, context="test") == _step_ref(step)
+
+
+def test_ui_step_rows_without_failures_have_no_errors_or_detail() -> None:
+    row = {
+        "stepId": "s-1",
+        "stepKey": "plan",
+        "stepKind": "PLAN",
+        "stepStatus": "SUCCEEDED",
+        "stepAttempts": "1",
+        "name": "Plan the changes",
+        "errors": [],
+        "detail": None,
+    }
+
+    ref = _step_ref_from_row(row, context="test")
+
+    assert (ref.errors, ref.detail, ref.has_output) == ((), None, False)
