@@ -162,7 +162,11 @@ async def execute_velero_backup_flow(
     from styrmin_backend.agent.service.kubernetes.dependency import (
         load_kubernetes_config,
     )
-    from styrmin_backend.agent.service.kubernetes.velero.client import VeleroClient
+    from styrmin_backend.agent.service.kubernetes.velero.client import (
+        VeleroClient,
+        VeleroClientError,
+        pod_volume_bytes,
+    )
 
     await load_kubernetes_config()
     api_client = k8s_client.ApiClient()
@@ -194,17 +198,29 @@ async def execute_velero_backup_flow(
         )
         await component_steps.finish(result)
 
-        # Store result for cross-worker retrieval via Prefect Variable
         status = result.get("status", {})
+        volume_bytes: int | None = None
+        if status.get("phase") == "Completed":
+            # Velero's Backup status has no byte size, only on its PodVolumeBackups.
+            # A size we cannot read must not fail a backup that Velero stored.
+            try:
+                volume_bytes = pod_volume_bytes(
+                    await client.list_pod_volume_backups(
+                        velero_namespace, velero_backup_name
+                    )
+                )
+            except VeleroClientError as e:
+                logger.warning(f"Could not read the size of {velero_backup_name}: {e}")
+
+        # Store result for cross-worker retrieval via Prefect Variable
         await Variable.set(  # type: ignore[misc]
             name=f"velero-result-{flow_run_ctx.id}",
             value={
+                # Computed by Styrmin, so it sits outside Velero's ``status``.
+                "volume_bytes": volume_bytes,
                 "status": {
                     "phase": status.get("phase", ""),
                     "failureReason": _failure_reason("backup", status),
-                    "backupItemOperationsCompleted": status.get(
-                        "backupItemOperationsCompleted"
-                    ),
                     # Velero's own expiration timestamp (creation + spec.ttl),
                     # recorded on the backup record so operators can read
                     # "when does this disappear?" without cluster access.
@@ -212,7 +228,7 @@ async def execute_velero_backup_flow(
                     # includes the PartiallyFailed phase. Absent on a Failed
                     # backup — nothing was stored, so nothing expires.
                     "expiration": status.get("expiration"),
-                }
+                },
             },
             overwrite=True,
         )
@@ -684,12 +700,11 @@ async def execute_backup_workflow(
 
         async with get_unit_of_work() as uow:
             if velero_phase == "Completed":
-                size_bytes = status.get("backupItemOperationsCompleted")
                 await update_backup_status(
                     backup_id=backup_uuid,
                     status=BackupStatus.COMPLETED,
                     uow=uow,
-                    size_bytes=size_bytes,
+                    size_bytes=result.get("volume_bytes"),
                     metadata_updates=metadata_updates,
                 )
                 if not expiration:

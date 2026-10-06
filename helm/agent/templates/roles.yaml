@@ -168,7 +168,7 @@ rules:
   - "backupstoragelocations"
   verbs:
   - "*"
-# Backup flows read PodVolumeBackups to record one step per component
+# Backup flows read PodVolumeBackups to record one step per component and Backup.sizeBytes
 - apiGroups:
   - "velero.io"
   resources:

@@ -23,6 +23,7 @@ const config: CodegenConfig = {
         scalars: {
           UUID: "string",
           JSON: "Record<string, unknown>",
+          BigInt: "number",
         },
       },
     },

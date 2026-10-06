@@ -269,6 +269,9 @@ type = "typing.Any"
 [tool.ariadne-codegen.scalars.DateTime]
 type = "datetime.datetime"
 
+[tool.ariadne-codegen.scalars.BigInt]
+type = "int"
+
 [tool.rumdl]
 exclude = [".venv", "node_modules", "dev", ".claude", "specs", ".github/agents", ".specify/extensions", ".specify/templates", ".agents"]
 disable = [

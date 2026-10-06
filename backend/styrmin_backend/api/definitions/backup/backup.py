@@ -12,6 +12,7 @@ from styrmin_backend.api.definitions.deployment.model import (
 from styrmin_backend.api.definitions.step.model import Step
 from styrmin_backend.api.loaders import backup_steps
 from styrmin_backend.api.resolvers import resolve_related
+from styrmin_backend.api.scalars import BigInt
 from styrmin_backend.db.models import Backup as BackupModel
 from styrmin_backend.db.models import BackupStatus as BackupStatusDB
 from styrmin_backend.services.backup.metadata import read_backup_metadata
@@ -24,7 +25,7 @@ BackupStatusType = strawberry.enum(BackupStatusDB, name="BackupStatus")
 class ComponentBackupStatus:
     component_name: str
     status: str
-    size_bytes: int | None = None
+    size_bytes: BigInt | None = None
     error_message: str | None = None
 
 
@@ -37,7 +38,16 @@ class Backup:
     updated_on: datetime | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    size_bytes: int | None = None
+    size_bytes: BigInt | None = strawberry.field(
+        default=None,
+        description=(
+            "Bytes of volume data the backup read, summed over Velero's "
+            "PodVolumeBackups. Measured before deduplication and compression, "
+            "so the space used in object storage is usually smaller. Kubernetes "
+            "resource manifests are not counted. Null when the backup captured "
+            "no volume data, did not complete, or the size could not be read."
+        ),
+    )
     error_message: str | None = None
     instance_id: UUID
 

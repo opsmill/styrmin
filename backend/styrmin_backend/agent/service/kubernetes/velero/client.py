@@ -49,6 +49,25 @@ def failure_message(resource: str, status: dict[str, Any]) -> str:
     return message
 
 
+def pod_volume_bytes(pod_volume_backups: list[dict[str, Any]]) -> int | None:
+    """Sum ``status.progress.totalBytes`` over the completed PodVolumeBackups of one backup.
+
+    This is the volume data the file-system backup read, before kopia deduplicates and
+    compresses it; manifests are not counted. None when no PodVolumeBackup completed.
+    """
+    completed = [
+        item.get("status") or {}
+        for item in pod_volume_backups
+        if (item.get("status") or {}).get("phase") == "Completed"
+    ]
+    if not completed:
+        return None
+    return sum(
+        int((status.get("progress") or {}).get("totalBytes") or 0)
+        for status in completed
+    )
+
+
 class VeleroClientError(Exception):
     """Base error for Velero client operations."""
 

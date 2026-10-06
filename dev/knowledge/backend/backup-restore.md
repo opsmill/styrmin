@@ -122,6 +122,20 @@ class Backup(StyrminModel, table=True):
     restores: list[Restore]       # One-to-many relationship
 ```
 
+`size_bytes` is the sum of `status.progress.totalBytes` over the backup's
+`Completed` PodVolumeBackups, listed with `VeleroClient.list_pod_volume_backups`
+(the same listing the component steps use). Velero's
+Backup status has no byte size: `backupItemOperationsCompleted` is a count of
+async plugin operations and must not be stored here (#136). The value is the
+logical volume data before kopia deduplication and compression, and excludes
+the resource manifests. It stays `NULL` when no PodVolumeBackup completed,
+when the phase is not `Completed`, or when listing them fails; a listing
+failure is logged and never fails the backup. Listing needs `get`/`list` on
+`velero.io/podvolumebackups`, granted in both Helm charts. Sizes pass 2 GiB, so
+the column is `BIGINT` and GraphQL exposes it as the `BigInt` scalar
+(`api/scalars.py`); every `strawberry.Schema` built from the app's `Query` must
+pass `StrawberryConfig(scalar_map=SCALAR_MAP)`.
+
 `metadata_` is a plain `JSON` column carrying per-operation metadata:
 
 | Key | Written by | Meaning |
@@ -290,8 +304,8 @@ Results are passed between workers via **Prefect Variables** (a cross-worker com
 
 **Backup:**
 
-1. `execute_backup_workflow` (INTERNAL) — marks backup IN_PROGRESS, resolves the retention TTL and records it (see [Retention TTL](#retention-ttl-servicesbackupttlpy)), builds Velero CRD, creates an action token, dispatches to USER flow with the token and `STYRMIN_BACKUP_ID`, updates status and `expires_at` from result
-2. `execute_velero_backup_flow` (USER) — creates Velero Backup CRD, polls completion, records one step per component, stores result (phase + `status.expiration`) in Prefect Variable
+1. `execute_backup_workflow` (INTERNAL) — marks backup IN_PROGRESS, resolves the retention TTL and records it (see [Retention TTL](#retention-ttl-servicesbackupttlpy)), builds Velero CRD, creates an action token, dispatches to USER flow with the token and `STYRMIN_BACKUP_ID`, updates status, `size_bytes` and `expires_at` from result
+2. `execute_velero_backup_flow` (USER) — creates Velero Backup CRD, polls completion, records one step per component, sums the PodVolumeBackup bytes on `Completed`, stores result (phase + `status.expiration` + `volume_bytes`) in Prefect Variable
 
 **Restore:**
 

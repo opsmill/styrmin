@@ -9,6 +9,10 @@ rules:
   - apiGroups: ["velero.io"]
     resources: ["backups", "restores", "backupstoragelocations"]
     verbs: ["create", "get", "list", "watch", "delete", "patch", "update"]
+  # Read-only: backup flows read PodVolumeBackups for component steps and Backup.sizeBytes.
+  - apiGroups: ["velero.io"]
+    resources: ["podvolumebackups"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

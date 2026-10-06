@@ -327,6 +327,55 @@ async def read_velero_backup(kubeconfig_path: str, backup_name: str) -> dict:
         await api_client.close()
 
 
+async def assert_backup_size_matches_pod_volume_backups(
+    kubeconfig_path: str,
+    backup_name: str,
+    recorded_size: int | None,
+) -> None:
+    """Verify ``sizeBytes`` is the byte sum of the backup's PodVolumeBackups (#136).
+
+    Selects the PodVolumeBackups by owner reference rather than the
+    ``velero.io/backup-uid`` label the workflow uses, so a wrong label still fails.
+    """
+    from kubernetes_asyncio import client as kubeclient
+    from kubernetes_asyncio import config as k8s_config
+    from kubernetes_asyncio.client import CustomObjectsApi
+
+    await k8s_config.load_config(config_file=kubeconfig_path)
+    api_client = kubeclient.ApiClient()
+    try:
+        listed = await CustomObjectsApi(api_client).list_namespaced_custom_object(
+            group="velero.io",
+            version="v1",
+            namespace="styrmin",
+            plural="podvolumebackups",
+        )
+    finally:
+        await api_client.close()
+
+    owned = [
+        item
+        for item in listed["items"]
+        if any(
+            ref.get("kind") == "Backup" and ref.get("name") == backup_name
+            for ref in item["metadata"].get("ownerReferences") or []
+        )
+    ]
+    expected = sum(
+        int(((item.get("status") or {}).get("progress") or {}).get("totalBytes") or 0)
+        for item in owned
+        if (item.get("status") or {}).get("phase") == "Completed"
+    )
+    assert owned and expected > 0, (
+        f"Backup {backup_name!r} should have completed PodVolumeBackups with data; "
+        f"found {[(i['metadata']['name'], i.get('status')) for i in owned]}"
+    )
+    assert recorded_size == expected, (
+        f"Backup {backup_name!r} sizeBytes should equal the PodVolumeBackup byte "
+        f"sum {expected}, got {recorded_size!r}"
+    )
+
+
 async def assert_velero_backup_uses_bsl(
     kubeconfig_path: str,
     backup_name: str,
@@ -791,6 +840,13 @@ async def test_backup_and_restore_lifecycle(
         )
         assert recorded_backup.expires_at is not None, (
             "A completed backup must record Velero's expiration timestamp"
+        )
+
+        # 2c'. The size is the volume data Velero read, not an operation count (#136).
+        await assert_backup_size_matches_pod_volume_backups(
+            kubeconfig_path=kubeconfig_path,
+            backup_name=backup.name,
+            recorded_size=recorded_backup.size_bytes,
         )
 
         # 2d. Velero can kopia-prune the repository the backup just wrote to.

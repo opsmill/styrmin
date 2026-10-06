@@ -16,6 +16,8 @@ break:
 * reordering the BSL / cluster reads inside the best-effort config block would
   silently divert backups to the cluster-default storage location.
 
+The same harness also pins which value lands in ``size_bytes`` (#136).
+
 The flow's Python body is exercised through ``Flow.fn`` — the undecorated
 coroutine — so no Prefect engine, work pool, or ephemeral API server is
 involved. Every boundary the body touches (unit of work, backup service,
@@ -35,6 +37,7 @@ from uuid import UUID, uuid4
 import pytest
 from prefect.client.schemas.objects import StateType
 
+from styrmin_backend.db.models import BackupStatus
 from styrmin_backend.services.backup.ttl import DEFAULT_BACKUP_TTL
 from styrmin_backend.services.exceptions import BackupNotFoundError
 from styrmin_backend.workflows.templates.backup import execute_backup_workflow
@@ -95,6 +98,7 @@ async def _run_backup_workflow(
     backup_storage_location_name: str | None = None,
     velero_phase: str = "Completed",
     velero_expiration: str | None = VELERO_EXPIRATION,
+    velero_volume_bytes: int | None = None,
     record_deleted_after_status_writes: int | None = None,
     capture_exception: bool = False,
 ) -> WorkflowRun:
@@ -119,6 +123,7 @@ async def _run_backup_workflow(
             or None for "no BSL assigned".
         velero_phase: ``status.phase`` the USER flow reports back.
         velero_expiration: ``status.expiration`` the USER flow reports back.
+        velero_volume_bytes: ``volume_bytes`` the USER flow reports back.
         record_deleted_after_status_writes: Simulate the backup row being
             deleted after this many successful ``update_backup_status`` calls —
             every call from then on raises ``BackupNotFoundError``, including the
@@ -197,12 +202,13 @@ async def _run_backup_workflow(
     flow_run.state.is_failed.return_value = False
 
     velero_result = {
+        "volume_bytes": velero_volume_bytes,
         "status": {
             "phase": velero_phase,
             "failureReason": "velero said no",
             "backupItemOperationsCompleted": 7,
             "expiration": velero_expiration,
-        }
+        },
     }
 
     variable = MagicMock()
@@ -597,3 +603,36 @@ async def test_the_in_progress_write_precedes_the_config_read() -> None:
         "ttl": "2160h",
         "ttl_source": "environment",
     }, run.status_calls
+
+
+# ---------------------------------------------------------------------------
+# Backup size (#136)
+# ---------------------------------------------------------------------------
+
+
+async def test_completed_backup_records_volume_bytes_not_operation_count() -> None:
+    """``size_bytes`` comes from ``volume_bytes``; the harness's Velero status
+    also carries ``backupItemOperationsCompleted: 7``, which must be ignored."""
+    run = await _run_backup_workflow(velero_volume_bytes=4_096)
+
+    terminal = run.status_calls[-1]
+    assert terminal["status"] == BackupStatus.COMPLETED
+    assert terminal["size_bytes"] == 4_096
+
+
+async def test_completed_backup_without_volume_bytes_records_no_size() -> None:
+    run = await _run_backup_workflow(velero_volume_bytes=None)
+
+    terminal = run.status_calls[-1]
+    assert terminal["status"] == BackupStatus.COMPLETED
+    assert terminal["size_bytes"] is None
+
+
+async def test_failed_backup_records_no_size() -> None:
+    run = await _run_backup_workflow(
+        velero_phase="PartiallyFailed", velero_volume_bytes=4_096
+    )
+
+    terminal = run.status_calls[-1]
+    assert terminal["status"] == BackupStatus.FAILED
+    assert terminal.get("size_bytes") is None

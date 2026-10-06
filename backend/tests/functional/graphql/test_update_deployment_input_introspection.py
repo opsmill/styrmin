@@ -28,6 +28,7 @@ fails immediately, without needing a separate regen step.
 from __future__ import annotations
 
 import strawberry
+from strawberry.schema.config import StrawberryConfig
 
 from styrmin_backend.api.definitions.config.inputs import StandardStorageInput
 from styrmin_backend.api.definitions.deployment.inputs import (
@@ -35,13 +36,18 @@ from styrmin_backend.api.definitions.deployment.inputs import (
     ParameterValueInput,
     UpdateDeploymentInput,
 )
+from styrmin_backend.api.scalars import SCALAR_MAP
 from styrmin_backend.api.schema.mutation import Mutation
 from styrmin_backend.api.schema.query import Query
 from styrmin_backend.context.models.config import ComponentConfigBlock, DeploymentConfig
 
 
 def _build_schema() -> strawberry.Schema:
-    return strawberry.Schema(query=Query, mutation=Mutation)
+    return strawberry.Schema(
+        query=Query,
+        mutation=Mutation,
+        config=StrawberryConfig(scalar_map=SCALAR_MAP),
+    )
 
 
 def test_update_deployment_input_field_coverage() -> None:
