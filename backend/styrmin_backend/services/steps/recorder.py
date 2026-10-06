@@ -2,7 +2,9 @@
 
 The primitives (``open_step``, ``start_step``, ``succeed_step``, ``fail_step``,
 ``record_output``, ``add_pending_steps``, ``ensure_operator_steps``,
-``fail_open_flow_steps``) run inside the caller's transaction and do not commit.
+``fail_open_flow_steps``, and the operator-phase ``add_attempt_error``,
+``record_detail`` and ``record_rollback``) run inside the caller's transaction
+and do not commit.
 ``record_event`` is the ``recordStep`` entry point and commits.
 
 State rules (data-model "State transitions of a step"): ``succeeded`` and
@@ -52,6 +54,7 @@ if TYPE_CHECKING:
     from styrmin_backend.services.unit_of_work import UnitOfWork
 
 _OPEN_STATUSES = frozenset({StepStatus.PENDING, StepStatus.RUNNING})
+_IN_PROGRESS = frozenset({StepStatus.RUNNING, StepStatus.FAILED})
 
 
 class StepRecord(BaseModel):
@@ -249,6 +252,74 @@ async def record_output(
     return await _save(
         locked, {"output": kept, "output_truncated": truncated or cut}, uow
     )
+
+
+async def _lock_in_progress(
+    step: Step, transition: str, uow: UnitOfWork
+) -> Step | None:
+    """Lock a running or failed operator-phase step; None, logged, for any other step."""
+    locked = await _lock(step.id, uow)
+    if locked.kind is not StepKind.OPERATOR_PHASE or locked.status not in _IN_PROGRESS:
+        _ignore(locked, transition)
+        return None
+    return locked
+
+
+async def add_attempt_error(
+    step: Step,
+    error: str,
+    at: datetime,
+    *,
+    uow: UnitOfWork,
+    next_attempt: bool = False,
+) -> Step:
+    """Append ``error`` to the current attempt of a running or failed operator-phase step.
+
+    The status stays. ``next_attempt`` then starts the next attempt of a running
+    step, for FluxCD retrying while the operator waits.
+    """
+    locked = await _lock_in_progress(step, "error", uow)
+    if locked is None:
+        return step
+    entry = StepError(
+        attempt=max(locked.attempt_count, 1), message=error, occurred_at=_utc(at)
+    )
+    update: dict[str, Any] = {"errors": [*locked.errors, entry]}
+    if next_attempt and locked.status is StepStatus.RUNNING:
+        update["attempt_count"] = locked.attempt_count + 1
+    return await _save(locked, update, uow)
+
+
+async def record_detail(step: Step, detail: str, *, uow: UnitOfWork) -> Step:
+    """Store FluxCD's current reason and message on a running or failed operator-phase step."""
+    locked = await _lock_in_progress(step, "detail", uow)
+    if locked is None or locked.detail == detail:
+        return locked or step
+    return await _save(locked, {"detail": detail}, uow)
+
+
+async def record_rollback(
+    step: Step,
+    at: datetime,
+    message: str | None,
+    *,
+    uow: UnitOfWork,
+    next_attempt: bool = False,
+) -> Step:
+    """Record that FluxCD rolled back or uninstalled the release; a newer rollback replaces it.
+
+    ``next_attempt`` ends the current attempt of a running step and starts the next one.
+    """
+    at = _utc(at)
+    locked = await _lock_in_progress(step, "rollback", uow)
+    if locked is None:
+        return step
+    if locked.rolled_back_at is not None and at <= locked.rolled_back_at:
+        return _ignore(locked, "older rollback")
+    update: dict[str, Any] = {"rolled_back_at": at, "rollback_message": message}
+    if next_attempt and locked.status is StepStatus.RUNNING:
+        update["attempt_count"] = locked.attempt_count + 1
+    return await _save(locked, update, uow)
 
 
 async def fail_open_flow_steps(
