@@ -46,6 +46,7 @@ async def apply_state(
     deployment: Deployment,
     current_instance: Instance | None,
     uow: UnitOfWork,  # noqa: ARG001  retained for caller-shape stability
+    task_type: TaskType = TaskType.NOOP,
     prefect_manager: PrefectManager = Depends(get_manager),
 ) -> Task:
     """Schedule a reconciliation pass for the deployment.
@@ -59,20 +60,25 @@ async def apply_state(
     boundary, which froze the plan against a snapshot of the world and
     produced staleness bugs whenever DB writes landed between the
     snapshot and the flow start.
+
+    ``task_type`` is the operation the caller starts (019 research D19).
+    The task records the new instance so operator reports find it (D4).
     """
     new_instance = deployment.active_instance
     assert new_instance is not None, "Deployment must have an active instance"
 
     task = Task.create(
-        type=TaskType.NOOP,
+        type=task_type,
         deployment_id=deployment.id,
         prefect_flow_run_id=None,
+        instance_id=new_instance.id,
     )
 
     logger.info(
-        "Scheduling apply_state flow: task_id={} deployment_id={} "
+        "Scheduling apply_state flow: task_id={} task_type={} deployment_id={} "
         "current_instance_id={} new_instance_id={}",
         task.id,
+        task_type.value,
         deployment.id,
         current_instance.id if current_instance else None,
         new_instance.id,

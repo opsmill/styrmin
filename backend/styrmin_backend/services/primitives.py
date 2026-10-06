@@ -142,7 +142,10 @@ async def stop_components(
 
         # Get the task from the reconciliation workflow
         task = await apply_state(
-            deployment=deployment, current_instance=current_instance, uow=uow
+            deployment=deployment,
+            current_instance=current_instance,
+            uow=uow,
+            task_type=TaskType.STOP_COMPONENTS,
         )
 
         await uow.deployments.save(deployment=deployment)
@@ -202,7 +205,10 @@ async def start_components(
 
         # Get the task from the reconciliation workflow
         task = await apply_state(
-            deployment=deployment, current_instance=current_instance, uow=uow
+            deployment=deployment,
+            current_instance=current_instance,
+            uow=uow,
+            task_type=TaskType.START_COMPONENTS,
         )
 
         await uow.deployments.save(deployment=deployment)

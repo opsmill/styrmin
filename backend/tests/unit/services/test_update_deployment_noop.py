@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from styrmin_backend.domain.models import Deployment, DeploymentState, Task, TaskType
+from styrmin_backend.domain.models import Deployment, DeploymentState, Task
 from styrmin_backend.services.deployment import (
     update_deployment,
     update_deployment_version,
@@ -151,8 +151,8 @@ async def _seed_steady_state_deployment(
     return deployment
 
 
-async def _fake_apply_state(deployment, current_instance, uow):  # noqa: ANN001
-    stub = Task.create(type=TaskType.UPDATE_INSTANCE, deployment_id=deployment.id)
+async def _fake_apply_state(deployment, current_instance, uow, task_type):  # noqa: ANN001
+    stub = Task.create(type=task_type, deployment_id=deployment.id)
     await uow.tasks.save(stub)
     return stub
 

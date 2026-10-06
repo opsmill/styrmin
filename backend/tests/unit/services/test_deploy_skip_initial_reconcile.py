@@ -130,10 +130,14 @@ def stub_reconcile(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         return _make_instance(deployment)
 
     async def _apply_state(
-        *, deployment: Deployment, current_instance: Instance | None, uow: object
+        *,
+        deployment: Deployment,
+        current_instance: Instance | None,
+        uow: object,
+        task_type: TaskType,
     ) -> Task:
         calls["apply_state"].append(deployment.id)
-        return Task.create(type=TaskType.CREATE_INSTANCE, deployment_id=deployment.id)
+        return Task.create(type=task_type, deployment_id=deployment.id)
 
     monkeypatch.setattr(
         deployment_service, "generate_instance_from_deployment", _generate
