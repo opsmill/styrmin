@@ -51,6 +51,7 @@ class PrefectAction(Enum):
     UPDATE_INSTANCE = "orchestrate_instance_update"
     UPGRADE_INSTANCE = "orchestrate_instance_upgrade"
     RUN_JOB = "run_job"
+    RUN_JOB_COMMAND = "run_job_command"
     EXECUTE_BACKUP = "execute_backup"
     EXECUTE_RESTORE = "execute_restore"
     EXECUTE_ENVIRONMENT_CLONE = "execute_environment_clone"

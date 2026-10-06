@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from styrmin_backend.domain.models import (
     DeploymentState,
     InstanceStatus,
+    StepParent,
     Task,
     TaskStatus,
 )
@@ -16,10 +18,14 @@ from styrmin_backend.services.exceptions import (
     TaskNotFoundError,
     UnknownTaskStateError,
 )
+from styrmin_backend.services.steps.recorder import fail_open_flow_steps
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 if TYPE_CHECKING:
     pass
+
+#: The error of the steps a failed flow left open, when Prefect sent no message.
+FLOW_FAILED_MESSAGE = "The flow run failed"
 
 
 async def get_task(task_id: UUID, uow: UnitOfWork) -> Task:
@@ -92,6 +98,14 @@ async def update_task_state(
         if deployment.active_instance is not None:
             deployment.active_instance.status = target_instance_state
         task.message = state_message
+        if target_task_state is TaskStatus.FAILED:
+            # The flow that owned the open steps can no longer end them.
+            await fail_open_flow_steps(
+                StepParent.of_task(task.id),
+                state_message or FLOW_FAILED_MESSAGE,
+                datetime.now(UTC),
+                uow=uow,
+            )
 
         await uow.tasks.save(task)
         await uow.deployments.save(deployment)

@@ -6,14 +6,16 @@ from prefect import flow
 from prefect.client.schemas.objects import FlowRun
 from prefect.logging import get_run_logger
 
-from prefect.states import Completed
+from prefect.states import Completed, format_exception
 from prefect.client.schemas.objects import State
 
 from styrmin_backend.agent.service.kubernetes.primitives import (
     patch_custom_resource,
     run_kubernetes_job,
 )
+from styrmin_backend.agent.steps.reporter import StepReporter
 from styrmin_backend.agent.tasks.utils import (
+    action_job_variables,
     run_deployment_or_fail,
     run_driver_action_or_fail,
 )
@@ -34,12 +36,22 @@ from styrmin_backend.agent.tasks.shared import (
 )
 from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.db.models import ApplicationInstance as ApplicationInstanceModel
+from styrmin_backend.domain import steps
 from styrmin_backend.domain.models import Instance
 from styrmin_backend.domain.models import Instance as InstanceEntity
 from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
+from styrmin_backend.domain.models import StepParent
 from styrmin_backend.services.reconciliation.diffs.comparison import Comparator
-from styrmin_backend.services.reconciliation.remediation import Remediator
+from styrmin_backend.services.reconciliation.remediation import (
+    Remediation,
+    Remediator,
+)
 from styrmin_backend.services.auth.action_token import action_api_token
+from styrmin_backend.services.steps.internal_flows import (
+    end_step,
+    fail_open_steps,
+    open_task_step,
+)
 from styrmin_backend.services.unit_of_work import get_unit_of_work
 from styrmin_backend.agent.service.kubernetes.primitives import (
     patch_custom_resource_status,
@@ -57,6 +69,9 @@ from styrmin_backend.operator.config import (
     HELMRELEASE_VERSION,
 )
 from styrmin_backend.operator.crd.builder import build_styrmin_deployment_body
+
+#: The USER flow that runs a job's command; must match its catalogue entry.
+RUN_JOB_COMMAND_DEPLOYMENT = "run_job_command/run_job_command"
 
 
 def _build_namespace_labels(
@@ -174,6 +189,39 @@ async def apply_state(
     retry sees fresh state, and DB writes that landed between scheduling
     and run no longer produce a stale plan.
     """
+    plan_step_id = await open_task_step(task_id, steps.PLAN)
+    try:
+        remediation = await _plan_remediation(
+            deployment_id=deployment_id,
+            new_instance_id=new_instance_id,
+            current_instance_id=current_instance_id,
+        )
+    except Exception as exc:
+        await end_step(plan_step_id, error=format_exception(exc))
+        raise
+    await end_step(plan_step_id)
+    if isinstance(remediation, State):
+        return remediation
+
+    # Applied after the unit of work closes, so its connection is not held
+    # while the remediation flow runs or while the action token is written.
+    async with action_api_token() as api_token:
+        try:
+            flow_info = await remediation.apply(api_token=api_token, task_id=task_id)
+        except Exception as exc:
+            # A crashed remediation Job cannot end the step it was running.
+            await fail_open_steps(StepParent.of_task(task_id), str(exc))
+            raise
+    return flow_info.state
+
+
+async def _plan_remediation(
+    *,
+    deployment_id: UUID,
+    new_instance_id: UUID,
+    current_instance_id: UUID | None,
+) -> Remediation | State:
+    """Build the remediation, or the ``Completed`` state when there is nothing to apply."""
     async with get_unit_of_work() as uow:
         deployment = await uow.deployments.find(id=deployment_id)
         if deployment is None:
@@ -207,12 +255,7 @@ async def apply_state(
 
         if remediation is None:
             return Completed(message="No remediation needed")
-
-    # Applied after the unit of work closes, so its connection is not held
-    # while the remediation flow runs or while the action token is written.
-    async with action_api_token() as api_token:
-        flow_info = await remediation.apply(api_token=api_token, task_id=task_id)
-    return flow_info.state
+        return remediation
 
 
 @flow(
@@ -230,9 +273,60 @@ async def run_job(
     commands: list[str],
     image: str,
 ) -> None:
-    # Render job template file
+    """Run the job's command in the USER flow ``run_job_command`` with an action token (019 research D11)."""
+    async with action_api_token() as api_token:
+        try:
+            await run_deployment_or_fail(
+                name=RUN_JOB_COMMAND_DEPLOYMENT,
+                parameters={
+                    "task_id": task_id,
+                    "runtime_class": runtime_class,
+                    "env": env,
+                    "namespace": namespace,
+                    "commands": commands,
+                    "image": image,
+                },
+                job_variables=action_job_variables(api_token, task_id=task_id),
+            )
+        except Exception as exc:
+            # A crashed command Job cannot end the step it was running.
+            await fail_open_steps(StepParent.of_task(task_id), str(exc))
+            raise
 
-    manifest = {
+
+@flow(flow_run_name="Run job command")
+async def run_job_command(
+    task_id: UUID,
+    runtime_class: str,
+    env: list[dict],
+    namespace: str,
+    commands: list[str],
+    image: str,
+) -> None:
+    """Run the job's command as a Kubernetes Job and record it as the ``command`` step."""
+    manifest = _build_job_manifest(
+        task_id=task_id,
+        runtime_class=runtime_class,
+        env=env,
+        namespace=namespace,
+        commands=commands,
+        image=image,
+    )
+    reporter = StepReporter.from_env()
+    async with reporter.step(*steps.COMMAND):
+        await run_kubernetes_job(manifest=manifest, namespace=namespace)
+
+
+def _build_job_manifest(
+    *,
+    task_id: UUID,
+    runtime_class: str,
+    env: list[dict],
+    namespace: str,
+    commands: list[str],
+    image: str,
+) -> dict:
+    return {
         "apiVersion": "batch/v1",
         "kind": "Job",
         "metadata": {
@@ -286,8 +380,6 @@ async def run_job(
             }
         },
     }
-
-    await run_kubernetes_job(manifest=manifest, namespace=namespace)
 
 
 @flow(flow_run_name="Upgrade instance")
@@ -618,6 +710,7 @@ async def create_instance_crd(
     Driver pre/post hooks remain Prefect-managed.
     """
     logger = get_run_logger()
+    reporter = StepReporter.from_env()
     context = instance.context
     release_reference = context.instance.release_reference
     namespace = context.instance.namespace
@@ -631,24 +724,27 @@ async def create_instance_crd(
 
     # Run pre-hook before CRD creation (imperative action)
     if prehook:
-        await run_driver_action_or_fail(
-            flow_run_name=f"Run {context.app.name} pre-hook",
-            name=prehook,
-            parameters={"context": context},
+        async with reporter.step(*steps.SETUP_PRE_HOOK) as step:
+            await run_driver_action_or_fail(
+                step_id=step.id,
+                flow_run_name=f"Run {context.app.name} pre-hook",
+                name=prehook,
+                parameters={"context": context},
+            )
+
+    async with reporter.step(*steps.STYRMIN_DEPLOYMENT_WRITE):
+        # Build and create the StyrminDeployment CRD
+        crd_body = build_styrmin_deployment_body(
+            context=context,
+            release_reference=release_reference,
+            namespace=namespace,
+            internal=internal,
         )
 
-    # Build and create the StyrminDeployment CRD
-    crd_body = build_styrmin_deployment_body(
-        context=context,
-        release_reference=release_reference,
-        namespace=namespace,
-        internal=internal,
-    )
+        namespace_labels = _build_namespace_labels(context)
+        await apply_kubernetes_namespace(namespace=namespace, labels=namespace_labels)
 
-    namespace_labels = _build_namespace_labels(context)
-    await apply_kubernetes_namespace(namespace=namespace, labels=namespace_labels)
-
-    await _apply_styrmin_deployment_crd(body=crd_body, namespace=namespace)
+        await _apply_styrmin_deployment_crd(body=crd_body, namespace=namespace)
 
     logger.info(
         "StyrminDeployment CRD created: %s/%s",
@@ -656,22 +752,17 @@ async def create_instance_crd(
         release_reference,
     )
 
-    # Apply cross-namespace ExternalName service aliases for service discovery
-    aliases = compute_service_aliases(context)
-    if aliases:
-        namespace_labels = _build_namespace_labels(context)
-        await apply_service_aliases(
-            aliases=aliases,
-            namespace_labels=namespace_labels,
-        )
+    await _apply_service_aliases_step(reporter, context)
 
     # Run post-hook after CRD creation (imperative action)
     if posthook:
-        await run_driver_action_or_fail(
-            flow_run_name=f"Run {context.app.name} post-hook",
-            name=posthook,
-            parameters={"context": context},
-        )
+        async with reporter.step(*steps.SETUP_POST_HOOK) as step:
+            await run_driver_action_or_fail(
+                step_id=step.id,
+                flow_run_name=f"Run {context.app.name} post-hook",
+                name=posthook,
+                parameters={"context": context},
+            )
 
 
 @flow(flow_run_name="Update instance (CRD)")
@@ -680,26 +771,21 @@ async def update_instance_crd(
 ) -> None:
     """Update the StyrminDeployment CRD spec for the operator to reconcile."""
     logger = get_run_logger()
+    reporter = StepReporter.from_env()
     context = instance.context
     release_reference = context.instance.release_reference
     namespace = context.instance.namespace
 
-    crd_body = build_styrmin_deployment_body(
-        context=context,
-        release_reference=release_reference,
-        namespace=namespace,
-    )
-
-    await _apply_styrmin_deployment_crd(body=crd_body, namespace=namespace)
-
-    # Apply cross-namespace ExternalName service aliases for service discovery
-    aliases = compute_service_aliases(context)
-    if aliases:
-        namespace_labels = _build_namespace_labels(context)
-        await apply_service_aliases(
-            aliases=aliases,
-            namespace_labels=namespace_labels,
+    async with reporter.step(*steps.STYRMIN_DEPLOYMENT_WRITE):
+        crd_body = build_styrmin_deployment_body(
+            context=context,
+            release_reference=release_reference,
+            namespace=namespace,
         )
+
+        await _apply_styrmin_deployment_crd(body=crd_body, namespace=namespace)
+
+    await _apply_service_aliases_step(reporter, context)
 
     logger.info("StyrminDeployment CRD updated: %s/%s", namespace, release_reference)
 
@@ -714,6 +800,7 @@ async def upgrade_instance_crd(
 ) -> None:
     """Upgrade via StyrminDeployment CRD. Driver hooks remain Prefect-managed."""
     logger = get_run_logger()
+    reporter = StepReporter.from_env()
     context = instance.context
     release_reference = context.instance.release_reference
     namespace = context.instance.namespace
@@ -725,63 +812,77 @@ async def upgrade_instance_crd(
     # CRD to a fresh instance. Writing the CRD at the end of this flow
     # would stomp those hook-driven updates with this flow's (older)
     # instance. Writing here first lets hook updates layer correctly on top.
-    crd_body = build_styrmin_deployment_body(
-        context=context,
-        release_reference=release_reference,
-        namespace=namespace,
-    )
-    await _apply_styrmin_deployment_crd(body=crd_body, namespace=namespace)
+    async with reporter.step(*steps.STYRMIN_DEPLOYMENT_WRITE):
+        crd_body = build_styrmin_deployment_body(
+            context=context,
+            release_reference=release_reference,
+            namespace=namespace,
+        )
+        await _apply_styrmin_deployment_crd(body=crd_body, namespace=namespace)
 
-    # Reset status.displayState + phase atomically with the spec change.
-    # Without this there is a window where the CRD carries the new
-    # instanceId / appVersion but the previous rollout's "Running"
-    # displayState, letting a stale agent report race the server into
-    # prematurely flipping Deployment.status to RUNNING.
-    await patch_custom_resource_status(
-        plural=CRD_PLURAL,
-        # The CR is named after its namespace, not after the release reference
-        # (``build_styrmin_deployment_body``). The two are the same string for an
-        # ordinary deployment and differ for a clone counterpart, which adopts
-        # the source's Helm release name (010 research D2).
-        reference=namespace,
-        group=CRD_GROUP,
-        version=CRD_VERSION,
-        namespace=namespace,
-        status_patch={"displayState": "Deploying", "phase": "Pending"},
-    )
+        # Reset status.displayState + phase atomically with the spec change.
+        # Without this there is a window where the CRD carries the new
+        # instanceId / appVersion but the previous rollout's "Running"
+        # displayState, letting a stale agent report race the server into
+        # prematurely flipping Deployment.status to RUNNING.
+        await patch_custom_resource_status(
+            plural=CRD_PLURAL,
+            # The CR is named after its namespace, not after the release reference
+            # (``build_styrmin_deployment_body``). The two are the same string for an
+            # ordinary deployment and differ for a clone counterpart, which adopts
+            # the source's Helm release name (010 research D2).
+            reference=namespace,
+            group=CRD_GROUP,
+            version=CRD_VERSION,
+            namespace=namespace,
+            status_patch={"displayState": "Deploying", "phase": "Pending"},
+        )
 
     if prehook:
+        async with reporter.step(*steps.UPGRADE_PRE_HOOK) as step:
+            await run_driver_action_or_fail(
+                step_id=step.id,
+                flow_run_name=f"Run {context.app.name} upgrade pre-hook",
+                name=prehook,
+                parameters={"context": context, "target_version": target_version},
+            )
+
+    async with reporter.step(*steps.UPGRADE_CORE_HOOK) as step:
         await run_driver_action_or_fail(
-            flow_run_name=f"Run {context.app.name} upgrade pre-hook",
-            name=prehook,
+            step_id=step.id,
+            flow_run_name=f"Upgrade {context.app.name} to {target_version}",
+            name=upgrade_hook,
             parameters={"context": context, "target_version": target_version},
         )
 
-    await run_driver_action_or_fail(
-        flow_run_name=f"Upgrade {context.app.name} to {target_version}",
-        name=upgrade_hook,
-        parameters={"context": context, "target_version": target_version},
-    )
-
-    # Apply cross-namespace ExternalName service aliases for service discovery
-    aliases = compute_service_aliases(context)
-    if aliases:
-        namespace_labels = _build_namespace_labels(context)
-        await apply_service_aliases(
-            aliases=aliases,
-            namespace_labels=namespace_labels,
-        )
+    await _apply_service_aliases_step(reporter, context)
 
     if posthook:
-        await run_driver_action_or_fail(
-            flow_run_name=f"Run {context.app.name} upgrade post-hook",
-            name=posthook,
-            parameters={"context": context, "target_version": target_version},
-        )
+        async with reporter.step(*steps.UPGRADE_POST_HOOK) as step:
+            await run_driver_action_or_fail(
+                step_id=step.id,
+                flow_run_name=f"Run {context.app.name} upgrade post-hook",
+                name=posthook,
+                parameters={"context": context, "target_version": target_version},
+            )
 
     logger.info(
         "Upgrade CRD updated: %s:%s in %s", context.app.name, target_version, namespace
     )
+
+
+async def _apply_service_aliases_step(
+    reporter: StepReporter, context: GlobalContext
+) -> None:
+    """Apply cross-namespace ExternalName service aliases for service discovery, if any."""
+    aliases = compute_service_aliases(context)
+    if not aliases:
+        return
+    async with reporter.step(*steps.SERVICE_ALIASES):
+        await apply_service_aliases(
+            aliases=aliases,
+            namespace_labels=_build_namespace_labels(context),
+        )
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────
