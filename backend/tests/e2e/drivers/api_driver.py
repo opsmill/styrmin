@@ -14,7 +14,10 @@ from typing import Any
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.exceptions import ResourceNotFoundError, StyrminError
 from styrmin_sdk.graphql._generated import (
+    GetBackupBackup,
+    GetBackupBackupSteps,
     GetDeploymentTimelineDeploymentTimelineTaskSteps,
+    GetRestoreRestoreSteps,
 )
 
 from tests.e2e.drivers.errors import (
@@ -121,7 +124,13 @@ def _constituent_outcome(constituent: Any) -> str:
             return "in-flight"
 
 
-def _step_ref(step: GetDeploymentTimelineDeploymentTimelineTaskSteps) -> StepRef:
+def _step_ref(
+    step: GetDeploymentTimelineDeploymentTimelineTaskSteps
+    | GetBackupBackupSteps
+    | GetRestoreRestoreSteps,
+) -> StepRef:
+    # Backup and restore steps have no FluxCD detail and are never superseded.
+    superseded_by = getattr(step, "superseded_by", None)
     return StepRef(
         id=str(step.id),
         key=step.key,
@@ -139,9 +148,18 @@ def _step_ref(step: GetDeploymentTimelineDeploymentTimelineTaskSteps) -> StepRef
             )
             for error in step.errors
         ),
-        detail=step.detail,
+        detail=getattr(step, "detail", None),
         has_output=step.has_output,
-        superseded_by=str(step.superseded_by.id) if step.superseded_by else None,
+        superseded_by=str(superseded_by.id) if superseded_by else None,
+    )
+
+
+def _backup_ref(backup: GetBackupBackup) -> BackupRef:
+    return BackupRef(
+        id=str(backup.id),
+        name=backup.name,
+        status=backup.status,
+        steps=tuple(_step_ref(step) for step in backup.steps),
     )
 
 
@@ -849,7 +867,7 @@ class ApiScenarioDriver:
             )
         except StyrminError as exc:
             raise _normalise(exc) from exc
-        return BackupRef(id=str(backup.id), name=backup.name, status=backup.status)
+        return _backup_ref(backup)
 
     async def create_restore(
         self, *, backup_id: str, target_namespace: str
@@ -871,7 +889,11 @@ class ApiScenarioDriver:
             )
         except StyrminError as exc:
             raise _normalise(exc) from exc
-        return RestoreRef(id=str(restore.id), status=restore.status)
+        return RestoreRef(
+            id=str(restore.id),
+            status=restore.status,
+            steps=tuple(_step_ref(step) for step in restore.steps),
+        )
 
     async def delete_backup(self, *, backup_id: str) -> None:
         try:
@@ -886,7 +908,7 @@ class ApiScenarioDriver:
             raise ResourceNotFound(str(exc)) from exc
         except StyrminError as exc:
             raise _normalise(exc) from exc
-        return BackupRef(id=str(backup.id), name=backup.name, status=backup.status)
+        return _backup_ref(backup)
 
     # --- Environment-level backup / restore -------------------------------
 

@@ -734,6 +734,21 @@ class DeploymentDetailPage:
             await asyncio.sleep(1.0)
         raise ScenarioTimeout("create_backup: new backup row did not appear within 60s")
 
+    async def _read_parent_steps(
+        self, parent: str, parent_id: str
+    ) -> tuple[StepRef, ...]:
+        # Scoped to the step container: a backup row also holds its restores' steps.
+        container = self._page.locator(
+            f"[data-testid={parent}-steps][data-{parent}-id='{parent_id}']"
+        )
+        context = f"{parent} {parent_id} steps"
+        if await container.count() == 0:
+            raise ScenarioActionError(
+                f"{context}: no {parent}-steps container "
+                "(frontend test-hook may have been removed or renamed)"
+            )
+        return await _read_steps(container, context=context)
+
     async def wait_for_backup_status(
         self, *, backup_id: str, terminal_statuses: tuple[str, ...], max_wait: float
     ) -> BackupRef:
@@ -752,7 +767,12 @@ class DeploymentDetailPage:
                     name = await _required_attr(
                         row, "data-backup-name", context=context
                     )
-                    return BackupRef(id=backup_id, name=name, status=status)
+                    return BackupRef(
+                        id=backup_id,
+                        name=name,
+                        status=status,
+                        steps=await self._read_parent_steps("backup", backup_id),
+                    )
             await asyncio.sleep(2.0)
         raise ScenarioTimeout(
             f"backup {backup_id} did not reach a terminal status within {max_wait}s"
@@ -770,6 +790,7 @@ class DeploymentDetailPage:
             id=backup_id,
             name=await _required_attr(row, "data-backup-name", context=context),
             status=await _required_attr(row, "data-backup-status", context=context),
+            steps=await self._read_parent_steps("backup", backup_id),
         )
 
     async def delete_backup(self, *, backup_id: str) -> None:
@@ -858,7 +879,11 @@ class DeploymentDetailPage:
                     row, "data-restore-status", context=context
                 )
                 if status in terminal_statuses:
-                    return RestoreRef(id=restore_id, status=status)
+                    return RestoreRef(
+                        id=restore_id,
+                        status=status,
+                        steps=await self._read_parent_steps("restore", restore_id),
+                    )
             await asyncio.sleep(2.0)
         raise ScenarioTimeout(
             f"restore {restore_id} did not reach a terminal status within {max_wait}s"

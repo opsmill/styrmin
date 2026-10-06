@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
+from datetime import datetime
 from typing import Any, AsyncIterator, Sequence
 
 import httpx
@@ -16,11 +17,14 @@ from styrmin_sdk.exceptions import ResourceNotFoundError
 
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import (
+    BackupRef,
     EnvironmentBackupRef,
     EnvironmentCloneDeploymentResultRef,
     EnvironmentCloneRef,
     ResourceNotFound,
+    RestoreRef,
     ScenarioDriver,
+    StepRef,
 )
 
 # Shard markers are per test: deployment-level tests run in ``shard_backup``,
@@ -90,6 +94,26 @@ MAINTENANCE_OVERDUE_SENTINEL = "1970-01-01T00:00:00Z"
 
 # Parked on the repository after the forced cycle so the shared cluster stops maintaining.
 MAINTENANCE_FREQUENCY_AFTER_CHECK = "24h"
+
+# --- Backup and restore steps (spec 019-task-steps / US6) ------------------
+
+# simple-app's components with a backup configuration
+# (``driver/examples/simple-app/driver.styrmin.yml``): one backup step each.
+SIMPLE_APP_BACKUP_COMPONENTS = ("database",)
+
+# The steps of a completed restore, in the order the restore runs them.
+COMPLETED_RESTORE_STEPS = (
+    ("restore:namespace", "Delete the namespace"),
+    ("restore:velero", "Run the Velero restore"),
+    ("restore:recovery", "Run the recovery"),
+)
+
+# The start of the error "Run the Velero restore" records when Velero rejects
+# the restore in validation; Velero's own errors follow, joined by "; ".
+VELERO_VALIDATION_ERROR_PREFIX = "Velero restore failed validation:"
+
+# A DeleteBackupRequest removing the backup's data and then its Backup object.
+VELERO_BACKUP_REMOVAL_TIMEOUT_SECONDS = 180.0
 
 # --- Environment clone (spec 010-environment-clone) -------------------------
 
@@ -469,6 +493,110 @@ async def assert_velero_backup_ttl(
     )
 
 
+def _assert_step_times(step: StepRef, *, context: str) -> datetime:
+    """Assert the step has a start, an end and a duration; return its start."""
+    assert step.started_at and step.ended_at, (
+        f"{context}: step {step.key!r} needs a start and an end time, got {step!r}"
+    )
+    started_at = datetime.fromisoformat(step.started_at)
+    assert datetime.fromisoformat(step.ended_at) >= started_at, (
+        f"{context}: step {step.key!r} ends before it starts: {step!r}"
+    )
+    return started_at
+
+
+def assert_steps_in_order(
+    steps: Sequence[StepRef],
+    expected: Sequence[tuple[str, str, str]],
+    *,
+    context: str,
+) -> None:
+    """Assert ``(key, name, status)`` of each step, and start times in that order."""
+    assert [(step.key, step.name, step.status) for step in steps] == list(expected), (
+        f"{context}: unexpected steps {steps!r}"
+    )
+    started = [_assert_step_times(step, context=context) for step in steps]
+    assert started == sorted(started), (
+        f"{context}: steps are not listed in the order they started: {steps!r}"
+    )
+
+
+def assert_backup_component_steps(backup: BackupRef) -> None:
+    """A completed simple-app backup lists one succeeded step per component."""
+    assert_steps_in_order(
+        backup.steps,
+        [
+            (f"backup:component:{component}", f"Back up {component}", "SUCCEEDED")
+            for component in SIMPLE_APP_BACKUP_COMPONENTS
+        ],
+        context=f"backup {backup.id}",
+    )
+    assert {step.kind for step in backup.steps} == {"BACKUP_COMPONENT"}
+
+
+def assert_completed_restore_steps(restore: RestoreRef) -> None:
+    """A completed restore lists its three steps in order, each succeeded."""
+    assert_steps_in_order(
+        restore.steps,
+        [(key, name, "SUCCEEDED") for key, name in COMPLETED_RESTORE_STEPS],
+        context=f"restore {restore.id}",
+    )
+    assert {step.kind for step in restore.steps} == {"RESTORE"}
+
+
+async def remove_velero_backup(
+    kubeconfig_path: str, backup_name: str, timeout: float
+) -> None:
+    """Remove a Velero backup and its stored data, then wait until the Backup is gone.
+
+    A ``DeleteBackupRequest`` also deletes the data in the storage location, so
+    Velero's backup sync cannot create the ``Backup`` object again.
+    """
+    from kubernetes_asyncio import client as kubeclient
+    from kubernetes_asyncio import config as k8s_config
+    from kubernetes_asyncio.client import CustomObjectsApi
+    from kubernetes_asyncio.client.exceptions import ApiException
+
+    await k8s_config.load_config(config_file=kubeconfig_path)
+    api_client = kubeclient.ApiClient()
+    custom_api = CustomObjectsApi(api_client)
+    loop = asyncio.get_running_loop()
+    try:
+        await custom_api.create_namespaced_custom_object(
+            group="velero.io",
+            version="v1",
+            namespace="styrmin",
+            plural="deletebackuprequests",
+            body={
+                "apiVersion": "velero.io/v1",
+                "kind": "DeleteBackupRequest",
+                "metadata": {"generateName": f"{backup_name}-"},
+                "spec": {"backupName": backup_name},
+            },
+        )
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            try:
+                await custom_api.get_namespaced_custom_object(
+                    group="velero.io",
+                    version="v1",
+                    namespace="styrmin",
+                    plural="backups",
+                    name=backup_name,
+                )
+            except ApiException as exc:
+                if exc.status == 404:
+                    return
+                raise
+            await asyncio.sleep(3)
+    finally:
+        await api_client.close()
+    raise AssertionError(
+        f"Velero Backup {backup_name!r} still exists {timeout}s after its "
+        "DeleteBackupRequest"
+    )
+
+
 async def wait_for_env_fanout_steady_state(
     client: StyrminClient,
     deployment_id: str,
@@ -638,6 +766,9 @@ async def test_backup_and_restore_lifecycle(
         )
         assert backup.status == "completed"
 
+        # 2a. One step per component with a backup configuration (spec 019 US6).
+        assert_backup_component_steps(backup)
+
         # 2b. Verify backup targets the assigned BSL and carries the
         #     environment-scope retention (016 / FR-002).
         await assert_velero_backup_uses_bsl(
@@ -680,6 +811,9 @@ async def test_backup_and_restore_lifecycle(
             restore_id=created_restore.id, max_wait=300
         )
         assert restore.status == "completed"
+
+        # 4a. The three restore steps in order, each with a duration (spec 019 US6).
+        assert_completed_restore_steps(restore)
 
         # 5. Wait for pods to recover, verify data restored
         await wait_for_pods_ready(kubeconfig_path, namespace)
@@ -1386,6 +1520,130 @@ async def test_restore_failure_marks_failed_not_indefinite(
         f"Failed restore must not change deployment status; was {pre_status!r}, "
         f"now {after.status!r}"
     )
+
+
+async def _wait_for_sdk_deployment_running(
+    client: StyrminClient, deployment_id: str, timeout: float
+) -> str:
+    """Poll the deployment until it runs; return its instance id."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    status = None
+    while loop.time() < deadline:
+        with suppress(ResourceNotFoundError):
+            deployment = await client.deployments.get(deployment_id)
+            status = deployment.status
+            if status == "running" and deployment.application_instance:
+                return str(deployment.application_instance.id)
+        await asyncio.sleep(2)
+    raise AssertionError(
+        f"Deployment {deployment_id} did not run within {timeout}s (status {status!r})"
+    )
+
+
+@pytest.mark.ci
+@pytest.mark.shard_backup
+@pytest.mark.api_only(
+    reason="Every action is a raw SDK or Kubernetes call and no dual-entrypoint "
+    "driver method is invoked. Component tests in BackupRestoreSteps.test.tsx "
+    "cover how a failed restore step and its error appear on the Backups tab, "
+    "and test_backup_and_restore_lifecycle[ui-chromium] reads restore steps "
+    "from the page; a [ui-chromium] variant would repeat the same GraphQL "
+    "calls with one more deployment boot."
+)
+async def test_restore_of_removed_velero_backup_fails_velero_step(
+    styrmin_resources: dict,
+    simple_app_image: str,  # noqa: ARG001 — builds the image
+    velero_ready: None,  # noqa: ARG001 — ensures Velero is up before backup/restore
+    vcluster: dict,
+) -> None:
+    """A restore of a backup that Velero no longer has fails "Run the Velero restore".
+
+    Spec 019 US6 acceptance scenario 1 and SC-005: the restore lists its steps
+    in order with durations, and the Velero step is failed with Velero's
+    validation error. The restore deletes the deployment's namespace before
+    Velero rejects it, so the test uses its own environment and deployment;
+    deleting the environment removes them even though their CR is gone.
+    """
+    from uuid import uuid4
+
+    client: StyrminClient = styrmin_resources["client"]
+    suffix = uuid4().hex[:8]
+    environment = await client.environments.create(
+        name=f"restore-fail-{suffix}",
+        cluster_id=styrmin_resources["cluster_id"],
+        config={},
+    )
+    try:
+        await client.backup_storage_locations.assign(
+            environment_id=environment.id, bsl_id=styrmin_resources["bsl_id"]
+        )
+        task = await client.deployments.create(
+            driver="simple-app",
+            version="0.1.0",
+            environment_id=environment.id,
+            name=f"restore-fail-{suffix}",
+        )
+        assert task.deployment_id is not None, task
+        deployment_id = str(task.deployment_id)
+        instance_id = await _wait_for_sdk_deployment_running(
+            client, deployment_id, timeout=DEPLOYMENT_RUNNING_TIMEOUT_SECONDS
+        )
+
+        created_backup = await client.backups.create_backup(instance_id=instance_id)
+        backup = await client.backups.wait_for_backup(created_backup.id, max_wait=180)
+        assert backup.status == "completed", backup
+
+        # Remove the Velero backup behind Styrmin's record, which stays completed.
+        await remove_velero_backup(
+            vcluster["kubeconfig_path"],
+            backup.name,
+            timeout=VELERO_BACKUP_REMOVAL_TIMEOUT_SECONDS,
+        )
+
+        created_restore = await client.backups.create_restore(
+            backup_id=backup.id, target_namespace=f"styrmin-{deployment_id}"
+        )
+        restore = await client.backups.wait_for_restore(
+            created_restore.id, max_wait=600
+        )
+        velero_step = next(
+            (step for step in restore.steps if step.key == "restore:velero"), None
+        )
+        print(
+            f"failed restore {restore.id}: status={restore.status!r} "
+            f"error_message={restore.error_message!r} "
+            f"velero_step_error={velero_step.error if velero_step else None!r}"
+        )
+        assert restore.status == "failed", restore
+
+        # The recovery step runs only after a completed Velero restore.
+        steps = [(step.key, step.name, step.status.value) for step in restore.steps]
+        assert steps == [
+            ("restore:namespace", "Delete the namespace", "SUCCEEDED"),
+            ("restore:velero", "Run the Velero restore", "FAILED"),
+        ], restore.steps
+        started = []
+        for step in restore.steps:
+            assert step.started_at and step.ended_at, step
+            assert step.duration_seconds is not None, step
+            assert step.ended_at >= step.started_at, step
+            started.append(step.started_at)
+        assert started == sorted(started), restore.steps
+
+        assert velero_step is not None
+        assert velero_step.error is not None, velero_step
+        assert velero_step.error.startswith(VELERO_VALIDATION_ERROR_PREFIX), (
+            velero_step.error
+        )
+        # Velero's own error names the backup it cannot find.
+        assert backup.name in velero_step.error, velero_step.error
+        assert [(error.attempt, error.message) for error in velero_step.errors] == [
+            (1, velero_step.error)
+        ], velero_step.errors
+    finally:
+        with suppress(Exception):
+            await client.environments.delete(environment_id=environment.id)
 
 
 # ---------------------------------------------------------------------------

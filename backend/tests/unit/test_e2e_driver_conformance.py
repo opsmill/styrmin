@@ -29,7 +29,9 @@ import textwrap
 import pytest
 
 from styrmin_sdk.graphql._generated import (
+    GetBackupBackupSteps,
     GetDeploymentTimelineDeploymentTimelineTaskSteps,
+    GetRestoreRestoreSteps,
 )
 
 from tests.e2e.drivers.api_driver import (
@@ -561,3 +563,61 @@ def test_superseded_step_names_the_interrupting_task_on_both_entrypoints() -> No
 
     assert _step_ref(step).superseded_by == task_id
     assert _step_ref_from_row(row, context="test") == _step_ref(step)
+
+
+@pytest.mark.parametrize(
+    "model",
+    [GetBackupBackupSteps, GetRestoreRestoreSteps],
+    ids=["backup", "restore"],
+)
+def test_backup_and_restore_step_refs_match_the_ui_rows(model: type) -> None:
+    """Backup and restore steps have no detail or link fields; both drivers agree."""
+    message = "Velero restore failed validation: Error retrieving backup"
+    step = model.model_validate(
+        {
+            "id": "7f6c1f3e-5d0b-4b8e-9a43-0c7c0b1d2e3f",
+            "key": "restore:velero",
+            "name": "Run the Velero restore",
+            "kind": "RESTORE",
+            "status": "FAILED",
+            "startedAt": "2026-10-06T10:00:00+00:00",
+            "endedAt": "2026-10-06T10:00:04.500000Z",
+            "durationSeconds": 4.5,
+            "attemptCount": 1,
+            "errors": [
+                {
+                    "attempt": 1,
+                    "message": message,
+                    "occurredAt": "2026-10-06T10:00:04.500000Z",
+                }
+            ],
+            "error": message,
+            "hasOutput": False,
+        }
+    )
+    # The Backups tab requests no hasOutput, so StepList publishes "false".
+    row = {
+        "stepId": "7f6c1f3e-5d0b-4b8e-9a43-0c7c0b1d2e3f",
+        "stepKey": "restore:velero",
+        "stepKind": "RESTORE",
+        "stepStatus": "FAILED",
+        "stepStartedAt": "2026-10-06T10:00:00+00:00",
+        "stepEndedAt": "2026-10-06T10:00:04.500000Z",
+        "stepAttempts": "1",
+        "stepHasOutput": "false",
+        "supersededByTaskId": "",
+        "name": "Run the Velero restore",
+        "errors": [
+            {
+                "attempt": "1",
+                "message": message,
+                "occurredAt": "2026-10-06T10:00:04.500000Z",
+            }
+        ],
+        "detail": None,
+    }
+
+    ref = _step_ref(step)
+
+    assert (ref.detail, ref.superseded_by) == (None, None)
+    assert _step_ref_from_row(row, context="test") == ref

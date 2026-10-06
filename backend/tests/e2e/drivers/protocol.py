@@ -295,7 +295,13 @@ class ScenarioDriver(Protocol):
 
     async def wait_for_backup(
         self, *, backup_id: str, max_wait: float = 300.0
-    ) -> BackupRef: ...
+    ) -> BackupRef:
+        """The backup once terminal, with one step per component in API order.
+
+        API driver: ``Backup.steps`` from the SDK. UI driver: the ``step-row``
+        attributes inside the row's ``backup-steps`` container, which keeps its
+        rows in the DOM while collapsed.
+        """
 
     async def create_restore(
         self, *, backup_id: str, target_namespace: str
@@ -303,11 +309,17 @@ class ScenarioDriver(Protocol):
 
     async def wait_for_restore(
         self, *, restore_id: str, max_wait: float = 600.0
-    ) -> RestoreRef: ...
+    ) -> RestoreRef:
+        """The restore once terminal, with its steps in API order.
+
+        API driver: ``Restore.steps`` from the SDK. UI driver: the ``step-row``
+        attributes inside the row's ``restore-steps`` container.
+        """
 
     async def delete_backup(self, *, backup_id: str) -> None: ...
 
-    async def get_backup(self, *, backup_id: str) -> BackupRef: ...
+    async def get_backup(self, *, backup_id: str) -> BackupRef:
+        """The backup with its steps, as ``wait_for_backup`` reads them."""
 
     # --- Environment-level backup / restore -------------------------------
     #
