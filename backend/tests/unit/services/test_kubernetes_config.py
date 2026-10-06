@@ -84,3 +84,8 @@ class TestKubernetesSettings:
         assert settings.config_mode == KubernetesConfigMode.KUBECONFIG
         assert settings.host is None
         assert settings.token is None
+
+    def test_kubeconfig_reads_the_kubeconfig_env_var(self, monkeypatch):
+        monkeypatch.setenv("KUBECONFIG", "/home/user/.kube/config")
+        settings = KubernetesSettings()
+        assert settings.kubeconfig == "/home/user/.kube/config"

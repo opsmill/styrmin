@@ -24,7 +24,6 @@ from pydantic import ValidationError
 from styrmin_backend import config
 from styrmin_backend.agent.steps.queries import load_query
 from styrmin_backend.agent.tasks.utils import (
-    API_TOKEN_ENV,
     BACKUP_ID_ENV,
     RESTORE_ID_ENV,
     STEP_ID_ENV,
@@ -67,7 +66,8 @@ class StepReporter:
     @classmethod
     def from_env(cls) -> StepReporter:
         """Build the reporter from ``STYRMIN_TOKEN``, the parent variables and ``STYRMIN_STEP_ID``."""
-        token = os.environ.get(API_TOKEN_ENV) or None
+        api_token = config.SETTINGS.agent.api_token
+        token = api_token.get_secret_value() if api_token else None
         parent = _parent_from_env()
         if token is None or parent is None:
             logger.info(

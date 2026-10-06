@@ -5,9 +5,9 @@ from uuid import UUID
 from prefect.client.schemas.objects import FlowRun
 from prefect.deployments.flow_runs import arun_deployment
 
-#: Carries a reconcile's API token into the jobs it starts (ADR-059). The SDK
-#: reads the same variable, so a driver action using it is authenticated too.
-API_TOKEN_ENV = "STYRMIN_TOKEN"
+from styrmin_backend import config
+from styrmin_backend.config import API_TOKEN_ENV
+
 #: The parent of the steps a Job records; exactly one is set (019 research D3).
 TASK_ID_ENV = "STYRMIN_TASK_ID"
 BACKUP_ID_ENV = "STYRMIN_BACKUP_ID"
@@ -62,9 +62,10 @@ async def run_driver_action_or_fail(
 
     Forwards this job's API token and task id, and adds the hook step.
     """
+    token = config.SETTINGS.agent.api_token
     return await run_deployment_or_fail(
         job_variables=action_job_variables(
-            os.environ.get(API_TOKEN_ENV),
+            token.get_secret_value() if token else None,
             task_id=os.environ.get(TASK_ID_ENV),
             step_id=step_id,
         ),

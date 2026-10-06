@@ -12,6 +12,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from loguru import logger
+from pydantic import SecretStr
 
 from styrmin_backend import config
 from styrmin_backend.agent.steps import reporter as reporter_module
@@ -25,7 +26,7 @@ from styrmin_backend.agent.tasks.utils import (
 )
 from styrmin_backend.domain.models import StepKind
 
-_ENV_NAMES = (API_TOKEN_ENV, TASK_ID_ENV, BACKUP_ID_ENV, RESTORE_ID_ENV, STEP_ID_ENV)
+_ENV_NAMES = (TASK_ID_ENV, BACKUP_ID_ENV, RESTORE_ID_ENV, STEP_ID_ENV)
 
 
 class FakeApi:
@@ -57,6 +58,7 @@ class FakeApi:
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in _ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", None)
     monkeypatch.setattr(config.SETTINGS.url, "api", "http://styrmin.test")
 
 
@@ -86,7 +88,11 @@ def warnings_log() -> Iterator[io.StringIO]:
 
 def _env(monkeypatch: pytest.MonkeyPatch, **values: str) -> None:
     for name, value in values.items():
-        monkeypatch.setenv(name, value)
+        if name == API_TOKEN_ENV:
+            # Settings load STYRMIN_TOKEN once per process, so set the loaded value.
+            monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr(value))
+        else:
+            monkeypatch.setenv(name, value)
 
 
 # No-op mode.

@@ -6,11 +6,15 @@ from pathlib import Path
 from typing import Any, Optional
 
 import toml
-from pydantic import AliasChoices, Field, ValidationError, model_validator
+from pydantic import AliasChoices, Field, SecretStr, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from styrmin_backend.db.constants import DatabaseType
 from styrmin_backend.exceptions import InitializationError
+
+#: Carries a reconcile's API token into the jobs it starts (ADR-059). The SDK
+#: reads the same variable, so a driver action using it is authenticated too.
+API_TOKEN_ENV = "STYRMIN_TOKEN"
 
 
 class WorkflowDriver(str, Enum):
@@ -63,6 +67,11 @@ class KubernetesSettings(BaseSettings):
     ca_cert: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("STYRMIN_K8S_CA_CERT", "KUBERNETES_CA_CERT"),
+    )
+    kubeconfig: Optional[str] = Field(
+        default=None,
+        validation_alias="KUBECONFIG",
+        description="Kubeconfig path(s) used when config_mode is kubeconfig.",
     )
 
     @model_validator(mode="after")
@@ -151,12 +160,20 @@ class DatabaseSettings(BaseSettings):
 
 
 class AgentSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="STYRMIN_AGENT_")
+    model_config = SettingsConfigDict(
+        env_prefix="STYRMIN_AGENT_", populate_by_name=True
+    )
 
     poll_retries: int = Field(default=60, ge=0)
     poll_retry_delay_seconds: int = Field(default=10, ge=1)
     poll_interval: int = Field(default=10, ge=1)
     status_poll_interval: int = Field(default=5, ge=1)
+    api_token: Optional[SecretStr] = Field(
+        default=None,
+        validation_alias=API_TOKEN_ENV,
+        exclude=True,
+        description="Token of the running reconcile, set by Styrmin on its jobs (ADR-059).",
+    )
 
 
 class OperatorSettings(BaseSettings):
@@ -247,10 +264,10 @@ class ConfiguredSettings:  # pylint: disable=too-many-public-methods
             raise InitializationError(msg)
         return self.settings
 
-    def initialize_and_exit(self, config_file: Optional[str] = None) -> None:
+    def initialize_and_exit(self, config_file: Optional[str] = None) -> Settings:
         """Same as initialize(), but print validation errors and exit."""
         try:
-            self.initialize(config_file)
+            return self.initialize(config_file)
         except ValidationError as err:
             print(f"Configuration not valid, found {len(err.errors())} error(s)")
             for error in err.errors():
