@@ -118,7 +118,16 @@ one backup for the whole namespace and creates one `PodVolumeBackup` per backed-
     sets the phase `Failed`, `displayState: Error`, the message
     `"<Stalled message>: <failure message>"`, and `Ready=False` with the `Stalled` reason (for
     example `RetriesExceeded`). `Remediated=True` alone is not final, because FluxCD tries again
-    after each rollback (`remediation.retries: 3`).
+    after each rollback (`remediation.retries: 3`). FluxCD's `Ready=True` for its own rollback
+    also fails the rollout: after rolling back a change of post-renderers alone, helm-controller
+    v1.1.0 compares only the chart and the values, reports the rolled-back release as
+    `UpgradeSucceeded` and removes `Remediated`. The timer counts `Ready=True` as that rollback
+    when FluxCD counted a failed install or upgrade for the current generation and the newest
+    `status.history` entry is `deployed` with the version right after a `failed` entry. It then
+    sets the phase `Failed`, `displayState: Error`, the message
+    `"FluxCD rolled the release back after release v<N> failed: <failure message>"`, and
+    `Ready=False` with reason `RolledBack`. A retry that succeeds adds a newer release, so it
+    still reaches `Ready`.
 14. **The readiness timeout counts from `status.rolloutStartedAt`**, and from `creationTimestamp`
     for a CR that an older operator wrote. It stays the safety net when FluxCD never reports
     `Stalled`.
@@ -287,7 +296,6 @@ one backup for the whole namespace and creates one `PodVolumeBackup` per backed-
 - The `callback` mutation rejects Prefect's `Crashed` and `Cancelled` states as unknown, and a
   flow run that the zombie automation marks `Crashed` sends no callback. The `Task.status` of such
   a task stays `running`, so its task result stays `RUNNING`.
-- Known issue, under review: after FluxCD rolls back a change that only adds post-render overrides
-  (image or environment variable overrides), FluxCD can report the release Ready again. The
-  operator then reports `Ready`, and the failed HelmRelease step later shows `succeeded` although
-  the override was not applied.
+- The rollback rule of decision 13 reads FluxCD's release history and failure counters, which
+  depend on helm-controller's behaviour (v1.1.0 in `helm/agent`). It assumes that FluxCD rolls
+  back each failed upgrade before it tries again, which `remediation.retries: 3` guarantees.

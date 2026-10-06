@@ -195,7 +195,7 @@ Markers follow [`dev/knowledge/backend/e2e-testing.md`](../../dev/knowledge/back
 | A remediation flow dies without closing its step | A task stays `RUNNING` | `apply_state`, the `run_job` wrapper, the backup and restore flows and the callback close open flow-kind steps |
 | Forged reports through the unauthenticated `reportDeploymentStatuses` | Forged operator-phase steps | Same exposure as `Deployment.status` today; tracked by [#396](https://github.com/opsmill/styrmin/issues/396) |
 | FluxCD attempts faster than the operator's 60-second check | Attempts undercounted | Documented limit (research D6) |
-| FluxCD rolls back after each failed attempt, then retries | Treating a rollback as final would leave the CR `Failed` after a successful retry | Only `Stalled=True` is final; the readiness timeout is the safety net (research D5) |
+| FluxCD rolls back after each failed attempt, then retries | Treating a rollback as final would leave the CR `Failed` after a successful retry | Only `Stalled=True`, and FluxCD's `Ready=True` for its own rollback of the generation, are final; the readiness timeout is the safety net (research D5) |
 | Timeline payload and query count grow | Slower page refresh | No output in the timeline query; precomputed read model with a query-count test; output loaded per step |
 | New task types for reconcile tasks | Consumers that expected `noop` see `create_instance`, `update_instance`, `upgrade_instance` and the component types | The values already exist in the enum and in the frontend labels; E2E `VALID_TASK_TYPES` already accepts them; changelog fragment |
 

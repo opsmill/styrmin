@@ -844,6 +844,49 @@ async def test_stalled_release_fails_the_attempt_fluxcd_failed(
     assert helmrelease.rolled_back_at == _at(325)
 
 
+async def test_rollback_failure_keeps_the_helmrelease_step_failed(
+    uow: SqlModelUnitOfWork, parents: Parents, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """H1: the operator fails the rollout when FluxCD reports its rollback Ready."""
+    await _running_helmrelease(uow, parents)
+    await apply_operator_report(_timed_out(parents), _at(300), uow)
+    copied = [_upgrade_failed(_at(305)), _remediated(_at(305))]
+    await apply_operator_report(_timed_out(parents, *copied), _at(310), uow)
+    rolled_back = (
+        f"FluxCD rolled the release back after release v3 failed: {UPGRADE_FAILED}"
+    )
+    report = _failed(
+        parents,
+        rolled_back,
+        *copied,
+        _condition(
+            "Ready", _at(316), status="False", reason="RolledBack", message=rolled_back
+        ),
+    )
+
+    await apply_operator_report(report, _at(320), uow)
+    before = _fields(await _steps(uow, parents.task.id))
+    calls = _spy_writes(monkeypatch, uow)
+    await apply_operator_report(report, _at(330), uow)
+
+    by_key = await _steps(uow, parents.task.id)
+    helmrelease = by_key[HELMRELEASE]
+    assert (helmrelease.status, helmrelease.attempt_count) == (FAILED, 1)
+    assert _errors(helmrelease) == [
+        (1, TIMEOUT, _at(300)),
+        (1, f"UpgradeFailed: {UPGRADE_FAILED}", _at(305)),
+        (1, rolled_back, _at(316)),
+    ]
+    assert (helmrelease.rolled_back_at, helmrelease.rollback_message) == (
+        _at(305),
+        ROLLBACK,
+    )
+    assert {by_key[key].status for key in (SERVICES, READY)} == {PENDING}
+    # The failed phase stays until the next rollout, so its reports change nothing.
+    assert calls == []
+    assert _fields(by_key) == before
+
+
 # --- Pod reasons on failure --------------------------------------------------------
 
 

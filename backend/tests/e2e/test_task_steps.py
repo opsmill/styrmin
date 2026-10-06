@@ -76,6 +76,17 @@ PREREQUISITE_ATTEMPTS_TIMEOUT = 240.0
 # report and the page refresh, with margin.
 HELMRELEASE_FAILURE_BUDGET = 420.0
 READ_ONLY_MATCH_TIMEOUT = 60.0
+# FluxCD rolls the upgrade back at its 5-minute timeout, about 30 s after the
+# operator's readiness timeout, and then reconciles the rolled-back release again.
+ROLLBACK_TIMEOUT = 240.0
+AFTER_ROLLBACK_WATCH = 90.0
+# Below uvicorn's 5-second keep-alive timeout, so a read never reuses a connection
+# that the server closes at that moment.
+POLL_INTERVAL = 3.0
+
+CR_GROUP = "styrmin.io"
+CR_VERSION = "v1alpha1"
+CR_PLURAL = "styrmindeployments"
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +260,57 @@ async def _wait_for_quota(core: kubeclient.CoreV1Api, namespace: str) -> None:
 
 def _steps_by_task(timeline: list[TimelineEntry]) -> dict[str, tuple[StepRef, ...]]:
     return {entry.task_id: entry.steps for entry in timeline}
+
+
+async def _styrmin_deployment_status(api: Any, namespace: str) -> dict[str, Any]:
+    """The status of the deployment's StyrminDeployment, which is named after its namespace."""
+    resource = await kubeclient.CustomObjectsApi(api).get_namespaced_custom_object(
+        group=CR_GROUP,
+        version=CR_VERSION,
+        namespace=namespace,
+        plural=CR_PLURAL,
+        name=namespace,
+    )
+    return resource.get("status") or {}
+
+
+def _is_true(status: dict[str, Any], condition_type: str) -> bool:
+    return any(
+        condition.get("type") == condition_type and condition.get("status") == "True"
+        for condition in status.get("conditions") or ()
+    )
+
+
+async def _wait_for_rollback(api: Any, namespace: str) -> dict[str, Any]:
+    """Wait until the operator records FluxCD's rollback; return the StyrminDeployment status."""
+    deadline = time.monotonic() + ROLLBACK_TIMEOUT
+    while True:
+        status = await _styrmin_deployment_status(api, namespace)
+        if _is_true(status, "HelmReleaseRemediated"):
+            return status
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"FluxCD's rollback not recorded within {ROLLBACK_TIMEOUT}s: {status}"
+            )
+        await asyncio.sleep(3.0)
+
+
+async def _assert_failure_stays(
+    read_timeline: Callable[[], Awaitable[list[TimelineEntry]]],
+    task_id: str,
+    *,
+    duration: float,
+) -> None:
+    """Read the task for ``duration`` seconds: its result and HelmRelease step stay FAILED."""
+    deadline = time.monotonic() + duration
+    while True:
+        entry = next(e for e in await read_timeline() if e.task_id == task_id)
+        step = next(s for s in entry.steps if s.key == HELMRELEASE)
+        assert step.status == "FAILED", step
+        assert entry.result == "FAILED", entry
+        if time.monotonic() >= deadline:
+            return
+        await asyncio.sleep(POLL_INTERVAL)
 
 
 async def _manifest_with_image(
@@ -429,7 +491,9 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
     ``apply(wait=True)``. The HelmRelease step fails at the operator's readiness
     timeout with FluxCD's reason as its detail and the pods' ``ImagePullBackOff`` in
     its error, and the apply's ``failure_reason`` names that step. A ``READ_ONLY``
-    user then reads the same steps, errors and command output as the admin.
+    user then reads the same steps, errors and command output as the admin. After
+    FluxCD's rollback, the operator fails the rollout, so the step, the task result
+    and the deployment stay failed.
     """
     admin: StyrminClient = failing_actions_deployment["client"]
     deployment_id = failing_actions_deployment["deployment_id"]
@@ -462,7 +526,7 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
             # The UI reads the result and the steps one after the other, so both must agree.
             lambda entry, step: step.status == "FAILED" and entry.result != "RUNNING",
             timeout=HELMRELEASE_FAILURE_BUDGET - (time.monotonic() - started),
-            interval=5.0,
+            interval=POLL_INTERVAL,
         )
         outcome = await applying
     finally:
@@ -510,3 +574,29 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
             assert await _step_output(
                 read_only_client, with_output.id
             ) == await _step_output(admin, with_output.id)
+
+    # FluxCD rolls the upgrade back and then reports the rolled-back release Ready,
+    # because the post-render override is not part of the chart or values it compares.
+    # The rollout stays failed.
+    namespace = failing_actions_deployment["namespace"]
+    api = failing_actions_deployment["api"]
+    await _wait_for_rollback(api, namespace)
+    await _assert_failure_stays(
+        admin_timeline, entry.task_id, duration=AFTER_ROLLBACK_WATCH
+    )
+    cr_status = await _styrmin_deployment_status(api, namespace)
+    assert cr_status.get("phase") == "Failed", cr_status
+    assert cr_status.get("displayState") == "Error", cr_status
+    assert "rolled the release back" in (cr_status.get("message") or ""), cr_status
+    assert not _is_true(cr_status, "Ready"), cr_status
+    deployment = await admin.deployments.get(deployment_id)
+    assert deployment.status == "failed", deployment.status
+    final = next(
+        e
+        for e in await scenario_driver.get_deployment_timeline(
+            deployment_id=deployment_id
+        )
+        if e.task_id == entry.task_id
+    )
+    assert final.result == "FAILED", final
+    assert {s.key: s.status for s in final.steps}[HELMRELEASE] == "FAILED", final
