@@ -85,7 +85,12 @@ from .get_application_driver_versions import (
     GetApplicationDriverVersionsApplicationDriver,
     GetApplicationDriverVersionsApplicationDriverVersions,
 )
-from .get_backup import GetBackup, GetBackupBackup
+from .get_backup import (
+    GetBackup,
+    GetBackupBackup,
+    GetBackupBackupSteps,
+    GetBackupBackupStepsErrors,
+)
 from .get_backup_schedule import GetBackupSchedule, GetBackupScheduleBackupSchedule
 from .get_backup_storage_location import (
     GetBackupStorageLocation,
@@ -212,7 +217,12 @@ from .get_environment_services import (
 )
 from .get_group import GetGroup, GetGroupGroup
 from .get_pod_statuses import GetPodStatuses, GetPodStatusesPodStatuses
-from .get_restore import GetRestore, GetRestoreRestore
+from .get_restore import (
+    GetRestore,
+    GetRestoreRestore,
+    GetRestoreRestoreSteps,
+    GetRestoreRestoreStepsErrors,
+)
 from .get_step_output import GetStepOutput, GetStepOutputStep
 from .get_task import (
     GetTask,
@@ -268,7 +278,12 @@ from .list_backup_storage_locations import (
     ListBackupStorageLocations,
     ListBackupStorageLocationsBackupStorageLocations,
 )
-from .list_backups import ListBackups, ListBackupsBackups
+from .list_backups import (
+    ListBackups,
+    ListBackupsBackups,
+    ListBackupsBackupsSteps,
+    ListBackupsBackupsStepsErrors,
+)
 from .list_clusters import ListClusters, ListClustersClusters
 from .list_deployments import (
     ListDeployments,
@@ -300,7 +315,12 @@ from .list_environments import (
     ListEnvironmentsEnvironmentsCluster,
 )
 from .list_groups import ListGroups, ListGroupsGroups
-from .list_restores import ListRestores, ListRestoresRestores
+from .list_restores import (
+    ListRestores,
+    ListRestoresRestores,
+    ListRestoresRestoresSteps,
+    ListRestoresRestoresStepsErrors,
+)
 from .list_tasks import ListTasks, ListTasksTasks
 from .list_users import ListUsers, ListUsersUsers, ListUsersUsersGroups
 from .load_local_application_driver_version import (
@@ -436,6 +456,8 @@ __all__ = [
     "GetApplicationDriverVersionsApplicationDriverVersions",
     "GetBackup",
     "GetBackupBackup",
+    "GetBackupBackupSteps",
+    "GetBackupBackupStepsErrors",
     "GetBackupSchedule",
     "GetBackupScheduleBackupSchedule",
     "GetBackupStorageLocation",
@@ -530,6 +552,8 @@ __all__ = [
     "GetPodStatusesPodStatuses",
     "GetRestore",
     "GetRestoreRestore",
+    "GetRestoreRestoreSteps",
+    "GetRestoreRestoreStepsErrors",
     "GetStepOutput",
     "GetStepOutputStep",
     "GetTask",
@@ -558,6 +582,8 @@ __all__ = [
     "ListBackupStorageLocationsBackupStorageLocations",
     "ListBackups",
     "ListBackupsBackups",
+    "ListBackupsBackupsSteps",
+    "ListBackupsBackupsStepsErrors",
     "ListClusters",
     "ListClustersClusters",
     "ListDeployments",
@@ -583,6 +609,8 @@ __all__ = [
     "ListGroupsGroups",
     "ListRestores",
     "ListRestoresRestores",
+    "ListRestoresRestoresSteps",
+    "ListRestoresRestoresStepsErrors",
     "ListTasks",
     "ListTasksTasks",
     "ListUsers",

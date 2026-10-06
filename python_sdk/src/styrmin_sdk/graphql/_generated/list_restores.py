@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import Field
 
 from .base_model import BaseModel
+from .enums import StepKind, StepStatus
 
 
 class ListRestores(BaseModel):
@@ -26,6 +27,30 @@ class ListRestoresRestores(BaseModel):
     completed_at: Optional[datetime] = Field(alias="completedAt")
     created_on: datetime = Field(alias="createdOn")
     updated_on: Optional[datetime] = Field(alias="updatedOn")
+    steps: list["ListRestoresRestoresSteps"]
+
+
+class ListRestoresRestoresSteps(BaseModel):
+    id: UUID
+    key: str
+    name: str
+    kind: StepKind
+    status: StepStatus
+    started_at: Optional[datetime] = Field(alias="startedAt")
+    ended_at: Optional[datetime] = Field(alias="endedAt")
+    duration_seconds: Optional[float] = Field(alias="durationSeconds")
+    attempt_count: int = Field(alias="attemptCount")
+    errors: list["ListRestoresRestoresStepsErrors"]
+    error: Optional[str]
+    has_output: bool = Field(alias="hasOutput")
+
+
+class ListRestoresRestoresStepsErrors(BaseModel):
+    attempt: int
+    message: str
+    occurred_at: datetime = Field(alias="occurredAt")
 
 
 ListRestores.model_rebuild()
+ListRestoresRestores.model_rebuild()
+ListRestoresRestoresSteps.model_rebuild()

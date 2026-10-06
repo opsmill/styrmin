@@ -144,6 +144,7 @@ function makeBackup(overrides: Partial<BackupItem> = {}): BackupItem {
     errorMessage: null,
     ttl: "2160h",
     expiresAt: EXPIRES_AT,
+    steps: [],
     ...overrides,
   } as BackupItem;
 }

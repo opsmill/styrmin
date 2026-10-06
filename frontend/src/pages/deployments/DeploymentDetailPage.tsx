@@ -51,7 +51,9 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
+import { BackupRestoreSteps } from "@/components/deployment/BackupRestoreSteps";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
+import type { StepListItem } from "@/components/deployment/StepList";
 import { TaskResultBadge } from "@/components/deployment/TaskResultBadge";
 import { PinnedImageOverridesNotice } from "@/components/deployment/PinnedImageOverridesNotice";
 import { IfRole } from "@/auth/IfRole";
@@ -1023,6 +1025,8 @@ function BackupRow({
     ttl?: string | null;
     /** Expiration Velero reported for the backup. */
     expiresAt?: string | null;
+    /** One step per component. */
+    steps: StepListItem[];
   };
   index: number;
   onRestore: (backupId: string) => void;
@@ -1131,6 +1135,15 @@ function BackupRow({
         </div>
       </div>
 
+      <div className="px-4 py-2 pl-8">
+        <BackupRestoreSteps
+          parent="backup"
+          parentId={backup.id}
+          status={backup.status}
+          steps={backup.steps}
+        />
+      </div>
+
       {/* Restore history */}
       {restores.map((restore) => (
         <RestoreRow key={restore.id} restore={restore} />
@@ -1144,44 +1157,54 @@ function RestoreRow({ restore }: { restore: RestoreItem }) {
 
   return (
     <div
-      className="flex items-center gap-3 border-t border-border/50 px-4 py-2.5 pl-10"
+      className="flex flex-col gap-2 border-t border-border/50 px-4 py-2.5 pl-10"
       data-testid="restore-row"
       data-restore-id={restore.id}
       data-restore-status={restore.status}
       data-target-namespace={restore.targetNamespace}
     >
-      <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
-      <span className="text-xs text-muted-foreground">Restored to</span>
-      <span className="text-xs font-medium text-foreground">
-        {restore.targetNamespace}
-      </span>
-      <span className="text-xs text-muted-foreground">—</span>
-      <span data-testid="restore-status">
-        <StatusBadge status={restore.status} />
-      </span>
-      <span className="text-xs text-muted-foreground">
-        {new Date(restore.createdOn).toLocaleDateString()}
-      </span>
+      <div className="flex items-center gap-3">
+        <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">Restored to</span>
+        <span className="text-xs font-medium text-foreground">
+          {restore.targetNamespace}
+        </span>
+        <span className="text-xs text-muted-foreground">—</span>
+        <span data-testid="restore-status">
+          <StatusBadge status={restore.status} />
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {new Date(restore.createdOn).toLocaleDateString()}
+        </span>
 
-      {components.length > 0 && (
-        <Collapsible className="ml-auto">
-          <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors group">
-            <ChevronRight className="h-3 w-3 transition-transform group-data-[panel-open]:rotate-90" />
-            {components.length} components
-          </CollapsibleTrigger>
-          <CollapsibleContent className="mt-1 space-y-1">
-            {components.map((comp) => (
-              <div
-                key={comp.componentName}
-                className="flex items-center justify-between py-0.5"
-              >
-                <span className="text-xs">{comp.componentName}</span>
-                <StatusBadge status={comp.status} />
-              </div>
-            ))}
-          </CollapsibleContent>
-        </Collapsible>
-      )}
+        {components.length > 0 && (
+          <Collapsible className="ml-auto">
+            <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors group">
+              <ChevronRight className="h-3 w-3 transition-transform group-data-[panel-open]:rotate-90" />
+              {components.length} components
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-1 space-y-1">
+              {components.map((comp) => (
+                <div
+                  key={comp.componentName}
+                  className="flex items-center justify-between py-0.5"
+                >
+                  <span className="text-xs">{comp.componentName}</span>
+                  <StatusBadge status={comp.status} />
+                </div>
+              ))}
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+      </div>
+      <div className="pl-6">
+        <BackupRestoreSteps
+          parent="restore"
+          parentId={restore.id}
+          status={restore.status}
+          steps={restore.steps}
+        />
+      </div>
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -41,6 +41,35 @@ async def list_steps(parent: StepParent, uow: UnitOfWork) -> list[Step]:
     """List the steps of a task, backup or restore by start time, pending steps last."""
     async with uow:
         return await steps_of_parent(parent, uow)
+
+
+async def list_steps_by_backup(
+    backup_ids: Sequence[UUID], uow: UnitOfWork
+) -> dict[UUID, list[Step]]:
+    """The steps of many backups in one query, keyed by backup, in list order."""
+    async with uow:
+        steps = await uow.steps.list_by_backup_ids(backup_ids)
+    return _group_by(steps, lambda step: step.backup_id)
+
+
+async def list_steps_by_restore(
+    restore_ids: Sequence[UUID], uow: UnitOfWork
+) -> dict[UUID, list[Step]]:
+    """The steps of many restores in one query, keyed by restore, in list order."""
+    async with uow:
+        steps = await uow.steps.list_by_restore_ids(restore_ids)
+    return _group_by(steps, lambda step: step.restore_id)
+
+
+def _group_by(
+    steps: Iterable[Step], parent_of: Callable[[Step], UUID | None]
+) -> dict[UUID, list[Step]]:
+    grouped: dict[UUID, list[Step]] = {}
+    for step in steps:
+        parent_id = parent_of(step)
+        if parent_id is not None:
+            grouped.setdefault(parent_id, []).append(step)
+    return grouped
 
 
 async def get_started_tasks(step_id: UUID, uow: UnitOfWork) -> list[Task]:

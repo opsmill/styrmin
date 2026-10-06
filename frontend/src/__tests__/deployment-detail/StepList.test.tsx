@@ -199,6 +199,39 @@ describe("StepList", () => {
     );
   });
 
+  it("shows start and end times only with showTimes", async () => {
+    const running = makeStep({
+      id: "running",
+      key: "restore:velero",
+      status: "RUNNING",
+      endedAt: null,
+      durationSeconds: null,
+    });
+    const { unmount } = await render(
+      <StepList steps={[makeStep(), running]} />,
+    );
+    expect(screen.queryAllByTestId("step-times")).toHaveLength(0);
+    unmount();
+
+    await render(
+      <StepList
+        steps={[makeStep(), running, makeStep({ id: "p", startedAt: null })]}
+        showTimes
+      />,
+    );
+
+    const [finished, started, pending] = rows();
+    const startedAt = new Date("2026-10-06T10:00:00+00:00").toLocaleString();
+    const endedAt = new Date("2026-10-06T10:00:04+00:00").toLocaleString();
+    expect(within(finished).getByTestId("step-times")).toHaveTextContent(
+      `Started ${startedAt}, ended ${endedAt}`,
+    );
+    expect(within(started).getByTestId("step-times").textContent).toBe(
+      `Started ${startedAt}`,
+    );
+    expect(within(pending).queryByTestId("step-times")).not.toBeInTheDocument();
+  });
+
   it("renders nothing for an empty list", async () => {
     await render(<StepList steps={[]} />);
 

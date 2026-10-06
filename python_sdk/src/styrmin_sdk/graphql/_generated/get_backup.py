@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import Field
 
 from .base_model import BaseModel
+from .enums import StepKind, StepStatus
 
 
 class GetBackup(BaseModel):
@@ -27,6 +28,30 @@ class GetBackupBackup(BaseModel):
     updated_on: Optional[datetime] = Field(alias="updatedOn")
     ttl: Optional[str]
     expires_at: Optional[datetime] = Field(alias="expiresAt")
+    steps: list["GetBackupBackupSteps"]
+
+
+class GetBackupBackupSteps(BaseModel):
+    id: UUID
+    key: str
+    name: str
+    kind: StepKind
+    status: StepStatus
+    started_at: Optional[datetime] = Field(alias="startedAt")
+    ended_at: Optional[datetime] = Field(alias="endedAt")
+    duration_seconds: Optional[float] = Field(alias="durationSeconds")
+    attempt_count: int = Field(alias="attemptCount")
+    errors: list["GetBackupBackupStepsErrors"]
+    error: Optional[str]
+    has_output: bool = Field(alias="hasOutput")
+
+
+class GetBackupBackupStepsErrors(BaseModel):
+    attempt: int
+    message: str
+    occurred_at: datetime = Field(alias="occurredAt")
 
 
 GetBackup.model_rebuild()
+GetBackupBackup.model_rebuild()
+GetBackupBackupSteps.model_rebuild()
