@@ -1806,7 +1806,7 @@ export type GetDeploymentTimelineQueryVariables = Exact<{
 }>;
 
 
-export type GetDeploymentTimelineQuery = { __typename?: 'Query', deploymentTimeline: Array<{ __typename?: 'DeploymentTimelineEntry', applicationVersion?: string | null, task: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, createdOn?: any | null, updatedOn?: any | null }, contextDiff?: { __typename?: 'ContextDiff', changes: Array<{ __typename?: 'ContextChange', path: string, action: string, oldValue?: Record<string, unknown> | null, newValue?: Record<string, unknown> | null }> } | null }> };
+export type GetDeploymentTimelineQuery = { __typename?: 'Query', deploymentTimeline: Array<{ __typename?: 'DeploymentTimelineEntry', applicationVersion?: string | null, task: { __typename?: 'Task', id: string, type: string, status: string, message?: string | null, createdOn?: any | null, updatedOn?: any | null, startedByStepId?: string | null, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, detail?: string | null, hasOutput: boolean }> }, contextDiff?: { __typename?: 'ContextDiff', changes: Array<{ __typename?: 'ContextChange', path: string, action: string, oldValue?: Record<string, unknown> | null, newValue?: Record<string, unknown> | null }> } | null }> };
 
 export type GetDriverQueryVariables = Exact<{
   applicationDriverId: Scalars['UUID']['input'];
@@ -2756,6 +2756,21 @@ export const GetDeploymentTimelineDocument = `
       message
       createdOn
       updatedOn
+      startedByStepId
+      steps {
+        id
+        key
+        name
+        kind
+        status
+        startedAt
+        endedAt
+        durationSeconds
+        attemptCount
+        error
+        detail
+        hasOutput
+      }
     }
     applicationVersion
     contextDiff {

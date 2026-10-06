@@ -7,6 +7,21 @@ query GetDeploymentTimeline($deploymentId: UUID!) {
       message
       createdOn
       updatedOn
+      startedByStepId
+      steps {
+        id
+        key
+        name
+        kind
+        status
+        startedAt
+        endedAt
+        durationSeconds
+        attemptCount
+        error
+        detail
+        hasOutput
+      }
     }
     applicationVersion
     contextDiff {
