@@ -1,6 +1,7 @@
 import os
 import subprocess
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -9,7 +10,10 @@ import yaml
 from kubernetes_asyncio import client as kubeclient
 from kubernetes_asyncio import config as kubeconfig
 from pytest_asyncio import is_async_test
+from sqlalchemy import make_url, text
+from sqlalchemy.ext.asyncio import create_async_engine
 from testcontainers.core.container import DockerContainer
+from testcontainers.postgres import PostgresContainer
 
 from styrmin_backend import config
 from styrmin_backend.workflows.catalogue import PrefectCatalogue
@@ -217,6 +221,31 @@ async def real_kubernetes(
     )
 
     yield api
+
+
+@pytest.fixture(scope="session")
+def postgres_container() -> Iterator[PostgresContainer]:
+    """One PostgreSQL server for the session; each test takes its own database."""
+    with PostgresContainer("postgres:16-alpine", driver="asyncpg") as container:
+        yield container
+
+
+@pytest.fixture
+async def postgres_url(
+    postgres_container: PostgresContainer,
+) -> AsyncGenerator[str, None]:
+    """URL of a new, empty PostgreSQL database, dropped after the test."""
+    server_url = make_url(postgres_container.get_connection_url())
+    name = f"test_{uuid.uuid4().hex}"
+    engine = create_async_engine(server_url, isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text(f'CREATE DATABASE "{name}"'))
+        yield server_url.set(database=name).render_as_string(hide_password=False)
+        async with engine.connect() as connection:
+            await connection.execute(text(f'DROP DATABASE "{name}" WITH (FORCE)'))
+    finally:
+        await engine.dispose()
 
 
 def pytest_collection_modifyitems(items):

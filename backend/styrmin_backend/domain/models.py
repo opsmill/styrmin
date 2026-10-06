@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Dict
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.domain.utils import generate_unique_name, validate_deployment_name
@@ -281,6 +281,9 @@ class Task(BaseModel):
     prefect_flow_run_id: UUID | None = Field(default=None)
 
     deployment_id: UUID
+    # The instance this task rolls out, and the hook step that started it.
+    instance_id: UUID | None = Field(default=None)
+    started_by_step_id: UUID | None = Field(default=None)
 
     created_on: datetime | None = Field(default=None)
     updated_on: datetime | None = Field(default=None)
@@ -292,11 +295,151 @@ class Task(BaseModel):
         deployment_id: UUID,
         prefect_flow_run_id: UUID | None = None,
         status: TaskStatus = TaskStatus.PENDING,
+        instance_id: UUID | None = None,
+        started_by_step_id: UUID | None = None,
     ) -> Task:
         """Create a new Task instance."""
         return cls(
             id=uuid4(),
             type=type,
+            status=status,
             deployment_id=deployment_id,
             prefect_flow_run_id=prefect_flow_run_id,
+            instance_id=instance_id,
+            started_by_step_id=started_by_step_id,
+        )
+
+
+class StepStatus(str, Enum):
+    """Status of a step. ``succeeded`` and ``superseded`` are final."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SUPERSEDED = "superseded"
+
+
+class StepKind(str, Enum):
+    """What a step does, and so which process writes it."""
+
+    PLAN = "plan"
+    HOOK = "hook"
+    RESOURCE_WRITE = "resource_write"
+    OPERATOR_PHASE = "operator_phase"
+    COMMAND = "command"
+    RESTORE = "restore"
+    BACKUP_COMPONENT = "backup_component"
+
+    @property
+    def is_flow_kind(self) -> bool:
+        """Written by a flow, so failed when the flow that owns it dies."""
+        return self is not StepKind.OPERATOR_PHASE
+
+
+class TaskResult(str, Enum):
+    """Result of a task as users view it, calculated from its steps."""
+
+    RUNNING = "running"
+    FAILED = "failed"
+    SUCCEEDED = "succeeded"
+    SUPERSEDED = "superseded"
+
+
+class StepError(BaseModel):
+    """The error of one failed attempt of a step."""
+
+    attempt: int
+    message: str
+    occurred_at: datetime
+
+
+class StepParent(BaseModel):
+    """The task, backup or restore a step belongs to. Exactly one id is set."""
+
+    model_config = ConfigDict(frozen=True)
+
+    task_id: UUID | None = None
+    backup_id: UUID | None = None
+    restore_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_parent(self) -> StepParent:
+        ids = (self.task_id, self.backup_id, self.restore_id)
+        if sum(parent_id is not None for parent_id in ids) != 1:
+            raise ValueError("A step has exactly one task, backup or restore")
+        return self
+
+    @classmethod
+    def of_task(cls, task_id: UUID) -> StepParent:
+        return cls(task_id=task_id)
+
+    @classmethod
+    def of_backup(cls, backup_id: UUID) -> StepParent:
+        return cls(backup_id=backup_id)
+
+    @classmethod
+    def of_restore(cls, restore_id: UUID) -> StepParent:
+        return cls(restore_id=restore_id)
+
+
+class Step(BaseModel):
+    """One unit of work inside a task, a backup or a restore."""
+
+    id: UUID
+    parent: StepParent
+    key: str
+    name: str
+    kind: StepKind
+    status: StepStatus = Field(default=StepStatus.PENDING)
+
+    started_at: datetime | None = Field(default=None)
+    ended_at: datetime | None = Field(default=None)
+    attempt_count: int = Field(default=0)
+    errors: list[StepError] = Field(default_factory=list)
+
+    detail: str | None = Field(default=None)
+    rolled_back_at: datetime | None = Field(default=None)
+    rollback_message: str | None = Field(default=None)
+
+    output: str | None = Field(default=None)
+    output_truncated: bool = Field(default=False)
+
+    superseded_by_task_id: UUID | None = Field(default=None)
+
+    created_on: datetime | None = Field(default=None)
+    updated_on: datetime | None = Field(default=None)
+
+    @property
+    def task_id(self) -> UUID | None:
+        return self.parent.task_id
+
+    @property
+    def backup_id(self) -> UUID | None:
+        return self.parent.backup_id
+
+    @property
+    def restore_id(self) -> UUID | None:
+        return self.parent.restore_id
+
+    @classmethod
+    def create(
+        cls,
+        parent: StepParent,
+        key: str,
+        name: str,
+        kind: StepKind,
+        status: StepStatus = StepStatus.PENDING,
+        started_at: datetime | None = None,
+    ) -> Step:
+        """Create a new step; a started step counts its first attempt."""
+        return cls(
+            id=uuid4(),
+            parent=parent,
+            key=key,
+            name=name,
+            kind=kind,
+            status=status,
+            started_at=started_at,
+            attempt_count=0 if started_at is None else 1,
         )

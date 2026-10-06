@@ -80,6 +80,7 @@ from styrmin_backend.repository.pod_status import (
     PodStatusRepository,
     SQLModelPodStatusRepository,
 )
+from styrmin_backend.repository.steps import SQLModelStepRepository, StepRepository
 from styrmin_backend.repository.tasks import SQLModelTaskRepository, TaskRepository
 from styrmin_backend.repository.utility import (
     SQLModelUtilityRepository,
@@ -101,6 +102,7 @@ class UnitOfWork(ABC):
     actions: ActionRepository
     utilities: UtilityRepository
     tasks: TaskRepository
+    steps: StepRepository
     deployments: DeploymentRepository
     deployed_services: DeployedServiceRepository
     backups: BackupRepository
@@ -147,6 +149,7 @@ class SqlModelUnitOfWork(UnitOfWork):
     actions: SQLModelActionRepository
     utilities: SQLModelUtilityRepository
     tasks: SQLModelTaskRepository
+    steps: SQLModelStepRepository
     deployments: SQLModelDeploymentRepository
     deployed_services: SQLModelDeployedServiceRepository
     backups: SQLModelBackupRepository
@@ -182,6 +185,7 @@ class SqlModelUnitOfWork(UnitOfWork):
         self.actions = SQLModelActionRepository(session=self.session)
         self.utilities = SQLModelUtilityRepository(session=self.session)
         self.tasks = SQLModelTaskRepository(session=self.session)
+        self.steps = SQLModelStepRepository(session=self.session)
         self.deployments = SQLModelDeploymentRepository(session=self.session)
         self.deployed_services = SQLModelDeployedServiceRepository(session=self.session)
         self.backups = SQLModelBackupRepository(session=self.session)
