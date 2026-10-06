@@ -153,6 +153,8 @@ from .get_deployment_timeline import (
     GetDeploymentTimelineDeploymentTimelineContextDiff,
     GetDeploymentTimelineDeploymentTimelineContextDiffChanges,
     GetDeploymentTimelineDeploymentTimelineTask,
+    GetDeploymentTimelineDeploymentTimelineTaskSteps,
+    GetDeploymentTimelineDeploymentTimelineTaskStepsErrors,
 )
 from .get_deployment_timeline_context_diff import (
     GetDeploymentTimelineContextDiff,
@@ -473,6 +475,8 @@ __all__ = [
     "GetDeploymentTimelineDeploymentTimelineContextDiff",
     "GetDeploymentTimelineDeploymentTimelineContextDiffChanges",
     "GetDeploymentTimelineDeploymentTimelineTask",
+    "GetDeploymentTimelineDeploymentTimelineTaskSteps",
+    "GetDeploymentTimelineDeploymentTimelineTaskStepsErrors",
     "GetDriverContainerOverrideDocs",
     "GetDriverContainerOverrideDocsApplicationDriver",
     "GetDriverContainerOverrideDocsApplicationDriverVersions",

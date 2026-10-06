@@ -13,6 +13,9 @@ from typing import Any
 
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.exceptions import ResourceNotFoundError, StyrminError
+from styrmin_sdk.graphql._generated import (
+    GetDeploymentTimelineDeploymentTimelineTaskSteps,
+)
 
 from tests.e2e.drivers.errors import (
     ResourceNotFound,
@@ -33,6 +36,8 @@ from tests.e2e.drivers.refs import (
     EnvironmentRestoreRef,
     EnvironmentRestoreSkipRef,
     RestoreRef,
+    StepErrorRef,
+    StepRef,
     TERMINAL_ENVIRONMENT_OPERATION_STATUSES,
     TimelineEntry,
 )
@@ -113,6 +118,29 @@ def _constituent_outcome(constituent: Any) -> str:
             return "failed"
         case _:
             return "in-flight"
+
+
+def _step_ref(step: GetDeploymentTimelineDeploymentTimelineTaskSteps) -> StepRef:
+    return StepRef(
+        id=str(step.id),
+        key=step.key,
+        name=step.name,
+        kind=step.kind.value,
+        status=step.status.value,
+        started_at=step.started_at.isoformat() if step.started_at else None,
+        ended_at=step.ended_at.isoformat() if step.ended_at else None,
+        attempt_count=step.attempt_count,
+        errors=tuple(
+            StepErrorRef(
+                attempt=error.attempt,
+                message=error.message,
+                occurred_at=error.occurred_at.isoformat(),
+            )
+            for error in step.errors
+        ),
+        detail=step.detail,
+        has_output=step.has_output,
+    )
 
 
 def _environment_backup_ref(environment_backup: Any) -> EnvironmentBackupRef:
@@ -772,6 +800,14 @@ class ApiScenarioDriver:
                     if entry.task.created_on is not None
                     else None
                 ),
+                steps=tuple(_step_ref(step) for step in entry.task.steps),
+                started_by_step_id=(
+                    str(entry.task.started_by_step_id)
+                    if entry.task.started_by_step_id is not None
+                    else None
+                ),
+                # result, started_by and started_tasks: T071 adds them to the
+                # schema and T084 to the SDK operation.
             )
             for entry in entries
         ]

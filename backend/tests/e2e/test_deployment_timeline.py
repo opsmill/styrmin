@@ -2,10 +2,11 @@
 
 import asyncio
 import time
+from datetime import datetime
 
 import pytest
 
-from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.drivers import ScenarioDriver, TimelineEntry
 
 pytestmark = [
     pytest.mark.shard_general,
@@ -25,6 +26,41 @@ VALID_TASK_TYPES = {
 
 VALID_TASK_STATUSES = {"pending", "running", "failed", "success"}
 
+VALID_TASK_RESULTS = {"RUNNING", "FAILED", "SUCCEEDED", "SUPERSEDED"}
+
+# Steps of a create, in start-time order (data-model.md "Step keys and names").
+CREATE_STEP_KINDS = {
+    "plan": "PLAN",
+    "resource:styrmindeployment": "RESOURCE_WRITE",
+    "operator:prerequisites": "OPERATOR_PHASE",
+    "operator:helmrelease": "OPERATOR_PHASE",
+    "operator:services": "OPERATOR_PHASE",
+    "operator:ready": "OPERATOR_PHASE",
+}
+
+
+async def _wait_for_create_steps(
+    scenario_driver: ScenarioDriver, deployment_id: str, timeout: float = 60.0
+) -> list[TimelineEntry]:
+    """Read the timeline until the create task's expected steps have all ended.
+
+    Absorbs the lag between the deployment reaching Running and the last
+    operator report reaching the steps, and the UI's refetch interval.
+    """
+    deadline = time.time() + timeout
+    while True:
+        timeline = await scenario_driver.get_deployment_timeline(
+            deployment_id=deployment_id
+        )
+        creates = [e for e in timeline if e.task_type == "create_instance"]
+        if len(creates) == 1:
+            ended = {s.key for s in creates[0].steps if s.ended_at is not None}
+            if ended >= CREATE_STEP_KINDS.keys():
+                return timeline
+        if time.time() >= deadline:
+            return timeline
+        await asyncio.sleep(2.0)
+
 
 @pytest.mark.ci
 async def test_deployment_timeline_has_entries(
@@ -36,9 +72,11 @@ async def test_deployment_timeline_has_entries(
     Reuses the session-scoped ``deployed_simple_app`` (parametrized by
     driver_mode). This test only observes the timeline of an already-
     running deployment; no mutation, so no need for a fresh deploy.
+    The create task carries its plan, CR-write and operator-phase steps
+    (spec 019, US1).
     """
-    timeline = await scenario_driver.get_deployment_timeline(
-        deployment_id=deployed_simple_app["deployment_id"]
+    timeline = await _wait_for_create_steps(
+        scenario_driver, deployed_simple_app["deployment_id"]
     )
 
     assert len(timeline) >= 1, (
@@ -56,10 +94,45 @@ async def test_deployment_timeline_has_entries(
         assert entry.created_on is not None, (
             f"Timeline entry missing created_on: {entry}"
         )
+        # TODO(T076): require a result on every task once T071/T074 expose
+        # Task.result to both drivers; until then the drivers return None.
+        assert entry.result is None or entry.result in VALID_TASK_RESULTS, (
+            f"Unexpected task result: {entry.result}"
+        )
 
     # The initial deploy should have version 0.1.0
     versions = [e.application_version for e in timeline if e.application_version]
     assert "0.1.0" in versions, f"Expected version 0.1.0 in timeline, got {versions}"
+
+    creates = [e for e in timeline if e.task_type == "create_instance"]
+    assert len(creates) == 1, (
+        f"Expected one create_instance task, got {[e.task_type for e in timeline]}"
+    )
+    steps = {step.key: step for step in creates[0].steps}
+    keys = [step.key for step in creates[0].steps]
+    missing = CREATE_STEP_KINDS.keys() - steps.keys()
+    assert not missing, f"Create task is missing steps {missing}; it has {keys}"
+
+    for key, kind in CREATE_STEP_KINDS.items():
+        step = steps[key]
+        assert step.kind == kind, f"Step {key} has kind {step.kind}, expected {kind}"
+        assert step.status == "SUCCEEDED", f"Step {key} is {step.status}: {step}"
+        assert step.name, f"Step {key} has no name"
+        assert step.started_at is not None and step.ended_at is not None, (
+            f"Succeeded step {key} lacks a start or end time: {step}"
+        )
+
+    # Steps are listed in start-time order.
+    expected_order = [key for key in keys if key in CREATE_STEP_KINDS]
+    assert expected_order == list(CREATE_STEP_KINDS), (
+        f"Create steps out of order: {keys}"
+    )
+    started = [
+        datetime.fromisoformat(step.started_at)
+        for step in creates[0].steps
+        if step.started_at is not None
+    ]
+    assert started == sorted(started), f"Steps not in start-time order: {keys}"
 
 
 @pytest.mark.ci

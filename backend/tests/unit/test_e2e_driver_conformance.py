@@ -28,10 +28,19 @@ import textwrap
 
 import pytest
 
-from tests.e2e.drivers.api_driver import ApiScenarioDriver, _constituent_outcome
+from styrmin_sdk.graphql._generated import (
+    GetDeploymentTimelineDeploymentTimelineTaskSteps,
+)
+
+from tests.e2e.drivers.api_driver import (
+    ApiScenarioDriver,
+    _constituent_outcome,
+    _step_ref,
+)
 from tests.e2e.drivers.protocol import ScenarioDriver
 from tests.e2e.drivers.refs import TERMINAL_ENVIRONMENT_OPERATION_STATUSES
 from tests.e2e.drivers.ui_driver import UiScenarioDriver
+from tests.e2e.pages.deployment_detail import _iso_or_none
 
 # The environment-level backup/restore surface (spec 001-env-backup-restore).
 # Spelled out rather than derived so a method silently dropped from the
@@ -379,3 +388,46 @@ def test_protocol_method_signatures_match() -> None:
                 f"(proto={proto_sig.return_annotation!r}, "
                 f"impl={impl_sig.return_annotation!r})"
             )
+
+
+def test_step_refs_use_the_values_the_step_rows_publish() -> None:
+    """The API driver's step fields must match what the UI driver reads.
+
+    ``StepList`` publishes the raw enum names and the API's ISO timestamps as
+    ``data-step-*`` attributes; the UI driver normalises those timestamps, so
+    one scenario assertion holds on both entrypoints.
+    """
+    step = GetDeploymentTimelineDeploymentTimelineTaskSteps.model_validate(
+        {
+            "id": "7f6c1f3e-5d0b-4b8e-9a43-0c7c0b1d2e3f",
+            "key": "operator:helmrelease",
+            "name": "Install or upgrade the HelmRelease",
+            "kind": "OPERATOR_PHASE",
+            "status": "SUCCEEDED",
+            "startedAt": "2026-10-06T10:00:00.250000+00:00",
+            "endedAt": "2026-10-06T10:00:09Z",
+            "durationSeconds": 8.75,
+            "attemptCount": 2,
+            "errors": [
+                {
+                    "attempt": 1,
+                    "message": "quota exceeded",
+                    "occurredAt": "2026-10-06T10:00:03+00:00",
+                }
+            ],
+            "error": "quota exceeded",
+            "detail": None,
+            "hasOutput": False,
+        }
+    )
+    ref = _step_ref(step)
+
+    assert (ref.kind, ref.status, ref.attempt_count) == (
+        "OPERATOR_PHASE",
+        "SUCCEEDED",
+        2,
+    )
+    assert ref.started_at == _iso_or_none("2026-10-06T10:00:00.250000+00:00")
+    assert ref.ended_at == _iso_or_none("2026-10-06T10:00:09Z")
+    assert [(e.attempt, e.message) for e in ref.errors] == [(1, "quota exceeded")]
+    assert _iso_or_none("") is None

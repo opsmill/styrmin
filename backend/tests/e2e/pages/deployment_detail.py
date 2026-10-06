@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, expect
 
 from tests.e2e.drivers.errors import ScenarioActionError, ScenarioTimeout
-from tests.e2e.drivers.refs import BackupRef, RestoreRef, TimelineEntry
+from tests.e2e.drivers.refs import BackupRef, RestoreRef, StepRef, TimelineEntry
 
 # Shared with ``pages/environments.py`` — both read their state off ``data-*``
 # test hooks and must fail identically when one is missing.
@@ -30,6 +31,53 @@ _STATUS_LABELS = {
     "completed": "Complete",
     "failed": "Failed",
 }
+
+
+# One round trip per entry: the step rows of collapsed entries stay mounted.
+_READ_STEP_ROWS_JS = """
+rows => rows.map(row => ({
+  ...row.dataset,
+  name: row.querySelector('[data-testid=step-name]')?.textContent ?? '',
+}))
+"""
+
+_STEP_REQUIRED_ATTRS = ("stepId", "stepKey", "stepKind", "stepStatus", "stepAttempts")
+
+
+def _iso_or_none(value: str | None) -> str | None:
+    # Same string shape as the API driver's ``datetime.isoformat()``.
+    return datetime.fromisoformat(value).isoformat() if value else None
+
+
+async def _read_steps(entry: Locator, *, context: str) -> tuple[StepRef, ...]:
+    rows = await entry.locator("[data-testid=step-row]").evaluate_all(
+        _READ_STEP_ROWS_JS
+    )
+    steps: list[StepRef] = []
+    for row in rows:
+        missing = [attr for attr in _STEP_REQUIRED_ATTRS if not row.get(attr)]
+        if missing:
+            raise ScenarioActionError(
+                f"{context} rendered a step row without {missing} "
+                "(frontend test-hook may have been removed or renamed)"
+            )
+        steps.append(
+            StepRef(
+                id=row["stepId"],
+                key=row["stepKey"],
+                name=row["name"].strip(),
+                kind=row["stepKind"],
+                status=row["stepStatus"],
+                started_at=_iso_or_none(row.get("stepStartedAt")),
+                ended_at=_iso_or_none(row.get("stepEndedAt")),
+                attempt_count=int(row["stepAttempts"]),
+                # StepList renders errors and FluxCD detail from T060.
+                errors=(),
+                detail=None,
+                has_output=row.get("stepHasOutput") == "true",
+            )
+        )
+    return tuple(steps)
 
 
 class DeploymentDetailPage:
@@ -526,6 +574,7 @@ class DeploymentDetailPage:
             )
             created_on = await row.get_attribute("data-created-on")
             application_version = await row.get_attribute("data-application-version")
+            started_by_step_id = await row.get_attribute("data-started-by-step-id")
             results.append(
                 TimelineEntry(
                     task_id=task_id,
@@ -533,6 +582,9 @@ class DeploymentDetailPage:
                     task_status=task_status,
                     application_version=application_version or None,
                     created_on=created_on or None,
+                    steps=await _read_steps(row, context=f"timeline entry {task_id}"),
+                    started_by_step_id=started_by_step_id or None,
+                    # result, started_by and started_tasks: rendered from T074.
                 )
             )
         return results
