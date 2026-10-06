@@ -18,6 +18,7 @@ from tests.e2e.drivers.refs import (
     RestoreRef,
     StepErrorRef,
     StepRef,
+    TaskLinkRef,
     TimelineEntry,
 )
 
@@ -54,6 +55,11 @@ rows => rows.map(row => ({
 """
 
 _STEP_REQUIRED_ATTRS = ("stepId", "stepKey", "stepKind", "stepStatus", "stepAttempts")
+
+# Started tasks are listed under the hook steps that started them.
+_READ_STARTED_TASKS_JS = """
+items => items.map(item => ({ ...item.dataset }))
+"""
 
 
 def _iso_or_none(value: str | None) -> str | None:
@@ -96,6 +102,28 @@ async def _read_steps(entry: Locator, *, context: str) -> tuple[StepRef, ...]:
         _READ_STEP_ROWS_JS
     )
     return tuple(_step_ref_from_row(row, context=context) for row in rows)
+
+
+async def _read_started_tasks(
+    entry: Locator, *, context: str
+) -> tuple[TaskLinkRef, ...]:
+    items = await entry.locator("[data-testid=started-task]").evaluate_all(
+        _READ_STARTED_TASKS_JS
+    )
+    for item in items:
+        if not item.get("taskId") or not item.get("taskType"):
+            raise ScenarioActionError(
+                f"{context} rendered a started task without data-task-id or "
+                "data-task-type (frontend test-hook may have been removed or renamed)"
+            )
+    return tuple(
+        TaskLinkRef(
+            id=item["taskId"],
+            type=item["taskType"],
+            result=item.get("taskResult") or None,
+        )
+        for item in items
+    )
 
 
 class DeploymentDetailPage:
@@ -593,6 +621,11 @@ class DeploymentDetailPage:
             created_on = await row.get_attribute("data-created-on")
             application_version = await row.get_attribute("data-application-version")
             started_by_step_id = await row.get_attribute("data-started-by-step-id")
+            result = await _required_attr(
+                row, "data-task-result", context=f"timeline entry {task_id}"
+            )
+            started_by_task_id = await row.get_attribute("data-started-by-task-id")
+            started_by_task_type = await row.get_attribute("data-started-by-task-type")
             results.append(
                 TimelineEntry(
                     task_id=task_id,
@@ -602,7 +635,20 @@ class DeploymentDetailPage:
                     created_on=created_on or None,
                     steps=await _read_steps(row, context=f"timeline entry {task_id}"),
                     started_by_step_id=started_by_step_id or None,
-                    # result, started_by and started_tasks: rendered from T074.
+                    result=result,
+                    # The timeline shows only the type of the starting task.
+                    started_by=(
+                        TaskLinkRef(
+                            id=started_by_task_id,
+                            type=started_by_task_type or "",
+                            result=None,
+                        )
+                        if started_by_task_id
+                        else None
+                    ),
+                    started_tasks=await _read_started_tasks(
+                        row, context=f"timeline entry {task_id}"
+                    ),
                 )
             )
         return results

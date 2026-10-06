@@ -418,6 +418,8 @@ def test_step_refs_use_the_values_the_step_rows_publish() -> None:
             "error": "quota exceeded",
             "detail": None,
             "hasOutput": False,
+            "supersededBy": None,
+            "startedTasks": [],
         }
     )
     ref = _step_ref(step)
@@ -466,6 +468,8 @@ def test_ui_step_rows_with_failures_match_the_api_step_refs() -> None:
             "error": errors[-1]["message"],
             "detail": "UpgradeFailed: Helm upgrade failed",
             "hasOutput": True,
+            "supersededBy": None,
+            "startedTasks": [],
         }
     )
     # What _READ_STEP_ROWS_JS returns for the row StepList renders.

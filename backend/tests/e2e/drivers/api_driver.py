@@ -38,6 +38,7 @@ from tests.e2e.drivers.refs import (
     RestoreRef,
     StepErrorRef,
     StepRef,
+    TaskLinkRef,
     TERMINAL_ENVIRONMENT_OPERATION_STATUSES,
     TimelineEntry,
 )
@@ -806,8 +807,25 @@ class ApiScenarioDriver:
                     if entry.task.started_by_step_id is not None
                     else None
                 ),
-                # result, started_by and started_tasks: T071 adds them to the
-                # schema and T084 to the SDK operation.
+                result=entry.task.result.value,
+                # The timeline reads only the id and type of the starting task.
+                started_by=(
+                    TaskLinkRef(
+                        id=str(entry.task.started_by.id),
+                        type=entry.task.started_by.type_,
+                        result=None,
+                    )
+                    if entry.task.started_by is not None
+                    else None
+                ),
+                started_tasks=tuple(
+                    TaskLinkRef(
+                        id=str(started.id),
+                        type=started.type_,
+                        result=started.result.value,
+                    )
+                    for started in entry.task.started_tasks
+                ),
             )
             for entry in entries
         ]

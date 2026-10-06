@@ -52,10 +52,12 @@ import {
 } from "lucide-react";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
+import { TaskResultBadge } from "@/components/deployment/TaskResultBadge";
 import { PinnedImageOverridesNotice } from "@/components/deployment/PinnedImageOverridesNotice";
 import { IfRole } from "@/auth/IfRole";
 import { PodsTab } from "./PodsTab";
 import { formatDriverVersionLabel } from "@/lib/driverVersion";
+import { taskResultDisplay } from "@/lib/task-display";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const DEPLOYMENT_TABS = [
@@ -533,18 +535,21 @@ export default function DeploymentDetailPage() {
               ) : (
                 <div className="flex flex-col">
                   {timelineEntries.slice(0, 5).map((entry, i) => (
-                    <div key={entry.task.id} className="flex gap-3">
+                    <div
+                      key={entry.task.id}
+                      className="flex gap-3"
+                      data-testid="recent-timeline-entry"
+                      data-task-id={entry.task.id}
+                      data-task-result={entry.task.result}
+                    >
                       <div
                         className="flex flex-col items-center"
                         style={{ width: 20 }}
                       >
                         <div
+                          aria-hidden="true"
                           className={`mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full ${
-                            entry.task.status === "failed"
-                              ? "bg-destructive"
-                              : entry.task.type.includes("stop")
-                                ? "bg-warning"
-                                : "bg-success"
+                            taskResultDisplay(entry.task.result).dot
                           }`}
                         />
                         {i < Math.min(timelineEntries.length, 5) - 1 && (
@@ -556,7 +561,7 @@ export default function DeploymentDetailPage() {
                           <span className="text-xs font-medium text-foreground">
                             {formatTaskType(entry.task.type)}
                           </span>
-                          <StatusBadge status={entry.task.status} />
+                          <TaskResultBadge result={entry.task.result} />
                         </div>
                         <span className="text-[11px] text-muted-foreground">
                           {entry.applicationVersion &&

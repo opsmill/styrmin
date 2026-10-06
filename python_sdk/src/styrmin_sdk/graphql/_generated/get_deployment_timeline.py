@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import Field
 
 from .base_model import BaseModel
-from .enums import StepKind, StepStatus
+from .enums import StepKind, StepStatus, TaskResult
 
 
 class GetDeploymentTimeline(BaseModel):
@@ -32,8 +32,26 @@ class GetDeploymentTimelineDeploymentTimelineTask(BaseModel):
     message: Optional[str]
     created_on: Optional[datetime] = Field(alias="createdOn")
     updated_on: Optional[datetime] = Field(alias="updatedOn")
+    result: TaskResult
     started_by_step_id: Optional[UUID] = Field(alias="startedByStepId")
+    started_by: Optional["GetDeploymentTimelineDeploymentTimelineTaskStartedBy"] = (
+        Field(alias="startedBy")
+    )
+    started_tasks: list["GetDeploymentTimelineDeploymentTimelineTaskStartedTasks"] = (
+        Field(alias="startedTasks")
+    )
     steps: list["GetDeploymentTimelineDeploymentTimelineTaskSteps"]
+
+
+class GetDeploymentTimelineDeploymentTimelineTaskStartedBy(BaseModel):
+    id: UUID
+    type_: str = Field(alias="type")
+
+
+class GetDeploymentTimelineDeploymentTimelineTaskStartedTasks(BaseModel):
+    id: UUID
+    type_: str = Field(alias="type")
+    result: TaskResult
 
 
 class GetDeploymentTimelineDeploymentTimelineTaskSteps(BaseModel):
@@ -50,12 +68,29 @@ class GetDeploymentTimelineDeploymentTimelineTaskSteps(BaseModel):
     error: Optional[str]
     detail: Optional[str]
     has_output: bool = Field(alias="hasOutput")
+    superseded_by: Optional[
+        "GetDeploymentTimelineDeploymentTimelineTaskStepsSupersededBy"
+    ] = Field(alias="supersededBy")
+    started_tasks: list[
+        "GetDeploymentTimelineDeploymentTimelineTaskStepsStartedTasks"
+    ] = Field(alias="startedTasks")
 
 
 class GetDeploymentTimelineDeploymentTimelineTaskStepsErrors(BaseModel):
     attempt: int
     message: str
     occurred_at: datetime = Field(alias="occurredAt")
+
+
+class GetDeploymentTimelineDeploymentTimelineTaskStepsSupersededBy(BaseModel):
+    id: UUID
+    type_: str = Field(alias="type")
+
+
+class GetDeploymentTimelineDeploymentTimelineTaskStepsStartedTasks(BaseModel):
+    id: UUID
+    type_: str = Field(alias="type")
+    result: TaskResult
 
 
 class GetDeploymentTimelineDeploymentTimelineContextDiff(BaseModel):
