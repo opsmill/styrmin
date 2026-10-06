@@ -1,5 +1,6 @@
 """Tests for the deployment status service — displayState to Deployment.status mapping."""
 
+from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -12,7 +13,13 @@ from styrmin_backend.db.models import (
     Restore,
     RestoreStatus,
 )
-from styrmin_backend.domain.models import Deployment, DeploymentState, Instance
+from styrmin_backend.agent.service.kubernetes.exceptions import CustomResourceNotFound
+from styrmin_backend.domain.models import (
+    Deployment,
+    DeploymentState,
+    Instance,
+    TaskType,
+)
 from styrmin_backend.services.deployment_status import (
     extract_scheduling_conditions,
 )
@@ -47,6 +54,7 @@ def _make_uow(
     restores: FakeRestoreRepository | None = None,
     instances: FakeApplicationInstanceRepository | None = None,
     backups: FakeBackupRepository | None = None,
+    tasks: FakeTaskRepository | None = None,
 ) -> FakeUnitOfWork:
     return FakeUnitOfWork(
         clusters=FakeClusterRepository(),
@@ -56,7 +64,7 @@ def _make_uow(
         application_driver_versions=FakeApplicationRepository(),
         instances=instances or FakeApplicationInstanceRepository(),
         actions=FakeActionRepository(),
-        tasks=FakeTaskRepository(),
+        tasks=tasks or FakeTaskRepository(),
         deployments=deployments,
         deployment_statuses=deployment_statuses,
         deployed_services=deployed_services,
@@ -663,6 +671,225 @@ async def test_missing_instance_id_backcompat() -> None:
     found = await dep_repo.find(dep.id)
     assert found is not None
     assert found.status == DeploymentState.RUNNING
+
+
+@pytest.mark.anyio
+async def test_deleting_ignores_stale_live_report() -> None:
+    """A report polled before the operator saw ``deletionRequested`` must not
+    pull a DELETING deployment back to a live state."""
+    dep = _make_deployment(status=DeploymentState.DELETING)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    uow = _make_uow(deployments=dep_repo)
+
+    reports = [{"deployment_id": dep.id, "phase": "Ready", "display_state": "Running"}]
+    _, deployments_updated = await report_deployment_statuses(reports, uow)
+
+    assert deployments_updated == 0
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentState.DELETING
+
+
+# ======================================================================
+# Dedicated ingress controller teardown when the last app is deleted (#252)
+# ======================================================================
+
+
+def _make_ingress_controller(
+    environment_id: UUID, status: DeploymentState = DeploymentState.PENDING
+) -> Deployment:
+    ingress = _make_deployment(status=status)
+    ingress.name = "styrmin-ingress-controller"
+    ingress.internal = True
+    ingress.environment_id = environment_id
+    return ingress
+
+
+def _make_app(
+    environment_id: UUID, status: DeploymentState = DeploymentState.DELETING
+) -> Deployment:
+    app = _make_deployment(status=status)
+    app.environment_id = environment_id
+    return app
+
+
+def _deleted_report(deployment_id: UUID) -> dict:
+    return {
+        "deployment_id": deployment_id,
+        "phase": "Deleted",
+        "display_state": "Deleted",
+    }
+
+
+@pytest.fixture
+def patch_crd_mock():
+    # The fake unit of work has no step repository; the functional test covers steps.
+    with (
+        patch(
+            "styrmin_backend.services.deployment.patch_custom_resource",
+            new_callable=AsyncMock,
+        ) as mock,
+        patch(
+            "styrmin_backend.services.deployment._record_delete_steps",
+            new_callable=AsyncMock,
+        ),
+    ):
+        yield mock
+
+
+@pytest.mark.anyio
+async def test_last_app_deleted_requests_ingress_controller_teardown(
+    patch_crd_mock: AsyncMock,
+) -> None:
+    env_id = uuid4()
+    app = _make_app(env_id)
+    ingress = _make_ingress_controller(env_id)
+    dep_repo = FakeDeploymentRepository([app, ingress])
+    tasks = FakeTaskRepository()
+    uow = _make_uow(deployments=dep_repo, tasks=tasks)
+
+    await report_deployment_statuses([_deleted_report(app.id)], uow)
+
+    patch_crd_mock.assert_awaited_once()
+    kwargs = patch_crd_mock.call_args.kwargs
+    assert kwargs["reference"] == f"styrmin-{ingress.id}"
+    assert kwargs["namespace"] == f"styrmin-{ingress.id}"
+    assert kwargs["patch"] == [
+        {"op": "add", "path": "/spec/deletionRequested", "value": True}
+    ]
+    found = await dep_repo.find(ingress.id)
+    assert found is not None
+    assert found.status == DeploymentState.DELETING
+    # Only the status reporter tombstones, on the terminal report (ADR-008).
+    assert found.deleted_at is None
+    ingress_tasks = await tasks.find_by_deployment(ingress.id)
+    assert [task.type for task in ingress_tasks] == [TaskType.DELETE_DEPLOYMENT]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "peer_status",
+    [DeploymentState.RUNNING, DeploymentState.DELETING, DeploymentState.RESTORING],
+)
+async def test_non_last_app_deleted_keeps_ingress_controller(
+    patch_crd_mock: AsyncMock, peer_status: DeploymentState
+) -> None:
+    env_id = uuid4()
+    app = _make_app(env_id)
+    peer = _make_app(env_id, status=peer_status)
+    ingress = _make_ingress_controller(env_id)
+    dep_repo = FakeDeploymentRepository([app, peer, ingress])
+    uow = _make_uow(deployments=dep_repo)
+
+    await report_deployment_statuses([_deleted_report(app.id)], uow)
+
+    patch_crd_mock.assert_not_awaited()
+    found = await dep_repo.find(ingress.id)
+    assert found is not None
+    assert found.status == DeploymentState.PENDING
+
+
+@pytest.mark.anyio
+async def test_last_two_apps_deleted_in_one_report_tear_down_once(
+    patch_crd_mock: AsyncMock,
+) -> None:
+    env_id = uuid4()
+    first = _make_app(env_id)
+    second = _make_app(env_id)
+    ingress = _make_ingress_controller(env_id)
+    dep_repo = FakeDeploymentRepository([first, second, ingress])
+    uow = _make_uow(deployments=dep_repo)
+
+    await report_deployment_statuses(
+        [_deleted_report(first.id), _deleted_report(second.id)], uow
+    )
+
+    patch_crd_mock.assert_awaited_once()
+    found = await dep_repo.find(ingress.id)
+    assert found is not None
+    assert found.status == DeploymentState.DELETING
+
+
+@pytest.mark.anyio
+async def test_ingress_controller_already_deleting_is_not_patched_again(
+    patch_crd_mock: AsyncMock,
+) -> None:
+    env_id = uuid4()
+    app = _make_app(env_id)
+    ingress = _make_ingress_controller(env_id, status=DeploymentState.DELETING)
+    dep_repo = FakeDeploymentRepository([app, ingress])
+    tasks = FakeTaskRepository()
+    uow = _make_uow(deployments=dep_repo, tasks=tasks)
+
+    await report_deployment_statuses([_deleted_report(app.id)], uow)
+
+    patch_crd_mock.assert_not_awaited()
+    assert await tasks.find_by_deployment(ingress.id) == []
+
+
+@pytest.mark.anyio
+async def test_ingress_controller_without_cr_is_marked_deleting(
+    patch_crd_mock: AsyncMock,
+) -> None:
+    """No CR on the cluster: the row still goes to DELETING so the reporter's
+    synthetic Deleted report can tombstone it."""
+    patch_crd_mock.side_effect = CustomResourceNotFound("gone")
+    env_id = uuid4()
+    app = _make_app(env_id)
+    ingress = _make_ingress_controller(env_id)
+    dep_repo = FakeDeploymentRepository([app, ingress])
+    uow = _make_uow(deployments=dep_repo)
+
+    await report_deployment_statuses([_deleted_report(app.id)], uow)
+
+    found = await dep_repo.find(ingress.id)
+    assert found is not None
+    assert found.status == DeploymentState.DELETING
+
+
+@pytest.mark.anyio
+async def test_ingress_controller_patch_failure_keeps_app_tombstone(
+    patch_crd_mock: AsyncMock,
+) -> None:
+    """A cluster error leaves the controller as it was; the app still reaches
+    DELETED."""
+    patch_crd_mock.side_effect = RuntimeError("cluster unreachable")
+    env_id = uuid4()
+    app = _make_app(env_id)
+    ingress = _make_ingress_controller(env_id)
+    dep_repo = FakeDeploymentRepository([app, ingress])
+    tasks = FakeTaskRepository()
+    uow = _make_uow(deployments=dep_repo, tasks=tasks)
+
+    await report_deployment_statuses([_deleted_report(app.id)], uow)
+
+    found_app = await dep_repo.find(app.id)
+    assert found_app is not None
+    assert found_app.status == DeploymentState.DELETED
+    assert found_app.deleted_at is not None
+    found_ingress = await dep_repo.find(ingress.id)
+    assert found_ingress is not None
+    assert found_ingress.status == DeploymentState.PENDING
+    assert await tasks.find_by_deployment(ingress.id) == []
+
+
+@pytest.mark.anyio
+async def test_ingress_controller_reaches_deleted(patch_crd_mock: AsyncMock) -> None:
+    """The controller's own terminal report tombstones it without starting
+    another teardown."""
+    env_id = uuid4()
+    ingress = _make_ingress_controller(env_id, status=DeploymentState.DELETING)
+    dep_repo = FakeDeploymentRepository([ingress])
+    uow = _make_uow(deployments=dep_repo)
+
+    await report_deployment_statuses([_deleted_report(ingress.id)], uow)
+
+    patch_crd_mock.assert_not_awaited()
+    found = await dep_repo.find(ingress.id)
+    assert found is not None
+    assert found.status == DeploymentState.DELETED
+    assert found.deleted_at is not None
 
 
 class TestExtractSchedulingConditions:

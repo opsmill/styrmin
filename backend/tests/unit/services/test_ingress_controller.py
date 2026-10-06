@@ -11,6 +11,7 @@ Covers:
 - T020b: Retroactive reconciliation when dedicated_ingress is added
 """
 
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -741,6 +742,69 @@ class TestEnsureIngressController:
             deployments=fake_deployment_repo,
         )
         with pytest.raises(IngressControllerNotHealthyError):
+            await _ensure_ingress_controller(
+                env_with_ingress.id, uow, created_by_user_id=uuid4()
+            )
+
+    async def test_raises_while_controller_is_being_removed(
+        self,
+        fake_cluster_repo,
+        fake_env_repo,
+        fake_deployment_repo,
+        env_with_ingress,
+    ):
+        """#252: a controller torn down after the last app was deleted is not
+        reused, and no second one is started next to it."""
+        existing = Deployment.create(
+            name="styrmin-ingress-controller",
+            application_version="1.0.0",
+            application_driver_version_id=uuid4(),
+            environment_id=env_with_ingress.id,
+            created_by_user_id=uuid4(),
+            internal=True,
+        )
+        existing.set_status(DeploymentState.DELETING)
+        await fake_deployment_repo.save(existing)
+
+        uow = _make_uow(
+            clusters=fake_cluster_repo,
+            environments=fake_env_repo,
+            deployments=fake_deployment_repo,
+        )
+        with pytest.raises(IngressControllerNotHealthyError, match="being removed"):
+            await _ensure_ingress_controller(
+                env_with_ingress.id, uow, created_by_user_id=uuid4()
+            )
+        assert len(fake_deployment_repo._deployments) == 1
+
+    async def test_provisions_again_after_controller_was_tombstoned(
+        self,
+        fake_cluster_repo,
+        fake_env_repo,
+        fake_deployment_repo,
+        env_with_ingress,
+    ):
+        """#252: a tombstoned controller does not count, so a new one is
+        created. The internal driver is absent, so reaching the creation path
+        surfaces as ApplicationDriverNotFoundError."""
+        tombstoned = Deployment.create(
+            name="styrmin-ingress-controller",
+            application_version="1.0.0",
+            application_driver_version_id=uuid4(),
+            environment_id=env_with_ingress.id,
+            created_by_user_id=uuid4(),
+            internal=True,
+        )
+        tombstoned.set_status(DeploymentState.DELETED)
+        tombstoned.deleted_at = datetime.now(tz=timezone.utc)
+        await fake_deployment_repo.save(tombstoned)
+
+        uow = _make_uow(
+            clusters=fake_cluster_repo,
+            environments=fake_env_repo,
+            deployments=fake_deployment_repo,
+        )
+        with pytest.raises(ApplicationDriverNotFoundError):
             await _ensure_ingress_controller(
                 env_with_ingress.id, uow, created_by_user_id=uuid4()
             )

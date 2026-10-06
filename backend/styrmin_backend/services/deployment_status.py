@@ -9,6 +9,7 @@ from loguru import logger
 
 from styrmin_backend.db.models import DeploymentState, DeploymentStatus
 from styrmin_backend.services.backup.service import has_in_flight_restore
+from styrmin_backend.services.deployment import tear_down_unused_ingress_controller
 from styrmin_backend.services.steps.operator_history import apply_operator_report
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
@@ -122,6 +123,14 @@ async def report_deployment_statuses(
                 )
                 continue
 
+            # Deletion is one-way: a report polled before the operator saw
+            # ``deletionRequested`` must not pull a DELETING row back.
+            if (
+                deployment.status == DeploymentState.DELETING
+                and target_state != DeploymentState.DELETED
+            ):
+                continue
+
             if (
                 deployment.status == DeploymentState.RESTORING
                 and target_state != DeploymentState.RESTORING
@@ -164,6 +173,11 @@ async def report_deployment_statuses(
                 deployment.status = target_state
                 await uow.deployments.save(deployment)
                 deployments_updated += 1
+
+                if target_state == DeploymentState.DELETED and not deployment.internal:
+                    await tear_down_unused_ingress_controller(
+                        environment_id=deployment.environment_id, uow=uow
+                    )
 
         await uow.commit()
         return statuses_updated, deployments_updated

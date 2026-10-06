@@ -6,6 +6,7 @@ from loguru import logger
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 
+from styrmin_backend.agent.service.kubernetes.exceptions import CustomResourceNotFound
 from styrmin_backend.agent.service.kubernetes.primitives import patch_custom_resource
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.context.exceptions import InvalidDeploymentContextError
@@ -1178,6 +1179,14 @@ async def _ensure_ingress_controller(
                 "The dedicated ingress controller has failed. "
                 "Resolve the ingress controller issue before deploying applications."
             )
+        if existing.status == DeploymentState.DELETING:
+            # A second controller would collide with the old one's pinned node
+            # port or load balancer IP, so wait for the teardown to finish.
+            raise IngressControllerNotHealthyError(
+                "The dedicated ingress controller is being removed because the "
+                "last application in this environment was deleted. "
+                "Retry once the removal completes."
+            )
         # PENDING — still deploying, let it proceed
         return
 
@@ -1629,31 +1638,14 @@ async def delete_deployment(
                 f"state {deployment.status.value}"
             )
 
-        # Patch the CRD spec. The CR name and namespace both follow the
-        # `styrmin-{deployment_id}` convention (CR name == namespace for
-        # platform-managed deployments).
-        crd_name = get_kubernetes_reference(deployment_id)
         requested_at = datetime.now(UTC)
-        await patch_custom_resource(
-            plural=CRD_PLURAL,
-            reference=crd_name,
-            group=CRD_GROUP,
-            version=CRD_VERSION,
-            namespace=crd_name,
-            patch=[{"op": "add", "path": "/spec/deletionRequested", "value": True}],
-        )
+        await _patch_deletion_requested(deployment_id)
         patched_at = datetime.now(UTC)
 
         # Create a born-complete DELETE_DEPLOYMENT task. The mutation acks
         # immediately; the status reporter's reports move its teardown step
         # (see services/deployment_status.py).
-        task = Task(
-            id=uuid4(),
-            type=TaskType.DELETE_DEPLOYMENT,
-            deployment_id=deployment_id,
-            status=TaskStatus.SUCCESS,
-            prefect_flow_run_id=None,
-        )
+        task = _born_complete_delete_task(deployment_id)
         await uow.tasks.save(task=task)
         await _record_delete_steps(task, requested_at, patched_at, uow)
         await uow.commit()
@@ -1701,16 +1693,8 @@ async def request_cluster_teardown(deployment_id: UUID) -> bool:
     Returns:
         ``True`` when the CR was patched, ``False`` when it could not be.
     """
-    crd_name = get_kubernetes_reference(deployment_id)
     try:
-        await patch_custom_resource(
-            plural=CRD_PLURAL,
-            reference=crd_name,
-            group=CRD_GROUP,
-            version=CRD_VERSION,
-            namespace=crd_name,
-            patch=[{"op": "add", "path": "/spec/deletionRequested", "value": True}],
-        )
+        await _patch_deletion_requested(deployment_id)
     except Exception as exc:
         logger.warning(
             "deployment_teardown_request_failed deployment_id={} error={}",
@@ -1719,3 +1703,78 @@ async def request_cluster_teardown(deployment_id: UUID) -> bool:
         )
         return False
     return True
+
+
+async def tear_down_unused_ingress_controller(
+    environment_id: UUID,
+    uow: UnitOfWork,
+) -> None:
+    """Request deletion of the environment's internal ingress controller once
+    no user-facing deployment is left for it to route to.
+
+    Runs inside the caller's unit of work and does not commit. The row goes to
+    ``DELETING`` at once so new deployments stop reusing it; the status
+    reporter tombstones it like any other deployment (ADR-008).
+    """
+    deployments = await uow.deployments.find_all_by_environment(environment_id)
+    if any(not deployment.internal for deployment in deployments):
+        return
+
+    for ingress in deployments:
+        if ingress.status == DeploymentState.DELETING:
+            continue
+        requested_at = datetime.now(UTC)
+        try:
+            await _patch_deletion_requested(ingress.id)
+        except CustomResourceNotFound:
+            # Nothing on the cluster: the reporter's synthetic Deleted report
+            # tombstones the DELETING row.
+            pass
+        except Exception as exc:
+            logger.warning(
+                "ingress_controller_teardown_request_failed environment_id={} "
+                "deployment_id={} error={}",
+                environment_id,
+                ingress.id,
+                exc,
+            )
+            continue
+
+        logger.info(
+            "Requested deletion of internal ingress controller deployment={} "
+            "for environment={}: no user-facing deployment is left",
+            ingress.id,
+            environment_id,
+        )
+        ingress.set_status(DeploymentState.DELETING)
+        await uow.deployments.save(ingress)
+        task = _born_complete_delete_task(ingress.id)
+        await uow.tasks.save(task=task)
+        await _record_delete_steps(task, requested_at, datetime.now(UTC), uow)
+
+
+async def _patch_deletion_requested(deployment_id: UUID) -> None:
+    """Set ``spec.deletionRequested`` on the deployment's ``StyrminDeployment`` CR.
+
+    The CR name and namespace both follow the ``styrmin-{deployment_id}``
+    convention (CR name == namespace for platform-managed deployments).
+    """
+    crd_name = get_kubernetes_reference(deployment_id)
+    await patch_custom_resource(
+        plural=CRD_PLURAL,
+        reference=crd_name,
+        group=CRD_GROUP,
+        version=CRD_VERSION,
+        namespace=crd_name,
+        patch=[{"op": "add", "path": "/spec/deletionRequested", "value": True}],
+    )
+
+
+def _born_complete_delete_task(deployment_id: UUID) -> Task:
+    return Task(
+        id=uuid4(),
+        type=TaskType.DELETE_DEPLOYMENT,
+        deployment_id=deployment_id,
+        status=TaskStatus.SUCCESS,
+        prefect_flow_run_id=None,
+    )

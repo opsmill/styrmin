@@ -7,6 +7,8 @@ Covers:
 - T038: Traffic routes through dedicated ingress — HTTP request via Traefik (port-forward)
 - T038b: Traffic routes via the LoadBalancer external IP provisioned by vcluster
 - T038a: Toggle dedicated_ingress on/off — verify provisioning and deprovisioning
+- #252: Deleting the last app tears the ingress controller down; deploying again
+  provisions a fresh one
 """
 
 import asyncio
@@ -18,6 +20,7 @@ import kr8s
 import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Ingress as AsyncIngress
+from kr8s.asyncio.objects import Namespace as AsyncNamespace
 from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
 from kr8s.asyncio.objects import new_class
@@ -762,3 +765,135 @@ async def test_ip_whitelist_enforcement_allows_and_rejects(
             f"(baseline={baseline_restart}, final={final_restart}); "
             "ip_whitelist must take effect without app restart"
         )
+
+
+_INGRESS_CONTROLLER_NAME_PREFIX = "styrmin-ingress-controller"
+
+
+async def _wait_for_deployment_status(
+    client: StyrminClient, deployment_id: str, expected: str, timeout: float = 300.0
+) -> None:
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        last = (await client.deployments.get(deployment_id)).status
+        if last == expected:
+            return
+        await asyncio.sleep(2)
+    raise AssertionError(
+        f"Deployment {deployment_id} never reached {expected!r} within "
+        f"{timeout}s. Last observed: {last!r}."
+    )
+
+
+async def _ingress_controller_ids(
+    client: StyrminClient, environment_id: str, *, include_deleted: bool = False
+) -> dict[str, str]:
+    """Map each ingress controller deployment's id to its status. The
+    ``deployment`` query hides internal deployments; the environment list
+    does not."""
+    deployments = await client.deployments.list(
+        environment_id=environment_id, include_deleted=include_deleted
+    )
+    return {
+        str(deployment.id): deployment.status
+        for deployment in deployments
+        if deployment.name.startswith(_INGRESS_CONTROLLER_NAME_PREFIX)
+    }
+
+
+async def _wait_for_traefik_pod(
+    kr8s_api: kr8s.asyncio.Api, namespace: str, timeout: float = 300.0
+) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        async for pod in AsyncPod.list(
+            namespace=namespace,
+            label_selector={"app.kubernetes.io/name": "traefik"},
+            api=kr8s_api,
+        ):
+            if isinstance(pod, AsyncPod) and pod.status.get("phase") == "Running":
+                return
+        await asyncio.sleep(5)
+    raise AssertionError(f"No running Traefik pod in {namespace!r} after {timeout}s")
+
+
+async def _namespace_exists(kr8s_api: kr8s.asyncio.Api, namespace: str) -> bool:
+    try:
+        await AsyncNamespace.get(namespace, api=kr8s_api)
+    except kr8s.NotFoundError:
+        return False
+    return True
+
+
+@pytest.mark.e2e
+@pytest.mark.ci
+@pytest.mark.api_only(
+    reason="The teardown runs in the backend when the status reporter "
+    "tombstones the last app; every step goes through the SDK and kr8s, so the "
+    "[ui-chromium] variant would re-run the same calls without adding coverage."
+)
+async def test_deleting_last_app_tears_down_dedicated_ingress(
+    styrmin_resources: dict,
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
+    vcluster: dict,
+):
+    """#252: deleting the last app of a dedicated-ingress environment removes
+    its ingress controller from Styrmin and the cluster; deploying again
+    provisions a fresh controller."""
+    client: StyrminClient = styrmin_resources["client"]
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
+
+    # The session cluster carries dedicated_ingress; the new env inherits it.
+    environment = await client.environments.create(
+        name=f"ingress-teardown-{uuid.uuid4().hex[:6]}",
+        cluster_id=styrmin_resources["cluster_id"],
+        config={},
+    )
+    environment_id = str(environment.id)
+    try:
+        task = await client.deployments.create(
+            driver="simple-app", version="0.1.0", environment_id=environment_id
+        )
+        app_id = str(task.deployment_id)
+        await _wait_for_deployment_status(client, app_id, "running")
+
+        controllers = await _ingress_controller_ids(client, environment_id)
+        assert len(controllers) == 1, controllers
+        (ingress_id,) = controllers
+        ingress_namespace = f"styrmin-{ingress_id}"
+        await _wait_for_traefik_pod(kr8s_api, ingress_namespace)
+
+        await client.deployments.delete(app_id)
+        await _wait_for_deployment_status(client, app_id, "deleted")
+
+        deadline = time.time() + 300.0
+        while time.time() < deadline:
+            history = await _ingress_controller_ids(
+                client, environment_id, include_deleted=True
+            )
+            if history.get(ingress_id) == "deleted":
+                break
+            await asyncio.sleep(5)
+        else:
+            raise AssertionError(
+                f"Ingress controller {ingress_id} never reached 'deleted': {history}"
+            )
+        # The default list hides tombstones, so absence proves deleted_at is set.
+        assert await _ingress_controller_ids(client, environment_id) == {}
+        assert not await _namespace_exists(kr8s_api, ingress_namespace), (
+            f"Namespace {ingress_namespace!r} (Traefik release) still present"
+        )
+
+        task = await client.deployments.create(
+            driver="simple-app", version="0.1.0", environment_id=environment_id
+        )
+        await _wait_for_deployment_status(client, str(task.deployment_id), "running")
+
+        controllers = await _ingress_controller_ids(client, environment_id)
+        assert len(controllers) == 1, controllers
+        (new_ingress_id,) = controllers
+        assert new_ingress_id != ingress_id
+        await _wait_for_traefik_pod(kr8s_api, f"styrmin-{new_ingress_id}")
+    finally:
+        await client.environments.delete(environment_id=environment_id)

@@ -444,11 +444,12 @@ class SQLModelDeploymentRepository(
     async def find_internal_by_environment(
         self, environment_id: UUID
     ) -> DeploymentEntity | None:
-        """Find the internal ingress controller deployment for an environment."""
+        """Find the live internal ingress controller deployment for an environment."""
         result = await self.session.exec(
             select(self.model_class)
             .where(self.model_class.environment_id == environment_id)
             .where(self.model_class.internal == True)  # noqa: E712
+            .where(self.model_class.deleted_at.is_(None))  # type: ignore[union-attr]
             .options(*self._eager_load_options())
         )
         entity = result.first()

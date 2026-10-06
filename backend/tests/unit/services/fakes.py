@@ -697,7 +697,11 @@ class FakeDeploymentRepository(DeploymentRepository):
         self, environment_id: UUID
     ) -> DeploymentEntity | None:
         for d in self._deployments:
-            if d.environment_id == environment_id and d.internal:
+            if (
+                d.environment_id == environment_id
+                and d.internal
+                and d.deleted_at is None
+            ):
                 return d
         return None
 

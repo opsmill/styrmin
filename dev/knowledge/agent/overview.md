@@ -112,7 +112,7 @@ The status reporter is the mechanism by which the database reflects what is actu
 
 Every poll cycle, the reporter:
 
-1. Calls the `listDeploymentsForStatus` GraphQL query against the server to discover all non-internal deployments grouped by environment.
+1. Calls the `listDeploymentsForStatus` GraphQL query against the server to discover all non-internal deployments grouped by environment, plus internal deployments in `deleting` (an ingress controller being torn down after its environment's last app was deleted), so their terminal `Deleted` report reaches the server.
 2. For each deployment, in its namespace:
    - Lists pods via `kr8s` and extracts phase, readiness, restart count, container statuses, node, start time, and the `styrmin/component` label (recorded as-is — see [ADR-007](../../adr/0007-pod-status-records-observed-state-not-declared-state.md)). Pods without the component label are reported with `component_name = None` rather than dropped.
    - Fetches the `StyrminDeployment` CRD (`styrmin.io/v1alpha1`) and reads `status.instanceId`, `status.phase`, `status.displayState`, `status.message`, `status.conditions`, and `status.managedResources`. A missing CRD is not an error — that deployment is simply skipped this cycle.
