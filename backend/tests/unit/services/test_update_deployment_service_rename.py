@@ -181,7 +181,7 @@ async def test_service_rename_produces_instance_with_new_name(
     # Stub apply_state so we don't touch Prefect.  The side_effect saves the
     # stub task into the fake repo so that the service's subsequent
     # ``tasks.find(id=task.id)`` round-trip succeeds.
-    async def _fake_apply_state(deployment, current_instance, uow):  # noqa: ANN001
+    async def _fake_apply_state(deployment, current_instance, uow, task_type):  # noqa: ANN001
         stub = _stub_task(deployment_id=deployment.id)
         await uow.tasks.save(stub)
         return stub
