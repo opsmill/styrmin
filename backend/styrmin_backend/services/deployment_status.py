@@ -9,6 +9,7 @@ from loguru import logger
 
 from styrmin_backend.db.models import DeploymentState, DeploymentStatus
 from styrmin_backend.services.backup.service import has_in_flight_restore
+from styrmin_backend.services.steps.operator_history import apply_operator_report
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 # CRD displayState to DeploymentState mapping.
@@ -24,14 +25,32 @@ _DISPLAY_STATE_TO_STATUS: dict[str, DeploymentState] = {
 }
 
 
+async def _record_operator_steps(report: dict, now: datetime, uow: UnitOfWork) -> None:
+    """Run the phase history in a savepoint, so its failure keeps the rest of the report."""
+    try:
+        async with uow.session.begin_nested():
+            await apply_operator_report(report, now, uow)
+    except Exception:  # noqa: BLE001 - a step write never fails the status report
+        logger.exception(
+            "Could not record the operator steps of deployment {}",
+            report["deployment_id"],
+        )
+
+
 async def report_deployment_statuses(
     reports: list[dict],
     uow: UnitOfWork,
 ) -> tuple[int, int]:
     """Upsert deployment status snapshots and update Deployment state based on CRD phase.
 
-    A status report carries the ``instance_id`` that was on the CRD at poll
-    time. The server updates ``deployment.status`` only when that id matches
+    After each snapshot, the operator phase history moves the steps of the
+    report's task, in the same transaction but inside a savepoint: when it
+    fails, its own writes roll back and the snapshot and state still commit.
+
+    A status report carries the CR's ``status.instanceId``, the instance whose
+    spec the operator last handled (``spec.instanceId`` for a CR no operator
+    handler has touched since the upgrade). The server updates
+    ``deployment.status`` only when that id matches
     the current ``deployment.active_application_instance_id``; otherwise the
     report is for a superseded instance (e.g. the previous version during an
     in-progress upgrade) and must not be allowed to overwrite the status of
@@ -74,6 +93,7 @@ async def report_deployment_statuses(
             )
             await uow.deployment_statuses.upsert(snapshot)
             statuses_updated += 1
+            await _record_operator_steps(report, now, uow)
 
             # Update Deployment state based on CRD displayState
             target_state = _DISPLAY_STATE_TO_STATUS.get(display_state)

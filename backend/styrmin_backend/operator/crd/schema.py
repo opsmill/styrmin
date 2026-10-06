@@ -141,3 +141,6 @@ class StyrminDeploymentStatus(BaseModel):
         default_factory=ManagedResourceCounts,
         alias="managedResources",
     )
+    # The instance whose spec the operator last handled, and when that rollout started.
+    instance_id: str | None = Field(default=None, alias="instanceId")
+    rollout_started_at: str | None = Field(default=None, alias="rolloutStartedAt")

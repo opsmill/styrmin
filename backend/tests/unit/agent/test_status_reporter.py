@@ -730,3 +730,56 @@ class TestCollectCrdStatus:
         assert result["phase"] == "Ready"
         assert result["message"] == "All good"
         assert result["instanceId"] == "11111111-2222-3333-4444-555555555555"
+
+    @pytest.mark.anyio
+    async def test_crd_instance_id_comes_from_the_status(self) -> None:
+        # The operator writes the instance it acted on; a newer spec is not handled yet.
+        crd_data = {
+            "spec": {"instanceId": "11111111-2222-3333-4444-555555555555"},
+            "status": {
+                "phase": "Ready",
+                "instanceId": "99999999-8888-7777-6666-555555555555",
+            },
+        }
+        with patch(
+            "styrmin_backend.agent.status.reporter.get_custom_resource",
+            new_callable=AsyncMock,
+            return_value=crd_data,
+        ):
+            result = await _collect_crd_status("styrmin-test", "styrmin-test")
+        assert result is not None
+        assert result["instanceId"] == "99999999-8888-7777-6666-555555555555"
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "status",
+        [{"phase": "Ready"}, {"phase": "Ready", "instanceId": None}, None],
+        ids=["no-status-instance", "null-status-instance", "no-status"],
+    )
+    async def test_crd_instance_id_falls_back_to_the_spec(
+        self, status: dict | None
+    ) -> None:
+        crd_data = {
+            "spec": {"instanceId": "11111111-2222-3333-4444-555555555555"},
+            "status": status,
+        }
+        with patch(
+            "styrmin_backend.agent.status.reporter.get_custom_resource",
+            new_callable=AsyncMock,
+            return_value=crd_data,
+        ):
+            result = await _collect_crd_status("styrmin-test", "styrmin-test")
+        assert result is not None
+        assert result["instanceId"] == "11111111-2222-3333-4444-555555555555"
+
+    @pytest.mark.anyio
+    async def test_crd_without_any_instance_id_reports_none(self) -> None:
+        crd_data = {"spec": {}, "status": {"phase": "Ready"}}
+        with patch(
+            "styrmin_backend.agent.status.reporter.get_custom_resource",
+            new_callable=AsyncMock,
+            return_value=crd_data,
+        ):
+            result = await _collect_crd_status("styrmin-test", "styrmin-test")
+        assert result is not None
+        assert result["instanceId"] is None

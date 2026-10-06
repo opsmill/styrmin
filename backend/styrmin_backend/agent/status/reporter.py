@@ -147,7 +147,8 @@ async def _collect_crd_status(namespace: str, crd_name: str) -> dict | None:
         spec: dict = crd_dict.get("spec") or {}
         status: dict = crd_dict.get("status") or {}
         return {
-            "instanceId": spec.get("instanceId"),
+            # The instance the operator acted on; a CR it has not handled since its upgrade has none.
+            "instanceId": status.get("instanceId") or spec.get("instanceId"),
             "phase": status.get("phase", "Pending"),
             "displayState": status.get("displayState", "Deploying"),
             "message": status.get("message"),
