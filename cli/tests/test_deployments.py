@@ -903,7 +903,43 @@ def test_deployments_apply_wait_passes_flag_through_to_sdk(
 
     _args, kwargs = mock_client.deployments.apply_files.call_args
     assert kwargs["wait"] is True
+    assert kwargs["max_wait"] == 600
     assert kwargs["on_event"] is not None
+
+
+def test_deployments_apply_max_wait_passes_through_to_sdk(
+    mock_client: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """``--max-wait`` sets the SDK's wait limit."""
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    mock_client.deployments.apply_files = _wait_apply_files_stub(
+        [
+            ("submitted", _outcome("my-app", "updated")),
+            ("terminal", _outcome("my-app", "updated")),
+        ]
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest), "--wait", "--max-wait", "900"])
+    assert exc.value.code == 0
+
+    _args, kwargs = mock_client.deployments.apply_files.call_args
+    assert kwargs["max_wait"] == 900
+
+
+def test_deployments_apply_rejects_non_positive_max_wait(
+    mock_client: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """A ``--max-wait`` of 0 fails before the SDK is called."""
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    mock_client.deployments.apply_files = AsyncMock(return_value=[])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest), "--wait", "--max-wait", "0"])
+    assert exc.value.code != 0
+    mock_client.deployments.apply_files.assert_not_awaited()
 
 
 def test_deployments_apply_no_wait_does_not_install_callback(

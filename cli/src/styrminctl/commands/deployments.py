@@ -14,7 +14,14 @@ from styrmin_sdk.models.deployment_manifest import ApplyEvent, ApplyOutcome, App
 from styrminctl import client
 from styrminctl.labels import format_driver_version_label
 from styrminctl.output import console, parse_json_argument, print_success, print_table, styrmin_error_handler
-from styrminctl.types import ClusterContextId, ClusterContextName, DeploymentId, EnvironmentName, OptionalEnvironmentId
+from styrminctl.types import (
+    ClusterContextId,
+    ClusterContextName,
+    DeploymentId,
+    EnvironmentName,
+    MaxWait,
+    OptionalEnvironmentId,
+)
 
 # ``version_flags=()`` disables cyclopts's default ``--version`` meta-flag on
 # this sub-app so ``deployments apply --version <X>`` binds to the subcommand
@@ -217,8 +224,7 @@ async def context(deployment_id: DeploymentId) -> None:
 # Per-request HTTP timeout for `apply`. Lower than the global default (30s)
 # so the command fails fast against an unreachable server instead of making
 # the operator wait out the full budget. Each ``--wait`` poll is an
-# individual request bounded by this value; the overall wait budget is the
-# SDK's separate ``WAIT_TIMEOUT_SECONDS``.
+# individual request bounded by this value; ``--max-wait`` bounds the whole wait.
 _APPLY_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
@@ -296,6 +302,7 @@ async def apply(
     ] = None,
     cluster: Annotated[str | None, Parameter(help="Override spec.cluster (env: STYRMIN_CLUSTER).")] = None,
     wait: Annotated[bool, Parameter(help="Block until each deployment reaches a terminal state.")] = False,
+    max_wait: MaxWait = 600,
 ) -> None:
     """Create or update deployments from one or more YAML manifests.
 
@@ -338,7 +345,9 @@ async def apply(
 
     try:
         async with client.get_client(timeout=_APPLY_REQUEST_TIMEOUT_SECONDS) as sdk:
-            outcomes = await sdk.deployments.apply_files(file, overrides=overrides, wait=wait, on_event=on_event)
+            outcomes = await sdk.deployments.apply_files(
+                file, overrides=overrides, wait=wait, max_wait=max_wait, on_event=on_event
+            )
     except (BatchNameConflictError, ApplyError, FileNotFoundError, StyrminError) as exc:
         prefix = "file not found: " if isinstance(exc, FileNotFoundError) else ""
         print(f"failed: {prefix}{exc}", file=sys.stderr)

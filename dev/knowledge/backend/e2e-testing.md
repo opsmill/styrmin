@@ -177,13 +177,12 @@ upgrade and delete slept ~60s *after* Kubernetes had finished:
 duration, check this value reached the agent pod before looking anywhere
 else.
 
-The same `agent.extraEnv` sets `STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT: "270"`.
-FluxCD rolls a failed Helm upgrade back at its 5-minute timeout, and the
-rollback removes the failing pods. At the default of 300 s, the operator's
-readiness timeout fires at the same moment, so a failed HelmRelease step lists
-the pods' reasons (for example `ImagePullBackOff`) only by chance.
-`test_task_steps.py` asserts those reasons, so the E2E stack fails the rollout
-30 s before FluxCD rolls it back.
+The E2E stack keeps the production `STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT`
+of 270 s. FluxCD rolls a failed Helm upgrade back at its 5-minute timeout, and
+the rollback removes the failing pods; `test_task_steps.py` asserts that the
+failed HelmRelease step lists those pods' reasons (for example
+`ImagePullBackOff`), which holds only while the readiness timeout stays below
+FluxCD's.
 
 The next cost is **Prefect scheduling latency**. The agent runs its own
 Prefect `ProcessWorker` (`entrypoint/combined.py`), which polls its work

@@ -146,7 +146,7 @@ An internal deployment, such as the ingress controller, also counts as ready whe
 
 ### Readiness timeout
 
-While the phase is not `Ready`, `Failed` or `Deleting`, the timer compares the time since `status.rolloutStartedAt` with `STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT` (default 300 seconds). A CR written by an older operator, without `rolloutStartedAt`, counts from `metadata.creationTimestamp`. After the timeout, the timer sets `displayState: Error` and the message `Deployment did not reach Ready within <timeout>s (phase: <phase>)`. The phase does not change, so a later FluxCD attempt that succeeds still moves the CR to `Ready` and `displayState: Running`. The timeout is the safety net when FluxCD never reports `Stalled`.
+While the phase is not `Ready`, `Failed` or `Deleting`, the timer compares the time since `status.rolloutStartedAt` with `STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT` (default 270 seconds). The default is below FluxCD's 5-minute HelmRelease timeout: at that timeout FluxCD rolls the release back and the failing pods are removed, so a later readiness timeout would fail the HelmRelease step without the pods' reasons, such as `ImagePullBackOff`. A CR written by an older operator, without `rolloutStartedAt`, counts from `metadata.creationTimestamp`. After the timeout, the timer sets `displayState: Error` and the message `Deployment did not reach Ready within <timeout>s (phase: <phase>)`. The phase does not change, so a later FluxCD attempt that succeeds still moves the CR to `Ready` and `displayState: Running`. The timeout is the safety net when FluxCD never reports `Stalled`.
 
 ### Rollback reported Ready
 

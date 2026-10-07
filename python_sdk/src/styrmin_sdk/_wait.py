@@ -3,8 +3,9 @@
 Centralises the timeout / poll-interval pair used by every SDK call that
 blocks on a terminal state (``apply(wait=True)`` today, ``create(wait=True)``
 when it lands). Keeping the constants in one module guarantees the same
-ceiling across surfaces — so a test that expects a 300s budget for one
-SDK call sees the same budget for every other.
+ceiling across surfaces — so a test that expects a 600s budget for one
+SDK call sees the same budget for every other. Callers pass ``max_wait``
+to use another ceiling.
 
 The poll target is ``Deployment.status``, the canonical user-visible
 state enum (``PENDING / DEPLOYING / RUNNING / FAILED / …``). This matches
@@ -20,8 +21,9 @@ can touch it.
 
 from __future__ import annotations
 
-#: Maximum seconds to spend polling a deployment for its terminal state.
-WAIT_TIMEOUT_SECONDS: float = 300.0
+#: Default maximum seconds to spend polling a deployment for its terminal state.
+#: Above the operator's readiness timeout (270 s), which starts later, after the flow and its hooks.
+WAIT_TIMEOUT_SECONDS: float = 600.0
 
 #: Sleep interval between successive ``get`` polls during ``--wait``.
 WAIT_POLL_INTERVAL_SECONDS: float = 10.0

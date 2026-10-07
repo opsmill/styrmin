@@ -260,6 +260,12 @@ def _build_parameters_input(manifest: ResolvedManifest) -> list[ParameterValueIn
     return [ParameterValueInput(name=name, value=value) for name, value in manifest.parameters.items()]
 
 
+def _check_max_wait(max_wait: float | None) -> None:
+    """Reject a ``max_wait`` that is not positive, before anything is submitted."""
+    if max_wait is not None and max_wait <= 0:
+        raise ValueError(f"max_wait must be positive, got {max_wait}")
+
+
 class DeploymentResource(BaseResource):
     async def create(
         self,
@@ -557,7 +563,9 @@ class DeploymentResource(BaseResource):
             )
         return candidates[0].id
 
-    async def apply(self, manifest: ResolvedManifest, *, wait: bool = False) -> ApplyOutcome:
+    async def apply(
+        self, manifest: ResolvedManifest, *, wait: bool = False, max_wait: float | None = None
+    ) -> ApplyOutcome:
         """Create-or-update a deployment from a resolved manifest.
 
         * resolve ``(environment, cluster)`` to a unique ``environment_id``
@@ -581,12 +589,16 @@ class DeploymentResource(BaseResource):
 
         With ``wait=True`` this method blocks after a successful submission
         until the deployment's ``applicationInstance.status`` reaches a
-        terminal value, polling at the SDK-wide cadence. On a terminal
-        failure or wait timeout the returned outcome's ``action`` is
-        flipped to ``"failed"`` and ``failure_reason`` is populated. The
+        terminal value, polling at the SDK-wide cadence, for at most
+        ``max_wait`` seconds (``WAIT_TIMEOUT_SECONDS`` when ``None``).
+        A ``max_wait`` that is not positive raises :class:`ValueError`
+        before anything is submitted. On a terminal failure or wait timeout
+        the returned outcome's ``action`` is flipped to ``"failed"`` and
+        ``failure_reason`` is populated. The
         submission itself is NOT undone — re-running ``apply`` against the
         same manifest is the recovery path.
         """
+        _check_max_wait(max_wait)
         environment_id = await self._resolve_environment_id(manifest.environment, manifest.cluster)
         existing = await self.get_by_name(manifest.name, environment_id=environment_id)
 
@@ -621,7 +633,7 @@ class DeploymentResource(BaseResource):
             outcome = await self._apply_update(manifest, existing)
 
         if wait and outcome.action in {"created", "updated"} and outcome.deployment_id is not None:
-            outcome = await self._wait_for_terminal(outcome)
+            outcome = await self._wait_for_terminal(outcome, max_wait)
         return outcome
 
     async def _apply_update(self, manifest: ResolvedManifest, existing: GetDeploymentByNameDeployment) -> ApplyOutcome:
@@ -692,13 +704,13 @@ class DeploymentResource(BaseResource):
             ),
         )
 
-    async def _wait_for_terminal(self, outcome: ApplyOutcome) -> ApplyOutcome:
+    async def _wait_for_terminal(self, outcome: ApplyOutcome, max_wait: float | None = None) -> ApplyOutcome:
         """Poll the deployment until its ``Deployment.status`` reaches a terminal state.
 
         Reuses the same convention (``WAIT_TIMEOUT_SECONDS`` /
         ``WAIT_POLL_INTERVAL_SECONDS``) shared with any other SDK
         ``--wait``-style helper, so callers see a uniform ceiling regardless of
-        which method they invoked.
+        which method they invoked. ``max_wait`` replaces the ceiling when set.
 
         The poll target is the user-facing ``Deployment.status`` enum
         (``PENDING / DEPLOYING / RUNNING / FAILED / …``), not the task or
@@ -730,7 +742,7 @@ class DeploymentResource(BaseResource):
         deployment_id = outcome.deployment_id
         if deployment_id is None:
             return outcome
-        deadline = time.monotonic() + WAIT_TIMEOUT_SECONDS
+        deadline = time.monotonic() + (WAIT_TIMEOUT_SECONDS if max_wait is None else max_wait)
         while time.monotonic() < deadline:
             deployment = await self.get(deployment_id)
             status = deployment.status
@@ -764,6 +776,7 @@ class DeploymentResource(BaseResource):
         overrides: ApplyOverrides | None = None,
         env: Mapping[str, str] | None = None,
         wait: bool = False,
+        max_wait: float | None = None,
         on_event: Callable[[ApplyEvent], None] | None = None,
     ) -> list[ApplyOutcome]:
         """Load YAML manifest files (or directories) and apply each one.
@@ -776,7 +789,9 @@ class DeploymentResource(BaseResource):
           (:class:`BatchNameConflictError`) BEFORE per-manifest dispatch.
         * Per-manifest exceptions are caught and turned into
           ``ApplyOutcome(action="failed", failure_reason=...)``.
+        * ``max_wait`` bounds the wait of each manifest, as in :meth:`apply`.
         """
+        _check_max_wait(max_wait)
         if overrides is None:
             overrides = ApplyOverrides()
         if env is None:
@@ -793,7 +808,7 @@ class DeploymentResource(BaseResource):
             for failure in pending_failures:
                 on_event(ApplyEvent(type="submitted", name=failure.name, outcome=failure))
         for resolved in resolved_entries:
-            outcomes.append(await self._dispatch_one(resolved, wait=wait, on_event=on_event))
+            outcomes.append(await self._dispatch_one(resolved, wait=wait, max_wait=max_wait, on_event=on_event))
         return outcomes
 
     async def _dispatch_one(
@@ -801,6 +816,7 @@ class DeploymentResource(BaseResource):
         resolved: ResolvedManifest,
         *,
         wait: bool,
+        max_wait: float | None,
         on_event: Callable[[ApplyEvent], None] | None,
     ) -> ApplyOutcome:
         """Submit one resolved manifest, optionally wait, and emit events.
@@ -824,7 +840,7 @@ class DeploymentResource(BaseResource):
             return submitted
 
         try:
-            terminal = await self._wait_for_terminal(submitted)
+            terminal = await self._wait_for_terminal(submitted, max_wait)
         except Exception as exc:  # noqa: BLE001 — wait failures are per-manifest
             terminal = submitted.model_copy(update={"action": "failed", "failure_reason": f"wait error: {exc}"})
 
