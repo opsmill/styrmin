@@ -55,6 +55,17 @@ async def _drop_apply_env(client: StyrminClient, env_id: str) -> None:
         pass
 
 
+async def _dispatched_task_count(client: StyrminClient, deployment_id: str) -> int:
+    """Count the timeline's tasks, without the tasks that a hook step started.
+
+    An upgrade hook's ``stop_components`` and ``start_components`` stay separate
+    timeline entries linked to the upgrade (019 spec, FR-008), so they are not
+    tasks that the apply dispatched.
+    """
+    timeline = await client.deployments.get_timeline(deployment_id)
+    return sum(1 for entry in timeline if entry.task.started_by_step_id is None)
+
+
 @pytest.fixture
 async def apply_environment_id(
     styrmin_resources: dict,
@@ -278,8 +289,9 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
       - a config-only change → ``updated`` + exactly one new reconcile task;
       - a version-only change → ``updated`` + exactly one further upgrade task.
 
-    Task count is read via the deployment timeline (one entry per ``Task``);
-    each real change must add precisely one entry.
+    Task count is read via the deployment timeline (one entry per ``Task``),
+    without the tasks that the upgrade hook starts; each real change must add
+    precisely one entry.
     """
     driver, client = session_scenario_driver
 
@@ -312,7 +324,7 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
     deployment_id = str(create_outcome.deployment_id)
     await driver.wait_for_deployment_running(deployment_id=deployment_id, timeout=300.0)
 
-    baseline_task_count = len(await client.deployments.get_timeline(deployment_id))
+    baseline_task_count = await _dispatched_task_count(client, deployment_id)
 
     # --- Config-only change → exactly 1 new reconcile ----------------------
     manifest_doc["spec"]["config"] = {"ip_whitelist": ["10.0.0.0/8"]}
@@ -326,7 +338,7 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
     assert config_outcome.task_id is not None, "a real change must dispatch a task"
     await driver.wait_for_deployment_running(deployment_id=deployment_id, timeout=300.0)
 
-    after_config_task_count = len(await client.deployments.get_timeline(deployment_id))
+    after_config_task_count = await _dispatched_task_count(client, deployment_id)
     assert after_config_task_count == baseline_task_count + 1, (
         f"a config-only change must dispatch exactly one reconcile; task count "
         f"went {baseline_task_count} -> {after_config_task_count}"
@@ -344,7 +356,7 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
     assert version_outcome.task_id is not None, "a version upgrade must dispatch a task"
     await driver.wait_for_deployment_running(deployment_id=deployment_id, timeout=300.0)
 
-    after_version_task_count = len(await client.deployments.get_timeline(deployment_id))
+    after_version_task_count = await _dispatched_task_count(client, deployment_id)
     assert after_version_task_count == after_config_task_count + 1, (
         f"a version-only change must dispatch exactly one upgrade; task count "
         f"went {after_config_task_count} -> {after_version_task_count}"
