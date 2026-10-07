@@ -196,8 +196,9 @@ release history: FluxCD counted a failed install or upgrade for the
 current generation of the HelmRelease, and the newest release is
 `deployed` right after a `failed` one, so it is the rollback. The
 operator then sets the phase `Failed` and the display state `Error`,
-with the message "FluxCD rolled the release back after release v<N>
-failed" followed by the failure message when it recorded one, and the
+with the message
+`FluxCD rolled the release back after release v<N> failed` followed by
+the failure message when it recorded one, and the
 `Ready` condition becomes `False` with the reason `RolledBack`. The
 HelmRelease step and the task stay failed. A retry by FluxCD that
 succeeds creates a newer release after the rollback, so the deployment
