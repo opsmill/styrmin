@@ -276,10 +276,12 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
 
     Baseline apply, then:
       - a config-only change → ``updated`` + exactly one new reconcile task;
-      - a version-only change → ``updated`` + exactly one further upgrade task.
+      - a version-only change → ``updated`` + exactly one upgrade task, plus
+        the tasks simple-app's ``upgrade`` action creates itself.
 
-    Task count is read via the deployment timeline (one entry per ``Task``);
-    each real change must add precisely one entry.
+    Task count is read via the deployment timeline (one entry per ``Task``)
+    once the dispatched task has succeeded. ``Deployment.status`` cannot be
+    the wait point: it can read ``running`` mid-upgrade (#405).
     """
     driver, client = session_scenario_driver
 
@@ -324,12 +326,16 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
         f"action={config_outcome.action!r} (reason={config_outcome.failure_reason!r})"
     )
     assert config_outcome.task_id is not None, "a real change must dispatch a task"
-    await driver.wait_for_deployment_running(deployment_id=deployment_id, timeout=300.0)
+    await _wait_for_task_success(
+        client, deployment_id, str(config_outcome.task_id), timeout=300.0
+    )
 
-    after_config_task_count = len(await client.deployments.get_timeline(deployment_id))
-    assert after_config_task_count == baseline_task_count + 1, (
+    after_config_task_ids = {
+        str(e.task.id) for e in await client.deployments.get_timeline(deployment_id)
+    }
+    assert len(after_config_task_ids) == baseline_task_count + 1, (
         f"a config-only change must dispatch exactly one reconcile; task count "
-        f"went {baseline_task_count} -> {after_config_task_count}"
+        f"went {baseline_task_count} -> {len(after_config_task_ids)}"
     )
 
     # --- Version-only change → exactly 1 upgrade ---------------------------
@@ -342,12 +348,27 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
         f"action={version_outcome.action!r} (reason={version_outcome.failure_reason!r})"
     )
     assert version_outcome.task_id is not None, "a version upgrade must dispatch a task"
-    await driver.wait_for_deployment_running(deployment_id=deployment_id, timeout=300.0)
+    # The upgrade task succeeds only after the driver's upgrade action returns,
+    # so every task the action creates exists by then.
+    await _wait_for_task_success(
+        client, deployment_id, str(version_outcome.task_id), timeout=300.0
+    )
 
-    after_version_task_count = len(await client.deployments.get_timeline(deployment_id))
-    assert after_version_task_count == after_config_task_count + 1, (
-        f"a version-only change must dispatch exactly one upgrade; task count "
-        f"went {after_config_task_count} -> {after_version_task_count}"
+    # simple-app's upgrade action adds a stop_components and a start_components
+    # task; upgrade_deployment_version is a no-op and execute_commands writes none.
+    action_task_count = 2
+    new_tasks = [
+        e
+        for e in await client.deployments.get_timeline(deployment_id)
+        if str(e.task.id) not in after_config_task_ids
+    ]
+    assert len(new_tasks) == 1 + action_task_count, (
+        f"a version-only change must dispatch exactly one upgrade; expected "
+        f"{1 + action_task_count} new tasks (upgrade + {action_task_count} from "
+        f"the driver action), got {[(str(e.task.id), e.task.type_) for e in new_tasks]}"
+    )
+    assert str(version_outcome.task_id) in {str(e.task.id) for e in new_tasks}, (
+        "the upgrade task apply dispatched must be on the timeline"
     )
 
 
