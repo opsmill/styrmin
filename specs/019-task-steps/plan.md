@@ -190,7 +190,7 @@ Markers follow [`dev/knowledge/backend/e2e-testing.md`](../../dev/knowledge/back
 | Risk | Effect | Mitigation |
 |---|---|---|
 | D5 changes when deployments become `RUNNING` after an update or upgrade | Updates take as long as FluxCD's rollout; failed upgrades now end `FAILED`; E2E tests that wait for `RUNNING` wait longer | Existing waits use 300-second budgets; run the whole `shard_general` and `shard_backup` locally before handoff; `fix` changelog fragment and docs explain the change |
-| The readiness timeout (300 seconds) now applies to updates | A rollout slower than 300 seconds shows `FAILED`, then `RUNNING` if it completes | Matches FluxCD's own 5-minute timeout; documented; `deployment_ready_timeout` stays configurable |
+| The readiness timeout (270 seconds) now applies to updates | A rollout slower than 270 seconds shows `FAILED`, then `RUNNING` if it completes | Below FluxCD's own 5-minute timeout, so the failed step lists the pods before FluxCD's rollback removes them; documented; `deployment_ready_timeout` stays configurable |
 | Two writers change the same step | Lost or out-of-order transitions | Row locks; final states; failed-to-running only for operator-phase steps |
 | A remediation flow dies without closing its step | A task stays `RUNNING` | `apply_state`, the `run_job` wrapper, the backup and restore flows and the callback close open flow-kind steps |
 | Forged reports through the unauthenticated `reportDeploymentStatuses` | Forged operator-phase steps | Same exposure as `Deployment.status` today; tracked by [#396](https://github.com/opsmill/styrmin/issues/396) |

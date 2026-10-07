@@ -171,10 +171,14 @@ ready as soon as one of its pods is ready, even when FluxCD reports
 
 The readiness timeout is the safety net when FluxCD never reports
 `Stalled`. When a rollout has not reached `Ready` or `Failed` within
-`STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT` seconds (300 by default), the
+`STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT` seconds (270 by default), the
 operator sets the display state `Error` with the message "Deployment did
 not reach Ready within" followed by the timeout and the phase. The phase
 does not change, so the rollout can still become `Ready` later. The
+default is below FluxCD's 5-minute HelmRelease timeout. At that timeout
+FluxCD rolls the failed release back, which removes its pods, so a failed
+rollout reports the pods that are not ready and why before they are
+removed. The
 timeout counts from `status.rolloutStartedAt`, or from the CR's creation
 time when that field is missing. When the operator restarts and resumes a
 rollout, it keeps the recorded start, so a restart does not extend the

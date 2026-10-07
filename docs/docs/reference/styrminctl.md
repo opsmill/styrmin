@@ -344,11 +344,12 @@ the task that the apply started, then in the tasks that the task's hook
 steps started, nearest first. When it finds no failed step, the reason
 is `deployment reconciliation failed (status: <status>)`.
 
-`--wait` gives up after 300 seconds with the reason `wait timeout`. The
-operator's default readiness timeout is also 300 seconds, but counts from
-the start of the rollout, which is later, and FluxCD retries a failed
-release before it reports it as stalled. A failed HelmRelease can
-therefore end the wait with `wait timeout` instead of a step. Read the steps
+`--wait` gives up after `--max-wait` seconds (600 by default) with the
+reason `wait timeout`. The operator fails a HelmRelease that is not ready
+after its readiness timeout (270 seconds by default), which counts from the
+start of the rollout, after the flow and its hooks. When the hooks of a
+deployment take longer than about 5 minutes, raise `--max-wait`, or the
+wait can end with `wait timeout` instead of the failed step. Read the steps
 with `styrminctl tasks get <task-id>`; `styrminctl tasks list` shows the
 type and deployment of each task.
 

@@ -59,13 +59,6 @@ styrmin-agent:
       # to a sane rate while cutting ~55s off every lifecycle transition.
       - name: STYRMIN_OPERATOR_RECONCILE_INTERVAL
         value: "5"
-      # FluxCD gives up on a Helm upgrade after its 5-minute timeout and rolls
-      # back at once, which removes the failing pods. The default 300 s readiness
-      # timeout fires at the same moment, so the failed HelmRelease step lists the
-      # pods' reasons (e.g. ImagePullBackOff) only by chance. 270 s fails the
-      # rollout while those pods still exist (test_task_steps.py).
-      - name: STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT
-        value: "270"
       # The agent's embedded Prefect worker polls its work pool at Prefect's
       # 10s default; every create chains 3 agent flow runs (main, pre-hook,
       # post-hook), so each start waited ~9s on average.

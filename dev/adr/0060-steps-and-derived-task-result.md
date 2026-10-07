@@ -130,7 +130,11 @@ one backup for the whole namespace and creates one `PodVolumeBackup` per backed-
     still reaches `Ready`.
 14. **The readiness timeout counts from `status.rolloutStartedAt`**, and from `creationTimestamp`
     for a CR that an older operator wrote. It stays the safety net when FluxCD never reports
-    `Stalled`.
+    `Stalled`. Its default is 270 seconds, below FluxCD's 5-minute HelmRelease timeout: FluxCD's
+    rollback at that timeout removes the failing pods, so a later timeout would fail the
+    HelmRelease step without the pods' reasons. `apply --wait` waits 600 seconds by default
+    (`--max-wait`, SDK `max_wait`), which leaves time for the flow and its hooks before the
+    rollout starts.
 15. **Internal deployments keep their exception.** A ready pod still counts as ready, and wins over
     `Stalled`, because their HelmRelease can stay `Progressing` when a LoadBalancer gets no
     external IP.
@@ -289,8 +293,11 @@ one backup for the whole namespace and creates one `PodVolumeBackup` per backed-
   as one attempt.
 - A kopf retry of the create or update handler resets `rolloutStartedAt`, which extends the
   readiness timeout of that rollout.
-- The SDK's wait limit (300 seconds) equals the operator's default readiness timeout, so a
-  HelmRelease failure can reach `apply --wait` as a wait timeout before the step fails.
+- A rollout that becomes ready between 270 seconds and FluxCD's 5-minute timeout shows `FAILED`,
+  then `RUNNING`.
+- Hooks that run for more than about 5 minutes before the rollout starts can end
+  `apply --wait` with a wait timeout before the HelmRelease step fails, unless the caller raises
+  `--max-wait`.
 - Tasks, backups and restores from before this change have no steps; a task without steps gets
   its result from `Task.status`.
 - The `callback` mutation rejects Prefect's `Crashed` and `Cancelled` states as unknown, and a

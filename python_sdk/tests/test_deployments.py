@@ -1361,6 +1361,49 @@ async def test_apply_wait_marks_outcome_failed_on_timeout(
     assert outcome.failure_reason == "wait timeout"
 
 
+async def test_apply_wait_stops_at_max_wait(
+    client: StyrminClient,
+    mock_transport: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``max_wait`` replaces the default limit: 101 s after the submission, a 100 s wait ends unpolled."""
+    from styrmin_sdk.resources import deployments as deployments_module
+
+    times = iter([0.0, 101.0])
+    monkeypatch.setattr(deployments_module.time, "monotonic", lambda: next(times, 101.0))
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_response(),
+        _update_version_noop_response(),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(version="1.0.0", config={"ip_whitelist": ["10.0.0.0/8"]}),
+        wait=True,
+        max_wait=100,
+    )
+
+    assert outcome.action == "failed"
+    assert outcome.failure_reason == "wait timeout"
+    assert mock_transport.execute.await_count == 4
+
+
+@pytest.mark.parametrize("max_wait", [0, -1])
+async def test_apply_rejects_non_positive_max_wait_before_submitting(
+    client: StyrminClient,
+    mock_transport: AsyncMock,
+    max_wait: float,
+) -> None:
+    """A ``max_wait`` that is not positive raises before any request."""
+    with pytest.raises(ValueError, match="max_wait must be positive"):
+        await client.deployments.apply(_resolved_manifest(version="1.0.0"), wait=True, max_wait=max_wait)
+    with pytest.raises(ValueError, match="max_wait must be positive"):
+        await client.deployments.apply_files([], wait=True, max_wait=max_wait)
+
+    mock_transport.execute.assert_not_awaited()
+
+
 async def test_apply_files_wait_emits_submitted_then_terminal_events_in_order(
     client: StyrminClient,
     tmp_path: Path,
@@ -1378,7 +1421,7 @@ async def test_apply_files_wait_emits_submitted_then_terminal_events_in_order(
         assert wait is False
         return _stub_apply_outcome("my-app", "updated")
 
-    async def fake_wait(outcome: ApplyOutcome) -> ApplyOutcome:  # noqa: RUF029 — mirrors _wait_for_terminal signature
+    async def fake_wait(outcome: ApplyOutcome, _max_wait: float | None = None) -> ApplyOutcome:  # noqa: RUF029 — mirrors _wait_for_terminal signature
         return outcome  # terminal RUNNING — no change
 
     monkeypatch.setattr(client.deployments, "apply", fake_apply)
@@ -1435,7 +1478,7 @@ async def test_apply_files_wait_terminal_failure_keeps_failed_outcome_in_list(
         assert wait is False
         return _stub_apply_outcome("my-app", "created")
 
-    async def fake_wait(outcome: ApplyOutcome) -> ApplyOutcome:  # noqa: RUF029 — mirrors _wait_for_terminal signature
+    async def fake_wait(outcome: ApplyOutcome, _max_wait: float | None = None) -> ApplyOutcome:  # noqa: RUF029 — mirrors _wait_for_terminal signature
         return outcome.model_copy(
             update={"action": "failed", "failure_reason": "deployment reconciliation failed (status: failed)"}
         )

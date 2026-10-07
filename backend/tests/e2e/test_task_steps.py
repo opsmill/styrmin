@@ -37,7 +37,6 @@ from styrmin_sdk.exceptions import StyrminError
 from styrmin_sdk.graphql._generated import GetStepOutput, GetStepOutputStep
 from styrmin_sdk.graphql._generated.enums import Role
 from styrmin_sdk.models import EnvVarInput, ResolvedManifest, UpdateDeploymentInput
-from styrmin_sdk.resources import deployments as sdk_deployments
 
 from tests.e2e.drivers.api_driver import ApiScenarioDriver
 
@@ -71,9 +70,9 @@ MISSING_IMAGE = "registry.invalid/styrmin-e2e/simple-app:missing"
 
 HOOK_FAILURE_TIMEOUT = 300.0
 PREREQUISITE_ATTEMPTS_TIMEOUT = 240.0
-# The operator's readiness timeout (300 s, 270 s in the E2E values so it fails
-# before FluxCD's 5-minute timeout and rollback), its 5-second check, the agent
-# report and the page refresh, with margin.
+# The operator's readiness timeout (270 s, so it fails before FluxCD's 5-minute
+# timeout and rollback), its 5-second check, the agent report and the page refresh,
+# with margin.
 HELMRELEASE_FAILURE_BUDGET = 420.0
 READ_ONLY_MATCH_TIMEOUT = 60.0
 # FluxCD rolls the upgrade back at its 5-minute timeout, about 30 s after the
@@ -483,7 +482,6 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
     scenario_driver: ScenarioDriver,
     failing_actions_deployment: dict[str, Any],
     read_only_client: StyrminClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """SC-001 (c): FluxCD cannot roll out an image that does not exist (US2 scenario 1, SC-004, US5 scenario 3).
 
@@ -506,10 +504,6 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
 
     manifest = await _manifest_with_image(
         admin, failing_actions_deployment, MISSING_IMAGE
-    )
-    # The 270-second readiness timeout leaves too little of the SDK's 300-second wait.
-    monkeypatch.setattr(
-        sdk_deployments, "WAIT_TIMEOUT_SECONDS", HELMRELEASE_FAILURE_BUDGET
     )
     started = time.monotonic()
     applying = asyncio.create_task(admin.deployments.apply(manifest, wait=True))
