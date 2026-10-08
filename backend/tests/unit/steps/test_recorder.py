@@ -1,6 +1,6 @@
 """Step recorder against a real database (spec 019, T011 and T012)."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -251,6 +251,29 @@ async def test_naive_event_time_is_read_as_utc(
     step = await record_event(record, uow)
 
     assert step.started_at == T0
+
+
+async def test_event_time_with_an_offset_reads_back_as_the_same_instant(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    # SQLite drops the offset of a stored time, so the recorder stores UTC.
+    plus_two = timezone(timedelta(hours=2))
+    started = _started(StepParent.of_task(parents.task.id)).model_copy(
+        update={"occurred_at": T0.astimezone(plus_two)}
+    )
+    step = await record_event(started, uow)
+    failed = await record_event(
+        _event(step, StepEvent.FAILED, T1.astimezone(plus_two), error="exit code 1"),
+        uow,
+    )
+
+    stored = await _stored(uow, failed)
+    assert stored.started_at == T0
+    assert stored.ended_at == T1
+    assert stored.errors == [
+        StepError(attempt=1, message="exit code 1", occurred_at=T1)
+    ]
+    assert _fields(stored) == _fields(failed)
 
 
 async def test_end_time_is_never_before_the_start_time(

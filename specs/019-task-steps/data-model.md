@@ -135,7 +135,7 @@ Rules the recorder enforces:
 - `failed` is final for flow kinds. An `operator_phase` step goes from `failed` back to `running` when a later report shows the operator working on it again; `attempt_count` increases by one. When a report shows a later phase, a `failed` earlier step gets a new attempt and goes straight to `succeeded`.
 - Opening a step that already exists and is running returns it unchanged, so a retried `STARTED` event is harmless.
 - Each transition locks the step row (`SELECT … FOR UPDATE`). Two writers serialize on the row.
-- Times: a writer can send `occurredAt`; otherwise the server's time is used. `ended_at` is never earlier than `started_at`.
+- Times: a writer can send `occurredAt`; otherwise the server's time is used. The recorder stores every time in UTC: a time with an offset is converted to UTC, and a time without one is read as UTC. `ended_at` is never earlier than `started_at`.
 
 ## Task result calculation
 

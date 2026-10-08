@@ -76,7 +76,8 @@ class StepRecord(BaseModel):
 
 
 def _utc(at: datetime) -> datetime:
-    return at if at.tzinfo is not None else at.replace(tzinfo=UTC)
+    # Store UTC: SQLite drops the offset, and the repository reads naive times as UTC.
+    return at.astimezone(UTC) if at.tzinfo is not None else at.replace(tzinfo=UTC)
 
 
 def _end_time(step: Step, at: datetime) -> datetime:
