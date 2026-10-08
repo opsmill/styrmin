@@ -939,3 +939,19 @@ class DeploymentStatus(StyrminModel, table=True):
     )
 
     deployment: Deployment = Relationship(back_populates="crd_status")
+
+
+class Installation(SQLModel, table=True):
+    """The install ID that telemetry reports (spec 020). Always one row, ``id = 1``."""
+
+    __table_args__ = (CheckConstraint("id = 1", name="ck_installation_single_row"),)
+
+    id: int = Field(
+        default=1, primary_key=True, sa_column_kwargs={"autoincrement": False}
+    )
+    install_id: UUID = Field(nullable=False)
+    created_on: datetime | None = Field(  # type: ignore[call-overload]
+        sa_type=DateTime(timezone=True),
+        sa_column_kwargs={"server_default": func.now()},
+        nullable=False,
+    )

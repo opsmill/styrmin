@@ -68,6 +68,10 @@ from styrmin_backend.repository.helm_repository import (
     HelmRepositoryRepository,
     SQLModelHelmRepositoryRepository,
 )
+from styrmin_backend.repository.installation import (
+    InstallationRepository,
+    SQLModelInstallationRepository,
+)
 from styrmin_backend.repository.application_instance import (
     ApplicationInstanceRepository,
     SQLModelApplicationInstanceRepository,
@@ -113,6 +117,7 @@ class UnitOfWork(ABC):
     backup_schedules: BackupScheduleRepository
     pod_statuses: PodStatusRepository
     deployment_statuses: DeploymentStatusRepository
+    installation: InstallationRepository
 
     async def __aenter__(self) -> "UnitOfWork":
         return self
@@ -160,6 +165,7 @@ class SqlModelUnitOfWork(UnitOfWork):
     backup_schedules: SQLModelBackupScheduleRepository
     pod_statuses: SQLModelPodStatusRepository
     deployment_statuses: SQLModelDeploymentStatusRepository
+    installation: SQLModelInstallationRepository
 
     def __init__(self, session: AsyncSession):
         self.session: AsyncSession = session
@@ -204,6 +210,7 @@ class SqlModelUnitOfWork(UnitOfWork):
         self.deployment_statuses = SQLModelDeploymentStatusRepository(
             session=self.session
         )
+        self.installation = SQLModelInstallationRepository(session=self.session)
         return self
 
     async def rollback(self) -> None:

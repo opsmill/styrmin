@@ -215,6 +215,36 @@ class OperatorSettings(BaseSettings):
     )
 
 
+DEFAULT_TELEMETRY_ENDPOINT = (
+    "https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin"
+)
+
+
+class TelemetrySettings(BaseSettings):
+    """Daily anonymous report (spec 020). See the configuration contract."""
+
+    model_config = SettingsConfigDict(env_prefix="STYRMIN_TELEMETRY_")
+
+    enabled: bool = True
+    endpoint: str = DEFAULT_TELEMETRY_ENDPOINT
+    do_not_track: str | None = Field(default=None, validation_alias="DO_NOT_TRACK")
+
+    @field_validator("endpoint", mode="before")
+    @classmethod
+    def blank_endpoint_is_default(cls, value: Any) -> Any:
+        if isinstance(value, str) and not value.strip():
+            return DEFAULT_TELEMETRY_ENDPOINT
+        return value
+
+    def disabled_by(self) -> str | None:
+        """Name the setting that turns telemetry off, or None when it is on."""
+        if not self.enabled:
+            return "STYRMIN_TELEMETRY_ENABLED=false"
+        if self.do_not_track == "1":
+            return "DO_NOT_TRACK=1"
+        return None
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="STYRMIN_", populate_by_name=True)
     # default_factory reads the sub-settings' env vars at load time, not import time.
@@ -226,6 +256,7 @@ class Settings(BaseSettings):
     agent: AgentSettings = Field(default_factory=AgentSettings)
     operator: OperatorSettings = Field(default_factory=OperatorSettings)
     url: UrlSettings = Field(default_factory=UrlSettings)
+    telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
     log_level: str = Field(
         default="INFO",
         description="Log level for the application. Can be one of DEBUG, INFO, WARNING, ERROR, CRITICAL",
@@ -345,6 +376,10 @@ class ConfiguredSettings:  # pylint: disable=too-many-public-methods
     @property
     def operator(self) -> OperatorSettings:
         return self.active_settings.operator
+
+    @property
+    def telemetry(self) -> TelemetrySettings:
+        return self.active_settings.telemetry
 
 
 def load(
