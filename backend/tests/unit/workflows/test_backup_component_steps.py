@@ -7,6 +7,7 @@ action token and the backup id, and fails its open steps when it dies.
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -15,12 +16,15 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 from loguru import logger
 from prefect.client.schemas.objects import StateType
 
 from styrmin_backend import config
+from styrmin_backend.agent.steps import backup_components
 from styrmin_backend.agent.steps.backup_components import (
+    FINISH_ATTEMPTS,
     BackupComponentSteps,
     ComponentProgress,
     PodComponents,
@@ -228,10 +232,11 @@ async def test_component_steps_follow_the_pod_volume_backups_on_each_poll(
     await steps.on_poll(_backup("Completed"))
     await steps.finish(_backup("Completed"))
 
+    # db's items ended while the backup was InProgress: it ends with web, at its own time.
     assert events == [
         ("STARTED", "backup:component:db"),
-        ("SUCCEEDED", "backup:component:db"),
         ("STARTED", "backup:component:web"),
+        ("SUCCEEDED", "backup:component:db"),
         ("SUCCEEDED", "backup:component:web"),
     ]
     started = api.record("STARTED", "backup:component:db")
@@ -244,6 +249,76 @@ async def test_component_steps_follow_the_pod_volume_backups_on_each_poll(
     assert _at(api.record("SUCCEEDED", "backup:component:db")["occurredAt"]) == _at(T2)
     assert _at(api.record("STARTED", "backup:component:web")["occurredAt"]) == _at(T1)
     assert _at(api.record("SUCCEEDED", "backup:component:web")["occurredAt"]) == _at(T3)
+
+
+async def test_a_component_stays_running_while_velero_can_still_create_its_items(
+    api: FakeStepApi, events: list[Event]
+) -> None:
+    items = Items()
+    steps = _steps(["db"], items)
+
+    items.current = [_pvb("db-0", "Completed", start=T0, end=T1)]
+    await steps.on_poll(_backup("InProgress"))
+    assert events == [("STARTED", "backup:component:db")]
+
+    # Velero creates the PodVolumeBackup of the second pod later, and it fails.
+    items.current = [
+        _pvb("db-0", "Completed", start=T0, end=T1),
+        _pvb("db-1", "InProgress", start=T2),
+    ]
+    await steps.on_poll(_backup("InProgress"))
+    items.current = [
+        _pvb("db-0", "Completed", start=T0, end=T1),
+        _pvb("db-1", "Failed", start=T2, end=T3, message="disk full"),
+    ]
+    await steps.on_poll(_backup("FinalizingPartiallyFailed"))
+
+    assert events == [
+        ("STARTED", "backup:component:db"),
+        ("FAILED", "backup:component:db"),
+    ]
+    failed = api.record("FAILED", "backup:component:db")
+    assert failed["error"] == "Pod volume db-1/data: disk full"
+    assert _at(failed["occurredAt"]) == _at(T3)
+
+
+@pytest.mark.parametrize(
+    "phase", ["WaitingForPluginOperations", "Finalizing", "Completed"]
+)
+async def test_a_component_ends_once_the_backup_has_left_in_progress(
+    api: FakeStepApi, events: list[Event], phase: str
+) -> None:
+    items = Items()
+    steps = _steps(["db"], items)
+    items.current = [_pvb("db-0", "Completed", start=T0, end=T1)]
+
+    await steps.on_poll(_backup(phase))
+
+    assert events == [
+        ("STARTED", "backup:component:db"),
+        ("SUCCEEDED", "backup:component:db"),
+    ]
+    assert _at(api.record("SUCCEEDED", "backup:component:db")["occurredAt"]) == _at(T1)
+
+
+async def test_a_component_whose_items_ended_during_in_progress_gets_the_backups_result(
+    api: FakeStepApi, events: list[Event]
+) -> None:
+    """When the last poll could not list the items, the backup's result ends the component."""
+    items = Items()
+    steps = _steps(["db"], items)
+    items.current = [_pvb("db-0", "Completed", start=T0, end=T1)]
+    await steps.on_poll(_backup("InProgress"))
+
+    await steps.finish(_backup("PartiallyFailed", errors=1))
+
+    assert events == [
+        ("STARTED", "backup:component:db"),
+        ("FAILED", "backup:component:db"),
+    ]
+    failed = api.record("FAILED", "backup:component:db")
+    assert failed["error"] == "Velero backup phase: PartiallyFailed (1 errors)"
+    assert _at(failed["occurredAt"]) == _at(BACKUP_END)
 
 
 async def test_a_failed_pod_volume_backup_fails_its_component(
@@ -321,6 +396,70 @@ async def test_a_component_still_running_when_the_backup_fails_gets_its_error(
     failed = api.record("FAILED", "backup:component:db")
     assert failed["error"] == "node agent gone"
     assert _at(failed["occurredAt"]) == _at(BACKUP_END)
+
+
+class FlakyStepApi(FakeStepApi):
+    """Answers the first ``failures`` writes of ``event`` with a GraphQL error."""
+
+    def __init__(self, events: list[Event], event: str, failures: int) -> None:
+        super().__init__(events)
+        self.event = event
+        self.failures = failures
+        self.rejected = 0
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        record = json.loads(request.content)["variables"]["input"]
+        if record["event"] == self.event and self.rejected < self.failures:
+            self.rejected += 1
+            return httpx.Response(200, json={"errors": [{"message": "unavailable"}]})
+        return super().handle(request)
+
+
+def _flaky_api(
+    monkeypatch: pytest.MonkeyPatch, events: list[Event], event: str, failures: int
+) -> FlakyStepApi:
+    monkeypatch.setattr(backup_components, "FINISH_RETRY_DELAY_SECONDS", 0)
+    fake = FlakyStepApi(events, event, failures)
+    fake.install(monkeypatch)
+    return fake
+
+
+@pytest.mark.parametrize("event", ["STARTED", "SUCCEEDED"])
+async def test_finish_sends_a_write_that_was_not_recorded_again(
+    monkeypatch: pytest.MonkeyPatch, events: list[Event], backup_id: UUID, event: str
+) -> None:
+    del backup_id
+    api = _flaky_api(monkeypatch, events, event, failures=FINISH_ATTEMPTS - 1)
+    steps = _steps(["config"], Items())
+
+    await steps.finish(_backup("Completed"))
+
+    assert api.rejected == FINISH_ATTEMPTS - 1
+    assert events == [
+        ("STARTED", "backup:component:config"),
+        ("SUCCEEDED", "backup:component:config"),
+    ]
+
+
+async def test_finish_stops_after_its_last_attempt(
+    monkeypatch: pytest.MonkeyPatch, events: list[Event], backup_id: UUID
+) -> None:
+    del backup_id
+    api = _flaky_api(monkeypatch, events, "SUCCEEDED", failures=FINISH_ATTEMPTS + 1)
+    steps = _steps(["config"], Items())
+    warnings: list[str] = []
+    sink = logger.add(warnings.append, level="WARNING", format="{message}")
+    try:
+        await steps.finish(_backup("Completed"))
+    finally:
+        logger.remove(sink)
+
+    assert api.rejected == FINISH_ATTEMPTS
+    assert events == [("STARTED", "backup:component:config")]
+    assert any(
+        f"components config after {FINISH_ATTEMPTS} attempts" in line
+        for line in warnings
+    )
 
 
 async def test_listing_errors_do_not_fail_the_backup(
