@@ -80,7 +80,7 @@ Both read the output before they raise, so a later Job cleanup ([#374](https://g
 
 - `VeleroClient.list_pod_volume_backups(namespace, backup_name)` lists `podvolumebackups.velero.io` with label `velero.io/backup-name=<name>`.
 - Each item gives `spec.pod.name`, `spec.volume`, `status.phase` (`New`, `InProgress`, `Completed`, `Failed`), `status.startTimestamp`, `status.completionTimestamp`, `status.message`.
-- The flow maps pods to components with the pod label `styrmin/component`. A component's step starts at its earliest `startTimestamp`, ends at its latest `completionTimestamp` once all its items are terminal, and fails when any item failed (error: the item's `status.message`).
+- The flow maps pods to components with the pod label `styrmin/component`. A component's step starts at its earliest `startTimestamp`, ends at its latest `completionTimestamp` once all its items are terminal and the Backup has left the `New` and `InProgress` phases (Velero creates `PodVolumeBackup` objects only until then), and fails when any item failed (error: the item's `status.message`). `finish` ends the remaining components with the Backup's result and sends each write that was not recorded again, up to 3 attempts in total.
 - `poll_backup_status` gains an optional `on_poll` callback that receives the Backup object after each poll.
 - `poll_backup_status` and `poll_restore_status` treat Velero's `FailedValidation` phase as terminal, next to `Completed`, `PartiallyFailed` and `Failed`. The step's error is the joined `status.validationErrors`.
 - The agent's ClusterRole gains `get` and `list` on `podvolumebackups` in `velero.io` (`helm/agent/templates/roles.yaml`).

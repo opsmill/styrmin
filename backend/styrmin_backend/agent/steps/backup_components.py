@@ -1,14 +1,16 @@
 """One step per component of a Velero backup, from its PodVolumeBackups (spec 019, research D13).
 
 Velero backs up the whole namespace and creates one PodVolumeBackup per pod
-volume. Each pod belongs to a component through its ``styrmin/component``
-label. A component's step starts at its earliest item, ends at its latest
-item once all have ended, and fails when any item failed. A component that
-has not ended when the backup ends gets the backup's result and times.
+volume while the backup is ``InProgress``. Each pod belongs to a component
+through its ``styrmin/component`` label. A component's step starts at its
+earliest item, ends at its latest item once all have ended and the backup has
+left ``InProgress``, and fails when any item failed. A component that has not
+ended when the backup ends gets the backup's result and times.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,6 +26,11 @@ from styrmin_backend.domain.steps import backup_component_step
 COMPONENT_LABEL = "styrmin/component"
 _FAILED_PHASES = frozenset({"Failed", "Canceled"})
 _ENDED_PHASES = _FAILED_PHASES | {"Completed"}
+#: Backup phases in which Velero can still create PodVolumeBackups ("" before it sets one).
+_CREATING_ITEMS_PHASES = frozenset({"", "New", "InProgress"})
+#: How many times ``finish`` sends a step write that was not recorded, and the wait between.
+FINISH_ATTEMPTS = 3
+FINISH_RETRY_DELAY_SECONDS = 2.0
 
 ListItems = Callable[[], Awaitable[list[dict[str, Any]]]]
 ComponentOfPod = Callable[[str, str], Awaitable[str | None]]
@@ -124,21 +131,30 @@ class BackupComponentSteps:
         return self._reporter.enabled and bool(self._components)
 
     async def on_poll(self, backup: dict[str, Any]) -> None:
-        """``poll_backup_status`` callback: record each component's progress."""
-        del backup  # The PodVolumeBackups carry the progress.
+        """``poll_backup_status`` callback: record each component's progress.
+
+        Components end only after the backup has left ``InProgress``: until then
+        Velero can still create PodVolumeBackups for them.
+        """
         if not self._enabled:
             return
+        phase = (backup.get("status") or {}).get("phase") or ""
         try:
             items = await self._items_by_component()
             for component in self._components:
                 progress = component_progress(items.get(component, []))
+                if phase in _CREATING_ITEMS_PHASES:
+                    progress = ComponentProgress(started_at=progress.started_at)
                 self._progress[component] = progress
                 await self._record(component, progress)
         except Exception as exc:  # noqa: BLE001 - a step write never fails the backup
             logger.warning("Could not record the backup's component steps: {}", exc)
 
     async def finish(self, backup: dict[str, Any]) -> None:
-        """End each component that has not ended with the backup's result and times."""
+        """End each component that has not ended with the backup's result and times.
+
+        A write that was not recorded is sent again, up to ``FINISH_ATTEMPTS`` times.
+        """
         if not self._enabled:
             return
         try:
@@ -151,6 +167,7 @@ class BackupComponentSteps:
                 if status.get("phase") == "Completed"
                 else failure_message("backup", status)
             )
+            pending: dict[str, ComponentProgress] = {}
             for component in self._components:
                 if component in self._ended:
                     continue
@@ -160,7 +177,20 @@ class BackupComponentSteps:
                     progress = ComponentProgress(
                         start, max(ended_at, start), progress.error or error
                     )
-                await self._record(component, progress)
+                pending[component] = progress
+            for attempt in range(FINISH_ATTEMPTS):
+                if attempt:
+                    await asyncio.sleep(FINISH_RETRY_DELAY_SECONDS)
+                for component, progress in pending.items():
+                    await self._record(component, progress)
+                pending = {c: p for c, p in pending.items() if c not in self._ended}
+                if not pending:
+                    return
+            logger.warning(
+                "Could not end the backup's steps for components {} after {} attempts",
+                ", ".join(pending),
+                FINISH_ATTEMPTS,
+            )
         except Exception as exc:  # noqa: BLE001 - a step write never fails the backup
             logger.warning("Could not end the backup's component steps: {}", exc)
 
@@ -176,7 +206,7 @@ class BackupComponentSteps:
         return grouped
 
     async def _record(self, component: str, progress: ComponentProgress) -> None:
-        """Send what changed; a write that was not recorded is sent again next time."""
+        """Send what changed; a write that was not recorded is sent again on the next call."""
         if progress.started_at is None or component in self._ended:
             return
         step = backup_component_step(component)

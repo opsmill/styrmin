@@ -124,7 +124,10 @@ name. Velero backs up the whole namespace at once and creates one
 `PodVolumeBackup` object for each pod volume it backs up. Styrmin maps
 each of these objects to a component through the pod's
 `styrmin/component` label: a component's step starts with its first pod
-volume, ends with its last one, and fails when one of them failed. A
+volume, ends with its last one, and fails when one of them failed. Velero
+creates these objects while the backup is in its `InProgress` phase, so a
+component's step stays running until the backup has left that phase, even
+when all of the component's pod volumes are already backed up. A
 component without pod volumes gets the start time, end time and result of
 the whole backup.
 
