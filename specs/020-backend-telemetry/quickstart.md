@@ -87,17 +87,18 @@ sleep infinity | uv run pytest "backend/tests/e2e/test_server_telemetry.py" -v -
 
 Expected: `PASSED`. The test:
 
-1. Prints `styrmin telemetry show` in the server pod and parses the JSON.
-2. Reads the number of reports the in-cluster sink holds.
-3. Starts `send_telemetry_report/send_telemetry_report` through the Prefect API and waits for `COMPLETED`.
-4. Asserts the sink holds exactly one new report, with `kind: "styrmin"`, `payload_format: "1.0"`, a checksum that matches its `data`, and `data` equal to the output of step 1, including the simple-app driver with at least one deployment.
+1. Reads the server pod's log and finds one line that starts with `Telemetry is on`.
+2. Prints `styrmin telemetry show` in the server pod and parses the JSON.
+3. Reads the number of reports the in-cluster sink holds.
+4. Starts `send_telemetry_report/send_telemetry_report` through the Prefect API and waits for `COMPLETED`.
+5. Asserts the sink holds exactly one new report, with `kind: "styrmin"`, `payload_format: "1.0"`, a checksum that matches its `data`, and `data` equal to the output of step 2, including the simple-app driver with at least one deployment and a `styrmin_version` other than `"unknown"`.
 
 Record the evidence that Constitution §V requires: node ID, command, ISO 8601 time of the passing run, vcluster ID and kubeconfig path, and the `PASSED` line.
 
 ## 5. Documentation
 
 - [`docs/docs/reference/telemetry.md`](../../docs/docs/reference/telemetry.md) is titled "Telemetry & privacy" and has a server section.
-- `helm/styrmin/README.md` lists `styrmin.telemetry.enabled` and `styrmin.telemetry.endpoint`.
+- `helm/styrmin/README.md` lists `styrmin.telemetry.enabled` and `styrmin.telemetry.endpoint`, and `helm template helm/styrmin` shows the telemetry lines in the install notes.
 - The new ADR is in `dev/adr/`, and `CONTEXT.md` has the extended **Telemetry** entry and the new **Install ID** entry.
 - A towncrier fragment exists in `changelog/`.
 - `cd docs && pnpm build` succeeds.

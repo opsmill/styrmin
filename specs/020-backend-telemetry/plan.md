@@ -14,7 +14,7 @@ The approach, from [research.md](research.md):
 - The flow runs in the task worker, so the settings reach it through the shared Helm ConfigMap. Two new Helm values set them: `styrmin.telemetry.enabled` and `styrmin.telemetry.endpoint` (D11).
 - A payload builder in `services/telemetry/` reads the counts and driver usage through new repository queries, and is shared by the flow and the CLI command (D1, D2, D9).
 - The sender wraps the data in the `styrminctl` envelope with `kind: "styrmin"` and `payload_format: "1.0"`, using its own copy of the checksum that a test checks against `styrminctl` (D3, D5). Each send stops after 10 seconds in total and failures are logged at debug level (D8).
-- The install ID is a single row in a new `installation` table, created on server start with an insert that two replicas can run at the same time (D10).
+- The install ID is a single row in a new `installation` table, created on server start with an insert that two replicas can run at the same time (D10). A failure there logs a warning and the server keeps starting.
 - The Styrmin version is read from the root `pyproject.toml` that the release workflow bumps, because no installed package carries it (D6).
 - The E2E test reuses the Styrmin install and the simple-app deployment of `shard_general` and sends to a sink inside the vcluster (D12, D13, D19).
 
@@ -50,7 +50,7 @@ The approach, from [research.md](research.md):
 | IV. Typed errors | Pass | No new error class. The sender catches send failures and returns `False`; the flow catches the rest and logs at debug level (D8). No GraphQL change, so no `ServiceError` is needed. |
 | V. Tests | Pass | Unit tests for every module marked "Yes" in the PRD table; one `api_only` E2E test that reuses `deployed_simple_app` in `shard_general` (D19). Turning telemetry off is covered by unit tests only; the PRD records that this was confirmed on 2026-10-08. No GraphQL propagation test, because the schema does not change. |
 | VI. Format and lint | Pass | `uv run invoke format lint` before each commit. |
-| VII. Documentation | Pass | Tasks update `docs/docs/reference/telemetry.md`, `helm/styrmin/README.md`, a new ADR, `CONTEXT.md`, `dev/knowledge/backend/data-models.md`, `dev/knowledge/backend/orchestration-flows.md`, and add a towncrier fragment. |
+| VII. Documentation | Pass | Tasks update `docs/docs/reference/telemetry.md`, `helm/styrmin/README.md`, the chart's `NOTES.txt`, a new ADR, `CONTEXT.md`, `dev/knowledge/architecture.md`, `dev/knowledge/backend/data-models.md`, `dev/knowledge/backend/orchestration-flows.md`, and add a towncrier fragment. |
 
 Governance gates:
 
@@ -134,12 +134,14 @@ backend/tests/
 helm/styrmin/
 ├── values.yaml                             # + styrmin.telemetry.{enabled,endpoint}
 ├── templates/configmap.yaml                # + STYRMIN_TELEMETRY_ENABLED, STYRMIN_TELEMETRY_ENDPOINT
+├── templates/NOTES.txt                     # + telemetry on/off, how to turn it off and view the report
 └── README.md                               # + both values
 
 docker-compose.yml                          # + STYRMIN_TELEMETRY_ENABLED on server and task-worker
 dev/local/demo-values.yaml                  # + styrmin.telemetry.enabled: false
 docs/docs/reference/telemetry.md            # renamed title, + server section
 dev/adr/0061-server-anonymous-daily-telemetry.md   # new
+dev/knowledge/architecture.md               # + the task worker sends one report a day
 dev/knowledge/backend/data-models.md        # + installation table
 dev/knowledge/backend/orchestration-flows.md        # + send_telemetry_report in the catalogue table
 CONTEXT.md                                  # Telemetry entry extended, Install ID added
@@ -151,14 +153,18 @@ changelog/274.added.md                      # towncrier fragment
 ## Implementation Order
 
 1. Settings and effective state (D7) with unit tests. Nothing else depends on the database.
-2. `installation` model, Alembic revision, repository and the startup call (D10), with the migration and repository tests.
+2. `installation` model, Alembic revision, repository and the startup call, which logs a warning and continues on failure (D10), with the migration, repository and startup tests.
 3. Repository count and usage queries, then the payload builder (D2, D6, D9), with tests.
 4. Sender (D3, D8) with tests, including the checksum check against `styrminctl`.
 5. Flow, catalogue entry and the late-run guard (D14, D16), with tests.
 6. Startup log line (D17) and `styrmin telemetry show`.
 7. Helm values and ConfigMap (D11), docker-compose and demo values (D18), Helm template test.
 8. E2E sink fixture, values overlay and `test_server_telemetry.py` (D12, D13, D19), run to a pass with evidence.
-9. Documentation, ADR, `CONTEXT.md`, knowledge pages and the changelog fragment.
+9. Documentation, ADR, `CONTEXT.md`, knowledge pages, install notes and the changelog fragment. The server section of the documentation page also states:
+   - that the first report is sent at the first 02:43 UTC after the install starts, so an operator can turn telemetry off before anything is sent
+   - that the setting must reach both the server and the task worker, which the Helm value does (critique E4)
+   - that the endpoint receives the install's public IP address, as any HTTP server does, and Styrmin does not add it to the report
+   - that the server honours `HTTPS_PROXY`, because `httpx` reads the standard proxy variables
 
 ## Risks
 

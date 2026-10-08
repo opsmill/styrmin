@@ -169,7 +169,7 @@ Sending:
 - **FR-008**: The daily telemetry flow MUST end in the `Completed` state when the endpoint refuses the connection, does not respond, or returns a 4xx or 5xx status. A failed send MUST be logged at debug level only.
 - **FR-009**: Each send attempt MUST stop after 10 seconds.
 - **FR-012**: The server MUST send at most one report a day, at a fixed time of day, from a scheduled flow in the same way as the daily session cleanup flow ([ADR-016](../../dev/adr/0016-authentication-and-sessions.md)). Restarts of the server and extra server replicas MUST NOT cause extra reports.
-- **FR-014**: The install ID MUST be a random UUID that is created the first time the server starts and stored in the Styrmin database. Every later report from the same database MUST carry the same install ID, across restarts and server replicas. The install ID MUST be created whether telemetry is on or off, so that it does not change when an operator turns telemetry on later.
+- **FR-014**: The install ID MUST be a random UUID that is created the first time the server starts and stored in the Styrmin database. Every later report from the same database MUST carry the same install ID, across restarts and server replicas. The install ID MUST be created whether telemetry is on or off, so that it does not change when an operator turns telemetry on later. A failure to create the install ID MUST NOT stop the server from starting; the daily flow and `styrmin telemetry show` create it later. [CLAUDE RECOMMENDED – based on issue #274, "never block or degrade the backend", and critique finding E2]
 
 Viewing the report and the startup log line:
 
@@ -183,7 +183,7 @@ Test and development installs:
 Documentation, in the same change ([Constitution §VII](../../dev/constitution.md)):
 
 - **FR-016**: The documentation page [`docs/docs/reference/telemetry.md`](../../docs/docs/reference/telemetry.md) MUST be renamed from "CLI telemetry & privacy" to "Telemetry & privacy" and MUST get a section for the server. That section lists every key in the report, states that driver names are sent as written and that a custom driver name can identify the operator's organisation, names the settings that turn telemetry off, names the default endpoint, and explains `styrmin telemetry show`.
-- **FR-017**: `helm/styrmin/README.md` MUST document the Helm values `styrmin.telemetry.enabled` and `styrmin.telemetry.endpoint`.
+- **FR-017**: `helm/styrmin/README.md` MUST document the Helm values `styrmin.telemetry.enabled` and `styrmin.telemetry.endpoint`. The chart's install notes (`NOTES.txt`) MUST say whether telemetry is on and how to turn it off and view the report. [CLAUDE RECOMMENDED for the install notes – based on PRD user story 7 and critique finding P2]
 - **FR-018**: A new ADR MUST record that driver names are sent as written and that the install ID is stored in the database.
 - **FR-019**: `CONTEXT.md` MUST extend the **Telemetry** entry to cover the server and MUST add an **Install ID** entry.
 

@@ -91,7 +91,7 @@ Each decision lists what was chosen, why, and what was rejected. File references
 **Decision**:
 - The sender posts with `httpx.AsyncClient` inside `asyncio.timeout(10)`. The `asyncio` deadline covers DNS, connect, write and read together.
 - A response outside 2xx, a timeout, or any `httpx` or OS error counts as a failed send. The sender returns `False` and logs one debug line with the error class and status code. It never raises.
-- The flow wraps its whole body in `try/except Exception` and logs anything unexpected at debug level, so the run always ends `Completed` (FR-008, PRD module table: "always ends `Completed`").
+- The flow wraps its whole body in `try/except Exception`, so the run always ends `Completed` (FR-008, PRD module table: "always ends `Completed`"). An exception raised while building the report, such as a database error or a bug in a query, is logged at warning level, because it means reports stop until someone fixes it. Endpoint failures stay at debug level (critique E3).
 - Logging inside the flow uses Prefect's `get_run_logger()`, as `session_cleanup.py` does. Prefect's default level is INFO, so debug lines do not appear unless an operator lowers the level.
 
 **Rationale**: An `httpx` timeout applies to each phase separately, so a slow server that sends one byte at a time could exceed 10 seconds in total. ADR-047 found the same problem for `styrminctl`. In an async flow, `asyncio.timeout` gives a hard total limit without a thread. `httpx` needs no extension for this.
@@ -115,6 +115,8 @@ Each decision lists what was chosen, why, and what was rejected. File references
 - `InstallationRepository.get_or_create_install_id()` inserts `(1, uuid4())` with `ON CONFLICT (id) DO NOTHING`, then selects the row. The insert picks the PostgreSQL or SQLite dialect, as `services/auth/bootstrap.py:36-87` does for the admin user.
 - The server calls it during startup, after the admin bootstrap and before `PrefectManager.initialize()` (`server/app.py`, between lines 55 and 58). The flow and `styrmin telemetry show` call the same method, so they also work against a database where the row is missing.
 - One Alembic revision `add_installation` with `down_revision = "c2ff6dba5ffd"` (the current head) creates the table; the downgrade drops it. The PRD records the approval of this database change on 2026-10-08.
+
+- The startup call is wrapped: on any exception the server logs one warning and continues starting, so telemetry never stops the server (critique E2, spec FR-014).
 
 **Rationale**: `CHECK (id = 1)` with a fixed key makes a second row impossible, and `ON CONFLICT DO NOTHING` lets two replicas that start at the same time agree on one ID without a lock. The ID is created whether telemetry is on or off (FR-014). `init_db()` only runs `create_all` for a fresh database, so the revision is required for existing databases (ADR-001).
 
@@ -172,7 +174,7 @@ Each decision lists what was chosen, why, and what was rejected. File references
 
 ## D17: Startup log line
 
-**Decision**: `services/telemetry/state.py` has `startup_message(settings) -> str`. `app_initialization` logs it with loguru at INFO right after the logger is configured (`server/app.py`, after line 48), so it appears even when the database is not ready yet. The exact text is in [contracts/configuration.md](contracts/configuration.md).
+**Decision**: `services/telemetry/state.py` has `startup_message(settings) -> str`. The chart's `NOTES.txt` shows the same information after `helm install` and `helm upgrade` (critique P2). `app_initialization` logs it with loguru at INFO right after the logger is configured (`server/app.py`, after line 48), so it appears even when the database is not ready yet. The exact text is in [contracts/configuration.md](contracts/configuration.md).
 
 **Rationale**: FR-010 asks for the line on every start. With more than one uvicorn worker (`styrmin server start --workers N`) each process logs it once; the default is one worker.
 
@@ -188,8 +190,8 @@ Each decision lists what was chosen, why, and what was rejected. File references
 ## D19: Tests
 
 **Decision**:
-- Unit tests for the settings (D7), the install ID store against SQLite and PostgreSQL (D10), the repository queries, the payload builder (exact key set, merged and sorted drivers, tombstoned deployments excluded, no forbidden keys), the sender (2xx, 4xx, 5xx, connection refused, a server that never answers, checksum against `styrminctl`), the flow (off by each setting means no request; late run means no request; exceptions end `Completed`), the startup message, the catalogue entry's cron schedule (through `to_deployment()`, as `test_git_source_commit_pinning.py:112-152` does), and the Helm ConfigMap (`helm template` with and without the values).
+- Unit tests for the settings (D7), the install ID store against SQLite and PostgreSQL (D10), the startup call that continues after a failure (D10), the repository queries, the payload builder (exact key set, merged and sorted drivers, tombstoned deployments excluded, no forbidden keys), the sender (2xx, 4xx, 5xx, connection refused, a server that never answers, checksum against `styrminctl`), the flow (off by each setting means no request; late run means no request; exceptions end `Completed`; called with `.fn()` and with `get_run_logger` and the scheduled start time patched, as `tests/unit/workflows/test_velero_backup_flow.py` does), the startup message, the catalogue entry's cron schedule (through `to_deployment()`, as `test_git_source_commit_pinning.py:112-152` does), and the Helm ConfigMap (`helm template` with and without the values).
 - A migration test for the new revision, following `tests/unit/db/test_steps_migration.py`.
-- One `api_only` E2E test in a new file `backend/tests/e2e/test_server_telemetry.py`, marked `ci` and `shard_general`, that uses `deployed_simple_app` (booted by ten other files in the same shard, so no extra stack). It runs `styrmin telemetry show` in the server pod, triggers the flow (D13), and asserts that the sink received exactly one new report with the FR-006 keys, `kind: "styrmin"`, a valid checksum, and `data` equal to the command output.
+- One `api_only` E2E test in a new file `backend/tests/e2e/test_server_telemetry.py`, marked `ci` and `shard_general`, that uses `deployed_simple_app` (booted by ten other files in the same shard, so no extra stack). It asserts the server pod's log has one "Telemetry is on" line (FR-010, critique E7), runs `styrmin telemetry show` in the server pod, triggers the flow (D13), and asserts that the sink received exactly one new report with the FR-006 keys, `kind: "styrmin"`, a valid checksum, and `data` equal to the command output.
 
 **Rationale**: The PRD testing decisions. The E2E file is new, but it adds no heavy fixture: it reuses the Styrmin install and the simple-app deployment that the shard already boots, which is the "sibling sharing its session fixture" form in `dev/guides/e2e-deployment-sharing.md`. The test compares the command output with the received data instead of fixed numbers, because other tests in `shard_general` add and remove deployments.
