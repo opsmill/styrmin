@@ -24,6 +24,10 @@ component container a driver declares (``components.<name>.container``),
 loaded through ``loadLocalApplicationDriverVersion`` and read back from both
 the DB row and the ``applicationDriver`` query.
 
+020-driver-info-display (T010) adds ``icon``, ``description`` and ``links``:
+the ``spec.info`` values, loaded through ``loadLocalApplicationDriverVersion``,
+read back from the DB row and projected through ``applicationDriver.versions``.
+
 Test location note: the task list specifies
 ``backend/tests/unit/api/schema/test_application_driver_version_propagation.py``
 but the project's documented propagation-test harness (fixtures, seeds,
@@ -161,6 +165,155 @@ def _write_container_driver(path: Path) -> None:
     }
     (path / "driver.styrmin.yml").write_text(yaml.safe_dump(spec))
     (path / "values.j2.yml").write_text("{}\n")
+
+
+INFO_ICON = "https://example.com/logo.svg"
+INFO_DESCRIPTION = "Driver info propagation fixture"
+# The bare-host URL checks that ``HttpUrl`` normalisation (trailing ``/``) is what gets stored.
+INFO_LINKS = [
+    {"link": "Homepage", "url": "https://example.com"},
+    {"link": "Documentation", "url": "https://docs.example.com/guide"},
+]
+STORED_INFO_LINKS = [
+    {"link": "Homepage", "url": "https://example.com/"},
+    {"link": "Documentation", "url": "https://docs.example.com/guide"},
+]
+
+
+def _write_info_driver(path: Path, info: dict[str, Any]) -> None:
+    """Write a local driver whose ``spec.info`` block is ``info``."""
+    spec: dict[str, Any] = {
+        "apiVersion": "styrmin.io/v1",
+        "kind": "ApplicationDriver",
+        "metadata": {"name": "info-propagation"},
+        "spec": {
+            "version": "0.1.0",
+            "supported_versions": ">=0.1,<1.0",
+            "info": info,
+            "helm": {
+                "main": {
+                    "location": "oci://registry.example.com/charts/simple-app",
+                    "version": "0.1.0",
+                }
+            },
+            "components": {
+                "server": {
+                    "identifier": {"label": {"app.kubernetes.io/name": "simple-app"}},
+                },
+            },
+        },
+    }
+    (path / "driver.styrmin.yml").write_text(yaml.safe_dump(spec))
+    (path / "values.j2.yml").write_text("{}\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_driver_info_propagates_from_driver_load_to_db(
+    client: AsyncClient, session: AsyncSession, tmp_path: Path
+) -> None:
+    """Loading a driver stores ``spec.info`` icon, description and links on
+    the ``ApplicationDriverVersion`` row."""
+    _write_info_driver(
+        tmp_path,
+        {"icon": INFO_ICON, "description": INFO_DESCRIPTION, "links": INFO_LINKS},
+    )
+
+    loaded = await gql(client, "load_local_driver_info", {"path": str(tmp_path)})
+    version = loaded["loadLocalApplicationDriverVersion"]
+
+    row = await session.get(
+        ApplicationDriverVersion, UUID(version["id"]), populate_existing=True
+    )
+    assert row is not None
+    assert row.icon == INFO_ICON
+    assert row.description == INFO_DESCRIPTION
+    assert row.links == STORED_INFO_LINKS
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_driver_info_projects_through_application_driver_query(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """``applicationDriver.versions`` returns the loaded icon, description and
+    links, with the links in file order."""
+    _write_info_driver(
+        tmp_path,
+        {"icon": INFO_ICON, "description": INFO_DESCRIPTION, "links": INFO_LINKS},
+    )
+    loaded = await gql(client, "load_local_driver_info", {"path": str(tmp_path)})
+    version = loaded["loadLocalApplicationDriverVersion"]
+
+    data = await gql(
+        client,
+        "get_driver_info",
+        {"applicationDriverId": version["applicationDriverId"]},
+    )
+    [read_back] = [
+        v for v in data["applicationDriver"]["versions"] if v["id"] == version["id"]
+    ]
+    expected_links = [
+        {"label": "Homepage", "url": "https://example.com/"},
+        {"label": "Documentation", "url": "https://docs.example.com/guide"},
+    ]
+    assert read_back["icon"] == INFO_ICON
+    assert read_back["description"] == INFO_DESCRIPTION
+    assert read_back["links"] == expected_links
+    assert version["links"] == expected_links
+
+
+@pytest.mark.asyncio
+async def test_driver_info_is_empty_for_rows_without_info(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """Rows stored without info (or before the columns existed) project as
+    ``null``, ``null`` and ``[]``."""
+    adv = await seed_application_driver_version(session)
+    assert (adv.icon, adv.description, adv.links) == (None, None, None)
+
+    data = await gql(
+        client,
+        "get_driver_info",
+        {"applicationDriverId": str(adv.application_driver_id)},
+    )
+    [version] = [
+        v for v in data["applicationDriver"]["versions"] if v["id"] == str(adv.id)
+    ]
+    assert version["icon"] is None
+    assert version["description"] is None
+    assert version["links"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_driver_info_empty_description_and_links_are_stored_as_null(
+    client: AsyncClient, session: AsyncSession, tmp_path: Path
+) -> None:
+    """An empty ``description`` and an empty ``links`` list are stored as NULL
+    and project as ``null`` and ``[]``."""
+    _write_info_driver(tmp_path, {"description": "", "links": []})
+
+    loaded = await gql(client, "load_local_driver_info", {"path": str(tmp_path)})
+    version = loaded["loadLocalApplicationDriverVersion"]
+
+    row = await session.get(
+        ApplicationDriverVersion, UUID(version["id"]), populate_existing=True
+    )
+    assert row is not None
+    assert (row.icon, row.description, row.links) == (None, None, None)
+
+    data = await gql(
+        client,
+        "get_driver_info",
+        {"applicationDriverId": version["applicationDriverId"]},
+    )
+    [read_back] = [
+        v for v in data["applicationDriver"]["versions"] if v["id"] == version["id"]
+    ]
+    assert read_back["icon"] is None
+    assert read_back["description"] is None
+    assert read_back["links"] == []
 
 
 @pytest.mark.asyncio

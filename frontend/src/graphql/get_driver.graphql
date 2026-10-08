@@ -15,6 +15,12 @@ query GetDriver($applicationDriverId: UUID!) {
       contentHash
       components
       createdOn
+      icon
+      description
+      links {
+        label
+        url
+      }
       parameters {
         name
         label

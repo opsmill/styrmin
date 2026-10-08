@@ -13,6 +13,8 @@ query ListDrivers {
       sourceCommitSha
       contentHash
       createdOn
+      icon
+      description
     }
   }
 }

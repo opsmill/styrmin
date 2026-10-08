@@ -53,6 +53,16 @@ type ApplicationDriverVersion {
   sourceCommitSha: String
   createdOn: DateTime!
   components: JSON
+
+  """
+  URL of the driver's logo image, from `spec.info.icon` in the driver specification file. An absolute http or https URL; the browser of each viewer loads the image from it. Null when the driver does not set it.
+  """
+  icon: String
+
+  """
+  Description of the application, from `spec.info.description`. Null when the driver does not set it.
+  """
+  description: String
   applicationDriver: ApplicationDriver!
   services: [ServiceDefinition!]!
   parameters: [ParameterDefinition!]!
@@ -66,6 +76,11 @@ type ApplicationDriverVersion {
   Doc-only container-override declarations from the driver's spec.container_overrides block (014). Empty when the driver omits the block.
   """
   containerOverrides: [DriverContainerOverrideDoc!]!
+
+  """
+  Links from `spec.info.links`, in file order. Empty when the driver does not set any.
+  """
+  links: [DriverLink!]!
   componentConfigs: [ComponentConfig!]!
   helmChart: HelmChart!
   actions: [Action!]!
@@ -576,6 +591,17 @@ type DriverEnvVarDoc {
 enum DriverEnvVarLevel {
   DEPLOYMENT
   COMPONENT
+}
+
+"""
+A link a driver declares under `spec.info.links`, such as its homepage or documentation.
+"""
+type DriverLink {
+  """Link text, from the `link` key of the entry."""
+  label: String!
+
+  """Absolute http or https URL, from the `url` key of the entry."""
+  url: String!
 }
 
 """
