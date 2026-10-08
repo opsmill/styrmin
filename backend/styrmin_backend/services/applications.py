@@ -40,6 +40,7 @@ from styrmin_backend.services.driver.loaders import (
     get_local_driver_loader,
 )
 from styrmin_backend.services.driver.models.resources.actions import HookKind
+from styrmin_backend.services.driver.models.resources.driver import Info
 from styrmin_backend.services.driver.models.structure.source import GitSource
 from styrmin_backend.services.exceptions import (
     ApplicationDriverNotFoundError,
@@ -58,6 +59,15 @@ from styrmin_backend.services.utils import (
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.manager import PrefectManager
 from styrmin_backend.workflows.models import PrefectAction
+
+
+def _driver_info_columns(info: Info) -> dict[str, object]:
+    """Map ``spec.info`` to the driver version's info columns; empty values become NULL."""
+    return {
+        "icon": str(info.icon) if info.icon else None,
+        "description": info.description or None,
+        "links": [link.model_dump(mode="json") for link in info.links or []] or None,
+    }
 
 
 @inject(cast_result=False)  # type: ignore[arg-type]
@@ -252,6 +262,7 @@ async def load_application_driver_from_object(
                     services=services,
                     env_vars=env_vars_payload,
                     container_overrides=container_overrides_payload,
+                    **_driver_info_columns(driver_object.driver_spec.spec.info),
                     helm_chart_id=helm_chart.id,
                     source_type=source_type,
                     source_repository=source_repository,

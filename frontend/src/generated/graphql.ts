@@ -70,10 +70,16 @@ export type ApplicationDriverVersion = {
   contentHash?: Maybe<Scalars['String']['output']>;
   createdOn: Scalars['DateTime']['output'];
   defaultVersion?: Maybe<Scalars['String']['output']>;
+  /** Description of the application, from `spec.info.description`. Null when the driver does not set it. */
+  description?: Maybe<Scalars['String']['output']>;
   /** Doc-only env var declarations from the driver's spec.env_vars block. Empty when the driver omits the block. */
   envVars: Array<DriverEnvVarDoc>;
   helmChart: HelmChart;
+  /** URL of the driver's logo image, from `spec.info.icon` in the driver specification file. An absolute http or https URL; the browser of each viewer loads the image from it. Null when the driver does not set it. */
+  icon?: Maybe<Scalars['String']['output']>;
   id: Scalars['UUID']['output'];
+  /** Links from `spec.info.links`, in file order. Empty when the driver does not set any. */
+  links: Array<DriverLink>;
   parameters: Array<ParameterDefinition>;
   services: Array<ServiceDefinition>;
   sourceBranch?: Maybe<Scalars['String']['output']>;
@@ -472,6 +478,15 @@ export type DriverEnvVarDoc = {
 export type DriverEnvVarLevel =
   | 'COMPONENT'
   | 'DEPLOYMENT';
+
+/** A link a driver declares under `spec.info.links`, such as its homepage or documentation. */
+export type DriverLink = {
+  __typename?: 'DriverLink';
+  /** Link text, from the `link` key of the entry. */
+  label: Scalars['String']['output'];
+  /** Absolute http or https URL, from the `url` key of the entry. */
+  url: Scalars['String']['output'];
+};
 
 /**
  * A single environment variable to inject into rendered containers.
@@ -1838,7 +1853,7 @@ export type GetDriverQueryVariables = Exact<{
 }>;
 
 
-export type GetDriverQuery = { __typename?: 'Query', applicationDriver?: { __typename?: 'ApplicationDriver', id: string, name: string, createdOn: any, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, sourceCommitSha?: string | null, contentHash?: string | null, components?: Record<string, unknown> | null, createdOn: any, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', id: string, name: string, config?: Record<string, unknown> | null, container?: string | null }>, helmChart: { __typename?: 'HelmChart', id: string, name: string, version: string, repository: string, valueTemplate: string }, actions: Array<{ __typename?: 'Action', id: string, name: string, description: string, location: string }> }> } | null };
+export type GetDriverQuery = { __typename?: 'Query', applicationDriver?: { __typename?: 'ApplicationDriver', id: string, name: string, createdOn: any, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, sourceCommitSha?: string | null, contentHash?: string | null, components?: Record<string, unknown> | null, createdOn: any, icon?: string | null, description?: string | null, links: Array<{ __typename?: 'DriverLink', label: string, url: string }>, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', id: string, name: string, config?: Record<string, unknown> | null, container?: string | null }>, helmChart: { __typename?: 'HelmChart', id: string, name: string, version: string, repository: string, valueTemplate: string }, actions: Array<{ __typename?: 'Action', id: string, name: string, description: string, location: string }> }> } | null };
 
 export type GetEnvironmentQueryVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
@@ -1906,7 +1921,7 @@ export type ListClustersQuery = { __typename?: 'Query', clusters: Array<{ __type
 export type ListDriversQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type ListDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, sourceCommitSha?: string | null, contentHash?: string | null, createdOn: any }> }> };
+export type ListDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, sourceCommitSha?: string | null, contentHash?: string | null, createdOn: any, icon?: string | null, description?: string | null }> }> };
 
 export type ListEnvironmentBackupsQueryVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
@@ -2882,6 +2897,12 @@ export const GetDriverDocument = `
       contentHash
       components
       createdOn
+      icon
+      description
+      links {
+        label
+        url
+      }
       parameters {
         name
         label
@@ -3348,6 +3369,8 @@ export const ListDriversDocument = `
       sourceCommitSha
       contentHash
       createdOn
+      icon
+      description
     }
   }
 }

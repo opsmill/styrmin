@@ -1,0 +1,12 @@
+mutation LoadLocalDriverInfo($path: String!) {
+    loadLocalApplicationDriverVersion(path: $path) {
+        id
+        applicationDriverId
+        icon
+        description
+        links {
+            label
+            url
+        }
+    }
+}

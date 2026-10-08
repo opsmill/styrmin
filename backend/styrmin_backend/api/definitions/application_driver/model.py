@@ -86,6 +86,26 @@ class DriverContainerOverrideDoc:
         )
 
 
+@strawberry.type(
+    description=(
+        "A link a driver declares under `spec.info.links`, such as its homepage or "
+        "documentation."
+    )
+)
+class DriverLink:
+    label: str = strawberry.field(
+        description="Link text, from the `link` key of the entry."
+    )
+    url: str = strawberry.field(
+        description="Absolute http or https URL, from the `url` key of the entry."
+    )
+
+    @classmethod
+    def from_dict(cls, data: dict) -> DriverLink:
+        # ``data`` is the JSON-column payload stored at registration: ``{"link", "url"}``.
+        return cls(label=data["link"], url=data["url"])
+
+
 # FIXME: Support domain models serialization instead
 
 
@@ -163,6 +183,22 @@ class ApplicationDriverVersion:
 
     components: JSON | None = None
 
+    icon: str | None = strawberry.field(
+        default=None,
+        description=(
+            "URL of the driver's logo image, from `spec.info.icon` in the driver "
+            "specification file. An absolute http or https URL; the browser of each "
+            "viewer loads the image from it. Null when the driver does not set it."
+        ),
+    )
+    description: str | None = strawberry.field(
+        default=None,
+        description=(
+            "Description of the application, from `spec.info.description`. Null "
+            "when the driver does not set it."
+        ),
+    )
+
     instance: strawberry.Private[ApplicationDriverVersionModel]
 
     @strawberry.field
@@ -218,6 +254,15 @@ class ApplicationDriverVersion:
             return []
         return [DriverContainerOverrideDoc.from_dict(d) for d in raw]
 
+    @strawberry.field(
+        description=(
+            "Links from `spec.info.links`, in file order. Empty when the driver does "
+            "not set any."
+        )
+    )
+    def links(self) -> list[DriverLink]:
+        return [DriverLink.from_dict(d) for d in self.instance.links or []]
+
     @strawberry.field
     def component_configs(self) -> list[ComponentConfig]:
         return [
@@ -251,5 +296,7 @@ class ApplicationDriverVersion:
             content_hash=instance.content_hash,
             source_commit_sha=instance.source_commit_sha,
             created_on=instance.created_on,
+            icon=instance.icon,
+            description=instance.description,
             instance=instance,
         )

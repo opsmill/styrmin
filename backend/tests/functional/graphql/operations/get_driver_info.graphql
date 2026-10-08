@@ -1,0 +1,13 @@
+query GetDriverInfo($applicationDriverId: UUID!) {
+    applicationDriver(applicationDriverId: $applicationDriverId) {
+        versions {
+            id
+            icon
+            description
+            links {
+                label
+                url
+            }
+        }
+    }
+}
