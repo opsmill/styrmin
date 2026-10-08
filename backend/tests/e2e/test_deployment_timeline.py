@@ -66,6 +66,7 @@ async def _wait_for_create_steps(
 async def test_deployment_timeline_has_entries(
     scenario_driver: ScenarioDriver,
     deployed_simple_app: dict,
+    scenario_environment_id: str,
 ) -> None:
     """Verify that a deployment timeline has entries after initial deploy.
 
@@ -75,6 +76,7 @@ async def test_deployment_timeline_has_entries(
     The create task carries its plan, CR-write and operator-phase steps
     (spec 019, US1).
     """
+    scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
     timeline = await _wait_for_create_steps(
         scenario_driver, deployed_simple_app["deployment_id"]
     )
@@ -140,6 +142,7 @@ async def test_deployment_timeline_after_upgrade(
     scenario_driver: ScenarioDriver,
     deployed_simple_app: dict,
     simple_app_image_v2: str,  # noqa: ARG001 — ensures v2 image is built
+    scenario_environment_id: str,
 ) -> None:
     """Verify timeline reflects both deploy and upgrade operations.
 
@@ -147,6 +150,7 @@ async def test_deployment_timeline_after_upgrade(
     previous test already did the upgrade. Timeline still retains the
     initial ``create_instance`` at 0.1.0 alongside the upgrade entry.
     """
+    scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
     deployment_id = deployed_simple_app["deployment_id"]
     await scenario_driver.upgrade_deployment(
         deployment_id=deployment_id, version="0.2.0"
@@ -172,6 +176,7 @@ async def test_deployment_timeline_ordering(
     scenario_driver: ScenarioDriver,
     deployed_simple_app: dict,
     simple_app_image_v2: str,  # noqa: ARG001 — ensures v2 image is built
+    scenario_environment_id: str,
 ) -> None:
     """Verify that timeline entries are ordered newest-first by created_on.
 
@@ -181,6 +186,7 @@ async def test_deployment_timeline_ordering(
     or after the other tests that upgrade the shared deployment. The poll
     loop absorbs DOM-render lag in the UI variant (FR-014).
     """
+    scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
     deployment_id = deployed_simple_app["deployment_id"]
     await scenario_driver.upgrade_deployment(
         deployment_id=deployment_id, version="0.2.0"
