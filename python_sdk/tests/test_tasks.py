@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
 from styrmin_sdk import FailedStep, ResourceNotFoundError, StyrminClient
-from styrmin_sdk.models import StepKind, StepStatus, TaskResult
+from styrmin_sdk.models import StepKind, StepOutput, StepStatus, TaskResult
 
 TASK_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 STARTED_TASK_ID = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
@@ -23,7 +24,7 @@ def _step(
     status: str,
     *,
     error: str | None = None,
-    output: str | None = None,
+    has_output: bool = False,
     started_tasks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     errors = [] if error is None else [{"attempt": 1, "message": error, "occurredAt": "2026-10-06T10:01:05+00:00"}]
@@ -42,9 +43,7 @@ def _step(
         "detail": None,
         "rolledBackAt": None,
         "rollbackMessage": None,
-        "hasOutput": output is not None,
-        "output": output,
-        "outputTruncated": False,
+        "hasOutput": has_output,
         "supersededBy": None,
         "startedTasks": started_tasks or [],
         "noReportSince": None,
@@ -89,7 +88,7 @@ async def test_get_task_returns_steps_result_and_started_tasks(
         TASK_ID,
         [
             _step("plan", "Plan the changes", "SUCCEEDED"),
-            _step("hook:upgrade:core", "Run the upgrade hook", "FAILED", error="boom", output="line 1\nline 2"),
+            _step("hook:upgrade:core", "Run the upgrade hook", "FAILED", error="boom", has_output=True),
             _step("operator:helmrelease", "Install or upgrade the HelmRelease", "RUNNING"),
         ],
         started_tasks=[_started_task(STARTED_TASK_ID, "SUCCEEDED")],
@@ -104,11 +103,13 @@ async def test_get_task_returns_steps_result_and_started_tasks(
     assert hook.status == StepStatus.FAILED
     assert hook.error == "boom"
     assert hook.errors[0].message == "boom"
-    assert hook.output == "line 1\nline 2"
+    assert hook.has_output is True
     assert task.steps[2].duration_seconds is None
     assert task.started_tasks[0].id == UUID(STARTED_TASK_ID)
     assert task.started_tasks[0].result == TaskResult.SUCCEEDED
-    variables = mock_transport.execute.call_args.args[1]
+    query, variables = mock_transport.execute.call_args.args
+    # Step.output is read one step at a time, with step_output().
+    assert re.search(r"\boutput(Truncated)?\b", query) is None
     assert variables == {"taskId": TASK_ID}
 
 
@@ -120,6 +121,30 @@ async def test_get_task_not_found(client: StyrminClient, mock_transport: AsyncMo
 
     with pytest.raises(ResourceNotFoundError):
         await client.tasks.get(TASK_ID)
+
+
+async def test_step_output_reads_one_step(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    step_id = str(uuid5(NAMESPACE_URL, "hook:upgrade:core"))
+    mock_transport.execute.return_value = {
+        "data": {"step": {"id": step_id, "output": "line 1\nline 2", "outputTruncated": True}}
+    }
+
+    output = await client.tasks.step_output(step_id)
+
+    assert output == StepOutput.model_validate({"id": step_id, "output": "line 1\nline 2", "outputTruncated": True})
+    query, variables = mock_transport.execute.call_args.args
+    assert "query GetStepOutput" in query
+    assert variables == {"stepId": step_id}
+
+
+async def test_step_output_not_found(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.return_value = {
+        "data": {"step": None},
+        "errors": [{"message": "Step not found", "extensions": {"code": "NOT_FOUND"}}],
+    }
+
+    with pytest.raises(ResourceNotFoundError):
+        await client.tasks.step_output(str(uuid5(NAMESPACE_URL, "missing")))
 
 
 async def test_failed_step_finds_the_first_failed_step_of_the_task(

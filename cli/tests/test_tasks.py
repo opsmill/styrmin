@@ -8,7 +8,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 from styrmin_sdk.exceptions import StyrminError
-from styrmin_sdk.models import Task
+from styrmin_sdk.models import StepOutput, Task
 from styrminctl.cli import app
 
 TASK_ID = "550e8400-e29b-41d4-a716-446655440000"
@@ -63,8 +63,6 @@ def _step(name: str, status: str, **fields: Any) -> dict[str, Any]:  # noqa: ANN
         "rolledBackAt": None,
         "rollbackMessage": None,
         "hasOutput": False,
-        "output": None,
-        "outputTruncated": False,
         "supersededBy": None,
         "startedTasks": [],
         "noReportSince": None,
@@ -146,6 +144,7 @@ def test_tasks_get(mock_client: MagicMock, capsys: pytest.CaptureFixture[str], m
     assert "PENDING" in next(line for line in lines if "Wait for the pods to be ready" in line)
     assert "No steps recorded" not in output
     assert "Started tasks" not in output
+    mock_client.tasks.step_output.assert_not_called()
 
 
 def test_tasks_get_running_step_and_command_output(
@@ -161,10 +160,15 @@ def test_tasks_get_running_step_and_command_output(
                 durationSeconds=12.0,
                 error="command exited with 3",
                 hasOutput=True,
-                output="step-output-1\n[step-output-2]\n\n",
             ),
             _step("Install or upgrade the HelmRelease", "RUNNING"),
         ]
+    )
+    hook_id = task.steps[0].id
+    mock_client.tasks.step_output = AsyncMock(
+        return_value=StepOutput.model_validate(
+            {"id": hook_id, "output": "step-output-1\n[step-output-2]\n\n", "outputTruncated": False}
+        )
     )
 
     output = _run_get(mock_client, task, capsys)
@@ -177,6 +181,8 @@ def test_tasks_get_running_step_and_command_output(
     assert "output: [step-output-2]" in lines[lines.index(hook) + 1]
     assert "step-output-1" not in output
     assert "running" in next(line for line in lines if "Install or upgrade the HelmRelease" in line)
+    # Only the step with output has its output read.
+    mock_client.tasks.step_output.assert_awaited_once_with(hook_id)
 
 
 def test_tasks_get_without_steps(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:

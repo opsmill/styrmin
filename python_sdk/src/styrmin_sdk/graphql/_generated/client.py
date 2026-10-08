@@ -1845,8 +1845,6 @@ class Client(AsyncBaseClient):
                   rolledBackAt
                   rollbackMessage
                   hasOutput
-                  output
-                  outputTruncated
                   supersededBy {
                     id
                     type

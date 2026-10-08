@@ -57,8 +57,6 @@ class GetTaskTaskSteps(BaseModel):
     rolled_back_at: Optional[datetime] = Field(alias="rolledBackAt")
     rollback_message: Optional[str] = Field(alias="rollbackMessage")
     has_output: bool = Field(alias="hasOutput")
-    output: Optional[str]
-    output_truncated: bool = Field(alias="outputTruncated")
     superseded_by: Optional["GetTaskTaskStepsSupersededBy"] = Field(
         alias="supersededBy"
     )

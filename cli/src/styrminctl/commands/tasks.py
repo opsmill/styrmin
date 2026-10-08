@@ -57,10 +57,10 @@ def _step_duration(step: TaskStep) -> str:
     return _format_duration(step.duration_seconds) if step.duration_seconds is not None else ""
 
 
-def _step_error(step: TaskStep) -> str:
+def _step_error(step: TaskStep, output: str | None) -> str:
     """The newest error, FluxCD's detail and the last output line, one per line."""
-    lines = [line for line in (step.output or "").splitlines() if line.strip()]
-    parts = [step.error, step.detail, f"output: {lines[-1]}" if step.has_output and lines else None]
+    lines = [line for line in (output or "").splitlines() if line.strip()]
+    parts = [step.error, step.detail, f"output: {lines[-1]}" if lines else None]
     # Errors and output are free text: keep "[...]" from being read as Rich markup.
     return escape("\n".join(part for part in parts if part))
 
@@ -71,6 +71,8 @@ async def get(task_id: TaskId) -> None:
     with styrmin_error_handler():
         async with client.get_client() as sdk:
             task = await sdk.tasks.get(task_id)
+            # The task read leaves out command output: read it for each step that has some.
+            outputs = {step.id: (await sdk.tasks.step_output(step.id)).output for step in task.steps if step.has_output}
 
     row = {
         "id": str(task.id),
@@ -89,7 +91,7 @@ async def get(task_id: TaskId) -> None:
                 "status": step.status.value,
                 "duration": _step_duration(step),
                 "attempts": step.attempt_count,
-                "error": _step_error(step),
+                "error": _step_error(step, outputs.get(step.id)),
             }
             for step in task.steps
         ]

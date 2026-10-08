@@ -38,8 +38,6 @@ query GetTask($taskId: UUID!) {
             rolledBackAt
             rollbackMessage
             hasOutput
-            output
-            outputTruncated
             supersededBy {
                 id
                 type

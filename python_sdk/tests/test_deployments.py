@@ -1188,8 +1188,6 @@ def _task_step(name: str, status: str, error: str | None = None) -> dict[str, An
         "rolledBackAt": None,
         "rollbackMessage": None,
         "hasOutput": False,
-        "output": None,
-        "outputTruncated": False,
         "supersededBy": None,
         "startedTasks": [],
         "noReportSince": None,
