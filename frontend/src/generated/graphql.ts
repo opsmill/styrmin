@@ -514,6 +514,7 @@ export type Environment = {
 
 export type EnvironmentDeploymentsArgs = {
   includeDeleted?: Scalars['Boolean']['input'];
+  includeInternal?: Scalars['Boolean']['input'];
 };
 
 export type EnvironmentBackup = {
@@ -1843,7 +1844,7 @@ export type GetEnvironmentQueryVariables = Exact<{
 }>;
 
 
-export type GetEnvironmentQuery = { __typename?: 'Query', environment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, internal: boolean, applicationVersion: string, applicationDriverVersionId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriver: { __typename?: 'ApplicationDriver', name: string } }, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, status: string } | null }> } | null };
+export type GetEnvironmentQuery = { __typename?: 'Query', environment?: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, applicationVersion: string, applicationDriverVersionId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriver: { __typename?: 'ApplicationDriver', name: string } }, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }>, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, status: string } | null }> } | null };
 
 export type GetEnvironmentCloneQueryVariables = Exact<{
   environmentCloneId: Scalars['UUID']['input'];
@@ -1931,7 +1932,7 @@ export type ListEnvironmentsQueryVariables = Exact<{
 }>;
 
 
-export type ListEnvironmentsQuery = { __typename?: 'Query', environments: Array<{ __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, internal: boolean, applicationVersion: string, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }> }> }> };
+export type ListEnvironmentsQuery = { __typename?: 'Query', environments: Array<{ __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string }, deployments: Array<{ __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, applicationVersion: string, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean }> }> }> };
 
 export type ListGroupsQueryVariables = Exact<{
   search?: InputMaybe<Scalars['String']['input']>;
@@ -2947,7 +2948,6 @@ export const GetEnvironmentDocument = `
       name
       status
       deletedAt
-      internal
       applicationVersion
       applicationDriverVersionId
       applicationDriverVersion {
@@ -3510,7 +3510,6 @@ export const ListEnvironmentsDocument = `
       name
       status
       deletedAt
-      internal
       applicationVersion
       components {
         id

@@ -10,8 +10,7 @@ import {
 
 const ENV_ID = "00000000-0000-0000-0000-000000000001";
 
-const noDeployments: Array<{ id: string; name: string; internal: boolean }> =
-  [];
+const noDeployments: Array<{ id: string; name: string }> = [];
 
 describe("EnvironmentConfigurationTab", () => {
   it("renders all six sections with populated values", async () => {

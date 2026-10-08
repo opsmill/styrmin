@@ -1757,12 +1757,22 @@ async def test_list_deployments_success(client: StyrminClient, mock_transport: A
     assert str(deployments[0].application_instance.id) == "33333333-4444-5555-6666-777777777777"
     assert deployments[1].application_instance is None
 
-    # Active instance excluded deleted deployments by default.
+    # Deleted and internal deployments are excluded by default.
     sent_variables = mock_transport.execute.await_args.args[1]
     assert sent_variables == {
         "environmentId": "22222222-3333-4444-5555-666666666666",
         "includeDeleted": False,
+        "includeInternal": False,
     }
+
+
+async def test_list_deployments_forwards_include_internal(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.return_value = {"data": {"environment": {"deployments": []}}}
+
+    await client.deployments.list("22222222-3333-4444-5555-666666666666", include_internal=True)
+
+    sent_variables = mock_transport.execute.await_args.args[1]
+    assert sent_variables["includeInternal"] is True
 
 
 async def test_list_deployments_unknown_environment_returns_empty(

@@ -1,6 +1,10 @@
-query ListDeployments($environmentId: UUID!, $includeDeleted: Boolean! = false) {
+query ListDeployments(
+    $environmentId: UUID!
+    $includeDeleted: Boolean! = false
+    $includeInternal: Boolean! = false
+) {
     environment(environmentId: $environmentId) {
-        deployments(includeDeleted: $includeDeleted) {
+        deployments(includeDeleted: $includeDeleted, includeInternal: $includeInternal) {
             id
             name
             status

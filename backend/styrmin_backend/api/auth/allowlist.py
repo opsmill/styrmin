@@ -54,7 +54,7 @@ MUTATION_ALLOW_LIST: frozenset[str] = frozenset(
 #:        credentials, so there is no token to validate against.
 #:     2. Replace ``environments`` here with a purpose-built
 #:        ``environmentsForAgent`` query that returns ONLY
-#:        ``deployments { id, status, internal }`` (the fields
+#:        ``deployments(includeInternal: true) { id, status }`` (the fields
 #:        ``ListDeploymentsForStatus`` actually reads), gated by
 #:        ``RequiresAuthentication`` alone (any authenticated principal).
 #:        Drop ``environments`` from this list at the same time.

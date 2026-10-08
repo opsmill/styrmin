@@ -176,7 +176,7 @@ async def ensure_operator_steps(task: Task, at: datetime, *, uow: UnitOfWork) ->
     """Create the operator-phase steps of a rollout task once its CR write succeeded.
 
     The prerequisites step starts at ``at``; the others wait for the operator.
-    An internal deployment gets none, because the agent does not report its status.
+    An internal deployment gets none: users cannot open its tasks.
     """
     deployment = await uow.deployments.find(task.deployment_id)
     if deployment is None or deployment.internal:

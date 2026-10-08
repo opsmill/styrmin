@@ -39,7 +39,6 @@ export interface EnvVarRowState {
 export interface EnvVarsFormDeployment {
   id: string;
   name: string;
-  internal: boolean;
 }
 
 export interface EnvVarPayload {
@@ -176,13 +175,6 @@ export function EnvVarsForm({
   const validation = useMemo(() => validateRows(rows), [rows]);
   const hasErrors =
     validation.globalError !== null || rowsHaveErrors(validation.rows);
-
-  // Eligible deployments — the backend skips tombstoned and internal
-  // deployments during fanout; we mirror that for the dialog count.
-  const eligibleDeployments = useMemo(
-    () => deployments.filter((d) => !d.internal),
-    [deployments],
-  );
 
   const updateRow = (
     id: string,
@@ -368,8 +360,8 @@ export function EnvVarsForm({
 
       <RedeployConfirmDialog
         open={confirmOpen}
-        deploymentCount={eligibleDeployments.length}
-        deploymentNames={eligibleDeployments.map((d) => d.name)}
+        deploymentCount={deployments.length}
+        deploymentNames={deployments.map((d) => d.name)}
         onConfirm={handleConfirmRedeploy}
         onCancel={handleCancelRedeploy}
       />

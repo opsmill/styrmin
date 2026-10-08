@@ -326,16 +326,23 @@ class DeploymentResource(BaseResource):
         environment_id: str | UUID,
         *,
         include_deleted: bool = False,
+        include_internal: bool = False,
     ) -> list[ListDeploymentsEnvironmentDeployments]:
         """List the deployments belonging to an environment.
 
         Each entry carries the deployment's active application instance
         (``application_instance``), or ``None`` when the deployment has no
-        active instance yet.
+        active instance yet. Internal deployments, such as the ingress
+        controller of a dedicated ingress, are left out unless
+        ``include_internal`` is true.
         """
         result = await self._transport.execute(
             load_query("list_deployments"),
-            {"environmentId": str(environment_id), "includeDeleted": include_deleted},
+            {
+                "environmentId": str(environment_id),
+                "includeDeleted": include_deleted,
+                "includeInternal": include_internal,
+            },
         )
         self._check_graphql_errors(result)
         validated = ListDeployments.model_validate(result["data"])

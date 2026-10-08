@@ -9,22 +9,7 @@ import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { IfRole } from "@/auth/IfRole";
 import { CreateEnvironmentDialog } from "./CreateEnvironmentDialog";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-
-function deriveEnvHealth(deployments: { status: string }[]): string {
-  if (deployments.length === 0) return "pending";
-  if (deployments.some((d) => d.status === "FAILED" || d.status === "failed"))
-    return "failed";
-  if (
-    deployments.some(
-      (d) =>
-        d.status === "PENDING" ||
-        d.status === "pending" ||
-        d.status === "in_progress",
-    )
-  )
-    return "pending";
-  return "active";
-}
+import { deriveEnvHealth } from "@/lib/environment-health";
 
 export default function EnvironmentListPage() {
   useDocumentTitle("Environments");
@@ -76,8 +61,7 @@ export default function EnvironmentListPage() {
           {/* Environment Cards */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {data.environments.map((env) => {
-              const userDeploys = env.deployments.filter((d) => !d.internal);
-              const health = deriveEnvHealth(userDeploys);
+              const health = deriveEnvHealth(env.deployments);
               const colors = getStatusColor(health);
 
               return (
@@ -88,6 +72,8 @@ export default function EnvironmentListPage() {
                   data-testid="environment-card"
                   data-environment-id={env.id}
                   data-environment-name={env.name}
+                  data-environment-status={health}
+                  data-application-count={env.deployments.length}
                 >
                   <div
                     className={`flex flex-col gap-4 rounded-xl border-2 bg-card p-5 transition-colors hover:shadow-md cursor-pointer ${colors.border}`}
@@ -117,7 +103,7 @@ export default function EnvironmentListPage() {
                           Apps
                         </span>
                         <span className="text-lg font-semibold text-card-foreground">
-                          {userDeploys.length}
+                          {env.deployments.length}
                         </span>
                       </div>
                     </div>
@@ -126,12 +112,12 @@ export default function EnvironmentListPage() {
                     <div className="border-t border-border pt-4">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] text-muted-foreground">
-                          {userDeploys.length} deployment
-                          {userDeploys.length !== 1 ? "s" : ""}
+                          {env.deployments.length} deployment
+                          {env.deployments.length !== 1 ? "s" : ""}
                         </span>
-                        {userDeploys.length > 0 && (
+                        {env.deployments.length > 0 && (
                           <div className="flex gap-1">
-                            {userDeploys.slice(0, 5).map((d) => {
+                            {env.deployments.slice(0, 5).map((d) => {
                               const dc = getStatusColor(d.status);
                               return (
                                 <div
@@ -174,13 +160,11 @@ export default function EnvironmentListPage() {
             {/* Table rows */}
             {data.environments
               .flatMap((env) =>
-                env.deployments
-                  .filter((d) => !d.internal)
-                  .map((d) => ({
-                    envName: env.name,
-                    envId: env.id,
-                    ...d,
-                  })),
+                env.deployments.map((d) => ({
+                  envName: env.name,
+                  envId: env.id,
+                  ...d,
+                })),
               )
               .slice(0, 5)
               .map((d, i) => {

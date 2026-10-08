@@ -34,6 +34,7 @@ def _db_deployment_to_domain(db_deployment: DeploymentDBModel) -> DeploymentEnti
         application_version=db_deployment.application_version,
         config=db_deployment.config,
         parameters=db_deployment.parameters or {},
+        internal=db_deployment.internal,
         application_driver_version_id=db_deployment.application_driver_version_id,
         environment_id=db_deployment.environment_id,
         status=DeploymentStateEntity(db_deployment.status.value),
@@ -175,7 +176,9 @@ class Environment:
         return [EnvVar(name=k, value=v) for k, v in env_vars_dict.items()]
 
     @strawberry.field
-    def deployments(self, include_deleted: bool = False) -> list[Deployment]:
+    def deployments(
+        self, include_deleted: bool = False, include_internal: bool = False
+    ) -> list[Deployment]:
         """List deployments in this environment.
 
         By default, tombstoned deployments (``deleted_at IS NOT NULL``) are
@@ -183,11 +186,16 @@ class Environment:
         appear with a non-null ``deletedAt`` field. ``DELETING`` rows have
         ``deleted_at IS NULL`` until the terminal ``DELETED`` transition,
         so they remain visible by default.
+
+        Internal deployments (the ingress controller Styrmin creates for a
+        dedicated ingress) are excluded unless ``includeInternal: true``,
+        matching the ``deployment(id:)`` query, which never returns them.
         """
         return [
             Deployment.from_instance(_db_deployment_to_domain(deployment))
             for deployment in self.instance.deployments
-            if include_deleted or deployment.deleted_at is None
+            if (include_deleted or deployment.deleted_at is None)
+            and (include_internal or not deployment.internal)
         ]
 
     @classmethod

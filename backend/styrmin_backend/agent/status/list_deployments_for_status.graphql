@@ -1,9 +1,8 @@
 query ListDeploymentsForStatus {
     environments {
-        deployments {
+        deployments(includeInternal: true) {
             id
             status
-            internal
         }
     }
 }

@@ -12,7 +12,6 @@ query ListEnvironments($includeDeleted: Boolean = false) {
       name
       status
       deletedAt
-      internal
       applicationVersion
       components {
         id

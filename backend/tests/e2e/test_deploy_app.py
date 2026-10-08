@@ -3,6 +3,7 @@ import contextlib
 import time
 import warnings
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import httpx
 import kr8s.asyncio
@@ -11,6 +12,10 @@ from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver, StepRef, TaskLinkRef, TimelineEntry
+from tests.e2e.pages.environments import EnvironmentDetailPage, EnvironmentsListPage
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
 
 pytestmark = [
     pytest.mark.shard_general,
@@ -476,3 +481,61 @@ async def test_deployed_service_external_url_includes_port(
             assert svc.human_readable_url.endswith(":8080"), (
                 f"human_readable_url should include the cluster's external port (8080), got: {svc.human_readable_url}"
             )
+
+
+def _expected_environment_status(statuses: list[str]) -> str:
+    """The status rule of ``frontend/src/lib/environment-health.ts``."""
+    if not statuses:
+        return "pending"
+    if any(status in {"FAILED", "failed"} for status in statuses):
+        return "failed"
+    if any(status in {"PENDING", "pending", "in_progress"} for status in statuses):
+        return "pending"
+    return "active"
+
+
+@pytest.mark.ci
+@pytest.mark.ui_only(
+    reason="Asserts what the environment list and detail pages render for an "
+    "environment with an internal ingress controller; the SDK has no "
+    "environment status or application count."
+)
+async def test_environment_views_hide_ingress_controller(
+    deployed_simple_app: dict,
+    scenario_environment_id: str,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    session_ui_page: "Page",
+) -> None:
+    """#253: the environment pages list, count and summarise only the
+    applications users deployed, not the internal ingress controller that the
+    dedicated-ingress cluster adds to the environment."""
+    _, client = session_scenario_driver
+
+    every_deployment = await client.deployments.list(
+        scenario_environment_id, include_internal=True
+    )
+    applications = await client.deployments.list(scenario_environment_id)
+    application_ids = {str(d.id) for d in applications}
+    controller_ids = {str(d.id) for d in every_deployment} - application_ids
+    assert len(controller_ids) == 1, (
+        "the dedicated-ingress environment should own one internal ingress "
+        f"controller, got {controller_ids!r}"
+    )
+    assert deployed_simple_app["deployment_id"] in application_ids
+    expected_status = _expected_environment_status([d.status for d in applications])
+
+    detail = EnvironmentDetailPage(session_ui_page)
+    await detail.goto(environment_id=scenario_environment_id)
+    await detail.wait_for_row_to_appear(
+        deployment_id=deployed_simple_app["deployment_id"]
+    )
+    assert await detail.read_listed_deployment_ids() == application_ids
+    assert await detail.read_application_count() == len(application_ids)
+    assert await detail.read_environment_status() == expected_status
+    assert await session_ui_page.get_by_text("Show internal").count() == 0
+
+    environments = EnvironmentsListPage(session_ui_page)
+    await environments.goto()
+    assert await environments.read_card_summary(
+        environment_id=scenario_environment_id
+    ) == (expected_status, len(application_ids))

@@ -3,11 +3,10 @@ import { render, screen, userEvent, waitFor } from "@/test/utils";
 
 import { BackupRetentionForm } from "@/components/environment/BackupRetentionForm";
 
-const NO_DEPLOYMENTS: Array<{ id: string; name: string; internal: boolean }> =
-  [];
+const NO_DEPLOYMENTS: Array<{ id: string; name: string }> = [];
 
-const ONE_DEPLOYMENT: Array<{ id: string; name: string; internal: boolean }> = [
-  { id: "d1", name: "deploy-one", internal: false },
+const ONE_DEPLOYMENT: Array<{ id: string; name: string }> = [
+  { id: "d1", name: "deploy-one" },
 ];
 
 function input(): HTMLInputElement {

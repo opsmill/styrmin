@@ -926,8 +926,8 @@ async def instanced_deployment_ids(
     """Every live deployment in ``environment_id`` that has an active instance.
 
     A **superset** of the snapshot's eligible set: ``ListDeployments`` excludes
-    tombstones but does not project ``internal``, and every environment built on
-    a ``dedicated_ingress`` cluster owns an internal ingress-controller
+    tombstones but is asked for internal deployments too, and every environment
+    built on a ``dedicated_ingress`` cluster owns an internal ingress-controller
     deployment (``services/deployment.py`` creates it with ``internal=True``).
     That controller has an active instance and therefore appears here, while the
     snapshot must exclude it (spec FR-001) — which is exactly what the SC-001
@@ -938,7 +938,9 @@ async def instanced_deployment_ids(
     created or deleted" check, where counting the internal controller too is a
     feature rather than a caveat.
     """
-    deployments = await client.deployments.list(environment_id=environment_id)
+    deployments = await client.deployments.list(
+        environment_id=environment_id, include_internal=True
+    )
     return {
         str(deployment.id)
         for deployment in deployments

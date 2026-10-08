@@ -146,9 +146,9 @@ has finished. When a later report shows the operator working on the step
 again, the step runs again as a new attempt; when a later phase is
 reported, the failed step succeeds.
 
-The reporter does not report internal deployments, such as the
-per-environment ingress controller, so their tasks have no operator-phase
-steps.
+The reporter also reports internal deployments, such as the
+per-environment ingress controller, so their status stays current. Their
+tasks have no operator-phase steps.
 
 `reportDeploymentStatuses`, the mutation the reporter calls, accepts calls
 without credentials

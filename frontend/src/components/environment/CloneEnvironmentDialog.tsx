@@ -65,12 +65,12 @@ import { Tooltip } from "@/components/ui/tooltip";
 /**
  * The deployment fields the picker needs, as `GetEnvironment` already selects
  * them. Declared structurally rather than as the generated query type so the
- * page can pass its own rows straight through.
+ * page can pass its own rows straight through. `GetEnvironment` leaves internal
+ * deployments out, so the picker never lists them.
  */
 export interface CloneCandidateDeployment {
   id: string;
   name: string;
-  internal: boolean;
   deletedAt?: string | null;
   applicationInstance?: { id: string } | null;
 }
@@ -78,28 +78,24 @@ export interface CloneCandidateDeployment {
 /**
  * Why a source deployment cannot be included in a clone.
  *
- * The three values mirror the backend's environment-backup eligibility rule
- * (non-tombstoned, non-internal, carrying an active application instance) —
- * clone reuses it verbatim, so an ineligible deployment is one the capture
- * would skip anyway.
+ * The values mirror the backend's environment-backup eligibility rule
+ * (non-tombstoned, carrying an active application instance) — clone reuses it
+ * verbatim, so an ineligible deployment is one the capture would skip anyway.
+ * The rule also excludes internal deployments, which never reach the picker.
  */
-export type CloneIneligibleReason =
-  | "tombstoned"
-  | "internal"
-  | "no_active_instance";
+export type CloneIneligibleReason = "tombstoned" | "no_active_instance";
 
 /**
  * Classify one deployment against the clone eligibility rule.
  *
  * Returns `null` when the deployment can be cloned. Order matters only for the
- * message shown: a deleted internal deployment is reported as deleted, which is
- * the more actionable half.
+ * message shown: a deleted deployment is reported as deleted even when it also
+ * never had an active instance.
  */
 export function cloneIneligibilityReason(
   deployment: CloneCandidateDeployment,
 ): CloneIneligibleReason | null {
   if (deployment.deletedAt != null) return "tombstoned";
-  if (deployment.internal) return "internal";
   if (deployment.applicationInstance == null) return "no_active_instance";
   return null;
 }
@@ -111,8 +107,6 @@ export function describeCloneIneligibility(
   switch (reason) {
     case "tombstoned":
       return "This deployment is deleted. A tombstoned deployment has no live data to capture, so a clone cannot include it.";
-    case "internal":
-      return "This is an internal deployment managed by Styrmin. Internal deployments are never part of an environment backup, so they are never cloned.";
     case "no_active_instance":
       return "This deployment has no active application instance — it was never deployed, so there is nothing to capture.";
   }
@@ -125,8 +119,6 @@ export function summariseCloneIneligibility(
   switch (reason) {
     case "tombstoned":
       return "deleted";
-    case "internal":
-      return "internal";
     case "no_active_instance":
       return "never deployed";
   }
