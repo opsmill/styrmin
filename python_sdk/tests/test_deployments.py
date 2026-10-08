@@ -1387,6 +1387,49 @@ async def test_apply_wait_stops_at_max_wait(
     assert mock_transport.execute.await_count == 4
 
 
+@pytest.mark.parametrize(
+    ("max_wait", "expected_sleeps"),
+    [(3, [3.0]), (25, [10.0, 10.0, 5.0])],
+    ids=["shorter-than-the-poll-interval", "not-a-multiple-of-the-poll-interval"],
+)
+async def test_apply_wait_never_sleeps_past_max_wait(
+    client: StyrminClient,
+    mock_transport: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    max_wait: float,
+    expected_sleeps: list[float],
+) -> None:
+    """The last sleep ends at the deadline instead of a full poll interval after it."""
+    from styrmin_sdk.resources import deployments as deployments_module
+
+    clock = {"now": 0.0}
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:  # noqa: RUF029 — must mirror asyncio.sleep signature
+        sleeps.append(seconds)
+        clock["now"] += seconds
+
+    monkeypatch.setattr(deployments_module.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(deployments_module.asyncio, "sleep", fake_sleep)
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_response(),
+        _update_version_noop_response(),
+        *[_get_deployment_response(deployment_status="deploying") for _ in expected_sleeps],
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(version="1.0.0", config={"ip_whitelist": ["10.0.0.0/8"]}),
+        wait=True,
+        max_wait=max_wait,
+    )
+
+    assert outcome.failure_reason == "wait timeout"
+    assert sleeps == expected_sleeps
+    assert clock["now"] == max_wait
+
+
 @pytest.mark.parametrize("max_wait", [0, -1])
 async def test_apply_rejects_non_positive_max_wait_before_submitting(
     client: StyrminClient,

@@ -752,7 +752,8 @@ class DeploymentResource(BaseResource):
                 return outcome.model_copy(
                     update={"action": "failed", "failure_reason": await self._failure_reason(outcome, status)}
                 )
-            await asyncio.sleep(WAIT_POLL_INTERVAL_SECONDS)
+            # Never sleep past the deadline, so a short ``max_wait`` ends on time.
+            await asyncio.sleep(max(0.0, min(WAIT_POLL_INTERVAL_SECONDS, deadline - time.monotonic())))
         return outcome.model_copy(update={"action": "failed", "failure_reason": "wait timeout"})
 
     async def _failure_reason(self, outcome: ApplyOutcome, status: str) -> str:
