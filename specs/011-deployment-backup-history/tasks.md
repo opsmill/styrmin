@@ -74,9 +74,9 @@ description: "Task list for keeping a deployment's backup history when it gets a
 
 ### SDK
 
-- [ ] T013 Update `python_sdk/src/styrmin_sdk/graphql/list_backups.graphql` to `query ListBackups($deploymentId: UUID, $instanceId: UUID, $status: BackupStatus)` calling `backups(deploymentId: $deploymentId, instanceId: $instanceId, status: $status)`, and add `instance { id applicationVersion }` to the selection ([contracts/graphql.md](contracts/graphql.md))
-- [ ] T014 Change `BackupsResource.list_backups` in `python_sdk/src/styrmin_sdk/resources/backups.py` to `list_backups(self, instance_id: str | UUID | None = None, status: BackupStatus | str | None = None, *, deployment_id: str | UUID | None = None)`, sending only the variables that are set (`deploymentId`, `instanceId`, `status`), and update its docstring ([contracts/sdk.md](contracts/sdk.md))
-- [ ] T015 Regenerate the SDK and frontend types with `uv run invoke generate` (commits the changes under `python_sdk/src/styrmin_sdk/graphql/_generated/` and `frontend/src/generated/`); do not edit generated files by hand
+- [X] T013 Update `python_sdk/src/styrmin_sdk/graphql/list_backups.graphql` to `query ListBackups($deploymentId: UUID, $instanceId: UUID, $status: BackupStatus)` calling `backups(deploymentId: $deploymentId, instanceId: $instanceId, status: $status)`, and add `instance { id applicationVersion }` to the selection ([contracts/graphql.md](contracts/graphql.md))
+- [X] T014 Change `BackupsResource.list_backups` in `python_sdk/src/styrmin_sdk/resources/backups.py` to `list_backups(self, instance_id: str | UUID | None = None, status: BackupStatus | str | None = None, *, deployment_id: str | UUID | None = None)`, sending only the variables that are set (`deploymentId`, `instanceId`, `status`), and update its docstring ([contracts/sdk.md](contracts/sdk.md))
+- [X] T015 Regenerate the SDK and frontend types with `uv run invoke generate` (commits the changes under `python_sdk/src/styrmin_sdk/graphql/_generated/` and `frontend/src/generated/`); do not edit generated files by hand
 
 **Checkpoint**: `backups(deploymentId:)` works end to end through the SDK. User story phases can begin.
 

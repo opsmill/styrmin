@@ -1,9 +1,13 @@
-query ListBackups($instanceId: UUID!, $status: BackupStatus) {
-    backups(instanceId: $instanceId, status: $status) {
+query ListBackups($deploymentId: UUID, $instanceId: UUID, $status: BackupStatus) {
+    backups(deploymentId: $deploymentId, instanceId: $instanceId, status: $status) {
         id
         name
         status
         instanceId
+        instance {
+            id
+            applicationVersion
+        }
         errorMessage
         startedAt
         completedAt

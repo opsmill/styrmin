@@ -14,6 +14,9 @@ if TYPE_CHECKING:
 
     from styrmin_sdk.client import StyrminClient
 
+# The instance each listed backup was taken of, as ListBackups selects it.
+LISTED_INSTANCE = {"id": "00000000-0000-0000-0000-000000000010", "applicationVersion": "0.1.0"}
+
 
 class TestBackupResource:
     @staticmethod
@@ -117,6 +120,7 @@ class TestBackupResource:
                         "name": "backup-1",
                         "status": "completed",
                         "instanceId": "00000000-0000-0000-0000-000000000010",
+                        "instance": LISTED_INSTANCE,
                         "errorMessage": None,
                         "startedAt": None,
                         "completedAt": None,
@@ -132,6 +136,7 @@ class TestBackupResource:
                         "name": "backup-2",
                         "status": "failed",
                         "instanceId": "00000000-0000-0000-0000-000000000010",
+                        "instance": LISTED_INSTANCE,
                         "errorMessage": "velero reported Failed",
                         "startedAt": None,
                         "completedAt": None,
@@ -369,7 +374,12 @@ class TestBackupAndRestoreSteps:
     ) -> None:
         other_id = "00000000-0000-0000-0000-000000000002"
         mock_transport.execute.return_value = {
-            "data": {"backups": [_backup(BACKUP_ID, COMPONENT_STEPS), _backup(other_id, [])]}
+            "data": {
+                "backups": [
+                    {**_backup(BACKUP_ID, COMPONENT_STEPS), "instance": LISTED_INSTANCE},
+                    {**_backup(other_id, []), "instance": LISTED_INSTANCE},
+                ]
+            }
         }
 
         backups = await client.backups.list_backups(instance_id="00000000-0000-0000-0000-000000000010")

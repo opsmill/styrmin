@@ -1922,17 +1922,22 @@ class Client(AsyncBaseClient):
 
     async def list_backups(
         self,
-        instance_id: UUID,
+        deployment_id: Union[Optional[UUID], UnsetType] = UNSET,
+        instance_id: Union[Optional[UUID], UnsetType] = UNSET,
         status: Union[Optional[BackupStatus], UnsetType] = UNSET,
         **kwargs: Any,
     ) -> ListBackups:
         query = gql("""
-            query ListBackups($instanceId: UUID!, $status: BackupStatus) {
-              backups(instanceId: $instanceId, status: $status) {
+            query ListBackups($deploymentId: UUID, $instanceId: UUID, $status: BackupStatus) {
+              backups(deploymentId: $deploymentId, instanceId: $instanceId, status: $status) {
                 id
                 name
                 status
                 instanceId
+                instance {
+                  id
+                  applicationVersion
+                }
                 errorMessage
                 startedAt
                 completedAt
@@ -1962,7 +1967,11 @@ class Client(AsyncBaseClient):
               }
             }
             """)
-        variables: dict[str, object] = {"instanceId": instance_id, "status": status}
+        variables: dict[str, object] = {
+            "deploymentId": deployment_id,
+            "instanceId": instance_id,
+            "status": status,
+        }
         response = await self.execute(
             query=query, operation_name="ListBackups", variables=variables, **kwargs
         )
