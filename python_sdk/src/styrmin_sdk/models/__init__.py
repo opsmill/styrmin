@@ -54,6 +54,7 @@ from styrmin_sdk.graphql._generated.get_environment_restore import (
     GetEnvironmentRestoreEnvironmentRestoreSkippedConstituents as SkippedConstituent,
 )
 from styrmin_sdk.graphql._generated.get_restore import GetRestoreRestore as Restore
+from styrmin_sdk.graphql._generated.get_step_output import GetStepOutputStep as StepOutput
 from styrmin_sdk.graphql._generated.get_task import GetTaskTask as Task
 from styrmin_sdk.graphql._generated.get_task import GetTaskTaskSteps as TaskStep
 from styrmin_sdk.graphql._generated.input_types import (
@@ -137,6 +138,7 @@ __all__ = [
     "SkippedConstituent",
     "StandardStorageInput",
     "StepKind",
+    "StepOutput",
     "StepStatus",
     "Task",
     "TaskResult",

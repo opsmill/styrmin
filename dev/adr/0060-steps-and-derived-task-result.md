@@ -276,7 +276,7 @@ one backup for the whole namespace and creates one `PodVolumeBackup` per backed-
 ## Consequences
 
 - Each task, backup and restore shows its steps, and each task a result that includes the
-  operator's work, in the web page, the API, the SDK (`tasks.get`, `tasks.failed_step`) and
+  operator's work, in the web page, the API, the SDK (`tasks.get`, `tasks.step_output`, `tasks.failed_step`) and
   `styrminctl tasks get`. `styrminctl deployments apply --wait` names the failed step.
 - Updates and upgrades now reach `Ready` only after FluxCD reports the new generation Ready, and a
   failed update or upgrade ends `FAILED` instead of `RUNNING`.

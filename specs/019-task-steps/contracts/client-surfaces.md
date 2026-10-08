@@ -49,13 +49,14 @@ Refresh stays at the existing `refetchInterval: 10_000` while auto-refresh is on
 
 | Change | Detail |
 |---|---|
-| `graphql/get_task.graphql` | Adds `createdOn`, `result`, `startedByStepId`, `startedBy { id type }`, `startedTasks { id type status result }`, and `steps { … }` with the timeline's step fields plus `output` and `outputTruncated` |
+| `graphql/get_task.graphql` | Adds `createdOn`, `result`, `startedByStepId`, `startedBy { id type }`, `startedTasks { id type status result }`, and `steps { … }` with the timeline's step fields except `outputTruncated`. No `output`, because `Step.output` is requested for one step at a time. |
+| `graphql/get_step_output.graphql` (new) | `step(stepId) { id output outputTruncated }` |
 | `graphql/get_deployment_timeline.graphql` | Adds `result` and `steps { … }` without `output` |
 | `graphql/get_backup.graphql`, `get_restore.graphql`, `list_backups.graphql`, `list_restores.graphql` | Add `steps { … }` |
-| `resources/tasks.py` | `get()` returns the extended generated model; new `failed_step(task_id) -> FailedStep | None` that searches the task's steps, then its started tasks, and returns the step name, its task id and its error |
+| `resources/tasks.py` | `get()` returns the extended generated model; new `step_output(step_id) -> StepOutput` that reads the output of one step; new `failed_step(task_id) -> FailedStep | None` that searches the task's steps, then its started tasks, and returns the step name, its task id and its error |
 | `resources/deployments.py::_wait_for_terminal` | On terminal failure, sets `failure_reason` to `step "<name>" failed: <error>` when `failed_step(outcome.task_id)` finds one, and keeps `deployment reconciliation failed (status: <status>)` otherwise |
 
-Tests: generated-model parsing with steps; `failed_step` finds a step in the task and in a started task; `_wait_for_terminal` failure reason with and without a failed step.
+Tests: generated-model parsing with steps; the task query does not request `output`; `step_output` reads one step and maps `NOT_FOUND`; `failed_step` finds a step in the task and in a started task; `_wait_for_terminal` failure reason with and without a failed step.
 
 ## `styrminctl` (`cli/`)
 
@@ -70,6 +71,8 @@ Prints the existing task table with a `result` column, then a "Steps" table:
 | `duration` | `durationSeconds` formatted as `1m 05s`, `running` while running |
 | `attempts` | `attemptCount` |
 | `error` | Newest error, then FluxCD's detail, then "output: <last line>" when the step has output |
+
+The command reads the output of each step whose `hasOutput` is true with `tasks.step_output()`, one step at a time.
 
 When the task has no steps: "No steps recorded for this task." When the task has started tasks: a "Started tasks" table with id, type and result.
 
