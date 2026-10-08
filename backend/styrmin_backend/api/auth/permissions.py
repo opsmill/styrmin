@@ -98,7 +98,9 @@ class IsActionsServiceAccount(BasePermission):
     Used after ``RequiresRole(Role.READ_WRITE)`` on ``recordStep``, so that
     no person, admins included, can change the record of what happened.
     Every other caller gets ``FORBIDDEN``; the role gate before it rejects
-    unauthenticated callers with ``UNAUTHENTICATED``.
+    unauthenticated callers with ``UNAUTHENTICATED``. The username is enough
+    because only ``action_api_token`` creates sessions for this user: login,
+    password changes and resets, and ``createUser`` refuse it.
     """
 
     message = "Only the actions service account can record steps"

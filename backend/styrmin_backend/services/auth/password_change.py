@@ -19,6 +19,7 @@ from loguru import logger
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import User
+from styrmin_backend.services.auth.bootstrap import ACTIONS_SERVICE_ACCOUNT_USERNAME
 from styrmin_backend.services.auth.password import (
     hash_password,
     verify_password,
@@ -26,7 +27,10 @@ from styrmin_backend.services.auth.password import (
 from styrmin_backend.services.auth.session import (
     delete_other_sessions_for_user,
 )
-from styrmin_backend.services.exceptions import InvalidCredentialsError
+from styrmin_backend.services.exceptions import (
+    ActionsServiceAccountError,
+    InvalidCredentialsError,
+)
 
 
 async def change_password(
@@ -42,8 +46,13 @@ async def change_password(
     Returns the number of other sessions invalidated. Raises
     :class:`InvalidCredentialsError` when ``current_password`` does not
     verify against the stored hash — same code as a failed login so the
-    error surface stays uniform.
+    error surface stays uniform — and :class:`ActionsServiceAccountError`
+    when ``user`` is ``styrmin-actions`` (ADR-059).
     """
+    if user.username == ACTIONS_SERVICE_ACCOUNT_USERNAME:
+        raise ActionsServiceAccountError(
+            "The password of the styrmin-actions user cannot be changed"
+        )
     if not verify_password(user.password_hash, current_password):
         raise InvalidCredentialsError
 
