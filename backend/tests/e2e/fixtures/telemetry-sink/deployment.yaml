@@ -1,0 +1,42 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telemetry-sink
+  namespace: default
+  labels:
+    app: telemetry-sink
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: telemetry-sink
+  template:
+    metadata:
+      labels:
+        app: telemetry-sink
+    spec:
+      containers:
+        - name: telemetry-sink
+          image: telemetry-sink:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: telemetry-sink
+  namespace: default
+  labels:
+    app: telemetry-sink
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: telemetry-sink

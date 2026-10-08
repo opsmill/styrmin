@@ -23,6 +23,10 @@ styrmin:
   agentPoll:
     retryDelaySeconds: 1
     interval: 1
+  # Daily telemetry reports go to the in-cluster sink of the `telemetry_sink`
+  # fixture (backend/tests/e2e/conftest.py), never to the OpsMill endpoint.
+  telemetry:
+    endpoint: http://telemetry-sink.default.svc.cluster.local:8080/report
 
 styrmin-agent:
   image:
