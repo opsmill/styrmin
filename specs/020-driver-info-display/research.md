@@ -19,6 +19,7 @@ All decisions below were made against the code on `develop` at `a2a627d3`. The t
 - **Finding**: `command.heads()` on `develop` at `a2a627d3` reports two heads, `c2ff6dba5ffd` (widen backup size bytes) and `f3a4b5c6d7e8` (drop empty cluster dedicated ingress); both revise `e2f3a4b5c6d7`. With two heads, `styrmin db migrate` fails with "Multiple head revisions are present". `dev/guides/database-migrations.md` ("Multi-head resolution") prescribes a merge revision; `a8b9c0d1e2f3` is the worked example of a revision that merges two heads and adds schema.
 - **Rationale**: A revision that names only one parent would leave the chain with two heads. Merging here restores a single head, which the new revision needs anyway.
 - **Risk**: If `develop` gains its own merge revision before this branch lands, the rebase changes `down_revision` to that merge revision. A unit test that asserts a single head (R9) catches a missed rebase.
+- **Outcome**: `develop` merged the two heads first, in `69b12221e5df`, and then added `3b926acd0791` (installation). On the rebase onto `develop`, the revision became a plain revision with `down_revision = "3b926acd0791"`.
 - **Alternatives considered**: Fix the heads in a separate PR first — rejected because this branch cannot ship a revision without resolving them, and the guide treats merge-plus-schema as normal.
 
 ## R3. URL validation for `icon` and `links[].url`
@@ -55,7 +56,7 @@ All decisions below were made against the code on `develop` at `a2a627d3`. The t
 ## R7. Logo rendering in the browser
 
 - **Decision**: One shared `DriverLogo` component:
-  - Renders `<img src={icon} alt="<driver name> logo" referrerPolicy="no-referrer" loading="lazy" decoding="async">` inside a fixed-size frame with `object-contain`.
+  - Renders `<img src={icon} alt="" referrerPolicy="no-referrer" loading="lazy" decoding="async">` inside a fixed-size frame with `object-contain`. The image is decorative because the driver name is always shown next to it (critique P4).
   - Tracks a `failed` state set by `onError`; when `icon` is null or `failed`, renders the lucide `Package` icon in the same frame.
   - Resets `failed` when `icon` changes (keyed by `icon`), so switching versions retries.
   - Exposes `data-testid="driver-logo"` and `data-logo-state="image|fallback"` for tests.
@@ -93,10 +94,10 @@ All decisions below were made against the code on `develop` at `a2a627d3`. The t
 ## R10. E2E without internet access from the test browser
 
 - **Decision**: Extend `backend/tests/e2e/test_ui_smoke.py` (ui-only, `shard_general`, uses the session `styrmin_resources` driver `simple-app`). The `git_server` fixture already rewrites `simple-app/driver.styrmin.yml` (Helm location) before committing it. It also sets `spec.info.icon` to a fixed test URL on a reserved domain (`https://styrmin-e2e.invalid/simple-app-logo.svg`) and adds one link. The test:
-  1. Calls `page.route()` on that URL and serves a small inline SVG with `image/svg+xml`.
+  1. Calls `page.route()` on that URL and serves a small inline SVG with `image/svg+xml` and explicit `width="24" height="24"`, so `naturalWidth` is not zero (critique E8).
   2. Opens `/drivers` and asserts that the `simple-app` header logo is in `data-logo-state="image"`, has that `src`, and has `naturalWidth > 0`.
   3. Opens `/drivers/<id>` and asserts the header logo, the description text and the link.
-  4. Removes the route.
+  4. Removes the route in `finally`, so a failed assertion does not leave it on the session page (critique E7).
 - **Rationale**:
   - "Reuse before you boot": `styrmin_resources` and `session_ui_page` are already booted by active tests in the same file, so the new assertions add seconds, not a stack.
   - `page.route()` makes the browser load a real external-looking URL through the normal `<img>` path without depending on network access in CI. The `.invalid` TLD (RFC 2606) guarantees that no real host answers if the route is missing, which would make the test fail clearly instead of passing by accident.
@@ -114,7 +115,8 @@ All decisions below were made against the code on `develop` at `a2a627d3`. The t
   - `docs/docs/drivers/creating-a-driver.md`: Step 2 example and notes.
   - `docs/docs/reference/driver-api.md`: the `spec.info` line.
   - `docs/docs/concepts-and-architecture/what-is-a-driver.md`: example `info` block.
-- **Changelog**: `changelog/272.added.md`, which also states the stricter validation.
+- **Changelog**: `changelog/272.added.md` for the feature and `changelog/272.changed.md` for the stricter `icon`/`links` validation (critique X1).
+- **Fixtures**: `backend/tests/unit/services/driver/fixtures/local_driver_directory/driver.styrmin.yml` and `fixtures/syntax/valid.yaml` use `icon: xxxx` and are switched to a valid `https` URL (critique E2).
 - **Glossary**: `CONTEXT.md` gets a short **Driver logo** entry under "Application drivers", because the term appears in UI copy and docs.
 
 ## R12. Third-party dependency gaps

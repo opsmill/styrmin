@@ -90,6 +90,8 @@ backend/styrmin_backend/
 └── api/definitions/application_driver/model.py     # DriverLink type + 3 fields
 
 backend/tests/
+├── unit/services/driver/fixtures/local_driver_directory/driver.styrmin.yml  # icon: xxxx → https URL
+├── unit/services/driver/fixtures/syntax/valid.yaml # icon: xxxx → https URL
 ├── unit/services/driver/test_driver_info.py        # validation
 ├── unit/db/test_driver_info_migration.py           # single head, columns
 ├── functional/graphql/test_application_driver_version_propagation.py  # + 3 tests
@@ -112,14 +114,14 @@ schema.graphql, python_sdk/src/styrmin_sdk/graphql/_generated/, frontend/src/gen
 driver/DRIVERS.md, driver/examples/infrahub*/driver.styrmin.yml
 docs/docs/drivers/creating-a-driver.md, docs/docs/reference/driver-api.md,
 docs/docs/concepts-and-architecture/what-is-a-driver.md
-CONTEXT.md, changelog/272.added.md
+CONTEXT.md, changelog/272.added.md, changelog/272.changed.md
 ```
 
 **Structure Decision**: Existing web-application layout (`backend/` + `frontend/`). No new packages or modules beyond one React component and test files.
 
 ## Implementation Approach
 
-1. **Driver model** (research R3): change `Info.icon` to `HttpUrl | None` and `Info.links` to `list[InfoLink] | None`. Unit-test valid and invalid values through `DriverSpec` and through `DriverLoader` (the error names the field).
+1. **Driver model** (research R3): change `Info.icon` to `HttpUrl | None` and `Info.links` to `list[InfoLink] | None`. Replace `icon: xxxx` in the test fixtures `backend/tests/unit/services/driver/fixtures/local_driver_directory/driver.styrmin.yml` and `backend/tests/unit/services/driver/fixtures/syntax/valid.yaml` with a valid `https` URL; they feed `test_deserializer.py`, `test_loaders_git_commit_sha.py`, `test_applications_upsert_idempotent.py` and the E2E `test_driver_reload_identity.py`. Unit-test valid and invalid values through `DriverSpec` and through `DriverLoader` (the error names the field).
 2. **DB + migration** (R1, R2): add 3 nullable fields to `ApplicationDriverVersion`, and write the revision with `down_revision = ("c2ff6dba5ffd", "f3a4b5c6d7e8")`. Add a unit test that the script directory has one head equal to the new revision, following `test_steps_migration.py` / `test_empty_dedicated_ingress_migration.py`.
 3. **Service** (R4, R5):
    - Add a helper `_driver_info_columns(spec) -> dict` that returns `{"icon", "description", "links"}`, with empty values normalized to `None`.
@@ -137,11 +139,11 @@ CONTEXT.md, changelog/272.added.md
    - Add `latestVersion` to `FilteredDriver`.
    - Update the list header, flat rows, detail header, description and Overview links section.
    - Vitest coverage for each.
-7. **Examples and docs** (R11): set the infrahub/infrahub-enterprise `icon` to `https://docs.infrahub.app/img/infrahub-logo.svg`, and update `DRIVERS.md`, the three docs pages, `CONTEXT.md` (**Driver logo**) and `changelog/272.added.md`.
+7. **Examples and docs** (R11): set the infrahub/infrahub-enterprise `icon` to `https://docs.infrahub.app/img/infrahub-logo.svg`. Update `DRIVERS.md` and the three docs pages, including the note that each viewer's browser contacts the logo host, so authors should use a host they trust. Update `CONTEXT.md` (**Driver logo**), and add `changelog/272.added.md` (feature) and `changelog/272.changed.md` (stricter `icon`/`links` validation).
 8. **E2E** (R10):
    - In the `git_server` fixture, set `spec.info.icon` (`https://styrmin-e2e.invalid/simple-app-logo.svg`) and one `links` entry on the `simple-app` copy.
    - Add `DriversListPage.driver_group_logo()`.
-   - Add `test_driver_logo_description_and_links_render` to `test_ui_smoke.py`. It uses `page.route()` to serve an inline SVG, then asserts the list header logo (`data-logo-state="image"`, `naturalWidth > 0`), the detail header logo, the description and the link (`target=_blank`, `rel` contains `noopener`). It then removes the route.
+   - Add `test_driver_logo_description_and_links_render` to `test_ui_smoke.py`. Inside `try`, it uses `page.route()` to serve an inline SVG with explicit `width="24" height="24"`, then asserts the list header logo (`data-logo-state="image"`, `naturalWidth > 0`), the detail header logo, the description and the link (`target=_blank`, `rel` contains `noopener`). It calls `page.unroute()` in `finally`, so a failure does not leave the route on the session page.
    - Run locally with `--pdb` and record the PASS evidence.
 
 ## Risks
@@ -150,6 +152,7 @@ CONTEXT.md, changelog/272.added.md
 - **Third-party driver files with `icon: xxxx` stop loading**: intended (user decision). The changelog and `DRIVERS.md` state it.
 - **`HttpUrl` normalization changes the displayed URL text** (trailing slash, lower-case host): accepted, documented in contracts/graphql.md.
 - **Changing the `simple-app` E2E driver file** changes the session driver's commit SHA only. No test asserts on the `info` block or on a fixed SHA (verified by grep during implementation).
+- **Leftover `icon: xxxx` values**: before the last commit, `grep -rn "icon: xxxx" --exclude-dir=archive .` must return nothing outside `specs/archive/`.
 
 ## Complexity Tracking
 

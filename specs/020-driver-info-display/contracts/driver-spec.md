@@ -28,7 +28,7 @@ spec:
 
 - Styrmin does not download the image. Each person who opens the driver pages loads it from `icon` in their own browser, so the URL must be reachable from those browsers. In an installation without internet access, host the image on an internal server or leave `icon` out.
 - When the image cannot be loaded, the pages show the generic package icon.
-- The browser does not send the Styrmin page address to the image host.
+- The browser does not send the Styrmin page address to the image host, but the host still receives a request with the IP address of each viewer. Use an image host you trust.
 - Changing `info` changes the specification file. For a local driver, that changes the content hash, so the load creates a new driver version. For a Git driver, it needs a new commit, which creates a new driver version.
 
 ## Breaking change for driver files
