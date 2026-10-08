@@ -1,9 +1,10 @@
-"""Resolve a deployment reference to its active application instance.
+"""Resolve a deployment reference to its id or to its active application instance.
 
-The backup/restore commands operate on an application *instance*, but
-operators think in terms of *deployments*. These helpers turn a deployment
-name or id (or a raw instance id escape hatch) into the active instance id,
-reusing the existing SDK surface — no backend changes required.
+The backup/restore commands operate on an application *instance* or on a
+deployment's backup history, but operators think in terms of *deployments*.
+These helpers turn a deployment name or id (or a raw instance id escape hatch)
+into the deployment id or the active instance id, reusing the existing SDK
+surface — no backend changes required.
 """
 
 from __future__ import annotations
@@ -76,6 +77,41 @@ async def _resolve_by_name(sdk: StyrminClient, deployment_name: str, environment
     return matches[0]
 
 
+async def _find_deployment(
+    sdk: StyrminClient,
+    deployment_name: str | None,
+    deployment_id: str | None,
+    environment: str | None,
+) -> Any:  # noqa: ANN401
+    """Fetch the deployment selected by ``deployment_id`` or ``deployment_name``."""
+    if deployment_id is not None:
+        return await sdk.deployments.get(deployment_id)
+    if deployment_name is not None:
+        return await _resolve_by_name(sdk, deployment_name, environment)
+    # Unreachable after _validate_selectors.
+    raise ValueError("Provide a deployment name, --id, or --instance-id.")  # pragma: no cover
+
+
+async def resolve_deployment_id(
+    sdk: StyrminClient,
+    *,
+    deployment_name: str | None,
+    deployment_id: str | None,
+    environment: str | None,
+) -> str:
+    """Resolve a deployment name or id to the deployment's id.
+
+    Exactly one of ``deployment_id`` or ``deployment_name`` must be provided;
+    ``environment`` only applies to the name lookup. Unlike
+    :func:`resolve_active_instance`, the deployment does not need an active
+    instance. ``deployment_id`` also reaches a deleted deployment, which the
+    name lookup does not list.
+    """
+    _validate_selectors(deployment_name, deployment_id, None, environment)
+    deployment = await _find_deployment(sdk, deployment_name, deployment_id, environment)
+    return str(deployment.id)
+
+
 async def resolve_active_instance(
     sdk: StyrminClient,
     *,
@@ -96,13 +132,7 @@ async def resolve_active_instance(
     if instance_id is not None:
         return ResolvedTarget(instance_id=instance_id, deployment_id=None)
 
-    if deployment_id is not None:
-        deployment = await sdk.deployments.get(deployment_id)
-    elif deployment_name is not None:
-        deployment = await _resolve_by_name(sdk, deployment_name, environment)
-    else:  # pragma: no cover — guaranteed unreachable by _validate_selectors
-        raise ValueError("Provide a deployment name, --id, or --instance-id.")
-
+    deployment = await _find_deployment(sdk, deployment_name, deployment_id, environment)
     return ResolvedTarget(instance_id=_active_instance_id(deployment), deployment_id=str(deployment.id))
 
 

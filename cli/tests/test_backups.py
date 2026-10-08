@@ -15,6 +15,7 @@ DEPLOYMENT_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 ENV_UUID = "b2c3d4e5-f6a7-8901-bcde-f12345678901"
 
 NS = "ns-1"
+APP_VERSION = "1.4.2"
 
 
 def _make_deployment(*, name: str, deployment_id: str = DEPLOYMENT_UUID, instance_id: str | None = INSTANCE_UUID):
@@ -141,7 +142,10 @@ def test_backups_create_ambiguous_name_errors(mock_client: MagicMock, capsys: py
 # --- list -----------------------------------------------------------------
 
 
-def test_backups_list_by_deployment_name(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+def test_backups_list_by_deployment_name(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
     _seed_name_lookup(mock_client, deployments=[_make_deployment(name="demo")])
     mock_backup = MagicMock(
         id=BACKUP_UUID,
@@ -152,13 +156,75 @@ def test_backups_list_by_deployment_name(mock_client: MagicMock, capsys: pytest.
         expires_at="2026-11-01T12:04:06+00:00",
     )
     mock_backup.name = "backup-1"
+    mock_backup.instance.application_version = APP_VERSION
     mock_client.backups.list_backups = AsyncMock(return_value=[mock_backup])
 
     with pytest.raises(SystemExit) as exc:
         app(["backups", "list", "demo"])
     assert exc.value.code == 0
-    mock_client.backups.list_backups.assert_called_once_with(instance_id=INSTANCE_UUID, status=None)
+    mock_client.backups.list_backups.assert_called_once_with(deployment_id=DEPLOYMENT_UUID, status=None)
     assert "backup-1" in capsys.readouterr().out
+
+
+def test_backups_list_by_deployment_id_without_active_instance(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``list --id`` lists the deployment's history even when it has no active instance."""
+    monkeypatch.setenv("COLUMNS", "200")
+    mock_client.deployments.get = AsyncMock(return_value=_make_deployment(name="demo", instance_id=None))
+    mock_backup = MagicMock(
+        id=BACKUP_UUID,
+        status="completed",
+        started_at="x",
+        completed_at="y",
+        size_bytes=1,
+        expires_at=None,
+    )
+    mock_backup.name = "backup-1"
+    mock_backup.instance.application_version = APP_VERSION
+    mock_client.backups.list_backups = AsyncMock(return_value=[mock_backup])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "list", "--id", DEPLOYMENT_UUID])
+    assert exc.value.code == 0
+    mock_client.deployments.get.assert_called_once_with(DEPLOYMENT_UUID)
+    mock_client.backups.list_backups.assert_called_once_with(deployment_id=DEPLOYMENT_UUID, status=None)
+    assert "backup-1" in capsys.readouterr().out
+
+
+def test_backups_list_shows_application_version_column(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each row shows the application version of the instance the backup was taken of."""
+    monkeypatch.setenv("COLUMNS", "200")
+    _seed_name_lookup(mock_client, deployments=[_make_deployment(name="demo")])
+    newer = MagicMock(
+        id=BACKUP_UUID, status="completed", started_at="x", completed_at="y", size_bytes=1, expires_at=None
+    )
+    newer.name = "backup-2"
+    newer.instance.application_version = "2.0.0"
+    older = MagicMock(
+        id="11111111-2222-3333-4444-555555555555",
+        status="completed",
+        started_at="x",
+        completed_at="y",
+        size_bytes=1,
+        expires_at=None,
+    )
+    older.name = "backup-1"
+    older.instance.application_version = APP_VERSION
+    mock_client.backups.list_backups = AsyncMock(return_value=[newer, older])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "list", "demo"])
+    assert exc.value.code == 0
+    lines = capsys.readouterr().out.splitlines()
+    header = next(line for line in lines if "application_version" in line)
+    assert header.index("status") < header.index("application_version") < header.index("started_at")
+    newer_row = next(line for line in lines if "backup-2" in line)
+    older_row = next(line for line in lines if "backup-1" in line)
+    assert "2.0.0" in newer_row
+    assert APP_VERSION in older_row
 
 
 def test_backups_list_shows_expiry_column(
@@ -177,6 +243,7 @@ def test_backups_list_shows_expiry_column(
         expires_at="2026-11-01T12:04:06+00:00",
     )
     mock_backup.name = "backup-1"
+    mock_backup.instance.application_version = APP_VERSION
     mock_client.backups.list_backups = AsyncMock(return_value=[mock_backup])
 
     with pytest.raises(SystemExit) as exc:
@@ -201,6 +268,7 @@ def test_backups_list_renders_dash_without_expiry(
         expires_at=None,
     )
     mock_backup.name = "backup-1"
+    mock_backup.instance.application_version = APP_VERSION
     mock_client.backups.list_backups = AsyncMock(return_value=[mock_backup])
 
     with pytest.raises(SystemExit) as exc:
