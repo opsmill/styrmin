@@ -199,8 +199,8 @@ description: "Task list for keeping a deployment's backup history when it gets a
 
 ### Tests for User Story 4
 
-- [ ] T035 [P] [US4] Add cases to `backend/tests/functional/graphql/test_backup_history_propagation.py`: a deployment marked deleted (`deleted_at` set, status `DELETED`, as `test_deployments_include_deleted.py` seeds it) still returns its backups through `backups(deploymentId:)`; a second deployment with the same name in the same environment returns `[]`
-- [ ] T036 [P] [US4] Extend `frontend/src/__tests__/deployment-detail/BackupExpiry.test.tsx` (or the existing deleted-deployment test file that renders `DeploymentDetailPage`) with a deleted deployment whose `applicationInstance` is set: the Backups tab lists the history rows and the restore and delete actions stay disabled, as they are today for a deleted deployment
+- [X] T035 [P] [US4] Add cases to `backend/tests/functional/graphql/test_backup_history_propagation.py`: a deployment marked deleted (`deleted_at` set, status `DELETED`, as `test_deployments_include_deleted.py` seeds it) still returns its backups through `backups(deploymentId:)`; a second deployment with the same name in the same environment returns `[]`
+- [X] T036 [P] [US4] Extend `frontend/src/__tests__/deployment-detail/BackupExpiry.test.tsx` (or the existing deleted-deployment test file that renders `DeploymentDetailPage`) with a deleted deployment whose `applicationInstance` is set: the Backups tab lists the history rows and the restore and delete actions stay disabled, as they are today for a deleted deployment
 
 ### Implementation for User Story 4
 

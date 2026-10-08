@@ -406,4 +406,48 @@ describe("DeploymentDetailPage backups tab backup history (#304)", () => {
       ),
     ).toEqual(["2.5.0", "2.4.0"]);
   });
+
+  it("lists a deleted deployment's backup history with restore and delete disabled", async () => {
+    await renderBackupsTab(
+      [
+        makeBackup({
+          id: "backup-new",
+          name: "backup-new",
+          instance: { id: "inst-1", applicationVersion: "2.5.0" },
+        }),
+        makeBackup({
+          id: "backup-old",
+          name: "backup-old",
+          instance: { id: "inst-0", applicationVersion: "2.4.0" },
+        }),
+      ],
+      makeDeployment({
+        status: "deleted",
+        deletedAt: "2026-09-01T08:00:00+00:00",
+      }),
+    );
+
+    expect(screen.getByTestId("deleted-banner")).toBeInTheDocument();
+    expect(screen.getByTestId("deployment-detail")).toHaveAttribute(
+      "data-instance-id",
+      "inst-1",
+    );
+    for (const [variables, options] of useListBackupsQueryMock.mock.calls) {
+      expect(variables).toEqual({ deploymentId: "dep-1" });
+      expect(options).not.toMatchObject({ enabled: false });
+    }
+    const rows = screen.getAllByTestId("backup-row");
+    expect(rows.map((row) => row.getAttribute("data-backup-id"))).toEqual([
+      "backup-new",
+      "backup-old",
+    ]);
+    // Both backups are completed, so only the deleted state disables restore.
+    for (const row of rows) {
+      for (const name of ["Restore", "Delete"]) {
+        const button = within(row).getByRole("button", { name });
+        expect(button).toBeDisabled();
+        expect(button).toHaveAttribute("title", "This deployment is retired");
+      }
+    }
+  });
 });

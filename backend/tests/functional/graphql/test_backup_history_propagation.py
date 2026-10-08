@@ -27,6 +27,7 @@ from styrmin_backend.db.models import (
     Backup,
     BackupStatus,
     Deployment,
+    DeploymentState,
 )
 from styrmin_backend.services.deployment import refresh_deployment
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
@@ -229,6 +230,8 @@ async def test_backups_with_both_or_neither_id_is_a_validation_error(
 @dataclass(frozen=True)
 class DeployedWithBackup:
     deployment_id: UUID
+    name: str
+    driver_name: str
     environment_id: UUID
     instance_id: UUID
     backup_id: UUID
@@ -289,6 +292,8 @@ async def _deploy_with_completed_backup(
     )
     return DeployedWithBackup(
         deployment_id=deployment_id,
+        name="history-app",
+        driver_name=driver_name,
         environment_id=environment_id,
         instance_id=instance_id,
         backup_id=backup.id,
@@ -375,3 +380,77 @@ async def test_backup_stays_in_history_after_operation_creates_new_instance(
         "id": str(seeded.instance_id),
         "applicationVersion": "1.0.0",
     }
+
+
+# ---------------------------------------------------------------------------
+# A deleted deployment keeps its backup history (US4)
+# ---------------------------------------------------------------------------
+
+
+async def _mark_deleted(session: AsyncSession, deployment_id: UUID) -> None:
+    """Tombstone the deployment as the deletion flow leaves it."""
+    deployment = await session.get(Deployment, deployment_id)
+    assert deployment is not None
+    deployment.status = DeploymentState.DELETED
+    deployment.deleted_at = datetime.now(tz=UTC)
+    session.add(deployment)
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_deleted_deployment_still_lists_its_backup_history(
+    client: AsyncClient, session: AsyncSession, history: BackupHistory
+) -> None:
+    await _mark_deleted(session, UUID(history.deployment_id))
+
+    data = await gql(
+        client, "list_backup_history", {"deploymentId": history.deployment_id}
+    )
+
+    assert [row["id"] for row in data["backups"]] == [
+        history.new_backup_id,
+        history.old_backup_id,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_new_deployment_reusing_a_deleted_name_starts_with_empty_history(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    deleted = await _deploy_with_completed_backup(client, session)
+    await _mark_deleted(session, deleted.deployment_id)
+
+    # The name is free again only because the first deployment is tombstoned.
+    await gql(
+        client,
+        "deploy_with_driver_version",
+        {
+            "driver": deleted.driver_name,
+            "environmentId": str(deleted.environment_id),
+            "name": deleted.name,
+            "version": "1.0.0",
+        },
+    )
+    session.expire_all()
+    same_name = (
+        await session.exec(
+            select(Deployment)
+            .where(Deployment.name == deleted.name)
+            .where(Deployment.environment_id == deleted.environment_id)
+        )
+    ).all()
+    [reused] = [row for row in same_name if row.id != deleted.deployment_id]
+    assert reused.deleted_at is None
+    assert reused.active_application_instance_id is not None
+    reused_id = reused.id
+
+    reused_history = await gql(
+        client, "list_backup_history", {"deploymentId": str(reused_id)}
+    )
+    deleted_history = await gql(
+        client, "list_backup_history", {"deploymentId": str(deleted.deployment_id)}
+    )
+
+    assert reused_history["backups"] == []
+    assert [row["id"] for row in deleted_history["backups"]] == [str(deleted.backup_id)]
