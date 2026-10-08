@@ -25,6 +25,8 @@ The settings group exposes one read-only answer, used by the daily flow and the 
 | `DO_NOT_TRACK=1` | off | `DO_NOT_TRACK=1` |
 | both | off | `STYRMIN_TELEMETRY_ENABLED=false` (checked first) |
 
+The settings must reach both the server, which logs the startup line, and the task worker, which runs the daily flow and decides whether to send. The Helm value and the ConfigMap do this. An operator who sets `DO_NOT_TRACK` or `STYRMIN_TELEMETRY_ENABLED` by other means must set it on both containers; otherwise the server can log "off" while the task worker sends (critique E4).
+
 The daily flow reads the effective state when it runs, not when the server starts. A change of setting takes effect after the pods restart with the new environment, which is the case for every other setting.
 
 ## Helm values (`helm/styrmin/values.yaml`)
