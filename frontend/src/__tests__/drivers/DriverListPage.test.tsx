@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -53,7 +53,12 @@ function makeAuthValue(role: Role): AuthContextValue {
 type Driver = ListDriversQuery["applicationDrivers"][number];
 type Version = Driver["versions"][number];
 
-function mkVersion(id: string, version: string, createdOn: string): Version {
+function mkVersion(
+  id: string,
+  version: string,
+  createdOn: string,
+  icon: string | null = null,
+): Version {
   return {
     id,
     version,
@@ -65,12 +70,17 @@ function mkVersion(id: string, version: string, createdOn: string): Version {
     sourceCommitSha: "abc1234",
     contentHash: null,
     createdOn,
+    icon,
+    description: null,
   } as Version;
 }
 
 function data(drivers: Driver[]): ListDriversQuery {
   return { applicationDrivers: drivers } as ListDriversQuery;
 }
+
+const INFRAHUB_OLD_LOGO = "https://example.com/infrahub-old.svg";
+const INFRAHUB_NEW_LOGO = "https://example.com/infrahub-new.svg";
 
 const DRIVERS: Driver[] = [
   {
@@ -82,8 +92,8 @@ const DRIVERS: Driver[] = [
     id: "id-infrahub",
     name: "infrahub",
     versions: [
-      mkVersion("i1", "2.0.3", "2026-01-01T00:00:00Z"),
-      mkVersion("i2", "2.1.0", "2026-03-01T00:00:00Z"),
+      mkVersion("i1", "2.0.3", "2026-01-01T00:00:00Z", INFRAHUB_OLD_LOGO),
+      mkVersion("i2", "2.1.0", "2026-03-01T00:00:00Z", INFRAHUB_NEW_LOGO),
     ],
   } as Driver,
 ];
@@ -137,6 +147,14 @@ async function renderPage(role: Role = "READ_WRITE") {
 
 function ok(d: ListDriversQuery) {
   return { data: d, isLoading: false, error: null, refetch: vi.fn() };
+}
+
+function groupLogo(driverName: string): HTMLElement {
+  const group = document.querySelector<HTMLElement>(
+    `[data-testid="driver-group"][data-driver-name="${driverName}"]`,
+  );
+  expect(group).not.toBeNull();
+  return within(group!).getByTestId("driver-logo");
 }
 
 describe("DriverListPage", () => {
@@ -197,6 +215,62 @@ describe("DriverListPage", () => {
     await waitFor(() => {
       expect(screen.getByText("driver detail page")).toBeInTheDocument();
     });
+  });
+
+  it("shows the latest version's logo in the group header", async () => {
+    useListDriversQueryMock.mockReturnValue(ok(data(DRIVERS)));
+    await renderPage();
+    const logo = groupLogo("infrahub");
+    expect(logo).toHaveAttribute("data-logo-state", "image");
+    expect(logo.querySelector("img")).toHaveAttribute("src", INFRAHUB_NEW_LOGO);
+
+    // filtering down to the older version keeps the latest version's logo
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Filter drivers"), "2.0.3");
+    await waitFor(() => {
+      expect(screen.queryByText("2.1.0")).not.toBeInTheDocument();
+    });
+    expect(groupLogo("infrahub").querySelector("img")).toHaveAttribute(
+      "src",
+      INFRAHUB_NEW_LOGO,
+    );
+  });
+
+  it("shows the fallback logo for a driver without an icon", async () => {
+    useListDriversQueryMock.mockReturnValue(ok(data(DRIVERS)));
+    await renderPage();
+    const logo = groupLogo("grafana");
+    expect(logo).toHaveAttribute("data-logo-state", "fallback");
+    expect(logo.querySelector("img")).toBeNull();
+  });
+
+  it("shows one logo per row, for the row's own version, in the flat view", async () => {
+    useListDriversQueryMock.mockReturnValue(ok(data(DRIVERS)));
+    await renderPage();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Flat list" }));
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="driver-group"]'),
+      ).not.toBeInTheDocument();
+    });
+
+    // rows: grafana 1.4.2, infrahub 2.1.0, infrahub 2.0.3
+    const logos = screen.getAllByTestId("driver-logo");
+    expect(logos).toHaveLength(3);
+    expect(logos.map((l) => l.getAttribute("data-logo-state"))).toEqual([
+      "fallback",
+      "image",
+      "image",
+    ]);
+    expect(logos[1].querySelector("img")).toHaveAttribute(
+      "src",
+      INFRAHUB_NEW_LOGO,
+    );
+    expect(logos[2].querySelector("img")).toHaveAttribute(
+      "src",
+      INFRAHUB_OLD_LOGO,
+    );
   });
 
   it("hides the Load driver action for a read-only user", async () => {

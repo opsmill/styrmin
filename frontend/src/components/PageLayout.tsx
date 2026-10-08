@@ -10,6 +10,8 @@ interface Breadcrumb {
 
 interface PageLayoutProps {
   title: string;
+  /** Rendered before the title, for example a logo. */
+  icon?: ReactNode;
   breadcrumbs?: Breadcrumb[];
   actions?: ReactNode;
   children: ReactNode;
@@ -17,10 +19,14 @@ interface PageLayoutProps {
 
 export function PageLayout({
   title,
+  icon,
   breadcrumbs,
   actions,
   children,
 }: PageLayoutProps) {
+  const heading = (
+    <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+  );
   return (
     <div>
       <header className="border-b bg-background">
@@ -45,7 +51,14 @@ export function PageLayout({
             </nav>
           )}
           <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+            {icon ? (
+              <div className="flex items-center gap-3">
+                {icon}
+                {heading}
+              </div>
+            ) : (
+              heading
+            )}
             {actions && (
               <div className="flex items-center gap-2">{actions}</div>
             )}

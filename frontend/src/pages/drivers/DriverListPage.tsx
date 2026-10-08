@@ -13,6 +13,7 @@ import { useEffectiveRole } from "@/auth/useEffectiveRole";
 import { useDebounce } from "@/hooks/useDebounce";
 import { LoadDriverDrawer } from "@/pages/drivers/LoadDriverDrawer";
 import { LatestBadge } from "@/pages/drivers/VersionStatusBadge";
+import { DriverLogo } from "@/pages/drivers/DriverLogo";
 import { highlightMatch } from "@/lib/highlight";
 import { collidingVersions, displayDriverVersion } from "@/lib/driverVersion";
 import { cn } from "@/lib/utils";
@@ -25,7 +26,7 @@ import {
   showsLatestBadge,
   versionSource,
 } from "@/pages/drivers/lib/driverList";
-import { Package, Plus, Search, X } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
 type ViewMode = "grouped" | "flat";
@@ -302,11 +303,13 @@ function AppGroup({
 }) {
   const colliding = collidingVersions(driver.versions);
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-background">
+    <div
+      data-testid="driver-group"
+      data-driver-name={driver.name}
+      className="overflow-hidden rounded-lg border border-border bg-background"
+    >
       <div className="flex items-center gap-3 border-b border-border bg-muted/40 px-4 py-3">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background">
-          <Package className="h-4 w-4 text-muted-foreground" />
-        </span>
+        <DriverLogo icon={driver.latestVersion?.icon} size="md" />
         <span className="text-[13.5px] font-semibold">
           {highlightMatch(driver.name, query)}
         </span>
@@ -376,6 +379,7 @@ function FlatTable({
           )}
         >
           <span className="flex items-center gap-2">
+            <DriverLogo icon={version.icon} size="sm" />
             <span className="font-medium">
               {highlightMatch(driver.name, query)}
             </span>

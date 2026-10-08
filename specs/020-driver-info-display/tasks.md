@@ -70,28 +70,28 @@ Web application: `backend/styrmin_backend/`, `backend/tests/`, `frontend/src/`, 
 
 ### Tests for User Story 1
 
-- [ ] T011 [P] [US1] Add `frontend/src/__tests__/drivers/DriverLogo.test.tsx`. Assert:
+- [X] T011 [P] [US1] Add `frontend/src/__tests__/drivers/DriverLogo.test.tsx`. Assert:
   - With `icon` set, an `<img>` with that `src`, `alt=""` and `referrerpolicy="no-referrer"` renders inside `[data-testid=driver-logo][data-logo-state=image]`.
   - With `icon` null or `""`, `data-logo-state="fallback"` and no `<img>`.
   - After `fireEvent.error(img)`, it switches to fallback.
   - Re-rendering with a different `icon` returns to `image`.
-- [ ] T012 [P] [US1] In `frontend/src/__tests__/drivers/driverList.test.ts`, add tests that `filterDrivers` sets `latestVersion` to the latest-wins version of the full set, including when the query filters that version out of `versions`.
+- [X] T012 [P] [US1] In `frontend/src/__tests__/drivers/driverList.test.ts`, add tests that `filterDrivers` sets `latestVersion` to the latest-wins version of the full set, including when the query filters that version out of `versions`.
 
 ### Implementation for User Story 1
 
-- [ ] T013 [P] [US1] Create `frontend/src/pages/drivers/DriverLogo.tsx` per contracts/ui.md and research R7:
+- [X] T013 [P] [US1] Create `frontend/src/pages/drivers/DriverLogo.tsx` per contracts/ui.md and research R7:
   - Props `icon?: string | null` and `size?: "sm" | "md"` (`sm` = 20 px, `md` = 32 px frame with the current `AppGroup` frame style).
   - A `failed` state that `onError` sets and that resets when `icon` changes.
   - Renders the `<img alt="" referrerPolicy="no-referrer" loading="lazy" decoding="async" className="h-full w-full object-contain">`, or the lucide `Package` icon with `aria-hidden`.
   - Root carries `data-testid="driver-logo"` and `data-logo-state`.
-- [ ] T014 [P] [US1] In `frontend/src/pages/drivers/lib/driverList.ts`, add `latestVersion: DriverListVersion | undefined` to `FilteredDriver`, and set it in both branches of `filterDrivers` from the unfiltered latest-first list (the same source as `latestVersionId`).
-- [ ] T015 [P] [US1] In `frontend/src/components/PageLayout.tsx`, add an optional `icon?: ReactNode` prop rendered before the `<h1>` inside a `flex items-center gap-3` wrapper; the layout is unchanged when `icon` is not passed.
-- [ ] T016 [US1] In `frontend/src/pages/drivers/DriverListPage.tsx`:
+- [X] T014 [P] [US1] In `frontend/src/pages/drivers/lib/driverList.ts`, add `latestVersion: DriverListVersion | undefined` to `FilteredDriver`, and set it in both branches of `filterDrivers` from the unfiltered latest-first list (the same source as `latestVersionId`).
+- [X] T015 [P] [US1] In `frontend/src/components/PageLayout.tsx`, add an optional `icon?: ReactNode` prop rendered before the `<h1>` inside a `flex items-center gap-3` wrapper; the layout is unchanged when `icon` is not passed.
+- [X] T016 [US1] In `frontend/src/pages/drivers/DriverListPage.tsx`:
   - `AppGroup`: give the root `data-testid="driver-group"` and `data-driver-name={driver.name}`, and replace the `<Package>` frame with `<DriverLogo icon={driver.latestVersion?.icon} size="md" />`.
   - `FlatTable` rows: render `<DriverLogo icon={version.icon} size="sm" />` before the driver name.
   - Remove the `Package` import if it is no longer used.
-- [ ] T017 [US1] In `frontend/src/pages/drivers/DriverDetailPage.tsx`, pass `icon={<DriverLogo icon={selected.icon} size="md" />}` to `PageLayout`.
-- [ ] T018 [US1] Extend `frontend/src/__tests__/drivers/DriverListPage.test.tsx` and `frontend/src/__tests__/driver-detail/DriverDetailPage.test.tsx`. Assert:
+- [X] T017 [US1] In `frontend/src/pages/drivers/DriverDetailPage.tsx`, pass `icon={<DriverLogo icon={selected.icon} size="md" />}` to `PageLayout`.
+- [X] T018 [US1] Extend `frontend/src/__tests__/drivers/DriverListPage.test.tsx` and `frontend/src/__tests__/driver-detail/DriverDetailPage.test.tsx`. Assert:
   - The group header shows the latest version's logo `src`.
   - A driver without `icon` shows `data-logo-state="fallback"`.
   - The flat view shows one logo per row.

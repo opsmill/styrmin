@@ -6,11 +6,14 @@ export type DriverListVersion = DriverListItem["versions"][number];
 
 /**
  * A driver group as the list displays it: `versions` may be narrowed by the
- * filter, while `latestVersionId` / `totalVersions` are always computed from
- * the full loaded set — so filtering can never change which version reads as
- * "Latest" (it must stay the latest-wins winner deployments actually bind).
+ * filter, while `latestVersion` / `latestVersionId` / `totalVersions` are
+ * always computed from the full loaded set — so filtering can never change
+ * which version reads as "Latest" (it must stay the latest-wins winner
+ * deployments actually bind) or whose logo the group header shows.
  */
 export type FilteredDriver = DriverListItem & {
+  /** The latest-wins winner across ALL loaded versions. */
+  latestVersion: DriverListVersion | undefined;
   /** id of the latest-wins winner across ALL loaded versions. */
   latestVersionId: string | undefined;
   /** Count of all loaded versions, before filtering. */
@@ -65,6 +68,7 @@ export function filterDrivers(
       return {
         ...d,
         versions,
+        latestVersion: versions[0],
         latestVersionId: versions[0]?.id,
         totalVersions: versions.length,
       };
@@ -82,6 +86,7 @@ export function filterDrivers(
       result.push({
         ...driver,
         versions,
+        latestVersion: allVersions[0],
         latestVersionId: allVersions[0]?.id,
         totalVersions: allVersions.length,
       });
