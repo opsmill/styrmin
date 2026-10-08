@@ -14,7 +14,7 @@ An operator who takes a backup of a deployment and then changes the deployment c
 
 The backup drops out of view because each backup belongs to one instance, and the Backups tab, the CLI and the `backups` query list only the backups of the deployment's active instance. Four operations each create a new instance and make it the active instance, so any of them hides the earlier backups:
 
-- an upgrade to a new driver version
+- an upgrade to a new application version
 - a config edit of the deployment
 - a refresh of the deployment
 - an environment config change, which redeploys every deployment in the environment
