@@ -90,7 +90,7 @@ description: "Task list for keeping a deployment's backup history when it gets a
 
 ### Tests for User Story 1
 
-- [ ] T016 [US1] Add the four-operation integration test to `backend/tests/functional/graphql/test_backup_history_propagation.py`, parametrized over upgrade, config edit, refresh and environment config change (research R8). For each case:
+- [X] T016 [US1] Add the four-operation integration test to `backend/tests/functional/graphql/test_backup_history_propagation.py`, parametrized over upgrade, config edit, refresh and environment config change (research R8). For each case:
   - seed a deployment with an active instance and a completed backup of it
   - arm Prefect with the `_arm_prefect` pattern from `test_driver_version_reselection_propagation.py`
   - run the operation: `updateDeploymentVersion` (operation file `update_deployment_version.graphql`, with a second driver version seeded so the upgrade is not a no-op), `updateDeployment` (`update_deployment_config.graphql`, with a changed config), `updateEnvironment` (`update_environment.graphql`, with a changed environment config), and `refresh_deployment` called directly with a real `SqlModelUnitOfWork` over the test session, because it has no GraphQL field (research R2)
