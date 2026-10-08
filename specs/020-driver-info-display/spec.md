@@ -180,7 +180,7 @@ A platform engineer upgrades Styrmin. Driver versions that were loaded before th
 - The logo belongs to the driver version, not to the application driver, because `spec.info` is part of each version's specification file. The list header, which represents the whole driver, uses the latest driver version.
 - `http` is accepted in addition to `https`, as the user decided ("an http(s) URL"). Documentation recommends `https`.
 - Styrmin does not add a Content-Security-Policy in this feature. Any logo host is allowed.
-- The CLI (`styrminctl`) and the SDK get the new GraphQL fields through the regenerated SDK types; no new CLI output is part of this feature.
+- The GraphQL schema exposes the new fields to any API client. The SDK's own operations and the CLI (`styrminctl`) output do not change in this feature.
 - The description is not searched by the list filter.
 - Styrmin does not limit the length of the description; the list page shortens it visually.
 - Rejecting `icon` values that are not URLs, and `links` entries with other keys, can break third-party driver files that copied the `xxxx` placeholder. The changelog states it. Driver versions already stored are not checked again.
