@@ -15,8 +15,12 @@ from styrmin_backend.domain.models import (
     Task,
     TaskType,
 )
-from styrmin_backend.services.steps.exceptions import StepNotFoundError
+from styrmin_backend.services.steps.exceptions import (
+    InvalidStartingStepError,
+    StepNotFoundError,
+)
 from styrmin_backend.services.steps.reads import (
+    check_starting_step,
     get_no_report_since,
     get_started_tasks,
     get_step,
@@ -97,6 +101,53 @@ async def test_get_started_tasks_lists_the_tasks_a_step_started(
     tasks = await get_started_tasks(hook.id, uow)
 
     assert [task.id for task in tasks] == [started.id]
+
+
+# check_starting_step ----------------------------------------------------
+
+
+async def test_check_starting_step_accepts_no_step(uow: SqlModelUnitOfWork) -> None:
+    await check_starting_step(None, uuid4(), uow)
+
+
+async def test_check_starting_step_accepts_a_step_of_a_task_of_the_deployment(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    hook = await _seed(uow, StepParent.of_task(parents.task.id), "hook", T0)
+
+    await check_starting_step(hook.id, parents.deployment_id, uow)
+
+
+async def test_check_starting_step_rejects_an_unknown_step(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    unknown = uuid4()
+
+    with pytest.raises(StepNotFoundError, match=f"Step with id {unknown} not found"):
+        await check_starting_step(unknown, parents.deployment_id, uow)
+
+
+async def test_check_starting_step_rejects_a_step_of_another_deployment(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    hook = await _seed(uow, StepParent.of_task(parents.task.id), "hook", T0)
+
+    with pytest.raises(InvalidStartingStepError):
+        await check_starting_step(hook.id, uuid4(), uow)
+
+
+@pytest.mark.parametrize("parent_type", ["backup", "restore"])
+async def test_check_starting_step_rejects_a_step_of_a_backup_or_a_restore(
+    uow: SqlModelUnitOfWork, parents: Parents, parent_type: str
+) -> None:
+    parent = {
+        "backup": StepParent.of_backup(parents.backup_id),
+        "restore": StepParent.of_restore(parents.restore_id),
+    }[parent_type]
+    step = await _seed(uow, parent, "step", T0)
+
+    with pytest.raises(InvalidStartingStepError):
+        await check_starting_step(step.id, parents.deployment_id, uow)
 
 
 # no_report_since --------------------------------------------------------

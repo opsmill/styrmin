@@ -78,6 +78,7 @@ from styrmin_backend.services.steps.recorder import (
     succeed_step,
     supersede_operator_steps,
 )
+from styrmin_backend.services.steps.reads import check_starting_step
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 
@@ -799,7 +800,10 @@ async def update_deployment_version(
             ``version``, or the pin belongs to a different driver.
         InvalidImageReferenceError: If a stored image override applicable in the
             target driver version is invalid at ``version``.
-        StepNotFoundError: If ``started_by_step_id`` names no step.
+        StepNotFoundError: If ``started_by_step_id`` names no step, also on a
+            no-op.
+        InvalidStartingStepError: If the step is not a step of a task of the
+            deployment, also on a no-op.
 
     Returns:
         Task | None: The task created for the deployment update, or ``None``
@@ -825,6 +829,8 @@ async def update_deployment_version(
             deployment.id,
             deployment.application_version,
         )
+        # Before the ingress controller dispatch and the no-op return below.
+        await check_starting_step(started_by_step_id, deployment.id, uow)
 
         # Get the application driver version
         application_driver_version = await uow.application_driver_versions.get(

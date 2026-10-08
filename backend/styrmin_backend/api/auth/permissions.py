@@ -121,3 +121,25 @@ class IsActionsServiceAccount(BasePermission):
             current_user is not None
             and current_user.username == ACTIONS_SERVICE_ACCOUNT_USERNAME
         )
+
+
+class StartedByStepRequiresActionsServiceAccount(IsActionsServiceAccount):
+    """Permit ``startedByStepId`` only from the built-in ``styrmin-actions`` user.
+
+    Used after ``RequiresRole(Role.READ_WRITE)`` on the mutations that take
+    the argument. A call without it passes. With it, the new task joins the
+    hook step's started tasks and changes its task's result, so only the
+    driver action primitives, which run with the action token, can send it.
+    """
+
+    message = "Only the actions service account can set startedByStepId"
+
+    def has_permission(
+        self,
+        source: Any,
+        info: Info,
+        **kwargs: Any,
+    ) -> bool:
+        if kwargs.get("started_by_step_id") is None:
+            return True
+        return super().has_permission(source, info)

@@ -15,6 +15,7 @@ from styrmin_backend.services.reconciliation import (
     apply_state,
     generate_instance_from_deployment,
 )
+from styrmin_backend.services.steps.reads import check_starting_step
 from styrmin_backend.services.unit_of_work import UnitOfWork
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.manager import PrefectManager
@@ -113,6 +114,8 @@ async def stop_components(
     Raises:
         DeploymentNotFoundError: If the deployment is not found.
         StepNotFoundError: If ``started_by_step_id`` names no step.
+        InvalidStartingStepError: If the step is not a step of a task of the
+            deployment.
 
     Returns:
         Task: The task created for the deployment refresh.
@@ -124,6 +127,7 @@ async def stop_components(
             raise DeploymentNotFoundError(
                 f"Deployment with ID {deployment_id} not found"
             )
+        await check_starting_step(started_by_step_id, deployment.id, uow)
 
         # Handle unknown components name
         unknown_components = set(components) - set(deployment.get_components_names())
@@ -180,6 +184,8 @@ async def start_components(
     Raises:
         DeploymentNotFoundError: If the deployment is not found.
         StepNotFoundError: If ``started_by_step_id`` names no step.
+        InvalidStartingStepError: If the step is not a step of a task of the
+            deployment.
 
     Returns:
         Task: The task created for the deployment refresh.
@@ -191,6 +197,7 @@ async def start_components(
             raise DeploymentNotFoundError(
                 f"Deployment with ID {deployment_id} not found"
             )
+        await check_starting_step(started_by_step_id, deployment.id, uow)
 
         # Handle unknown components name
         unknown_components = set(components) - set(deployment.get_components_names())

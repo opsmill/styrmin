@@ -12,7 +12,11 @@ import strawberry
 from loguru import logger
 from strawberry.permission import PermissionExtension
 
-from styrmin_backend.api.auth.permissions import IsActionsServiceAccount, RequiresRole
+from styrmin_backend.api.auth.permissions import (
+    IsActionsServiceAccount,
+    RequiresRole,
+    StartedByStepRequiresActionsServiceAccount,
+)
 from styrmin_backend.api.definitions.backup.backup import Backup as BackupType
 from styrmin_backend.api.definitions.backup.environment_backup import (
     EnvironmentBackup as EnvironmentBackupType,
@@ -169,8 +173,17 @@ def _requires(role: Role) -> PermissionExtension:
 
 
 _STARTED_BY_STEP_ID = (
-    "The hook step that starts the task; Styrmin's driver action primitives set it."
+    "The hook step that starts the task; Styrmin's driver action primitives set it. "
+    "Only the styrmin-actions user can set it, and the step must be a step of a "
+    "task of the same deployment."
 )
+
+
+def _started_by_step_gate() -> PermissionExtension:
+    """READ_WRITE, and only the styrmin-actions user when ``startedByStepId`` is set."""
+    return PermissionExtension(
+        [RequiresRole(Role.READ_WRITE), StartedByStepRequiresActionsServiceAccount()]
+    )
 
 
 @strawberry.type
@@ -1255,7 +1268,7 @@ class Mutation:
         step = await record_event(input.to_record(), uow=uow)
         return StepType.from_instance(step)
 
-    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
+    @strawberry.mutation(extensions=[_started_by_step_gate()])
     async def stop_components(
         self,
         deployment_id: UUID,
@@ -1275,7 +1288,7 @@ class Mutation:
         )
         return Task.from_instance(task)
 
-    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
+    @strawberry.mutation(extensions=[_started_by_step_gate()])
     async def start_components(
         self,
         deployment_id: UUID,
@@ -1315,7 +1328,7 @@ class Mutation:
         )
         return Task.from_instance(task)
 
-    @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
+    @strawberry.mutation(extensions=[_started_by_step_gate()])
     async def update_deployment_version(
         self,
         deployment_id: UUID,

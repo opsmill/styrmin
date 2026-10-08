@@ -159,15 +159,24 @@ Styrmin's resolvers query per object (`api/resolvers.py`), with no data loaders.
 ```graphql
 type Mutation {
   stopComponents(deploymentId: UUID!, components: [String!]!, startedByStepId: UUID = null): Task
+    @requiresRole @startedByStepRequiresActionsServiceAccount
   startComponents(deploymentId: UUID!, components: [String!]!, startedByStepId: UUID = null): Task
+    @requiresRole @startedByStepRequiresActionsServiceAccount
   updateDeploymentVersion(
     deploymentId: UUID!, version: String!, parameters: JSON = null,
     driverVersionId: UUID = null, startedByStepId: UUID = null
-  ): Task
+  ): Task @requiresRole @startedByStepRequiresActionsServiceAccount
 }
 ```
 
-`startedByStepId` sets `Task.startedByStepId` on the task the mutation creates. An unknown id raises `StepNotFoundError`. Omitting it keeps today's behaviour.
+`startedByStepId` sets `Task.startedByStepId` on the task the mutation creates. Omitting it keeps today's behaviour. The argument adds the new task to the started tasks of the hook step and so changes the result of the hook's task, so the server accepts it only under two rules:
+
+- Only the built-in `styrmin-actions` user can send it. Access: `PermissionExtension([RequiresRole(Role.READ_WRITE), StartedByStepRequiresActionsServiceAccount()])`. A call without the argument needs only `READ_WRITE`. Every other user who sends it, admins included, gets `FORBIDDEN`.
+- The step must be a step of a task of the same deployment. Hook steps belong only to tasks, so a step of a backup or a restore is rejected too.
+
+`check_starting_step` (`services/steps/reads.py`) checks the step in `stop_components`, `start_components` and `update_deployment_version` right after it loads the deployment, before the mutation changes anything and before the no-op return of `update_deployment_version`.
+
+Errors: `StepNotFoundError` (`NOT_FOUND`) when the id names no step; `InvalidStartingStepError` (`VALIDATION_ERROR`) when the step is not a step of a task of the deployment.
 
 ## Unchanged
 
@@ -182,6 +191,7 @@ type Mutation {
 | `recordStep` (each event, each parent) | yes | returned `Step` |
 | `recordStep` without a token / as `READ_ONLY` / as a `READ_WRITE` or `ADMIN` person | rejected, nothing written | — |
 | `startedByStepId` on the three mutations | `task.started_by_step_id` | `Task.startedBy`, `Task.startedTasks`, `Step.startedTasks` |
+| `startedByStepId` from a `READ_WRITE` or `ADMIN` person, naming no step, or naming a step of another deployment's task | rejected (`FORBIDDEN`, `NOT_FOUND`, `VALIDATION_ERROR`), no task created | — |
 | Every `Step` field | — | seeded row → field |
 | `Task.steps`, `Task.result` (four values, including a family with a sibling-superseded started task and one interrupted by an outside task), `Backup.steps`, `Restore.steps`, `Query.step` | — | seeded rows → fields, read as `READ_ONLY` |
 | `Task.type` for tasks created by each caller in research D19 | `task.type` | `Task.type` |

@@ -130,7 +130,7 @@ The `apply_state` service function (`services/reconciliation/__init__.py`) takes
 
 The type names the operation the user asked for, not the flow that runs: a version change is an `upgrade_instance` task even when the driver has no upgrade hook and the remediation runs `update_instance_crd`. The step list shows which flow ran. Tasks created before this change keep the type `noop`; `noop` remains the default of the argument.
 
-`stop_components`, `start_components` and `update_deployment_version` also accept `started_by_step_id`. `apply_state` raises `StepNotFoundError` when it names no step, and otherwise stores it in `Task.started_by_step_id`.
+`stop_components`, `start_components` and `update_deployment_version` also accept `started_by_step_id`. Each checks it with `check_starting_step` (`services/steps/reads.py`) right after it loads the deployment, before it changes anything and before the no-op return of `update_deployment_version`: `StepNotFoundError` when it names no step, `InvalidStartingStepError` when the step is not a step of a task of the same deployment. `apply_state` stores it in `Task.started_by_step_id`.
 
 ## Flow: apply_state
 

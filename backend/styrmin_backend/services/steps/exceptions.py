@@ -15,3 +15,10 @@ class InvalidStepRecordError(ServiceError):
 
     error_code = "VALIDATION_ERROR"
     default_message = "Invalid step record"
+
+
+class InvalidStartingStepError(ServiceError):
+    """``startedByStepId`` names a step that is not a step of a task of the deployment."""
+
+    error_code = "VALIDATION_ERROR"
+    default_message = "The step cannot start a task of this deployment"

@@ -15,12 +15,24 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from styrmin_backend.domain.models import Deployment, DeploymentState, Task
+from styrmin_backend.domain.models import (
+    Deployment,
+    DeploymentState,
+    Step,
+    StepKind,
+    StepParent,
+    Task,
+    TaskType,
+)
 from styrmin_backend.services.deployment import (
     update_deployment,
     update_deployment_version,
 )
 from styrmin_backend.services.reconciliation import generate_instance_from_deployment
+from styrmin_backend.services.steps.exceptions import (
+    InvalidStartingStepError,
+    StepNotFoundError,
+)
 from tests.unit.services.fakes import (
     FakeUnitOfWork,
     FakeClusterRepository,
@@ -315,3 +327,71 @@ async def test_update_deployment_version_new_version_dispatches_reconcile(
     assert mock_apply_state.call_count == 1, (
         "A version change must dispatch exactly one reconcile"
     )
+
+
+class _Steps:
+    """The one step read ``check_starting_step`` makes."""
+
+    def __init__(self, *steps: Step) -> None:
+        self._steps = {step.id: step for step in steps}
+
+    async def get(self, id: UUID, for_update: bool = False) -> Step | None:  # noqa: A002, ARG002
+        return self._steps.get(id)
+
+
+@pytest.mark.asyncio
+@patch("styrmin_backend.services.deployment.apply_state", new_callable=AsyncMock)
+async def test_update_deployment_version_noop_rejects_an_unknown_starting_step(
+    mock_apply_state: AsyncMock,
+) -> None:
+    """The step check runs before the no-op return (spec 019, data-model "Validation rules")."""
+    uow = _make_uow()
+    uow.steps = _Steps()  # type: ignore[assignment]
+    deployment_id = uuid4()
+    await _seed_steady_state_deployment(
+        uow=uow, deployment_id=deployment_id, environment_id=uuid4()
+    )
+    unknown = uuid4()
+
+    with pytest.raises(StepNotFoundError, match=f"Step with id {unknown} not found"):
+        async with uow:
+            await update_deployment_version(
+                deployment_id=deployment_id,
+                version="1.0.0",
+                uow=uow,
+                started_by_step_id=unknown,
+            )
+
+    mock_apply_state.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("styrmin_backend.services.deployment.apply_state", new_callable=AsyncMock)
+async def test_update_deployment_version_noop_rejects_a_step_of_another_deployment(
+    mock_apply_state: AsyncMock,
+) -> None:
+    uow = _make_uow()
+    other_task = Task.create(type=TaskType.UPGRADE_INSTANCE, deployment_id=uuid4())
+    await uow.tasks.save(other_task)
+    hook = Step.create(
+        StepParent.of_task(other_task.id),
+        "hook:upgrade:core",
+        "Run the upgrade hook",
+        StepKind.HOOK,
+    )
+    uow.steps = _Steps(hook)  # type: ignore[assignment]
+    deployment_id = uuid4()
+    await _seed_steady_state_deployment(
+        uow=uow, deployment_id=deployment_id, environment_id=uuid4()
+    )
+
+    with pytest.raises(InvalidStartingStepError):
+        async with uow:
+            await update_deployment_version(
+                deployment_id=deployment_id,
+                version="1.0.0",
+                uow=uow,
+                started_by_step_id=hook.id,
+            )
+
+    mock_apply_state.assert_not_called()

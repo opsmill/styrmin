@@ -4,6 +4,8 @@ directive @isSelfOrRole on FIELD_DEFINITION
 
 directive @requiresRole on FIELD_DEFINITION
 
+directive @startedByStepRequiresActionsServiceAccount on FIELD_DEFINITION
+
 type Action {
   id: UUID!
   name: String!
@@ -914,19 +916,19 @@ type Mutation {
     components: [String!]!
 
     """
-    The hook step that starts the task; Styrmin's driver action primitives set it.
+    The hook step that starts the task; Styrmin's driver action primitives set it. Only the styrmin-actions user can set it, and the step must be a step of a task of the same deployment.
     """
     startedByStepId: UUID = null
-  ): Task @requiresRole
+  ): Task @requiresRole @startedByStepRequiresActionsServiceAccount
   startComponents(
     deploymentId: UUID!
     components: [String!]!
 
     """
-    The hook step that starts the task; Styrmin's driver action primitives set it.
+    The hook step that starts the task; Styrmin's driver action primitives set it. Only the styrmin-actions user can set it, and the step must be a step of a task of the same deployment.
     """
     startedByStepId: UUID = null
-  ): Task @requiresRole
+  ): Task @requiresRole @startedByStepRequiresActionsServiceAccount
   runJob(deploymentId: UUID!, commands: [String!]!, env: [JSON!]!, image: String!): Task @requiresRole
   updateDeploymentVersion(
     deploymentId: UUID!
@@ -935,10 +937,10 @@ type Mutation {
     driverVersionId: UUID = null
 
     """
-    The hook step that starts the task; Styrmin's driver action primitives set it.
+    The hook step that starts the task; Styrmin's driver action primitives set it. Only the styrmin-actions user can set it, and the step must be a step of a task of the same deployment.
     """
     startedByStepId: UUID = null
-  ): Task @requiresRole
+  ): Task @requiresRole @startedByStepRequiresActionsServiceAccount
   reportPodStatuses(reports: [DeploymentPodStatusReport!]!): ReportPodStatusesResponse!
   reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!): ReportDeploymentStatusesResponse!
 }

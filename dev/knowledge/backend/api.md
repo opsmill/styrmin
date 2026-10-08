@@ -184,7 +184,7 @@ two-UoW `update_deployment` flow.
 
 The agent callbacks (`callback`, `reportPodStatuses`, `reportDeploymentStatuses`) are documented in [`../agent/overview.md`](../agent/overview.md) and [`reconciliation.md`](reconciliation.md). All three are still on the unauthenticated allow-list (`api/auth/allowlist.py`, tracked by [#396](https://github.com/opsmill/styrmin/issues/396)). Since spec 019, `reportDeploymentStatuses` also moves the operator-phase steps of the reported task (`services/steps/operator_history.py`), so a caller who can reach the API can change those steps as well as `Deployment.status`.
 
-`startedByStepId` on `stopComponents`, `startComponents` and `updateDeploymentVersion` is optional. Styrmin's driver action primitives set it to the hook step that runs the action (`STYRMIN_STEP_ID`); the server stores it in `Task.started_by_step_id` and rejects an id that names no step with `NOT_FOUND` (`StepNotFoundError`). See [hooks-and-actions.md](hooks-and-actions.md#tasks-started-by-a-hook-step).
+`startedByStepId` on `stopComponents`, `startComponents` and `updateDeploymentVersion` is optional. Styrmin's driver action primitives set it to the hook step that runs the action (`STYRMIN_STEP_ID`); the server stores it in `Task.started_by_step_id`. The argument adds the new task to the hook step's started tasks and changes the result of the hook's task, so the server accepts it only from the built-in `styrmin-actions` user: the three mutations carry `PermissionExtension([RequiresRole(Role.READ_WRITE), StartedByStepRequiresActionsServiceAccount()])`, and every other user who sends the argument, admins included, gets `FORBIDDEN`. A call without the argument needs only `READ_WRITE`. The step must also be a step of a task of the same deployment. `check_starting_step` (`services/steps/reads.py`) checks this right after the service loads the deployment, before it changes anything and before the no-op return of `updateDeploymentVersion`: an id that names no step raises `NOT_FOUND` (`StepNotFoundError`), and a step of another deployment's task, of a backup or of a restore raises `VALIDATION_ERROR` (`InvalidStartingStepError`). See [hooks-and-actions.md](hooks-and-actions.md#tasks-started-by-a-hook-step).
 
 ## Context Injection
 
@@ -764,7 +764,7 @@ All `*Id` scalar fields are preserved alongside the nested object fields for bac
 | [api/errors.py](backend/styrmin_backend/api/errors.py) | `StructuredErrorExtension` middleware |
 | [api/definitions/](backend/styrmin_backend/api/definitions/) | One subpackage per domain (cluster, deployment, task, ...) |
 | [api/definitions/step/model.py](backend/styrmin_backend/api/definitions/step/model.py) | `Step`, `StepError`, the step enums, `RecordStepInput` |
-| [api/auth/permissions.py](backend/styrmin_backend/api/auth/permissions.py) | `RequiresRole`, `IsActionsServiceAccount` |
+| [api/auth/permissions.py](backend/styrmin_backend/api/auth/permissions.py) | `RequiresRole`, `IsActionsServiceAccount`, `StartedByStepRequiresActionsServiceAccount` |
 | [services/deployment_timeline.py](backend/styrmin_backend/services/deployment_timeline.py) | Timeline and its read model (steps, started tasks, results, no-report times) |
 | [services/steps/reads.py](backend/styrmin_backend/services/steps/reads.py) | Step reads and the `noReportSince` rule |
 | [schema.graphql](schema.graphql) | Generated schema; the authoritative inventory |
