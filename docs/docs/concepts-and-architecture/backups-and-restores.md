@@ -94,6 +94,49 @@ that each of Velero's `PodVolumeBackup` objects reports for the backup.
   volume), when the backup did not complete, or when Styrmin could not read
   the `PodVolumeBackup` objects.
 
+### Backup history of a deployment
+
+Each backup is a backup of one instance of a deployment. When you back
+up a deployment, Styrmin backs up its active instance. A deployment gets
+a new instance, which becomes its active instance, after each of these
+four operations:
+
+- an upgrade of the deployment to another application version
+- an edit of the deployment's config
+- a refresh of the deployment
+- a change to the config of the deployment's environment, which
+  redeploys every deployment in that environment
+
+The deployment's Backups tab, `styrminctl backups list <deployment>`
+and the `backups(deploymentId:)` GraphQL query list the deployment's
+backup history: the backups of every instance the deployment has had,
+newest first. A backup you created before one of these operations stays
+in the list. Each backup shows the application version of the instance
+it was taken of, in the "Application version" column of the Backups tab
+and the `application_version` column of `styrminctl backups list`.
+
+To list the backups of one instance only, run
+`styrminctl backups list --instance-id <instance-id>` or query
+`backups(instanceId:)`.
+
+A deleted deployment keeps its backup history:
+
+- On the environment's page, turn on "Show deleted" and open the
+  deleted deployment. Its Backups tab lists the history. The restore and
+  delete actions on each backup are disabled, as every action is on a
+  deleted deployment.
+- From the CLI, run `styrminctl backups list --id <deployment-id>`. The
+  lookup by name does not find a deleted deployment.
+
+A new deployment that reuses the name of a deleted deployment starts
+with an empty backup history, because the history is listed by
+deployment id, not by name.
+
+A restore does not check the application version. When you restore a
+backup that was taken at another application version than the one the
+deployment runs now, the restore starts with no check and no
+confirmation.
+
 ### What happens when you restore
 
 A restore is the same machinery, run in reverse:
