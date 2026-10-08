@@ -190,7 +190,7 @@ Web application: `backend/styrmin_backend/`, `backend/tests/`, `frontend/src/`, 
 
 ### Tests for User Story 4
 
-- [ ] T033 [P] [US4] In `backend/tests/functional/graphql/test_application_driver_version_propagation.py`, add a test:
+- [X] T033 [P] [US4] In `backend/tests/functional/graphql/test_application_driver_version_propagation.py`, add a test:
   - Load the info driver from T010 via `LoadLocalDriverInfo`.
   - Set `icon`, `description` and `links` to `None` on that row through `session`, then commit.
   - Load again, and assert the same `id` is returned and the DB row and `GetDriverInfo` carry the three values.
@@ -198,12 +198,12 @@ Web application: `backend/styrmin_backend/`, `backend/tests/`, `frontend/src/`, 
 
 ### Implementation for User Story 4
 
-- [ ] T034 [US4] In `backend/styrmin_backend/services/applications.py` `load_application_driver_from_object`, in the `existing_identity is not None` branch:
+- [X] T034 [US4] In `backend/styrmin_backend/services/applications.py` `load_application_driver_from_object`, in the `existing_identity is not None` branch:
   - Compute `info = _driver_info_columns(driver_object.driver_spec.spec.info)`.
   - When any `getattr(existing_identity, key) != value`, assign the values, `await uow.commit()`, and return `await uow.application_driver_versions.get(existing_identity.id)` (eager-loaded).
   - Otherwise return `existing_identity` unchanged.
   - Add a 1–2 line comment: the identity tuple pins the file content, so this only fills rows stored before the info columns existed (research R5).
-- [ ] T035 [US4] Run `uv run pytest backend/tests/unit/services/test_applications_upsert_idempotent.py backend/tests/functional/graphql/test_application_driver_version_propagation.py -q`, and confirm the existing idempotency tests still pass with the new identity-hit branch.
+- [X] T035 [US4] Run `uv run pytest backend/tests/unit/services/test_applications_upsert_idempotent.py backend/tests/functional/graphql/test_application_driver_version_propagation.py -q`, and confirm the existing idempotency tests still pass with the new identity-hit branch.
 
 **Checkpoint**: All four user stories work.
 
