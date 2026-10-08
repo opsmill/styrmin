@@ -198,7 +198,7 @@ class BackupSchedule(StyrminModel, table=True):
 | `resolve_backup_target(instance_id, uow)` | Walk instance → deployment (namespace) and instance → driver version → backup-enabled component configs, returning a `BackupTarget(deployment_id, target_namespace, component_configs)`. Best-effort: any failure degrades to `BackupTarget(None, "", None)` — a hookless backup — and logs a warning. Shared by the `createBackup` mutation and the environment fan-out so both build identical constituents (FR-014) |
 | `create_backup(instance_id, uow, ...)` | Create on-demand backup with component configs. `environment_backup_id` links it as an environment-backup constituent. The row id is generated up front so the unique auto-generated name is final before the `INSERT` |
 | `get_backup(backup_id, uow)` | Get backup by ID |
-| `get_backups(instance_id, uow, status)` | List backups for instance |
+| `get_backups(uow, *, deployment_id=None, instance_id=None, status=None)` | List backups, newest first (`created_on` descending). Exactly one of `deployment_id` or `instance_id` is required; both or neither raise `AmbiguousIdentifierError` (`VALIDATION_ERROR`). `deployment_id` returns the deployment's backup history: the backups of every instance the deployment has had, found by joining `Backup.instance_id` to `ApplicationInstance.deployment_id` (`BackupRepository.get_by_deployment_id`), so backups stay listed after an upgrade, a config edit, a refresh or an environment config change gives the deployment a new active instance, and after the deployment is deleted. `instance_id` returns that one instance's backups (`get_by_instance_id`). See [issue #304](https://github.com/opsmill/styrmin/issues/304) |
 | `delete_backup(backup_id, uow)` | Delete backup (cascades to restores) |
 | `update_backup_status(backup_id, status, uow, ...)` | Update overall backup status; `metadata_updates` merges keys into `Backup.metadata_` by reassignment |
 | `update_backup_component_status(backup_id, component_name, ...)` | Update component status, derives overall status |
@@ -1005,7 +1005,7 @@ Two related notes:
 
 ```graphql
 backup(backupId: UUID!): Backup
-backups(instanceId: UUID!, status: BackupStatus): [Backup!]!
+backups(deploymentId: UUID, instanceId: UUID, status: BackupStatus): [Backup!]!   # exactly one id, else VALIDATION_ERROR; deploymentId = backup history
 restore(restoreId: UUID!): Restore
 restores(backupId: UUID!, status: RestoreStatus): [Restore!]!
 backupSchedule(scheduleId: UUID!): BackupSchedule

@@ -59,10 +59,20 @@ Once auto-generation lands, this page will document, command by command:
 
 The `env-backups` group covers whole-environment snapshots: one command
 backs up every eligible deployment in an environment, and one restores
-them. Per-deployment backups stay in the `backups` group — the two are
-deliberately separate namespaces, because `backups` options are
-instance-scoped (`--deployment`, `--instance-id`) and these are not. For
-the semantics behind these commands, read [Backups and
+them. Per-deployment backups stay in the `backups` group. The two groups
+are separate because the `backups` commands target one deployment or one
+instance, and the `env-backups` commands target an environment:
+
+- `backups list` and `backups restore --last` work on a deployment's
+  backup history: the backups of every instance the deployment has had.
+  `backups list` takes the deployment by name or by `--id`, and
+  `backups restore --last` takes it with `--target-deployment` or
+  `--target-deployment-id`. See [Backup history of a
+  deployment](../concepts-and-architecture/backups-and-restores.md#backup-history-of-a-deployment).
+- `--instance-id` on `backups list` and `--target-instance-id` on
+  `backups restore` work on one instance only.
+
+For the semantics behind the `env-backups` commands, read [Backups and
 restores](../concepts-and-architecture/backups-and-restores.md#backing-up-a-whole-environment).
 
 Seven commands:

@@ -44,10 +44,21 @@ override targeting a component the driver does not declare is rejected with
 
 ## Backups and restores
 
-Backups and restores act on a deployment's **active application instance**, so
-the `backups` commands take a **deployment** — by name or by `--id` — and
-resolve the active instance for you. A raw `--instance-id` escape hatch is kept
-for targeting a specific (non-active) instance.
+The `backups` commands take a deployment: `create` and `list` by name or by
+`--id`, and `restore` with `--target-deployment` or `--target-deployment-id`.
+
+- `backups create` backs up the deployment's active instance.
+- `backups list` lists the deployment's backup history: the backups of every
+  instance the deployment has had, newest first. Its `application_version`
+  column shows the application version each backup was taken at. Backups taken
+  before an upgrade, a config edit or an environment config change stay in the
+  list.
+- `backups restore --last` restores the newest completed backup in that
+  history, whichever instance it was taken of.
+
+A raw `--instance-id` (`--target-instance-id` on `restore`) targets one
+instance instead: `create` backs up that instance, `list` lists only its
+backups, and `restore --last` chooses from its backups only.
 
 ```bash
 # Back up a deployment's active instance (by name, by id, or a raw instance)
@@ -56,14 +67,20 @@ uv run styrminctl backups create my-app --environment prod   # disambiguate a sh
 uv run styrminctl backups create --id <deployment-id> --wait
 uv run styrminctl backups create --instance-id <instance-id> # escape hatch
 
-# List a deployment's backups
+# List a deployment's backup history, with the application version of each backup
 uv run styrminctl backups list my-app
+
+# List the backup history of a deleted deployment (the name lookup does not find it)
+uv run styrminctl backups list --id <deployment-id>
+
+# List the backups of one instance only
+uv run styrminctl backups list --instance-id <instance-id>
 
 # Restore a specific backup into a deployment (in-place). The target namespace
 # defaults to the deployment's namespace, so you usually don't pass it.
 uv run styrminctl backups restore <backup-id> --target-deployment my-app
 
-# Restore the most recent completed backup of a deployment, in-place
+# Restore the newest completed backup in a deployment's history, in-place
 uv run styrminctl backups restore --last --target-deployment my-app
 ```
 
