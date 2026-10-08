@@ -9,7 +9,7 @@ Example:
         version: ">=1.1.5,<=1.2.0"
     spec:
         info:
-            icon: xxxx
+            icon: https://docs.infrahub.app/img/infrahub-logo.svg
             description: Next generation source of truth for infrastructure management
             authors: [fatih, jeremy]
             license: Apache-2.0
@@ -119,11 +119,11 @@ class InfoLink(BaseModel):
 class Info(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    links: list[dict[str, str]] | None = None
+    links: list[InfoLink] | None = None
     authors: list[str] | None = None
     description: str | None = None
     license: str | None = None
-    icon: str | None = None
+    icon: HttpUrl | None = None
 
 
 class LabelIdentifier(RootModel):

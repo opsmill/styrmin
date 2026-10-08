@@ -7,7 +7,7 @@ spec:
   version: "0.1"
   supported_versions: ">=0.1,<1.0"
   info:
-    icon: xxxx
+    icon: https://docs.infrahub.app/img/infrahub-logo.svg
     description: Next generation source of truth for infrastructure management
     authors: [fatih, jeremy]
     license: Apache-2.0
