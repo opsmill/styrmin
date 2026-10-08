@@ -1,9 +1,10 @@
 """E2E coverage for the server's daily telemetry report (spec 020, issue #274).
 
 The chart points ``STYRMIN_TELEMETRY_ENDPOINT`` at the in-cluster sink of the
-``telemetry_sink`` fixture. The test runs ``styrmin telemetry show`` in the server
-pod, starts the catalogued daily flow through the Prefect API, as the scheduler
-would, and inspects the report the sink received.
+``telemetry_sink`` fixture. The test reads the server's startup log line, runs
+``styrmin telemetry show`` in the server pod, starts the catalogued daily flow
+through the Prefect API, as the scheduler would, and inspects the report the sink
+received.
 """
 
 from __future__ import annotations
@@ -18,12 +19,13 @@ from uuid import UUID
 import httpx
 import kr8s.asyncio
 import pytest
+import yaml
 from kr8s.asyncio.objects import Service as AsyncService
 from prefect.client.orchestration import PrefectClient
 from prefect.client.schemas.filters import LogFilter, LogFilterFlowRunId
 from prefect.client.schemas.objects import FlowRun
 
-from tests.e2e.conftest import _portforward, _wait_for_http
+from tests.e2e.conftest import FIXTURES_DIR, _portforward, _wait_for_http
 
 pytestmark = [pytest.mark.shard_general]
 
@@ -76,8 +78,7 @@ async def _kubectl(kubeconfig_path: str, *args: str) -> str:
     return stdout.decode()
 
 
-async def _telemetry_show(kubeconfig_path: str) -> dict[str, Any]:
-    """Run ``styrmin telemetry show`` in the server pod and parse its output."""
+async def _server_pod(kubeconfig_path: str) -> str:
     pod = (
         await _kubectl(
             kubeconfig_path,
@@ -90,6 +91,25 @@ async def _telemetry_show(kubeconfig_path: str) -> dict[str, Any]:
         )
     ).strip()
     assert pod, "styrmin-server pod not found in vcluster"
+    return pod
+
+
+def _sink_endpoint() -> str:
+    """The endpoint ``styrmin-values.yaml`` gives the chart (the sink's cluster DNS name)."""
+    values = yaml.safe_load((FIXTURES_DIR / "styrmin-values.yaml").read_text())
+    return values["styrmin"]["telemetry"]["endpoint"]
+
+
+async def _startup_telemetry_lines(kubeconfig_path: str) -> list[str]:
+    """Return the ``Telemetry is …`` lines of the running server container's whole log."""
+    pod = await _server_pod(kubeconfig_path)
+    log = await _kubectl(kubeconfig_path, "logs", pod, "-c", "styrmin-server")
+    return [line for line in log.splitlines() if "Telemetry is " in line]
+
+
+async def _telemetry_show(kubeconfig_path: str) -> dict[str, Any]:
+    """Run ``styrmin telemetry show`` in the server pod and parse its output."""
+    pod = await _server_pod(kubeconfig_path)
     output = await _kubectl(
         kubeconfig_path,
         "exec",
@@ -153,9 +173,19 @@ async def test_server_sends_daily_report(
 ) -> None:
     """One run of the daily flow sends one report with the FR-006 data to the endpoint.
 
-    ``styrmin telemetry show`` sends nothing and prints the same data (FR-013).
+    The server logged one "Telemetry is on" line naming the endpoint when it started
+    (FR-010). ``styrmin telemetry show`` sends nothing and prints the same data (FR-013).
     """
     kubeconfig_path = deployed_simple_app["kubeconfig_path"]
+
+    startup_lines = await _startup_telemetry_lines(kubeconfig_path)
+    assert len(startup_lines) == 1, (
+        f"Expected one telemetry line in the server log, got: {startup_lines}"
+    )
+    assert "INFO" in startup_lines[0], startup_lines[0]
+    assert "Telemetry is on" in startup_lines[0], startup_lines[0]
+    assert f"to {_sink_endpoint()}." in startup_lines[0], startup_lines[0]
+
     reports_before = await _sink_reports(telemetry_sink)
 
     shown_data = await _telemetry_show(kubeconfig_path)
