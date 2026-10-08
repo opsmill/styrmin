@@ -134,7 +134,7 @@ description: "Task list for keeping a deployment's backup history when it gets a
   - keep steps 3 to 6 (restore, data check, delete) unchanged, so they run against a backup of an earlier instance
   - in `finally`, revert the `server` env vars to their previous value inside their own `try`/`finally` that wraps the existing `backup_ttl` revert, so neither revert can skip the other or hide the test's failure (critique E5)
   - keep the `ci` and `shard_backup` markers; do not add `api_only` or `ui_only`
-- [ ] T029 [US1] Run the extended E2E test to a PASS in each variant, each variant in its own pytest session (`-k api-chromium`, then `-k ui-chromium`), because running both in one session breaks the UI variant's setup, with the commands in [quickstart.md](quickstart.md) §2. If the restore step becomes unstable after the config edit, apply the fallback in research R9 (move the edit and the history check after step 5) and record the move. Record for each variant the evidence Constitution §V requires in `specs/011-deployment-backup-history/e2e-evidence.md`:
+- [X] T029 [US1] Run the extended E2E test to a PASS in each variant, each variant in its own pytest session (`-k api-chromium`, then `-k ui-chromium`), because running both in one session breaks the UI variant's setup, with the commands in [quickstart.md](quickstart.md) §2. If the restore step becomes unstable after the config edit, apply the fallback in research R9 (move the edit and the history check after step 5) and record the move. Record for each variant the evidence Constitution §V requires in `specs/011-deployment-backup-history/e2e-evidence.md`:
   - node id
   - exact command
   - ISO 8601 timestamp of the passing run
