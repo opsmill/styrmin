@@ -113,6 +113,12 @@ task of the deployment instead: its step "Remove the deployment's
 resources and namespace" runs during `Deleting` and succeeds at
 `Deleted`.
 
+Once a newer task has written the `StyrminDeployment` or requested the
+deletion, the operator no longer works on the earlier instance. Reports
+that still name the earlier instance then change none of the earlier
+task's steps, so a step that failed keeps its failure. Until then,
+reports for the earlier instance still move the earlier task's steps.
+
 When a report shows the phase `Failed` or the display state `Error`, the
 first unfinished step fails with the CR's message. For the HelmRelease
 step and the ready step, the error also names up to five pods that are not

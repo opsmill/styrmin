@@ -32,7 +32,7 @@ from styrmin_backend.domain.models import (
     Task,
 )
 from styrmin_backend.domain.steps import (
-    DELETE_REQUEST,
+    CR_WRITE_KEYS,
     ROLLOUT_OPERATOR_STEPS,
     STYRMIN_DEPLOYMENT_WRITE,
     StepDefinition,
@@ -56,8 +56,6 @@ if TYPE_CHECKING:
 
 _OPEN_STATUSES = frozenset({StepStatus.PENDING, StepStatus.RUNNING})
 _IN_PROGRESS = frozenset({StepStatus.RUNNING, StepStatus.FAILED})
-# The steps whose success interrupts the rollouts of older tasks.
-_CR_WRITE_KEYS = (STYRMIN_DEPLOYMENT_WRITE.key, DELETE_REQUEST.key)
 
 
 class StepRecord(BaseModel):
@@ -449,7 +447,7 @@ async def _after_success(step: Step, uow: UnitOfWork) -> None:
         return
     await ensure_operator_steps(task, step.ended_at, uow=uow)
     newer = await uow.steps.find_first_newer_task_with_succeeded_step(
-        task.id, _CR_WRITE_KEYS
+        task.id, CR_WRITE_KEYS
     )
     await supersede_operator_steps(newer or task.id, step.ended_at, uow=uow)
 
