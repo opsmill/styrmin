@@ -96,6 +96,17 @@ The last one is diagnostic: the dump has the column, the live table does not, be
 
 The same race applies in principle to the mariadb, mongodb and neo4j hooks; only postgres has a documented occurrence and only postgres is fenced today.
 
+### The mariadb and mongodb restore hooks retry the load
+
+These hooks used to run `sleep 5` and then load the dump once, which failed as a `PartiallyFailed` restore whenever the database took longer to initialise (#412). The bitnami images initialise an empty data volume on a temporary server, create the users and the database on it, stop it, and start the final server. The chart's readiness probes (`mariadb-admin ping`, and an unauthenticated `db.hello()` for mongodb) pass against that temporary server, so velero's `waitForReady` runs the hook before the final server is up. Depending on the moment, the load then fails with:
+
+- `ERROR 1045` or `ERROR 1044` (mariadb) or `(AuthenticationFailed)` (mongodb): the temporary server does not have the user or the database yet.
+- `ERROR 2002 ... Can't connect to local server through socket`: the temporary server has stopped and the final server has not started.
+
+`mariadb_restore_hooks()` and `mongodb_restore_hooks()` now rerun the load every 2 s until it succeeds, and fail after `_DB_LOAD_DEADLINE_SECONDS` (120 s). A rerun is safe because `mariadb-dump` writes `DROP TABLE IF EXISTS` before each table and `mongorestore --drop` drops each collection before restoring it. A load that completes on the temporary server is kept, because the final server starts on the same data directory. Velero's log for a successful restore can therefore show failed attempts before the one that succeeded.
+
+`backend/tests/unit/services/backup/test_strategies.py::TestRetriedDatabaseLoad` runs the rendered scripts with fake clients. The race itself was reproduced against the bitnami images with the container limited to 0.08 CPU: the old hooks failed 3 of 3 runs (mariadb) and 1 of 3 runs (mongodb) with the errors from CI, and the new hooks restored the data in 5 of 5 runs each.
+
 The fence is covered at unit level only: `backend/tests/unit/services/backup/test_strategies.py` asserts the rendered script's fence, role filter, liveness bound, atomicity and retry. There is deliberately no E2E for the race — the one scenario with a live writer against a `kind: postgres` component is the enterprise backup/restore lifecycle, and probing Prefect's schema from it was judged too heavy for what it proved.
 
 ## Data Models

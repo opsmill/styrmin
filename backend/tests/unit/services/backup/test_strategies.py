@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from styrmin_backend.services.backup.strategies.action import ActionBackupStrategy
+from styrmin_backend.services.backup.strategies.base import BackupStrategy
 from styrmin_backend.services.backup.strategies.disk import DiskSnapshotStrategy
 from styrmin_backend.services.backup.strategies.mariadb import MariadbBackupStrategy
 from styrmin_backend.services.backup.strategies.mongodb import MongodbBackupStrategy
@@ -404,6 +408,23 @@ class TestMariadbBackupStrategy:
         )
         assert hooks[0].post[0].container == "my-mariadb"
 
+    def test_restore_retries_the_load_rather_than_sleeping(self) -> None:
+        """bitnami passes the readiness probe on a temporary server it then restarts.
+
+        A load that ran 5s after readiness hit the restart and failed with
+        ``ERROR 2002 ... Can't connect to local server through socket`` (#412).
+        """
+        strategy = MariadbBackupStrategy()
+        hooks = strategy.get_restore_hooks(
+            namespace="test-ns",
+            component_name="db",
+            config={"kind": "mariadb"},
+        )
+        script = hooks[0].post[0].command[2]
+        assert "sleep 5 &&" not in script
+        assert "until mariadb -u $MARIADB_USER" in script
+        assert "< /backup/pre-snapshot.sql; do" in script
+
     def test_get_backup_volumes_default(self) -> None:
         strategy = MariadbBackupStrategy()
         volumes = strategy.get_backup_volumes(
@@ -518,6 +539,23 @@ class TestMongodbBackupStrategy:
         )
         assert hooks[0].post[0].container == "my-mongo"
 
+    def test_restore_retries_the_load_rather_than_sleeping(self) -> None:
+        """bitnami passes the readiness probe before it has created the root user.
+
+        A load that ran 5s after readiness could still reach that server and
+        failed with ``(AuthenticationFailed)`` (#412). ``--drop`` makes a rerun safe.
+        """
+        strategy = MongodbBackupStrategy()
+        hooks = strategy.get_restore_hooks(
+            namespace="test-ns",
+            component_name="db",
+            config={"kind": "mongodb"},
+        )
+        script = hooks[0].post[0].command[2]
+        assert "sleep 5 &&" not in script
+        assert "until mongorestore --username=$MONGO_INITDB_ROOT_USERNAME" in script
+        assert "--drop; do" in script
+
     def test_get_backup_volumes_default(self) -> None:
         strategy = MongodbBackupStrategy()
         volumes = strategy.get_backup_volumes(
@@ -533,6 +571,102 @@ class TestMongodbBackupStrategy:
             config={"kind": "mongodb", "backup_volume": "mongo-dump"},
         )
         assert volumes == ["mongo-dump"]
+
+
+# Fails the first $FAILURES calls, then succeeds; counts calls in $CALLS.
+_FAKE_CLIENT = """\
+#!/bin/sh
+n=$(($(cat "$CALLS" 2>/dev/null || echo 0) + 1))
+echo "$n" > "$CALLS"
+[ "$n" -gt "$FAILURES" ]
+"""
+
+# Advances 100s per call, so the 120s deadline has passed by the second check.
+_FAKE_DATE = """\
+#!/bin/sh
+now=$(cat "$CLOCK" 2>/dev/null || echo 0)
+echo $((now + 100)) > "$CLOCK"
+echo "$now"
+"""
+
+
+@pytest.mark.parametrize(
+    ("strategy", "engine", "client", "dump"),
+    [
+        (MariadbBackupStrategy(), "mariadb", "mariadb", "pre-snapshot.sql"),
+        (MongodbBackupStrategy(), "mongodb", "mongorestore", "pre-snapshot.archive"),
+    ],
+)
+class TestRetriedDatabaseLoad:
+    """Run the rendered restore script with fake clients in place of the database."""
+
+    @staticmethod
+    def _run(
+        tmp_path: Path,
+        strategy: BackupStrategy,
+        client: str,
+        dump: str,
+        *,
+        failures: int,
+        fake_date: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[str], int]:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        shims = {client: _FAKE_CLIENT, "sleep": "#!/bin/sh\n"}
+        if fake_date:
+            shims["date"] = _FAKE_DATE
+        for name, body in shims.items():
+            shim = bin_dir / name
+            shim.write_text(body)
+            shim.chmod(0o755)
+        (tmp_path / dump).touch()
+        hooks = strategy.get_restore_hooks(
+            namespace="test-ns",
+            component_name="db",
+            config={"backup_mount_path": str(tmp_path)},
+        )
+        result = subprocess.run(
+            hooks[0].post[0].command,
+            env={
+                "PATH": f"{bin_dir}:/usr/bin:/bin",
+                "CALLS": str(tmp_path / "calls"),
+                "CLOCK": str(tmp_path / "clock"),
+                "FAILURES": str(failures),
+            },
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return result, int((tmp_path / "calls").read_text())
+
+    def test_load_is_retried_until_it_succeeds(
+        self,
+        tmp_path: Path,
+        strategy: BackupStrategy,
+        engine: str,
+        client: str,
+        dump: str,
+    ) -> None:
+        result, calls = self._run(tmp_path, strategy, client, dump, failures=2)
+        assert result.returncode == 0, result.stderr
+        assert calls == 3
+        assert f"{engine} restore attempt 2 failed; retrying" in result.stderr
+
+    def test_load_fails_once_the_deadline_passes(
+        self,
+        tmp_path: Path,
+        strategy: BackupStrategy,
+        engine: str,
+        client: str,
+        dump: str,
+    ) -> None:
+        result, calls = self._run(
+            tmp_path, strategy, client, dump, failures=1000, fake_date=True
+        )
+        assert result.returncode == 1
+        assert calls == 2
+        assert f"{engine} restore failed after 2 attempt(s)" in result.stderr
 
 
 class TestActionBackupStrategy:

@@ -66,6 +66,35 @@ def _postgres_restore_command(backup_mount_path: str) -> str:
     )
 
 
+# Seconds the mariadb and mongodb restore hooks keep retrying the load before failing.
+_DB_LOAD_DEADLINE_SECONDS = 120
+
+# waitForReady only covers the readiness probe, which bitnami passes against the temporary server
+# it stops and restarts after creating users. Reloading is safe: the dumps drop what they recreate.
+_RETRIED_LOAD_SCRIPT = """\
+deadline=$(($(date +%s) + {deadline}))
+attempt=1
+until {load}; do
+  if [ "$(date +%s)" -ge "$deadline" ]; then
+    echo "{engine} restore failed after $attempt attempt(s)" >&2
+    exit 1
+  fi
+  echo "{engine} restore attempt $attempt failed; retrying" >&2
+  attempt=$((attempt + 1))
+  sleep 2
+done
+"""
+
+
+def _retried_load_command(engine: str, load: str) -> str:
+    """Render a shell script that reruns ``load`` until it succeeds or the deadline passes."""
+    return _RETRIED_LOAD_SCRIPT.format(
+        engine=engine,
+        load=load,
+        deadline=_DB_LOAD_DEADLINE_SECONDS,
+    )
+
+
 def postgres_backup_hooks(
     namespace: str,
     component_name: str,
@@ -208,7 +237,10 @@ def mariadb_restore_hooks(
                 command=[
                     "/bin/sh",
                     "-c",
-                    f"sleep 5 && mariadb -u $MARIADB_USER -p$MARIADB_PASSWORD $MARIADB_DATABASE < {backup_mount_path}/pre-snapshot.sql",
+                    _retried_load_command(
+                        "mariadb",
+                        f"mariadb -u $MARIADB_USER -p$MARIADB_PASSWORD $MARIADB_DATABASE < {backup_mount_path}/pre-snapshot.sql",
+                    ),
                 ],
                 on_error="Fail",
                 exec_timeout=timeout,
@@ -284,7 +316,10 @@ def mongodb_restore_hooks(
                 command=[
                     "/bin/sh",
                     "-c",
-                    f"sleep 5 && mongorestore --username=$MONGO_INITDB_ROOT_USERNAME --password=$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase=admin --nsExclude='admin.system.*' --archive={backup_mount_path}/pre-snapshot.archive --drop",
+                    _retried_load_command(
+                        "mongodb",
+                        f"mongorestore --username=$MONGO_INITDB_ROOT_USERNAME --password=$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase=admin --nsExclude='admin.system.*' --archive={backup_mount_path}/pre-snapshot.archive --drop",
+                    ),
                 ],
                 on_error="Fail",
                 exec_timeout=timeout,
