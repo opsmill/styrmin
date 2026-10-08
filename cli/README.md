@@ -51,8 +51,8 @@ The `backups` commands take a deployment: `create` and `list` by name or by
 - `backups list` lists the deployment's backup history: the backups of every
   instance the deployment has had, newest first. Its `application_version`
   column shows the application version each backup was taken at. Backups taken
-  before an upgrade, a config edit or an environment config change stay in the
-  list.
+  before an upgrade, a config edit, a refresh or an environment config change
+  stay in the list.
 - `backups restore --last` restores the newest completed backup in that
   history, whichever instance it was taken of.
 

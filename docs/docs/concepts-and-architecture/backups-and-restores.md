@@ -134,8 +134,8 @@ deployment id, not by name.
 
 A restore does not check the application version. When you restore a
 backup that was taken at another application version than the one the
-deployment runs now, the restore starts with no check and no
-confirmation.
+deployment runs now, Styrmin does not compare the two versions and
+shows no warning about the difference.
 
 ### What happens when you restore
 
