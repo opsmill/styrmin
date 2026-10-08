@@ -99,7 +99,7 @@ A platform engineer upgrades Styrmin. Driver versions that were loaded before th
 
 ### Edge Cases
 
-- **No `spec.info` block**: the driver loads as today. The pages show the generic icon, no description and no links.
+- **`spec.info` without `icon`, `description` or `links`**: the driver loads as today. The pages show the generic icon, no description and no links. (The `spec.info` block itself stays required, as today; all of its keys are optional.)
 - **`spec.info.icon` uses `http` instead of `https`**: accepted. When Styrmin is served over `https`, the browser can upgrade or block the image; the page then shows the generic icon.
 - **Logo host is not reachable** (air-gapped installation, blocked domain, removed image): the page shows the generic icon and no error.
 - **Very large or wide image**: the page scales it to fit the fixed logo area without changing the layout.
