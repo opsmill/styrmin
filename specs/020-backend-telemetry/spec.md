@@ -125,10 +125,10 @@ A Styrmin developer runs E2E tests, docker-compose or `invoke dev`. These instal
 
 - The endpoint cannot be reached because the install has no internet access or outbound traffic is blocked: the flow run ends `Completed` and the failure is logged at debug level, every day.
 - The endpoint never responds: the send attempt stops after 10 seconds.
-- The install is down at the scheduled time: no report is sent that day, and the missed report is not sent later.
+- The install is down at the scheduled time: no report is sent that day, and the missed report is not sent later. This also holds when only the process that runs the daily flow is down: a run that starts more than one hour after its scheduled time sends nothing ([research D14](research.md)).
 - A database dump is restored into a second install: both installs report the same install ID.
 - The database is rebuilt from scratch: the install reports a new install ID.
-- Workflows are turned off (`STYRMIN_WORKFLOW_ENABLE=false`): the daily flow does not run, so no report is sent.
+- An operator sets `STYRMIN_WORKFLOW_ENABLE=false`: the PRD says the daily flow then does not run. In the current code no part of Styrmin reads this setting, so it does not stop the daily flow or the report ([research D15](research.md)). Operators turn telemetry off with the settings in FR-003 and FR-004. This feature does not change `STYRMIN_WORKFLOW_ENABLE`.
 - No cluster has been added: the report contains `cluster_count: 0`. [ADR-039](../../dev/adr/0039-single-cluster-platform-scope.md) limits an install to one cluster, so the value is 0 or 1.
 - Both `STYRMIN_TELEMETRY_ENABLED=false` and `DO_NOT_TRACK=1` are set: telemetry is off. Any one setting that turns telemetry off is enough.
 - `DO_NOT_TRACK` is set to a value other than `1`, such as `true`: it does not turn telemetry off, as in `styrminctl` ([eligibility.py](../../cli/src/styrminctl/telemetry/eligibility.py)).
@@ -139,7 +139,7 @@ A Styrmin developer runs E2E tests, docker-compose or `invoke dev`. These instal
 
 ### Functional Requirements
 
-The numbers FR-001 to FR-013 are the same as in the PRD. FR-014 onwards add requirements that the PRD states outside its list of functional requirements.
+The numbers FR-001 to FR-013 are the same as in the PRD. FR-014 onwards add requirements that the PRD states outside its list of functional requirements, and FR-020, which the plan needs for FR-011.
 
 Report content:
 
@@ -161,6 +161,7 @@ Turning telemetry off and changing the destination:
 - **FR-003**: The server MUST send no request when `STYRMIN_TELEMETRY_ENABLED=false` or `DO_NOT_TRACK=1` is set.
 - **FR-004**: Operators MUST be able to turn telemetry off with the Helm value `styrmin.telemetry.enabled: false`, which sets `STYRMIN_TELEMETRY_ENABLED` in the server environment.
 - **FR-005**: Operators MUST be able to change the destination with `STYRMIN_TELEMETRY_ENDPOINT`.
+- **FR-020**: Operators MUST be able to set `STYRMIN_TELEMETRY_ENDPOINT` with the Helm value `styrmin.telemetry.endpoint`. When the value is empty, the chart does not set the variable. [CLAUDE RECOMMENDED – based on FR-011, which needs the E2E install to send to a local sink, and on the chart, which has no field for other environment variables ([values.yaml](../../helm/styrmin/values.yaml))]
 - **FR-015**: When `STYRMIN_TELEMETRY_ENDPOINT` is not set, reports MUST go to the OpsMill endpoint `https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin`. [CLAUDE RECOMMENDED – based on the `styrminctl` default endpoint `https://telemetry-endpoints.cloudflare-096.workers.dev/styrminctl` in `cli/src/styrminctl/telemetry/config.py`, which uses one path per reporting product. The PRD leaves the URL open. The owner of the ingestion endpoint must confirm the path accepts `kind: "styrmin"` before the release.]
 
 Sending:
@@ -182,7 +183,7 @@ Test and development installs:
 Documentation, in the same change ([Constitution §VII](../../dev/constitution.md)):
 
 - **FR-016**: The documentation page [`docs/docs/reference/telemetry.md`](../../docs/docs/reference/telemetry.md) MUST be renamed from "CLI telemetry & privacy" to "Telemetry & privacy" and MUST get a section for the server. That section lists every key in the report, states that driver names are sent as written and that a custom driver name can identify the operator's organisation, names the settings that turn telemetry off, names the default endpoint, and explains `styrmin telemetry show`.
-- **FR-017**: `helm/styrmin/README.md` MUST document the Helm value `styrmin.telemetry.enabled`.
+- **FR-017**: `helm/styrmin/README.md` MUST document the Helm values `styrmin.telemetry.enabled` and `styrmin.telemetry.endpoint`.
 - **FR-018**: A new ADR MUST record that driver names are sent as written and that the install ID is stored in the database.
 - **FR-019**: `CONTEXT.md` MUST extend the **Telemetry** entry to cover the server and MUST add an **Install ID** entry.
 
@@ -208,8 +209,8 @@ Documentation, in the same change ([Constitution §VII](../../dev/constitution.m
 - One install is one Styrmin database (PRD).
 - Sending driver names as written is accepted, and the documentation page states it (PRD).
 - The ingestion endpoint accepts anonymous POST requests without authentication, as ADR-047 assumes for `styrminctl` (PRD).
-- Installs with workflows turned off are not normal production setups, because deployments do not run in that mode (PRD).
-- The Helm value and the environment variables reach every server process that builds or sends a report, including the process that runs the daily telemetry flow.
+- Installs with workflows turned off are not normal production setups, because deployments do not run in that mode (PRD). As the edge cases note, `STYRMIN_WORKFLOW_ENABLE=false` does not turn workflows off in the current code.
+- The Helm values and the environment variables reach every process that builds or sends a report: the server and the task worker, which runs the daily telemetry flow.
 - `DO_NOT_TRACK` turns telemetry off only when its value is exactly `1`, as in `styrminctl`.
 - The time of day of the daily run is not decided in the PRD. The plan chooses it.
 
