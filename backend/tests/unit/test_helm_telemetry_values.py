@@ -1,10 +1,14 @@
-"""Telemetry values and install notes of the Styrmin Helm chart (spec 020, FR-004, FR-017, FR-020, research D11)."""
+"""Telemetry settings of the Styrmin Helm chart and of the development and test installs.
+
+Spec 020: FR-004, FR-011, FR-017, FR-020; research D11, D18.
+"""
 
 from __future__ import annotations
 
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -18,14 +22,13 @@ CHART_FILES = (
     "templates/NOTES.txt",
 )
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("helm") is None,
-    reason="helm is not on PATH; this test renders the chart with `helm template`",
-)
-
 
 @pytest.fixture
 def chart(tmp_path: Path) -> Path:
+    if shutil.which("helm") is None:
+        pytest.skip(
+            "helm is not on PATH; this test renders the chart with `helm template`"
+        )
     # The subcharts in helm/styrmin/charts/ are not committed, so render a copy without them.
     chart_yaml = yaml.safe_load((CHART_DIR / "Chart.yaml").read_text())
     chart_yaml.pop("dependencies", None)
@@ -118,3 +121,31 @@ def test_endpoint_value_renders_the_endpoint(chart: Path) -> None:
 
     assert data["STYRMIN_TELEMETRY_ENDPOINT"] == "http://sink/report"
     assert data["STYRMIN_TELEMETRY_ENABLED"] == "true"
+
+
+def test_docker_compose_turns_telemetry_off_in_the_server_and_the_task_worker() -> None:
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text())
+
+    for service in ("server", "task-worker"):
+        environment = compose["services"][service]["environment"]
+        assert environment["STYRMIN_TELEMETRY_ENABLED"] == "false", service
+
+
+def test_local_demo_values_turn_telemetry_off() -> None:
+    values = yaml.safe_load(
+        (REPO_ROOT / "dev" / "local" / "demo-values.yaml").read_text()
+    )
+
+    assert values["styrmin"]["telemetry"]["enabled"] is False
+
+
+def test_e2e_values_send_reports_to_an_in_cluster_sink() -> None:
+    values_file = (
+        REPO_ROOT / "backend" / "tests" / "e2e" / "fixtures" / "styrmin-values.yaml"
+    )
+    endpoint = urlsplit(
+        yaml.safe_load(values_file.read_text())["styrmin"]["telemetry"]["endpoint"]
+    )
+
+    assert endpoint.scheme == "http"
+    assert (endpoint.hostname or "").endswith(".svc.cluster.local"), endpoint.geturl()

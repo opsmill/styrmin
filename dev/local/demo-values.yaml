@@ -40,6 +40,9 @@ styrmin:
   # ``Secure`` cookies are dropped by browsers on non-HTTPS, non-localhost
   # origins, so disable the flag for the demo only.
   sessionCookieSecure: false
+  # The local demo is a development install, so it sends no telemetry reports.
+  telemetry:
+    enabled: false
 
 velero:
   backupsEnabled: false

@@ -20,6 +20,8 @@ services:
       STYRMIN_URL_API: http://server:8000
       STYRMIN_URL_API_K8S: http://host.docker.internal:8000
       STYRMIN_DB_NAME: /source/data/styrmin.db
+      # Development installs send no telemetry reports (spec 020, FR-011).
+      STYRMIN_TELEMETRY_ENABLED: "false"
     volumes:
       - ./backend:/source/backend
       - ./driver/examples:/styrmin/drivers:ro
@@ -66,6 +68,8 @@ services:
       STYRMIN_ADMIN_PASSWORD: styrmin
       # Compose serves over plain HTTP, so the session cookie cannot be Secure.
       STYRMIN_SESSION_COOKIE_SECURE: "false"
+      # Development installs send no telemetry reports (spec 020, FR-011).
+      STYRMIN_TELEMETRY_ENABLED: "false"
 
     healthcheck:
       test: curl --fail http://localhost:8000/graphql || exit 1
