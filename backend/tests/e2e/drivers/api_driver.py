@@ -910,6 +910,23 @@ class ApiScenarioDriver:
             raise _normalise(exc) from exc
         return _backup_ref(backup)
 
+    async def list_backups(self, *, deployment_id: str) -> tuple[BackupRef, ...]:
+        try:
+            backups = await self._client.backups.list_backups(
+                deployment_id=deployment_id
+            )
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+        return tuple(
+            BackupRef(
+                id=str(b.id),
+                name=b.name,
+                status=b.status,
+                application_version=b.instance.application_version,
+            )
+            for b in backups
+        )
+
     # --- Environment-level backup / restore -------------------------------
 
     async def create_environment_backup(
