@@ -12,10 +12,10 @@ File: `frontend/src/pages/deployments/DeploymentDetailPage.tsx`.
 
 ## Table
 
-A **Version** column is added after **Status**. Each row shows `backup.instance.applicationVersion`.
+An **Application version** column is added after **Status**. The label names the application version so that it is not read as the driver version that the page header shows. Each row shows `backup.instance.applicationVersion`.
 
 ```text
-Name | Status | Version | Created | Size | Expires | Actions
+Name | Status | Application version | Created | Size | Expires | Actions
 ```
 
 ## Row attributes (E2E hooks)

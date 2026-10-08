@@ -122,7 +122,7 @@ cli/
 frontend/src/
 ├── graphql/list_backups.graphql           # ($deploymentId: UUID!) + instance { id applicationVersion }
 ├── generated/graphql.ts                   # regenerated
-├── pages/deployments/DeploymentDetailPage.tsx  # query by deploymentId; Version column; row attribute
+├── pages/deployments/DeploymentDetailPage.tsx  # query by deploymentId; Application version column; row attribute
 └── __tests__/deployment-detail/
     ├── BackupExpiry.test.tsx              # extend
     └── *.test.tsx                         # update ListBackups fixtures for the new instance field
@@ -166,7 +166,7 @@ As in research R9:
 - re-read the active instance before the backup
 - after the backup completes, edit the `server` component's env vars, and wait for the deployment to run and its pods to be ready
 - assert through the new `list_backups` driver method that the backup is listed with application version `0.1.0`
-- revert the env vars in `finally`
+- revert the env vars in `finally`, in its own `try`/`finally` so that it cannot skip the existing `backup_ttl` revert (critique E5)
 
 The test keeps its markers (`ci`, `shard_backup`) and runs in both variants.
 
