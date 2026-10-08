@@ -105,6 +105,7 @@ A platform engineer upgrades Styrmin. Driver versions that were loaded before th
 - **Very large or wide image**: the page scales it to fit the fixed logo area without changing the layout.
 - **SVG logo with embedded script**: the browser loads the logo as an image, so it does not run scripts in the image.
 - **Privacy of viewers**: loading the logo sends a request from each viewer's browser to the logo host. Styrmin asks the browser not to send the address of the Styrmin page with that request.
+- **Logo host can see who views the driver pages**: a user who can load drivers chooses the logo host, and that host receives a request, with the viewer's IP address, each time someone opens a driver page. The driver author documentation tells authors to use an image host they trust.
 - **Description with Markdown or HTML characters**: shown as plain text; no Markdown or HTML is rendered.
 - **Long description on the list page**: shortened to one line, full text on hover. The detail page shows the full text and keeps line breaks from the specification file.
 - **Link label or URL repeated**: listed as written; Styrmin does not remove duplicates.
@@ -149,15 +150,15 @@ A platform engineer upgrades Styrmin. Driver versions that were loaded before th
 **Logo rendering and fallback**
 
 - **FR-017**: Every place that shows a driver logo MUST show the generic package icon when the driver version has no logo or when the browser fails to load the image, in the same size and position.
-- **FR-018**: Logos MUST be loaded as images (not as documents or frames), with a text alternative that names the driver, and the browser MUST be asked not to send the Styrmin page address to the logo host.
+- **FR-018**: Logos MUST be loaded as images (not as documents or frames) and marked as decorative (empty text alternative), because the driver name is always shown next to them as text. The browser MUST be asked not to send the Styrmin page address to the logo host.
 - **FR-019**: Descriptions and link labels MUST be shown as plain text.
 
 **Documentation and examples**
 
-- **FR-020**: `driver/DRIVERS.md` MUST describe `spec.info.icon`, `spec.info.description` and `spec.info.links`: accepted formats, where each value appears in the UI, that each viewer's browser loads the logo from the given URL, and the recommended image format (square SVG or PNG) — with a working example.
+- **FR-020**: `driver/DRIVERS.md` MUST describe `spec.info.icon`, `spec.info.description` and `spec.info.links`: accepted formats, where each value appears in the UI, that each viewer's browser loads the logo from the given URL (so authors should use an image host they trust), and the recommended image format (square SVG or PNG) — with a working example.
 - **FR-021**: The `infrahub` and `infrahub-enterprise` example drivers MUST set `spec.info.icon` to a real, publicly reachable logo URL, and no example or documentation page MUST keep the `xxxx` placeholder.
 - **FR-022**: The public documentation pages under `docs/` that describe the driver specification file or the driver pages MUST describe the same fields and behavior.
-- **FR-023**: The change MUST include a towncrier changelog fragment for #272 that also states that `spec.info.icon` and `spec.info.links` are now validated at load time.
+- **FR-023**: The change MUST include two towncrier changelog fragments for #272: an "Added" entry for the logo, description and links, and a "Changed" entry stating that `spec.info.icon` and `spec.info.links` are now validated at load time.
 
 ### Key Entities
 
@@ -182,6 +183,7 @@ A platform engineer upgrades Styrmin. Driver versions that were loaded before th
 - Styrmin does not add a Content-Security-Policy in this feature. Any logo host is allowed.
 - The GraphQL schema exposes the new fields to any API client. The SDK's own operations and the CLI (`styrminctl`) output do not change in this feature.
 - The description is not searched by the list filter.
+- Other places that name a driver (the deploy form's driver selector, the deployment header) keep their current look. Showing the logo there is a possible follow-up.
 - Styrmin does not limit the length of the description; the list page shortens it visually.
 - Rejecting `icon` values that are not URLs, and `links` entries with other keys, can break third-party driver files that copied the `xxxx` placeholder. The changelog states it. Driver versions already stored are not checked again.
 - The end-to-end test cannot depend on internet access from the test browser, so it uses a logo URL that the test environment serves itself.

@@ -6,11 +6,11 @@ Selectors and attributes that tests (Vitest and the E2E page objects) rely on.
 
 `frontend/src/pages/drivers/DriverLogo.tsx`
 
-Props: `icon: string | null | undefined`, `driverName: string`, `size?: "sm" | "md"` (`sm` = 20 px frame for flat rows, `md` = 32 px frame for headers).
+Props: `icon: string | null | undefined`, `size?: "sm" | "md"` (`sm` = 20 px frame for flat rows, `md` = 32 px frame for headers).
 
 | State | DOM |
 |-------|-----|
-| `icon` set, not failed | `<span data-testid="driver-logo" data-logo-state="image"><img src={icon} alt="{driverName} logo" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="object-contain"></span>` |
+| `icon` set, not failed | `<span data-testid="driver-logo" data-logo-state="image"><img src={icon} alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="object-contain"></span>` (decorative: the driver name is always shown next to it) |
 | `icon` null/empty, or `<img>` fired `error` | `<span data-testid="driver-logo" data-logo-state="fallback">` with the lucide `Package` icon (`aria-hidden`) |
 
 - The frame size and border are the same in both states, so the layout does not change.
