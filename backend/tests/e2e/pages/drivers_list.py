@@ -1,4 +1,4 @@
-"""Page object for the Load Driver flow (drawer on ``/drivers``)."""
+"""Page object for the drivers list (`/drivers`) and its Load Driver drawer."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.refs import DriverVersionRef
 
 if TYPE_CHECKING:
-    from playwright.async_api import Page
+    from playwright.async_api import Locator, Page
 
 
 class DriversListPage:
@@ -17,6 +17,16 @@ class DriversListPage:
 
     def __init__(self, page: Page) -> None:
         self._page = page
+
+    async def goto(self) -> None:
+        await self._page.goto("/drivers")
+
+    def driver_group_logo(self, driver_name: str) -> Locator:
+        """The logo in the grouped-view header of ``driver_name``."""
+        return self._page.locator(
+            f'[data-testid=driver-group][data-driver-name="{driver_name}"] '
+            "[data-testid=driver-logo]"
+        )
 
     async def load_remote_version(self, *, git_url: str, ref: str) -> DriverVersionRef:
         """Drive the Load Driver drawer (Git tab) and return the new version ref.
