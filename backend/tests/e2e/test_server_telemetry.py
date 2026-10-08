@@ -1,8 +1,9 @@
 """E2E coverage for the server's daily telemetry report (spec 020, issue #274).
 
 The chart points ``STYRMIN_TELEMETRY_ENDPOINT`` at the in-cluster sink of the
-``telemetry_sink`` fixture. The test starts the catalogued daily flow through the
-Prefect API, as the scheduler would, and inspects the report the sink received.
+``telemetry_sink`` fixture. The test runs ``styrmin telemetry show`` in the server
+pod, starts the catalogued daily flow through the Prefect API, as the scheduler
+would, and inspects the report the sink received.
 """
 
 from __future__ import annotations
@@ -27,6 +28,9 @@ from tests.e2e.conftest import _portforward, _wait_for_http
 pytestmark = [pytest.mark.shard_general]
 
 _TELEMETRY_DEPLOYMENT = "send_telemetry_report/send_telemetry_report"
+_SERVER_POD_SELECTOR = (
+    "app.kubernetes.io/component=server,app.kubernetes.io/name=styrmin"
+)
 _FLOW_RUN_TIMEOUT_SECONDS = 180.0
 
 # FR-006 keys in contract order (contracts/telemetry-report-wire-format.md).
@@ -50,6 +54,54 @@ async def _sink_reports(sink_url: str) -> list[dict[str, Any]]:
         response = await client.get(f"{sink_url}/reports", timeout=10)
     response.raise_for_status()
     return response.json()
+
+
+async def _kubectl(kubeconfig_path: str, *args: str) -> str:
+    """Run kubectl in the ``styrmin`` namespace without blocking the port-forwards; return stdout."""
+    proc = await asyncio.create_subprocess_exec(
+        "kubectl",
+        "--kubeconfig",
+        kubeconfig_path,
+        "-n",
+        "styrmin",
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    assert proc.returncode == 0, (
+        f"kubectl {' '.join(args)} exited {proc.returncode}: "
+        f"{stderr.decode(errors='replace')}"
+    )
+    return stdout.decode()
+
+
+async def _telemetry_show(kubeconfig_path: str) -> dict[str, Any]:
+    """Run ``styrmin telemetry show`` in the server pod and parse its output."""
+    pod = (
+        await _kubectl(
+            kubeconfig_path,
+            "get",
+            "pods",
+            "-l",
+            _SERVER_POD_SELECTOR,
+            "-o",
+            "jsonpath={.items[0].metadata.name}",
+        )
+    ).strip()
+    assert pod, "styrmin-server pod not found in vcluster"
+    output = await _kubectl(
+        kubeconfig_path,
+        "exec",
+        pod,
+        "-c",
+        "styrmin-server",
+        "--",
+        "styrmin",
+        "telemetry",
+        "show",
+    )
+    return json.loads(output)
 
 
 async def _flow_run_logs(client: PrefectClient, flow_run_id: UUID) -> str:
@@ -99,9 +151,19 @@ async def test_server_sends_daily_report(
     deployed_simple_app: dict,
     telemetry_sink: str,
 ) -> None:
-    """One run of the daily flow sends one report with the FR-006 data to the endpoint."""
+    """One run of the daily flow sends one report with the FR-006 data to the endpoint.
+
+    ``styrmin telemetry show`` sends nothing and prints the same data (FR-013).
+    """
     kubeconfig_path = deployed_simple_app["kubeconfig_path"]
     reports_before = await _sink_reports(telemetry_sink)
+
+    shown_data = await _telemetry_show(kubeconfig_path)
+    reports_after_show = await _sink_reports(telemetry_sink)
+    assert len(reports_after_show) == len(reports_before), (
+        f"styrmin telemetry show sent a report: "
+        f"{reports_after_show[len(reports_before) :]}"
+    )
 
     run, run_logs = await _run_telemetry_flow(kubeconfig_path)
 
@@ -137,3 +199,7 @@ async def test_server_sends_daily_report(
         entry["name"] == "simple-app" and entry["deployment_count"] >= 1
         for entry in drivers
     ), f"No simple-app driver entry with a live deployment: {drivers}"
+
+    assert data == shown_data, (
+        "The sent data differs from the output of styrmin telemetry show"
+    )

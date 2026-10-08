@@ -33,3 +33,8 @@ app.command(
     name="agent",
     help="Agent and operator management commands.",
 )
+app.command(
+    "styrmin_backend.cli.telemetry:telemetry_app",
+    name="telemetry",
+    help="Telemetry commands.",
+)

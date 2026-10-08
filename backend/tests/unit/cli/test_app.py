@@ -20,12 +20,14 @@ def test_help_output_contains_all_command_groups(
     assert "db" in output
     assert "config" in output
     assert "export" in output
+    assert "telemetry" in output
 
     # Verify help descriptions are present
     assert "Server management commands" in output
     assert "Database management commands" in output
     assert "Configuration management commands" in output
     assert "Export commands" in output
+    assert "Telemetry commands" in output
 
 
 def test_version_output_shows_package_version(
