@@ -27,6 +27,7 @@ the DB row and the ``applicationDriver`` query.
 020-driver-info-display (T010) adds ``icon``, ``description`` and ``links``:
 the ``spec.info`` values, loaded through ``loadLocalApplicationDriverVersion``,
 read back from the DB row and projected through ``applicationDriver.versions``.
+T028 adds the rejected-load case: an invalid ``icon`` stores nothing (FR-005).
 
 Test location note: the task list specifies
 ``backend/tests/unit/api/schema/test_application_driver_version_propagation.py``
@@ -47,8 +48,13 @@ from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from styrmin_backend.db.models import ApplicationDriverVersion, ComponentConfig
+from styrmin_backend.db.models import (
+    ApplicationDriver,
+    ApplicationDriverVersion,
+    ComponentConfig,
+)
 
+from ._queries import load_query
 from .conftest import gql
 from .seeds import seed_application_driver_version
 
@@ -314,6 +320,40 @@ async def test_driver_info_empty_description_and_links_are_stored_as_null(
     assert read_back["icon"] is None
     assert read_back["description"] is None
     assert read_back["links"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_driver_info_invalid_icon_fails_load_and_stores_nothing(
+    client: AsyncClient, session: AsyncSession, tmp_path: Path
+) -> None:
+    """A placeholder ``icon`` fails the load with an error naming
+    ``spec.info.icon``, and no ``ApplicationDriver`` row is created."""
+    _write_info_driver(tmp_path, {"icon": "xxxx"})
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("load_local_driver_info"),
+            "variables": {"path": str(tmp_path)},
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    error = payload["errors"][0]
+    assert (error.get("extensions") or {}).get("code") == "VALIDATION_ERROR", error
+    assert "spec.info.icon" in error["message"], error
+    assert payload["data"] == {"loadLocalApplicationDriverVersion": None}
+
+    rows = (
+        await session.exec(
+            select(ApplicationDriver).where(
+                ApplicationDriver.name == "info-propagation"
+            )
+        )
+    ).all()
+    assert rows == []
 
 
 @pytest.mark.asyncio
