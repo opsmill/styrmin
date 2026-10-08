@@ -19,7 +19,7 @@ from styrmin_backend.workflows.catalogue import PrefectCatalogue
 from styrmin_backend.workflows.constants import WorkflowType
 from styrmin_backend.workflows.models import PrefectAction
 from styrmin_backend.workflows.templates.telemetry import send_telemetry_report_flow
-from tests.helpers.http_sink import Sink, serve_sink
+from tests.helpers.http_sink import Sink, refused_url, serve_sink
 from tests.helpers.unit_of_work import yield_unit_of_work
 
 MODULE = "styrmin_backend.workflows.templates.telemetry"
@@ -58,13 +58,17 @@ def sink() -> Iterator[Sink]:
 
 
 async def _run_flow(
-    *, scheduled_start_time: datetime | None, send_report: AsyncMock | None = None
+    *,
+    scheduled_start_time: datetime | None,
+    send_report: AsyncMock | None = None,
+    build_report_data: AsyncMock | None = None,
 ) -> FlowRun:
     uow = MagicMock()
     uow.__aenter__ = AsyncMock(return_value=uow)
     uow.__aexit__ = AsyncMock(return_value=None)
     uow.commit = AsyncMock()
-    build_report_data = AsyncMock(return_value=REPORT_DATA)
+    if build_report_data is None:
+        build_report_data = AsyncMock(return_value=REPORT_DATA)
     if send_report is None:
         send_report = AsyncMock(return_value=True)
     logger = MagicMock()
@@ -91,6 +95,11 @@ async def _run_flow(
         uow=uow,
         logger=logger,
     )
+
+
+def _log_methods(logger: MagicMock) -> list[str]:
+    """Return the logger methods called, in order (``debug``, ``warning`` and so on)."""
+    return [name for name, _args, _kwargs in logger.method_calls]
 
 
 async def test_on_time_run_sends_the_built_data_to_the_default_endpoint() -> None:
@@ -189,3 +198,43 @@ async def test_on_setting_sends_one_request_with_the_real_sender(
 
     assert run.result is True
     assert len(sink.requests) == 1
+
+
+async def test_failed_send_returns_false_and_logs_nothing_above_debug() -> None:
+    run = await _run_flow(
+        scheduled_start_time=datetime.now(UTC),
+        send_report=AsyncMock(return_value=False),
+    )
+
+    assert run.result is False
+    run.send_report.assert_awaited_once()
+    assert set(_log_methods(run.logger)) <= {"debug"}
+
+
+async def test_report_build_error_returns_false_and_logs_one_warning() -> None:
+    run = await _run_flow(
+        scheduled_start_time=datetime.now(UTC),
+        build_report_data=AsyncMock(side_effect=RuntimeError("query failed")),
+    )
+
+    assert run.result is False
+    run.uow.commit.assert_not_awaited()
+    run.send_report.assert_not_awaited()
+    assert _log_methods(run.logger) == ["warning"]
+    assert "RuntimeError" in run.logger.warning.call_args.args
+
+
+async def test_refused_endpoint_with_the_real_sender_returns_false_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with refused_url() as url:
+        monkeypatch.setenv("STYRMIN_TELEMETRY_ENDPOINT", url)
+
+        run = await _run_flow(
+            scheduled_start_time=datetime.now(UTC),
+            send_report=AsyncMock(wraps=sender.send_report),
+        )
+
+    assert run.result is False
+    run.send_report.assert_awaited_once_with(REPORT_DATA, url, run.logger)
+    assert _log_methods(run.logger) == ["debug"]
