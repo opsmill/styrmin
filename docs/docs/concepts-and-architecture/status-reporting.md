@@ -91,6 +91,21 @@ previous rollout. Because `status.instanceId` changes only when the
 operator acts on the new spec, the server never reads the previous
 rollout's `Ready` phase as the result of the new instance.
 
+### When a deployment becomes RUNNING
+
+A report with `displayState: Running` sets the deployment to `RUNNING`
+only when the task that rolled out the reported instance has finished.
+When a hook step of another task started that task, the starting task
+must have finished too.
+
+This matters for upgrades whose driver hook calls `stop_components` and
+`start_components`. Each call rolls out its own instance while the upgrade
+task is still running. Without the check, the operator's `Running` report
+for the stopped instance would set the deployment to `RUNNING` in the
+middle of the upgrade, and `styrminctl deployments apply --wait` would
+return at that point. The first report after the upgrade task finishes sets
+`RUNNING`, within one reporting cycle.
+
 ### Steps from status reports
 
 The operator's work appears on the deployment page as the steps of the

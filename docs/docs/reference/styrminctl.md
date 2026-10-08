@@ -337,8 +337,11 @@ redeploy.
 
 With `--wait`, `apply` prints `submitted <name>` when it submits a
 change, then `running <name>` or `failed <name>: <reason>` when the
-deployment reaches a final state. When the deployment state becomes
-`FAILED`, the reason names the failed step, in the form
+deployment reaches a final state. For an upgrade, `running` comes only
+after the upgrade task and the tasks its driver hook started have
+finished (see
+[Status reporting](../concepts-and-architecture/status-reporting.md)).
+When the deployment state becomes `FAILED`, the reason names the failed step, in the form
 `step "<step name>" failed: <error>`. `apply` looks for it in the steps of
 the task that the apply started, then in the tasks that the task's hook
 steps started, nearest first. When it finds no failed step, the reason
