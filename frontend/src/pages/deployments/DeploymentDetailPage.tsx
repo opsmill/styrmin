@@ -139,12 +139,10 @@ export default function DeploymentDetailPage() {
     string | null
   >(null);
 
+  // Lists every instance's backups, so the history survives a new instance.
   const { data: backupsData, isLoading: backupsFetching } = useListBackupsQuery(
-    { instanceId: instanceId ?? "" },
-    {
-      enabled: !!instanceId,
-      refetchInterval: autoRefreshEnabled ? 10_000 : false,
-    },
+    { deploymentId },
+    { refetchInterval: autoRefreshEnabled ? 10_000 : false },
   );
 
   const selectedBackup = backupsData?.backups?.find(
@@ -628,6 +626,9 @@ export default function DeploymentDetailPage() {
                   Status
                 </span>
                 <span className="w-[150px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Application version
+                </span>
+                <span className="w-[150px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Created
                 </span>
                 <span className="w-[100px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -1025,6 +1026,8 @@ function BackupRow({
     ttl?: string | null;
     /** Expiration Velero reported for the backup. */
     expiresAt?: string | null;
+    /** The instance the backup was taken of, possibly not the active one. */
+    instance: { applicationVersion: string };
     /** One step per component. */
     steps: StepListItem[];
   };
@@ -1083,6 +1086,7 @@ function BackupRow({
       data-backup-id={backup.id}
       data-backup-name={backup.name}
       data-backup-status={backup.status}
+      data-backup-application-version={backup.instance.applicationVersion}
     >
       <div
         className={`flex items-center gap-4 rounded-lg border-l-[3px] px-4 py-3 ${bc.border} ${
@@ -1098,6 +1102,13 @@ function BackupRow({
         <div className="w-[100px]" data-testid="backup-status">
           <StatusBadge status={backup.status} />
         </div>
+        <span
+          className="w-[150px] truncate font-mono text-[13px] text-muted-foreground"
+          data-testid="backup-application-version"
+          title={backup.instance.applicationVersion}
+        >
+          {backup.instance.applicationVersion}
+        </span>
         <span className="w-[150px] text-[13px] text-muted-foreground">
           {new Date(backup.createdOn).toLocaleDateString()}
         </span>

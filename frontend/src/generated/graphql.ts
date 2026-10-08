@@ -1892,11 +1892,11 @@ export type ListBackupStorageLocationsQueryVariables = Exact<{ [key: string]: ne
 export type ListBackupStorageLocationsQuery = { __typename?: 'Query', backupStorageLocations: Array<{ __typename?: 'BackupStorageLocation', id: string, name: string, endpoint: string, bucket: string, region: string, createdOn: any, updatedOn?: any | null, environmentCount: number }> };
 
 export type ListBackupsQueryVariables = Exact<{
-  instanceId: Scalars['UUID']['input'];
+  deploymentId: Scalars['UUID']['input'];
 }>;
 
 
-export type ListBackupsQuery = { __typename?: 'Query', backups: Array<{ __typename?: 'Backup', id: string, name: string, status: string, createdOn: any, completedAt?: any | null, sizeBytes?: number | null, errorMessage?: string | null, ttl?: string | null, expiresAt?: any | null, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, errors: Array<{ __typename?: 'StepError', attempt: number, message: string, occurredAt: any }> }> }> };
+export type ListBackupsQuery = { __typename?: 'Query', backups: Array<{ __typename?: 'Backup', id: string, name: string, status: string, createdOn: any, completedAt?: any | null, sizeBytes?: number | null, errorMessage?: string | null, ttl?: string | null, expiresAt?: any | null, instance: { __typename?: 'ApplicationInstance', id: string, applicationVersion: string }, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, errors: Array<{ __typename?: 'StepError', attempt: number, message: string, occurredAt: any }> }> }> };
 
 export type ListClustersQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -3250,8 +3250,8 @@ export const useListBackupStorageLocationsQuery = <
 useListBackupStorageLocationsQuery.getKey = (variables?: ListBackupStorageLocationsQueryVariables) => variables === undefined ? ['ListBackupStorageLocations'] : ['ListBackupStorageLocations', variables];
 
 export const ListBackupsDocument = `
-    query ListBackups($instanceId: UUID!) {
-  backups(instanceId: $instanceId) {
+    query ListBackups($deploymentId: UUID!) {
+  backups(deploymentId: $deploymentId) {
     id
     name
     status
@@ -3261,6 +3261,10 @@ export const ListBackupsDocument = `
     errorMessage
     ttl
     expiresAt
+    instance {
+      id
+      applicationVersion
+    }
     steps {
       id
       key

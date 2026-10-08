@@ -101,7 +101,9 @@ function makeAuthValue(): AuthContextValue {
 
 type DeploymentShape = NonNullable<GetDeploymentQuery["deployment"]>;
 
-function makeDeployment(): DeploymentShape {
+function makeDeployment(
+  overrides: Partial<DeploymentShape> = {},
+): DeploymentShape {
   return {
     id: "dep-1",
     name: "web",
@@ -130,6 +132,7 @@ function makeDeployment(): DeploymentShape {
     components: [],
     componentImageOverrides: [],
     deployedServices: [],
+    ...overrides,
   } as unknown as DeploymentShape;
 }
 
@@ -144,6 +147,7 @@ function makeBackup(overrides: Partial<BackupItem> = {}): BackupItem {
     errorMessage: null,
     ttl: "2160h",
     expiresAt: EXPIRES_AT,
+    instance: { id: "inst-1", applicationVersion: "2.5.0" },
     steps: [],
     ...overrides,
   } as BackupItem;
@@ -184,18 +188,24 @@ function makeQueryClient(): QueryClient {
 }
 
 /** Render the page and switch to the Backups tab. */
-async function renderBackupsTab(backups: BackupItem[]) {
+async function renderBackupsTab(
+  backups: BackupItem[],
+  deployment: DeploymentShape = makeDeployment(),
+) {
   useGetDeploymentQueryMock.mockReturnValue({
-    data: { deployment: makeDeployment() } as GetDeploymentQuery,
+    data: { deployment } as GetDeploymentQuery,
     isLoading: false,
     error: null,
     refetch: vi.fn(),
     dataUpdatedAt: Date.now(),
   });
-  useListBackupsQueryMock.mockReturnValue({
-    ...noopQueryResult,
-    data: { backups } as ListBackupsQuery,
-  });
+  // A disabled query returns no data, as TanStack Query does.
+  useListBackupsQueryMock.mockImplementation(
+    (_variables: unknown, options?: { enabled?: boolean }) =>
+      options?.enabled === false
+        ? noopQueryResult
+        : { ...noopQueryResult, data: { backups } as ListBackupsQuery },
+  );
 
   const router = makeTestRouter();
   await router.load();
@@ -317,5 +327,83 @@ describe("DeploymentDetailPage backups tab expiry column", () => {
       new Date(EXPIRES_AT).toLocaleDateString(),
     );
     expect(cell.getAttribute("title")).toBeNull();
+  });
+});
+
+describe("DeploymentDetailPage backups tab backup history (#304)", () => {
+  beforeEach(() => {
+    useGetDeploymentQueryMock.mockReset();
+    useListBackupsQueryMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("lists the backups by the deployment id from the route", async () => {
+    await renderBackupsTab([makeBackup()]);
+
+    expect(useListBackupsQueryMock).toHaveBeenCalledWith(
+      { deploymentId: "dep-1" },
+      expect.not.objectContaining({ enabled: false }),
+    );
+    for (const [variables] of useListBackupsQueryMock.mock.calls) {
+      expect(variables).toEqual({ deploymentId: "dep-1" });
+    }
+  });
+
+  it("lists the backup history when the deployment has no active instance", async () => {
+    await renderBackupsTab(
+      [
+        makeBackup({
+          id: "backup-old",
+          name: "backup-old",
+          instance: { id: "inst-0", applicationVersion: "2.4.0" },
+        }),
+      ],
+      makeDeployment({ applicationInstance: null }),
+    );
+
+    for (const [, options] of useListBackupsQueryMock.mock.calls) {
+      expect(options).not.toMatchObject({ enabled: false });
+    }
+    expect(screen.queryByText("No backups yet")).not.toBeInTheDocument();
+    expect(screen.getByTestId("backup-row")).toHaveAttribute(
+      "data-backup-id",
+      "backup-old",
+    );
+    // Creating a backup still needs an active instance.
+    expect(
+      screen.getByRole("button", { name: /Create Backup/ }),
+    ).toBeDisabled();
+  });
+
+  it("shows the application version of each backup after the Status column", async () => {
+    await renderBackupsTab([
+      makeBackup({
+        id: "backup-new",
+        name: "backup-new",
+        instance: { id: "inst-1", applicationVersion: "2.5.0" },
+      }),
+      makeBackup({
+        id: "backup-old",
+        name: "backup-old",
+        instance: { id: "inst-0", applicationVersion: "2.4.0" },
+      }),
+    ]);
+
+    const header = screen.getByText("Application version");
+    expect(header.previousElementSibling?.textContent).toBe("Status");
+
+    const rows = screen.getAllByTestId("backup-row");
+    expect(
+      rows.map((row) => row.getAttribute("data-backup-application-version")),
+    ).toEqual(["2.5.0", "2.4.0"]);
+    expect(
+      rows.map(
+        (row) =>
+          within(row).getByTestId("backup-application-version").textContent,
+      ),
+    ).toEqual(["2.5.0", "2.4.0"]);
   });
 });
