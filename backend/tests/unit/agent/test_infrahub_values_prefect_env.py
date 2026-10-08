@@ -94,3 +94,13 @@ def test_analytics_flag_set_under_global_prefect_env(
     ]
     # The image tag set alongside it must survive the move.
     assert prefect["global"]["prefect"]["image"] == {"prefectTag": "1.5.0"}
+
+
+@pytest.mark.parametrize("driver", ["infrahub", "infrahub-enterprise"])
+def test_ingress_extra_hosts_use_hostname_key(driver: str) -> None:
+    ingress = _render(driver)["infrahubServer"]["ingress"]
+
+    # The chart's ingress template reads `.hostname` from each extraHosts entry.
+    assert ingress["extraHosts"] == [
+        {"hostname": "infrahub-hr.example.test", "path": "/"}
+    ]

@@ -1,0 +1,1 @@
+Fixed the infrahub and infrahub-enterprise example drivers so the ingress also serves the human-readable FQDN: the `extraHosts` entry used the `name` key, which the infrahub chart ignores, instead of `hostname`.
