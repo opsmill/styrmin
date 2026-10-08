@@ -38,3 +38,8 @@ data:
   # Agent source configuration
   STYRMIN_AGENT_SOURCE_REPOSITORY: {{ .Values.styrmin.agentSource.repository | quote }}
   STYRMIN_AGENT_SOURCE_BRANCH: {{ .Values.styrmin.agentSource.branch | quote }}
+
+  # Telemetry
+  {{- if .Values.styrmin.telemetry.endpoint }}
+  STYRMIN_TELEMETRY_ENDPOINT: {{ .Values.styrmin.telemetry.endpoint | quote }}
+  {{- end }}
