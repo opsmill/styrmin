@@ -58,6 +58,7 @@ function mkVersion(
   version: string,
   createdOn: string,
   icon: string | null = null,
+  description: string | null = null,
 ): Version {
   return {
     id,
@@ -71,7 +72,7 @@ function mkVersion(
     contentHash: null,
     createdOn,
     icon,
-    description: null,
+    description,
   } as Version;
 }
 
@@ -81,6 +82,9 @@ function data(drivers: Driver[]): ListDriversQuery {
 
 const INFRAHUB_OLD_LOGO = "https://example.com/infrahub-old.svg";
 const INFRAHUB_NEW_LOGO = "https://example.com/infrahub-new.svg";
+const INFRAHUB_OLD_DESCRIPTION = "Old Infrahub description";
+const INFRAHUB_NEW_DESCRIPTION =
+  "Infrahub is a source of truth and network automation platform for the whole infrastructure";
 
 const DRIVERS: Driver[] = [
   {
@@ -92,8 +96,20 @@ const DRIVERS: Driver[] = [
     id: "id-infrahub",
     name: "infrahub",
     versions: [
-      mkVersion("i1", "2.0.3", "2026-01-01T00:00:00Z", INFRAHUB_OLD_LOGO),
-      mkVersion("i2", "2.1.0", "2026-03-01T00:00:00Z", INFRAHUB_NEW_LOGO),
+      mkVersion(
+        "i1",
+        "2.0.3",
+        "2026-01-01T00:00:00Z",
+        INFRAHUB_OLD_LOGO,
+        INFRAHUB_OLD_DESCRIPTION,
+      ),
+      mkVersion(
+        "i2",
+        "2.1.0",
+        "2026-03-01T00:00:00Z",
+        INFRAHUB_NEW_LOGO,
+        INFRAHUB_NEW_DESCRIPTION,
+      ),
     ],
   } as Driver,
 ];
@@ -149,12 +165,16 @@ function ok(d: ListDriversQuery) {
   return { data: d, isLoading: false, error: null, refetch: vi.fn() };
 }
 
-function groupLogo(driverName: string): HTMLElement {
+function driverGroup(driverName: string): HTMLElement {
   const group = document.querySelector<HTMLElement>(
     `[data-testid="driver-group"][data-driver-name="${driverName}"]`,
   );
   expect(group).not.toBeNull();
-  return within(group!).getByTestId("driver-logo");
+  return group!;
+}
+
+function groupLogo(driverName: string): HTMLElement {
+  return within(driverGroup(driverName)).getByTestId("driver-logo");
 }
 
 describe("DriverListPage", () => {
@@ -271,6 +291,81 @@ describe("DriverListPage", () => {
       "src",
       INFRAHUB_OLD_LOGO,
     );
+  });
+
+  it("shows the latest version's description in the group header, with the full text as its title", async () => {
+    useListDriversQueryMock.mockReturnValue(ok(data(DRIVERS)));
+    await renderPage();
+    const description = within(driverGroup("infrahub")).getByTestId(
+      "driver-description",
+    );
+    expect(description).toHaveTextContent(INFRAHUB_NEW_DESCRIPTION);
+    expect(description).toHaveAttribute("title", INFRAHUB_NEW_DESCRIPTION);
+    expect(description).toHaveClass("truncate");
+    expect(
+      screen.queryByText(INFRAHUB_OLD_DESCRIPTION),
+    ).not.toBeInTheDocument();
+
+    // filtering down to the older version keeps the latest version's description
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Filter drivers"), "2.0.3");
+    await waitFor(() => {
+      expect(screen.queryByText("2.1.0")).not.toBeInTheDocument();
+    });
+    expect(
+      within(driverGroup("infrahub")).getByTestId("driver-description"),
+    ).toHaveTextContent(INFRAHUB_NEW_DESCRIPTION);
+  });
+
+  it("omits the description when the latest version has none", async () => {
+    useListDriversQueryMock.mockReturnValue(
+      ok(
+        data([
+          ...DRIVERS,
+          {
+            id: "id-netbox",
+            name: "netbox",
+            versions: [
+              mkVersion(
+                "n1",
+                "4.0.0",
+                "2026-01-01T00:00:00Z",
+                null,
+                "Old NetBox description",
+              ),
+              mkVersion("n2", "4.1.0", "2026-03-01T00:00:00Z"),
+            ],
+          } as Driver,
+        ]),
+      ),
+    );
+    await renderPage();
+    expect(
+      within(driverGroup("grafana")).queryByTestId("driver-description"),
+    ).not.toBeInTheDocument();
+    // an older version's description does not stand in for the latest one
+    expect(
+      within(driverGroup("netbox")).queryByTestId("driver-description"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Old NetBox description"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders no description in the flat view", async () => {
+    useListDriversQueryMock.mockReturnValue(ok(data(DRIVERS)));
+    await renderPage();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Flat list" }));
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="driver-group"]'),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.queryAllByTestId("driver-description")).toHaveLength(0);
+    expect(
+      screen.queryByText(INFRAHUB_NEW_DESCRIPTION),
+    ).not.toBeInTheDocument();
   });
 
   it("hides the Load driver action for a read-only user", async () => {
