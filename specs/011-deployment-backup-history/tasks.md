@@ -175,7 +175,7 @@ description: "Task list for keeping a deployment's backup history when it gets a
 
 ### Tests for User Story 3
 
-- [ ] T033 [P] [US3] Extend `python_sdk/tests/test_backups.py`:
+- [X] T033 [P] [US3] Extend `python_sdk/tests/test_backups.py`:
   - `list_backups(deployment_id=...)` sends `{"deploymentId": ...}` and no `instanceId`
   - `list_backups(instance_id=...)` and positional `list_backups(<id>)` send `{"instanceId": ...}` as before
   - `status` is coerced and sent with either
@@ -185,7 +185,7 @@ description: "Task list for keeping a deployment's backup history when it gets a
 
 ### Implementation for User Story 3
 
-- [ ] T034 [US3] Check the docstring of `BackupsResource.list_backups` in `python_sdk/src/styrmin_sdk/resources/backups.py` describes both arguments, says the server enforces the exactly-one rule, and gives one example for each argument; `python_sdk/AGENTS.md` and the `docs/` pages do not document `list_backups` today, so no other SDK page changes
+- [X] T034 [US3] Check the docstring of `BackupsResource.list_backups` in `python_sdk/src/styrmin_sdk/resources/backups.py` describes both arguments, says the server enforces the exactly-one rule, and gives one example for each argument; `python_sdk/AGENTS.md` and the `docs/` pages do not document `list_backups` today, so no other SDK page changes
 
 **Checkpoint**: US3 works with the SDK tests and the propagation test green.
 

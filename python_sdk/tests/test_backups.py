@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from styrmin_sdk.exceptions import OperationFailedError, ResourceNotFoundError
+from styrmin_sdk.graphql._generated.enums import BackupStatus  # noqa: PLC2701 — not re-exported
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -417,6 +418,128 @@ class TestBackupAndRestoreSteps:
 
         _assert_steps(restores[0].steps, RESTORE_STEPS)
         assert restores[1].steps == []
+
+
+DEPLOYMENT_ID = "00000000-0000-0000-0000-000000000100"
+INSTANCE_ID = LISTED_INSTANCE["id"]
+# The instance that replaced LISTED_INSTANCE after an upgrade.
+CURRENT_INSTANCE = {"id": "00000000-0000-0000-0000-000000000011", "applicationVersion": "0.2.0"}
+
+BY_DEPLOYMENT = pytest.param({"deployment_id": DEPLOYMENT_ID}, {"deploymentId": DEPLOYMENT_ID}, id="by-deployment")
+BY_INSTANCE = pytest.param({"instance_id": INSTANCE_ID}, {"instanceId": INSTANCE_ID}, id="by-instance")
+
+
+def _listed_backup(backup_id: str, instance: dict[str, str]) -> dict[str, Any]:
+    return {**_backup(backup_id, []), "instanceId": instance["id"], "instance": instance}
+
+
+def _sent_variables(mock_transport: AsyncMock) -> dict[str, Any]:
+    _, variables = mock_transport.execute.call_args.args
+    return variables
+
+
+class TestListBackupsByDeploymentOrInstance:
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_by_deployment_sends_only_the_deployment_id(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {"data": {"backups": []}}
+
+        await client.backups.list_backups(deployment_id=UUID(DEPLOYMENT_ID))
+
+        assert _sent_variables(mock_transport) == {"deploymentId": DEPLOYMENT_ID}
+
+    @staticmethod
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("args", "kwargs"),
+        [
+            pytest.param((INSTANCE_ID,), {}, id="positional"),
+            pytest.param((), {"instance_id": INSTANCE_ID}, id="keyword"),
+        ],
+    )
+    async def test_by_instance_sends_only_the_instance_id(
+        client: StyrminClient, mock_transport: AsyncMock, args: tuple[str, ...], kwargs: dict[str, str]
+    ) -> None:
+        mock_transport.execute.return_value = {"data": {"backups": []}}
+
+        await client.backups.list_backups(*args, **kwargs)
+
+        assert _sent_variables(mock_transport) == {"instanceId": INSTANCE_ID}
+
+    @staticmethod
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("id_kwargs", "id_variables"), [BY_DEPLOYMENT, BY_INSTANCE])
+    @pytest.mark.parametrize(
+        "status", [pytest.param("completed", id="str"), pytest.param(BackupStatus.COMPLETED, id="enum")]
+    )
+    async def test_status_is_coerced_and_sent_with_either_id(
+        client: StyrminClient,
+        mock_transport: AsyncMock,
+        id_kwargs: dict[str, str],
+        id_variables: dict[str, str],
+        status: BackupStatus | str,
+    ) -> None:
+        mock_transport.execute.return_value = {"data": {"backups": []}}
+
+        await client.backups.list_backups(status=status, **id_kwargs)
+
+        assert _sent_variables(mock_transport) == {**id_variables, "status": "COMPLETED"}
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_parses_the_instance_each_backup_was_taken_of(
+        client: StyrminClient, mock_transport: AsyncMock
+    ) -> None:
+        other_id = "00000000-0000-0000-0000-000000000002"
+        mock_transport.execute.return_value = {
+            "data": {
+                "backups": [
+                    _listed_backup(BACKUP_ID, CURRENT_INSTANCE),
+                    _listed_backup(other_id, LISTED_INSTANCE),
+                ]
+            }
+        }
+
+        backups = await client.backups.list_backups(deployment_id=DEPLOYMENT_ID)
+
+        assert backups[0].instance.application_version == "0.2.0"
+        assert [(str(b.instance.id), b.instance.application_version) for b in backups] == [
+            (CURRENT_INSTANCE["id"], "0.2.0"),
+            (INSTANCE_ID, "0.1.0"),
+        ]
+
+    @staticmethod
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("kwargs", "message", "sent"),
+        [
+            pytest.param(
+                {"deployment_id": DEPLOYMENT_ID, "instance_id": INSTANCE_ID},
+                "Provide either deployment_id or instance_id, not both",
+                {"deploymentId": DEPLOYMENT_ID, "instanceId": INSTANCE_ID},
+                id="both",
+            ),
+            pytest.param({}, "Either deployment_id or instance_id is required", {}, id="neither"),
+        ],
+    )
+    async def test_validation_error_raises_operation_failed(
+        client: StyrminClient,
+        mock_transport: AsyncMock,
+        kwargs: dict[str, str],
+        message: str,
+        sent: dict[str, str],
+    ) -> None:
+        mock_transport.execute.return_value = {
+            "data": None,
+            "errors": [{"message": message, "extensions": {"code": "VALIDATION_ERROR"}}],
+        }
+
+        with pytest.raises(OperationFailedError, match=message) as exc_info:
+            await client.backups.list_backups(**kwargs)
+
+        assert exc_info.value.typename == "VALIDATION_ERROR"
+        # The server owns the exactly-one rule, so the SDK sends what it was given.
+        assert _sent_variables(mock_transport) == sent
 
 
 class TestScheduleResource:
