@@ -97,6 +97,34 @@ def _rollout_started_at(status: Any, body: Any) -> datetime | None:
     )
 
 
+def _seconds_to_ready_timeout(status: Any, body: Any) -> float | None:
+    """Seconds left before the rollout's readiness timeout (negative once passed)."""
+    started_at = _rollout_started_at(status, body)
+    if started_at is None:
+        return None
+    elapsed = (datetime.now(tz=UTC) - started_at).total_seconds()
+    return config.SETTINGS.operator.deployment_ready_timeout - elapsed
+
+
+#: Wait this long past the readiness timeout, so the check after the wait sees it passed.
+_READY_TIMEOUT_MARGIN_SECONDS = 1.0
+
+
+async def _wait_for_ready_timeout(
+    spec: Any, status: Any, body: Any, stopped: kopf.DaemonStopped
+) -> None:
+    """Wait past the readiness timeout when the next timer run would come after it."""
+    phase = status.get("phase", DeploymentPhase.PENDING.value)
+    if phase not in _ROLLOUT_PHASES or spec.get("deletionRequested", False):
+        return
+    remaining = _seconds_to_ready_timeout(status, body)
+    if remaining is None or remaining <= 0:
+        return
+    delay = remaining + _READY_TIMEOUT_MARGIN_SECONDS
+    if delay < config.SETTINGS.operator.reconcile_interval:
+        await stopped.wait(delay)
+
+
 @contextmanager
 def _recording_instance(spec: dict[str, Any], patch: Any) -> Iterator[None]:
     """Write the handled ``spec.instanceId`` to ``status.instanceId``, also when the handler raises.
@@ -869,9 +897,15 @@ async def kopf_styrmin_deployment_timer(
     namespace: str | None,
     patch: kopf.Patch,
     logger: kopf.Logger,
+    stopped: kopf.DaemonStopped,
     **_: Any,
 ) -> None:
     """Periodic reconciliation: advance phases and detect drift."""
+    # kopf keeps a timer's body, spec and status up to date, so after the wait the tick reads the
+    # CR as it is at the readiness timeout.
+    await _wait_for_ready_timeout(spec, status, body, stopped)
+    if stopped:
+        return
     ns = namespace or ""
     phase = status.get("phase", DeploymentPhase.PENDING.value)
     conditions = list(status.get("conditions", []))
@@ -912,23 +946,19 @@ async def kopf_styrmin_deployment_timer(
         DeploymentPhase.FAILED.value,
         DeploymentPhase.DELETING.value,
     ):
-        started_at = _rollout_started_at(status, body)
-        if started_at is not None:
-            elapsed = (datetime.now(tz=UTC) - started_at).total_seconds()
+        remaining = _seconds_to_ready_timeout(status, body)
+        if remaining is not None and remaining < 0:
             ready_timeout = config.SETTINGS.operator.deployment_ready_timeout
-            if elapsed > ready_timeout:
-                current_display = status.get(
-                    "displayState", DisplayState.DEPLOYING.value
+            current_display = status.get("displayState", DisplayState.DEPLOYING.value)
+            if current_display != DisplayState.ERROR.value:
+                patch.status["displayState"] = DisplayState.ERROR.value
+                patch.status["message"] = (
+                    f"Deployment did not reach Ready within"
+                    f" {ready_timeout}s (phase: {phase})"
                 )
-                if current_display != DisplayState.ERROR.value:
-                    patch.status["displayState"] = DisplayState.ERROR.value
-                    patch.status["message"] = (
-                        f"Deployment did not reach Ready within"
-                        f" {ready_timeout}s (phase: {phase})"
-                    )
-                    logger.warning(
-                        "Deployment %s/%s timed out in phase %s", ns, name, phase
-                    )
+                logger.warning(
+                    "Deployment %s/%s timed out in phase %s", ns, name, phase
+                )
 
     # Phase advancement for in-progress deployments
     if phase == DeploymentPhase.CREATING_HELM_RELEASE.value:

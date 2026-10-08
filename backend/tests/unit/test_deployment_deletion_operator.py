@@ -56,6 +56,15 @@ class _Logger:
     def exception(self, *_: Any, **__: Any) -> None: ...
 
 
+class _Stopped:
+    """Stand-in for kopf's ``stopped`` flag of a timer that kopf does not stop."""
+
+    def __bool__(self) -> bool:
+        return False
+
+    async def wait(self, timeout: float) -> None: ...
+
+
 def _make_body(creation_offset_seconds: int = 0) -> dict[str, Any]:
     created_at = datetime.now(tz=timezone.utc) - timedelta(
         seconds=creation_offset_seconds
@@ -207,6 +216,7 @@ async def test_timer_advances_to_deleted_once_namespace_is_gone(mocker) -> None:
         namespace="styrmin-abc",
         patch=patch,
         logger=_Logger(),
+        stopped=_Stopped(),
     )
 
     assert patch.status["phase"] == DeploymentPhase.DELETED.value
@@ -247,6 +257,7 @@ async def test_timer_keeps_deleting_when_namespace_still_present(mocker) -> None
         namespace="styrmin-abc",
         patch=patch,
         logger=_Logger(),
+        stopped=_Stopped(),
     )
 
     assert "phase" not in patch.status
@@ -285,6 +296,7 @@ async def test_timer_noop_for_terminal_deleted_phase(mocker) -> None:
         namespace="styrmin-abc",
         patch=patch,
         logger=_Logger(),
+        stopped=_Stopped(),
     )
 
     # _advance_to_phase_deleted will be entered (because the gating

@@ -7,17 +7,20 @@ is the regression that caused deployments to land in 'failed' after a
 successful velero restore.
 
 Also: the timer fails the CR when the HelmRelease reports the
-component-container guard failure (018, FR-007).
+component-container guard failure (018, FR-007), and waits for a readiness
+timeout that comes before its next run.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
 from kubernetes_asyncio.client.api_client import ApiException
 
+from styrmin_backend import config
 from styrmin_backend.operator import reconciler as reconciler_module
 from styrmin_backend.operator.crd.schema import (
     ConditionType,
@@ -54,6 +57,23 @@ class _Logger:
     def warning(self, *_: Any, **__: Any) -> None: ...
     def debug(self, *_: Any, **__: Any) -> None: ...
     def error(self, *_: Any, **__: Any) -> None: ...
+
+
+class _Stopped:
+    """Stand-in for kopf's ``stopped`` flag; ``on_wait`` runs in place of the wait."""
+
+    def __init__(self, on_wait: Callable[[float], None] | None = None) -> None:
+        self.is_set = False
+        self.waits: list[float] = []
+        self._on_wait = on_wait
+
+    def __bool__(self) -> bool:
+        return self.is_set
+
+    async def wait(self, timeout: float) -> None:
+        self.waits.append(timeout)
+        if self._on_wait is not None:
+            self._on_wait(timeout)
 
 
 def _make_body(creation_offset_seconds: int = 0) -> dict[str, Any]:
@@ -94,6 +114,7 @@ async def test_timer_skips_when_phase_is_restoring_even_after_timeout() -> None:
         namespace="styrmin-deadbeef",
         patch=patch,
         logger=_Logger(),
+        stopped=_Stopped(),
     )
 
     # Nothing should have been patched — the timer must defer to the
@@ -121,6 +142,7 @@ async def test_timer_still_trips_timeout_for_non_restoring_phase() -> None:
         namespace="styrmin-deadbeef",
         patch=patch,
         logger=_Logger(),
+        stopped=_Stopped(),
     )
 
     assert patch.status.get("displayState") == DisplayState.ERROR.value
@@ -161,6 +183,7 @@ async def test_timeout_counts_from_the_rollout_start(
         namespace="styrmin-deadbeef",
         patch=patch,
         logger=_Logger(),
+        stopped=_Stopped(),
     )
 
     if times_out:
@@ -193,9 +216,142 @@ async def test_timeout_falls_back_to_the_creation_time(
         namespace="styrmin-deadbeef",
         patch=patch,
         logger=_Logger(),
+        stopped=_Stopped(),
     )
 
     assert patch.status["displayState"] == DisplayState.ERROR.value
+
+
+# --- A readiness timeout that comes before the next timer run ---
+
+NOW = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture
+def clock(mocker: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """The handlers' clock, frozen at NOW, with the default interval and readiness timeout."""
+    monkeypatch.setattr(config.SETTINGS.operator, "reconcile_interval", 60)
+    monkeypatch.setattr(config.SETTINGS.operator, "deployment_ready_timeout", 270)
+    clock = mocker.patch.object(handlers_module, "datetime", wraps=datetime)
+    clock.now.return_value = NOW
+    return clock
+
+
+def _elapse(clock: Any) -> Callable[[float], None]:
+    def elapse(seconds: float) -> None:
+        clock.now.return_value += timedelta(seconds=seconds)
+
+    return elapse
+
+
+def _rollout_status(started_ago: float) -> dict[str, Any]:
+    return {
+        "phase": DeploymentPhase.CREATING_HELM_RELEASE.value,
+        "displayState": DisplayState.DEPLOYING.value,
+        "rolloutStartedAt": (NOW - timedelta(seconds=started_ago)).isoformat(),
+    }
+
+
+@pytest.mark.anyio
+async def test_timer_waits_for_a_readiness_timeout_before_its_next_run(
+    mocker: Any, clock: Any
+) -> None:
+    """30 s before the timeout, the next run (60 s) would fail the rollout after FluxCD's rollback."""
+    get_hr = _mock_helmrelease(mocker, None)
+    stopped = _Stopped(on_wait=_elapse(clock))
+    patch = _Patch()
+
+    await _run_timer(_rollout_status(started_ago=240), patch, stopped)
+
+    assert stopped.waits == [31.0]
+    assert patch.status["displayState"] == DisplayState.ERROR.value
+    assert patch.status["message"] == (
+        "Deployment did not reach Ready within 270s (phase: CreatingHelmRelease)"
+    )
+    # The rest of the tick runs after the wait.
+    get_hr.assert_awaited_once()
+
+
+def _reach_ready(status: dict[str, Any]) -> None:
+    status["phase"] = DeploymentPhase.READY.value
+    status["displayState"] = DisplayState.RUNNING.value
+
+
+def _start_new_rollout(status: dict[str, Any]) -> None:
+    status["rolloutStartedAt"] = (NOW + timedelta(seconds=30)).isoformat()
+
+
+@pytest.mark.parametrize(
+    "move_on", [_reach_ready, _start_new_rollout], ids=["ready", "new-rollout"]
+)
+@pytest.mark.anyio
+async def test_timer_does_not_fail_a_cr_that_moved_on_during_the_wait(
+    mocker: Any, clock: Any, move_on: Callable[[dict[str, Any]], None]
+) -> None:
+    """kopf updates the timer's status during the wait, and the tick reads it after the wait."""
+    _mock_helmrelease(mocker, None)
+    mocker.patch(
+        "styrmin_backend.operator.pipeline.build_desired_resources_from_crd",
+        return_value=[],
+    )
+    mocker.patch.object(
+        reconciler_module,
+        "list_managed_resources",
+        new=mocker.AsyncMock(return_value=[]),
+    )
+    status = _rollout_status(started_ago=240)
+    elapse = _elapse(clock)
+
+    def wait(seconds: float) -> None:
+        elapse(seconds)
+        move_on(status)
+
+    stopped = _Stopped(on_wait=wait)
+    patch = _Patch()
+
+    await _run_timer(status, patch, stopped)
+
+    assert stopped.waits == [31.0]
+    assert patch.status == {}
+
+
+@pytest.mark.parametrize(
+    ("started_ago", "times_out"),
+    [(170, False), (211, False), (300, True)],
+    ids=["timeout-after-next-run", "wait-would-reach-next-run", "timeout-passed"],
+)
+@pytest.mark.anyio
+async def test_timer_waits_only_when_the_timeout_comes_before_its_next_run(
+    mocker: Any, clock: Any, started_ago: int, times_out: bool
+) -> None:
+    _mock_helmrelease(mocker, None)
+    stopped = _Stopped(on_wait=_elapse(clock))
+    patch = _Patch()
+
+    await _run_timer(_rollout_status(started_ago=started_ago), patch, stopped)
+
+    assert stopped.waits == []
+    assert (patch.status.get("displayState") == DisplayState.ERROR.value) is times_out
+
+
+@pytest.mark.anyio
+async def test_timer_writes_nothing_when_kopf_stops_it_during_the_wait(
+    mocker: Any, clock: Any
+) -> None:
+    """kopf stops the timer when the CR is deleted or the operator exits."""
+    get_hr = _mock_helmrelease(mocker, None)
+
+    def stop(_: float) -> None:
+        stopped.is_set = True
+
+    stopped = _Stopped(on_wait=stop)
+    patch = _Patch()
+
+    await _run_timer(_rollout_status(started_ago=240), patch, stopped)
+
+    assert stopped.waits == [31.0]
+    assert patch.status == {}
+    get_hr.assert_not_awaited()
 
 
 # --- Component-container guard failure surfacing (018, T056) ---
@@ -290,7 +446,9 @@ def _mock_helmrelease(mocker: Any, helmrelease: dict[str, Any] | None) -> Any:
     )
 
 
-async def _run_timer(status: dict[str, Any], patch: _Patch) -> None:
+async def _run_timer(
+    status: dict[str, Any], patch: _Patch, stopped: _Stopped | None = None
+) -> None:
     await kopf_styrmin_deployment_timer(
         body=_make_body(),
         spec=SPEC,
@@ -299,6 +457,7 @@ async def _run_timer(status: dict[str, Any], patch: _Patch) -> None:
         namespace="styrmin-deadbeef",
         patch=patch,
         logger=_Logger(),
+        stopped=_Stopped() if stopped is None else stopped,
     )
 
 
@@ -390,6 +549,7 @@ async def test_guard_failure_message_replaces_readiness_timeout_message(
         namespace="styrmin-deadbeef",
         patch=patch,
         logger=_Logger(),
+        stopped=_Stopped(),
     )
 
     _assert_failed_on_guard(patch)
