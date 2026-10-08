@@ -234,15 +234,6 @@ async def test_drawer_scheduling_edit(
         "the UI; no SDK equivalent."
     ),
 )
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "Flaky under CI load — keyboard-driven Apply intermittently submits "
-        "with stale form state and the CPU edit doesn't persist. See "
-        "opsmill/styrmin#260. Quarantined so unrelated CI work can land; "
-        "flip back to a hard assert once the form-state desync is fixed."
-    ),
-)
 async def test_drawer_scheduling_edit_keyboard_only(
     drawer_deployment: dict,
     session_ui_page: "Page",
@@ -295,10 +286,20 @@ async def test_drawer_scheduling_edit_keyboard_only(
     # at commit b19c914. Bump to 30s to match the pattern of the
     # ``to_be_hidden`` assertion below.
     await expect(diff_dialog).to_be_visible(timeout=30_000)
+    await expect(
+        diff_dialog.locator("[data-testid=diff-section-scheduling]")
+    ).to_contain_text("Request cpu")
 
+    # Base UI focuses the dialog's close button one animation frame after
+    # opening. Focusing Apply before that frame let it steal focus, so Enter
+    # closed the dialog without applying (#260).
+    await expect(
+        diff_dialog.locator("[data-testid=diff-dialog-close-button]")
+    ).to_be_focused()
     apply_button = page.locator("[data-testid=diff-dialog-apply-button]")
     await expect(apply_button).to_be_enabled()
     await apply_button.focus()
+    await expect(apply_button).to_be_focused()
     await page.keyboard.press("Enter")
 
     await expect(diff_dialog).to_be_hidden(timeout=60_000)
