@@ -44,7 +44,7 @@ ClusterName = Annotated[str | None, Parameter(help="Name of the cluster.")]
 EnvironmentName = Annotated[str | None, Parameter(help="Name of the environment.")]
 DeploymentName = Annotated[
     str | None,
-    Parameter(help="Name of the deployment (resolves its active instance)."),
+    Parameter(help="Name of the deployment."),
 ]
 
 # --- Optional ID flags (--id for backward-compatible UUID access) ---
@@ -59,7 +59,7 @@ OptionalEnvironmentId = Annotated[
 ]
 OptionalDeploymentId = Annotated[
     str | None,
-    Parameter(name="--id", help="UUID of the deployment (resolves its active instance).", validator=validate_uuid),
+    Parameter(name="--id", help="UUID of the deployment.", validator=validate_uuid),
 ]
 
 # --- Environment context flag (disambiguates a deployment name lookup) ---
