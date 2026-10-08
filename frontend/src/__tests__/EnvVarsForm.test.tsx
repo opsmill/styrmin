@@ -3,11 +3,10 @@ import { render, screen, userEvent, waitFor, within } from "@/test/utils";
 
 import { EnvVarsForm } from "@/components/environment/EnvVarsForm";
 
-const NO_DEPLOYMENTS: Array<{ id: string; name: string; internal: boolean }> =
-  [];
+const NO_DEPLOYMENTS: Array<{ id: string; name: string }> = [];
 
-const ONE_DEPLOYMENT: Array<{ id: string; name: string; internal: boolean }> = [
-  { id: "d1", name: "deploy-one", internal: false },
+const ONE_DEPLOYMENT: Array<{ id: string; name: string }> = [
+  { id: "d1", name: "deploy-one" },
 ];
 
 describe("EnvVarsForm", () => {

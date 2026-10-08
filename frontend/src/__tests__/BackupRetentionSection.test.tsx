@@ -28,8 +28,7 @@ vi.mock("@/generated/graphql", async () => {
 
 const ENV_ID = "00000000-0000-0000-0000-000000000001";
 
-const NO_DEPLOYMENTS: Array<{ id: string; name: string; internal: boolean }> =
-  [];
+const NO_DEPLOYMENTS: Array<{ id: string; name: string }> = [];
 
 /** A fully-populated config with no nested overrides (so Save is allowed). */
 const FULL_CONFIG: Record<string, unknown> = {

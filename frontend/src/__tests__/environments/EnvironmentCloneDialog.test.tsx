@@ -52,7 +52,6 @@ function deployment(
 ): CloneCandidateDeployment {
   return {
     id: `dep-${overrides.name}`,
-    internal: false,
     deletedAt: null,
     applicationInstance: { id: `inst-${overrides.name}` },
     ...overrides,
@@ -63,7 +62,6 @@ function deployment(
 const DEPLOYMENTS: CloneCandidateDeployment[] = [
   deployment({ name: "api" }),
   deployment({ name: "worker" }),
-  deployment({ name: "styrmin-agent", internal: true }),
   deployment({ name: "never-deployed", applicationInstance: null }),
   deployment({ name: "old", deletedAt: "2026-08-01T00:00:00Z" }),
 ];
@@ -137,9 +135,6 @@ describe("clone eligibility helpers", () => {
   it("mirrors the environment-backup eligibility rule", () => {
     expect(cloneIneligibilityReason(deployment({ name: "api" }))).toBeNull();
     expect(
-      cloneIneligibilityReason(deployment({ name: "a", internal: true })),
-    ).toBe("internal");
-    expect(
       cloneIneligibilityReason(
         deployment({ name: "a", applicationInstance: null }),
       ),
@@ -151,13 +146,13 @@ describe("clone eligibility helpers", () => {
     ).toBe("tombstoned");
   });
 
-  it("reports a deleted internal deployment as deleted", () => {
-    // Both flags are true; the deletion is the half the operator can act on.
+  it("reports a deleted, never-deployed deployment as deleted", () => {
+    // Both conditions hold; the deletion is the one the operator can act on.
     expect(
       cloneIneligibilityReason(
         deployment({
           name: "a",
-          internal: true,
+          applicationInstance: null,
           deletedAt: "2026-01-01T00:00:00Z",
         }),
       ),
@@ -339,7 +334,7 @@ describe("CloneEnvironmentDialog", () => {
     const user = await openDialog();
 
     const rows = screen.getAllByTestId("clone-deployment-option");
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(4);
 
     const byName = new Map(
       rows.map((row) => [row.getAttribute("data-deployment-name"), row]),
@@ -355,7 +350,6 @@ describe("CloneEnvironmentDialog", () => {
     // reason: one silently missing from the picker is indistinguishable from
     // one that was never in the environment.
     for (const [name, reason, label] of [
-      ["styrmin-agent", "internal", "internal"],
       ["never-deployed", "no_active_instance", "never deployed"],
       ["old", "tombstoned", "deleted"],
     ] as const) {

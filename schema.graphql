@@ -618,7 +618,7 @@ type Environment {
   WARNING: This surface is for non-secret values only. The platform stores values in plaintext and exposes them through any query that selects them. Do not store credentials, API keys, or other secret material here — use the dedicated secret env var path (separate ticket) once available.
   """
   envVars: [EnvVar!]!
-  deployments(includeDeleted: Boolean! = false): [Deployment!]!
+  deployments(includeDeleted: Boolean! = false, includeInternal: Boolean! = false): [Deployment!]!
 }
 
 type EnvironmentBackup {

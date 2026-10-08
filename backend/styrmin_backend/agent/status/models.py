@@ -134,7 +134,6 @@ class ReportDeploymentStatusesResponse(BaseModel):
 class DeploymentForStatus(BaseModel):
     id: str
     status: str
-    internal: bool
 
 
 class EnvironmentForStatus(BaseModel):

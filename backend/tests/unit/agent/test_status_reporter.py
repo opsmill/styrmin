@@ -484,7 +484,6 @@ class TestGetActiveDeployments:
                                 {
                                     "id": dep_id,
                                     "status": "running",
-                                    "internal": False,
                                 }
                             ]
                         }
@@ -525,40 +524,11 @@ class TestGetActiveDeployments:
         assert results == []
 
     @pytest.mark.anyio
-    async def test_filters_internal(self) -> None:
-        mock_resp = _mock_response(
-            {
-                "data": {
-                    "environments": [
-                        {
-                            "deployments": [
-                                {
-                                    "id": str(uuid4()),
-                                    "status": "running",
-                                    "internal": True,
-                                },
-                                {
-                                    "id": str(uuid4()),
-                                    "status": "running",
-                                    "internal": False,
-                                },
-                            ]
-                        }
-                    ]
-                }
-            }
-        )
-        with patch("styrmin_backend.agent.status.reporter.httpx.AsyncClient") as mock:
-            mock.return_value.__aenter__ = AsyncMock(return_value=mock.return_value)
-            mock.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock.return_value.post = AsyncMock(return_value=mock_resp)
-            results = await _get_active_deployments(GRAPHQL_URL)
-        assert len(results) == 1
-
-    @pytest.mark.anyio
-    async def test_keeps_internal_being_deleted(self) -> None:
-        """An internal ingress controller in teardown is reported, so the
-        backend can tombstone it once its CR is gone (#252)."""
+    async def test_reports_internal_deployments(self) -> None:
+        """The default environment list hides internal deployments, so the
+        reporter asks for them: an ingress controller needs its status
+        reported, including the tombstone after teardown (#252)."""
+        running_id = str(uuid4())
         deleting_id = str(uuid4())
         mock_resp = _mock_response(
             {
@@ -566,16 +536,8 @@ class TestGetActiveDeployments:
                     "environments": [
                         {
                             "deployments": [
-                                {
-                                    "id": deleting_id,
-                                    "status": "deleting",
-                                    "internal": True,
-                                },
-                                {
-                                    "id": str(uuid4()),
-                                    "status": "pending",
-                                    "internal": True,
-                                },
+                                {"id": running_id, "status": "running"},
+                                {"id": deleting_id, "status": "deleting"},
                             ]
                         }
                     ]
@@ -587,8 +549,11 @@ class TestGetActiveDeployments:
             mock.return_value.__aexit__ = AsyncMock(return_value=False)
             mock.return_value.post = AsyncMock(return_value=mock_resp)
             results = await _get_active_deployments(GRAPHQL_URL)
+            sent_query = mock.return_value.post.await_args.kwargs["json"]["query"]
+        assert "includeInternal: true" in sent_query
         assert [(str(dep_id), status) for dep_id, status in results] == [
-            (deleting_id, "deleting")
+            (running_id, "running"),
+            (deleting_id, "deleting"),
         ]
 
 

@@ -789,11 +789,13 @@ async def _wait_for_deployment_status(
 async def _ingress_controller_ids(
     client: StyrminClient, environment_id: str, *, include_deleted: bool = False
 ) -> dict[str, str]:
-    """Map each ingress controller deployment's id to its status. The
-    ``deployment`` query hides internal deployments; the environment list
-    does not."""
+    """Map each ingress controller deployment's id to its status. Both the
+    ``deployment`` query and the default environment list hide internal
+    deployments, so the list has to ask for them."""
     deployments = await client.deployments.list(
-        environment_id=environment_id, include_deleted=include_deleted
+        environment_id=environment_id,
+        include_deleted=include_deleted,
+        include_internal=True,
     )
     return {
         str(deployment.id): deployment.status

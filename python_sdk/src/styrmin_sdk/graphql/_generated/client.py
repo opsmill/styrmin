@@ -1987,12 +1987,16 @@ class Client(AsyncBaseClient):
         return ListClusters.model_validate(data)
 
     async def list_deployments(
-        self, environment_id: UUID, include_deleted: bool, **kwargs: Any
+        self,
+        environment_id: UUID,
+        include_deleted: bool,
+        include_internal: bool,
+        **kwargs: Any,
     ) -> ListDeployments:
         query = gql("""
-            query ListDeployments($environmentId: UUID!, $includeDeleted: Boolean! = false) {
+            query ListDeployments($environmentId: UUID!, $includeDeleted: Boolean! = false, $includeInternal: Boolean! = false) {
               environment(environmentId: $environmentId) {
-                deployments(includeDeleted: $includeDeleted) {
+                deployments(includeDeleted: $includeDeleted, includeInternal: $includeInternal) {
                   id
                   name
                   status
@@ -2007,6 +2011,7 @@ class Client(AsyncBaseClient):
         variables: dict[str, object] = {
             "environmentId": environment_id,
             "includeDeleted": include_deleted,
+            "includeInternal": include_internal,
         }
         response = await self.execute(
             query=query, operation_name="ListDeployments", variables=variables, **kwargs

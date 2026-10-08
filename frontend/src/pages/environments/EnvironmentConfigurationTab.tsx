@@ -34,7 +34,7 @@ import { buildFullReplacementInput } from "./EnvironmentConfigurationTab.helpers
 interface EnvironmentConfigurationTabProps {
   environmentId: string;
   config: Record<string, unknown> | null | undefined;
-  deployments: Array<{ id: string; name: string; internal: boolean }>;
+  deployments: Array<{ id: string; name: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +226,7 @@ function EnvVarsSection({
 }: {
   environmentId: string;
   vars: Array<{ name: string; value: string }>;
-  deployments: Array<{ id: string; name: string; internal: boolean }>;
+  deployments: Array<{ id: string; name: string }>;
   config: Record<string, unknown> | null | undefined;
 }) {
   const queryClient = useQueryClient();
@@ -278,7 +278,7 @@ function BackupRetentionSection({
 }: {
   environmentId: string;
   backupTtl: string | null;
-  deployments: Array<{ id: string; name: string; internal: boolean }>;
+  deployments: Array<{ id: string; name: string }>;
   config: Record<string, unknown> | null | undefined;
 }) {
   const queryClient = useQueryClient();

@@ -16,7 +16,6 @@ query GetEnvironment($environmentId: UUID!, $includeDeleted: Boolean = false) {
       name
       status
       deletedAt
-      internal
       applicationVersion
       applicationDriverVersionId
       applicationDriverVersion {

@@ -148,6 +148,17 @@ class EnvironmentsListPage:
             )
         return EnvironmentRef(id=env_id, name=name, cluster_id=cluster_id)
 
+    async def read_card_summary(self, *, environment_id: str) -> tuple[str, int]:
+        """Return the status and application count an environment card shows."""
+        card = self._page.locator(
+            f"[data-testid=environment-card][data-environment-id='{environment_id}']"
+        ).first
+        await card.wait_for()
+        context = f"environment card {environment_id}"
+        status = await _required_attr(card, "data-environment-status", context=context)
+        count = await _required_attr(card, "data-application-count", context=context)
+        return status, int(count)
+
 
 class EnvironmentDetailPage:
     def __init__(self, page: Page) -> None:
@@ -213,6 +224,28 @@ class EnvironmentDetailPage:
             await asyncio.sleep(1.0)
         raise ScenarioTimeout(
             f"deployment row {deployment_id} did not appear within {timeout}s"
+        )
+
+    async def read_listed_deployment_ids(self) -> set[str]:
+        """Return the ids of every deployment row the overview lists."""
+        rows = self._page.locator("[data-testid=deployment-row]")
+        return {
+            await _required_attr(
+                rows.nth(i), "data-deployment-id", context="deployment row"
+            )
+            for i in range(await rows.count())
+        }
+
+    async def read_application_count(self) -> int:
+        """Return the number in the "Applications" summary tile."""
+        tile = self._page.locator("[data-testid=environment-application-count]").first
+        return int((await tile.inner_text()).strip())
+
+    async def read_environment_status(self) -> str:
+        """Return the status the header badge shows for the environment."""
+        root = self._page.locator("[data-testid=environment-detail]").first
+        return await _required_attr(
+            root, "data-environment-status", context="environment detail"
         )
 
     async def toggle_show_deleted(self) -> None:

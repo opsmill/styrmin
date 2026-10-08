@@ -103,7 +103,9 @@ type-checks and fails at execution.
 
 Both shapes return `null` on not-found rather than raising, and both apply the
 same `internal=True` guard — a lookup landing on a platform-internal deployment
-returns `null`. Resolution itself lives in
+returns `null`. `Environment.deployments` leaves internal deployments out too,
+unless the caller passes `includeInternal: true` (the agent status reporter
+does, see `dev/knowledge/agent/overview.md`). Resolution itself lives in
 `services/deployment.py::get_deployment_by_name`.
 
 See [ADR-050](../../adr/0050-composite-natural-key-deployment-lookup.md) for why this

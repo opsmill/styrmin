@@ -24,6 +24,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Plus } from "lucide-react";
 import { formatDriverVersionLabel } from "@/lib/driverVersion";
+import { deriveEnvHealth } from "@/lib/environment-health";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { IfRole } from "@/auth/IfRole";
 import { useEffectiveRole } from "@/auth/useEffectiveRole";
@@ -47,7 +48,6 @@ export default function EnvironmentDetailPage() {
   const navigate = useNavigate();
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
-  const [showInternal, setShowInternal] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
   const { data, isLoading, error, refetch, dataUpdatedAt } =
     useGetEnvironmentQuery(
@@ -92,26 +92,8 @@ export default function EnvironmentDetailPage() {
         .map(([key, value]) => ({ key, value }))
     : [];
 
-  const userDeployments = environment.deployments.filter((d) => !d.internal);
-  const internalDeployments = environment.deployments.filter((d) => d.internal);
-
-  const hasFailures = environment.deployments.some(
-    (d) => d.status === "FAILED" || d.status === "failed",
-  );
-  const hasPending = environment.deployments.some(
-    (d) =>
-      d.status === "PENDING" ||
-      d.status === "pending" ||
-      d.status === "in_progress",
-  );
-  const envHealth =
-    environment.deployments.length === 0
-      ? "pending"
-      : hasFailures
-        ? "failed"
-        : hasPending
-          ? "pending"
-          : "active";
+  const { deployments } = environment;
+  const envHealth = deriveEnvHealth(deployments);
   const envColors = getStatusColor(envHealth);
 
   return (
@@ -120,6 +102,7 @@ export default function EnvironmentDetailPage() {
       data-testid="environment-detail"
       data-environment-id={environment.id}
       data-bsl-id={environment.backupStorageLocation?.id ?? ""}
+      data-environment-status={envHealth}
     >
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-xs">
@@ -171,8 +154,11 @@ export default function EnvironmentDetailPage() {
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
             Applications
           </span>
-          <span className="text-2xl font-bold tracking-tight text-foreground">
-            {userDeployments.length}
+          <span
+            className="text-2xl font-bold tracking-tight text-foreground"
+            data-testid="environment-application-count"
+          >
+            {deployments.length}
           </span>
         </div>
         <div className="flex flex-1 flex-col gap-1 rounded-[10px] bg-surface p-4">
@@ -206,33 +192,11 @@ export default function EnvironmentDetailPage() {
                 Deployed Applications
               </span>
               <span className="text-xs text-muted-foreground">
-                {userDeployments.length} application
-                {userDeployments.length !== 1 ? "s" : ""}
-                {showInternal &&
-                  internalDeployments.length > 0 &&
-                  ` · ${internalDeployments.length} internal`}
+                {deployments.length} application
+                {deployments.length !== 1 ? "s" : ""}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              {internalDeployments.length > 0 && (
-                <button
-                  onClick={() => setShowInternal((prev) => !prev)}
-                  className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                    showInternal
-                      ? "border-primary bg-primary/5 text-primary"
-                      : "border-border text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <div
-                    className={`flex h-4 w-7 items-center rounded-full p-0.5 transition-colors ${
-                      showInternal ? "justify-end bg-primary" : "bg-border"
-                    }`}
-                  >
-                    <div className="h-3 w-3 rounded-full bg-white" />
-                  </div>
-                  Show internal
-                </button>
-              )}
               <button
                 onClick={() => setShowDeleted((prev) => !prev)}
                 className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
@@ -254,7 +218,7 @@ export default function EnvironmentDetailPage() {
             </div>
           </div>
 
-          {userDeployments.length === 0 && !showInternal ? (
+          {deployments.length === 0 ? (
             <EmptyState
               title="No deployments"
               description="No applications have been deployed to this environment yet."
@@ -290,8 +254,7 @@ export default function EnvironmentDetailPage() {
                 </span>
               </div>
 
-              {/* User deployments */}
-              {userDeployments.map((deployment, i) => (
+              {deployments.map((deployment, i) => (
                 <DeploymentRow
                   key={deployment.id}
                   deployment={deployment}
@@ -299,30 +262,6 @@ export default function EnvironmentDetailPage() {
                   index={i}
                 />
               ))}
-
-              {/* Internal deployments */}
-              {showInternal && internalDeployments.length > 0 && (
-                <>
-                  {/* Dashed separator */}
-                  <div className="flex items-center gap-2.5 py-1">
-                    <div className="h-px flex-1 border-t border-dashed border-border" />
-                    <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                      Internal
-                    </span>
-                    <div className="h-px flex-1 border-t border-dashed border-border" />
-                  </div>
-
-                  {internalDeployments.map((deployment, i) => (
-                    <DeploymentRow
-                      key={deployment.id}
-                      deployment={deployment}
-                      environmentId={environmentId}
-                      index={i}
-                      internal
-                    />
-                  ))}
-                </>
-              )}
             </>
           )}
         </div>
@@ -381,7 +320,7 @@ export default function EnvironmentDetailPage() {
         <EnvironmentConfigurationTab
           environmentId={environmentId}
           config={environment.config}
-          deployments={environment.deployments}
+          deployments={deployments}
         />
       </TabPanel>
 
@@ -405,7 +344,7 @@ export default function EnvironmentDetailPage() {
         <EnvironmentClonesSection
           environmentId={environmentId}
           environmentName={environment.name}
-          deployments={environment.deployments}
+          deployments={deployments}
           config={environment.config}
           isActive={activeTab === "clones"}
           autoRefreshEnabled={autoRefreshEnabled}
@@ -439,7 +378,6 @@ export function DeploymentRow({
   deployment,
   environmentId,
   index,
-  internal = false,
 }: {
   deployment: {
     id: string;
@@ -457,7 +395,6 @@ export function DeploymentRow({
   };
   environmentId: string;
   index: number;
-  internal?: boolean;
 }) {
   const dc = getStatusColor(deployment.status);
   const isDeleting = deployment.status === "deleting";
@@ -485,29 +422,18 @@ export function DeploymentRow({
     >
       <div
         className={`flex items-center gap-4 rounded-lg border-l-[3px] px-4 py-3 transition-colors hover:bg-accent/50 ${
-          isTombstoned
-            ? "border-border opacity-50 grayscale"
-            : internal
-              ? "border-border opacity-70"
-              : dc.border
+          isTombstoned ? "border-border opacity-50 grayscale" : dc.border
         } ${index % 2 === 0 ? "bg-surface" : ""}`}
       >
         <div className="flex w-[180px] items-center gap-2">
           <div className={`h-2 w-2 flex-shrink-0 rounded-full ${dc.dot}`} />
           <span
             className={`text-[13px] font-medium ${
-              isTombstoned || internal
-                ? "text-muted-foreground"
-                : "text-foreground"
+              isTombstoned ? "text-muted-foreground" : "text-foreground"
             }`}
           >
             {deployment.name}
           </span>
-          {internal && (
-            <span className="rounded bg-muted px-1 py-px text-[10px] font-medium text-muted-foreground">
-              INT
-            </span>
-          )}
           {isDeleting && (
             <span
               className="rounded bg-amber-500/10 px-1.5 py-px text-[10px] font-medium uppercase tracking-wider text-amber-700 dark:text-amber-400"
@@ -518,12 +444,12 @@ export function DeploymentRow({
           )}
         </div>
         <span
-          className={`w-[90px] font-mono text-[13px] ${isTombstoned || internal ? "text-muted-foreground/70" : "text-muted-foreground"}`}
+          className={`w-[90px] font-mono text-[13px] ${isTombstoned ? "text-muted-foreground/70" : "text-muted-foreground"}`}
         >
           {deployment.applicationVersion}
         </span>
         <div
-          className={`w-[220px] text-[13px] ${isTombstoned || internal ? "text-muted-foreground/70" : "text-muted-foreground"}`}
+          className={`w-[220px] text-[13px] ${isTombstoned ? "text-muted-foreground/70" : "text-muted-foreground"}`}
           data-testid="deployment-driver-cell"
         >
           {driverName ? (
@@ -543,7 +469,7 @@ export function DeploymentRow({
           <StatusBadge status={deployment.status} />
         </div>
         <span
-          className={`flex-1 text-[13px] ${isTombstoned || internal ? "text-muted-foreground/70" : "text-muted-foreground"}`}
+          className={`flex-1 text-[13px] ${isTombstoned ? "text-muted-foreground/70" : "text-muted-foreground"}`}
         >
           {isDeleted && deployment.deletedAt ? (
             <span data-testid="deleted-at-relative">
