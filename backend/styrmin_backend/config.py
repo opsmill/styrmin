@@ -166,6 +166,7 @@ class OperatorSettings(BaseSettings):
 
     reconcile_interval: int = Field(default=60, ge=1)
     # Below FluxCD's 5-minute HelmRelease timeout, whose rollback removes the failing pods.
+    # The timer waits for this timeout when its next run would come after it.
     deployment_ready_timeout: int = Field(default=270, ge=1)
     peering_name: str = "styrmin-operator"
     peering_priority: int = 100

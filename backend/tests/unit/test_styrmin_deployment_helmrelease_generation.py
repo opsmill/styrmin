@@ -69,6 +69,15 @@ class _Logger:
     def exception(self, *_: Any, **__: Any) -> None: ...
 
 
+class _Stopped:
+    """Stand-in for kopf's ``stopped`` flag of a timer that kopf does not stop."""
+
+    def __bool__(self) -> bool:
+        return False
+
+    async def wait(self, timeout: float) -> None: ...
+
+
 def _flux(
     type_: str,
     status: str,
@@ -203,6 +212,7 @@ async def _tick(
         namespace=NAMESPACE,
         patch=patch,
         logger=_Logger(),
+        stopped=_Stopped(),
     )
     return patch
 
