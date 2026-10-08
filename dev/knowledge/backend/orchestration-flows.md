@@ -214,7 +214,7 @@ Execution order, with the step that each part records:
 7. Run post-hook (if posthook is not None) step hook:setup:post
 ```
 
-When the `resource:styrmindeployment` step succeeds, the recorder supersedes the open operator-phase steps of the deployment's other tasks and creates this task's four operator-phase steps (none for an internal deployment). See [Remediation-flow steps](#remediation-flow-steps).
+When the `resource:styrmindeployment` step succeeds, the recorder creates this task's four operator-phase steps (none for an internal deployment) and supersedes the open operator-phase steps of the deployment's older tasks. See [Remediation-flow steps](#remediation-flow-steps).
 
 Called via `Remediation(type=CREATE_INSTANCE, flow_id=<CREATE_INSTANCE deployment>, parameters={instance, prehook, posthook, internal})`.
 
@@ -302,12 +302,12 @@ A hook step covers one run of a hook mode. The flow passes the hook step's id to
 
 The flows do not record the operator's work. When `resource:styrmindeployment` succeeds, the recorder:
 
-1. Supersedes the pending and running operator-phase steps of the deployment's other tasks (status `SUPERSEDED`, `superseded_by_task_id` set to this task), because the operator abandons an earlier rollout as soon as the spec changes.
-2. Creates this task's operator-phase steps: `operator:prerequisites` ("Create network policies and secrets") as running, then `operator:helmrelease` ("Install or upgrade the HelmRelease"), `operator:services` ("Create services and middlewares") and `operator:ready` ("Wait for the deployment to be ready") as pending. An internal deployment gets none, because the status reporter does not report internal deployments.
+1. Creates this task's operator-phase steps: `operator:prerequisites` ("Create network policies and secrets") as running, then `operator:helmrelease` ("Install or upgrade the HelmRelease"), `operator:services` ("Create services and middlewares") and `operator:ready` ("Wait for the deployment to be ready") as pending. An internal deployment gets none, because the status reporter does not report internal deployments.
+2. Supersedes the pending and running operator-phase steps of the deployment's older tasks (status `SUPERSEDED`, `superseded_by_task_id` set to this task), because the operator abandons an earlier rollout as soon as the spec changes. A task is older when it was created first; tasks created at the same time are ordered by id. The steps of newer tasks do not change. When a `resource:styrmindeployment` or `resource:delete-request` step of a newer task has already succeeded, this success arrived late: the first such newer task supersedes this task's new operator-phase steps instead.
 
 The status reporter's reports then move those steps forward (`services/steps/operator_history.py`, called from `report_deployment_statuses`). See [`../agent/operator.md`](../agent/operator.md) for the CR status that drives them.
 
-A delete has no flow. `delete_deployment` records `resource:delete-request` ("Request the deletion") as succeeded after it patches the CR, supersedes the open operator-phase steps of the deployment's other tasks, and creates `operator:teardown` ("Remove the deployment's resources and namespace") as pending. Reports in the `Deleting` and `Deleted` phases go to the deployment's newest `delete_deployment` task.
+A delete has no flow. `delete_deployment` records `resource:delete-request` ("Request the deletion") as succeeded after it patches the CR, supersedes the open operator-phase steps of the deployment's older tasks (all its other tasks, because the delete task is the newest), and creates `operator:teardown` ("Remove the deployment's resources and namespace") as pending. Reports in the `Deleting` and `Deleted` phases go to the deployment's newest `delete_deployment` task.
 
 ## Flow: run_job
 

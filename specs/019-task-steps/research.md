@@ -110,12 +110,13 @@ The P1 acceptance scenario is an upgrade whose HelmRelease does not become Ready
   - **Deletes**: A `delete_deployment` task has two steps: "Request the deletion", recorded by the service when it patches the CR, and "Remove the deployment's resources and namespace", which runs during the operator's `Deleting` phase and succeeds at `Deleted`. The operator's teardown runs in one handler call, so it has no finer phases to report.
 - **Kopf extension points evaluated**: kopf records handler progress in annotations and can post Kubernetes Events. Kubernetes keeps Events for one hour by default, and the server does not read them. Neither gives a durable phase history, so the server keeps it.
 
-## D7. A rollout supersedes the open operator-phase steps of earlier rollouts
+## D7. A rollout supersedes the open operator-phase steps of older tasks
 
 [CLAUDE RECOMMENDED – based on PRD FR-007 and the edge case "A later task interrupts the operator phases"]
 
-- **Decision**: When a "Write the StyrminDeployment resource" step or a "Request the deletion" step succeeds, the recorder sets every pending or running operator-phase step of every other task of the same deployment to `superseded`, with `superseded_by_task_id` set to the new task. A superseded step is final.
+- **Decision**: When a "Write the StyrminDeployment resource" step or a "Request the deletion" step succeeds, the recorder sets every pending or running operator-phase step of every older task of the same deployment to `superseded`, with `superseded_by_task_id` set to the new task. A task is older when it was created first; tasks created at the same time are ordered by id. A superseded step is final.
 - **Rationale**: The operator abandons the earlier rollout as soon as the spec changes, so the write is the moment of interruption. It does not depend on when the next report arrives.
+- **Late success events**: The success of an older task's write can reach the server after a newer task's write ([review thread](https://github.com/opsmill/styrmin/pull/404#discussion_r4206764461)). That success does not supersede the steps of a newer task, so the reports for the newer rollout keep moving its steps. When a newer task of the deployment has already written the StyrminDeployment or requested the deletion, the recorder creates the older task's operator-phase steps and the first such newer task supersedes them at once, so they do not stay pending.
 
 ## D8. Task result calculation
 

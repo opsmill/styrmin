@@ -32,6 +32,7 @@ from styrmin_backend.domain.models import (
     Task,
 )
 from styrmin_backend.domain.steps import (
+    DELETE_REQUEST,
     ROLLOUT_OPERATOR_STEPS,
     STYRMIN_DEPLOYMENT_WRITE,
     StepDefinition,
@@ -55,6 +56,8 @@ if TYPE_CHECKING:
 
 _OPEN_STATUSES = frozenset({StepStatus.PENDING, StepStatus.RUNNING})
 _IN_PROGRESS = frozenset({StepStatus.RUNNING, StepStatus.FAILED})
+# The steps whose success interrupts the rollouts of older tasks.
+_CR_WRITE_KEYS = (STYRMIN_DEPLOYMENT_WRITE.key, DELETE_REQUEST.key)
 
 
 class StepRecord(BaseModel):
@@ -187,16 +190,17 @@ async def ensure_operator_steps(task: Task, at: datetime, *, uow: UnitOfWork) ->
 
 
 async def supersede_operator_steps(
-    deployment_id: UUID, by_task_id: UUID, at: datetime, *, uow: UnitOfWork
+    by_task_id: UUID, at: datetime, *, uow: UnitOfWork
 ) -> list[Step]:
-    """Supersede the pending and running operator-phase steps of the deployment's other tasks.
+    """Supersede the pending and running operator-phase steps of the deployment's older tasks.
 
-    A CR write or a deletion request of ``by_task_id`` interrupts them (research D7).
+    A CR write or a deletion request of ``by_task_id`` interrupts the rollouts of
+    the tasks created before it, never those of newer tasks (research D7).
     Failed steps keep their failure. Returns the steps this call superseded.
     """
     at = _utc(at)
-    open_steps = await uow.steps.list_open_operator_steps_for_deployment(
-        deployment_id, exclude_task_id=by_task_id, for_update=True
+    open_steps = await uow.steps.list_open_operator_steps_of_older_tasks(
+        by_task_id, for_update=True
     )
     return [
         await _save(
@@ -428,7 +432,11 @@ async def _start_by_key(
 
 
 async def _after_success(step: Step, uow: UnitOfWork) -> None:
-    """A succeeded CR write interrupts earlier rollouts and hands this one to the operator."""
+    """A succeeded CR write hands this rollout to the operator and interrupts older rollouts.
+
+    When a newer task already wrote the CR or requested the deletion, that task
+    supersedes this rollout at once.
+    """
     if (
         step.status is not StepStatus.SUCCEEDED
         or step.key != STYRMIN_DEPLOYMENT_WRITE.key
@@ -437,11 +445,13 @@ async def _after_success(step: Step, uow: UnitOfWork) -> None:
     ):
         return
     task = await uow.tasks.find(step.task_id)
-    if task is not None:
-        await supersede_operator_steps(
-            task.deployment_id, task.id, step.ended_at, uow=uow
-        )
-        await ensure_operator_steps(task, step.ended_at, uow=uow)
+    if task is None:
+        return
+    await ensure_operator_steps(task, step.ended_at, uow=uow)
+    newer = await uow.steps.find_first_newer_task_with_succeeded_step(
+        task.id, _CR_WRITE_KEYS
+    )
+    await supersede_operator_steps(newer or task.id, step.ended_at, uow=uow)
 
 
 async def _apply(record: StepRecord, at: datetime, uow: UnitOfWork) -> Step:

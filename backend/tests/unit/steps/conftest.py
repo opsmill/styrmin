@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -27,6 +28,7 @@ from styrmin_backend.db.models import (
     Role,
     User,
 )
+from styrmin_backend.db.models import Task as TaskModel
 from styrmin_backend.domain.models import Task, TaskType
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 
@@ -56,9 +58,27 @@ async def uow(session: AsyncSession) -> AsyncGenerator[SqlModelUnitOfWork, None]
         yield uow
 
 
+# Before the server's clock, so tasks that a test creates are newer.
+TASK_CREATED_ON = datetime(2026, 1, 1, tzinfo=UTC)
+OTHER_TASK_CREATED_ON = datetime(2026, 1, 2, tzinfo=UTC)
+
+
+async def set_created_on(
+    uow: SqlModelUnitOfWork, task_id: UUID, created_on: datetime
+) -> None:
+    """Set the creation time that orders tasks, which the database otherwise sets."""
+    model = await uow.session.get(TaskModel, task_id)
+    assert model is not None
+    model.created_on = created_on
+    await uow.session.flush()
+
+
 @dataclass(frozen=True)
 class Parents:
-    """One deployment with an instance, a backup, a restore and two tasks."""
+    """One deployment with an instance, a backup, a restore and two tasks.
+
+    ``other_task`` is newer than ``task``.
+    """
 
     deployment_id: UUID
     instance_id: UUID
@@ -138,6 +158,9 @@ async def parents(uow: SqlModelUnitOfWork) -> Parents:
     await uow.tasks.save(task)
     await uow.tasks.save(other_task)
     await session.flush()
+    # Tasks saved in one transaction share their creation time.
+    await set_created_on(uow, task.id, TASK_CREATED_ON)
+    await set_created_on(uow, other_task.id, OTHER_TASK_CREATED_ON)
     return Parents(
         deployment_id=deployment.id,
         instance_id=instance.id,

@@ -141,7 +141,7 @@ Semantics:
 
 Side effects in the recorder:
 
-- `SUCCEEDED` on `resource:styrmindeployment` creates the task's operator-phase steps (not for internal deployments) and supersedes open operator-phase steps of the deployment's other tasks.
+- `SUCCEEDED` on `resource:styrmindeployment` creates the task's operator-phase steps (not for internal deployments) and supersedes open operator-phase steps of the deployment's older tasks. It never changes the steps of a newer task: when a newer task of the deployment has already written the StyrminDeployment or requested the deletion, the first such newer task supersedes the new operator-phase steps at once.
 - The server keeps at most the last 200 lines and 64 KiB of `output`.
 
 Errors: `StepNotFoundError`, `TaskNotFoundError`, `BackupNotFoundError`, `RestoreNotFoundError` (all `NOT_FOUND`); `InvalidStepRecordError` (`VALIDATION_ERROR`). Unauthenticated calls get `UNAUTHENTICATED`; `READ_ONLY` callers and every user other than `styrmin-actions`, including admins, get `FORBIDDEN`.

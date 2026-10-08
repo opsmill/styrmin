@@ -6,9 +6,10 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import nulls_last, text
+from sqlalchemy import ColumnElement, and_, nulls_last, or_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import aliased
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel.sql.expression import SelectOfScalar
@@ -26,7 +27,11 @@ _OPEN_STATUSES = (StepStatusModel.PENDING, StepStatusModel.RUNNING)
 
 
 class StepRepository(ABC):
-    """Repository of steps. Lists are ordered by start time, pending steps last."""
+    """Repository of steps. Lists are ordered by start time, pending steps last.
+
+    A task is older than another when it was created first; tasks created at the
+    same time are ordered by id.
+    """
 
     @abstractmethod
     async def get(self, id: UUID, for_update: bool = False) -> StepEntity | None:
@@ -69,10 +74,23 @@ class StepRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def list_open_operator_steps_for_deployment(
-        self, deployment_id: UUID, exclude_task_id: UUID, for_update: bool = False
+    async def list_open_operator_steps_of_older_tasks(
+        self, task_id: UUID, for_update: bool = False
     ) -> list[StepEntity]:
-        """Pending or running operator-phase steps of the deployment's other tasks."""
+        """Pending or running operator-phase steps of the tasks older than the task.
+
+        Only the tasks of the task's deployment count.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def find_first_newer_task_with_succeeded_step(
+        self, task_id: UUID, keys: Sequence[str]
+    ) -> UUID | None:
+        """The oldest task newer than the task with a succeeded step of one of ``keys``.
+
+        Only the tasks of the task's deployment count.
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -93,6 +111,17 @@ def _utc(value: datetime | None) -> datetime | None:
     if value is None or value.tzinfo is not None:
         return value
     return value.replace(tzinfo=UTC)
+
+
+def _older(task: Any, than: Any) -> ColumnElement[bool]:
+    """``task`` was created before ``than``; the id orders tasks created at the same time."""
+    return or_(
+        col(task.created_on) < col(than.created_on),
+        and_(
+            col(task.created_on) == col(than.created_on),
+            col(task.id) < col(than.id),
+        ),
+    )
 
 
 def _ordered(
@@ -243,15 +272,17 @@ class SQLModelStepRepository(StepRepository):
             select(StepModel).where(col(StepModel.restore_id).in_(restore_ids))
         )
 
-    async def list_open_operator_steps_for_deployment(
-        self, deployment_id: UUID, exclude_task_id: UUID, for_update: bool = False
+    async def list_open_operator_steps_of_older_tasks(
+        self, task_id: UUID, for_update: bool = False
     ) -> list[StepEntity]:
+        newer = aliased(TaskModel)
         statement = (
             select(StepModel)
             .join(TaskModel, col(TaskModel.id) == col(StepModel.task_id))
+            .join(newer, col(newer.deployment_id) == col(TaskModel.deployment_id))
             .where(
-                TaskModel.deployment_id == deployment_id,
-                TaskModel.id != exclude_task_id,
+                newer.id == task_id,
+                _older(TaskModel, newer),
                 StepModel.kind == StepKindModel.OPERATOR_PHASE,
                 col(StepModel.status).in_(_OPEN_STATUSES),
             )
@@ -259,6 +290,26 @@ class SQLModelStepRepository(StepRepository):
         if for_update:
             statement = statement.with_for_update(of=StepModel)
         return await self._many(statement)
+
+    async def find_first_newer_task_with_succeeded_step(
+        self, task_id: UUID, keys: Sequence[str]
+    ) -> UUID | None:
+        older = aliased(TaskModel)
+        statement = (
+            select(TaskModel.id)
+            .join(StepModel, col(StepModel.task_id) == col(TaskModel.id))
+            .join(older, col(older.deployment_id) == col(TaskModel.deployment_id))
+            .where(
+                older.id == task_id,
+                _older(older, TaskModel),
+                col(StepModel.key).in_(keys),
+                StepModel.status == StepStatusModel.SUCCEEDED,
+            )
+            .order_by(col(TaskModel.created_on).asc(), col(TaskModel.id).asc())
+            .limit(1)
+        )
+        result = await self.session.exec(statement)
+        return result.first()
 
     async def save(self, step: StepEntity) -> None:
         """Insert the step, or update the fields a step can change."""

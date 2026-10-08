@@ -22,7 +22,11 @@ from styrmin_backend.domain.models import (
     TaskType,
 )
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
-from tests.unit.steps.conftest import Parents
+from tests.unit.steps.conftest import (
+    OTHER_TASK_CREATED_ON,
+    Parents,
+    set_created_on,
+)
 
 T0 = datetime(2026, 10, 6, 12, 0, tzinfo=UTC)
 
@@ -167,28 +171,86 @@ async def test_backup_and_restore_lists_hold_only_their_steps(
     ]
 
 
+async def _newer_task(uow: SqlModelUnitOfWork, parents: Parents, days: int = 1) -> Task:
+    """A task of the deployment created ``days`` after ``parents.other_task``."""
+    task = Task.create(TaskType.UPDATE_INSTANCE, parents.deployment_id)
+    await uow.tasks.save(task)
+    await uow.session.flush()
+    await set_created_on(uow, task.id, OTHER_TASK_CREATED_ON + timedelta(days=days))
+    return task
+
+
 @pytest.mark.parametrize("for_update", [False, True])
-async def test_open_operator_steps_of_the_deployments_other_tasks(
+async def test_open_operator_steps_of_the_deployments_older_tasks(
     uow: SqlModelUnitOfWork, parents: Parents, for_update: bool
 ) -> None:
-    other = StepParent.of_task(parents.other_task.id)
+    older = StepParent.of_task(parents.task.id)
     operator = StepKind.OPERATOR_PHASE
-    pending = _step(other, "operator:services", operator, StepStatus.PENDING, None)
-    running = _step(other, "operator:helmrelease", operator, StepStatus.RUNNING)
+    pending = _step(older, "operator:services", operator, StepStatus.PENDING, None)
+    running = _step(older, "operator:helmrelease", operator, StepStatus.RUNNING)
     closed = [
-        _step(other, f"operator:{status.value}", operator, status)
+        _step(older, f"operator:{status.value}", operator, status)
         for status in (StepStatus.SUCCEEDED, StepStatus.FAILED, StepStatus.SUPERSEDED)
     ]
-    flow_step = _step(other, "resource:styrmindeployment", StepKind.RESOURCE_WRITE)
-    own = _step(StepParent.of_task(parents.task.id), "operator:ready", operator)
-    for step in (pending, running, *closed, flow_step, own):
+    flow_step = _step(older, "resource:styrmindeployment", StepKind.RESOURCE_WRITE)
+    own = _step(StepParent.of_task(parents.other_task.id), "operator:ready", operator)
+    newer = _step(
+        StepParent.of_task((await _newer_task(uow, parents)).id),
+        "operator:ready",
+        operator,
+    )
+    for step in (pending, running, *closed, flow_step, own, newer):
         await uow.steps.insert_if_absent(step)
 
-    steps = await uow.steps.list_open_operator_steps_for_deployment(
-        parents.deployment_id, exclude_task_id=parents.task.id, for_update=for_update
+    steps = await uow.steps.list_open_operator_steps_of_older_tasks(
+        parents.other_task.id, for_update=for_update
     )
 
     assert [s.id for s in steps] == [running.id, pending.id]
+
+
+async def test_tasks_created_at_the_same_time_are_ordered_by_id(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    await set_created_on(uow, parents.task.id, OTHER_TASK_CREATED_ON)
+    first, second = sorted((parents.task, parents.other_task), key=lambda t: t.id)
+    for task in (first, second):
+        step = _step(
+            StepParent.of_task(task.id), "operator:ready", StepKind.OPERATOR_PHASE
+        )
+        await uow.steps.insert_if_absent(step)
+
+    older_than_second = await uow.steps.list_open_operator_steps_of_older_tasks(
+        second.id
+    )
+    older_than_first = await uow.steps.list_open_operator_steps_of_older_tasks(first.id)
+
+    assert [step.task_id for step in older_than_second] == [first.id]
+    assert older_than_first == []
+
+
+async def test_first_newer_task_with_a_succeeded_step(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    keys = ["resource:styrmindeployment", "resource:delete-request"]
+    write = StepKind.RESOURCE_WRITE
+    newest = await _newer_task(uow, parents, days=2)
+    newer = await _newer_task(uow, parents, days=1)
+    for task, key, status in (
+        (parents.task, keys[0], StepStatus.SUCCEEDED),
+        (parents.other_task, keys[0], StepStatus.RUNNING),
+        (parents.other_task, "plan", StepStatus.SUCCEEDED),
+        (newer, keys[1], StepStatus.SUCCEEDED),
+        (newest, keys[0], StepStatus.SUCCEEDED),
+    ):
+        await uow.steps.insert_if_absent(
+            _step(StepParent.of_task(task.id), key, write, status)
+        )
+
+    find = uow.steps.find_first_newer_task_with_succeeded_step
+    assert await find(parents.task.id, keys) == newer.id
+    assert await find(newer.id, keys) == newest.id
+    assert await find(newest.id, keys) is None
 
 
 @pytest.mark.parametrize(

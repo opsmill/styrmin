@@ -1668,12 +1668,12 @@ async def _record_delete_steps(
 ) -> None:
     """Record the CR patch as done; the operator's teardown waits for its first report.
 
-    The request interrupts the open operator-phase steps of the deployment's other tasks.
+    The request interrupts the open operator-phase steps of the deployment's older tasks.
     """
     parent = StepParent.of_task(task.id)
     request = await open_step(parent, *steps.DELETE_REQUEST, requested_at, uow=uow)
     await succeed_step(request, patched_at, uow=uow)
-    await supersede_operator_steps(task.deployment_id, task.id, patched_at, uow=uow)
+    await supersede_operator_steps(task.id, patched_at, uow=uow)
     await add_pending_steps(parent, [steps.OPERATOR_TEARDOWN], patched_at, uow=uow)
 
 
