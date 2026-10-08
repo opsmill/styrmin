@@ -638,6 +638,15 @@ class ResolvedConfig(DeploymentConfig):
     # Merged configuration the renderer actually reads from
 ```
 
+#### DedicatedIngressConfig
+
+`dedicated_ingress` turns on the dedicated ingress controller for an environment (the internal `styrmin-ingress-controller` deployment). The environment value wins over the cluster value.
+
+- An absent or `null` key turns it off. No controller is deployed, and the agent sets `spec.ingressClassName` and the `kubernetes.io/ingress.class` annotation on the application Ingress to the resolved `ingress_class`.
+- Any object, including `{}`, turns it on with the default values: `implementation: traefik`, `type: ingress`, `service.type: LoadBalancer`. The agent sets the `kubernetes.io/ingress.class` annotation to the implementation name and removes `ingress_class` from the values-template context.
+
+The controller check (`_resolve_dedicated_ingress` in `services/deployment.py`), the agent and the capability derivation all apply this rule. `createCluster` stores no default value. Earlier versions stored `{}`, which the controller check read as off and the agent read as on ([#409](https://github.com/opsmill/styrmin/issues/409)). The Alembic revision `f3a4b5c6d7e8` removes that `{}` from clusters. It keeps `{}` on environments, because an operator set it there.
+
 #### IngressServiceConfig
 
 <!-- Extracted from specs/001-ingress-ipfamily-nodeport on 2026-05-17 -->

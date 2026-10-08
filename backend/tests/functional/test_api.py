@@ -166,7 +166,6 @@ async def test_create_and_delete_cluster_with_error_support(client: AsyncClient)
     assert data["data"]["createCluster"]["id"] is not None
     assert data["data"]["createCluster"]["config"] == {
         "runtime_class": "example_runtime_class",
-        "dedicated_ingress": {},
         "ingress_class": "traefik",
     }
 
@@ -186,7 +185,6 @@ async def test_create_and_delete_cluster_with_error_support(client: AsyncClient)
     assert cluster_data["name"] == "test_cluster"
     assert cluster_data["config"] == {
         "runtime_class": "example_runtime_class",
-        "dedicated_ingress": {},
         "ingress_class": "traefik",
     }
     assert cluster_data["createdOn"] is not None

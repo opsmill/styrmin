@@ -30,9 +30,18 @@ async def test_create_cluster(
 
     # Verify default config values are applied
     assert cluster.config is not None
-    assert cluster.config["dedicated_ingress"] == {}
+    assert "dedicated_ingress" not in cluster.config
     assert cluster.config["ingress_class"] == "traefik"
     assert cluster.config["runtime_class"] == "default"
+
+
+async def test_create_cluster_keeps_empty_dedicated_ingress(uow: FakeUnitOfWork):
+    cluster = await create_cluster(
+        name="test_cluster", config={"dedicated_ingress": {}}, uow=uow
+    )
+
+    assert cluster.config is not None
+    assert cluster.config["dedicated_ingress"] == {}
 
 
 async def test_create_cluster_with_already_existing_cluster(

@@ -272,6 +272,12 @@ styrminctl environments create demo <CLUSTER_ID> \
 
 Record the returned `id` — referred to as `<ENVIRONMENT_ID>` below.
 
+Any `dedicated_ingress` object turns on the per-environment controller,
+including an empty one (`{}`), which uses the default values: Traefik
+with a `LoadBalancer` Service. Leave the key out of both the cluster and
+the environment configuration to route through the cluster's shared
+ingress controller instead.
+
 > **Tighten the IP whitelist before production.** `0.0.0.0/0` is open to
 > the public internet — use a real allowlist for non-demo workloads.
 
