@@ -100,9 +100,9 @@ Web application: `backend/styrmin_backend/`, `backend/tests/`, `frontend/src/`, 
 
 ### E2E for User Story 1
 
-- [ ] T019 [US1] In `backend/tests/e2e/conftest.py` `git_server`, inside the existing `chart_name` rewrite block, for `name == "simple-app"` only: set `driver_config["spec"].setdefault("info", {})["icon"] = SIMPLE_APP_LOGO_URL` and `["links"] = [{"link": "Documentation", "url": SIMPLE_APP_DOCS_URL}]`. Define module constants `SIMPLE_APP_LOGO_URL = "https://styrmin-e2e.invalid/simple-app-logo.svg"` and `SIMPLE_APP_DOCS_URL = "https://styrmin-e2e.invalid/docs"`. Before editing, grep `backend/tests/e2e` for assertions on the simple-app `info` block or a fixed commit SHA, and confirm none exist (plan Risks).
-- [ ] T020 [P] [US1] In `backend/tests/e2e/pages/drivers_list.py`, add `DriversListPage.goto()` (navigate to `/drivers`) and `driver_group_logo(driver_name) -> Locator` for `[data-testid=driver-group][data-driver-name="<name>"] [data-testid=driver-logo]` (contracts/ui.md).
-- [ ] T021 [US1] Add `test_driver_logo_description_and_links_render(styrmin_resources, session_ui_page)` to `backend/tests/e2e/test_ui_smoke.py` (module markers already `ci`, `ui_only`, `shard_general`):
+- [X] T019 [US1] In `backend/tests/e2e/conftest.py` `git_server`, inside the existing `chart_name` rewrite block, for `name == "simple-app"` only: set `driver_config["spec"].setdefault("info", {})["icon"] = SIMPLE_APP_LOGO_URL` and `["links"] = [{"link": "Documentation", "url": SIMPLE_APP_DOCS_URL}]`. Define module constants `SIMPLE_APP_LOGO_URL = "https://styrmin-e2e.invalid/simple-app-logo.svg"` and `SIMPLE_APP_DOCS_URL = "https://styrmin-e2e.invalid/docs"`. Before editing, grep `backend/tests/e2e` for assertions on the simple-app `info` block or a fixed commit SHA, and confirm none exist (plan Risks).
+- [X] T020 [P] [US1] In `backend/tests/e2e/pages/drivers_list.py`, add `DriversListPage.goto()` (navigate to `/drivers`) and `driver_group_logo(driver_name) -> Locator` for `[data-testid=driver-group][data-driver-name="<name>"] [data-testid=driver-logo]` (contracts/ui.md).
+- [X] T021 [US1] Add `test_driver_logo_description_and_links_render(styrmin_resources, session_ui_page)` to `backend/tests/e2e/test_ui_smoke.py` (module markers already `ci`, `ui_only`, `shard_general`):
   - Inside `try`, register `page.route(SIMPLE_APP_LOGO_URL, ...)` fulfilling with `content_type="image/svg+xml"` and an inline SVG with `width="24" height="24"`.
   - Open `/drivers`. Assert the `simple-app` group logo has `data-logo-state="image"`, its `img` has `src == SIMPLE_APP_LOGO_URL`, and `naturalWidth > 0` (use `expect.poll` or `wait_for_function`).
   - Open `/drivers/<driver_id>`. Assert the header `[data-testid=driver-logo]` is in the `image` state with the same `src`.
@@ -135,7 +135,7 @@ Web application: `backend/styrmin_backend/`, `backend/tests/`, `frontend/src/`, 
 - [X] T025 [US2] In `frontend/src/pages/drivers/DriverDetailPage.tsx`:
   - Render `selected.description` as `<p data-testid="driver-description" className="whitespace-pre-line pb-5 text-sm text-muted-foreground">` between the version header row and `<Tabs>`, only when set.
   - In `OverviewPanel`, after the details table, render a "Links" section `<ul data-testid="driver-links">` with one `<a href={url} target="_blank" rel="noopener noreferrer">{label}</a>` per link, only when `version.links.length > 0`, styled like the existing panel (border, `text-sm`, primary link color).
-- [ ] T026 [US2] Extend `test_driver_logo_description_and_links_render` in `backend/tests/e2e/test_ui_smoke.py`. On the detail page, assert:
+- [X] T026 [US2] Extend `test_driver_logo_description_and_links_render` in `backend/tests/e2e/test_ui_smoke.py`. On the detail page, assert:
   - `[data-testid=driver-description]` contains the `simple-app` example description ("Simple 3-tier FastAPI application with PostgreSQL").
   - `[data-testid=driver-links] a` with name "Documentation" has `href` starting with `SIMPLE_APP_DOCS_URL`, `target="_blank"`, and `rel` containing `noopener`.
   - On the list page, the `simple-app` group shows the same description.

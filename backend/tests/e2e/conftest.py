@@ -46,6 +46,11 @@ _LOG = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).parent.resolve().parents[2]
 FIXTURES_DIR = Path(__file__).parent.resolve() / "fixtures"
 
+# spec.info values set on the session simple-app driver. The reserved `.invalid`
+# TLD never resolves, so the UI test serves the logo itself via page.route().
+SIMPLE_APP_LOGO_URL = "https://styrmin-e2e.invalid/simple-app-logo.svg"
+SIMPLE_APP_DOCS_URL = "https://styrmin-e2e.invalid/docs"
+
 
 def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
     """E2E-only pytest setup hook.
@@ -576,6 +581,12 @@ async def git_server(
             driver_config["spec"]["helm"]["main"]["location"] = (
                 f"{chart_server}/{info['chart_name']}"
             )
+            if name == "simple-app":
+                driver_info = driver_config["spec"].setdefault("info", {})
+                driver_info["icon"] = SIMPLE_APP_LOGO_URL
+                driver_info["links"] = [
+                    {"link": "Documentation", "url": SIMPLE_APP_DOCS_URL}
+                ]
             with open(driver_yaml_path, "w") as f:
                 yaml.dump(driver_config, f, default_flow_style=False)
 

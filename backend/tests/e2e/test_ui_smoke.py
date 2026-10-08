@@ -21,13 +21,15 @@ from typing import TYPE_CHECKING
 import pytest
 from playwright.async_api import expect
 
+from tests.e2e.conftest import SIMPLE_APP_DOCS_URL, SIMPLE_APP_LOGO_URL
 from tests.e2e.pages.cluster_detail import ClusterDetailPage
 from tests.e2e.pages.deploy_form import DeployFormPage
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
+from tests.e2e.pages.drivers_list import DriversListPage
 from tests.e2e.pages.pods_tab import PodsTabPage
 
 if TYPE_CHECKING:
-    from playwright.async_api import Page
+    from playwright.async_api import Locator, Page, Route
 
 UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -196,6 +198,91 @@ async def test_driver_detail_inspects_versions_via_tabs(
     assert pre_count == 0, (
         f"Components tab must render zero <pre> JSON blocks; found {pre_count}"
     )
+
+
+# ---- spec 020: driver logo, description and links ----
+# `spec.info.description` of driver/examples/simple-app/driver.styrmin.yml.
+SIMPLE_APP_DESCRIPTION = "Simple 3-tier FastAPI application with PostgreSQL"
+# Explicit width/height so the decoded image has a non-zero naturalWidth.
+SIMPLE_APP_LOGO_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" '
+    'viewBox="0 0 24 24"><rect width="24" height="24" fill="#2563eb"/></svg>'
+)
+
+
+async def _serve_simple_app_logo(route: "Route") -> None:
+    await route.fulfill(
+        status=200, content_type="image/svg+xml", body=SIMPLE_APP_LOGO_SVG
+    )
+
+
+async def _expect_simple_app_logo_loaded(logo: "Locator") -> None:
+    await expect(logo).to_have_attribute("data-logo-state", "image")
+    img = logo.locator("img")
+    await expect(img).to_have_attribute("src", SIMPLE_APP_LOGO_URL)
+    # The <img> is loading="lazy": bring it into view so Chromium requests it.
+    await img.scroll_into_view_if_needed()
+    await logo.page.wait_for_function(
+        "img => img.complete && img.naturalWidth > 0",
+        arg=await img.element_handle(),
+    )
+    # A failed load would have switched the frame to the fallback icon.
+    await expect(logo).to_have_attribute("data-logo-state", "image")
+
+
+async def test_driver_logo_description_and_links_render(
+    styrmin_resources: dict,
+    session_ui_page: "Page",
+) -> None:
+    """The session simple-app driver's `spec.info` renders on the driver pages.
+
+    The `git_server` fixture sets the logo and link on a reserved `.invalid`
+    host, so the logo loads only through the route below and never by accident.
+    """
+    driver_id = styrmin_resources["driver_id"]
+    page = session_ui_page
+    try:
+        await page.route(SIMPLE_APP_LOGO_URL, _serve_simple_app_logo)
+
+        # 1. List page: the group header shows the latest version's logo and
+        # its description, truncated to one line with the full text as title.
+        drivers_list = DriversListPage(page)
+        await drivers_list.goto()
+        await _expect_simple_app_logo_loaded(
+            drivers_list.driver_group_logo("simple-app")
+        )
+        list_description = page.locator(
+            '[data-testid=driver-group][data-driver-name="simple-app"] '
+            "[data-testid=driver-description]"
+        )
+        await expect(list_description).to_have_text(SIMPLE_APP_DESCRIPTION)
+        await expect(list_description).to_have_attribute(
+            "title", SIMPLE_APP_DESCRIPTION
+        )
+
+        # 2. Detail page: the header logo of the selected version and its
+        # description.
+        await page.goto(f"/drivers/{driver_id}")
+        await expect(page.locator("[data-testid=driver-detail]")).to_be_visible()
+        await _expect_simple_app_logo_loaded(page.locator("[data-testid=driver-logo]"))
+        await expect(page.locator("[data-testid=driver-description]")).to_contain_text(
+            SIMPLE_APP_DESCRIPTION
+        )
+
+        # 3. Overview tab (default): the link opens in a new tab without
+        # giving the target page access to Styrmin's window.
+        await expect(page.locator("[data-testid=driver-overview]")).to_be_visible()
+        link = page.locator("[data-testid=driver-links]").get_by_role(
+            "link", name="Documentation"
+        )
+        await expect(link).to_have_attribute(
+            "href", re.compile(rf"^{re.escape(SIMPLE_APP_DOCS_URL)}")
+        )
+        await expect(link).to_have_attribute("target", "_blank")
+        await expect(link).to_have_attribute("rel", re.compile(r"\bnoopener\b"))
+    finally:
+        # The page is shared by the whole session: never leave the route on it.
+        await page.unroute(SIMPLE_APP_LOGO_URL, _serve_simple_app_logo)
 
 
 # ---- issue #332: browser tab title ----
