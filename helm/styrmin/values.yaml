@@ -272,6 +272,11 @@ styrmin:
     # -- Enable TLS for Prefect connection
     tlsEnabled: false
 
+  # Telemetry configuration
+  telemetry:
+    # -- Destination of the daily telemetry report. Leave empty for the OpsMill endpoint.
+    endpoint: ""
+
 # Secrets configuration
 secrets:
   # -- Use existing secret instead of creating one
