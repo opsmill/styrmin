@@ -28,6 +28,7 @@ the DB row and the ``applicationDriver`` query.
 the ``spec.info`` values, loaded through ``loadLocalApplicationDriverVersion``,
 read back from the DB row and projected through ``applicationDriver.versions``.
 T028 adds the rejected-load case: an invalid ``icon`` stores nothing (FR-005).
+T033 adds the reload case: an unchanged driver fills in a pre-feature row (FR-006).
 
 Test location note: the task list specifies
 ``backend/tests/unit/api/schema/test_application_driver_version_propagation.py``
@@ -354,6 +355,70 @@ async def test_driver_info_invalid_icon_fails_load_and_stores_nothing(
         )
     ).all()
     assert rows == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_driver_info_is_filled_in_on_reload_of_an_unchanged_driver(
+    client: AsyncClient, session: AsyncSession, tmp_path: Path
+) -> None:
+    """Reloading an unchanged driver fills in the info columns of a row stored
+    before they existed, on the same driver version (FR-006, US4)."""
+    _write_info_driver(
+        tmp_path,
+        {"icon": INFO_ICON, "description": INFO_DESCRIPTION, "links": INFO_LINKS},
+    )
+    loaded = await gql(client, "load_local_driver_info", {"path": str(tmp_path)})
+    first = loaded["loadLocalApplicationDriverVersion"]
+    version_id = UUID(first["id"])
+
+    # Simulate a row stored before the info columns existed.
+    row = await session.get(ApplicationDriverVersion, version_id)
+    assert row is not None
+    row.icon = None
+    row.description = None
+    row.links = None
+    session.add(row)
+    await session.commit()
+
+    reloaded = await gql(client, "load_local_driver_info", {"path": str(tmp_path)})
+    second = reloaded["loadLocalApplicationDriverVersion"]
+    assert second["id"] == first["id"]
+
+    row = await session.get(
+        ApplicationDriverVersion, version_id, populate_existing=True
+    )
+    assert row is not None
+    assert row.icon == INFO_ICON
+    assert row.description == INFO_DESCRIPTION
+    assert row.links == STORED_INFO_LINKS
+
+    data = await gql(
+        client,
+        "get_driver_info",
+        {"applicationDriverId": first["applicationDriverId"]},
+    )
+    [read_back] = [
+        v for v in data["applicationDriver"]["versions"] if v["id"] == first["id"]
+    ]
+    assert read_back["icon"] == INFO_ICON
+    assert read_back["description"] == INFO_DESCRIPTION
+    assert read_back["links"] == [
+        {"label": "Homepage", "url": "https://example.com/"},
+        {"label": "Documentation", "url": "https://docs.example.com/guide"},
+    ]
+
+    third = await gql(client, "load_local_driver_info", {"path": str(tmp_path)})
+    assert third["loadLocalApplicationDriverVersion"]["id"] == first["id"]
+    versions = (
+        await session.exec(
+            select(ApplicationDriverVersion).where(
+                ApplicationDriverVersion.application_driver_id
+                == UUID(first["applicationDriverId"])
+            )
+        )
+    ).all()
+    assert len(versions) == 1
 
 
 @pytest.mark.asyncio

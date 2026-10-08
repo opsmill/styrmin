@@ -126,6 +126,18 @@ async def load_application_driver_from_object(
             source_commit_sha=driver_object.source_commit_sha,
         )
         if existing_identity is not None:
+            # The identity tuple pins the file content, so this only fills
+            # rows stored before the info columns existed (spec 020, R5).
+            info = _driver_info_columns(driver_object.driver_spec.spec.info)
+            if any(getattr(existing_identity, k) != v for k, v in info.items()):
+                for key, value in info.items():
+                    setattr(existing_identity, key, value)
+                await uow.commit()
+                refreshed = await uow.application_driver_versions.get(
+                    existing_identity.id
+                )
+                assert refreshed is not None, "Application driver version not found"
+                return refreshed
             return existing_identity
 
         # Get or create Helm repository
