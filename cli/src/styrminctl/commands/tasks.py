@@ -58,9 +58,10 @@ def _step_duration(step: TaskStep) -> str:
 
 
 def _step_error(step: TaskStep, output: str | None) -> str:
-    """The newest error, FluxCD's detail and the last output line, one per line."""
+    """Each attempt's error, oldest first, then FluxCD's detail and the last output line, one per line."""
     lines = [line for line in (output or "").splitlines() if line.strip()]
-    parts = [step.error, step.detail, f"output: {lines[-1]}" if lines else None]
+    errors = [f"attempt {error.attempt}: {error.message}" for error in step.errors]
+    parts = [*errors, step.detail, f"output: {lines[-1]}" if lines else None]
     # Errors and output are free text: keep "[...]" from being read as Rich markup.
     return escape("\n".join(part for part in parts if part))
 

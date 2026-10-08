@@ -70,7 +70,7 @@ Prints the existing task table with a `result` column, then a "Steps" table:
 | `status` | Step status |
 | `duration` | `durationSeconds` formatted as `1m 05s`, `running` while running |
 | `attempts` | `attemptCount` |
-| `error` | Newest error, then FluxCD's detail, then "output: <last line>" when the step has output |
+| `error` | The error of each failed attempt as "attempt <n>: <message>", oldest first, then FluxCD's detail, then "output: <last line>" when the step has output; one per line |
 
 The command reads the output of each step whose `hasOutput` is true with `tasks.step_output()`, one step at a time.
 

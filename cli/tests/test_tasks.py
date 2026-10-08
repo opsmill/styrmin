@@ -71,6 +71,15 @@ def _step(name: str, status: str, **fields: Any) -> dict[str, Any]:  # noqa: ANN
     return step
 
 
+def _errors(*messages: str) -> dict[str, Any]:
+    """The ``errors`` and newest ``error`` of a step whose attempts failed with these messages."""
+    errors = [
+        {"attempt": attempt, "message": message, "occurredAt": "2026-10-06T10:00:00+00:00"}
+        for attempt, message in enumerate(messages, start=1)
+    ]
+    return {"errors": errors, "error": messages[-1]}
+
+
 def _task(steps: list[dict[str, Any]], started_tasks: list[dict[str, Any]] | None = None) -> Task:
     return Task.model_validate(
         {
@@ -116,8 +125,9 @@ def test_tasks_get(mock_client: MagicMock, capsys: pytest.CaptureFixture[str], m
                 "FAILED",
                 endedAt="2026-10-06T10:05:00+00:00",
                 durationSeconds=235.0,
-                error="Pods not ready: my-app-6d9 (app: ImagePullBackOff)",
+                attemptCount=2,
                 detail="UpgradeFailed: Helm upgrade failed",
+                **_errors("[install] retries exhausted", "Pods not ready: my-app-6d9 (app: ImagePullBackOff)"),
             ),
             _step("Wait for the pods to be ready", "PENDING", startedAt=None),
         ]
@@ -138,9 +148,11 @@ def test_tasks_get(mock_client: MagicMock, capsys: pytest.CaptureFixture[str], m
     assert " 2 " in prerequisites
     helmrelease = next(line for line in lines if "Install or upgrade the HelmRelease" in line)
     assert "3m 55s" in helmrelease
-    assert "Pods not ready: my-app-6d9 (app: ImagePullBackOff)" in helmrelease
-    # FluxCD's detail follows the error on the next line of the same cell.
-    assert "UpgradeFailed: Helm upgrade failed" in lines[lines.index(helmrelease) + 1]
+    # Each attempt's error, oldest first, then FluxCD's detail, one per line of the same cell.
+    at = lines.index(helmrelease)
+    assert "attempt 1: [install] retries exhausted" in helmrelease
+    assert "attempt 2: Pods not ready: my-app-6d9 (app: ImagePullBackOff)" in lines[at + 1]
+    assert "UpgradeFailed: Helm upgrade failed" in lines[at + 2]
     assert "PENDING" in next(line for line in lines if "Wait for the pods to be ready" in line)
     assert "No steps recorded" not in output
     assert "Started tasks" not in output
@@ -158,8 +170,8 @@ def test_tasks_get_running_step_and_command_output(
                 "FAILED",
                 kind="HOOK",
                 durationSeconds=12.0,
-                error="command exited with 3",
                 hasOutput=True,
+                **_errors("command exited with 3"),
             ),
             _step("Install or upgrade the HelmRelease", "RUNNING"),
         ]
@@ -176,7 +188,7 @@ def test_tasks_get_running_step_and_command_output(
     lines = output.splitlines()
     hook = next(line for line in lines if "Run the upgrade hook" in line)
     assert "12s" in hook
-    assert "command exited with 3" in hook
+    assert "attempt 1: command exited with 3" in hook
     # Command output is printed as text, not read as Rich markup.
     assert "output: [step-output-2]" in lines[lines.index(hook) + 1]
     assert "step-output-1" not in output
