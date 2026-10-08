@@ -128,7 +128,7 @@ type Mutation {
 }
 ```
 
-Access: `PermissionExtension([RequiresRole(Role.READ_WRITE), IsActionsServiceAccount()])`. The second permission accepts only the built-in `styrmin-actions` user (`ACTIONS_SERVICE_ACCOUNT_USERNAME`), so a person cannot change the record of what happened (research D14).
+Access: `PermissionExtension([RequiresRole(Role.READ_WRITE), IsActionsServiceAccount()])`. The second permission accepts only the built-in `styrmin-actions` user (`ACTIONS_SERVICE_ACCOUNT_USERNAME`), so a person cannot change the record of what happened (research D14). No person can get a session for that user: `login` rejects its username, `resetUserPassword` and `changePassword` refuse it, and `createUser` refuses the username (ADR-059).
 
 Semantics:
 

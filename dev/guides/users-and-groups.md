@@ -68,8 +68,11 @@ the first time it needs a token for it (`ensure_actions_service_account` in
   `updateDeploymentVersion` and `recordStep` require.
 - `recordStep` accepts only this user. Every other user, admins included,
   gets `FORBIDDEN`, so no person can change the recorded steps.
-- It has no password. Its stored hash is not an Argon2 hash, so `login`
-  rejects every password for it.
+- It has no password, and no one can log in as it, so only Styrmin's own
+  flows and actions can create sessions for it:
+  - `login` rejects every password for it with `INVALID_CREDENTIALS`;
+  - `resetUserPassword` and `changePassword` refuse it with `FORBIDDEN`;
+  - `createUser` refuses the username `styrmin-actions` with `FORBIDDEN`.
 - Styrmin creates a session for it that expires after 24 hours, passes the
   token to the Kubernetes Job that does the work in `STYRMIN_TOKEN`, and
   deletes the session when the work ends. This happens once for each:
@@ -90,7 +93,7 @@ The user appears in the Users list. Changes to it have these effects:
   `Insufficient permissions`, with the same effect on steps.
 - Adding it to a group with a higher role gives actions that higher role,
   because actions use the user's effective role.
-- Resetting its password turns it into a user that someone can log in as.
+- Resetting its password is refused with `FORBIDDEN`.
 - Deleting it also deletes the sessions of reconciles, jobs, backups and
   restores that are running, so their actions fail and their steps stop
   being recorded. The next of these operations creates the user again.

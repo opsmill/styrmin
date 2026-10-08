@@ -7,6 +7,7 @@ from sqlmodel import select
 
 from styrmin_backend.db.models import Session as SessionModel
 from styrmin_backend.db.models import User
+from styrmin_backend.services.auth.bootstrap import ACTIONS_SERVICE_ACCOUNT_USERNAME
 from styrmin_backend.services.auth.password import (
     needs_rehash,
     hash_password,
@@ -24,8 +25,8 @@ async def authenticate(
 
     Returns ``(user, session_row, raw_token)``. Raises
     :class:`InvalidCredentialsError` for nonexistent users, wrong passwords,
-    and deactivated accounts — the error shape is identical across all three
-    to close the username-enumeration channel.
+    deactivated accounts and the ``styrmin-actions`` user — the error shape
+    is identical across all of them to close the username-enumeration channel.
     """
     canonical = username.casefold()
     # Eager-load groups so downstream serialisation (User.effectiveRole,
@@ -40,6 +41,9 @@ async def authenticate(
     if user is None:
         raise InvalidCredentialsError
     if not user.active:
+        raise InvalidCredentialsError
+    # Only action_api_token creates sessions for this user (ADR-059).
+    if user.username == ACTIONS_SERVICE_ACCOUNT_USERNAME:
         raise InvalidCredentialsError
     if not verify_password(user.password_hash, password):
         raise InvalidCredentialsError

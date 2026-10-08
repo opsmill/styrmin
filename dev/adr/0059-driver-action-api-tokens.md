@@ -29,9 +29,10 @@ A reconcile runs in three processes:
 
 1. **A built-in user for driver actions.** `ensure_actions_service_account` creates the user
    `styrmin-actions` with the `READ_WRITE` role the first time a reconcile needs it, with
-   `INSERT … ON CONFLICT DO NOTHING`. Its password hash is not an Argon2 hash, so `login` rejects
-   every password. An existing row is used as it is, so an admin who deactivates the user or
-   changes its role keeps that change.
+   `INSERT … ON CONFLICT DO NOTHING`. Its password hash is not an Argon2 hash. `login` rejects the
+   username whatever the password, `resetUserPassword` and `changePassword` refuse the user, and
+   `createUser` refuses the username, so no person can get a session for it. An existing row is
+   used as it is, so an admin who deactivates the user or changes its role keeps that change.
 2. **One session per reconcile.** `apply_state` creates an ordinary `Session` row for that user
    before it applies the remediation, and deletes the row when the remediation returns or raises.
    The row expires after 24 hours instead of 30 days; the expiry only matters when the task worker
@@ -64,7 +65,7 @@ A reconcile runs in three processes:
   token. Deleting the session at the end of the reconcile limits how long the token is usable.
 - An action that runs longer than 24 hours loses access to the API.
 - `styrmin-actions` appears in the user list. Deactivating it, or setting its role to `READ_ONLY`,
-  stops actions from calling the API. Resetting its password makes it a user someone can log in as.
+  stops actions from calling the API. Resetting its password is refused.
   See [Users and Groups](../guides/users-and-groups.md#driver-actions-user-styrmin-actions).
 - Every reconcile writes and deletes one `Session` row.
 - The agent status reporter, the flow-run state callback and `GET /deployments/{id}/context` still

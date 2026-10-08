@@ -101,7 +101,9 @@ uses the SDK is authenticated as `styrmin-actions` too.
 
 `styrmin-actions` appears in the user list. If an admin deactivates it, or
 sets its role to Read-only, the actions' calls to the API fail and the
-deployment's task ends as `failed`.
+deployment's task ends as `failed`. No one can log in as `styrmin-actions`:
+Styrmin rejects a login with its username and refuses to set or reset its
+password, so only Styrmin's own flows and actions can record steps.
 
 ### Steps of a hook
 

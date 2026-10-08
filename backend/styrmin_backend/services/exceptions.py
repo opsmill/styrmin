@@ -713,6 +713,13 @@ class UserHasReferencesError(ServiceError):
     default_message = "User has foreign-key references and cannot be deleted"
 
 
+class ActionsServiceAccountError(ServiceError):
+    """A request would give the built-in ``styrmin-actions`` user a password (ADR-059)."""
+
+    error_code = "FORBIDDEN"
+    default_message = "The styrmin-actions user cannot have a password"
+
+
 class PostRenderPatchRenderingError(ServiceError):
     """Failed to serialise a post-renderer patch into YAML.
 

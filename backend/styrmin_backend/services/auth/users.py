@@ -46,10 +46,12 @@ from styrmin_backend.services.auth.admin_guards import (
     can_hard_delete_user,
     would_leave_zero_admins,
 )
+from styrmin_backend.services.auth.bootstrap import ACTIONS_SERVICE_ACCOUNT_USERNAME
 from styrmin_backend.services.auth.membership import replace_user_groups
 from styrmin_backend.services.auth.password import hash_password
 from styrmin_backend.services.auth.session import delete_all_sessions_for_user
 from styrmin_backend.services.exceptions import (
+    ActionsServiceAccountError,
     DuplicateUsernameError,
     GroupNotFoundError,
     LastAdminError,
@@ -240,6 +242,10 @@ async def create_user(
 ) -> UserModel:
     """Insert a new user row + optional group memberships in one commit."""
     canonical = _validate_username(input.username)
+    if canonical == ACTIONS_SERVICE_ACCOUNT_USERNAME:
+        raise ActionsServiceAccountError(
+            "The username styrmin-actions is reserved for driver actions"
+        )
     display_name = _validate_display_name(input.display_name)
     # ``hash_password`` enforces the argon2 length policy and raises
     # ``PasswordPolicyError`` (error_code=VALIDATION_ERROR) on violation.
@@ -404,8 +410,15 @@ async def reset_user_password(
     new_password: str,
     actor_user_id: UUID,
 ) -> bool:
-    """Reset a user's password and invalidate every session they hold."""
+    """Reset a user's password and invalidate every session they hold.
+
+    Refuses ``styrmin-actions``, so that no person can log in as it (ADR-059).
+    """
     user = await _load_user_with_groups(uow, user_id)
+    if user.username == ACTIONS_SERVICE_ACCOUNT_USERNAME:
+        raise ActionsServiceAccountError(
+            "The password of the styrmin-actions user cannot be reset"
+        )
     # ``hash_password`` enforces the length policy and raises
     # ``PasswordPolicyError`` (VALIDATION_ERROR) on violation.
     user.password_hash = hash_password(new_password)
