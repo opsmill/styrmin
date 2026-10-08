@@ -144,6 +144,7 @@ Frontend architecture documentation in [knowledge/frontend/](knowledge/frontend/
 - [forms.md](knowledge/frontend/forms.md) - TanStack Form architecture, Zod integration, field bindings, dynamic fields
 - [ui-primitives.md](knowledge/frontend/ui-primitives.md) - Base UI wrapper layer, Slot utility, data-attribute conventions
 - [deployment-configuration.md](knowledge/frontend/deployment-configuration.md) - Configuration tab and edit drawer: draft lifecycle, diff → impact → apply, inheritance state, conflict detection
+- [deployment-timeline.md](knowledge/frontend/deployment-timeline.md) - History timeline and backup/restore rows: task result badges, step rows, output loaded on request, entry expansion and task links, E2E data attributes
 
 CLI (`styrminctl`) internals in [knowledge/cli/](knowledge/cli/):
 

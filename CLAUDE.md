@@ -64,5 +64,4 @@
 - 058-frontend-testing: Added TypeScript 5.9.3, React 19.2.4, Node 22 + Vite 8.0.1, urql 5.0.1 (GraphQL), Radix UI, React Router 7, React Hook Form 7
 
 <!-- SPECKIT START -->
-Active feature plan: [specs/019-task-steps/plan.md](specs/019-task-steps/plan.md) (spec: [spec.md](specs/019-task-steps/spec.md), design: research.md, data-model.md, contracts/graphql.md, contracts/operator-status.md, contracts/flow-step-reporter.md, contracts/client-surfaces.md, quickstart.md)
 <!-- SPECKIT END -->

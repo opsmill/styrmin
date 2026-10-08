@@ -265,6 +265,35 @@ Tracks async operation status.
 | `get_tasks(uow)` | List all tasks |
 | `update_task_state(task_id, state_name, state_message, uow)` | Update task status |
 
+### Step Services (`steps/`)
+
+<!-- Extracted from specs/019-task-steps on 2026-10-08 -->
+
+Steps record the units of work of a task, a backup or a restore, so users can view what ran and why
+it failed. The data model is in [data-models.md](data-models.md#step), the GraphQL surface in
+[api.md](api.md#step), and the decisions in
+[ADR-060](../../adr/0060-steps-and-derived-task-result.md).
+
+| Module | What it does |
+|--------|--------------|
+| `recorder.py` | The only code that creates or changes steps. Its functions run in the caller's transaction and do not commit, except `record_event`, the entry point of the `recordStep` mutation. It enforces the state rules: a forbidden transition is logged and returns the step unchanged, because a late write is not an error. It also creates a task's operator-phase steps (`ensure_operator_steps`) and supersedes the open operator-phase steps of older tasks (`supersede_operator_steps`). |
+| `internal_flows.py` | Step writes from INTERNAL flows. Each write runs in its own transaction and logs a warning instead of failing the flow. `open_task_step` retries for up to 10 seconds while the task row is not committed yet. `fail_open_steps` fails the open steps of a USER flow that failed or crashed. |
+| `operator_history.py` | `apply_operator_report` turns one status report into changes to the operator-phase steps of the task that the report belongs to. See [Steps of a rollout](../agent/operator.md#steps-of-a-rollout). |
+| `results.py` | Calculates the task result on every read. `compute_task_result` and `family_results` are pure functions, so a read model can apply them to rows it loaded in bulk; `get_task_result` serves single reads. See [Task result](data-models.md#task-result). |
+| `reads.py` | Step reads for the API, the check of `startedByStepId` (`check_starting_step`), and the "no report from the agent" rule (`no_report_since`, 60 seconds). |
+| `exceptions.py` | `StepNotFoundError` (`NOT_FOUND`), `InvalidStepRecordError` and `InvalidStartingStepError` (`VALIDATION_ERROR`). |
+
+The step definitions (key, name and kind of each step that a flow records) are constants in
+`domain/steps.py`, for example `COMMAND` and `RESTORE_NAMESPACE`.
+
+**Timeline read model.** `deployment_timeline.py::load_timeline_read_model` loads, for all the
+tasks of a timeline, their steps, the tasks those steps started and the last agent reports, in a
+fixed number of queries. It then calculates every task result and "no report" time in memory and
+returns a `TimelineReadModel`. The GraphQL `Task` and `Step` objects read their part from it, so
+the timeline does not query once per task or per step.
+`tests/unit/services/test_deployment_timeline_steps.py` fails when a timeline of 20 tasks needs more
+queries than a timeline of one task, or more than five.
+
 ### Primitives Service (`primitives.py`)
 
 Low-level operations on deployments.

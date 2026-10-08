@@ -91,6 +91,24 @@ Order a service function as: load, validate everything, then the steps with side
 the database. Reference: `services/deployment.py::update_deployment_version`, which resolves the
 target driver version and re-checks image overrides before `_ensure_ingress_controller`.
 
+### Calculate a status that several writers change; do not store it
+
+<!-- Extracted from specs/019-task-steps on 2026-10-08 -->
+
+When a status or result depends on rows that different processes write at different times,
+calculate it on every read from those rows instead of storing it. A stored value forces every
+writer to recalculate it, and a writer that forgets leaves it wrong. Two features follow this rule:
+
+- The status of an environment backup or restore comes from its constituent backups or restores
+  ([ADR-055](../../adr/0055-environment-backup-parent-records.md)).
+- The task result comes from the steps and `Task.status` of the task and of the tasks its hook
+  steps started. Flows, driver actions and status reports write these
+  ([ADR-060](../../adr/0060-steps-and-derived-task-result.md)).
+
+Write the calculation as a pure function over rows that are already loaded
+(`services/steps/results.py::compute_task_result`), so a list read can load the rows in bulk and
+apply it in memory (see [Load list fields in a fixed number of queries](#load-list-fields-in-a-fixed-number-of-queries)).
+
 ## Repository Pattern
 
 Repositories use abstract base classes with concrete SQLModel implementations:
@@ -307,6 +325,10 @@ Rules for any mutation that touches user/group state, admin-conferring rows, or 
   Field **names only** — never values. Emit from the service function so it only fires on commit, never from the resolver.
 - Password-bearing GraphQL variables MUST be added to the `MASKED_VARIABLE_NAMES` frozenset in `api/logging/mask.py`. Per-mutation ad-hoc masking is forbidden — every password field on the schema goes through that one allow-list. Adding a new password field is a one-line PR change that triggers code review on the import site.
 
+<!-- Extracted from specs/019-task-steps on 2026-10-08 -->
+
+- A mutation that only Styrmin's own flows and driver actions may call, such as `recordStep`, MUST attach `PermissionExtension([RequiresRole(Role.READ_WRITE), IsActionsServiceAccount()])` and MUST NOT be on the unauthenticated allow-list (`api/auth/allowlist.py`). The flows call it with the action token of the built-in `styrmin-actions` user ([ADR-059](../../adr/0059-driver-action-api-tokens.md)); every other user, admins included, gets `FORBIDDEN`, so no person can change what the flows recorded. `IsActionsServiceAccount`'s error message names step recording, so give it a general message when a second mutation uses it.
+
 ## Database Models (SQLModel)
 
 - Inherit from `StyrminModel` (provides `id`, `created_on`, `updated_on`)
@@ -521,12 +543,79 @@ def application_driver(self) -> ApplicationDriver:
 
 **Circular imports**: Use `strawberry.lazy()` with `Annotated` only when circular imports actually occur. Prefer standard imports when possible.
 
+### Load list fields in a fixed number of queries
+
+<!-- Extracted from specs/019-task-steps on 2026-10-08 -->
+
+A nested resolver runs one query per parent object. That is acceptable for a single read, but a
+list that a page reloads every 10 seconds multiplies it: per-field resolvers for the steps,
+results and links of a 50-task timeline would run about a thousand queries on every refresh. When a
+new nested field appears in such a list, load it in a number of queries that does not grow with
+the number of items. Two patterns exist:
+
+- **A read model built by the service.** The service loads the child rows of all items in bulk,
+  calculates derived values in memory, and passes each GraphQL object its part through
+  `strawberry.Private` fields. The resolver uses the private field when it is set and queries only
+  for single reads. Use a sentinel (`NOT_LOADED` in `api/definitions/step/model.py`) rather than
+  `None`, because `None` and `[]` are valid loaded values. Reference:
+  `services/deployment_timeline.py::load_timeline_read_model` and `Task.steps` in
+  `api/definitions/task/model.py`.
+- **A per-request data loader** (`api/loaders.py`). Use it when the same type appears in several
+  queries and places, such as `Backup.steps` in backup lists and in environment backups. One query
+  reads the keys of the whole response, and a field that is not requested reads nothing.
+
+```python
+@strawberry.field
+async def steps(self, info: strawberry.Info) -> list[Step]:
+    if self.steps_view is not NOT_LOADED:  # set by the timeline read model
+        return self.steps_view
+    steps = await list_steps(StepParent.of_task(self.id), uow=info.context["uow"])
+    return [Step.from_instance(step) for step in steps]
+```
+
+Add a unit test that counts the `SELECT` statements of the list query for one item and for many
+items, and fails when the two counts differ or pass a fixed limit. Reference:
+`tests/unit/services/test_deployment_timeline_steps.py::test_timeline_query_count_does_not_grow_with_tasks`.
+
+Leave large text fields, such as `Step.output`, out of list queries. Expose a boolean
+(`hasOutput`) and a single-item query (`Query.step`) that the client calls on request.
+
 ## Prefect Flows & Tasks
 
 - `@task` for individual async operations
 - `@flow` for multi-step orchestration
 - Use `flow_run_name` / `task_run_name` for readable Prefect UI entries
 - Only top-level wrapper flows register callbacks; inner flows do not
+
+### Record units of work as steps
+
+<!-- Extracted from specs/019-task-steps on 2026-10-08 -->
+
+When a flow or a driver action primitive does work that users need to follow or diagnose, record
+each unit of work as a step of its task, backup or restore, so users can view it without Prefect
+or `kubectl` ([ADR-060](../../adr/0060-steps-and-derived-task-result.md)). Define the key, name
+and kind of each step as a `StepDefinition` constant in `domain/steps.py`. How a step is written
+depends on where the code runs:
+
+- **Server code and INTERNAL flows** (database access) call the step recorder through
+  `services/steps/internal_flows.py`: `open_task_step`, `end_step` and `fail_open_steps`. Never
+  insert or update `step` rows any other way; the recorder enforces the state rules.
+- **USER flows and driver actions** (no database access) use `StepReporter.from_env()` from
+  `agent/steps/reporter.py`, which calls the `recordStep` mutation with the action token. Wrap
+  the work in `async with reporter.step(*steps.MY_STEP):`, which records the start, the success,
+  or the failure with the exception text before it raises the exception again.
+- **To give a USER Job its step parent**, add it to the Job's environment with
+  `agent/tasks/utils.py::action_job_variables(token, task_id=..., backup_id=..., restore_id=...,
+  step_id=...)`. Do not add flow parameters for it: they would change the parameters of every
+  registered Prefect deployment for values that only the reporter reads.
+- **A failed step write never fails the work.** The reporter and the INTERNAL-flow helpers log a
+  warning and continue. Without a token or a parent, the reporter records nothing.
+- **A USER flow cannot end its own steps when it crashes.** The INTERNAL flow that started it
+  must catch the error of the USER flow run, call `fail_open_steps` with it, and raise it again,
+  as the `apply_state`, `run_job`, backup and restore flows do.
+
+See [Steps recorded by the flows](../../knowledge/backend/orchestration-flows.md#steps-recorded-by-the-flows)
+for the steps that each flow records today.
 
 ## Invoke Tasks
 
