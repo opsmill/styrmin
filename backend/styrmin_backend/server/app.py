@@ -23,6 +23,7 @@ from styrmin_backend.services.ingress_controller.driver import (
     initialize_internal_drivers,
 )
 from styrmin_backend.services.telemetry.install import ensure_install_id
+from styrmin_backend.services.telemetry.state import startup_message
 from styrmin_backend.services.utilities.utilities import initialize_utilities
 from styrmin_backend.workflows.dependency import get_manager
 
@@ -47,6 +48,9 @@ async def app_initialization(_: FastAPI) -> None:
     logger.remove(0)
     logger.configure(patcher=redact)
     logger.add(sys.stderr, level=config.SETTINGS.log_level)
+
+    # Logged before the database wait, so it appears even when the database is down (FR-010).
+    logger.info(startup_message(config.SETTINGS.telemetry))
 
     # Wait for the database to become available, then initialize
     await wait_for_database()
