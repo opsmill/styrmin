@@ -291,7 +291,8 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
 
     Task count is read via the deployment timeline (one entry per ``Task``),
     without the tasks that the upgrade hook starts; each real change must add
-    precisely one entry.
+    precisely one entry. The version change uses ``apply --wait``, which must
+    return only after the upgrade and the tasks its hook started have ended.
     """
     driver, client = session_scenario_driver
 
@@ -347,14 +348,23 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
     # --- Version-only change → exactly 1 upgrade ---------------------------
     manifest_doc["spec"]["version"] = "0.2.0"
     version_outcome = await client.deployments.apply(
-        _resolve_manifest_from_doc(manifest_doc, manifest_path)
+        _resolve_manifest_from_doc(manifest_doc, manifest_path), wait=True
     )
     assert version_outcome.action == "updated", (
         f"a version-only change must be an update, got "
         f"action={version_outcome.action!r} (reason={version_outcome.failure_reason!r})"
     )
     assert version_outcome.task_id is not None, "a version upgrade must dispatch a task"
-    await driver.wait_for_deployment_running(deployment_id=deployment_id, timeout=300.0)
+
+    # The deployment must not read running before the hook's tasks and the upgrade end (#405).
+    unfinished = [
+        (entry.task.type_, entry.task.status)
+        for entry in await client.deployments.get_timeline(deployment_id)
+        if entry.task.status in ("pending", "running")
+    ]
+    assert not unfinished, (
+        f"apply --wait returned before these tasks finished: {unfinished}"
+    )
 
     after_version_task_count = await _dispatched_task_count(client, deployment_id)
     assert after_version_task_count == after_config_task_count + 1, (

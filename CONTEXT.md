@@ -145,7 +145,7 @@ A `Deployment` row whose cluster-side workload has been torn down by the **opera
 _Avoid_: "soft-deleted row" (correct mechanism, wrong vocabulary in user-facing text), "archived deployment", "removed deployment".
 
 **Deployment state**:
-The enum value on `Deployment.status`: `PENDING`, `DEPLOYING`, `RUNNING`, `RESTORING`, `FAILED`, `DELETING`, `DELETED`. Sole source of truth for the column is the **status reporter** mapping the **operator**'s `displayState`, except during a restore: from `createRestore` until the restore workflow records the result, the column stays `RESTORING` whatever the reports say. If that workflow cannot be dispatched, the restore and the deployment are marked `FAILED` at once.
+The enum value on `Deployment.status`: `PENDING`, `DEPLOYING`, `RUNNING`, `RESTORING`, `FAILED`, `DELETING`, `DELETED`. Sole source of truth for the column is the **status reporter** mapping the **operator**'s `displayState`. A `Running` report sets `RUNNING` only once the task that rolls out the reported instance, and the task whose hook step started it, have finished. The column does not change during a restore: from `createRestore` until the restore workflow records the result, the column stays `RESTORING` whatever the reports say. If that workflow cannot be dispatched, the restore and the deployment are marked `FAILED` at once.
 _Avoid_: "deployment status" (use this for the _record_ `DeploymentStatus`, not the state value), "phase" (that is the operator's `.status.phase`).
 
 **Declarative deployment manifest**:

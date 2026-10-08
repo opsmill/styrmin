@@ -8,8 +8,10 @@ from uuid import UUID
 from loguru import logger
 
 from styrmin_backend.db.models import DeploymentState, DeploymentStatus
+from styrmin_backend.domain.models import Task, TaskStatus
 from styrmin_backend.services.backup.service import has_in_flight_restore
 from styrmin_backend.services.steps.operator_history import apply_operator_report
+from styrmin_backend.services.steps.reads import get_starting_task
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 # CRD displayState to DeploymentState mapping.
@@ -37,6 +39,22 @@ async def _record_operator_steps(report: dict, now: datetime, uow: UnitOfWork) -
         )
 
 
+async def _unfinished_rollout_task(instance_id: UUID, uow: UnitOfWork) -> Task | None:
+    """The task that rolls out the instance, or a task that started it, while it runs.
+
+    A hook's ``stop_components`` task rolls out its own instance while the
+    upgrade that started it still runs (#405).
+    """
+    task = await uow.tasks.find_by_instance(instance_id)
+    seen: set[UUID] = set()
+    while task is not None and task.id not in seen:
+        if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+            return task
+        seen.add(task.id)
+        task = await get_starting_task(task, uow)
+    return None
+
+
 async def report_deployment_statuses(
     reports: list[dict],
     uow: UnitOfWork,
@@ -62,6 +80,10 @@ async def report_deployment_statuses(
     CR only reads ``Restoring`` once Velero has finished, so reports sent
     earlier carry the pre-restore ``Running``, the teardown's ``Deleting``, or
     the ``Deploying`` default of the status-less CR that Velero recreates.
+
+    A ``Running`` report does not set ``RUNNING`` while the task that rolls out
+    the reported instance, or the task whose hook step started it, is pending
+    or running. The first report after that task finishes sets it.
 
     Args:
         reports: List of dicts with keys: deployment_id (UUID), phase (str),
@@ -134,6 +156,19 @@ async def report_deployment_statuses(
                     display_state,
                 )
                 continue
+
+            rollout_instance_id = reported_instance_id or active_instance_id
+            if target_state == DeploymentState.RUNNING and rollout_instance_id:
+                unfinished = await _unfinished_rollout_task(rollout_instance_id, uow)
+                if unfinished is not None:
+                    logger.info(
+                        "Skipping status update for deployment {}: task {} has not "
+                        "finished, ignoring reported state {}",
+                        deployment_id,
+                        unfinished.id,
+                        display_state,
+                    )
+                    continue
 
             if deployment.status != target_state.value:
                 # On the transition into DELETED, atomically tombstone the
