@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from styrmin_backend.db.models import ApplicationInstance
 from styrmin_backend.db.models import Deployment as DeploymentModel
@@ -17,6 +17,7 @@ from styrmin_backend.domain.models import (
 from styrmin_backend.services.deployment_status import report_deployment_statuses
 from styrmin_backend.services.steps.recorder import open_step
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
+from tests.unit.counterpart_crd_fixtures import make_context
 from tests.unit.steps.conftest import Parents
 
 
@@ -70,6 +71,7 @@ async def _hook_task(uow: SqlModelUnitOfWork, parents: Parents) -> Task:
         status=source.status,
         deployment_id=parents.deployment_id,
         application_driver_version_id=source.application_driver_version_id,
+        sequence=source.sequence + 1,
     )
     uow.session.add(instance)
     await uow.session.flush()
@@ -129,3 +131,54 @@ async def test_other_states_do_not_wait_for_the_task(
 
     _, updated = await report_deployment_statuses([report], uow)
     assert (updated, await _deployment_status(uow, parents)) == (1, "deploying")
+
+
+async def test_update_written_before_an_earlier_upgrade_waits_for_its_own_task(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    """An upgrade followed at once by an update whose flow writes first (#386).
+
+    The upgrade's flow leaves the StyrminDeployment unchanged and skips its status
+    reset, so the reports still carry the previous rollout's Running until the
+    operator handles the update's spec.
+    """
+    await _set_status(uow, parents.task, TaskStatus.RUNNING)
+    source = await uow.session.get(ApplicationInstance, parents.instance_id)
+    assert source is not None
+    newer = ApplicationInstance(
+        name="update-instance",
+        application_version=source.application_version,
+        status=source.status,
+        deployment_id=parents.deployment_id,
+        application_driver_version_id=source.application_driver_version_id,
+        context=make_context(
+            deployment_id=parents.deployment_id, namespace="ns", release_reference="rel"
+        ).model_dump(mode="json"),
+        sequence=source.sequence + 1,
+    )
+    uow.session.add(newer)
+    await uow.session.flush()
+    update = Task.create(
+        type=TaskType.UPDATE_INSTANCE,
+        deployment_id=parents.deployment_id,
+        status=TaskStatus.RUNNING,
+        instance_id=newer.id,
+    )
+    await uow.tasks.save(update)
+    deployment = await uow.session.get(DeploymentModel, parents.deployment_id)
+    assert deployment is not None
+    deployment.active_application_instance_id = newer.id
+    await uow.commit()
+    await _pending_deployment(uow, parents)
+
+    previous_rollout = _running_report(parents, uuid4())
+    upgrade_instance = _running_report(parents, parents.instance_id)
+    update_instance = _running_report(parents, newer.id)
+    for report in (previous_rollout, upgrade_instance, update_instance):
+        _, updated = await report_deployment_statuses([report], uow)
+        assert (updated, await _deployment_status(uow, parents)) == (0, "pending")
+
+    # The upgrade's hooks may still run; only the update's task holds RUNNING back.
+    await _set_status(uow, update, TaskStatus.SUCCESS)
+    _, updated = await report_deployment_statuses([update_instance], uow)
+    assert (updated, await _deployment_status(uow, parents)) == (1, "running")

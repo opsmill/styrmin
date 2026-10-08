@@ -307,14 +307,15 @@ def _validate_component_container_overrides(
 
 # Volatile / per-generation instance fields that are never part of the desired
 # state and must be ignored when deciding whether an update is a no-op:
-# the instance's own ``id`` / generated ``name`` / runtime ``status``, plus the
-# synthetic ``context.instance.id`` that ``generate_instance_from_deployment``
-# stamps onto every freshly-built candidate.
+# the instance's own ``id`` / generated ``name`` / runtime ``status`` /
+# ``sequence``, plus the synthetic ``context.instance.id`` that
+# ``generate_instance_from_deployment`` stamps onto every freshly-built candidate.
 _NOOP_EXCLUDE_PATHS = frozenset(
     {
         "root['id']",
         "root['name']",
         "root['status']",
+        "root['sequence']",
         "root['context']['instance']['id']",
     }
 )

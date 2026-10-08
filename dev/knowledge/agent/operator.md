@@ -194,11 +194,13 @@ All resources created from a StyrminDeployment carry:
 <!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
 
 Custom resources go through `upsert_custom_resource`
-(`agent/service/kubernetes/primitives.py`): a create, then a patch on `409 Conflict`. Two
-callers opt into `replace_spec_keys_on_update=True`: the operator's HelmRelease apply
-(`operator/pipeline.py`) and the agent's StyrminDeployment CR applies
+(`agent/service/kubernetes/primitives.py`): a create, then a patch on `409 Conflict`. The
+operator's HelmRelease apply (`operator/pipeline.py`) opts into
+`replace_spec_keys_on_update=True`. The agent's StyrminDeployment writes
 (`agent/tasks/orchestration.py::_apply_styrmin_deployment_crd`, used on create, update, and
-upgrade). Every other custom resource keeps JSON merge-patch.
+upgrade) send the same JSON Patch, built by `replace_spec_keys_json_patch`, as a conditional
+write: see [Write order of the StyrminDeployment](#write-order-of-the-styrmindeployment).
+Every other custom resource keeps JSON merge-patch.
 
 | Path | Behaviour |
 |------|-----------|
@@ -214,6 +216,73 @@ driver dropped). Spec keys Styrmin never writes survive: `spec.suspend` set by
 `flux suspend hr`, and the server-owned `spec.deletionRequested` on the CR, which the CRD's
 CEL rule forbids resetting after a delete request. See
 [ADR-057](../../adr/0057-post-render-component-overrides.md) §6.
+
+### Write order of the StyrminDeployment
+
+Each accepted change of a deployment schedules its own `apply_state` flow, and the
+remediation flows of two changes made in quick succession can write the StyrminDeployment
+in either order ([#386](https://github.com/opsmill/styrmin/issues/386)). Before this, the
+last write won, so the StyrminDeployment could keep the older configuration. The decision is
+recorded in [ADR-064](../../adr/0064-styrmindeployment-write-order-by-instance-sequence.md).
+
+Each instance therefore carries a `sequence`: 1 for the deployment's first instance, then
+one more for each new instance. `SQLModelDeploymentRepository.save` assigns it when it saves
+a new active instance, with
+`UPDATE deployment SET last_instance_sequence = last_instance_sequence + 1 ... RETURNING`.
+The UPDATE keeps the deployment row locked until the transaction commits, so a second
+transaction that saves an instance of the same deployment waits, and its instance gets the
+next number. The instance committed last therefore holds the highest sequence and is the
+active instance. A new deployment's first instance gets 1. The unique constraint
+`uq_applicationinstance_deployment_sequence` rejects a duplicate.
+
+The flows pass `Instance.sequence` to `build_styrmin_deployment_body`, which writes it in the
+`styrmin.io/instance-sequence` annotation. `_apply_styrmin_deployment_crd` then, up to five
+attempts:
+
+1. Reads the StyrminDeployment. When there is none, it creates it. A `409 Conflict` means
+   another flow created it after the read, and it reads again.
+2. Leaves the StyrminDeployment unchanged when its annotation holds a higher sequence than
+   the flow's instance, and returns that instance as a `KeptInstance`. An equal sequence is
+   written again. A missing or non-numeric annotation does not stop the write.
+3. Otherwise patches the StyrminDeployment with a JSON Patch whose first operation is a
+   `test` of `/metadata/resourceVersion`, so the patch applies only to the version it read.
+   The patch removes the annotation when the flow's instance has no sequence, because the
+   annotation would then describe the previous spec. On `409`, or on `422` after which a
+   second read returns a different `resourceVersion` (the write of another flow, a status
+   write, a kopf annotation), it reads again. Any other `422`, such as a schema or CEL
+   validation error, is raised at once.
+
+After five attempts it raises `CustomResourceWriteConflictError`, which fails the
+`resource:styrmindeployment` step with a message that names the StyrminDeployment.
+
+A flow whose write returned a `KeptInstance`:
+
+- logs the reason with the Prefect run logger, stores it as the output of the
+  `resource:styrmindeployment` step, and records a `NewerInstanceKept` Kubernetes Event on
+  the StyrminDeployment (a failed Event write logs a warning and does not fail the step);
+- ends the step as succeeded. The task's operator-phase steps end `superseded` when the
+  newer task's write step succeeds
+  ([ADR-060](../../adr/0060-steps-and-derived-task-result.md) §20), so the task result is
+  `superseded`;
+- skips its service aliases, because the flow of the later change writes its own;
+- in `upgrade_instance_crd`, skips the status reset;
+- still runs its driver hooks. A create still creates the namespace.
+
+The annotation is the only input of the comparison. When it holds a sequence higher than any
+instance of the deployment, for example after an edit with `kubectl`, every later flow
+leaves the StyrminDeployment unchanged, the newest task keeps running and the deployment
+stays `pending`. Removing the annotation and making a change to the deployment writes the
+StyrminDeployment again.
+
+A StyrminDeployment without the annotation, written before this change or by the
+cross-target restore, is written as before.
+
+The order of the StyrminDeployment writes does not cover FluxCD. helm-controller v1.1.0,
+which the agent chart installs, records a HelmRelease generation that arrives during an
+upgrade as observed, with its post-renderers digest, so a change to `spec.postRenderers`
+alone (env vars, image overrides) can be dropped
+([#433](https://github.com/opsmill/styrmin/issues/433)). FluxCD fixed it in helm-controller
+v1.5.0.
 
 ## Kubernetes Events
 

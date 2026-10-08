@@ -9,6 +9,10 @@ class CustomResourceNotFound(KubernetesError):
     """The custom resource could not be found."""
 
 
+class CustomResourceWriteConflictError(KubernetesError):
+    """Other writes changed a custom resource between each read and write of a flow."""
+
+
 class JobFailedError(AgentServiceError):
     """A Kubernetes Job failed; carries the end of its output when it could be read."""
 

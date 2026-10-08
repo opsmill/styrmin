@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime
 from typing import Any
 
 from fast_depends import Depends, inject
@@ -51,12 +52,12 @@ def _prune_none(value: Any) -> Any:
     return value
 
 
-def _json_pointer_token(key: str) -> str:
+def json_pointer_token(key: str) -> str:
     """Escape *key* as one RFC 6901 reference token (``~`` first, then ``/``)."""
     return key.replace("~", "~0").replace("/", "~1")
 
 
-def _replace_spec_keys_json_patch(body: dict[str, Any]) -> list[dict[str, Any]]:
+def replace_spec_keys_json_patch(body: dict[str, Any]) -> list[dict[str, Any]]:
     """Build the JSON Patch that replaces each spec key the body sets.
 
     Each top-level ``spec`` key the body sets is replaced (nested ``None``
@@ -70,7 +71,7 @@ def _replace_spec_keys_json_patch(body: dict[str, Any]) -> list[dict[str, Any]]:
     """
     ops: list[dict[str, Any]] = []
     for key, value in (body.get("spec") or {}).items():
-        path = f"/spec/{_json_pointer_token(key)}"
+        path = f"/spec/{json_pointer_token(key)}"
         if value is None:
             ops.append({"op": "add", "path": path, "value": {}})
             ops.append({"op": "remove", "path": path})
@@ -82,7 +83,7 @@ def _replace_spec_keys_json_patch(body: dict[str, Any]) -> list[dict[str, Any]]:
             ops.append(
                 {
                     "op": "add",
-                    "path": f"/metadata/{map_key}/{_json_pointer_token(key)}",
+                    "path": f"/metadata/{map_key}/{json_pointer_token(key)}",
                     "value": value,
                 }
             )
@@ -205,7 +206,7 @@ async def upsert_custom_resource(
                     version=version,
                     namespace=namespace,
                     plural=plurals,
-                    body=_replace_spec_keys_json_patch(body),
+                    body=replace_spec_keys_json_patch(body),
                     name=body["metadata"]["name"],
                     _content_type="application/json-patch+json",  # type: ignore[call-arg]
                 )
@@ -277,6 +278,38 @@ async def patch_custom_resource(
                 f"Custom resource {plural}/{reference} not found in namespace {namespace}"
             )
         raise
+
+
+@inject
+async def create_event(
+    *,
+    involved_object: kubeclient.V1ObjectReference,
+    reason: str,
+    message: str,
+    component: str,
+    event_type: str = "Normal",
+    client: ApiClient = Depends(get_api_client),
+) -> None:
+    """Record a Kubernetes Event on ``involved_object``, in that object's namespace."""
+    now = datetime.now(tz=UTC)
+    await kubeclient.CoreV1Api(client).create_namespaced_event(
+        namespace=involved_object.namespace,
+        body=kubeclient.CoreV1Event(
+            metadata=kubeclient.V1ObjectMeta(
+                generate_name=f"{involved_object.name}.",
+                namespace=involved_object.namespace,
+            ),
+            involved_object=involved_object,
+            reason=reason,
+            message=message,
+            type=event_type,
+            first_timestamp=now,
+            last_timestamp=now,
+            source=kubeclient.V1EventSource(component=component),
+            reporting_component=component,
+            action=reason,
+        ),
+    )
 
 
 @inject

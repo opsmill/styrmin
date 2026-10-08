@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import update
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, func, select
 
@@ -142,6 +143,7 @@ class SQLModelDeploymentRepository(
                 context=deployment.active_instance.context.model_dump(mode="json"),
                 deployment_id=deployment.id,
                 application_driver_version_id=deployment.active_instance.application_driver_version_id,
+                sequence=deployment.active_instance.sequence,
             )
 
         deployment_model = DeploymentModel(
@@ -163,8 +165,19 @@ class SQLModelDeploymentRepository(
         return deployment_model
 
     async def save(self, deployment: DeploymentEntity) -> None:
-        """Save a deployment."""
+        """Save a deployment, numbering its active instance when it is new."""
+        instance = deployment.active_instance
+        new_deployment_sequence = None
+        if instance is not None and instance.sequence is None:
+            sequence = await self._increment_instance_sequence(deployment.id)
+            if sequence is None:  # The deployment row does not exist yet.
+                sequence = new_deployment_sequence = 1
+            deployment.set_active_instance(
+                instance.model_copy(update={"sequence": sequence})
+            )
         model = self._to_model(deployment)
+        if new_deployment_sequence is not None:
+            model.last_instance_sequence = new_deployment_sequence
         merged = await self.session.merge(model)
         await self.session.flush()
         # Explicitly set the FK after flush. post_update=True relationships
@@ -175,6 +188,22 @@ class SQLModelDeploymentRepository(
             merged.active_application_instance_id = deployment.active_instance.id
         else:
             merged.active_application_instance_id = None
+
+    async def _increment_instance_sequence(self, deployment_id: UUID) -> int | None:
+        """Increment the deployment's instance counter; None when the row does not exist.
+
+        The UPDATE keeps the row locked until the transaction ends, so sequences
+        follow the order in which the instances are committed (#386).
+        """
+        result = await self.session.exec(
+            update(self.model_class)
+            .where(col(self.model_class.id) == deployment_id)
+            .values(
+                last_instance_sequence=col(self.model_class.last_instance_sequence) + 1
+            )
+            .returning(col(self.model_class.last_instance_sequence))
+        )
+        return result.scalar_one_or_none()
 
     def _to_entity(self, entity: DeploymentModel) -> DeploymentEntity:
         """Convert a database model to a domain entity."""
@@ -213,6 +242,7 @@ class SQLModelDeploymentRepository(
                 context=GlobalContext.model_validate(active_instance.context),
                 application_driver_version_id=active_instance.application_driver_version_id,
                 deployment_id=entity.id,
+                sequence=active_instance.sequence,
             )
         deployment.set_active_instance(application_instance)
 
@@ -507,6 +537,7 @@ class SQLModelDeploymentRepository(
                 context=GlobalContext.model_validate(active_instance.context),
                 application_driver_version_id=active_instance.application_driver_version_id,
                 deployment_id=entity.id,
+                sequence=active_instance.sequence,
             )
         deployment.set_active_instance(application_instance)
 

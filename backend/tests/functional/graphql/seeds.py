@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
+from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import (
@@ -206,14 +207,19 @@ async def seed_application_instance(
             ApplicationDriverVersion, deployment.application_driver_version_id
         )
     assert adv is not None
+    existing = await session.exec(
+        select(func.count()).where(ApplicationInstance.deployment_id == deployment.id)
+    )
     instance = ApplicationInstance(
         name=name or f"instance-{uuid4().hex[:8]}",
         application_version=adv.version,
         status=InstanceStatus.PENDING,
         deployment_id=deployment.id,
         application_driver_version_id=adv.id,
+        sequence=existing.one() + 1,
     )
-    session.add(instance)
+    deployment.last_instance_sequence = instance.sequence
+    session.add_all([instance, deployment])
     await session.commit()
     return instance
 

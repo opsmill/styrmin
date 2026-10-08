@@ -1,7 +1,11 @@
 import asyncio
+from dataclasses import dataclass
+from http import HTTPStatus
 from uuid import UUID
 
 import httpx
+from kubernetes_asyncio import client as kubeclient
+from kubernetes_asyncio.client.api_client import ApiException
 from prefect import flow
 from prefect.client.schemas.objects import FlowRun
 from prefect.logging import get_run_logger
@@ -9,12 +13,20 @@ from prefect.logging import get_run_logger
 from prefect.states import Completed, format_exception
 from prefect.client.schemas.objects import State
 
-from styrmin_backend.agent.service.kubernetes.exceptions import JobFailedError
+from styrmin_backend.agent.service.kubernetes.exceptions import (
+    CustomResourceNotFound,
+    CustomResourceWriteConflictError,
+    JobFailedError,
+)
 from styrmin_backend.agent.service.kubernetes.primitives import (
+    create_event,
+    get_custom_resource,
+    json_pointer_token,
     patch_custom_resource,
+    replace_spec_keys_json_patch,
     run_kubernetes_job,
 )
-from styrmin_backend.agent.steps.reporter import StepReporter
+from styrmin_backend.agent.steps.reporter import ReportedStep, StepReporter
 from styrmin_backend.agent.tasks.utils import (
     action_job_variables,
     run_deployment_or_fail,
@@ -62,9 +74,12 @@ from styrmin_backend.agent.service.kubernetes.primitives import (
 from styrmin_backend import config
 from styrmin_backend.operator.config import (
     ANNOTATION_DEPLOYMENT_IN_PROGRESS,
+    ANNOTATION_INSTANCE_SEQUENCE,
     CRD_GROUP,
+    CRD_KIND,
     CRD_PLURAL,
     CRD_VERSION,
+    EVENT_NEWER_INSTANCE_KEPT,
     HELMRELEASE_GROUP,
     HELMRELEASE_PLURAL,
     HELMRELEASE_VERSION,
@@ -73,6 +88,22 @@ from styrmin_backend.operator.crd.builder import build_styrmin_deployment_body
 
 #: The USER flow that runs a job's command; must match its catalogue entry.
 RUN_JOB_COMMAND_DEPLOYMENT = "run_job_command/run_job_command"
+
+#: Attempts at a StyrminDeployment write while other writes keep changing it.
+_CRD_WRITE_ATTEMPTS = 5
+_EVENT_COMPONENT = "styrmin-agent"
+_SEQUENCE_ANNOTATION_PATH = (
+    f"/metadata/annotations/{json_pointer_token(ANNOTATION_INSTANCE_SEQUENCE)}"
+)
+
+
+@dataclass(frozen=True)
+class KeptInstance:
+    """A newer instance that a flow found on the StyrminDeployment and left in place."""
+
+    instance_id: str | None
+    sequence: int
+    resource_uid: str | None
 
 
 def _build_namespace_labels(
@@ -84,18 +115,164 @@ def _build_namespace_labels(
     }
 
 
-async def _apply_styrmin_deployment_crd(*, body: dict, namespace: str) -> None:
-    """Create or update the StyrminDeployment CR, replacing each spec key it
-    writes so keys dropped from the context do not linger (017 FR-011); the
-    server-owned ``spec.deletionRequested`` is left alone."""
-    await upsert_custom_resource(
-        plurals=CRD_PLURAL,
-        body=body,
-        group=CRD_GROUP,
-        version=CRD_VERSION,
-        namespace=namespace,
-        replace_spec_keys_on_update=True,
+async def _apply_styrmin_deployment_crd(
+    *, body: dict, namespace: str
+) -> KeptInstance | None:
+    """Create or update the StyrminDeployment unless it holds a higher instance sequence.
+
+    Returns the newer instance it left in place, or None when it wrote ``body`` (#386).
+    """
+    name = body["metadata"]["name"]
+    for _ in range(_CRD_WRITE_ATTEMPTS):
+        live = await _read_styrmin_deployment(name=name, namespace=namespace)
+        if live is None:
+            try:
+                await upsert_custom_resource(
+                    plurals=CRD_PLURAL,
+                    body=body,
+                    group=CRD_GROUP,
+                    version=CRD_VERSION,
+                    namespace=namespace,
+                    update=False,
+                )
+            except ApiException as exc:
+                if exc.status != HTTPStatus.CONFLICT:  # Created by another flow.
+                    raise
+                continue
+            return None
+        kept = _kept_instance(live, body)
+        if kept is not None:
+            return kept
+        read_version = live["metadata"]["resourceVersion"]
+        try:
+            await patch_custom_resource(
+                plural=CRD_PLURAL,
+                reference=name,
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                patch=_conditional_patch(live, body),
+            )
+        except ApiException as exc:
+            # A failed resourceVersion test and a schema violation both return 422.
+            if exc.status != HTTPStatus.CONFLICT and not (
+                exc.status == HTTPStatus.UNPROCESSABLE_CONTENT
+                and await _changed_since(read_version, name=name, namespace=namespace)
+            ):
+                raise
+            continue
+        return None
+    raise CustomResourceWriteConflictError(
+        f"Could not write StyrminDeployment {namespace}/{name}: another write "
+        f"changed it between each read and write, {_CRD_WRITE_ATTEMPTS} times in a "
+        "row. The next change to the deployment writes it again."
     )
+
+
+async def _read_styrmin_deployment(*, name: str, namespace: str) -> dict | None:
+    try:
+        live = await get_custom_resource(
+            plural=CRD_PLURAL,
+            name=name,
+            group=CRD_GROUP,
+            version=CRD_VERSION,
+            namespace=namespace,
+        )
+    except CustomResourceNotFound:
+        return None
+    assert isinstance(live, dict)
+    return live
+
+
+async def _changed_since(read_version: str, *, name: str, namespace: str) -> bool:
+    live = await _read_styrmin_deployment(name=name, namespace=namespace)
+    return live is None or live["metadata"]["resourceVersion"] != read_version
+
+
+def _kept_instance(live: dict, body: dict) -> KeptInstance | None:
+    live_sequence = _instance_sequence(live)
+    sequence = _instance_sequence(body)
+    if live_sequence is None or sequence is None or live_sequence <= sequence:
+        return None
+    return KeptInstance(
+        instance_id=live["spec"].get("instanceId"),
+        sequence=live_sequence,
+        resource_uid=live["metadata"].get("uid"),
+    )
+
+
+def _conditional_patch(live: dict, body: dict) -> list[dict]:
+    """The patch that writes ``body`` only over the version of the resource that was read."""
+    live_metadata = live["metadata"]
+    live_annotations = live_metadata.get("annotations") or {}
+    annotations = body["metadata"].get("annotations") or {}
+    patch: list[dict] = [
+        {
+            "op": "test",
+            "path": "/metadata/resourceVersion",
+            "value": live_metadata["resourceVersion"],
+        }
+    ]
+    # A per-key annotation ``add`` needs the map to exist.
+    if annotations and not live_annotations:
+        patch.append({"op": "add", "path": "/metadata/annotations", "value": {}})
+    # A sequence left in place would describe the previous spec.
+    if (
+        ANNOTATION_INSTANCE_SEQUENCE in live_annotations
+        and ANNOTATION_INSTANCE_SEQUENCE not in annotations
+    ):
+        patch.append({"op": "remove", "path": _SEQUENCE_ANNOTATION_PATH})
+    return patch + replace_spec_keys_json_patch(body)
+
+
+def _instance_sequence(resource: dict) -> int | None:
+    """The sequence of the resource's instance, from its annotation; None when unknown."""
+    annotations = resource["metadata"].get("annotations") or {}
+    try:
+        return int(annotations[ANNOTATION_INSTANCE_SEQUENCE])
+    except KeyError, ValueError:
+        return None
+
+
+async def _write_styrmin_deployment(
+    reporter: StepReporter, step: ReportedStep, *, body: dict, namespace: str
+) -> bool:
+    """Write the StyrminDeployment; False, recorded on the step, when it holds a newer instance."""
+    kept = await _apply_styrmin_deployment_crd(body=body, namespace=namespace)
+    if kept is None:
+        return True
+    name = body["metadata"]["name"]
+    message = (
+        f"Left StyrminDeployment {namespace}/{name} unchanged: it holds instance "
+        f"{kept.instance_id} (sequence {kept.sequence}) of a later change. This "
+        f"task's instance is {body['spec'].get('instanceId')} (sequence "
+        f"{_instance_sequence(body)})."
+    )
+    run_logger = get_run_logger()
+    run_logger.info(message)
+    await reporter.record_output(step.id, message, truncated=False)
+    try:
+        await create_event(
+            involved_object=kubeclient.V1ObjectReference(
+                api_version=f"{CRD_GROUP}/{CRD_VERSION}",
+                kind=CRD_KIND,
+                name=name,
+                namespace=namespace,
+                uid=kept.resource_uid,
+            ),
+            reason=EVENT_NEWER_INSTANCE_KEPT,
+            message=message,
+            component=_EVENT_COMPONENT,
+        )
+    except ApiException as exc:
+        run_logger.warning(
+            "Could not record the %s event on StyrminDeployment %s/%s: %s",
+            EVENT_NEWER_INSTANCE_KEPT,
+            namespace,
+            name,
+            exc.reason,
+        )
+    return False
 
 
 async def _set_deployment_in_progress(namespace: str, release_reference: str) -> None:
@@ -738,27 +915,31 @@ async def create_instance_crd(
                 parameters={"context": context},
             )
 
-    async with reporter.step(*steps.STYRMIN_DEPLOYMENT_WRITE):
+    async with reporter.step(*steps.STYRMIN_DEPLOYMENT_WRITE) as step:
         # Build and create the StyrminDeployment CRD
         crd_body = build_styrmin_deployment_body(
             context=context,
             release_reference=release_reference,
             namespace=namespace,
             internal=internal,
+            instance_sequence=instance.sequence,
         )
 
         namespace_labels = _build_namespace_labels(context)
         await apply_kubernetes_namespace(namespace=namespace, labels=namespace_labels)
 
-        await _apply_styrmin_deployment_crd(body=crd_body, namespace=namespace)
+        written = await _write_styrmin_deployment(
+            reporter, step, body=crd_body, namespace=namespace
+        )
 
-    logger.info(
-        "StyrminDeployment CRD created: %s/%s",
-        namespace,
-        release_reference,
-    )
-
-    await _apply_service_aliases_step(reporter, context)
+    # A later change wrote its own StyrminDeployment and service aliases.
+    if written:
+        logger.info(
+            "StyrminDeployment CRD created: %s/%s",
+            namespace,
+            release_reference,
+        )
+        await _apply_service_aliases_step(reporter, context)
 
     # Run post-hook after CRD creation (imperative action)
     if posthook:
@@ -782,18 +963,23 @@ async def update_instance_crd(
     release_reference = context.instance.release_reference
     namespace = context.instance.namespace
 
-    async with reporter.step(*steps.STYRMIN_DEPLOYMENT_WRITE):
+    async with reporter.step(*steps.STYRMIN_DEPLOYMENT_WRITE) as step:
         crd_body = build_styrmin_deployment_body(
             context=context,
             release_reference=release_reference,
             namespace=namespace,
+            instance_sequence=instance.sequence,
         )
 
-        await _apply_styrmin_deployment_crd(body=crd_body, namespace=namespace)
+        written = await _write_styrmin_deployment(
+            reporter, step, body=crd_body, namespace=namespace
+        )
 
-    await _apply_service_aliases_step(reporter, context)
-
-    logger.info("StyrminDeployment CRD updated: %s/%s", namespace, release_reference)
+    if written:
+        await _apply_service_aliases_step(reporter, context)
+        logger.info(
+            "StyrminDeployment CRD updated: %s/%s", namespace, release_reference
+        )
 
 
 @flow(flow_run_name="Upgrade instance (CRD)")
@@ -818,31 +1004,32 @@ async def upgrade_instance_crd(
     # CRD to a fresh instance. Writing the CRD at the end of this flow
     # would stomp those hook-driven updates with this flow's (older)
     # instance. Writing here first lets hook updates layer correctly on top.
-    async with reporter.step(*steps.STYRMIN_DEPLOYMENT_WRITE):
+    async with reporter.step(*steps.STYRMIN_DEPLOYMENT_WRITE) as step:
         crd_body = build_styrmin_deployment_body(
             context=context,
             release_reference=release_reference,
             namespace=namespace,
+            instance_sequence=instance.sequence,
         )
-        await _apply_styrmin_deployment_crd(body=crd_body, namespace=namespace)
+        written = await _write_styrmin_deployment(
+            reporter, step, body=crd_body, namespace=namespace
+        )
 
-        # Reset status.displayState + phase atomically with the spec change.
-        # Without this there is a window where the CRD carries the new
-        # instanceId / appVersion but the previous rollout's "Running"
-        # displayState, letting a stale agent report race the server into
-        # prematurely flipping Deployment.status to RUNNING.
-        await patch_custom_resource_status(
-            plural=CRD_PLURAL,
-            # The CR is named after its namespace, not after the release reference
-            # (``build_styrmin_deployment_body``). The two are the same string for an
-            # ordinary deployment and differ for a clone counterpart, which adopts
-            # the source's Helm release name (010 research D2).
-            reference=namespace,
-            group=CRD_GROUP,
-            version=CRD_VERSION,
-            namespace=namespace,
-            status_patch={"displayState": "Deploying", "phase": "Pending"},
-        )
+        # Reset the status with the spec, so the previous rollout's Running cannot
+        # set the deployment RUNNING. A newer instance keeps its rollout's status.
+        if written:
+            await patch_custom_resource_status(
+                plural=CRD_PLURAL,
+                # The CR is named after its namespace, not after the release reference
+                # (``build_styrmin_deployment_body``). The two are the same string for an
+                # ordinary deployment and differ for a clone counterpart, which adopts
+                # the source's Helm release name (010 research D2).
+                reference=namespace,
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                status_patch={"displayState": "Deploying", "phase": "Pending"},
+            )
 
     if prehook:
         async with reporter.step(*steps.UPGRADE_PRE_HOOK) as step:
@@ -861,7 +1048,8 @@ async def upgrade_instance_crd(
             parameters={"context": context, "target_version": target_version},
         )
 
-    await _apply_service_aliases_step(reporter, context)
+    if written:
+        await _apply_service_aliases_step(reporter, context)
 
     if posthook:
         async with reporter.step(*steps.UPGRADE_POST_HOOK) as step:
@@ -912,4 +1100,5 @@ def _build_instance_entity(
         context=GlobalContext.model_validate(model.context),
         application_driver_version_id=model.application_driver_version_id,
         deployment_id=model.deployment_id,
+        sequence=model.sequence,
     )

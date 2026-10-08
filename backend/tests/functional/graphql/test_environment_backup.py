@@ -176,10 +176,12 @@ async def seed_running_deployment(
         deployment_id=deployment.id,
         application_driver_version_id=deployment.application_driver_version_id,
         context=_global_context_dict(),
+        sequence=1,
     )
     session.add(instance)
     await session.commit()
     deployment.active_application_instance_id = instance.id
+    deployment.last_instance_sequence = instance.sequence
     if config is not None:
         deployment.config = config
     if parameters is not None:

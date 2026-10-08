@@ -36,6 +36,19 @@ This page will document, field by field:
 - `status` — `phase`, `conditions`, `observedGeneration`,
   per-component readiness
 
+### Annotations
+
+Annotations are not part of the OpenAPI schema, so this section stays
+when the page is generated.
+
+- `styrmin.io/instance-sequence` — the number of the application
+  instance in `spec.instanceId` among the instances of the deployment:
+  1 for the first, then one more for each new instance. Styrmin manages
+  it; do not edit it. A workflow does not replace a `StyrminDeployment`
+  that holds a higher number than its own instance. See
+  [Several changes in quick succession](../concepts-and-architecture/reconciliation.md#several-changes-in-quick-succession)
+  for what users view and how to recover after an edit.
+
 ### Rollout fields in `status`
 
 These fields are documented here until the generated reference exists.

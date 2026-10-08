@@ -657,8 +657,10 @@ async def resolver_data_fixture(session: AsyncSession) -> dict:
         deployment_id=deployment.id,
         application_driver_version_id=adv.id,
         context=None,
+        sequence=1,
     )
     session.add(app_instance)
+    deployment.last_instance_sequence = 1
     await session.flush()
 
     task = TaskModel(

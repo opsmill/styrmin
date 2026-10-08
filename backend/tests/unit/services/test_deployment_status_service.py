@@ -99,6 +99,7 @@ async def _make_uow_with_own_backup_restore(
         status=InstanceStatus.RUNNING,
         deployment_id=dep.id,
         application_driver_version_id=uuid4(),
+        sequence=1,
     )
     backup = Backup(
         id=uuid4(),

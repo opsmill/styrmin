@@ -131,10 +131,12 @@ async def _attach_instance_at_config(
         deployment_id=deployment.id,
         application_driver_version_id=deployment.application_driver_version_id,
         context=_make_global_context_dict(env_config_dict),
+        sequence=1,
     )
     session.add(instance)
     await session.commit()
     deployment.active_application_instance_id = instance.id
+    deployment.last_instance_sequence = instance.sequence
     session.add(deployment)
     await session.commit()
     return instance

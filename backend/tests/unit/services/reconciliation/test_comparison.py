@@ -128,6 +128,18 @@ class TestComparatorCompare:
         report = comparator.compare()
         assert report.diff is None
 
+    def test_instances_differing_only_in_sequence_have_no_raw_diff(
+        self,
+    ) -> None:
+        """``sequence`` orders StyrminDeployment writes (#386); it is not a change to apply."""
+        current = _make_instance().model_copy(update={"sequence": 6})
+        new = current.model_copy(update={"id": uuid4(), "sequence": None})
+
+        report = Comparator(current_instance=current, new_instance=new).compare()
+
+        assert report.diff is None
+        assert report.raw is None
+
     def test_version_change_returns_instance_update(self) -> None:
         """When the application version changes, the comparator should return
         an InstanceUpdate with an ApplicationVersionChange diff entry."""

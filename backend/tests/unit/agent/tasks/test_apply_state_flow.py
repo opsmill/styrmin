@@ -207,3 +207,50 @@ async def test_apply_state_flow_plans_without_a_plan_step(
 
     flow.end_step.assert_awaited_once_with(None)
     flow.remediation.apply.assert_awaited_once()
+
+
+def test_the_instance_entity_carries_the_row_sequence() -> None:
+    """The remediation flows order their StyrminDeployment writes by it (#386)."""
+    from styrmin_backend.agent.tasks.orchestration import _build_instance_entity
+    from styrmin_backend.db.models import ApplicationInstance, InstanceStatus
+
+    from tests.unit.counterpart_crd_fixtures import make_context
+
+    deployment_id = uuid4()
+    context = make_context(
+        deployment_id=deployment_id, namespace="ns", release_reference="rel"
+    )
+    model = ApplicationInstance(
+        id=uuid4(),
+        name="instance",
+        application_version="1.0.0",
+        status=InstanceStatus.PENDING,
+        deployment_id=deployment_id,
+        application_driver_version_id=uuid4(),
+        context=context.model_dump(mode="json"),
+        sequence=7,
+    )
+
+    entity = _build_instance_entity(model)
+
+    assert entity is not None
+    assert entity.sequence == 7
+
+
+def test_the_instance_sequence_survives_the_flow_parameter_round_trip() -> None:
+    """Prefect passes the instance to the remediation flow as JSON."""
+    from styrmin_backend.domain.models import Instance
+
+    from tests.unit.counterpart_crd_fixtures import make_context
+
+    deployment_id = uuid4()
+    instance = Instance.create(
+        application_version="1.0.0",
+        deployment_id=deployment_id,
+        application_driver_version_id=uuid4(),
+        context=make_context(
+            deployment_id=deployment_id, namespace="ns", release_reference="rel"
+        ),
+    ).model_copy(update={"sequence": 7})
+
+    assert Instance.model_validate_json(instance.model_dump_json()) == instance

@@ -23,6 +23,7 @@ import pytest
 
 from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.operator.config import (
+    ANNOTATION_INSTANCE_SEQUENCE,
     CRD_GROUP,
     CRD_KIND,
     CRD_VERSION,
@@ -169,3 +170,23 @@ def test_internal_defaults_to_false_and_is_passed_through(internal: bool) -> Non
         namespace=COUNTERPART_NAMESPACE,
     )
     assert default["spec"]["internal"] is False
+
+
+def test_the_instance_sequence_is_recorded_in_an_annotation() -> None:
+    """The agent compares it with the live StyrminDeployment's to keep a newer instance (#386)."""
+    context = counterpart_context(uuid4())
+
+    body = build_styrmin_deployment_body(
+        context=context,
+        release_reference=SOURCE_RELEASE_REFERENCE,
+        namespace=COUNTERPART_NAMESPACE,
+        instance_sequence=7,
+    )
+    without = build_styrmin_deployment_body(
+        context=context,
+        release_reference=SOURCE_RELEASE_REFERENCE,
+        namespace=COUNTERPART_NAMESPACE,
+    )
+
+    assert body["metadata"]["annotations"] == {ANNOTATION_INSTANCE_SEQUENCE: "7"}
+    assert "annotations" not in without["metadata"]
