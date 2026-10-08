@@ -429,6 +429,68 @@ async def chart_server(
 
 
 # ---------------------------------------------------------------------------
+# Fixture: telemetry_sink
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+async def telemetry_sink(
+    vcluster: dict,
+) -> AsyncGenerator[str, None]:
+    """Deploy the telemetry report sink in the vcluster and yield its local base URL.
+
+    ``styrmin-values.yaml`` points ``styrmin.telemetry.endpoint`` at this sink's
+    cluster DNS name; ``GET <url>/reports`` lists the reports it received.
+    """
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    api: kubeclient.ApiClient = vcluster["api"]
+    sink_dir = FIXTURES_DIR / "telemetry-sink"
+
+    subprocess.run(
+        [
+            "docker",
+            "build",
+            "-t",
+            "telemetry-sink:latest",
+            "-f",
+            str(sink_dir / "Dockerfile"),
+            str(sink_dir),
+        ],
+        check=True,
+    )
+
+    with open(sink_dir / "deployment.yaml") as f:
+        docs = [doc for doc in yaml.safe_load_all(f) if doc]
+
+    apps_api = kubeclient.AppsV1Api(api)
+    core_api = kubeclient.CoreV1Api(api)
+
+    # Module scope: a later module reuses the objects an earlier one created.
+    for doc in docs:
+        try:
+            if doc["kind"] == "Deployment":
+                await apps_api.create_namespaced_deployment(
+                    namespace="default", body=doc
+                )
+            elif doc["kind"] == "Service":
+                await core_api.create_namespaced_service(namespace="default", body=doc)
+        except K8sApiException as exc:
+            if exc.status != 409:
+                raise
+
+    await _wait_for_service_ready(
+        core_api, name="telemetry-sink", label_selector="app=telemetry-sink"
+    )
+
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
+    service = await AsyncService.get(
+        "telemetry-sink", namespace="default", api=kr8s_api
+    )
+    async with _portforward(service, remote_port=8080) as local_port:
+        sink_url = f"http://localhost:{local_port}"
+        await _wait_for_http(f"{sink_url}/healthz", timeout=60.0)
+        yield sink_url
+
+
+# ---------------------------------------------------------------------------
 # Fixture: git_server
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")

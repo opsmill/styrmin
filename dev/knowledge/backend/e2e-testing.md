@@ -295,7 +295,7 @@ Refer to `tests/e2e/drivers/refs.py` for the canonical definitions; treat that f
 
 ## Supporting Services
 
-Two lightweight services are deployed inside the vCluster to simulate the external infrastructure that Styrmin depends on in production.
+Three lightweight services are deployed inside the vCluster to simulate the external infrastructure that Styrmin depends on in production.
 
 ### Chart Server
 
@@ -329,6 +329,19 @@ At setup time, the fixture:
 4. Port-forwards the git-daemon service and pushes the repo
 
 The test drivers exist only for E2E scenarios. `failing-actions` reuses the simple-app chart, and its upgrade action fails on purpose for some target versions; `test_task_steps.py` uses it to cause the failures of spec 019.
+
+### Telemetry Sink
+
+A standard-library HTTP server that receives the daily telemetry report (spec 020), so the E2E install never sends reports to the OpsMill endpoint.
+
+| Aspect | Detail |
+|--------|--------|
+| **Purpose** | Receive the report that the `send_telemetry_report` flow sends |
+| **Image** | Built at test time from `tests/e2e/fixtures/telemetry-sink/Dockerfile` (`python:3.14-slim`) |
+| **How it works** | `POST /report` stores the JSON body in memory, `GET /reports` returns the stored bodies, `GET /healthz` answers 200 |
+| **Cluster address** | `http://telemetry-sink.default.svc.cluster.local:8080/report` |
+
+`tests/e2e/fixtures/styrmin-values.yaml` sets `styrmin.telemetry.endpoint` to the cluster address when the chart is installed, before the sink exists. The module-scoped `telemetry_sink` fixture deploys the sink (or reuses it when an earlier module created it), port-forwards to it and yields the local base URL. A test reads the number of stored reports before it starts the flow and compares it after the run.
 
 ## Styrmin Deployment
 
@@ -414,6 +427,7 @@ vcluster ───────────────────────�
 | `vcluster` | session | — | K8s API client, cluster name, kubeconfig path |
 | `chart_server` | session | `vcluster` | Cluster-internal chart server URL |
 | `git_server` | session | `vcluster`, `chart_server` | Cluster-internal git URL |
+| `telemetry_sink` | module | `vcluster` | Port-forwarded telemetry sink URL |
 | `styrmin_deployment` | session | `vcluster` | Port-forwarded Styrmin server URL |
 | `driver_mode` | session | — (parametrised) | "api" or "ui" |
 | `session_ui_page` | session | `driver_mode`, `styrmin_deployment` | Playwright Page (in ui mode), else None |
