@@ -97,7 +97,7 @@ description: "Task list for keeping a deployment's backup history when it gets a
   - assert the deployment's `active_application_instance_id` changed
   - query `list_backup_history` with `deploymentId` and assert the earlier backup is returned with the application version of the instance it was taken of
 - [X] T017 [P] [US1] Extend `frontend/src/__tests__/deployment-detail/BackupExpiry.test.tsx`: assert `useListBackupsQuery` is called with `{ deploymentId }` from the route, and that the query is enabled when `deployment.applicationInstance` is null; assert each row shows the **Application version** column value and carries `data-backup-application-version`
-- [ ] T018 [P] [US1] Extend `cli/tests/test_backups.py`:
+- [X] T018 [P] [US1] Extend `cli/tests/test_backups.py`:
   - change `test_backups_list_by_deployment_name` (asserts at line 160) to expect `list_backups(deployment_id=<deployment id>, status=None)`
   - add a test that `list --id <deployment-id>` lists by `deployment_id` and works when the deployment has no active instance
   - keep `test_backups_list_by_instance_id_escape_hatch` expecting `instance_id=`
@@ -113,8 +113,8 @@ description: "Task list for keeping a deployment's backup history when it gets a
   - in `BackupRow`, add `instance: { applicationVersion: string }` to the `backup` prop type, render the version cell, and set `data-backup-application-version` on the `backup-row` element
   - leave "Create Backup", restore and delete behaviour unchanged ([contracts/ui.md](contracts/ui.md))
 - [X] T021 [US1] Update every frontend test that builds a `ListBackupsQuery` backup fixture so it includes `instance: { id, applicationVersion }`, and every test that asserts the `useListBackupsQuery` arguments: `frontend/src/__tests__/deployment-detail/BackupRestoreSteps.test.tsx`, `DocumentTitle.test.tsx`, `TaskResult.test.tsx`, `DeploymentDetailHeader.test.tsx`, `UpgradeDialogPinnedImages.test.tsx`; then run `cd frontend && pnpm test && pnpm build` (`build` runs `tsc -b`)
-- [ ] T022 [US1] Add `resolve_deployment_id(sdk, *, deployment_name, deployment_id, environment) -> str` to `cli/src/styrminctl/resolve.py`: validate that exactly one of a name or `--id` is given (and that `--environment` is used only with a name), reuse `_resolve_by_name` for names, call `sdk.deployments.get` for `--id`, and do not require an active instance (research R7)
-- [ ] T023 [US1] Change `list_backups` in `cli/src/styrminctl/commands/backups.py`:
+- [X] T022 [US1] Add `resolve_deployment_id(sdk, *, deployment_name, deployment_id, environment) -> str` to `cli/src/styrminctl/resolve.py`: validate that exactly one of a name or `--id` is given (and that `--environment` is used only with a name), reuse `_resolve_by_name` for names, call `sdk.deployments.get` for `--id`, and do not require an active instance (research R7)
+- [X] T023 [US1] Change `list_backups` in `cli/src/styrminctl/commands/backups.py`:
   - with `--instance-id`, call `sdk.backups.list_backups(instance_id=..., status=status)` as today
   - otherwise call `resolve_deployment_id` and `sdk.backups.list_backups(deployment_id=..., status=status)`
   - add the `application_version` column after `status`, read from `b.instance.application_version`

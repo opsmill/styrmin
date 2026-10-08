@@ -8,7 +8,7 @@ from cyclopts import App, Parameter
 
 from styrminctl import client
 from styrminctl.output import console, print_error, print_success, print_table, styrmin_error_handler
-from styrminctl.resolve import resolve_active_instance
+from styrminctl.resolve import resolve_active_instance, resolve_deployment_id
 
 if TYPE_CHECKING:
     from styrmin_sdk import StyrminClient
@@ -107,21 +107,31 @@ async def list_backups(
     instance_id: InstanceIdOption = None,
     status: Annotated[str | None, Parameter(help="Filter by status.")] = None,
 ) -> None:
-    """List backups for a deployment's active application instance.
+    """List a deployment's backup history: the backups of every instance it has had,
+    newest first, with the application version each one was taken at.
 
-    Target the deployment by name (optionally with --environment), by --id, or
-    a specific instance with --instance-id.
+    Target the deployment by name (optionally with --environment) or by --id.
+    --instance-id lists the backups of one instance only.
     """
     with styrmin_error_handler():
         async with client.get_client() as sdk:
-            target = await resolve_active_instance(
-                sdk,
-                deployment_name=deployment,
-                deployment_id=id,
-                instance_id=instance_id,
-                environment=environment,
-            )
-            backups = await sdk.backups.list_backups(instance_id=target.instance_id, status=status)
+            if instance_id is not None:
+                target = await resolve_active_instance(
+                    sdk,
+                    deployment_name=deployment,
+                    deployment_id=id,
+                    instance_id=instance_id,
+                    environment=environment,
+                )
+                backups = await sdk.backups.list_backups(instance_id=target.instance_id, status=status)
+            else:
+                deployment_id = await resolve_deployment_id(
+                    sdk,
+                    deployment_name=deployment,
+                    deployment_id=id,
+                    environment=environment,
+                )
+                backups = await sdk.backups.list_backups(deployment_id=deployment_id, status=status)
 
     if not backups:
         console.print("No backups found.")
@@ -132,6 +142,7 @@ async def list_backups(
             "id": str(b.id),
             "name": b.name,
             "status": b.status,
+            "application_version": b.instance.application_version,
             "started_at": str(b.started_at or ""),
             "completed_at": str(b.completed_at or ""),
             "size_bytes": str(b.size_bytes or ""),
@@ -141,7 +152,16 @@ async def list_backups(
     ]
     print_table(
         rows,
-        columns=["id", "name", "status", "started_at", "completed_at", "size_bytes", "expires_at"],
+        columns=[
+            "id",
+            "name",
+            "status",
+            "application_version",
+            "started_at",
+            "completed_at",
+            "size_bytes",
+            "expires_at",
+        ],
         title="Backups",
     )
 
