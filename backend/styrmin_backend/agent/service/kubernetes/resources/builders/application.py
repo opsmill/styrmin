@@ -293,7 +293,7 @@ class ApplicationHelmReleaseBuilder:
         # When dedicated_ingress is enabled, strip ingress_class from the rendering
         # context so driver templates do not set spec.ingressClassName on Ingress
         # resources.  The dedicated controller uses annotation-based matching instead.
-        if context.instance.config.dedicated_ingress:
+        if context.instance.config.dedicated_ingress is not None:
             for section in ("instance", "cluster", "environment", "deployment"):
                 config = context_dict.get(section, {}).get("config", {})
                 config.pop("ingress_class", None)

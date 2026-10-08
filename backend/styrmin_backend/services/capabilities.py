@@ -37,7 +37,7 @@ def _derive_ingress(
 
     effective_class = config.ingress_class or (
         config.dedicated_ingress.implementation
-        if config.dedicated_ingress
+        if config.dedicated_ingress is not None
         else "unknown"
     )
     return {

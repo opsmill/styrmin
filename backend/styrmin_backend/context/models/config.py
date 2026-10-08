@@ -446,6 +446,8 @@ class ClusterConfig(BaseConfigSection):
         runtime_class (str | None): The runtime class.
         node_selector (str | None): The node selector.
         dedicated_ingress (DedicatedIngressConfig | None): The dedicated ingress controller config.
+            ``None`` turns the controller off; any object, including ``{}``,
+            turns it on with the default values.
         standard_storage (StandardStorage | None): The standard storage.
         fast_storage (FastStorage | None): The fast storage.
     """
@@ -467,6 +469,8 @@ class EnvironmentConfig(BaseConfigSection):
     Attributes:
         ip_whitelist (list[str] | None): The IP whitelist.
         dedicated_ingress (DedicatedIngressConfig | None): The dedicated ingress controller config.
+            ``None`` turns the controller off; any object, including ``{}``,
+            turns it on with the default values.
         env_vars (dict[str, str] | None): Free-form environment variables to
             inject into every component's containers (008-deployment-env-vars,
             FR-001/FR-006..FR-008). Per-key validated through

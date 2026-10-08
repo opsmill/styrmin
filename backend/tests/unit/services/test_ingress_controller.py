@@ -572,6 +572,30 @@ async def env_without_ingress(cluster_without_ingress, fake_env_repo):
 
 
 @pytest.fixture
+async def env_with_empty_ingress(cluster_without_ingress, fake_env_repo):
+    return await fake_env_repo.create(
+        Environment(
+            name="env-empty-ingress",
+            cluster_id=cluster_without_ingress.id,
+            config={"dedicated_ingress": {}},
+        )
+    )
+
+
+@pytest.fixture
+async def env_in_cluster_with_empty_ingress(fake_cluster_repo, fake_env_repo):
+    cluster = await fake_cluster_repo.create(
+        Cluster(
+            name="empty-ingress-cluster",
+            config={"ingress_class": "traefik", "dedicated_ingress": {}},
+        )
+    )
+    return await fake_env_repo.create(
+        Environment(name="env-empty-cluster-ingress", cluster_id=cluster.id, config={})
+    )
+
+
+@pytest.fixture
 async def env_inherits_from_cluster(cluster_with_ingress, fake_env_repo):
     return await fake_env_repo.create(
         Environment(
@@ -641,6 +665,27 @@ class TestResolveDedicatedIngress:
         result = await _resolve_dedicated_ingress(uuid4(), uow)
         assert result is None
 
+    async def test_empty_environment_object_enables_defaults(
+        self, fake_cluster_repo, fake_env_repo, env_with_empty_ingress
+    ):
+        """#409: ``{}`` reads as enabled, as it does for the agent."""
+        uow = _make_uow(clusters=fake_cluster_repo, environments=fake_env_repo)
+        result = await _resolve_dedicated_ingress(env_with_empty_ingress.id, uow)
+        assert result == DedicatedIngressConfig()
+
+    async def test_empty_cluster_object_enables_defaults(
+        self, fake_cluster_repo, fake_env_repo, env_in_cluster_with_empty_ingress
+    ):
+        """#409: ``{}`` reads as enabled, as it does for the agent."""
+        uow = _make_uow(clusters=fake_cluster_repo, environments=fake_env_repo)
+        result = await _resolve_dedicated_ingress(
+            env_in_cluster_with_empty_ingress.id, uow
+        )
+        assert (
+            result
+            == ClusterConfig.model_validate({"dedicated_ingress": {}}).dedicated_ingress
+        )
+
 
 class TestEnsureIngressController:
     """T013: auto-create, T014: reuse, T015: skip."""
@@ -666,6 +711,24 @@ class TestEnsureIngressController:
             env_without_ingress.id
         )
         assert result is None
+
+    async def test_creates_controller_for_empty_object(
+        self,
+        fake_cluster_repo,
+        fake_env_repo,
+        fake_deployment_repo,
+        env_in_cluster_with_empty_ingress,
+    ):
+        """#409: ``{}`` does not skip the controller; creation reaches the driver lookup."""
+        uow = _make_uow(
+            clusters=fake_cluster_repo,
+            environments=fake_env_repo,
+            deployments=fake_deployment_repo,
+        )
+        with pytest.raises(ApplicationDriverNotFoundError):
+            await _ensure_ingress_controller(
+                env_in_cluster_with_empty_ingress.id, uow, created_by_user_id=uuid4()
+            )
 
     async def test_raises_when_driver_missing(
         self,

@@ -1125,14 +1125,16 @@ async def _resolve_dedicated_ingress(
 ) -> DedicatedIngressConfig | None:
     """Resolve the effective dedicated_ingress config for an environment.
 
-    Checks environment config first, falls back to cluster config.
+    Checks environment config first, falls back to cluster config. Any
+    object, including ``{}``, enables the controller; only an absent or null
+    key disables it.
     """
     environment = await uow.environments.get(environment_id)
     if environment is None:
         return None
 
     env_config = environment.config or {}
-    if env_config.get("dedicated_ingress"):
+    if env_config.get("dedicated_ingress") is not None:
         return DedicatedIngressConfig.model_validate(env_config["dedicated_ingress"])
 
     cluster = await uow.clusters.get(environment.cluster_id)
@@ -1140,7 +1142,7 @@ async def _resolve_dedicated_ingress(
         return None
 
     cluster_config = cluster.config or {}
-    if cluster_config.get("dedicated_ingress"):
+    if cluster_config.get("dedicated_ingress") is not None:
         return DedicatedIngressConfig.model_validate(
             cluster_config["dedicated_ingress"]
         )

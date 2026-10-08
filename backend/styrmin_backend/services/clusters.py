@@ -44,7 +44,6 @@ async def create_cluster(
             config = {}
 
         # Apply cluster defaults
-        config.setdefault("dedicated_ingress", {})
         config.setdefault("ingress_class", "traefik")
         config.setdefault("runtime_class", "default")
 

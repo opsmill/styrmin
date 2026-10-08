@@ -44,7 +44,7 @@ class IngressUtility(Utility):
             annotations["external-dns.alpha.kubernetes.io/endpoints-type"] = (
                 context.instance.config.external_dns_endpoints_type
             )
-        if context.instance.config.dedicated_ingress:
+        if context.instance.config.dedicated_ingress is not None:
             # Derive ingress class name from the dedicated ingress implementation
             ingress_class_name = (
                 context.instance.config.dedicated_ingress.implementation

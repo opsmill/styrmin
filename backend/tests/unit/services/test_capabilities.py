@@ -111,6 +111,28 @@ def test_cluster_capabilities_dedicated_ingress():
     assert result["ingress"]["external"]["ingress_class"] == "traefik"
 
 
+def test_cluster_capabilities_empty_dedicated_ingress_uses_defaults():
+    cluster = Cluster(
+        id=uuid4(),
+        name="test-cluster",
+        config={"dedicated_ingress": {}, "fqdn_suffix": "apps.example.com"},
+    )
+    result = compute_cluster_capabilities(cluster)
+
+    assert result is not None
+    assert result["ingress"]["external"]["ingress_class"] == "traefik"
+
+
+def test_cluster_capabilities_no_ingress_without_class_or_dedicated_ingress():
+    cluster = Cluster(
+        id=uuid4(),
+        name="test-cluster",
+        config={"fqdn_suffix": "apps.example.com"},
+    )
+
+    assert compute_cluster_capabilities(cluster) is None
+
+
 # ===== US2: Environment capability tests =====
 
 
