@@ -1041,7 +1041,11 @@ type Query {
   environment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): Environment
   deployment(deploymentId: UUID = null, name: String = null, environmentId: UUID = null): Deployment
   backup(backupId: UUID!): Backup
-  backups(instanceId: UUID!, status: BackupStatus = null): [Backup!]!
+
+  """
+  List backups. Pass exactly one of deploymentId or instanceId. deploymentId lists the deployment's backup history: the backups of every instance the deployment has had, newest first. instanceId lists the backups of that one instance.
+  """
+  backups(deploymentId: UUID = null, instanceId: UUID = null, status: BackupStatus = null): [Backup!]!
   restore(restoreId: UUID!): Restore
   restores(backupId: UUID!, status: RestoreStatus = null): [Restore!]!
   environmentBackup(environmentBackupId: UUID!): EnvironmentBackup

@@ -1114,6 +1114,7 @@ export type Query = {
   backupSchedules: Array<BackupSchedule>;
   backupStorageLocation?: Maybe<BackupStorageLocation>;
   backupStorageLocations: Array<BackupStorageLocation>;
+  /** List backups. Pass exactly one of deploymentId or instanceId. deploymentId lists the deployment's backup history: the backups of every instance the deployment has had, newest first. instanceId lists the backups of that one instance. */
   backups: Array<Backup>;
   cluster?: Maybe<Cluster>;
   clusters: Array<Cluster>;
@@ -1172,7 +1173,8 @@ export type QueryBackupStorageLocationArgs = {
 
 
 export type QueryBackupsArgs = {
-  instanceId: Scalars['UUID']['input'];
+  deploymentId?: InputMaybe<Scalars['UUID']['input']>;
+  instanceId?: InputMaybe<Scalars['UUID']['input']>;
   status?: InputMaybe<BackupStatus>;
 };
 
