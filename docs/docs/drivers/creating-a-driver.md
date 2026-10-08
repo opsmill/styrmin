@@ -98,10 +98,14 @@ metadata:
 spec:
   version: "1"              # the driver version (you'll bump this as you iterate)
   supported_versions: ">=0.1,<1.0"   # semver range of the application versions this driver knows how to deploy
-  info:
+  info:                     # required block; every key in it is optional
+    icon: https://docs.infrahub.app/img/infrahub-logo.svg   # replace with the URL of your application's logo
     description: Example FastAPI application with PostgreSQL
     authors: [you]
     license: Apache-2.0
+    links:
+      - link: Documentation  # label shown on the driver detail page
+        url: https://docs.example.com/my-app
   helm:
     main:
       location: my-app       # OCI URL or local path the server can resolve
@@ -122,6 +126,23 @@ A few notes:
   Helm — an OCI URL (`oci://registry.example.com/charts/foo`), an HTTP
   repository URL, or a relative path inside a baked-in chart
   directory.
+- **`info.icon`, `info.description` and `info.links`** describe the
+  application on the driver list page and the driver detail page:
+  - `icon` is the absolute `http` or `https` URL of the logo image. Use
+    a square SVG or PNG. The pages show it next to the driver name, and
+    show a generic package icon when it is not set or cannot be loaded.
+  - `description` is plain text. The driver list page shows it on one
+    line, and the driver detail page shows it in full.
+  - Each `links` entry has exactly two keys: `link`, the label, and
+    `url`, an absolute `http` or `https` URL. The Overview tab of the
+    driver detail page lists the links.
+
+  Styrmin does not download the logo. The browser of each person who
+  opens the driver pages loads it from the URL, so use an image host
+  that you trust and that those browsers can reach. Loading the driver
+  fails, with an error that names the field, when `icon` or a link
+  `url` is not an `http` or `https` URL, or when a `links` entry has
+  other keys.
 
 ### Step 3: Declare the components
 

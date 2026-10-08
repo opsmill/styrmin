@@ -93,6 +93,7 @@ spec:
   version: "0.4.0"
   supported_versions: ">=1.6.0,<2.0.0"
   info:
+    icon: "https://docs.infrahub.app/img/infrahub-logo.svg"
     description: "Infrahub deployment driver"
     authors: ["OpsMill"]
   helm:
@@ -120,6 +121,10 @@ spec:
       port: 8000
       component: server
 ```
+
+The driver list page and the driver detail page show the logo
+(`info.icon`), the description (`info.description`) and the links
+(`info.links`) of each driver version.
 
 [Creating a Driver](../drivers/creating-a-driver.md) walks through writing one
 from scratch.
