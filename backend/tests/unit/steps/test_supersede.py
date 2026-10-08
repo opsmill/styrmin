@@ -1,4 +1,4 @@
-"""A rollout or a deletion request supersedes earlier rollouts (spec 019, T066; research D7)."""
+"""A rollout or a deletion request supersedes older rollouts (spec 019, T066; research D7)."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -32,7 +32,7 @@ from styrmin_backend.services.steps.recorder import (
     supersede_operator_steps,
 )
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
-from tests.unit.steps.conftest import Parents
+from tests.unit.steps.conftest import OTHER_TASK_CREATED_ON, Parents, set_created_on
 
 # Before the server's clock, which ends the deletion request.
 T0 = datetime(2026, 1, 5, 12, 0, tzinfo=UTC)
@@ -122,7 +122,7 @@ async def _task_of_another_deployment(
 # --- Superseding on a CR write ------------------------------------------------------
 
 
-async def test_cr_write_success_supersedes_open_operator_steps_of_other_tasks(
+async def test_cr_write_success_supersedes_open_operator_steps_of_older_tasks(
     uow: SqlModelUnitOfWork, parents: Parents
 ) -> None:
     await _write_cr(uow, parents.task, _at(0))
@@ -195,6 +195,43 @@ async def test_cr_write_leaves_the_steps_of_other_deployments(
     assert _fields(await _steps(uow, elsewhere.id)) == before
 
 
+async def test_late_cr_write_of_an_older_task_is_superseded_by_the_newer_one(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    newer = Task.create(
+        TaskType.UPGRADE_INSTANCE,
+        parents.deployment_id,
+        instance_id=parents.instance_id,
+    )
+    await uow.tasks.save(newer)
+    await uow.session.flush()
+    await set_created_on(uow, newer.id, OTHER_TASK_CREATED_ON + timedelta(days=1))
+    await _write_cr(uow, newer, _at(30))
+    await apply_operator_report(_report(parents, "CreatingHelmRelease"), _at(35), uow)
+    await uow.commit()
+    before = _fields(await _steps(uow, newer.id))
+
+    # The older task's flow reports its CR write after the newer task's.
+    await _write_cr(uow, parents.task, _at(40))
+
+    assert _fields(await _steps(uow, newer.id)) == before
+    late = await _steps(uow, parents.task.id)
+    assert [late[key].status for key in ROLLOUT_KEYS] == [SUPERSEDED] * 4
+    assert {late[key].superseded_by_task_id for key in ROLLOUT_KEYS} == {newer.id}
+    assert {late[key].ended_at for key in ROLLOUT_KEYS} == {_at(40)}
+    assert late["operator:prerequisites"].started_at == _at(40)
+
+    # Reports keep moving the newer rollout.
+    await apply_operator_report(_report(parents, "CreatingServices"), _at(50), uow)
+    moved = await _steps(uow, newer.id)
+    assert [moved[key].status for key in ROLLOUT_KEYS] == [
+        SUCCEEDED,
+        SUCCEEDED,
+        RUNNING,
+        PENDING,
+    ]
+
+
 async def test_repeated_cr_write_success_supersedes_nothing(
     uow: SqlModelUnitOfWork, parents: Parents
 ) -> None:
@@ -213,21 +250,14 @@ async def test_supersede_returns_the_steps_and_never_ends_before_their_start(
 ) -> None:
     await ensure_operator_steps(parents.task, _at(10), uow=uow)
 
-    superseded = await supersede_operator_steps(
-        parents.deployment_id, parents.other_task.id, _at(5), uow=uow
-    )
+    superseded = await supersede_operator_steps(parents.other_task.id, _at(5), uow=uow)
 
     assert [step.key for step in superseded] == ROLLOUT_KEYS
     stored = await _steps(uow, parents.task.id)
     assert _fields({step.key: step for step in superseded}) == _fields(stored)
     assert stored["operator:prerequisites"].ended_at == _at(10)
     assert stored["operator:ready"].ended_at == _at(5)
-    assert (
-        await supersede_operator_steps(
-            parents.deployment_id, parents.other_task.id, _at(6), uow=uow
-        )
-        == []
-    )
+    assert await supersede_operator_steps(parents.other_task.id, _at(6), uow=uow) == []
 
 
 # --- Superseding on a deletion request ------------------------------------------------
@@ -255,6 +285,20 @@ async def test_delete_request_supersedes_open_operator_steps(
         delete_task.id
     }
     assert {interrupted[key].ended_at for key in ROLLOUT_KEYS} == {request.ended_at}
+    teardown = (await _steps(uow, delete_task.id))[steps.OPERATOR_TEARDOWN.key]
+    assert (teardown.status, teardown.superseded_by_task_id) == (PENDING, None)
+
+
+async def test_late_cr_write_after_a_deletion_request_is_superseded_by_it(
+    uow: SqlModelUnitOfWork, parents: Parents, patch_crd
+) -> None:
+    delete_task = await delete_deployment(parents.deployment_id, uow)
+
+    await _write_cr(uow, parents.task, _at(40))
+
+    late = await _steps(uow, parents.task.id)
+    assert {late[key].status for key in ROLLOUT_KEYS} == {SUPERSEDED}
+    assert {late[key].superseded_by_task_id for key in ROLLOUT_KEYS} == {delete_task.id}
     teardown = (await _steps(uow, delete_task.id))[steps.OPERATOR_TEARDOWN.key]
     assert (teardown.status, teardown.superseded_by_task_id) == (PENDING, None)
 
@@ -313,7 +357,7 @@ async def test_recorder_does_not_change_superseded_steps(
     third = Task.create(TaskType.UPDATE_INSTANCE, parents.deployment_id)
     await uow.tasks.save(third)
     await uow.session.flush()
-    await supersede_operator_steps(parents.deployment_id, third.id, _at(45), uow=uow)
+    await supersede_operator_steps(third.id, _at(45), uow=uow)
 
     after = await _steps(uow, parents.task.id)
     assert _fields({"step": after[helmrelease.key]}) == _fields({"step": helmrelease})

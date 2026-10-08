@@ -167,7 +167,7 @@ Each started task also has its own result, calculated the same way on its own fa
 | `callback` sets a task `FAILED` (flow failed; a `Crashed` or `Cancelled` state is rejected as unknown and leaves `status` unchanged) | Pending and running steps of a flow kind on that task fail with the state message |
 | `apply_state` catches a failed or crashed remediation flow | Same, before it raises |
 | The INTERNAL backup or restore flow sees its USER flow fail or crash | Pending and running steps of that backup or restore fail with the state message |
-| A `resource:styrmindeployment` or `resource:delete-request` step succeeds | Open `operator_phase` steps of the deployment's other tasks become superseded by this task |
+| A `resource:styrmindeployment` or `resource:delete-request` step succeeds | Open `operator_phase` steps of the deployment's older tasks become superseded by this task. A task is older when it was created first; tasks created at the same time are ordered by id. When a newer task already has one of these two steps succeeded, the first such newer task supersedes this task's `operator_phase` steps at once |
 
 ## Domain models
 

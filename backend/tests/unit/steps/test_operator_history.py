@@ -112,7 +112,7 @@ def _fields(task_steps: dict[str, Step]) -> dict[str, dict]:
 def _spy_writes(monkeypatch: pytest.MonkeyPatch, uow: SqlModelUnitOfWork) -> list[str]:
     """Record every locked read and every save of a step."""
     calls: list[str] = []
-    for name in ("get", "find_by_key", "list_open_operator_steps_for_deployment"):
+    for name in ("get", "find_by_key", "list_open_operator_steps_of_older_tasks"):
         original = getattr(uow.steps, name)
 
         async def locked(*args, _original=original, _name=name, **kwargs):
