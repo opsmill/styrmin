@@ -161,9 +161,9 @@ Run each E2E node with `--pdb` (in a non-interactive shell: `sleep infinity | uv
 
 **Independent Test**: Read each configuration and confirm a sink endpoint or telemetry off
 
-- [ ] T036 [P] [US6] Add `STYRMIN_TELEMETRY_ENABLED: "false"` to the `environment:` maps of the `server` and `task-worker` services in `docker-compose.yml`, with a one-line comment (`invoke dev` starts this file)
-- [ ] T037 [P] [US6] Add `styrmin.telemetry.enabled: false` with a one-line comment to `dev/local/demo-values.yaml`
-- [ ] T038 [US6] Add a unit test to `backend/tests/unit/test_helm_telemetry_values.py` that parses `docker-compose.yml`, `dev/local/demo-values.yaml` and `backend/tests/e2e/fixtures/styrmin-values.yaml` with `yaml.safe_load` and asserts: both compose services set `STYRMIN_TELEMETRY_ENABLED` to `"false"`; the demo values set `styrmin.telemetry.enabled` to `false`; the E2E values set `styrmin.telemetry.endpoint` to an `http://…svc.cluster.local` URL
+- [X] T036 [P] [US6] Add `STYRMIN_TELEMETRY_ENABLED: "false"` to the `environment:` maps of the `server` and `task-worker` services in `docker-compose.yml`, with a one-line comment (`invoke dev` starts this file)
+- [X] T037 [P] [US6] Add `styrmin.telemetry.enabled: false` with a one-line comment to `dev/local/demo-values.yaml`
+- [X] T038 [US6] Add a unit test to `backend/tests/unit/test_helm_telemetry_values.py` that parses `docker-compose.yml`, `dev/local/demo-values.yaml` and `backend/tests/e2e/fixtures/styrmin-values.yaml` with `yaml.safe_load` and asserts: both compose services set `STYRMIN_TELEMETRY_ENABLED` to `"false"`; the demo values set `styrmin.telemetry.enabled` to `false`; the E2E values set `styrmin.telemetry.endpoint` to an `http://…svc.cluster.local` URL
 
 **Checkpoint**: OpsMill's own installs are not counted
 
