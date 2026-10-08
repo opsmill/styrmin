@@ -245,9 +245,16 @@ Startup sequence:
 - Entrypoints that accept `--config-file` (`styrmin server start`, `styrmin db ...`) call `SETTINGS.initialize(path)` before any code reads a setting.
 - `styrmin agent start` calls `SETTINGS.initialize_and_exit()` before it imports the operator's handler modules, which read settings at import, so invalid settings print a validation summary instead of a traceback. It passes the loaded `Settings` to `entrypoint/combined.py::main`, which gives the status reporter its GraphQL URL and poll interval as arguments.
 - Every other process (Prefect flow runs, Alembic) loads the settings on first access, from the file named by `STYRMIN_CONFIG` (default `styrmin.toml` in the working directory). Without that file, only environment variables and defaults apply.
+- A value set in `styrmin.toml` takes precedence over its `STYRMIN_*` environment variable. A setting that the file does not set is read from the environment, then falls back to its default.
 - Each section (`database`, `workflow`, `kubernetes`, `driver`, `agent_code`, `agent`, `operator`, `url`) reads its environment variables when the settings load, not when the module is imported.
 - `SETTINGS.initialize(path)` raises `InitializationError` when the settings were already loaded from another file, so a call made too late cannot silently ignore the requested file.
 - Settings classes with aliased fields (`Settings`, `DatabaseSettings`, `KubernetesSettings`, `OperatorSettings`) set `populate_by_name=True`, so `styrmin.toml` sets those fields by their field name, the name `styrmin config show` writes. A test loads the output of `styrmin config show` back as a config file.
+- `styrmin config show` leaves out the fields listed in `config.SECRET_FIELDS`:
+  - `admin_password`
+  - `[database]` `db_password` and `db_url`, because the Helm chart builds `db_url` with the database password in it
+  - the `token` field of `[kubernetes]`, `[driver]` and `[agent_code]`
+
+  An operator who saves that output as `styrmin.toml` therefore keeps setting these credentials through the environment, and rotating a credential in the environment still takes effect. Add any new credential field to `SECRET_FIELDS`.
 
 Read configuration through `config.SETTINGS`, not `os.environ`. `AgentSettings` holds the `STYRMIN_AGENT_POLL_*` and `STYRMIN_AGENT_STATUS_POLL_INTERVAL` settings, and `api_token`, read from `STYRMIN_TOKEN`: the reconcile's API token that Styrmin sets on the remediation and driver action jobs (ADR-059). `api_token` is left out of `styrmin config show`. `KubernetesSettings.kubeconfig` reads `KUBECONFIG`. `RemoteAgentCodeSettings` holds `STYRMIN_AGENT_SOURCE_*`. `OperatorSettings` holds `STYRMIN_OPERATOR_*`, `DELETED_CR_TTL_HOURS` and `STYRMIN_JANITOR_INTERVAL`. Kopf timer intervals and Prefect task retries are read when their modules are imported, so they take the values present when the agent process starts.
 

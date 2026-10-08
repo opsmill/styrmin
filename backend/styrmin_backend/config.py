@@ -253,6 +253,17 @@ class Settings(BaseSettings):
     )
 
 
+# Left out of `styrmin config show`: a value in styrmin.toml overrides its STYRMIN_* env var,
+# so a saved output would pin these credentials over the environment.
+SECRET_FIELDS: dict[str, bool | set[str]] = {
+    "admin_password": True,
+    "database": {"db_password", "db_url"},
+    "kubernetes": {"token"},
+    "driver": {"token"},
+    "agent_code": {"token"},
+}
+
+
 @dataclass
 class ConfiguredSettings:  # pylint: disable=too-many-public-methods
     """Process-wide settings, parsed once: by an entrypoint or on first access."""

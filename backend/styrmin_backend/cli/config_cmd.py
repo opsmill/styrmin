@@ -20,7 +20,7 @@ console = Console()
 def show(
     format: Literal["json", "toml"] = "toml",
 ) -> None:
-    """Display current configuration.
+    """Display current configuration, without passwords and tokens.
 
     Args:
         format: Output format (json or toml).
@@ -28,7 +28,7 @@ def show(
     settings = config.SETTINGS.active_settings
 
     # mode="json": the toml library writes str enums as lists of characters.
-    settings_dict = settings.model_dump(mode="json")
+    settings_dict = settings.model_dump(mode="json", exclude=config.SECRET_FIELDS)
 
     # markup=False: Rich would otherwise strip TOML section headers like [database].
     if format == "json":
