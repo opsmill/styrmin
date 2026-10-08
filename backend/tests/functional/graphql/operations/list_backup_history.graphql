@@ -1,0 +1,12 @@
+query ListBackupHistory($deploymentId: UUID, $instanceId: UUID, $status: BackupStatus) {
+    backups(deploymentId: $deploymentId, instanceId: $instanceId, status: $status) {
+        id
+        status
+        createdOn
+        instanceId
+        instance {
+            id
+            applicationVersion
+        }
+    }
+}

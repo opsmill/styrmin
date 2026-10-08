@@ -60,17 +60,17 @@ description: "Task list for keeping a deployment's backup history when it gets a
 
 ### GraphQL
 
-- [ ] T008 Change the `backups` resolver in `backend/styrmin_backend/api/schema/query.py` to take `deployment_id: UUID | None = None`, `instance_id: UUID | None = None` and `status: BackupStatusType | None = None`, forward all three to `get_backups` without validating them, and give the field a description stating the exactly-one rule and that `deploymentId` lists the deployment's backup history ([contracts/graphql.md](contracts/graphql.md))
-- [ ] T009 Regenerate `schema.graphql` with `uv run styrmin export graphql-schema schema.graphql` and check the `backups` signature matches [contracts/graphql.md](contracts/graphql.md)
-- [ ] T010 Create `backend/tests/functional/graphql/operations/list_backup_history.graphql` with one named operation `query ListBackupHistory($deploymentId: UUID, $instanceId: UUID, $status: BackupStatus)` that calls `backups(deploymentId: $deploymentId, instanceId: $instanceId, status: $status)` and selects `id`, `status`, `createdOn`, `instanceId` and `instance { id applicationVersion }`
-- [ ] T011 Create the GraphQL propagation test `backend/tests/functional/graphql/test_backup_history_propagation.py` (read recipe in `dev/guides/graphql-propagation-tests.md`, seeds from `seeds.py`, `load_query("list_backup_history")`). Seed one deployment with two instances at different application versions, a backup of each, and a backup of an instance of a second deployment. Assert:
+- [X] T008 Change the `backups` resolver in `backend/styrmin_backend/api/schema/query.py` to take `deployment_id: UUID | None = None`, `instance_id: UUID | None = None` and `status: BackupStatusType | None = None`, forward all three to `get_backups` without validating them, and give the field a description stating the exactly-one rule and that `deploymentId` lists the deployment's backup history ([contracts/graphql.md](contracts/graphql.md))
+- [X] T009 Regenerate `schema.graphql` with `uv run styrmin export graphql-schema schema.graphql` and check the `backups` signature matches [contracts/graphql.md](contracts/graphql.md)
+- [X] T010 Create `backend/tests/functional/graphql/operations/list_backup_history.graphql` with one named operation `query ListBackupHistory($deploymentId: UUID, $instanceId: UUID, $status: BackupStatus)` that calls `backups(deploymentId: $deploymentId, instanceId: $instanceId, status: $status)` and selects `id`, `status`, `createdOn`, `instanceId` and `instance { id applicationVersion }`
+- [X] T011 Create the GraphQL propagation test `backend/tests/functional/graphql/test_backup_history_propagation.py` (read recipe in `dev/guides/graphql-propagation-tests.md`, seeds from `seeds.py`, `load_query("list_backup_history")`). Seed one deployment with two instances at different application versions, a backup of each, and a backup of an instance of a second deployment. Assert:
   - `backups(deploymentId:)` returns both backups of the first deployment, newest first, each with the `instance.applicationVersion` of its own instance
   - the second deployment's backup is not returned
   - `status: COMPLETED` filters the history
   - an unknown `deploymentId` returns `[]` (research R4)
   - `backups(instanceId:)` with the inactive instance returns only that instance's backup (SC-004)
   - passing both arguments, and passing neither, returns an error with `extensions.code == "VALIDATION_ERROR"`
-- [ ] T012 Run `uv run invoke validate-graphql` and confirm the existing operations that declare `$instanceId: UUID!` (`backend/tests/functional/graphql/operations/list_backup_statuses.graphql`, `list_backup_steps.graphql`) still validate (critique E7)
+- [X] T012 Run `uv run invoke validate-graphql` and confirm the existing operations that declare `$instanceId: UUID!` (`backend/tests/functional/graphql/operations/list_backup_statuses.graphql`, `list_backup_steps.graphql`) still validate (critique E7)
 
 ### SDK
 

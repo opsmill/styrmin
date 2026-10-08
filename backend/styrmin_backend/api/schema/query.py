@@ -320,16 +320,28 @@ class Query:
         backup = await get_backup(backup_id=backup_id, uow=uow)
         return BackupType.from_instance(backup)
 
-    @strawberry.field
+    @strawberry.field(
+        description=(
+            "List backups. Pass exactly one of deploymentId or instanceId. "
+            "deploymentId lists the deployment's backup history: the backups of "
+            "every instance the deployment has had, newest first. instanceId "
+            "lists the backups of that one instance."
+        )
+    )
     async def backups(
         self,
-        instance_id: UUID,
         info: strawberry.Info,
+        deployment_id: UUID | None = None,
+        instance_id: UUID | None = None,
         status: BackupStatusType | None = None,  # type: ignore[valid-type]
     ) -> list[BackupType]:
-        """List all backups for an instance."""
         uow = info.context["uow"]
-        backups = await get_backups(instance_id=instance_id, uow=uow, status=status)
+        backups = await get_backups(
+            uow,
+            deployment_id=deployment_id,
+            instance_id=instance_id,
+            status=status,
+        )
         return [BackupType.from_instance(b) for b in backups]
 
     @strawberry.field
