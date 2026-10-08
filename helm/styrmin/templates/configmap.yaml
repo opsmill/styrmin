@@ -40,6 +40,7 @@ data:
   STYRMIN_AGENT_SOURCE_BRANCH: {{ .Values.styrmin.agentSource.branch | quote }}
 
   # Telemetry
+  STYRMIN_TELEMETRY_ENABLED: {{ .Values.styrmin.telemetry.enabled | quote }}
   {{- if .Values.styrmin.telemetry.endpoint }}
   STYRMIN_TELEMETRY_ENDPOINT: {{ .Values.styrmin.telemetry.endpoint | quote }}
   {{- end }}
