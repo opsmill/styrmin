@@ -31,8 +31,8 @@ description: "Task list for keeping a deployment's backup history when it gets a
 
 **Purpose**: Working environment and a green baseline for the files this change touches.
 
-- [ ] T001 Install dependencies with `uv sync` and `cd frontend && pnpm install --ignore-workspace` (`--ignore-workspace` keeps pnpm from resolving a parent workspace when the checkout is a nested worktree), then confirm `uv run invoke generate` runs cleanly before any change
-- [ ] T002 Run the baseline of the affected test files and record any failure that exists before this change: `uv run pytest backend/tests/unit/repository/backup/test_backup_repository.py backend/tests/unit/services/backup/test_backup_service.py backend/tests/functional/graphql/test_backup_fields.py backend/tests/functional/graphql/test_backup_restore_steps_propagation.py python_sdk/tests/test_backups.py cli/tests/test_backups.py` and `cd frontend && pnpm test -- deployment-detail`
+- [X] T001 Install dependencies with `uv sync` and `cd frontend && pnpm install --ignore-workspace` (`--ignore-workspace` keeps pnpm from resolving a parent workspace when the checkout is a nested worktree), then confirm `uv run invoke generate` runs cleanly before any change
+- [X] T002 Run the baseline of the affected test files and record any failure that exists before this change: `uv run pytest backend/tests/unit/repository/backup/test_backup_repository.py backend/tests/unit/services/backup/test_backup_service.py backend/tests/functional/graphql/test_backup_fields.py backend/tests/functional/graphql/test_backup_restore_steps_propagation.py python_sdk/tests/test_backups.py cli/tests/test_backups.py` and `cd frontend && pnpm test -- deployment-detail`
 
 ---
 
