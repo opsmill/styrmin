@@ -2,7 +2,9 @@
 
 A report finds its task by the instance the operator acted on, or, in the
 ``Deleting`` and ``Deleted`` phases, as the newest delete task of the deployment
-(contracts/operator-status.md "Finding the task"). Each reported phase moves
+(contracts/operator-status.md "Finding the task"). A rollout report changes
+nothing once a newer task of the deployment wrote the CR or requested the
+deletion: the operator no longer works on that instance. Each reported phase moves
 the task's operator-phase steps forward; a later phase succeeds every earlier
 step. Only operator-phase steps change; other steps only give start times.
 
@@ -91,8 +93,9 @@ async def apply_operator_report(
 
     ``report`` is one ``reportDeploymentStatuses`` entry as the service receives
     it; ``now`` is the time of the report. Runs in the caller's transaction and
-    does not commit. A report that names no task with open operator-phase steps
-    returns before it locks any row.
+    does not commit. A report that names no task with open operator-phase steps,
+    or a rollout report for a task that a newer task replaced, returns before it
+    locks any row.
     """
     phase = report.get("phase")
     task = await _find_task(report, uow)
@@ -105,6 +108,8 @@ async def apply_operator_report(
         if step.kind is StepKind.OPERATOR_PHASE
     ):
         return  # Also a task without operator-phase steps.
+    if phase not in _DELETE_PHASES and await _replaced(task, uow):
+        return
     by_key = {step.key: step for step in task_steps}
 
     if phase in _DELETE_PHASES:
@@ -142,6 +147,14 @@ async def _find_task(report: Mapping[str, Any], uow: UnitOfWork) -> Task | None:
     if task is None or task.deployment_id != deployment_id:
         return None
     return task
+
+
+async def _replaced(task: Task, uow: UnitOfWork) -> bool:
+    """Whether a newer task of the deployment wrote the CR or requested the deletion."""
+    newer = await uow.steps.find_first_newer_task_with_succeeded_step(
+        task.id, steps.CR_WRITE_KEYS
+    )
+    return newer is not None
 
 
 def _reports_failure(report: Mapping[str, Any]) -> bool:

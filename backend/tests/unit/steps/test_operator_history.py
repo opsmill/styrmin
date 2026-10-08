@@ -16,6 +16,7 @@ from styrmin_backend.domain.models import (
     StepParent,
     StepStatus,
     Task,
+    TaskResult,
     TaskStatus,
     TaskType,
 )
@@ -30,6 +31,7 @@ from styrmin_backend.services.steps.recorder import (
     record_event,
     succeed_step,
 )
+from styrmin_backend.services.steps.results import load_families
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 from tests.unit.steps.conftest import Parents
 
@@ -41,10 +43,11 @@ ROLLOUT_KEYS = [
     "operator:services",
     "operator:ready",
 ]
-PENDING, RUNNING, SUCCEEDED = (
+PENDING, RUNNING, SUCCEEDED, FAILED = (
     StepStatus.PENDING,
     StepStatus.RUNNING,
     StepStatus.SUCCEEDED,
+    StepStatus.FAILED,
 )
 
 
@@ -556,6 +559,73 @@ async def test_deleting_report_without_a_delete_task_changes_nothing(
     await apply_operator_report(_delete_report(parents, "Deleting"), _at(30), uow)
 
     assert _fields(await _steps(uow, parents.task.id)) == before
+
+
+# --- Reports for an instance that a newer task replaced ---------------------------
+
+
+async def _failed_rollout(uow: SqlModelUnitOfWork, parents: Parents) -> Task:
+    """The task wrote the CR at 5s, its flow ended, and its prerequisites failed at 20s."""
+    await _record(uow, parents.task, StepEvent.STARTED, T0)
+    await _record(uow, parents.task, StepEvent.SUCCEEDED, _at(5))
+    stored = await uow.tasks.find(parents.task.id)
+    assert stored is not None
+    task = stored.model_copy(update={"status": TaskStatus.SUCCESS})
+    await uow.tasks.save(task)
+    await apply_operator_report(
+        _rollout_report(parents, "Failed", display_state="Error"), _at(20), uow
+    )
+    return task
+
+
+async def _result(uow: SqlModelUnitOfWork, task: Task) -> TaskResult:
+    return (await load_families([task], uow)).result_of(task)
+
+
+@pytest.mark.parametrize("newer_task_step", ["cr-write", "delete-request"])
+async def test_late_report_for_a_replaced_instance_keeps_the_failed_step(
+    uow: SqlModelUnitOfWork,
+    parents: Parents,
+    monkeypatch: pytest.MonkeyPatch,
+    newer_task_step: str,
+) -> None:
+    task = await _failed_rollout(uow, parents)
+    if newer_task_step == "cr-write":
+        await _record(uow, parents.other_task, StepEvent.STARTED, _at(30))
+        await _record(uow, parents.other_task, StepEvent.SUCCEEDED, _at(35))
+    else:
+        await _delete_task(uow, parents, _at(30))
+    before = _fields(await _steps(uow, task.id))
+    assert before["operator:prerequisites"]["status"] is FAILED
+    calls = _spy_writes(monkeypatch, uow)
+
+    # The operator reported the old instance Ready before it read the newer spec.
+    await apply_operator_report(
+        _rollout_report(parents, "Ready", display_state="Running"), _at(60), uow
+    )
+
+    assert calls == []
+    assert _fields(await _steps(uow, task.id)) == before
+    assert await _result(uow, task) is TaskResult.FAILED
+
+
+@pytest.mark.parametrize("newer_task", ["none", "cr-write-failed"])
+async def test_report_moves_a_failed_step_while_no_newer_task_wrote_the_cr(
+    uow: SqlModelUnitOfWork, parents: Parents, newer_task: str
+) -> None:
+    task = await _failed_rollout(uow, parents)
+    if newer_task == "cr-write-failed":
+        await _record(uow, parents.other_task, StepEvent.STARTED, _at(30))
+        await _record(uow, parents.other_task, StepEvent.FAILED, _at(35))
+
+    await apply_operator_report(
+        _rollout_report(parents, "Ready", display_state="Running"), _at(60), uow
+    )
+
+    assert await _rollout_statuses(uow, task.id) == [SUCCEEDED] * 4
+    prerequisites = (await _steps(uow, task.id))["operator:prerequisites"]
+    assert (prerequisites.attempt_count, prerequisites.ended_at) == (2, _at(60))
+    assert await _result(uow, task) is TaskResult.SUCCEEDED
 
 
 # --- Called by reportDeploymentStatuses --------------------------------------

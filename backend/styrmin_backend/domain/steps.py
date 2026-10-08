@@ -94,6 +94,9 @@ ROLLOUT_OPERATOR_STEPS = (
     OPERATOR_READY,
 )
 
+#: The keys of the steps whose success ends the rollouts of the deployment's older tasks.
+CR_WRITE_KEYS = (STYRMIN_DEPLOYMENT_WRITE.key, DELETE_REQUEST.key)
+
 #: The server keeps at most the end of a command's output (spec FR-003).
 MAX_OUTPUT_LINES = 200
 MAX_OUTPUT_BYTES = 64 * 1024
