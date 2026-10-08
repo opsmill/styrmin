@@ -976,7 +976,7 @@ Two related notes:
 
 ### Queries
 
-`Backup.steps` and `Restore.steps` (`[Step!]!`, by start time, pending steps last) return the steps described in [Backup and restore steps](#backup-and-restore-steps); they are empty for backups and restores that ran before steps were recorded. List queries load the steps of all their rows in one query.
+`Backup.steps` and `Restore.steps` (`[Step!]!`, by start time, pending steps last) return the steps described in [Backup and restore steps](#backup-and-restore-steps); they are empty for backups and restores that ran before steps were recorded. A response reads the steps of all its backups, and of all its restores, with one query each, wherever they appear, and reads none when `steps` is not requested (data loaders in `api/loaders.py`).
 
 ```graphql
 backup(backupId: UUID!): Backup
