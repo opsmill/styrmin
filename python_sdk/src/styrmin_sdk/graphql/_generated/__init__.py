@@ -281,6 +281,7 @@ from .list_backup_storage_locations import (
 from .list_backups import (
     ListBackups,
     ListBackupsBackups,
+    ListBackupsBackupsInstance,
     ListBackupsBackupsSteps,
     ListBackupsBackupsStepsErrors,
 )
@@ -582,6 +583,7 @@ __all__ = [
     "ListBackupStorageLocationsBackupStorageLocations",
     "ListBackups",
     "ListBackupsBackups",
+    "ListBackupsBackupsInstance",
     "ListBackupsBackupsSteps",
     "ListBackupsBackupsStepsErrors",
     "ListClusters",

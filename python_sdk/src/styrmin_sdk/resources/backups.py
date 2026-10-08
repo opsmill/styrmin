@@ -50,10 +50,34 @@ class BackupResource(BaseResource):
 
     async def list_backups(
         self,
-        instance_id: str | UUID,
+        instance_id: str | UUID | None = None,
         status: BackupStatus | str | None = None,
+        *,
+        deployment_id: str | UUID | None = None,
     ) -> list[ListBackupsBackups]:
-        variables: dict[str, Any] = {"instanceId": str(instance_id)}
+        """List backups, newest first, by deployment or by instance.
+
+        ``deployment_id`` lists the deployment's backup history: the backups of
+        every instance the deployment has had, including instances replaced by
+        an upgrade, a config edit, a refresh or an environment config change.
+        ``instance_id`` lists the backups of that one instance. Each backup
+        carries ``instance.application_version``, the application version of
+        the instance it was taken of. ``status`` filters either list.
+
+        Pass exactly one of ``deployment_id`` and ``instance_id``. The server
+        enforces this rule and answers ``VALIDATION_ERROR``, which the SDK raises
+        as :class:`~styrmin_sdk.exceptions.OperationFailedError`.
+
+        Examples::
+
+            history = await client.backups.list_backups(deployment_id=deployment_id)
+            completed = await client.backups.list_backups(instance_id, "completed")
+        """
+        variables: dict[str, Any] = {}
+        if deployment_id is not None:
+            variables["deploymentId"] = str(deployment_id)
+        if instance_id is not None:
+            variables["instanceId"] = str(instance_id)
         coerced = _coerce_backup_status(status)
         if coerced is not None:
             variables["status"] = coerced
