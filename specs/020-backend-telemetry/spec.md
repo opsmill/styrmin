@@ -148,6 +148,8 @@ Report content:
   - the driver version
   - the source type (`git` or `local`)
   - the number of live deployments that use it, not counting tombstoned deployments ([ADR-008](../../dev/adr/0008-deployment-soft-delete-tombstoning.md))
+
+  Driver versions that have the same name, version and source type, and differ only in the fields that FR-002 removes, are reported as one entry with their deployment counts added. [CLAUDE RECOMMENDED – based on [research D9](research.md): without those fields the entries cannot be told apart]
 - **FR-002**: Reports MUST NOT contain the driver source repository URL, branch or path.
 - **FR-006**: The report data MUST contain only these keys:
   - `install_id`
