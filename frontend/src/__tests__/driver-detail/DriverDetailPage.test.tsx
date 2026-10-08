@@ -13,7 +13,9 @@
  *   (c) tabs switch between Overview / Parameters / Components,
  *   (d) a driver with no versions renders an error (not a crash),
  *   (e) no <pre> JSON-dump fallback renders across tabs (SC-002),
- *   (f) the header logo follows the selected version, with a fallback.
+ *   (f) the header logo follows the selected version, with a fallback,
+ *   (g) the description and the Overview links follow the selected version,
+ *       render as plain text, and are absent when not set.
  */
 import {
   describe,
@@ -382,5 +384,107 @@ describe("DriverDetailPage", () => {
 
     expect(headerLogo()).toHaveAttribute("data-logo-state", "fallback");
     expect(headerLogo().querySelector("img")).toBeNull();
+  });
+  it("shows the selected version's full description as plain text", async () => {
+    const description =
+      "Deploys <b>Example</b> & its worker.\nSecond line <script>alert(1)</script>";
+    useGetDriverQueryMock.mockReturnValue(
+      makeQueryResult(
+        makeDriver([
+          makeVersion({
+            id: "v1",
+            version: "1.0.0",
+            createdOn: "2026-03-01T00:00:00Z",
+            description,
+          }),
+        ]),
+      ),
+    );
+
+    await renderPage();
+
+    const el = screen.getByTestId("driver-description");
+    expect(el.textContent).toBe(description);
+    expect(el).toHaveClass("whitespace-pre-line");
+    expect(el.querySelector("b")).toBeNull();
+    expect(el.querySelector("script")).toBeNull();
+  });
+
+  it("lists the selected version's links in the Overview tab, in order, opening in a new tab", async () => {
+    const links = [
+      { label: "Homepage", url: "https://example.com/" },
+      { label: "Documentation", url: "https://docs.example.com/guide" },
+      { label: "Github <source>", url: "https://github.com/example/repo" },
+    ];
+    useGetDriverQueryMock.mockReturnValue(
+      makeQueryResult(
+        makeDriver([
+          makeVersion({
+            id: "v1",
+            version: "1.0.0",
+            createdOn: "2026-03-01T00:00:00Z",
+            links,
+          }),
+        ]),
+      ),
+    );
+
+    const user = userEvent.setup();
+    await renderPage();
+
+    const overview = screen.getByTestId("driver-overview");
+    const anchors = within(
+      within(overview).getByTestId("driver-links"),
+    ).getAllByRole("link");
+    expect(anchors.map((a) => a.textContent)).toEqual(
+      links.map((l) => l.label),
+    );
+    anchors.forEach((a, i) => {
+      expect(a).toHaveAttribute("href", links[i].url);
+      expect(a).toHaveAttribute("target", "_blank");
+      expect(a).toHaveAttribute("rel", "noopener noreferrer");
+    });
+
+    // the links belong to the Overview tab only
+    await user.click(screen.getByRole("button", { name: /parameters/i }));
+    await waitFor(() => {
+      expect(screen.queryByTestId("driver-links")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows the description and links of the ?version version", async () => {
+    useGetDriverQueryMock.mockReturnValue(makeQueryResult(twoVersions()));
+
+    await renderPage("/drivers/driver-1?version=old");
+
+    expect(screen.getByTestId("driver-description")).toHaveTextContent(
+      "Old description",
+    );
+    expect(
+      within(screen.getByTestId("driver-links")).getByRole("link", {
+        name: "Docs",
+      }),
+    ).toHaveAttribute("href", "https://example.com/docs/v1");
+  });
+
+  it("renders no description area and no links section when the version has neither", async () => {
+    useGetDriverQueryMock.mockReturnValue(
+      makeQueryResult(
+        makeDriver([
+          makeVersion({
+            id: "v1",
+            version: "1.0.0",
+            createdOn: "2026-03-01T00:00:00Z",
+          }),
+        ]),
+      ),
+    );
+
+    await renderPage();
+
+    expect(screen.getByTestId("driver-overview")).toBeInTheDocument();
+    expect(screen.queryByTestId("driver-description")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("driver-links")).not.toBeInTheDocument();
+    expect(screen.queryByText("Links")).not.toBeInTheDocument();
   });
 });

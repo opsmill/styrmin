@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { Copy, Check } from "lucide-react";
+import { Copy, Check, ExternalLink } from "lucide-react";
 import { useGetDriverQuery } from "@/generated/graphql";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
@@ -165,6 +165,15 @@ export default function DriverDetailPage() {
           )}
         </div>
 
+        {selected.description && (
+          <p
+            data-testid="driver-description"
+            className="whitespace-pre-line pb-5 text-sm text-muted-foreground"
+          >
+            {selected.description}
+          </p>
+        )}
+
         <Tabs
           tabs={[
             { id: "overview", label: "Overview" },
@@ -247,30 +256,57 @@ function OverviewPanel({ version }: { version: DriverVersionDetail }) {
   rows.push({ label: "Loaded", value: formatRelativeTime(version.createdOn) });
 
   return (
-    <div
-      className="overflow-hidden rounded-lg border border-border"
-      data-testid="driver-overview"
-    >
-      <table className="w-full text-sm">
-        <tbody>
-          {rows.map((row, i) => (
-            <tr
-              key={row.label}
-              className={i < rows.length - 1 ? "border-b border-border/60" : ""}
-            >
-              <td className="w-52 border-r border-border/60 bg-muted/30 px-4 py-2.5 align-top text-muted-foreground">
-                {row.label}
-              </td>
-              <td className="px-4 py-2.5">
-                <span className="inline-flex items-center gap-2">
-                  {row.value}
-                  {row.copy && <CopyButton text={row.copy} />}
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-5" data-testid="driver-overview">
+      <div className="overflow-hidden rounded-lg border border-border">
+        <table className="w-full text-sm">
+          <tbody>
+            {rows.map((row, i) => (
+              <tr
+                key={row.label}
+                className={
+                  i < rows.length - 1 ? "border-b border-border/60" : ""
+                }
+              >
+                <td className="w-52 border-r border-border/60 bg-muted/30 px-4 py-2.5 align-top text-muted-foreground">
+                  {row.label}
+                </td>
+                <td className="px-4 py-2.5">
+                  <span className="inline-flex items-center gap-2">
+                    {row.value}
+                    {row.copy && <CopyButton text={row.copy} />}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {version.links.length > 0 && (
+        <section className="overflow-hidden rounded-lg border border-border">
+          <h2 className="border-b border-border/60 bg-muted/30 px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            Links
+          </h2>
+          <ul
+            data-testid="driver-links"
+            className="divide-y divide-border/60 text-sm"
+          >
+            {version.links.map((link, i) => (
+              <li key={i} className="px-4 py-2.5">
+                <a
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  {link.label}
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 }

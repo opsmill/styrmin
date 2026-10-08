@@ -120,19 +120,19 @@ Web application: `backend/styrmin_backend/`, `backend/tests/`, `frontend/src/`, 
 
 ### Tests for User Story 2
 
-- [ ] T022 [P] [US2] Extend `frontend/src/__tests__/drivers/DriverListPage.test.tsx`. Assert:
+- [X] T022 [P] [US2] Extend `frontend/src/__tests__/drivers/DriverListPage.test.tsx`. Assert:
   - The group header renders `[data-testid=driver-description]` with the latest version's description and a `title` with the full text.
   - It is absent when the description is null.
   - The flat view renders no description.
-- [ ] T023 [P] [US2] Extend `frontend/src/__tests__/driver-detail/DriverDetailPage.test.tsx`. Assert:
+- [X] T023 [P] [US2] Extend `frontend/src/__tests__/driver-detail/DriverDetailPage.test.tsx`. Assert:
   - `[data-testid=driver-description]` shows the full text, and HTML characters in it render as text.
   - The Overview tab lists `[data-testid=driver-links]` anchors in order, with `href`, `target="_blank"` and `rel="noopener noreferrer"`.
   - Both elements are absent when the description is null and the links are empty.
 
 ### Implementation for User Story 2
 
-- [ ] T024 [US2] In `frontend/src/pages/drivers/DriverListPage.tsx` `AppGroup` header, render `driver.latestVersion?.description` under the driver name as `<p data-testid="driver-description" title={description} className="truncate text-xs text-muted-foreground">` only when set. Keep the version-count text on the right, and make the name/description column `min-w-0` so truncation works.
-- [ ] T025 [US2] In `frontend/src/pages/drivers/DriverDetailPage.tsx`:
+- [X] T024 [US2] In `frontend/src/pages/drivers/DriverListPage.tsx` `AppGroup` header, render `driver.latestVersion?.description` under the driver name as `<p data-testid="driver-description" title={description} className="truncate text-xs text-muted-foreground">` only when set. Keep the version-count text on the right, and make the name/description column `min-w-0` so truncation works.
+- [X] T025 [US2] In `frontend/src/pages/drivers/DriverDetailPage.tsx`:
   - Render `selected.description` as `<p data-testid="driver-description" className="whitespace-pre-line pb-5 text-sm text-muted-foreground">` between the version header row and `<Tabs>`, only when set.
   - In `OverviewPanel`, after the details table, render a "Links" section `<ul data-testid="driver-links">` with one `<a href={url} target="_blank" rel="noopener noreferrer">{label}</a>` per link, only when `version.links.length > 0`, styled like the existing panel (border, `text-sm`, primary link color).
 - [ ] T026 [US2] Extend `test_driver_logo_description_and_links_render` in `backend/tests/e2e/test_ui_smoke.py`. On the detail page, assert:

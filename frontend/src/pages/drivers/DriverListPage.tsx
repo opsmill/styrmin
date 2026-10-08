@@ -302,6 +302,7 @@ function AppGroup({
   onOpen: (driverId: string, versionId: string) => void;
 }) {
   const colliding = collidingVersions(driver.versions);
+  const description = driver.latestVersion?.description;
   return (
     <div
       data-testid="driver-group"
@@ -310,10 +311,21 @@ function AppGroup({
     >
       <div className="flex items-center gap-3 border-b border-border bg-muted/40 px-4 py-3">
         <DriverLogo icon={driver.latestVersion?.icon} size="md" />
-        <span className="text-[13.5px] font-semibold">
-          {highlightMatch(driver.name, query)}
-        </span>
-        <span className="ml-auto text-xs text-muted-foreground">
+        <div className="min-w-0">
+          <span className="text-[13.5px] font-semibold">
+            {highlightMatch(driver.name, query)}
+          </span>
+          {description && (
+            <p
+              data-testid="driver-description"
+              title={description}
+              className="truncate text-xs text-muted-foreground"
+            >
+              {description}
+            </p>
+          )}
+        </div>
+        <span className="ml-auto shrink-0 text-xs text-muted-foreground">
           {driver.versions.length} driver version
           {driver.versions.length !== 1 ? "s" : ""}
         </span>
