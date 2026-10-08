@@ -48,6 +48,24 @@ GETTING STARTED
    kubectl logs --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "styrmin.name" . }},app.kubernetes.io/component=agent" -f
 
 =============================================================================
+TELEMETRY
+=============================================================================
+{{- if .Values.styrmin.telemetry.enabled }}
+
+Telemetry is on: Styrmin sends one anonymous report a day to {{ .Values.styrmin.telemetry.endpoint | default "OpsMill" }}.
+
+To view the report, run:
+  kubectl exec --namespace {{ .Release.Namespace }} deploy/{{ include "styrmin.server.fullname" . }} -c styrmin-server -- styrmin telemetry show
+
+To turn telemetry off, run:
+  helm upgrade {{ .Release.Name }} <chart> --version {{ .Chart.Version }} --namespace {{ .Release.Namespace }} --reuse-values --set styrmin.telemetry.enabled=false
+where <chart> is the chart you installed, for example oci://registry.opsmill.io/opsmill/chart/styrmin.
+{{- else }}
+
+Telemetry is off (styrmin.telemetry.enabled=false). Styrmin sends no reports.
+{{- end }}
+
+=============================================================================
 DOCUMENTATION
 =============================================================================
 
