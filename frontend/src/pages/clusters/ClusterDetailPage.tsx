@@ -5,10 +5,9 @@ import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { EmptyState } from "@/components/EmptyState";
-import { ConfigSection } from "@/components/ConfigSection";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { ClusterConfiguration } from "./ClusterConfiguration";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString();
@@ -61,14 +60,13 @@ export default function ClusterDetailPage() {
         </div>
       </div>
 
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-base">Configuration</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ConfigSection config={cluster.config ?? {}} />
-        </CardContent>
-      </Card>
+      <section className="mb-6">
+        <h2 className="text-lg font-semibold mb-4">Configuration</h2>
+        <ClusterConfiguration
+          config={cluster.config}
+          capabilities={cluster.capabilities}
+        />
+      </section>
 
       <section>
         <h2 className="text-lg font-semibold mb-4">Environments</h2>

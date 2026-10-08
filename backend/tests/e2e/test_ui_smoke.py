@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 import pytest
 from playwright.async_api import expect
 
+from tests.e2e.pages.cluster_detail import ClusterDetailPage
 from tests.e2e.pages.deploy_form import DeployFormPage
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 from tests.e2e.pages.pods_tab import PodsTabPage
@@ -233,3 +234,33 @@ async def test_browser_tab_title_names_page_and_product(
     assert deployment_name, "deployment detail page rendered an empty <h1>"
 
     await expect(page).to_have_title(f"{deployment_name} · Styrmin")
+
+
+# ---- cluster detail page shows every cluster setting ----
+async def test_cluster_detail_shows_full_configuration(
+    styrmin_resources: dict,
+    session_ui_page: "Page",
+) -> None:
+    """The session cluster's settings, including its dedicated ingress, render.
+
+    Values come from the ``styrmin_resources`` cluster config. The page
+    previously dropped the dedicated ingress service settings, the external
+    URL and DNS settings, and the derived capabilities.
+    """
+    page = ClusterDetailPage(session_ui_page)
+    await page.goto(cluster_id=styrmin_resources["cluster_id"])
+
+    ingress = await page.read_section("Dedicated ingress")
+    assert "traefik" in ingress, ingress
+    assert "LoadBalancer" in ingress, ingress
+
+    networking = await page.read_section("Networking")
+    for expected in ("styrmin.com", "8080", "NodeExternalIP"):
+        assert expected in networking, networking
+
+    storage = await page.read_section("Storage")
+    assert "csi-hostpath-sc" in storage, storage
+
+    capabilities = await page.read_section("Capabilities")
+    assert "csi-hostpath-sc" in capabilities, capabilities
+    assert "styrmin.com" in capabilities, capabilities

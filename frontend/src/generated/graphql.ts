@@ -1676,7 +1676,7 @@ export type GetClusterQueryVariables = Exact<{
 }>;
 
 
-export type GetClusterQuery = { __typename?: 'Query', cluster?: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown>, createdOn: any, updatedOn?: any | null, environments: Array<{ __typename?: 'Environment', id: string, name: string }> } | null };
+export type GetClusterQuery = { __typename?: 'Query', cluster?: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown>, capabilities: Record<string, unknown>, createdOn: any, updatedOn?: any | null, environments: Array<{ __typename?: 'Environment', id: string, name: string }> } | null };
 
 export type GetDeploymentQueryVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
@@ -2454,6 +2454,7 @@ export const GetClusterDocument = `
     id
     name
     config
+    capabilities
     createdOn
     updatedOn
     environments {
