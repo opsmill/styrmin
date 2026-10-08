@@ -28,7 +28,7 @@ Web application: `backend/styrmin_backend/`, `backend/tests/`, `frontend/src/`, 
 
 **Purpose**: Tooling the later tasks need.
 
-- [ ] T001 Install frontend dependencies so `uv run invoke generate` can run the frontend codegen: `cd frontend && pnpm --ignore-workspace install`. Confirm that `frontend/node_modules/.bin/graphql-codegen` exists. Do not commit lockfile changes. This worktree sits inside emdash's pnpm workspace, so `export npm_config_ignore_workspace=true` before `uv run invoke generate|lint` and before each `git commit` (the pre-commit frontend hook calls pnpm).
+- [X] T001 Install frontend dependencies so `uv run invoke generate` can run the frontend codegen: `cd frontend && pnpm --ignore-workspace install`. Confirm that `frontend/node_modules/.bin/graphql-codegen` exists. Do not commit lockfile changes. This worktree sits inside emdash's pnpm workspace, so `export npm_config_ignore_workspace=true` before `uv run invoke generate|lint` and before each `git commit` (the pre-commit frontend hook calls pnpm).
 
 ---
 
