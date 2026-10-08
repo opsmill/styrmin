@@ -22,6 +22,7 @@ from styrmin_backend.services.auth.bootstrap import (
 from styrmin_backend.services.ingress_controller.driver import (
     initialize_internal_drivers,
 )
+from styrmin_backend.services.telemetry.install import ensure_install_id
 from styrmin_backend.services.utilities.utilities import initialize_utilities
 from styrmin_backend.workflows.dependency import get_manager
 
@@ -53,6 +54,9 @@ async def app_initialization(_: FastAPI) -> None:
 
     # Seed the default admin user (no-op if it already exists). See ADR-016.
     await bootstrap_default_admin_from_settings()
+
+    # Created whether telemetry is on or off; a failure only logs a warning (spec 020).
+    await ensure_install_id()
 
     # Initialize the Prefect manager
     prefect_manager = get_manager()
