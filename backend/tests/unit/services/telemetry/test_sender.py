@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import json
-import threading
 from collections.abc import Iterator
-from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,6 +14,7 @@ from styrmin_backend.services.telemetry.sender import (
     checksum,
     send_report,
 )
+from tests.helpers.http_sink import Sink, serve_sink
 
 # Fixed values in FR-006 order; the digest is computed, not copied (wire-format contract).
 FIXED_DATA = {
@@ -51,54 +49,10 @@ FIXED_DATA = {
 }
 
 
-@dataclass
-class ReceivedRequest:
-    method: str
-    path: str
-    content_type: str | None
-    body: bytes
-
-
-@dataclass
-class Sink:
-    url: str
-    requests: list[ReceivedRequest] = field(default_factory=list)
-
-
-class _SinkServer(ThreadingHTTPServer):
-    sink: Sink
-
-
-class _Handler(BaseHTTPRequestHandler):
-    server: _SinkServer
-
-    def do_POST(self) -> None:
-        length = int(self.headers.get("Content-Length", 0))
-        self.server.sink.requests.append(
-            ReceivedRequest(
-                method="POST",
-                path=self.path,
-                content_type=self.headers.get("Content-Type"),
-                body=self.rfile.read(length),
-            )
-        )
-        self.send_response(200)
-        self.end_headers()
-
-    def log_message(self, format: str, *args: object) -> None:
-        """Keep the test output quiet."""
-
-
 @pytest.fixture
 def sink() -> Iterator[Sink]:
-    server = _SinkServer(("127.0.0.1", 0), _Handler)
-    host, port = server.server_address[:2]
-    server.sink = Sink(url=f"http://{host}:{port}/report")
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield server.sink
-    server.shutdown()
-    server.server_close()
+    with serve_sink() as running:
+        yield running
 
 
 def test_checksum_matches_styrminctl() -> None:

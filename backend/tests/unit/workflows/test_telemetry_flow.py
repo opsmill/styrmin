@@ -1,4 +1,4 @@
-"""The daily telemetry flow and its catalogue entry (spec 020, research D14, D16).
+"""The daily telemetry flow and its catalogue entry (spec 020, FR-003, research D14, D16).
 
 The flow body runs through ``Flow.fn`` with the logger, the unit of work, the
 payload builder, the sender and the scheduled start time patched in the module.
@@ -6,6 +6,7 @@ payload builder, the sender and the scheduled start time patched in the module.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,14 +14,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from styrmin_backend.config import DEFAULT_TELEMETRY_ENDPOINT, TelemetrySettings
+from styrmin_backend.services.telemetry import sender
 from styrmin_backend.workflows.catalogue import PrefectCatalogue
 from styrmin_backend.workflows.constants import WorkflowType
 from styrmin_backend.workflows.models import PrefectAction
 from styrmin_backend.workflows.templates.telemetry import send_telemetry_report_flow
+from tests.helpers.http_sink import Sink, serve_sink
 from tests.helpers.unit_of_work import yield_unit_of_work
 
 MODULE = "styrmin_backend.workflows.templates.telemetry"
 REPORT_DATA = {"install_id": "0b6f4f0e-6d0e-4a55-9a51-2f8c3f7c9f0d"}
+OFF_SETTINGS = [
+    pytest.param(
+        "STYRMIN_TELEMETRY_ENABLED", "false", id="STYRMIN_TELEMETRY_ENABLED=false"
+    ),
+    pytest.param("DO_NOT_TRACK", "1", id="DO_NOT_TRACK=1"),
+]
 
 
 @dataclass
@@ -42,13 +51,22 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
-async def _run_flow(*, scheduled_start_time: datetime | None) -> FlowRun:
+@pytest.fixture
+def sink() -> Iterator[Sink]:
+    with serve_sink() as running:
+        yield running
+
+
+async def _run_flow(
+    *, scheduled_start_time: datetime | None, send_report: AsyncMock | None = None
+) -> FlowRun:
     uow = MagicMock()
     uow.__aenter__ = AsyncMock(return_value=uow)
     uow.__aexit__ = AsyncMock(return_value=None)
     uow.commit = AsyncMock()
     build_report_data = AsyncMock(return_value=REPORT_DATA)
-    send_report = AsyncMock(return_value=True)
+    if send_report is None:
+        send_report = AsyncMock(return_value=True)
     logger = MagicMock()
     settings = MagicMock()
     settings.SETTINGS.telemetry = TelemetrySettings()
@@ -127,3 +145,47 @@ async def test_catalogue_entry_is_internal_with_a_daily_cron() -> None:
     (schedule,) = payload["schedules"]
     assert schedule.schedule.cron == "43 2 * * *"
     assert schedule.schedule.timezone in {None, "UTC"}
+
+
+@pytest.mark.parametrize(("name", "value"), OFF_SETTINGS)
+async def test_off_setting_builds_and_sends_nothing(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+
+    run = await _run_flow(scheduled_start_time=datetime.now(UTC))
+
+    assert run.result is False
+    run.build_report_data.assert_not_awaited()
+    run.send_report.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("name", "value"), OFF_SETTINGS)
+async def test_off_setting_sends_no_request_with_the_real_sender(
+    monkeypatch: pytest.MonkeyPatch, sink: Sink, name: str, value: str
+) -> None:
+    monkeypatch.setenv("STYRMIN_TELEMETRY_ENDPOINT", sink.url)
+    monkeypatch.setenv(name, value)
+
+    run = await _run_flow(
+        scheduled_start_time=datetime.now(UTC),
+        send_report=AsyncMock(wraps=sender.send_report),
+    )
+
+    assert run.result is False
+    assert sink.requests == []
+
+
+async def test_on_setting_sends_one_request_with_the_real_sender(
+    monkeypatch: pytest.MonkeyPatch, sink: Sink
+) -> None:
+    # Control for the test above: the same sink receives the report when telemetry is on.
+    monkeypatch.setenv("STYRMIN_TELEMETRY_ENDPOINT", sink.url)
+
+    run = await _run_flow(
+        scheduled_start_time=datetime.now(UTC),
+        send_report=AsyncMock(wraps=sender.send_report),
+    )
+
+    assert run.result is True
+    assert len(sink.requests) == 1
