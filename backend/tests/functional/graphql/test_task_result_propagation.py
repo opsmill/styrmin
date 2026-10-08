@@ -1,8 +1,10 @@
 """``startedByStepId``, ``Task.result`` and the links between tasks reach the caller (spec 019, T072).
 
 Writes: ``startedByStepId`` on ``stopComponents``, ``startComponents`` and
-``updateDeploymentVersion`` reaches ``task.started_by_step_id``, and an unknown
-step is rejected without creating a task. Reads: seeded tasks and steps reach a
+``updateDeploymentVersion`` from the ``styrmin-actions`` user reaches
+``task.started_by_step_id``. An unknown step, a step of another deployment and
+a person who sends the argument are rejected without creating a task. Reads:
+seeded tasks and steps reach a
 ``READ_ONLY`` user as ``Task.result`` (each of the four values, including a
 family whose started tasks interrupt each other and a family interrupted by an
 outside task), ``Task.startedBy``, ``Task.startedTasks``, ``Step.startedTasks``
@@ -33,6 +35,7 @@ from styrmin_backend.db.models import (
     TaskStatus,
     TaskType,
 )
+from styrmin_backend.services.auth.bootstrap import ensure_actions_service_account
 from styrmin_backend.services.auth.session import create_session
 
 from ._queries import load_query
@@ -52,6 +55,14 @@ def _at(seconds: int) -> datetime:
 async def read_only_token(session: AsyncSession) -> str:
     user = await seed_user(session, role=Role.READ_ONLY)
     _row, token = await create_session(session, user.id)
+    return token
+
+
+@pytest.fixture
+async def actions_token(session: AsyncSession) -> str:
+    """A session token of ``styrmin-actions``, as ``action_api_token`` mints it."""
+    user_id = await ensure_actions_service_account(session)
+    _row, token = await create_session(session, user_id)
     return token
 
 
@@ -195,25 +206,60 @@ def _variables(
     }
 
 
+async def _mutate(
+    client: AsyncClient,
+    mutation: StartingMutation,
+    variables: dict[str, Any],
+    token: str,
+) -> dict[str, Any]:
+    """The full payload, so negative paths can read ``errors``."""
+    response = await client.post(
+        "/graphql",
+        json={"query": load_query(mutation.operation), "variables": variables},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+async def _assert_no_task_created(
+    session: AsyncSession, deployment_id: UUID, dispatch: Any
+) -> None:
+    session.expire_all()
+    tasks = (
+        await session.exec(
+            select(TaskRow).where(TaskRow.deployment_id == deployment_id)
+        )
+    ).all()
+    assert tasks == []
+    row = await session.get(DeploymentRow, deployment_id)
+    assert row is not None
+    assert row.application_version == "1.0.0"
+    dispatch.run_action.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("dispatch")
 @pytest.mark.parametrize("path", READ_PATHS)
 @pytest.mark.parametrize("mutation", MUTATION_PARAMS)
 async def test_started_by_step_id_reaches_the_task_and_its_links(
-    client: AsyncClient,
     unauth_client: AsyncClient,
     session: AsyncSession,
+    actions_token: str,
     read_only_token: str,
     hook_step: HookStep,
     mutation: StartingMutation,
     path: str,
 ) -> None:
-    data = await gql(
-        client,
-        mutation.operation,
+    payload = await _mutate(
+        unauth_client,
+        mutation,
         _variables(mutation, hook_step.deployment_id, hook_step.step_id),
+        actions_token,
     )
 
+    assert "errors" not in payload, payload
+    data = payload["data"]
     started_id = UUID(data[mutation.field]["id"])
     assert data[mutation.field]["startedByStepId"] == str(hook_step.step_id)
     session.expire_all()
@@ -262,8 +308,9 @@ async def test_omitted_started_by_step_id_leaves_the_task_unlinked(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mutation", MUTATION_PARAMS)
 async def test_unknown_started_by_step_is_rejected_and_creates_no_task(
-    client: AsyncClient,
+    unauth_client: AsyncClient,
     session: AsyncSession,
+    actions_token: str,
     dispatch: Any,
     mutation: StartingMutation,
 ) -> None:
@@ -271,28 +318,77 @@ async def test_unknown_started_by_step_is_rejected_and_creates_no_task(
     deployment_id = (await seed_deployment(session)).id
     unknown = uuid4()
 
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query(mutation.operation),
-            "variables": _variables(mutation, deployment_id, unknown),
-        },
+    payload = await _mutate(
+        unauth_client,
+        mutation,
+        _variables(mutation, deployment_id, unknown),
+        actions_token,
     )
 
-    payload = response.json()
     (error,) = payload["errors"]
     assert error["extensions"]["code"] == "NOT_FOUND"
     assert error["message"] == f"Step with id {unknown} not found."
+    await _assert_no_task_created(session, deployment_id, dispatch)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", MUTATION_PARAMS)
+async def test_step_of_another_deployment_is_rejected_and_creates_no_task(
+    unauth_client: AsyncClient,
+    session: AsyncSession,
+    actions_token: str,
+    dispatch: Any,
+    hook_step: HookStep,
+    mutation: StartingMutation,
+) -> None:
+    deployment_id = (await seed_deployment(session)).id
+
+    payload = await _mutate(
+        unauth_client,
+        mutation,
+        _variables(mutation, deployment_id, hook_step.step_id),
+        actions_token,
+    )
+
+    (error,) = payload["errors"]
+    assert error["extensions"]["code"] == "VALIDATION_ERROR"
+    assert error["message"] == (
+        f"Step {hook_step.step_id} is not a step of a task of deployment "
+        f"{deployment_id}."
+    )
+    await _assert_no_task_created(session, deployment_id, dispatch)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", [Role.READ_WRITE, Role.ADMIN], ids=lambda r: r.name)
+@pytest.mark.parametrize("mutation", MUTATION_PARAMS)
+async def test_started_by_step_id_from_a_person_is_forbidden_and_creates_no_task(
+    unauth_client: AsyncClient,
+    session: AsyncSession,
+    dispatch: Any,
+    hook_step: HookStep,
+    mutation: StartingMutation,
+    role: Role,
+) -> None:
+    user = await seed_user(session, role=role)
+    _row, token = await create_session(session, user.id)
+
+    payload = await _mutate(
+        unauth_client,
+        mutation,
+        _variables(mutation, hook_step.deployment_id, hook_step.step_id),
+        token,
+    )
+
+    (error,) = payload["errors"]
+    assert error["extensions"]["code"] == "FORBIDDEN"
     session.expire_all()
-    tasks = (
+    started = (
         await session.exec(
-            select(TaskRow).where(TaskRow.deployment_id == deployment_id)
+            select(TaskRow).where(TaskRow.started_by_step_id == hook_step.step_id)
         )
     ).all()
-    assert tasks == []
-    row = await session.get(DeploymentRow, deployment_id)
-    assert row is not None
-    assert row.application_version == "1.0.0"
+    assert started == []
     dispatch.run_action.assert_not_awaited()
 
 

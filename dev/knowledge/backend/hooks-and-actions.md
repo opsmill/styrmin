@@ -257,8 +257,14 @@ when it is unset or not a UUID) on `stopComponents`, `startComponents` and
 `updateDeploymentVersion`. The server stores it in `Task.started_by_step_id`, so the task that ran
 the hook lists the new task in `Task.startedTasks`, the new task links back through
 `Task.startedBy`, and the hook's task result includes the started task's steps (see
-[ADR-060](../../adr/0060-steps-and-derived-task-result.md)). A step id that names no step fails the
-mutation with `StepNotFoundError`. An action that calls the API through the SDK instead of these
+[ADR-060](../../adr/0060-steps-and-derived-task-result.md)). The server accepts `startedByStepId`
+only from the `styrmin-actions` user, so a person who sends it, admins included, gets `FORBIDDEN`.
+The step must be a step of a task of the deployment that the mutation changes. The server checks
+the step before it changes anything, also when `updateDeploymentVersion` is a no-op: a step id that
+names no step fails the mutation with `StepNotFoundError`, and a step of another deployment's task,
+of a backup or of a restore fails it with `InvalidStartingStepError`. The primitives always target
+the deployment of the action's context, which is the deployment of the hook's task, so these rules
+do not reject their calls. An action that calls the API through the SDK instead of these
 primitives sends no `startedByStepId`, so the tasks it creates are not linked to the hook step.
 
 ## Command output of a failed Job

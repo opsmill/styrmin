@@ -10,7 +10,6 @@ from styrmin_backend.domain.models import (
     TaskType,
 )
 from styrmin_backend.services.context import generate_context_from_deployment
-from styrmin_backend.services.steps.exceptions import StepNotFoundError
 from styrmin_backend.services.unit_of_work import UnitOfWork
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.manager import PrefectManager
@@ -48,7 +47,7 @@ async def generate_instance_from_deployment(
 async def apply_state(
     deployment: Deployment,
     current_instance: Instance | None,
-    uow: UnitOfWork,
+    uow: UnitOfWork,  # noqa: ARG001  retained for caller-shape stability
     task_type: TaskType = TaskType.NOOP,
     started_by_step_id: UUID | None = None,
     prefect_manager: PrefectManager = Depends(get_manager),
@@ -67,18 +66,11 @@ async def apply_state(
 
     ``task_type`` is the operation the caller starts (019 research D19).
     The task records the new instance so operator reports find it (D4), and
-    ``started_by_step_id``, the hook step that started it (D12).
-
-    Raises:
-        StepNotFoundError: If ``started_by_step_id`` names no step.
+    ``started_by_step_id``, the hook step that started it (D12). The caller
+    checks that step with ``check_starting_step`` before it changes anything.
     """
     new_instance = deployment.active_instance
     assert new_instance is not None, "Deployment must have an active instance"
-    if (
-        started_by_step_id is not None
-        and await uow.steps.get(started_by_step_id) is None
-    ):
-        raise StepNotFoundError(f"Step with id {started_by_step_id} not found.")
 
     task = Task.create(
         type=task_type,

@@ -186,5 +186,7 @@ Each started task also has its own result, calculated the same way on its own fa
 | `recordStep` names a task, backup or restore that does not exist | `TaskNotFoundError`, `BackupNotFoundError`, `RestoreNotFoundError` (`NOT_FOUND`) |
 | `recordStep` gives neither a `stepId` nor exactly one parent with a `key`, or a `STARTED` event without `name` and `kind` | `InvalidStepRecordError` (`VALIDATION_ERROR`) |
 | `recordStep` called by a user other than `styrmin-actions` | Permission error `FORBIDDEN` (research D14) |
-| `startedByStepId` names a step that does not exist | `StepNotFoundError` |
+| `startedByStepId` names a step that does not exist, also when `updateDeploymentVersion` is a no-op | `StepNotFoundError` (`NOT_FOUND`) |
+| `startedByStepId` names a step that is not a step of a task of the same deployment (a step of another deployment's task, of a backup or of a restore), also on a no-op | `InvalidStartingStepError` (`VALIDATION_ERROR`) |
+| `startedByStepId` sent by a user other than `styrmin-actions` | Permission error `FORBIDDEN` |
 | A transition the rules above forbid (for example `SUCCEEDED` on a superseded step) | Ignored and logged; returns the step unchanged. A late write from a slow writer is not an error. |

@@ -1,4 +1,4 @@
-"""``IsActionsServiceAccount`` and the ``recordStep`` gate (spec 019, research D14)."""
+"""``IsActionsServiceAccount``, the ``recordStep`` gate and the ``startedByStepId`` gate (spec 019, research D14)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,11 @@ import strawberry
 from graphql import GraphQLError
 from strawberry.permission import PermissionExtension
 
-from styrmin_backend.api.auth.permissions import IsActionsServiceAccount, RequiresRole
+from styrmin_backend.api.auth.permissions import (
+    IsActionsServiceAccount,
+    RequiresRole,
+    StartedByStepRequiresActionsServiceAccount,
+)
 from styrmin_backend.api.schema.mutation import Mutation
 from styrmin_backend.api.schema.query import Query
 from styrmin_backend.db.models import Role, User
@@ -68,15 +72,19 @@ def test_refusal_is_forbidden() -> None:
 # The recordStep gate ------------------------------------------------------
 
 
-def _record_step_extension() -> PermissionExtension:
+def _mutation_extension(name: str) -> PermissionExtension:
     schema = strawberry.Schema(query=Query, mutation=Mutation)
-    field = schema._schema.type_map["Mutation"].fields["recordStep"]
+    field = schema._schema.type_map["Mutation"].fields[name]
     definition = field.extensions["strawberry-definition"]
     extensions = [
         ext for ext in definition.extensions if isinstance(ext, PermissionExtension)
     ]
     assert len(extensions) == 1
     return extensions[0]
+
+
+def _record_step_extension() -> PermissionExtension:
+    return _mutation_extension("recordStep")
 
 
 def test_record_step_requires_read_write_then_the_actions_account() -> None:
@@ -119,3 +127,95 @@ async def test_record_step_is_forbidden_for_everyone_else(user: User) -> None:
 
     assert excinfo.value.extensions == {"code": "FORBIDDEN"}
     resolver.assert_not_awaited()
+
+
+# The startedByStepId gate ------------------------------------------------
+
+STARTING_MUTATIONS = ["stopComponents", "startComponents", "updateDeploymentVersion"]
+STEP_ID = uuid4()
+
+
+@pytest.mark.parametrize("role", [Role.READ_ONLY, Role.READ_WRITE, Role.ADMIN])
+def test_started_by_step_is_refused_from_every_person(role: Role) -> None:
+    permission = StartedByStepRequiresActionsServiceAccount()
+
+    assert not permission.has_permission(
+        None, _info(_user(role)), started_by_step_id=STEP_ID
+    )
+
+
+def test_started_by_step_is_permitted_from_the_actions_account() -> None:
+    permission = StartedByStepRequiresActionsServiceAccount()
+
+    assert permission.has_permission(
+        None, _info(_actions_account()), started_by_step_id=STEP_ID
+    )
+
+
+@pytest.mark.parametrize("arguments", [{}, {"started_by_step_id": None}])
+def test_a_call_without_a_started_by_step_is_permitted(arguments: dict) -> None:
+    permission = StartedByStepRequiresActionsServiceAccount()
+
+    assert permission.has_permission(None, _info(_user(Role.READ_WRITE)), **arguments)
+
+
+def test_started_by_step_refusal_is_forbidden() -> None:
+    with pytest.raises(GraphQLError) as excinfo:
+        StartedByStepRequiresActionsServiceAccount().on_unauthorized()
+
+    assert excinfo.value.extensions == {"code": "FORBIDDEN"}
+    assert excinfo.value.message == (
+        "Only the actions service account can set startedByStepId"
+    )
+
+
+@pytest.mark.parametrize("name", STARTING_MUTATIONS)
+def test_starting_mutation_requires_read_write_then_the_started_by_step_gate(
+    name: str,
+) -> None:
+    permissions = _mutation_extension(name).permissions
+
+    assert [type(permission) for permission in permissions] == [
+        RequiresRole,
+        StartedByStepRequiresActionsServiceAccount,
+    ]
+    assert isinstance(permissions[0], RequiresRole)
+    assert permissions[0].required_role == Role.READ_WRITE
+
+
+@pytest.mark.parametrize("name", STARTING_MUTATIONS)
+@pytest.mark.parametrize("role", [Role.READ_WRITE, Role.ADMIN])
+async def test_starting_mutation_with_a_step_is_forbidden_for_a_person(
+    name: str, role: Role
+) -> None:
+    resolver = AsyncMock()
+
+    with pytest.raises(GraphQLError) as excinfo:
+        await _mutation_extension(name).resolve_async(
+            resolver, None, _info(_user(role)), started_by_step_id=STEP_ID
+        )
+
+    assert excinfo.value.extensions == {"code": "FORBIDDEN"}
+    resolver.assert_not_awaited()
+
+
+@pytest.mark.parametrize("name", STARTING_MUTATIONS)
+@pytest.mark.parametrize(
+    ("user", "arguments"),
+    [
+        (_user(Role.READ_WRITE), {"started_by_step_id": None}),
+        (_actions_account(), {"started_by_step_id": STEP_ID}),
+    ],
+    ids=["person-without-step", "actions-account-with-step"],
+)
+async def test_starting_mutation_reaches_the_resolver(
+    name: str, user: User, arguments: dict
+) -> None:
+    resolver = AsyncMock(return_value="task")
+
+    result = await _mutation_extension(name).resolve_async(
+        resolver, None, _info(user), **arguments
+    )
+
+    assert result == "task"
+    resolver.assert_awaited_once()

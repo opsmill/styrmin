@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from styrmin_backend.domain.models import Step, StepKind, StepParent, StepStatus, Task
-from styrmin_backend.services.steps.exceptions import StepNotFoundError
+from styrmin_backend.services.steps.exceptions import (
+    InvalidStartingStepError,
+    StepNotFoundError,
+)
 
 if TYPE_CHECKING:
     from styrmin_backend.services.unit_of_work import UnitOfWork
@@ -83,6 +86,30 @@ async def get_tasks_started_by_task(task_id: UUID, uow: UnitOfWork) -> list[Task
     async with uow:
         steps = await uow.steps.list_by_task_ids([task_id])
         return await uow.tasks.find_started_by_steps([step.id for step in steps])
+
+
+async def check_starting_step(
+    step_id: UUID | None, deployment_id: UUID, uow: UnitOfWork
+) -> None:
+    """Check that ``step_id`` can start a task of the deployment, inside the caller's transaction.
+
+    Driver actions run in hook steps, and hook steps belong to tasks, so the
+    step must be a step of a task of the same deployment. ``None`` passes.
+
+    Raises:
+        StepNotFoundError: If ``step_id`` names no step.
+        InvalidStartingStepError: If the step is not a step of a task of the deployment.
+    """
+    if step_id is None:
+        return
+    step = await uow.steps.get(step_id)
+    if step is None:
+        raise StepNotFoundError(f"Step with id {step_id} not found.")
+    task = await uow.tasks.find(step.task_id) if step.task_id is not None else None
+    if task is None or task.deployment_id != deployment_id:
+        raise InvalidStartingStepError(
+            f"Step {step_id} is not a step of a task of deployment {deployment_id}."
+        )
 
 
 async def get_starting_task(task: Task, uow: UnitOfWork) -> Task | None:
