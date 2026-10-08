@@ -514,6 +514,12 @@ class UiScenarioDriver:
             )
         return ref
 
+    async def list_backups(self, *, deployment_id: str) -> tuple[BackupRef, ...]:
+        self._deployment_id = deployment_id
+        async with _ui_errors(f"listing backups of deployment {deployment_id}"):
+            await self._ensure_deployment_detail()
+            return await self._deployment_detail.read_backups()
+
     # --- Environment-level backup / restore -------------------------------
     #
     # Driven from the Backups tab on the environment detail page. The tab's

@@ -793,6 +793,34 @@ class DeploymentDetailPage:
             steps=await self._read_parent_steps("backup", backup_id),
         )
 
+    async def read_backups(self) -> tuple[BackupRef, ...]:
+        """Open the Backups tab and read every backup row, in the order listed."""
+        await self.open_backups_tab()
+        rows = self._page.locator("[data-testid=backup-row]")
+        placeholder = self._page.get_by_text("No backups yet", exact=True)
+        await expect(rows.first.or_(placeholder)).to_be_visible()
+
+        refs: list[BackupRef] = []
+        for i in range(await rows.count()):
+            row = rows.nth(i)
+            backup_id = await _required_attr(
+                row, "data-backup-id", context="backup row"
+            )
+            context = f"backup row {backup_id}"
+            refs.append(
+                BackupRef(
+                    id=backup_id,
+                    name=await _required_attr(row, "data-backup-name", context=context),
+                    status=await _required_attr(
+                        row, "data-backup-status", context=context
+                    ),
+                    application_version=await _required_attr(
+                        row, "data-backup-application-version", context=context
+                    ),
+                )
+            )
+        return tuple(refs)
+
     async def delete_backup(self, *, backup_id: str) -> None:
         """Click the row's Delete, then confirm in the dialog."""
         await self.open_backups_tab()

@@ -101,6 +101,10 @@ MAINTENANCE_FREQUENCY_AFTER_CHECK = "24h"
 # (``driver/examples/simple-app/driver.styrmin.yml``): one backup step each.
 SIMPLE_APP_BACKUP_COMPONENTS = ("database",)
 
+# Set on ``server`` after the lifecycle backup so the deployment gets a new
+# instance and the backup stays listed only through its history (#304).
+BACKUP_HISTORY_SERVER_ENV_VARS = {"STYRMIN_E2E_BACKUP_HISTORY": "1"}
+
 # The steps of a completed restore, in the order the restore runs them.
 COMPLETED_RESTORE_STEPS = (
     ("restore:namespace", "Delete the namespace"),
@@ -724,14 +728,19 @@ async def test_backup_and_restore_lifecycle(
     ``backup_ttl`` policy set below must land on the Velero Backup CRD's
     ``spec.ttl`` and be readable back off the backup record together with
     Velero's own expiry.
+
+    And #304: a config edit after the backup gives the deployment a new
+    instance; the backup stays in the deployment's backup history with the
+    application version it was taken at, and the restore and delete below
+    act on that backup of an earlier instance.
     """
     client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
     deployment_id = deployed_simple_app["deployment_id"]
-    instance_id = deployed_simple_app["instance_id"]
-    assert instance_id is not None, "Deployment should have an instance_id"
     namespace = deployed_simple_app["namespace"]
+    # Set just before the config edit, so the ``finally`` reverts only an edit it attempted.
+    previous_server_env_vars: dict[str, str] | None = None
 
     # Verify environment exposes backup capability (BSL was assigned by the fixture)
     environment = await client.environments.get(environment_id=scenario_environment_id)
@@ -797,6 +806,13 @@ async def test_backup_and_restore_lifecycle(
         scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
         await scenario_driver.wait_for_deployment_running(deployment_id=deployment_id)
 
+        # The fanout gave the deployment a new instance; back up that one.
+        active_instance = (
+            await client.deployments.get(deployment_id)
+        ).application_instance
+        assert active_instance is not None, "Deployment should have an active instance"
+        backed_up_instance_id = str(active_instance.id)
+
         # 1. Write test data (increment counter N times)
         async with portforward_simple_app(kubeconfig_path, namespace) as port:
             async with httpx.AsyncClient() as http_client:
@@ -808,7 +824,9 @@ async def test_backup_and_restore_lifecycle(
                 pre_backup_count = resp.json()["counter"]  # 6
 
         # 2. Create backup via scenario_driver, wait for completion
-        created_backup = await scenario_driver.create_backup(instance_id=instance_id)
+        created_backup = await scenario_driver.create_backup(
+            instance_id=backed_up_instance_id
+        )
         assert created_backup.status in {"pending", "in_progress", "completed"}
         backup = await scenario_driver.wait_for_backup(
             backup_id=created_backup.id, max_wait=180
@@ -852,6 +870,44 @@ async def test_backup_and_restore_lifecycle(
         # 2d. Velero can kopia-prune the repository the backup just wrote to.
         await assert_backup_repository_maintenance_succeeds(kubeconfig_path)
 
+        # 2e. A config edit gives the deployment a new instance; the backup of
+        #     the earlier one stays in the deployment's backup history (#304).
+        stored_config = (await client.deployments.get(deployment_id)).config or {}
+        previous_server_env_vars = dict(
+            ((stored_config.get("components") or {}).get("server") or {}).get(
+                "env_vars"
+            )
+            or {}
+        )
+        await scenario_driver.set_component_env_vars(
+            deployment_id=deployment_id,
+            component="server",
+            env_vars={**previous_server_env_vars, **BACKUP_HISTORY_SERVER_ENV_VARS},
+        )
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=deployment_id, timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS
+        )
+        await wait_for_pods_ready(kubeconfig_path, namespace)
+
+        edited_instance = (
+            await client.deployments.get(deployment_id)
+        ).application_instance
+        assert edited_instance is not None, "Deployment should have an active instance"
+        assert str(edited_instance.id) != backed_up_instance_id, (
+            "The config edit should give the deployment a new active instance"
+        )
+
+        history = await scenario_driver.list_backups(deployment_id=deployment_id)
+        listed_backup = next((b for b in history if b.id == backup.id), None)
+        assert listed_backup is not None, (
+            f"Backup {backup.id} of an earlier instance should stay in the "
+            f"deployment's backup history, got {[b.id for b in history]}"
+        )
+        assert listed_backup.application_version == "0.1.0", (
+            "The backup should show the application version it was taken at, "
+            f"got {listed_backup.application_version!r}"
+        )
+
         # 3. Write more data (counter goes higher)
         async with portforward_simple_app(kubeconfig_path, namespace) as port:
             async with httpx.AsyncClient() as http_client:
@@ -886,33 +942,52 @@ async def test_backup_and_restore_lifecycle(
         with pytest.raises(ResourceNotFound):
             await scenario_driver.get_backup(backup_id=backup.id)
     finally:
-        # Restore the session-shared environment's retention policy. The
-        # revert itself must succeed (a leak is exactly what we are guarding
-        # against); the fanout wait afterwards is best-effort so a cleanup
-        # timeout can never mask the test's own failure.
-        revert_timeline_length = len(
-            await client.deployments.get_timeline(deployment_id=deployment_id)
-        )
-        await scenario_driver.set_environment_backup_ttl(
-            environment_id=scenario_environment_id,
-            ttl=previous_backup_ttl,
-        )
-        with suppress(AssertionError):
-            await wait_for_env_fanout_steady_state(
-                client,
-                deployment_id=deployment_id,
-                pre_timeline_length=revert_timeline_length,
-                noop_grace=NOOP_FANOUT_GRACE_SECONDS,
+        # Its own try/finally, so a failed env-var revert cannot skip the
+        # retention revert below (critique E5).
+        try:
+            if previous_server_env_vars is not None:
+                scenario_driver.attach_to_deployment(
+                    environment_id=scenario_environment_id
+                )
+                await scenario_driver.set_component_env_vars(
+                    deployment_id=deployment_id,
+                    component="server",
+                    env_vars=previous_server_env_vars,
+                )
+                with suppress(Exception):
+                    await scenario_driver.wait_for_deployment_running(
+                        deployment_id=deployment_id,
+                        timeout=CLEANUP_WAIT_TIMEOUT_SECONDS,
+                    )
+        finally:
+            # Restore the session-shared environment's retention policy. The
+            # revert itself must succeed (a leak is exactly what we are guarding
+            # against); the fanout wait afterwards is best-effort so a cleanup
+            # timeout can never mask the test's own failure.
+            revert_timeline_length = len(
+                await client.deployments.get_timeline(deployment_id=deployment_id)
             )
-        # Leave the driver back on the deployment detail page: the UI driver's
-        # page is session-scoped, and the sibling backup tests that follow act
-        # on whatever page is open. Best-effort like the wait above — a cleanup
-        # hiccup must never mask the test's own failure.
-        scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
-        with suppress(Exception):
-            await scenario_driver.wait_for_deployment_running(
-                deployment_id=deployment_id, timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS
+            await scenario_driver.set_environment_backup_ttl(
+                environment_id=scenario_environment_id,
+                ttl=previous_backup_ttl,
             )
+            with suppress(AssertionError):
+                await wait_for_env_fanout_steady_state(
+                    client,
+                    deployment_id=deployment_id,
+                    pre_timeline_length=revert_timeline_length,
+                    noop_grace=NOOP_FANOUT_GRACE_SECONDS,
+                )
+            # Leave the driver back on the deployment detail page: the UI
+            # driver's page is session-scoped, and the sibling backup tests that
+            # follow act on whatever page is open. Best-effort like the wait
+            # above — a cleanup hiccup must never mask the test's own failure.
+            scenario_driver.attach_to_deployment(environment_id=scenario_environment_id)
+            with suppress(Exception):
+                await scenario_driver.wait_for_deployment_running(
+                    deployment_id=deployment_id,
+                    timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS,
+                )
 
 
 # ---------------------------------------------------------------------------

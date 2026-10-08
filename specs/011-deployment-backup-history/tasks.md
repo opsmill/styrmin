@@ -122,11 +122,11 @@ description: "Task list for keeping a deployment's backup history when it gets a
 
 ### E2E for User Story 1
 
-- [ ] T024 [P] [US1] Add `application_version: str | None = None` to `BackupRef` in `backend/tests/e2e/drivers/refs.py`, after `steps`, so existing constructors keep working
-- [ ] T025 [US1] Add `async def list_backups(self, *, deployment_id: str) -> tuple[BackupRef, ...]` to the `ScenarioDriver` protocol in `backend/tests/e2e/drivers/protocol.py`, with a docstring stating the API source (`client.backups.list_backups(deployment_id=...)`) and the UI source (every `backup-row` on the Backups tab, including `data-backup-application-version`)
-- [ ] T026 [P] [US1] Implement `list_backups` in `backend/tests/e2e/drivers/api_driver.py`: call `client.backups.list_backups(deployment_id=...)` and map each result to `BackupRef(id, name, status, application_version=b.instance.application_version)`
-- [ ] T027 [P] [US1] Implement `list_backups` in `backend/tests/e2e/drivers/ui_driver.py` and a `read_backups()` page method in `backend/tests/e2e/pages/deployment_detail.py`: ensure the deployment detail page, open the Backups tab, read every `[data-testid=backup-row]` with `_required_attr` for `data-backup-id`, `data-backup-name`, `data-backup-status` and `data-backup-application-version`
-- [ ] T028 [US1] Extend `test_backup_and_restore_lifecycle` in `backend/tests/e2e/test_backup_restore.py` (research R9):
+- [X] T024 [P] [US1] Add `application_version: str | None = None` to `BackupRef` in `backend/tests/e2e/drivers/refs.py`, after `steps`, so existing constructors keep working
+- [X] T025 [US1] Add `async def list_backups(self, *, deployment_id: str) -> tuple[BackupRef, ...]` to the `ScenarioDriver` protocol in `backend/tests/e2e/drivers/protocol.py`, with a docstring stating the API source (`client.backups.list_backups(deployment_id=...)`) and the UI source (every `backup-row` on the Backups tab, including `data-backup-application-version`)
+- [X] T026 [P] [US1] Implement `list_backups` in `backend/tests/e2e/drivers/api_driver.py`: call `client.backups.list_backups(deployment_id=...)` and map each result to `BackupRef(id, name, status, application_version=b.instance.application_version)`
+- [X] T027 [P] [US1] Implement `list_backups` in `backend/tests/e2e/drivers/ui_driver.py` and a `read_backups()` page method in `backend/tests/e2e/pages/deployment_detail.py`: ensure the deployment detail page, open the Backups tab, read every `[data-testid=backup-row]` with `_required_attr` for `data-backup-id`, `data-backup-name`, `data-backup-status` and `data-backup-application-version`
+- [X] T028 [US1] Extend `test_backup_and_restore_lifecycle` in `backend/tests/e2e/test_backup_restore.py` (research R9):
   - after the step-0 fanout settles, re-read the deployment's active instance id with `client.deployments.get(deployment_id)` and pass it to `create_backup`, replacing the stale fixture value
   - after step 2d, read the `server` component's current env vars from the stored deployment config, call `scenario_driver.set_component_env_vars(deployment_id=..., component="server", env_vars={"STYRMIN_E2E_BACKUP_HISTORY": "1"})`, then `scenario_driver.wait_for_deployment_running(...)` and `wait_for_pods_ready(...)`
   - assert the active instance id changed

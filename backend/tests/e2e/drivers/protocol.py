@@ -321,6 +321,19 @@ class ScenarioDriver(Protocol):
     async def get_backup(self, *, backup_id: str) -> BackupRef:
         """The backup with its steps, as ``wait_for_backup`` reads them."""
 
+    async def list_backups(self, *, deployment_id: str) -> tuple[BackupRef, ...]:
+        """The deployment's backup history: the backups of every instance it has had.
+
+        Each ref carries ``application_version``, the version of the instance
+        the backup was taken of; ``steps`` stays empty.
+
+        API driver: ``client.backups.list_backups(deployment_id=...)``.
+
+        UI driver: every ``backup-row`` on the deployment's Backups tab, read
+        from ``data-backup-id``, ``data-backup-name``, ``data-backup-status``
+        and ``data-backup-application-version``.
+        """
+
     # --- Environment-level backup / restore -------------------------------
     #
     # Ordering contract: the UI flow lives on the environment detail page's

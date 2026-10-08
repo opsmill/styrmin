@@ -52,6 +52,8 @@ class BackupRef:
     status: str
     # One step per component (spec 019); empty on the ref ``create_backup`` returns.
     steps: tuple[StepRef, ...] = ()
+    # The version of the instance the backup was taken of; set by ``list_backups``.
+    application_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
