@@ -3,7 +3,7 @@ from typing import Any, Sequence
 from uuid import UUID
 
 from sqlalchemy.orm import selectinload
-from sqlmodel import select
+from sqlmodel import func, select
 
 from styrmin_backend.db.models import Cluster
 from styrmin_backend.repository.base import BaseRepository
@@ -15,6 +15,11 @@ class ClusterRepository(BaseRepository[Cluster], ABC):
 
     @abstractmethod
     async def get_by_name(self, name: str) -> Cluster | None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    async def count(self) -> int:
+        """Return the number of clusters."""
         raise NotImplementedError()
 
 
@@ -54,3 +59,10 @@ class SQLModelClusterRepository(BaseSQLModelRepository[Cluster], ClusterReposito
         )
         result = await self.session.exec(statement)
         return result.first()
+
+    async def count(self) -> int:
+        """Return the number of clusters without loading them."""
+        result = await self.session.exec(
+            select(func.count()).select_from(self.model_class)
+        )
+        return result.one()

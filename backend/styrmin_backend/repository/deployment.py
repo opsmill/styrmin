@@ -3,7 +3,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy.orm import selectinload
-from sqlmodel import select
+from sqlmodel import col, func, select
 
 from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.db.models import ApplicationInstance as InstanceModel
@@ -93,6 +93,13 @@ class DeploymentRepository(BaseRepository[DeploymentModel], ABC):
     async def delete_all_for_environment(self, environment_id: UUID) -> list[UUID]:
         raise NotImplementedError(
             "The delete_all_for_environment method must be implemented in the subclass."
+        )
+
+    @abstractmethod
+    async def count_live(self) -> int:
+        """Return the number of deployments that are not tombstoned."""
+        raise NotImplementedError(
+            "The count_live method must be implemented in the subclass."
         )
 
 
@@ -440,6 +447,15 @@ class SQLModelDeploymentRepository(
             )
         )
         return list(deployment_ids)
+
+    async def count_live(self) -> int:
+        """Return the number of live deployments, internal ones included."""
+        result = await self.session.exec(
+            select(func.count())
+            .select_from(self.model_class)
+            .where(col(self.model_class.deleted_at).is_(None))
+        )
+        return result.one()
 
     async def find_internal_by_environment(
         self, environment_id: UUID
