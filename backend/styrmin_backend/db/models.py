@@ -322,6 +322,12 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     # command, args). Nullable JSON column added by revision ``a8b9c0d1e2f3``;
     # rows pre-dating it carry NULL and deserialize to ``None``.
     container_overrides: list | None = Field(default=None, sa_column=Column(JSON))
+    # 020: logo URL from ``spec.info.icon`` (validated http/https URL).
+    icon: str | None = None
+    # 020: free text from ``spec.info.description``; an empty string is stored as NULL.
+    description: str | None = None
+    # 020: ``spec.info.links`` as ``[{"link", "url"}]`` in file order; empty is NULL.
+    links: list | None = Field(default=None, sa_column=Column(JSON))
     component_configs: list[ComponentConfig] = Relationship(
         back_populates="application_driver_version",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
