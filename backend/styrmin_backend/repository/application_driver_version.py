@@ -1,13 +1,30 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Sequence
 from uuid import UUID
 
+from sqlalchemy import and_
 from sqlalchemy.orm import selectinload
-from sqlmodel import select
+from sqlmodel import col, func, select
 
-from styrmin_backend.db.models import ApplicationDriverVersion, HelmChart
+from styrmin_backend.db.models import (
+    ApplicationDriver,
+    ApplicationDriverVersion,
+    Deployment,
+    HelmChart,
+)
 from styrmin_backend.repository.base import BaseRepository
 from styrmin_backend.repository.sqlmodel import BaseSQLModelRepository
+
+
+@dataclass(frozen=True)
+class DriverVersionUsage:
+    """One driver version and its live deployment count, without its source location."""
+
+    name: str
+    version: str
+    source_type: str
+    deployment_count: int
 
 
 # FIXME: Update repository for ApplicationDriverVersion to support domain models
@@ -50,6 +67,11 @@ class ApplicationDriverVersionRepository(BaseRepository[ApplicationDriverVersion
         distinct identities. Nullable identity columns use ``IS NULL`` to
         mirror the UNIQUE-index ``nulls_not_distinct`` semantics.
         """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def list_usage(self) -> list[DriverVersionUsage]:
+        """Return one row per driver version with its live deployment count."""
         raise NotImplementedError
 
 
@@ -140,13 +162,57 @@ class SQLModelApplicationDriverVersionRepository(
         # Nullable identity columns use IS NULL when the lookup value is
         # None, mirroring the UNIQUE index's ``nulls_not_distinct`` semantics
         # introduced in T006.
-        for col, value in (
+        for column, value in (
             (m.source_branch, source_branch),
             (m.source_path, source_path),
             (m.content_hash, content_hash),
             (m.source_commit_sha, source_commit_sha),
         ):
-            conditions.append(col.is_(None) if value is None else col == value)
+            conditions.append(column.is_(None) if value is None else column == value)
         statement = select(m).where(*conditions).options(*self._eager_load_options())
         result = await self.session.exec(statement)
         return result.first()
+
+    async def list_usage(self) -> list[DriverVersionUsage]:
+        """Return one row per driver version with its live deployment count.
+
+        The source repository, branch, path and fingerprint are not selected
+        (spec 020, FR-002).
+        """
+        version = self.model_class
+        statement = (
+            select(
+                ApplicationDriver.name,
+                version.version,
+                version.source_type,
+                func.count(col(Deployment.id)),
+            )
+            .select_from(version)
+            .join(
+                ApplicationDriver,
+                col(ApplicationDriver.id) == col(version.application_driver_id),
+            )
+            .outerjoin(
+                Deployment,
+                and_(
+                    col(Deployment.application_driver_version_id) == col(version.id),
+                    col(Deployment.deleted_at).is_(None),
+                ),
+            )
+            .group_by(
+                col(version.id),
+                col(ApplicationDriver.name),
+                col(version.version),
+                col(version.source_type),
+            )
+        )
+        result = await self.session.exec(statement)
+        return [
+            DriverVersionUsage(
+                name=name,
+                version=driver_version,
+                source_type=source_type,
+                deployment_count=deployment_count,
+            )
+            for name, driver_version, source_type, deployment_count in result.all()
+        ]

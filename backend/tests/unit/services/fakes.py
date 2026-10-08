@@ -39,6 +39,7 @@ from styrmin_backend.repository.action import ActionRepository
 from styrmin_backend.repository.application_driver import ApplicationDriverRepository
 from styrmin_backend.repository.application_driver_version import (
     ApplicationDriverVersionRepository,
+    DriverVersionUsage,
 )
 from styrmin_backend.repository.application_instance import (
     ApplicationInstanceRepository,
@@ -104,6 +105,9 @@ class FakeClusterRepository(FakeRepository[Cluster], ClusterRepository):
                 return cluster
         return None
 
+    async def count(self) -> int:
+        return len(self.models)
+
 
 class FakeBackupStorageLocationRepository(
     FakeRepository[BackupStorageLocation], BackupStorageLocationRepository
@@ -131,6 +135,9 @@ class FakeEnvironmentRepository(FakeRepository[Environment], EnvironmentReposito
             if environment.name == name and environment.cluster_id == cluster_id:
                 return environment
         return None
+
+    async def count(self) -> int:
+        return len(self.models)
 
 
 class FakeHelmRepositoryRepository(
@@ -200,6 +207,18 @@ class FakeApplicationRepository(
             ):
                 return application
         return None
+
+    async def list_usage(self) -> list[DriverVersionUsage]:
+        """The fake holds no deployments, so every count is 0."""
+        return [
+            DriverVersionUsage(
+                name=application.application_driver.name,
+                version=application.version,
+                source_type=application.source_type,
+                deployment_count=0,
+            )
+            for application in self.models
+        ]
 
 
 # FakeApplicationRepository is already a FakeRepository[ApplicationDriverVersion]
@@ -730,6 +749,9 @@ class FakeDeploymentRepository(DeploymentRepository):
             d for d in self._deployments if d.environment_id != environment_id
         ]
         return doomed
+
+    async def count_live(self) -> int:
+        return sum(1 for d in self._deployments if d.deleted_at is None)
 
 
 class FakeDeployedServiceRepository(
