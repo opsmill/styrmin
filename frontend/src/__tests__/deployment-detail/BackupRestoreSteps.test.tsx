@@ -222,6 +222,7 @@ function makeBackup(overrides: Partial<BackupItem> = {}): BackupItem {
     errorMessage: null,
     ttl: "2160h",
     expiresAt: null,
+    instance: { id: "inst-1", applicationVersion: "1.0.0" },
     steps: [],
     ...overrides,
   };

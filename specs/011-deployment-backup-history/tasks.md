@@ -96,7 +96,7 @@ description: "Task list for keeping a deployment's backup history when it gets a
   - run the operation: `updateDeploymentVersion` (operation file `update_deployment_version.graphql`, with a second driver version seeded so the upgrade is not a no-op), `updateDeployment` (`update_deployment_config.graphql`, with a changed config), `updateEnvironment` (`update_environment.graphql`, with a changed environment config), and `refresh_deployment` called directly with a real `SqlModelUnitOfWork` over the test session, because it has no GraphQL field (research R2)
   - assert the deployment's `active_application_instance_id` changed
   - query `list_backup_history` with `deploymentId` and assert the earlier backup is returned with the application version of the instance it was taken of
-- [ ] T017 [P] [US1] Extend `frontend/src/__tests__/deployment-detail/BackupExpiry.test.tsx`: assert `useListBackupsQuery` is called with `{ deploymentId }` from the route, and that the query is enabled when `deployment.applicationInstance` is null; assert each row shows the **Application version** column value and carries `data-backup-application-version`
+- [X] T017 [P] [US1] Extend `frontend/src/__tests__/deployment-detail/BackupExpiry.test.tsx`: assert `useListBackupsQuery` is called with `{ deploymentId }` from the route, and that the query is enabled when `deployment.applicationInstance` is null; assert each row shows the **Application version** column value and carries `data-backup-application-version`
 - [ ] T018 [P] [US1] Extend `cli/tests/test_backups.py`:
   - change `test_backups_list_by_deployment_name` (asserts at line 160) to expect `list_backups(deployment_id=<deployment id>, status=None)`
   - add a test that `list --id <deployment-id>` lists by `deployment_id` and works when the deployment has no active instance
@@ -106,13 +106,13 @@ description: "Task list for keeping a deployment's backup history when it gets a
 
 ### Implementation for User Story 1
 
-- [ ] T019 [US1] Update `frontend/src/graphql/list_backups.graphql` to `query ListBackups($deploymentId: UUID!)` calling `backups(deploymentId: $deploymentId)`, and add `instance { id applicationVersion }` to the selection; regenerate with `uv run invoke generate` (or `cd frontend && pnpm codegen`)
-- [ ] T020 [US1] In `frontend/src/pages/deployments/DeploymentDetailPage.tsx`:
+- [X] T019 [US1] Update `frontend/src/graphql/list_backups.graphql` to `query ListBackups($deploymentId: UUID!)` calling `backups(deploymentId: $deploymentId)`, and add `instance { id applicationVersion }` to the selection; regenerate with `uv run invoke generate` (or `cd frontend && pnpm codegen`)
+- [X] T020 [US1] In `frontend/src/pages/deployments/DeploymentDetailPage.tsx`:
   - call `useListBackupsQuery({ deploymentId }, { refetchInterval: ... })` with the route's `deploymentId`, and remove the `enabled: !!instanceId` gate
   - add an **Application version** column header after **Status** in the Backups tab table
   - in `BackupRow`, add `instance: { applicationVersion: string }` to the `backup` prop type, render the version cell, and set `data-backup-application-version` on the `backup-row` element
   - leave "Create Backup", restore and delete behaviour unchanged ([contracts/ui.md](contracts/ui.md))
-- [ ] T021 [US1] Update every frontend test that builds a `ListBackupsQuery` backup fixture so it includes `instance: { id, applicationVersion }`, and every test that asserts the `useListBackupsQuery` arguments: `frontend/src/__tests__/deployment-detail/BackupRestoreSteps.test.tsx`, `DocumentTitle.test.tsx`, `TaskResult.test.tsx`, `DeploymentDetailHeader.test.tsx`, `UpgradeDialogPinnedImages.test.tsx`; then run `cd frontend && pnpm test && pnpm build` (`build` runs `tsc -b`)
+- [X] T021 [US1] Update every frontend test that builds a `ListBackupsQuery` backup fixture so it includes `instance: { id, applicationVersion }`, and every test that asserts the `useListBackupsQuery` arguments: `frontend/src/__tests__/deployment-detail/BackupRestoreSteps.test.tsx`, `DocumentTitle.test.tsx`, `TaskResult.test.tsx`, `DeploymentDetailHeader.test.tsx`, `UpgradeDialogPinnedImages.test.tsx`; then run `cd frontend && pnpm test && pnpm build` (`build` runs `tsc -b`)
 - [ ] T022 [US1] Add `resolve_deployment_id(sdk, *, deployment_name, deployment_id, environment) -> str` to `cli/src/styrminctl/resolve.py`: validate that exactly one of a name or `--id` is given (and that `--environment` is used only with a name), reuse `_resolve_by_name` for names, call `sdk.deployments.get` for `--id`, and do not require an active instance (research R7)
 - [ ] T023 [US1] Change `list_backups` in `cli/src/styrminctl/commands/backups.py`:
   - with `--instance-id`, call `sdk.backups.list_backups(instance_id=..., status=status)` as today

@@ -1,5 +1,5 @@
-query ListBackups($instanceId: UUID!) {
-  backups(instanceId: $instanceId) {
+query ListBackups($deploymentId: UUID!) {
+  backups(deploymentId: $deploymentId) {
     id
     name
     status
@@ -9,6 +9,10 @@ query ListBackups($instanceId: UUID!) {
     errorMessage
     ttl
     expiresAt
+    instance {
+      id
+      applicationVersion
+    }
     steps {
       id
       key
