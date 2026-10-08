@@ -1,5 +1,6 @@
 import contextlib
 from collections.abc import Collection
+from datetime import UTC, datetime
 from typing import TypeVar
 from uuid import UUID
 
@@ -67,6 +68,7 @@ from styrmin_backend.repository.utility import UtilityRepository
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 ModelType = TypeVar("ModelType")
+_NO_TIME = datetime.min.replace(tzinfo=UTC)
 
 
 class FakeRepository(BaseRepository[ModelType]):
@@ -274,17 +276,31 @@ class FakeTaskRepository(FakeRepository[Task], TaskRepository):
     async def find_by_deployment(self, deployment_id: UUID):
         return [m for m in self.models if m.deployment_id == deployment_id]
 
+    @staticmethod
+    def _newest(matches: list[Task]) -> Task | None:
+        # Newest created_on first, like production; equal or unset times keep the last inserted.
+        if not matches:
+            return None
+        return max(
+            enumerate(matches),
+            key=lambda item: (
+                item[1].created_on is not None,
+                item[1].created_on or _NO_TIME,
+                item[0],
+            ),
+        )[1]
+
     async def find_by_instance(self, instance_id: UUID):
-        matches = [m for m in self.models if m.instance_id == instance_id]
-        return matches[-1] if matches else None
+        return self._newest([m for m in self.models if m.instance_id == instance_id])
 
     async def find_latest_by_type(self, deployment_id: UUID, type):
-        matches = [
-            m
-            for m in self.models
-            if m.deployment_id == deployment_id and m.type == type
-        ]
-        return matches[-1] if matches else None
+        return self._newest(
+            [
+                m
+                for m in self.models
+                if m.deployment_id == deployment_id and m.type == type
+            ]
+        )
 
     async def find_started_by_steps(self, step_ids):
         return [m for m in self.models if m.started_by_step_id in set(step_ids)]

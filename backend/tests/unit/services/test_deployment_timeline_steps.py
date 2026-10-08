@@ -60,7 +60,8 @@ HOOK_STEP = 1
 SUPERSEDED_STEP = 2
 #: An operator-phase step still running, long after the last agent report.
 RUNNING_STEP = 3
-T0 = datetime(2026, 10, 6, 12, 0, tzinfo=UTC)
+#: In the past, so the running step has had no report for more than 60 seconds.
+T0 = datetime(2020, 1, 6, 12, 0, tzinfo=UTC)
 SCHEMA = strawberry.Schema(query=Query, mutation=Mutation)
 
 

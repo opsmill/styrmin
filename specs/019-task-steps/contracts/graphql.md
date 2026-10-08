@@ -117,14 +117,14 @@ input RecordStepInput {
   error: String
   """Used with OUTPUT, and allowed with FAILED."""
   output: String
-  outputTruncated: Boolean = false
+  outputTruncated: Boolean! = false
   """When the event happened, in the writer's clock. Defaults to the server's time."""
   occurredAt: DateTime
 }
 
 type Mutation {
   """Record a step event. Called by Styrmin's own flows and actions with the action token."""
-  recordStep(input: RecordStepInput!): Step! @requiresRole  # READ_WRITE, and only the styrmin-actions user
+  recordStep(input: RecordStepInput!): Step! @requiresRole @isActionsServiceAccount  # READ_WRITE, and only the styrmin-actions user
 }
 ```
 
