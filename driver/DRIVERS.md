@@ -37,14 +37,14 @@ metadata:
 spec:
   version: <string>        # Driver version
   supported_versions: <string>  # Semver specifier for supported app versions
-  info:                    # Optional metadata
-    icon: <string>
-    description: <string>
+  info:                    # Required block; every key is optional
+    icon: <string>         # Absolute http or https URL of the logo image
+    description: <string>  # Plain text that describes the application
     authors: [<string>]
     license: <string>
-    links:
-      - link: <string>
-        url: <string>
+    links:                 # Links to the application's pages
+      - link: <string>     # Label of the link
+        url: <string>      # Absolute http or https URL
   helm:
     main:
       location: <string>   # OCI or HTTP URL to Helm chart
@@ -86,6 +86,7 @@ spec:
 | `metadata.name` | Unique identifier for the driver |
 | `spec.version` | Version string for this driver |
 | `spec.supported_versions` | Semver specifier (e.g., `>=1.1.5,<=1.2.0`) |
+| `spec.info` | Block that describes the application. It can be empty (`info: {}`); every key in it is optional |
 | `spec.helm.main.location` | Helm chart location (OCI or HTTP URL) |
 | `spec.helm.main.version` | Helm chart version |
 
@@ -101,7 +102,7 @@ spec:
   version: "1"
   supported_versions: ">=1.5,<1.9"
   info:
-    icon: xxxx
+    icon: https://docs.infrahub.app/img/infrahub-logo.svg
     description: Next generation source of truth for infrastructure management
     authors: [fatih]
     license: Apache-2.0
@@ -172,6 +173,36 @@ spec:
       description: Initial Setup of Infrahub
       location: "actions.py::post_setup"
 ```
+
+### Info Block: Logo, Description and Links
+
+The `spec.info` block describes the application that the driver deploys. Styrmin stores `icon`, `description` and `links` on each driver version. The table lists which driver version each place on the driver pages takes the values from.
+
+| Key | Accepted format | Where users view it |
+|-----|-----------------|---------------------|
+| `icon` | Absolute `http` or `https` URL of an image | Driver list page: the driver header in the "Group by application" view (latest driver version), and each row in the "Flat list" view (the driver version of the row). Driver detail page: next to the driver name (selected driver version). |
+| `description` | Plain text | Driver list page: under the driver name in the "Group by application" view, on one line, with the full text on hover (latest driver version). Driver detail page: the full text above the tabs, with its line breaks (selected driver version). |
+| `links` | List of entries with exactly two keys: `link` (the label) and `url` (an absolute `http` or `https` URL) | Driver detail page: the "Links" section of the Overview tab, in file order (selected driver version). Each link opens in a new browser tab. |
+| `authors` | List of strings | Not shown |
+| `license` | String | Not shown |
+
+An empty `description` or an empty `links` list counts as not set.
+
+The logo image:
+
+- Styrmin does not download the image. The browser of each person who opens the driver pages loads it from the `icon` URL, so the URL must be reachable from those browsers. In an installation without internet access, host the image on an internal server or leave `icon` out.
+- The browser does not send the address of the Styrmin page to the image host, but the host receives a request with the IP address of each viewer. Use an image host that you trust.
+- Use a square SVG or PNG image. The pages show the logo at 32 by 32 pixels or smaller.
+- When `icon` is not set, or the browser cannot load the image, the pages show a generic package icon in the same place.
+
+Loading the driver fails when:
+
+- `icon` is not an absolute `http` or `https` URL, for example `xxxx`, `logo.svg` or `javascript:alert(1)`.
+- A `links` entry has a key other than `link` and `url`, does not have one of them, or has a `url` that is not an absolute `http` or `https` URL.
+
+The error names the field, for example `spec.info.icon` or `spec.info.links.0.url`, and Styrmin stores nothing for that load. Driver versions that are already stored are not checked again.
+
+To change the logo, description or links, edit `spec.info` and load the driver again. For a local driver, the changed file creates a new driver version. For a Git driver, a new commit creates a new driver version.
 
 ## Helm Values Template (`values.j2.yml`)
 

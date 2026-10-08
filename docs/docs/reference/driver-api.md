@@ -31,7 +31,8 @@ by field:
 - `spec.version` — Application Driver Version
 - `spec.supported_versions` — semver specifier for the Application
   Versions this driver supports
-- `spec.info` — description, authors
+- `spec.info` — icon (logo URL), description, links — shown on the driver
+  pages; authors, license
 - `spec.helm.main` — Helm chart reference (location, version, values
   template)
 - `spec.components` — component definitions (label selectors,

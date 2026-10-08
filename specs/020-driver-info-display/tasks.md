@@ -152,17 +152,17 @@ Web application: `backend/styrmin_backend/`, `backend/tests/`, `frontend/src/`, 
 
 ### Tests for User Story 3
 
-- [ ] T027 [P] [US3] Add `backend/tests/unit/services/driver/test_driver_info.py`:
+- [X] T027 [P] [US3] Add `backend/tests/unit/services/driver/test_driver_info.py`:
   - Parametrized valid `icon` values (`https://…/logo.svg`, `http://…/logo.png`) build a `DriverSpec`.
   - Invalid `icon` values (`xxxx`, `logo.svg`, `javascript:alert(1)`, `data:image/png;base64,AAAA`, `ftp://host/logo.png`) raise `pydantic.ValidationError` whose text contains `spec.info.icon`.
   - Invalid `links` entries (missing `url`, extra key `name`, `url: javascript:x`, `url: not-a-url`) raise with `spec.info.links.0`.
   - Through `get_local_driver_loader(tmp_path).load_driver()`, a driver file with `icon: xxxx` raises `DriverLoadingError` whose message contains `spec.info.icon`.
-- [ ] T028 [P] [US3] In `backend/tests/functional/graphql/test_application_driver_version_propagation.py`, add a test: loading a local driver with `icon: xxxx` through `loadLocalApplicationDriverVersion` returns a GraphQL error that mentions `spec.info.icon`, and `session` contains no `ApplicationDriver` row with that driver name (FR-005).
+- [X] T028 [P] [US3] In `backend/tests/functional/graphql/test_application_driver_version_propagation.py`, add a test: loading a local driver with `icon: xxxx` through `loadLocalApplicationDriverVersion` returns a GraphQL error that mentions `spec.info.icon`, and `session` contains no `ApplicationDriver` row with that driver name (FR-005).
 
 ### Implementation for User Story 3
 
 - [X] T029 [P] [US3] In `driver/examples/infrahub/driver.styrmin.yml` and `driver/examples/infrahub-enterprise/driver.styrmin.yml`, replace `icon: xxxx` with `icon: https://docs.infrahub.app/img/infrahub-logo.svg` (research R11).
-- [ ] T030 [P] [US3] Update `driver/DRIVERS.md`:
+- [X] T030 [P] [US3] Update `driver/DRIVERS.md`:
   - Schema block comments for `icon` (absolute http/https image URL), `description` and `links` (`link` label + `url`). Correct the `info:` comment from "Optional metadata" to "Required block; every key is optional", which matches `Specification.info: Info` (no default).
   - Replace `icon: xxxx` in the example.
   - Add an "Info block" subsection that covers the following, per contracts/driver-spec.md:
@@ -173,10 +173,10 @@ Web application: `backend/styrmin_backend/`, `backend/tests/`, `frontend/src/`, 
     - The generic icon fallback.
     - That `authors`/`license` are accepted but not shown.
     - That invalid values fail the load.
-- [ ] T031 [P] [US3] Update `docs/docs/drivers/creating-a-driver.md` Step 2:
+- [X] T031 [P] [US3] Update `docs/docs/drivers/creating-a-driver.md` Step 2:
   - Add `icon` and `links` to the example `info` block.
   - Add a note bullet on `info.icon`/`description`/`links` that covers format, where they appear, the viewer's browser loading the image from a host you trust, and validation at load.
-- [ ] T032 [P] [US3] Update `docs/docs/reference/driver-api.md` (the `spec.info` line becomes "icon (logo URL), description, links — shown on the driver pages; authors, license") and `docs/docs/concepts-and-architecture/what-is-a-driver.md` (add `icon` to the example `info` block and one sentence saying the driver pages show the logo, description and links).
+- [X] T032 [P] [US3] Update `docs/docs/reference/driver-api.md` (the `spec.info` line becomes "icon (logo URL), description, links — shown on the driver pages; authors, license") and `docs/docs/concepts-and-architecture/what-is-a-driver.md` (add `icon` to the example `info` block and one sentence saying the driver pages show the logo, description and links).
 
 **Checkpoint**: The validation is tested, and the examples and docs match the implementation.
 
