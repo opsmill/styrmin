@@ -365,9 +365,11 @@ type and deployment of each task.
 2. A "Steps" table with one row per step, in start order with pending
    steps last: `step` (the step's name), `status`, `duration` (`running`
    while the step runs), `attempts` and `error`. The `error` column holds
-   the newest error, FluxCD's current reason for the HelmRelease step, and
-   the last line of a failed command's output, one per line. A task
-   without steps prints "No steps recorded for this task." instead.
+   the error of each failed attempt as `attempt <n>: <message>`, oldest
+   first, then FluxCD's current reason for the HelmRelease step, then the
+   last line of a failed command's output as `output: <line>`, one per
+   line. A task without steps prints "No steps recorded for this task."
+   instead.
 3. A "Started tasks" table with the `id`, `type` and `result` of each
    task that the task's hook steps started. It is printed only when there
    is one.
