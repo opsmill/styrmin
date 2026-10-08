@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-06
-**Source**: [issue #2](https://github.com/opsmill/styrmin/issues/2) and specs/019-task-steps/
+**Source**: [issue #2](https://github.com/opsmill/styrmin/issues/2) and specs/archive/019-task-steps/
 (research.md D1–D19, data-model.md, contracts/). Each decision in research.md names the evidence
 it is based on.
 **Related**: [ADR-059](0059-driver-action-api-tokens.md) (the action token that flows and actions

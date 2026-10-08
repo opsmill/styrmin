@@ -222,3 +222,43 @@ See [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md) Â
 when the submitted config is empty: the resolver then passes `None` and the stored config is kept.
 An omitted or empty `spec.config` therefore changes nothing. To clear the last per-component
 override, a manifest writes `components: []`.
+
+## Task steps
+
+<!-- Extracted from specs/019-task-steps on 2026-10-08 -->
+
+The steps of a task, its task result and the tasks its hook steps started come from the SDK's
+`TaskResource` (`python_sdk/src/styrmin_sdk/resources/tasks.py`). The CLI only formats them. The
+GraphQL side is described in [api.md](../backend/api.md#step), and the decisions in
+[ADR-060](../../adr/0060-steps-and-derived-task-result.md).
+
+**SDK reads.**
+
+- `tasks.get(task_id)` reads the task with `result`, `steps`, `startedBy` and `startedTasks`. The
+  query (`get_task.graphql`) leaves out `Step.output`, because output can be long; each step has
+  `has_output` instead.
+- `tasks.step_output(step_id)` reads the output of one step with `Query.step`.
+- `tasks.failed_step(task_id)` returns the first failed step of the task, else of the tasks it
+  started, nearest first, as a `FailedStep` (name, task id, newest error). It reads the task, then
+  each started task, breadth-first, and returns `None` when no step has failed.
+
+**`styrminctl tasks get <id>`** prints three parts:
+
+1. The task table, with a `result` column next to `status`.
+2. A "Steps" table with the columns `step`, `status`, `duration`, `attempts` and `error`. The
+   duration reads `running` while the step runs, and otherwise uses the deployment page's format
+   (`45s`, `1m 05s`, `1h 02m`). The error cell lists the error of each failed attempt as
+   `attempt <n>: <message>`, oldest first, then FluxCD's detail, then `output: <last line>`. The
+   command calls `tasks.step_output()` once for each step whose `has_output` is true. Errors and
+   output are escaped, so Rich does not read `[...]` in them as markup. A task without steps
+   prints "No steps recorded for this task." instead of the table.
+3. A "Started tasks" table (id, type, result), only when the task started tasks.
+
+**`styrminctl deployments apply --wait`.** When the deployment ends failed, the SDK's
+`_wait_for_terminal` sets `failure_reason` from `tasks.failed_step(outcome.task_id)`:
+`step "<name>" failed: <error>`. It keeps `deployment reconciliation failed (status: <status>)`
+when there is no task, no failed step, or the read raises a `StyrminError`, for example against a
+server without steps. It reads the failed step in the same poll that saw the failure, because a
+later status report can change that step. The CLI prints the reason on the `failed` line. The wait
+lasts 600 seconds by default (`WAIT_TIMEOUT_SECONDS`, `--max-wait`, SDK `max_wait`); a wait that
+runs out reports `wait timeout` instead of the failed step.

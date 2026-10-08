@@ -1,6 +1,6 @@
 """Read the end of a failed Job's output before the Job can be removed.
 
-See specs/019-task-steps/contracts/flow-step-reporter.md "Job output" and
+See specs/archive/019-task-steps/contracts/flow-step-reporter.md "Job output" and
 research D10.
 """
 

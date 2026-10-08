@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-06
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: PRD "Steps and failure causes for tasks, backups and restores" — [opsmill/styrmin#2 (comment)](https://github.com/opsmill/styrmin/issues/2#issuecomment-6012882649). Seed issue: [#2](https://github.com/opsmill/styrmin/issues/2). Related: [#374](https://github.com/opsmill/styrmin/issues/374) (the Job is never removed), [#381](https://github.com/opsmill/styrmin/issues/381) and [#397](https://github.com/opsmill/styrmin/pull/397) (action tokens for upgrade hooks), [#383](https://github.com/opsmill/styrmin/issues/383) (concurrent version updates), [#396](https://github.com/opsmill/styrmin/issues/396) (unauthenticated agent paths).
 
