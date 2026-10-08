@@ -12,7 +12,8 @@
  *   (b) `?version` selects an older version and flags "Update available",
  *   (c) tabs switch between Overview / Parameters / Components,
  *   (d) a driver with no versions renders an error (not a crash),
- *   (e) no <pre> JSON-dump fallback renders across tabs (SC-002).
+ *   (e) no <pre> JSON-dump fallback renders across tabs (SC-002),
+ *   (f) the header logo follows the selected version, with a fallback.
  */
 import {
   describe,
@@ -23,7 +24,7 @@ import {
   vi,
   type Mock,
 } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -94,6 +95,9 @@ function makeVersion(
     sourcePath: null as string | null,
     sourceCommitSha: "abcdef1234567890" as string | null,
     contentHash: null as string | null,
+    icon: null as string | null,
+    description: null as string | null,
+    links: [] as Array<{ label: string; url: string }>,
     components: null,
     parameters: [],
     componentConfigs: [],
@@ -197,19 +201,37 @@ async function renderPage(
   return result!;
 }
 
+const OLD_LOGO = "https://example.com/logo-v1.svg";
+const NEW_LOGO = "https://example.com/logo-v2.svg";
+
 const twoVersions = () =>
   makeDriver([
     makeVersion({
       id: "old",
       version: "1.0.0",
       createdOn: "2026-01-01T00:00:00Z",
+      icon: OLD_LOGO,
+      description: "Old description",
+      links: [{ label: "Docs", url: "https://example.com/docs/v1" }],
     }),
     makeVersion({
       id: "new",
       version: "2.0.0",
       createdOn: "2026-03-01T00:00:00Z",
+      icon: NEW_LOGO,
+      description: "New description",
+      links: [{ label: "Docs", url: "https://example.com/docs/v2" }],
     }),
   ]);
+
+/** The logo in the PageLayout header, next to the driver name. */
+function headerLogo(): HTMLElement {
+  const header = screen
+    .getByRole("heading", { level: 1, name: "example-driver" })
+    .closest("header");
+  expect(header).not.toBeNull();
+  return within(header!).getByTestId("driver-logo");
+}
 
 describe("DriverDetailPage", () => {
   beforeEach(() => {
@@ -320,5 +342,45 @@ describe("DriverDetailPage", () => {
       await user.click(screen.getByRole("button", { name: tab }));
       expect(container.querySelector("pre")).toBeNull();
     }
+  });
+
+  it("shows the selected version's logo in the header and switches with the version", async () => {
+    useGetDriverQueryMock.mockReturnValue(makeQueryResult(twoVersions()));
+
+    const user = userEvent.setup();
+    await renderPage();
+
+    expect(headerLogo()).toHaveAttribute("data-logo-state", "image");
+    expect(headerLogo().querySelector("img")).toHaveAttribute("src", NEW_LOGO);
+
+    await user.click(screen.getByLabelText("Switch version"));
+    await user.click(await screen.findByRole("option", { name: /1\.0\.0/ }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("driver-detail").getAttribute("data-version-id"),
+      ).toBe("old");
+    });
+    expect(headerLogo()).toHaveAttribute("data-logo-state", "image");
+    expect(headerLogo().querySelector("img")).toHaveAttribute("src", OLD_LOGO);
+  });
+
+  it("shows the fallback logo in the header when the version has no icon", async () => {
+    useGetDriverQueryMock.mockReturnValue(
+      makeQueryResult(
+        makeDriver([
+          makeVersion({
+            id: "v1",
+            version: "1.0.0",
+            createdOn: "2026-03-01T00:00:00Z",
+          }),
+        ]),
+      ),
+    );
+
+    await renderPage();
+
+    expect(headerLogo()).toHaveAttribute("data-logo-state", "fallback");
+    expect(headerLogo().querySelector("img")).toBeNull();
   });
 });

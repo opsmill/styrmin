@@ -26,6 +26,8 @@ function mkVersion(
     sourcePath: null,
     sourceCommitSha: "abc1234",
     contentHash: null,
+    icon: null,
+    description: null,
     ...over,
   } as DriverListVersion;
 }
@@ -123,6 +125,34 @@ describe("filterDrivers", () => {
     expect(res[0].latestVersionId).toBe("i2");
     expect(res[0].totalVersions).toBe(2);
     expect(showsLatestBadge(res[0], res[0].versions[0])).toBe(false);
+  });
+
+  it("sets latestVersion to the latest-wins version with no query", () => {
+    const res = filterDrivers(drivers, "");
+    expect(res.map((d) => d.latestVersion?.id)).toEqual(["g1", "i2"]);
+  });
+
+  it("keeps latestVersion on the latest-wins version when the query filters it out", () => {
+    const withIcons = [
+      mkDriver("infrahub", [
+        mkVersion({
+          id: "i1",
+          version: "2.0.3",
+          createdOn: "2026-01-01T00:00:00Z",
+          icon: "https://example.com/old.svg",
+        }),
+        mkVersion({
+          id: "i2",
+          version: "2.1.0",
+          createdOn: "2026-03-01T00:00:00Z",
+          icon: "https://example.com/new.svg",
+        }),
+      ]),
+    ];
+    const res = filterDrivers(withIcons, "2.0.3");
+    expect(res[0].versions.map((v) => v.id)).toEqual(["i1"]);
+    expect(res[0].latestVersion?.id).toBe("i2");
+    expect(res[0].latestVersion?.icon).toBe("https://example.com/new.svg");
   });
 });
 

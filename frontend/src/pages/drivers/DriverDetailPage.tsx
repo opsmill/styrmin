@@ -14,6 +14,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { LatestBadge, OlderBadge } from "./VersionStatusBadge";
+import { DriverLogo } from "./DriverLogo";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ParametersTab } from "./driver-detail/tabs/ParametersTab";
 import { ComponentsTab } from "./driver-detail/tabs/ComponentsTab";
@@ -81,6 +82,7 @@ export default function DriverDetailPage() {
   return (
     <PageLayout
       title={driver.name}
+      icon={<DriverLogo icon={selected.icon} size="md" />}
       breadcrumbs={[
         { label: "Drivers", href: "/drivers" },
         {
