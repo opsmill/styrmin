@@ -104,7 +104,10 @@ class FakeKubernetes:
         return web.json_response(job, status=201)
 
     async def _read_job_status(self, request: web.Request) -> web.Response:
-        job = self.jobs[request.match_info["job"]]
+        name = request.match_info["job"]
+        job = self.jobs.get(name)
+        if job is None:
+            return _status(404, f'jobs.batch "{name}" not found')
         if self.job_succeeds:
             status = {
                 "succeeded": 1,

@@ -53,10 +53,13 @@ The server never calls the agent directly. Direction flows through
 Status flows back the other way: Prefect callbacks POST to the server's
 internal GraphQL endpoint to update task and deployment status; the agent's
 status reporter periodically writes pod and CRD snapshots to the database.
-Flows and driver actions record the steps of their task, backup or restore
-through the `recordStep` mutation with the action token, and the server turns
-each CRD snapshot into the operator-phase steps of the task that rolled out
-the reported instance (the CR's `status.instanceId`) — see
+USER flows and driver actions record the steps of their task, backup or
+restore through the `recordStep` mutation with the action token; server code
+and INTERNAL flows call the step recorder directly. The server turns each
+CRD snapshot of a rollout into the operator-phase steps of the newest task
+that rolled out the reported instance (the CR's `status.instanceId`), and
+each snapshot in the `Deleting` or `Deleted` phase into the steps of the
+deployment's newest `delete_deployment` task — see
 [ADR-060](../adr/0060-steps-and-derived-task-result.md).
 
 ### 1.3 What the agent does

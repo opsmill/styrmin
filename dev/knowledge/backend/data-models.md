@@ -261,8 +261,8 @@ class Task(StyrminModel, table=True):
     started_by_step_id: UUID | None  # FK step.id, ON DELETE SET NULL, indexed
 ```
 
-- `status` follows only the Prefect flow run (through the `callback` mutation) and is what driver actions wait on. It is not the result users view; see "Task result" below.
-- `instance_id` is the instance the task rolls out. The `apply_state` service function sets it for every reconcile task, so operator reports, which carry the CR's `status.instanceId`, find their task. One instance belongs to one task. Tasks that roll out no instance (`run_job`, `delete_deployment`) and tasks created before this column existed have `NULL`.
+- `status` follows only the Prefect flow run (through the `callback` mutation) and is what driver actions wait on. A `delete_deployment` task runs no flow: it is created with `status` `success`. `status` is not the result users view; see "Task result" below.
+- `instance_id` is the instance the task rolls out. The `apply_state` service function sets it for every reconcile task, so operator reports, which carry the CR's `status.instanceId`, find their task. Several tasks can roll out the same instance; a report then goes to the newest of them (`find_by_instance` orders by `created_on`, newest first). Tasks that roll out no instance (`run_job`, `delete_deployment`) and tasks created before this column existed have `NULL`.
 - `started_by_step_id` is the hook step whose driver action started the task through `stopComponents`, `startComponents` or `updateDeploymentVersion` (see [hooks-and-actions.md](hooks-and-actions.md#tasks-started-by-a-hook-step)). The foreign key is created with `use_alter=True`, because `step.task_id` points back at `task`.
 
 #### Step

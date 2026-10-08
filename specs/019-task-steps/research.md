@@ -124,14 +124,14 @@ The P1 acceptance scenario is an upgrade whose HelmRelease does not become Ready
 [CLAUDE RECOMMENDED – based on PRD FR-006 and the edge cases]
 
 - **Decision**: `compute_task_result` is a pure function in `services/steps/results.py`. It works on the task's **family**: the task and every task its hook steps started, transitively. It applies the PRD's rules in the PRD's order:
-  1. `RUNNING` when a step of the family is pending or running.
-  2. `FAILED` when a step of the family failed.
+  1. `RUNNING` when the `Task.status` of a family member is `pending` or `running`, or a step of the family is running, or pending in a member that has no failed step.
+  2. `FAILED` when the `Task.status` of a family member is `failed`, or a step of the family failed.
   3. `SUPERSEDED` when a step of the family was superseded by a task outside the family.
   4. `SUCCEEDED` otherwise.
 
   For a task that started no task, the family is the task itself, and the rules read exactly as FR-006.
 
-  A task with no steps gets its result from `Task.status`: `pending` and `running` give `RUNNING`, `success` gives `SUCCEEDED`, `failed` gives `FAILED`. The deployment page shows "no steps recorded for this task" for a finished task with no steps (FR-010), and "waiting for the first step" for an unfinished one.
+  Each member's `Task.status` counts in addition to its steps, because the flow can fail, or still run, between two steps. A `success` status adds nothing, so a member whose flow succeeded counts by its steps only. A task with no steps therefore gets its result from `Task.status` alone: `pending` and `running` give `RUNNING`, `success` gives `SUCCEEDED`, `failed` gives `FAILED`. The deployment page shows "no steps recorded for this task" for a finished task with no steps (FR-010), and "waiting for the first step" for an unfinished one.
 - **Why the family**: The tasks that one hook starts interrupt each other. In the simple-app upgrade (`driver/examples/simple-app/actions.py`), `stop_components` and `upgrade_deployment_version` each write the CR before the operator finishes the previous rollout, and only `start_components` completes. With rules that look only at the upgrade's own steps and its direct results, the upgrade could never be `SUCCEEDED`, and an outside task interrupting `start_components` would not make the upgrade `SUPERSEDED`. With the family, the upgrade is `SUCCEEDED` when the last rollout succeeds, and each interrupted started task still shows `SUPERSEDED` on its own entry.
 - **Order**: `RUNNING` comes before `FAILED`, as in the PRD's list. A task whose post-hook failed after the CR write stays `RUNNING` until the operator finishes, because the work is not over. The failed step is visible in the step list at once.
 - **Pending steps behind a failure**: The operator leaves the steps after a failed phase pending. A pending step therefore counts as `RUNNING` only when its task has no failed step; otherwise a failed HelmRelease would keep its task `RUNNING` after the deployment is `FAILED` (US3 acceptance scenario 1, SC-003). A new attempt makes the failed step running, and the task `RUNNING` again. [CLAUDE RECOMMENDED – based on the E2E run of T076]

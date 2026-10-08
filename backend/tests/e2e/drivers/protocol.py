@@ -215,8 +215,8 @@ class ScenarioDriver(Protocol):
 
         UI driver: reads the ``timeline-entry`` and ``step-row`` data attributes
         of the Timeline tab; collapsed entries keep their steps in the DOM.
-        ``StepRef.errors`` and ``detail`` stay empty there until the step list
-        renders them (T060).
+        ``StepRef.errors`` come from each row's ``step-error`` elements, put back
+        in the API's oldest-first order, and ``detail`` from its ``step-detail``.
         """
 
     # --- Environments -----------------------------------------------------

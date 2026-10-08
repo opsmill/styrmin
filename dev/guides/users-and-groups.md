@@ -86,11 +86,16 @@ the first time it needs a token for it (`ensure_actions_service_account` in
 
 The user appears in the Users list. Changes to it have these effects:
 
-- Deactivating it makes every action call to the API fail with
-  `Authentication is required`. Steps are then no longer recorded; the
-  work itself goes on, because a failed step write never fails it.
+- Deactivating it makes every API call made with its token fail with
+  `Authentication is required`:
+  - the driver action primitives `stop_components`, `start_components`
+    and `upgrade_deployment_version` raise an error, so the hooks that
+    call them fail;
+  - `recordStep` calls fail, so steps are no longer recorded. These
+    failures alone do not stop the work, because a failed step write
+    never fails it.
 - Setting its role to `READ_ONLY` makes those calls fail with
-  `Insufficient permissions`, with the same effect on steps.
+  `Insufficient permissions`, with the same effects.
 - Adding it to a group with a higher role gives actions that higher role,
   because actions use the user's effective role.
 - Resetting its password is refused with `FORBIDDEN`.

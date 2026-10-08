@@ -121,11 +121,15 @@ reports for the earlier instance still move the earlier task's steps.
 
 When a report shows the phase `Failed` or the display state `Error`, the
 first unfinished step fails with the CR's message. For the HelmRelease
-step and the ready step, the error also names up to five pods that are not
-ready and their container reasons, such as `ImagePullBackOff` or
-`CrashLoopBackOff`, from the stored pod statuses. When a later report
-shows the operator working on the step again, the step runs again as a new
-attempt; when a later phase is reported, the failed step succeeds.
+step and the ready step, the error also names up to five pods from the
+stored pod statuses, with each container that waits or ended with one of
+these reasons: `ImagePullBackOff`, `ErrImagePull`, `InvalidImageName`,
+`CrashLoopBackOff`, `CreateContainerConfigError`, `CreateContainerError`,
+`Error` or `OOMKilled`. The error does not name a pod without such a
+container, for example a pod that fails its readiness probe, or a pod that
+has finished. When a later report shows the operator working on the step
+again, the step runs again as a new attempt; when a later phase is
+reported, the failed step succeeds.
 
 The reporter does not report internal deployments, such as the
 per-environment ingress controller, so their tasks have no operator-phase

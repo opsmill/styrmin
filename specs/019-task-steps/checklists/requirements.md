@@ -35,5 +35,9 @@
 - The PRD's two open questions are resolved in the spec and labelled as recommendations:
   - FR-003 keeps the last 200 lines and at most 64 KiB of a failed command's output.
   - FR-016 keeps steps as long as their task, backup or restore exists.
-- FR-017 (typed error for unknown targets) and FR-018 (no change to reconciliation) restate PRD implementation decisions as testable requirements.
+- These requirements restate decisions taken from the PRD as testable requirements, so the implementation choices they fix pass the "no implementation details" item:
+  - FR-006: calculate the task result on each read and never store it;
+  - FR-014: write steps through a mutation that requires `READ_WRITE`, with the action token;
+  - FR-017: reject a write for an unknown target with a typed error;
+  - FR-018: make no change to reconciliation.
 - SC-005 adds a measurable outcome for the P2 restore journey, taken from the PRD's P2 acceptance scenario.

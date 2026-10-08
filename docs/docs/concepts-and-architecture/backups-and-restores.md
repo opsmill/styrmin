@@ -137,7 +137,10 @@ rejects the restore in its `FailedValidation` phase, and "Run the Velero
 restore" fails with an error that starts with "Velero restore failed
 validation:" followed by Velero's validation errors. The restore's error
 message is the same. When Velero ends a backup or a restore without a
-failure reason, its error message is the error of the failed step.
+failure reason, its error message is the error of the failed step. Without
+validation errors either, that error names the Velero phase, in the form
+`Velero backup phase: <phase>` or `Velero restore phase: <phase>`, followed
+by the number of Velero's errors in parentheses when Velero reports any.
 
 Backups and restores that ran before Styrmin recorded steps show "No
 steps recorded for this backup." or "No steps recorded for this

@@ -147,6 +147,7 @@ async def test_end_step_succeeds_the_step(
     step_id = await open_task_step(committed.task.id, steps.PLAN)
 
     await end_step(step_id)
+    await uow.rollback()  # Only committed writes remain.
 
     step = await _stored(uow, step_id)
     assert step.status is StepStatus.SUCCEEDED
@@ -159,6 +160,7 @@ async def test_end_step_fails_the_step_with_the_error(
     step_id = await open_task_step(committed.task.id, steps.PLAN)
 
     await end_step(step_id, error="ReconciliationError: No upgrade hook")
+    await uow.rollback()  # Only committed writes remain.
 
     step = await _stored(uow, step_id)
     assert step.status is StepStatus.FAILED

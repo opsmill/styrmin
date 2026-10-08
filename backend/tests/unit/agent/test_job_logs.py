@@ -115,8 +115,9 @@ async def test_201_lines_drop_the_first_line_and_set_truncated() -> None:
 
 
 async def test_65537_bytes_keep_the_end_of_the_output_and_set_truncated() -> None:
-    # Three lines of 65,537 bytes in all: the byte limit is reached at every
-    # line count above 1, so only the last line fits.
+    # Three lines of 65,537 bytes in all. Every read of 3 or more lines reaches
+    # the byte limit, and halving goes from 3 lines to 1, so only the last line
+    # is kept, although the last two lines would fit.
     log = b"a" * 40_000 + b"\n" + b"b" * 15_536 + b"\n" + b"c" * 9_998 + b"\n"
     assert len(log) == MAX_OUTPUT_BYTES + 1
     fake = FakeKubernetes(pods=[_pod("pod", log=log)])
