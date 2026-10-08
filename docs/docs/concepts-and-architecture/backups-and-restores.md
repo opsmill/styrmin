@@ -120,6 +120,12 @@ transaction so a restore either lands whole or not at all. Your
 application may log a few connection errors during that window; it should
 reconnect on its own once the restore finishes.
 
+The database itself also starts on an empty data volume and needs some
+time before it accepts connections. The MariaDB and MongoDB restore hooks
+retry loading the dump every 2 seconds, for up to 2 minutes, until the
+database accepts it. The Velero log of a successful restore can show
+failed attempts before the one that loaded the dump.
+
 ### Following a backup or a restore
 
 On the deployment page, each backup and each restore row lists its steps
