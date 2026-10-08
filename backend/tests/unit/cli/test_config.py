@@ -11,8 +11,10 @@ from styrmin_backend.cli.config_cmd import config_app
 from styrmin_backend.config import (
     ConfiguredSettings,
     DatabaseSettings,
+    DriverSettings,
     KubernetesConfigMode,
     KubernetesSettings,
+    RemoteAgentCodeSettings,
     Settings,
     WorkflowDriver,
     WorkflowSettings,
@@ -162,3 +164,45 @@ def test_config_show_output_loads_back_as_a_config_file(
     path.write_text(capsys.readouterr().out, encoding="utf-8")
 
     assert config.load(str(path)) == settings
+
+
+@pytest.mark.parametrize("output_format", ["toml", "json"])
+def test_config_show_leaves_out_credentials(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    output_format: str,
+) -> None:
+    settings = Settings(
+        admin_password="s3cret-admin",
+        database=DatabaseSettings(
+            db_password="s3cret-db", db_url="postgresql://u:s3cret-url@db/styrmin"
+        ),
+        kubernetes=KubernetesSettings(token="s3cret-k8s"),
+        driver=DriverSettings(token="s3cret-driver"),
+        agent_code=RemoteAgentCodeSettings(token="s3cret-agent-code"),
+    )
+    monkeypatch.setattr(config, "SETTINGS", ConfiguredSettings(settings=settings))
+
+    with pytest.raises(SystemExit):
+        config_app(["show", "--format", output_format])
+    output = capsys.readouterr().out
+
+    assert "s3cret" not in output
+    assert "db_host" in output
+
+
+def test_saved_config_show_output_reads_credentials_from_env(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    settings = Settings(database=DatabaseSettings(db_password="stale"))
+    monkeypatch.setattr(config, "SETTINGS", ConfiguredSettings(settings=settings))
+
+    with pytest.raises(SystemExit):
+        config_app(["show"])
+    path = tmp_path / "styrmin.toml"
+    path.write_text(capsys.readouterr().out, encoding="utf-8")
+    monkeypatch.setenv("STYRMIN_DB_PASSWORD", "rotated")
+
+    assert config.load(str(path)).database.db_password == "rotated"
