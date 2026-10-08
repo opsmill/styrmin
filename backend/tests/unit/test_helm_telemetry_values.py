@@ -1,4 +1,4 @@
-"""Telemetry values of the Styrmin Helm chart (spec 020, FR-004, FR-020, research D11)."""
+"""Telemetry values and install notes of the Styrmin Helm chart (spec 020, FR-004, FR-017, FR-020, research D11)."""
 
 from __future__ import annotations
 
@@ -45,6 +45,59 @@ def _configmap_data(chart: Path, *set_values: str) -> dict[str, object]:
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     return yaml.safe_load(result.stdout)["data"]
+
+
+def _install_notes(chart: Path, *set_values: str) -> str:
+    # `helm template` skips NOTES.txt; a client-side dry run renders it without a cluster.
+    command = ["helm", "install", "styrmin", str(chart)]
+    command += ["--namespace", "styrmin", "--dry-run=client"]
+    for value in set_values:
+        command += ["--set", value]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    _, separator, notes = result.stdout.partition("\nNOTES:\n")
+    assert separator, result.stdout
+    return notes
+
+
+def test_install_notes_say_telemetry_is_on_and_how_to_view_and_turn_it_off(
+    chart: Path,
+) -> None:
+    notes = _install_notes(chart)
+    version = yaml.safe_load((CHART_DIR / "Chart.yaml").read_text())["version"]
+
+    assert (
+        "Telemetry is on: Styrmin sends one anonymous report a day to OpsMill.\n"
+        "\n"
+        "To view the report, run:\n"
+        "  kubectl exec --namespace styrmin deploy/styrmin-server -c styrmin-server"
+        " -- styrmin telemetry show\n"
+        "\n"
+        "To turn telemetry off, run:\n"
+        f"  helm upgrade styrmin <chart> --version {version} --namespace styrmin"
+        " --reuse-values --set styrmin.telemetry.enabled=false\n"
+    ) in notes
+    assert "Telemetry is off" not in notes
+
+
+def test_install_notes_name_the_endpoint_value(chart: Path) -> None:
+    notes = _install_notes(chart, "styrmin.telemetry.endpoint=http://sink/report")
+
+    assert (
+        "Telemetry is on: Styrmin sends one anonymous report a day to http://sink/report."
+        in notes
+    )
+
+
+def test_install_notes_say_telemetry_is_off(chart: Path) -> None:
+    notes = _install_notes(chart, "styrmin.telemetry.enabled=false")
+
+    assert (
+        "Telemetry is off (styrmin.telemetry.enabled=false). Styrmin sends no reports."
+        in notes
+    )
+    assert "Telemetry is on" not in notes
+    assert "styrmin telemetry show" not in notes
 
 
 def test_default_values_turn_telemetry_on_without_an_endpoint(chart: Path) -> None:
