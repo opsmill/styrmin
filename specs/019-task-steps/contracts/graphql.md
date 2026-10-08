@@ -148,10 +148,11 @@ Errors: `StepNotFoundError`, `TaskNotFoundError`, `BackupNotFoundError`, `Restor
 
 ## Read model for lists
 
-Styrmin's resolvers query per object (`api/resolvers.py`), with no data loaders. To keep the timeline at a fixed number of queries:
+Most of Styrmin's resolvers query per object (`api/resolvers.py`). To keep the timeline at a fixed number of queries:
 
 - `build_deployment_timeline` returns, with each entry, the task's steps, its started tasks (with their steps), the summaries of superseding tasks, the family result, and the deployment's last report time.
-- `Task` and `Step` GraphQL objects hold that data in `strawberry.Private` fields (`steps_view`, `result_view`, `started_tasks_view`, `superseded_by_view`, `no_report_since_view`). Each resolver returns the private value when it is set, and queries otherwise (single reads: `Query.task`, `Query.step`, `Backup.steps`, `Restore.steps`).
+- `Task` and `Step` GraphQL objects hold that data in `strawberry.Private` fields (`steps_view`, `result_view`, `started_tasks_view`, `superseded_by_view`, `no_report_since_view`). Each resolver returns the private value when it is set, and queries otherwise (single reads: `Query.task`, `Query.step`).
+- `Backup.steps` and `Restore.steps` read through per-request data loaders (`api/loaders.py`): one query for the steps of all the backups in a response, one for the steps of all its restores, and none when `steps` is not requested.
 - A unit test counts the database queries of `deploymentTimeline` for 20 tasks with 10 steps each and fails when the count grows with the number of tasks.
 
 ## Changed mutations

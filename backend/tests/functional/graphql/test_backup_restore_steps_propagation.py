@@ -1,13 +1,15 @@
 """``Backup.steps`` and ``Restore.steps`` reach the caller (spec 019, T097).
 
 Seeded steps reach a ``READ_ONLY`` user through the single reads
-(``Query.backup``, ``Query.restore``: query fallback) and the lists
-(``Query.backups``, ``Query.restores``: one query for the steps of every
-listed row). Deleting a backup deletes its steps and the steps of its restores.
+(``Query.backup``, ``Query.restore``) and the lists (``Query.backups``,
+``Query.restores``). A response reads the steps of all its backups, and of all
+its restores, with one query each, and none when ``steps`` is not requested.
+Deleting a backup deletes its steps and the steps of its restores.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -26,6 +28,8 @@ from styrmin_backend.db.models import (
     ApplicationInstance,
     Backup,
     BackupStatus,
+    EnvironmentBackup,
+    EnvironmentRestore,
     Restore,
     RestoreStatus,
     Role,
@@ -39,7 +43,12 @@ from styrmin_backend.services.auth.session import create_session
 
 from ._queries import load_query
 from .conftest import gql
-from .seeds import seed_application_instance, seed_user
+from .seeds import (
+    seed_application_instance,
+    seed_deployment,
+    seed_environment,
+    seed_user,
+)
 
 T0 = datetime(2026, 10, 6, 10, 0, tzinfo=UTC)
 
@@ -323,7 +332,7 @@ async def test_restore_steps_reach_read_only_through_restores(
     }
 
 
-# The lists read the steps of all their rows with one query.
+# A response reads the steps of all its backups, or restores, with one query.
 
 
 @contextmanager
@@ -347,6 +356,13 @@ def _count_selects(session: AsyncSession) -> Iterator[list[str]]:
         yield statements
     finally:
         event.remove(engine, "before_cursor_execute", _record)
+
+
+_FROM_STEP = re.compile(r"\bFROM step\b")
+
+
+def _step_queries(statements: list[str]) -> list[str]:
+    return [statement for statement in statements if _FROM_STEP.search(statement)]
 
 
 async def _seed_many(session: AsyncSession, backups: int) -> tuple[UUID, UUID]:
@@ -404,6 +420,119 @@ async def test_lists_read_steps_with_a_fixed_number_of_queries(
 
     assert len(ten_backups) == len(one_backup), ten_backups
     assert len(ten_restores) == len(one_restore), ten_restores
+    assert len(_step_queries(ten_backups)) == 1, ten_backups
+    assert len(_step_queries(ten_restores)) == 1, ten_restores
+
+
+@pytest.mark.asyncio
+async def test_lists_without_steps_read_no_steps(
+    unauth_client: AsyncClient, session: AsyncSession
+) -> None:
+    token = await _token(session, Role.READ_ONLY)
+    instance_id, _backup_id = await _seed_many(session, backups=3)
+
+    with _count_selects(session) as queries:
+        data = await _read(
+            unauth_client,
+            "list_backup_statuses",
+            {"instanceId": str(instance_id)},
+            token,
+        )
+
+    assert len(data["backups"]) == 3
+    assert _step_queries(queries) == []
+
+
+async def _seed_environment_backup(
+    session: AsyncSession, constituents: int, environment_restores: int
+) -> UUID:
+    """An environment backup with backups and restores that all have steps.
+
+    Each environment restore restores every constituent backup once.
+    """
+    environment = await seed_environment(session)
+    deployments = [await seed_deployment(session) for _ in range(constituents)]
+    instances = [
+        await seed_application_instance(session, deployment=deployment)
+        for deployment in deployments
+    ]
+    parent = EnvironmentBackup(
+        name=f"snapshot-{environment.id}",
+        environment_id=environment.id,
+        deployment_snapshots=[
+            {
+                "deployment_id": str(deployment.id),
+                "deployment_name": deployment.name,
+                "instance_id": str(instance.id),
+                "driver_name": "seed-driver",
+                "driver_version": "1.0.0",
+                "application_version": "1.0.0",
+            }
+            for deployment, instance in zip(deployments, instances, strict=True)
+        ],
+    )
+    session.add(parent)
+    await session.commit()
+    backups = [
+        Backup(
+            name=f"constituent-{instance.id}",
+            status=BackupStatus.COMPLETED,
+            instance_id=instance.id,
+            environment_backup_id=parent.id,
+        )
+        for instance in instances
+    ]
+    session.add_all(backups)
+    await session.commit()
+    for backup in backups:
+        session.add_all(_backup_steps(backup.id))
+    for index in range(environment_restores):
+        environment_restore = EnvironmentRestore(environment_backup_id=parent.id)
+        session.add(environment_restore)
+        await session.commit()
+        for backup in backups:
+            restore = Restore(
+                name=f"restore-{backup.id}-{index}",
+                status=RestoreStatus.FAILED,
+                target_namespace="styrmin-steps",
+                backup_id=backup.id,
+                environment_restore_id=environment_restore.id,
+            )
+            session.add(restore)
+            await session.commit()
+            session.add_all(_restore_steps(restore.id))
+    await session.commit()
+    return parent.id
+
+
+@pytest.mark.asyncio
+async def test_environment_backup_reads_nested_steps_with_one_query_each(
+    unauth_client: AsyncClient, session: AsyncSession
+) -> None:
+    token = await _token(session, Role.READ_ONLY)
+    environment_backup_id = await _seed_environment_backup(
+        session, constituents=3, environment_restores=2
+    )
+
+    with _count_selects(session) as queries:
+        data = await _read(
+            unauth_client,
+            "get_environment_backup_steps",
+            {"environmentBackupId": str(environment_backup_id)},
+            token,
+        )
+
+    environment_backup = data["environmentBackup"]
+    backups = [row["backup"] for row in environment_backup["constituents"]]
+    restores = [
+        restore
+        for environment_restore in environment_backup["restores"]
+        for restore in environment_restore["restores"]
+    ]
+    assert [len(backup["steps"]) for backup in backups] == [2, 2, 2]
+    assert [len(restore["steps"]) for restore in restores] == [3] * 6
+    # One query for the steps of the 3 backups, one for those of the 6 restores.
+    assert len(_step_queries(queries)) == 2, queries
 
 
 # Steps are deleted with their backup (PostgreSQL enforces the foreign keys).

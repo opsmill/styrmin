@@ -105,11 +105,7 @@ from styrmin_backend.api.definitions.pod_status.model import (
     PodStatus as PodStatusType,
 )
 from styrmin_backend.services.pod_status import get_pod_statuses
-from styrmin_backend.services.steps.reads import (
-    get_step,
-    list_steps_by_backup,
-    list_steps_by_restore,
-)
+from styrmin_backend.services.steps.reads import get_step
 from styrmin_backend.services.tasks import get_task, get_tasks
 
 
@@ -334,8 +330,7 @@ class Query:
         """List all backups for an instance."""
         uow = info.context["uow"]
         backups = await get_backups(instance_id=instance_id, uow=uow, status=status)
-        steps = await list_steps_by_backup([b.id for b in backups], uow=uow)
-        return [BackupType.from_instance(b, steps=steps.get(b.id, [])) for b in backups]
+        return [BackupType.from_instance(b) for b in backups]
 
     @strawberry.field
     async def restore(
@@ -356,10 +351,7 @@ class Query:
         """List all restores for a backup."""
         uow = info.context["uow"]
         restores = await get_restores(backup_id=backup_id, uow=uow, status=status)
-        steps = await list_steps_by_restore([r.id for r in restores], uow=uow)
-        return [
-            RestoreType.from_instance(r, steps=steps.get(r.id, [])) for r in restores
-        ]
+        return [RestoreType.from_instance(r) for r in restores]
 
     @strawberry.field
     async def environment_backup(

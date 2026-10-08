@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 from uuid import UUID
 
 import strawberry
@@ -10,19 +9,15 @@ from loguru import logger
 from styrmin_backend.api.definitions.deployment.model import (
     ApplicationInstance as ApplicationInstanceType,
 )
-from styrmin_backend.api.definitions.step.model import NOT_LOADED, NotLoaded, Step
+from styrmin_backend.api.definitions.step.model import Step
+from styrmin_backend.api.loaders import backup_steps
 from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.db.models import Backup as BackupModel
 from styrmin_backend.db.models import BackupStatus as BackupStatusDB
-from styrmin_backend.domain.models import Step as StepEntity
-from styrmin_backend.domain.models import StepParent
 from styrmin_backend.services.backup.metadata import read_backup_metadata
 from styrmin_backend.services.exceptions import InstanceNotFoundError
-from styrmin_backend.services.steps.reads import list_steps
 
 BackupStatusType = strawberry.enum(BackupStatusDB, name="BackupStatus")
-
-_NotLoaded = Literal[NotLoaded.NOT_LOADED]
 
 
 @strawberry.type
@@ -47,8 +42,6 @@ class Backup:
     instance_id: UUID
 
     db_model: strawberry.Private[BackupModel]
-    #: Steps a list query loaded for all its backups, so this backup needs no query.
-    steps_view: strawberry.Private[list[StepEntity] | _NotLoaded] = NOT_LOADED
 
     @strawberry.field(
         description=(
@@ -57,9 +50,7 @@ class Backup:
         )
     )
     async def steps(self, info: strawberry.Info) -> list[Step]:
-        steps = self.steps_view
-        if steps is NOT_LOADED:
-            steps = await list_steps(StepParent.of_backup(self.id), info.context["uow"])
+        steps = await backup_steps(info).load(self.id)
         return [Step.of_backup_or_restore(step) for step in steps]
 
     @strawberry.field
@@ -149,12 +140,7 @@ class Backup:
             return None
 
     @classmethod
-    def from_instance(
-        cls,
-        instance: BackupModel,
-        *,
-        steps: list[StepEntity] | _NotLoaded = NOT_LOADED,
-    ) -> Backup:
+    def from_instance(cls, instance: BackupModel) -> Backup:
         return cls(
             id=instance.id,
             name=instance.name,
@@ -167,5 +153,4 @@ class Backup:
             error_message=instance.error_message,
             instance_id=instance.instance_id,
             db_model=instance,
-            steps_view=steps,
         )

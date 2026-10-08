@@ -1,24 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 from uuid import UUID
 
 import strawberry
 
 from styrmin_backend.api.definitions.backup.backup import Backup
-from styrmin_backend.api.definitions.step.model import NOT_LOADED, NotLoaded, Step
+from styrmin_backend.api.definitions.step.model import Step
+from styrmin_backend.api.loaders import restore_steps
 from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.db.models import Restore as RestoreModel
 from styrmin_backend.db.models import RestoreStatus as RestoreStatusDB
-from styrmin_backend.domain.models import Step as StepEntity
-from styrmin_backend.domain.models import StepParent
 from styrmin_backend.services.exceptions import BackupNotFoundError
-from styrmin_backend.services.steps.reads import list_steps
 
 RestoreStatusType = strawberry.enum(RestoreStatusDB, name="RestoreStatus")
-
-_NotLoaded = Literal[NotLoaded.NOT_LOADED]
 
 
 @strawberry.type
@@ -43,8 +38,6 @@ class Restore:
     target_instance_id: UUID | None = None
 
     instance: strawberry.Private[RestoreModel]
-    #: Steps a list query loaded for all its restores, so this restore needs no query.
-    steps_view: strawberry.Private[list[StepEntity] | _NotLoaded] = NOT_LOADED
 
     @strawberry.field(
         description=(
@@ -54,11 +47,7 @@ class Restore:
         )
     )
     async def steps(self, info: strawberry.Info) -> list[Step]:
-        steps = self.steps_view
-        if steps is NOT_LOADED:
-            steps = await list_steps(
-                StepParent.of_restore(self.id), info.context["uow"]
-            )
+        steps = await restore_steps(info).load(self.id)
         return [Step.of_backup_or_restore(step) for step in steps]
 
     @strawberry.field
@@ -86,12 +75,7 @@ class Restore:
         ]
 
     @classmethod
-    def from_instance(
-        cls,
-        instance: RestoreModel,
-        *,
-        steps: list[StepEntity] | _NotLoaded = NOT_LOADED,
-    ) -> Restore:
+    def from_instance(cls, instance: RestoreModel) -> Restore:
         return cls(
             id=instance.id,
             name=instance.name,
@@ -105,5 +89,4 @@ class Restore:
             backup_id=instance.backup_id,
             target_instance_id=instance.target_instance_id,
             instance=instance,
-            steps_view=steps,
         )
