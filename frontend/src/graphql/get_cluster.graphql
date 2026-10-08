@@ -3,6 +3,7 @@ query GetCluster($clusterId: UUID!) {
     id
     name
     config
+    capabilities
     createdOn
     updatedOn
     environments {
