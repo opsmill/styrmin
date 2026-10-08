@@ -10,7 +10,7 @@ infrahub:
       enabled: true
       hostname: "{{ services.infrahub.primary_fqdn }}"
       extraHosts:
-        - name: "{{ services.infrahub.human_readable_fqdn }}"
+        - hostname: "{{ services.infrahub.human_readable_fqdn }}"
           path: /
     infrahubServer:
       # Hard-coded chart wiring. The infrahub chart expects a map (key: value),

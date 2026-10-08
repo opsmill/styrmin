@@ -194,7 +194,9 @@ environment reach them by short DNS name (`infrahub`, `task-manager`).
 Both are also exposed through the per-environment ingress: the driver's
 `values.j2.yml` enables each chart's own Ingress and sets its host to
 the computed FQDNs from the template context — the Infrahub server on
-`{{ services.infrahub.primary_fqdn }}` and the Prefect UI on
+`{{ services.infrahub.primary_fqdn }}`, with
+`{{ services.infrahub.human_readable_fqdn }}` as an extra host (the
+chart's `extraHosts` entries take a `hostname` key), and the Prefect UI on
 `{{ services['task-manager'].human_readable_fqdn }}` (the
 service-scoped name, since `primary_fqdn` is app-scoped and identical
 for every service of a deployment). The `infrahub-enterprise` example
