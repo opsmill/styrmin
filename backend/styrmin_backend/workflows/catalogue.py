@@ -363,3 +363,16 @@ class PrefectCatalogue:
                 cron="17 3 * * *",
             ),
         )
+
+        # Daily anonymous telemetry report, 02:43 UTC. See spec 020.
+        self.add_workflow_definition(
+            action=PrefectAction.SEND_TELEMETRY_REPORT,
+            workflow=LocalSourceWorkflowDefinition(
+                name="send_telemetry_report",
+                type=WorkflowType.INTERNAL,
+                module="styrmin_backend.workflows.templates.telemetry",
+                function="send_telemetry_report_flow",
+                set_directory="/source/backend/",
+                cron="43 2 * * *",
+            ),
+        )
