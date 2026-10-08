@@ -29,9 +29,9 @@ Run each E2E node with `--pdb` (in a non-interactive shell: `sleep infinity | uv
 
 **Purpose**: Packages, evidence file and baseline
 
-- [ ] T001 Confirm the environment: run `uv sync` and `uv run invoke pre-commit-install`, check that `helm`, `docker` and `vcluster` are on `PATH`, and confirm the Alembic head is `c2ff6dba5ffd` by listing `backend/styrmin_backend/db/migrations/versions/` (T006 uses it as `down_revision`)
-- [ ] T002 [P] Create empty packages `backend/styrmin_backend/services/telemetry/__init__.py` and `backend/tests/unit/services/telemetry/__init__.py`
-- [ ] T003 [P] Create `specs/020-backend-telemetry/e2e-evidence.md` with a header and an empty table (columns: node ID, command, passing time, vCluster ID and kubeconfig, PASSED line)
+- [X] T001 Confirm the environment: run `uv sync` and `uv run invoke pre-commit-install`, check that `helm`, `docker` and `vcluster` are on `PATH`, and confirm the Alembic head is `c2ff6dba5ffd` by listing `backend/styrmin_backend/db/migrations/versions/` (T006 uses it as `down_revision`)
+- [X] T002 [P] Create empty packages `backend/styrmin_backend/services/telemetry/__init__.py` and `backend/tests/unit/services/telemetry/__init__.py`
+- [X] T003 [P] Create `specs/020-backend-telemetry/e2e-evidence.md` with a header and an empty table (columns: node ID, command, passing time, vCluster ID and kubeconfig, PASSED line)
 
 ---
 
