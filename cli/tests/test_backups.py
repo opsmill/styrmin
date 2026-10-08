@@ -10,6 +10,7 @@ from styrminctl.cli import app
 
 BACKUP_UUID = "d4e5f6a7-b8c9-0123-def0-123456789abc"
 INSTANCE_UUID = "e5f6a7b8-c9d0-1234-ef01-23456789abcd"
+PREVIOUS_INSTANCE_UUID = "c3d4e5f6-a7b8-9012-cdef-0123456789ab"
 RESTORE_UUID = "f6a7b8c9-d0e1-2345-f012-3456789abcde"
 DEPLOYMENT_UUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 ENV_UUID = "b2c3d4e5-f6a7-8901-bcde-f12345678901"
@@ -411,16 +412,18 @@ def test_backups_restore_to_instance_requires_namespace(
 
 
 def test_backups_restore_last_by_deployment(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    """``--last`` picks the newest completed backup of the deployment's history, even of a replaced instance."""
     mock_client.deployments.get = AsyncMock(return_value=_make_deployment(name="demo"))
-    newest = MagicMock(id=BACKUP_UUID, status="completed")
-    older = MagicMock(id="11111111-2222-3333-4444-555555555555", status="completed")
+    newest = MagicMock(id=BACKUP_UUID, status="completed", instance_id=PREVIOUS_INSTANCE_UUID)
+    older = MagicMock(id="11111111-2222-3333-4444-555555555555", status="completed", instance_id=INSTANCE_UUID)
     mock_client.backups.list_backups = AsyncMock(return_value=[newest, older])
     mock_client.backups.create_restore = AsyncMock(return_value=MagicMock(id=RESTORE_UUID, status="pending"))
 
     with pytest.raises(SystemExit) as exc:
         app(["backups", "restore", "--last", "--target-deployment-id", DEPLOYMENT_UUID])
     assert exc.value.code == 0
-    mock_client.backups.list_backups.assert_called_once_with(instance_id=INSTANCE_UUID, status="completed")
+    mock_client.backups.list_backups.assert_called_once_with(deployment_id=DEPLOYMENT_UUID, status="completed")
+    # The backup comes from the replaced instance; the restore still targets the active one.
     mock_client.backups.create_restore.assert_called_once_with(
         backup_id=BACKUP_UUID,
         target_namespace=f"styrmin-{DEPLOYMENT_UUID}",
@@ -475,16 +478,50 @@ def test_backups_restore_last_and_backup_id_is_rejected(
     assert "not both" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("target_args", "expected_list_call", "expected_message"),
+    [
+        pytest.param(
+            ["--target-deployment", "demo"],
+            {"deployment_id": DEPLOYMENT_UUID, "status": "completed"},
+            "No completed backups found for deployment 'demo'",
+            id="by-deployment-name",
+        ),
+        pytest.param(
+            ["--target-deployment-id", DEPLOYMENT_UUID],
+            {"deployment_id": DEPLOYMENT_UUID, "status": "completed"},
+            f"No completed backups found for deployment '{DEPLOYMENT_UUID}'",
+            id="by-deployment-id",
+        ),
+        pytest.param(
+            ["--target-instance-id", INSTANCE_UUID, "--target-namespace", NS],
+            {"instance_id": INSTANCE_UUID, "status": "completed"},
+            f"No completed backups found for instance {INSTANCE_UUID}",
+            id="by-instance-id",
+        ),
+    ],
+)
 def test_backups_restore_last_no_completed_backups_exits_nonzero(
-    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    target_args: list[str],
+    expected_list_call: dict[str, str],
+    expected_message: str,
 ) -> None:
+    """The failure names the deployment when one is targeted, and the instance otherwise."""
+    monkeypatch.setenv("COLUMNS", "200")
+    _seed_name_lookup(mock_client, deployments=[_make_deployment(name="demo")])
+    mock_client.deployments.get = AsyncMock(return_value=_make_deployment(name="demo"))
     mock_client.backups.list_backups = AsyncMock(return_value=[])
 
     with pytest.raises(SystemExit) as exc:
-        app(["backups", "restore", "--last", "--target-instance-id", INSTANCE_UUID, "--target-namespace", NS])
+        app(["backups", "restore", "--last", *target_args])
     assert exc.value.code == 1
+    mock_client.backups.list_backups.assert_called_once_with(**expected_list_call)
     mock_client.backups.create_restore.assert_not_called()
-    assert "No completed backups" in capsys.readouterr().out
+    assert expected_message in capsys.readouterr().out
 
 
 def test_backups_restore_without_backup_id_or_last_is_rejected(

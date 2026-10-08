@@ -12,6 +12,8 @@ from styrminctl.resolve import resolve_active_instance, resolve_deployment_id
 
 if TYPE_CHECKING:
     from styrmin_sdk import StyrminClient
+
+    from styrminctl.resolve import ResolvedTarget
 from styrminctl.types import (
     BackupId,
     DeploymentName,
@@ -176,6 +178,29 @@ async def delete(backup_id: BackupId) -> None:
     print_success(f"Backup '{backup_id}' deleted")
 
 
+async def _latest_completed_backup_id(
+    sdk: StyrminClient,
+    target: ResolvedTarget,
+    *,
+    deployment_label: str | None,
+) -> str:
+    """Return the newest completed backup of the target deployment's history, or of a raw target instance.
+
+    The server lists backups newest first. ``deployment_label`` names the
+    deployment in the error message; the deployment id is used when it is ``None``.
+    """
+    if target.deployment_id is not None:
+        backups_list = await sdk.backups.list_backups(deployment_id=target.deployment_id, status="completed")
+        if not backups_list:
+            label = deployment_label or target.deployment_id
+            raise ValueError(f"No completed backups found for deployment '{label}'")
+    else:
+        backups_list = await sdk.backups.list_backups(instance_id=target.instance_id, status="completed")
+        if not backups_list:
+            raise ValueError(f"No completed backups found for instance {target.instance_id}")
+    return str(backups_list[0].id)
+
+
 async def _prepare_restore(
     sdk: StyrminClient,
     *,
@@ -208,15 +233,12 @@ async def _prepare_restore(
     resolved_instance_id = target.instance_id if target else None
 
     if last:
-        if resolved_instance_id is None:
+        if target is None:
             raise ValueError(
                 "--last requires a target deployment (--target-deployment/--target-deployment-id) "
                 "or --target-instance-id"
             )
-        backups_list = await sdk.backups.list_backups(instance_id=resolved_instance_id, status="completed")
-        if not backups_list:
-            raise ValueError(f"No completed backups found for instance {resolved_instance_id}")
-        backup_id = str(backups_list[0].id)
+        backup_id = await _latest_completed_backup_id(sdk, target, deployment_label=target_deployment)
         console.print(f"Selected latest completed backup: {backup_id}")
 
     if backup_id is None:
@@ -248,7 +270,12 @@ async def restore(
     ] = None,
     last: Annotated[
         bool,
-        Parameter(help="Restore the most recent completed backup of the target deployment/instance (in-place)."),
+        Parameter(
+            help=(
+                "Restore (in place) the newest completed backup from the target deployment's backup history, "
+                "whichever instance it was taken of, or from the instance's backups with --target-instance-id."
+            )
+        ),
     ] = False,
     wait: Annotated[bool, Parameter(help="Wait for restore to complete.")] = False,
     max_wait: MaxWait = 300,

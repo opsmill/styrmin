@@ -153,15 +153,15 @@ description: "Task list for keeping a deployment's backup history when it gets a
 
 ### Tests for User Story 2
 
-- [ ] T030 [US2] Extend `cli/tests/test_backups.py`:
+- [X] T030 [US2] Extend `cli/tests/test_backups.py`:
   - change `test_backups_restore_last_by_deployment` (assert at line 355) to expect `list_backups(deployment_id=<deployment id>, status="completed")`, and check that the chosen backup can belong to an instance that is not the active one
   - keep `test_backups_restore_last_by_instance_id` expecting `instance_id=` (spec FR-004, critique P4)
   - change `test_backups_restore_last_no_completed_backups_exits_nonzero` to check the message names the deployment when targeted by deployment, and add a case for `--target-instance-id` that keeps the instance message
 
 ### Implementation for User Story 2
 
-- [ ] T031 [US2] In `_prepare_restore` in `cli/src/styrminctl/commands/backups.py`, when `last` is set and `target.deployment_id` is not `None`, call `sdk.backups.list_backups(deployment_id=target.deployment_id, status="completed")` and fail with `No completed backups found for deployment '<name or id>'`; when the target is a raw `--target-instance-id`, keep `list_backups(instance_id=..., status="completed")` and the existing message ([contracts/cli.md](contracts/cli.md))
-- [ ] T032 [US2] Update the help text of the `restore` command's `--last` parameter in `cli/src/styrminctl/commands/backups.py` to say it chooses the newest completed backup from the deployment's backup history, or from the instance's backups with `--target-instance-id`
+- [X] T031 [US2] In `_prepare_restore` in `cli/src/styrminctl/commands/backups.py`, when `last` is set and `target.deployment_id` is not `None`, call `sdk.backups.list_backups(deployment_id=target.deployment_id, status="completed")` and fail with `No completed backups found for deployment '<name or id>'`; when the target is a raw `--target-instance-id`, keep `list_backups(instance_id=..., status="completed")` and the existing message ([contracts/cli.md](contracts/cli.md))
+- [X] T032 [US2] Update the help text of the `restore` command's `--last` parameter in `cli/src/styrminctl/commands/backups.py` to say it chooses the newest completed backup from the deployment's backup history, or from the instance's backups with `--target-instance-id`
 
 **Checkpoint**: US2 works with the CLI tests green.
 
