@@ -17,6 +17,8 @@ Selectors (unchanged; exactly one is required):
 
 `--status` filters either list, as today.
 
+A deleted deployment's history is listed with `--id`. The name lookup searches the deployments that each environment lists, which leave out deleted deployments, so a deleted deployment cannot be found by name.
+
 Table columns (one added, after `status`):
 
 ```text

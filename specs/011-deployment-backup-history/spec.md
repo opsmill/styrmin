@@ -112,7 +112,7 @@ An operator opens a deployment that was deleted and views its backup history, to
   - A call MUST pass exactly one of `deploymentId` or `instanceId`. A call that passes both or neither MUST fail with `VALIDATION_ERROR`, as [ADR-031](../../dev/adr/0031-dual-identifier-resolution-service-layer.md) describes.
   - `backups(instanceId:)` MUST keep returning the backups of that one instance.
   - The existing `status` filter MUST apply to either argument.
-- **FR-004**: SDK users MUST be able to list a deployment's backup history by deployment id. `styrminctl backups list <deployment>` and `styrminctl backups restore --last` MUST use the deployment's backup history. `--instance-id` MUST keep listing the backups of one instance.
+- **FR-004**: SDK users MUST be able to list a deployment's backup history by deployment id. `styrminctl backups list <deployment>` and `styrminctl backups restore --last` with a target deployment MUST use the deployment's backup history. `styrminctl backups list --instance-id` MUST keep listing the backups of one instance, and `styrminctl backups restore --last --target-instance-id` MUST keep choosing from the backups of that one instance, because no deployment is named.
 - **FR-005**: The Backups tab MUST list the deployment's backup history by deployment id.
 - **FR-006**: The backup history of a deleted deployment MUST stay listable by its deployment id.
 - **FR-007**: A deployment's backup history MUST NOT include backups of instances that belong to another deployment, including a counterpart deployment in a cloned environment and a new deployment that reuses a deleted deployment's name.

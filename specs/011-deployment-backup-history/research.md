@@ -123,7 +123,7 @@ The functional tier is used, not `backend/tests/integration/`: that directory ho
 2. After the backup completes and its existing checks pass, edit the deployment's config with `set_component_env_vars(component="server", env_vars={...one marker variable...})`, then wait for the deployment to run and its pods to be ready. Assert the active instance id changed.
 3. Add a dual-entrypoint driver method `list_backups(*, deployment_id) -> tuple[BackupRef, ...]`, and an `application_version: str | None = None` field on `BackupRef`. API driver: `client.backups.list_backups(deployment_id=...)`. UI driver: open the Backups tab and read every `backup-row`, including a new `data-backup-application-version` attribute.
 4. Assert the backup is in that list with application version `0.1.0`. The existing restore (step 4) and delete (step 6) then run against a backup of an earlier instance, which the UI driver can only reach if the Backups tab lists the history.
-5. In `finally`, set the `server` component's env vars back to what they were before the edit.
+5. In `finally`, set the `server` component's env vars back to what they were before the edit. Run this revert in its own `try`/`finally` around the existing `backup_ttl` revert, so a failure in one revert cannot skip the other or hide the test's own failure (critique E5).
 
 **Rationale**: Reuses the deployed stack (Constitution §V, "Reuse before you boot"). A config edit on `server` does not touch the Postgres data that the restore assertions check. The PRD chose a config edit over an upgrade because the deployment is shared by every test in the session.
 

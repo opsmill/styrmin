@@ -62,7 +62,7 @@ uv run styrminctl backups list my-app                 # the same backup is still
 uv run styrminctl backups restore --last --target-deployment my-app   # restore starts
 ```
 
-On the deployment page, the Backups tab lists the same backups with a **Version** column.
+On the deployment page, the Backups tab lists the same backups with an **Application version** column.
 
 API check in GraphiQL:
 
