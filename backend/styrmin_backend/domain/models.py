@@ -32,6 +32,9 @@ class Instance(BaseModel):
 
     context: GlobalContext
 
+    # Position among the deployment's instances; the repository sets it on the first save.
+    sequence: int | None = None
+
     @classmethod
     def create(
         cls,

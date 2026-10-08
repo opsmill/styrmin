@@ -175,8 +175,12 @@ _Avoid_: "kubectl apply" (intentionally similar UX but not the same semantics �
 ### Instances — current (realised) state
 
 **Instance** (`ApplicationInstance`):
-A frozen snapshot of what was actually deployed at a point in time, generated from a **deployment** at **reconciliation** time. Carries a serialised `GlobalContext` in its `context` field. A **deployment** owns at most one **active instance** at a time.
+A frozen snapshot of what was actually deployed at a point in time, generated from a **deployment** at **reconciliation** time. Carries a serialised `GlobalContext` in its `context` field. A **deployment** owns at most one **active instance** at a time. Each instance carries an **instance sequence**.
 _Avoid_: "application instance" in prose (fine in code), "release", "rollout", "version".
+
+**Instance sequence**:
+The position of an **instance** among the instances of its **deployment**: 1 for the first, then one more for each new instance (`ApplicationInstance.sequence`). The repository assigns it when it saves a new **active instance**, by incrementing `Deployment.last_instance_sequence` under the deployment row lock, so the instance committed last holds the highest sequence. Recorded on the **StyrminDeployment** in the `styrmin.io/instance-sequence` annotation, and a **flow** leaves a StyrminDeployment that holds a higher sequence than its own instance unchanged ([#386](https://github.com/opsmill/styrmin/issues/386)).
+_Avoid_: "revision" (Helm's term for a release version), "generation" (Kubernetes' `metadata.generation`), "instance number".
 
 **Active instance**:
 The single **instance** currently considered live for a **deployment** — pointed to by `Deployment.active_application_instance_id`. Reconciliation compares the proposed new **instance** against the **active instance**.
@@ -229,7 +233,7 @@ The flow of direction from **server** to **agent**: GraphQL → service → **Ta
 _Avoid_: "command", "RPC", "push" (the agent pulls).
 
 **StyrminDeployment** (CRD):
-Styrmin's primary Custom Resource Definition. Carries the embedded **GlobalContext** in `spec` and is the **operator**'s single source of truth about what should be running. Watched by the **kopf operator**. Its `status.instanceId` names the **instance** whose `spec.instanceId` the operator's create, update or resume handler last acted on (written also when the handler fails), so it changes only once the operator has picked up a new spec; `spec.instanceId` is the instance the last **flow** wrote. `status.rolloutStartedAt` is when the current rollout started, and the readiness timeout counts from it.
+Styrmin's primary Custom Resource Definition. Carries the embedded **GlobalContext** in `spec` and is the **operator**'s single source of truth about what should be running. Watched by the **kopf operator**. Its `status.instanceId` names the **instance** whose `spec.instanceId` the operator's create, update or resume handler last acted on (written also when the handler fails), so it changes only once the operator has picked up a new spec; `spec.instanceId` is the instance of the last **flow** that wrote the StyrminDeployment, which is the instance with the highest **instance sequence** among the flows that have run. The `styrmin.io/instance-sequence` annotation holds that sequence; Styrmin manages it and users must not edit it. `status.rolloutStartedAt` is when the current rollout started, and the readiness timeout counts from it.
 _Avoid_: "deployment CRD" (ambiguous with the database `Deployment`), "the CR".
 
 **Operator**:

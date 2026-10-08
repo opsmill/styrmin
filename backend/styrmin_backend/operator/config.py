@@ -16,11 +16,15 @@ LABEL_OPERATOR_MANAGED_VALUE = "true"
 # --- Annotations ---
 ANNOTATION_DEPLOYMENT_IN_PROGRESS = "styrmin.io/deployment-in-progress"
 ANNOTATION_DEPLOYMENT_ID = "styrmin.io/deployment-id"
+#: The sequence of the instance in a StyrminDeployment's ``spec.instanceId``.
+ANNOTATION_INSTANCE_SEQUENCE = "styrmin.io/instance-sequence"
 
 # --- Kubernetes Event reasons ---
 EVENT_RECONCILE_SUCCEEDED = "ReconcileSucceeded"
 EVENT_DRIFT_DETECTED = "DriftDetected"
 EVENT_RECONCILE_FAILED = "ReconcileFailed"
+#: A flow left a StyrminDeployment that holds a newer instance unchanged.
+EVENT_NEWER_INSTANCE_KEPT = "NewerInstanceKept"
 
 # --- Kubernetes resource constants ---
 HELMRELEASE_GROUP = "helm.toolkit.fluxcd.io"

@@ -205,14 +205,17 @@ Execution order, with the step that each part records:
 3. Build the StyrminDeployment CRD body   step resource:styrmindeployment
    from the resolved context              (steps 3 to 5)
 4. Apply the deployment namespace with labels
-5. Upsert the StyrminDeployment CRD       ──> operator reconciles in
-                                              ordered phases (NetworkPolicies,
+5. Write the StyrminDeployment CRD,       ──> operator reconciles in
+   unless it holds a higher sequence          ordered phases (NetworkPolicies,
                                               Secrets -> HelmRelease ->
                                               Services, Middlewares)
 6. Apply cross-namespace ExternalName     step resource:service-aliases
-   service aliases (if any)               (only when there are aliases)
+   service aliases (if any, and only      (only when there are aliases)
+   when step 5 wrote the CRD)
 7. Run post-hook (if posthook is not None) step hook:setup:post
 ```
+
+A flow never replaces a StyrminDeployment that holds an instance with a higher sequence than its own, and then skips its service aliases; see [Write order of the StyrminDeployment](../agent/operator.md#write-order-of-the-styrmindeployment).
 
 When the `resource:styrmindeployment` step succeeds, the recorder creates this task's four operator-phase steps (none for an internal deployment) and supersedes the open operator-phase steps of the deployment's older tasks. See [Remediation-flow steps](#remediation-flow-steps).
 
@@ -234,11 +237,12 @@ Execution order:
 ```text
 1. Extract context, release_reference, namespace from instance.context
 2. Build the new StyrminDeployment CRD body  step resource:styrmindeployment
-3. Upsert the CRD                          ──> operator reconciles
-                                              the new HelmRelease and
+3. Write the CRD, unless it holds a       ──> operator reconciles
+   higher sequence                            the new HelmRelease and
                                               utility resources
 4. Apply cross-namespace service aliases   step resource:service-aliases
-   (if any)
+   (if any, and only when step 3 wrote
+   the CRD)
 ```
 
 Called via `Remediation(type=UPDATE_INSTANCE, flow_id=<UPDATE_INSTANCE deployment>, parameters={instance})`. No hooks are involved in updates.
@@ -261,15 +265,18 @@ async def upgrade_instance_crd(
 Execution order:
 
 ```text
-1. Build and upsert StyrminDeployment CRD (the new spec)   step resource:styrmindeployment
+1. Build and write StyrminDeployment CRD (the new spec),   step resource:styrmindeployment
+   unless it holds a higher sequence
 2. Patch CRD status to displayState=Deploying / phase=Pending atomically
    with the spec change. Without this, a stale "Running" displayState
    could race the agent into reporting the new instance as healthy
-   before the new rollout has even started.   (still resource:styrmindeployment)
+   before the new rollout has even started. Skipped when step 1 left
+   the CRD unchanged.                         (still resource:styrmindeployment)
 3. Run pre-hook (if prehook is not None)                   step hook:upgrade:pre
 4. Run core upgrade hook (driver's upgrade function —      step hook:upgrade:core
    e.g. stop, migrate, start)
-5. Apply cross-namespace service aliases (if any)          step resource:service-aliases
+5. Apply cross-namespace service aliases (if any, and      step resource:service-aliases
+   only when step 1 wrote the CRD)
 6. Run post-hook (if posthook is not None)                 step hook:upgrade:post
 ```
 
@@ -294,7 +301,7 @@ The three CRD flows record their steps with `StepReporter.from_env()`. Keys, nam
 | `resource:styrmindeployment` | Write the StyrminDeployment resource | `RESOURCE_WRITE` | all three CRD flows |
 | `hook:upgrade:pre` | Run the upgrade pre-hook | `HOOK` | `upgrade_instance_crd`, when the driver has an upgrade pre-hook |
 | `hook:upgrade:core` | Run the upgrade hook | `HOOK` | `upgrade_instance_crd` |
-| `resource:service-aliases` | Create service aliases | `RESOURCE_WRITE` | all three CRD flows, only when the context has aliases |
+| `resource:service-aliases` | Create service aliases | `RESOURCE_WRITE` | all three CRD flows, only when the context has aliases and the flow wrote the StyrminDeployment |
 | `hook:setup:post` | Run the setup post-hook | `HOOK` | `create_instance_crd`, when the driver has a setup post-hook |
 | `hook:upgrade:post` | Run the upgrade post-hook | `HOOK` | `upgrade_instance_crd`, when the driver has an upgrade post-hook |
 

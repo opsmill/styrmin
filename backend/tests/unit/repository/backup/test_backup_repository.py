@@ -76,6 +76,7 @@ async def instance(
         status=InstanceStatus.RUNNING,
         deployment_id=deployment.id,
         application_driver_version_id=uuid4(),
+        sequence=1,
     )
     session.add(inst)
     await session.flush()
@@ -232,6 +233,7 @@ async def _create_deployment_with_instance(
         status=InstanceStatus.RUNNING,
         deployment_id=dep.id,
         application_driver_version_id=uuid4(),
+        sequence=1,
     )
     session.add(inst)
     await session.flush()
@@ -249,6 +251,7 @@ async def second_instance(
         status=InstanceStatus.RUNNING,
         deployment_id=deployment.id,
         application_driver_version_id=uuid4(),
+        sequence=2,
     )
     session.add(inst)
     await session.flush()

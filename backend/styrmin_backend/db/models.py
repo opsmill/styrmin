@@ -457,6 +457,13 @@ class Deployment(StyrminModel, table=True):
         foreign_key="applicationinstance.id", default=None
     )
 
+    # The sequence of the deployment's newest instance. Only the repository's
+    # atomic increment writes it, so it has no default that a merge could copy.
+    last_instance_sequence: int | None = Field(  # type: ignore[call-overload]
+        sa_column_kwargs={"server_default": "0"},
+        nullable=False,
+    )
+
     active_application_instance: Optional["ApplicationInstance"] = Relationship(
         back_populates="is_active_for",
         sa_relationship_kwargs={
@@ -493,6 +500,14 @@ class InstanceStatus(str, Enum):
 
 
 class ApplicationInstance(StyrminModel, table=True):
+    __table_args__ = (
+        UniqueConstraint(
+            "deployment_id",
+            "sequence",
+            name="uq_applicationinstance_deployment_sequence",
+        ),
+    )
+
     name: str = Field(unique=True)
     application_version: str
     status: InstanceStatus = Field(sa_column=Column(SQLModelEnum(InstanceStatus)))
@@ -519,6 +534,9 @@ class ApplicationInstance(StyrminModel, table=True):
     )
 
     context: dict | None = Field(default=None, sa_column=Column(JSON))
+
+    # 1 for the deployment's first instance, then one more for each new one.
+    sequence: int = Field(nullable=False)
 
 
 class BackupStatus(str, Enum):

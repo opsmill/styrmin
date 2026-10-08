@@ -76,6 +76,7 @@ async def instance(
         status=InstanceStatus.RUNNING,
         deployment_id=deployment.id,
         application_driver_version_id=uuid4(),
+        sequence=1,
     )
     session.add(inst)
     await session.flush()
@@ -222,6 +223,7 @@ async def test_get_non_terminal_by_source_deployment_id(
         status=InstanceStatus.RUNNING,
         deployment_id=other_deployment.id,
         application_driver_version_id=uuid4(),
+        sequence=1,
     )
     session.add(other_instance)
     await session.flush()

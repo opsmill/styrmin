@@ -92,6 +92,7 @@ async def instance(
         status=InstanceStatus.RUNNING,
         deployment_id=deployment.id,
         application_driver_version_id=uuid4(),
+        sequence=1,
     )
     session.add(inst)
     await session.flush()

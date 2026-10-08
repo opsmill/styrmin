@@ -135,6 +135,21 @@ version the deployment already has starts no task. Calls that an action
 makes through the Python SDK instead of these primitives are not linked:
 the tasks they create appear as separate entries.
 
+### Hooks of an earlier change
+
+Each change to a deployment starts its own workflow. When a later
+change reaches the cluster first, the workflow of the earlier change
+leaves the `StyrminDeployment` unchanged but still runs the hooks of
+the earlier change. For an upgrade, the upgrade pre-hook, upgrade hook
+and post-hook can then run while the deployment already runs the later
+change, and after the deployment page shows `running` for it. An action
+that calls `stop_components` or `start_components` in that case starts
+a task that uses the deployment's current configuration, which includes
+the later change.
+
+Wait for the task of an upgrade to end before you make the next change
+to the deployment.
+
 ### Reading a component's images
 
 Upgrade actions often run a migration Job with the component's own

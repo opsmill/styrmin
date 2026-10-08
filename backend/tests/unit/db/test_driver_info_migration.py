@@ -106,10 +106,9 @@ def _applied_revisions(url: str) -> set[str]:
     return {row.version_num for row in rows}
 
 
-def test_revision_is_the_single_head_after_the_installation_revision() -> None:
+def test_revision_follows_the_installation_revision() -> None:
     script = ScriptDirectory.from_config(_get_alembic_config())
 
-    assert script.get_heads() == [REVISION]
     assert script.get_revision(REVISION).down_revision == PREVIOUS_REVISION
 
 

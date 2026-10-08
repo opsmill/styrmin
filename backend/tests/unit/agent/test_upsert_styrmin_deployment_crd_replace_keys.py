@@ -18,7 +18,10 @@ from uuid import uuid4
 import pytest
 from kubernetes_asyncio.client.api_client import ApiException
 
-from styrmin_backend.agent.service.kubernetes.primitives import upsert_custom_resource
+from styrmin_backend.agent.service.kubernetes.primitives import (
+    replace_spec_keys_json_patch,
+    upsert_custom_resource,
+)
 from styrmin_backend.context.models.config import (
     ClusterConfig,
     DeploymentConfig,
@@ -152,16 +155,27 @@ async def test_cleared_context_key_is_gone_and_deletion_request_survives() -> No
 
 
 @pytest.mark.asyncio
-async def test_agent_crd_apply_opts_into_per_key_replace() -> None:
+async def test_agent_crd_apply_replaces_each_spec_key() -> None:
     from styrmin_backend.agent.tasks import orchestration
 
-    upsert = AsyncMock()
+    live = _crd_body({"LOG_LEVEL": "debug"})
+    live["metadata"]["resourceVersion"] = "7"
+    patch_cr = AsyncMock()
     body = _crd_body(None)
-    with patch.object(orchestration, "upsert_custom_resource", upsert):
-        await orchestration._apply_styrmin_deployment_crd(body=body, namespace="ns")
+    with (
+        patch.object(
+            orchestration, "get_custom_resource", AsyncMock(return_value=live)
+        ),
+        patch.object(orchestration, "patch_custom_resource", patch_cr),
+    ):
+        kept = await orchestration._apply_styrmin_deployment_crd(
+            body=body, namespace="ns"
+        )
 
-    upsert.assert_awaited_once()
-    kwargs = upsert.call_args.kwargs
-    assert kwargs["plurals"] == CRD_PLURAL
-    assert kwargs["body"] is body
-    assert kwargs["replace_spec_keys_on_update"] is True
+    assert kept is None
+    kwargs = patch_cr.call_args.kwargs
+    assert kwargs["plural"] == CRD_PLURAL
+    assert kwargs["patch"] == [
+        {"op": "test", "path": "/metadata/resourceVersion", "value": "7"},
+        *replace_spec_keys_json_patch(body),
+    ]

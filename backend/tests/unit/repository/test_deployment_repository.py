@@ -1,9 +1,12 @@
+import asyncio
 from uuid import uuid4
 
 import pytest
-from sqlmodel import select
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from styrmin_backend.db.models import ApplicationInstance as InstanceModel
 from styrmin_backend.db.models import (
     ApplicationDriver,
     ApplicationDriverVersion,
@@ -70,6 +73,10 @@ def _make_global_context(deployment_id, chart_id, repo_id) -> GlobalContext:
 @pytest.fixture
 async def prerequisites(session: AsyncSession):
     """Create all prerequisite DB records for a deployment."""
+    return await _create_prerequisites(session)
+
+
+async def _create_prerequisites(session: AsyncSession) -> dict:
     helm_repo = HelmRepository(id=uuid4(), url="https://example.com/charts")
     session.add(helm_repo)
 
@@ -237,6 +244,149 @@ async def test_save_preserves_active_instance_on_round_trip(
     assert db_deployment.active_application_instance_id == instance_id, (
         "active_application_instance_id was nulled out after a find() -> save() round-trip"
     )
+
+
+# ---------------------------------------------------------------------------
+# Instance sequence (#386)
+# ---------------------------------------------------------------------------
+
+
+def _new_instance(deployment_id, prerequisites: dict) -> InstanceEntity:
+    return InstanceEntity(
+        id=uuid4(),
+        name=f"instance-{uuid4().hex[:8]}",
+        application_version="1.0.0",
+        status=InstanceStatusEntity.PENDING,
+        deployment_id=deployment_id,
+        application_driver_version_id=prerequisites["app_driver_version"].id,
+        context=_make_global_context(
+            deployment_id,
+            prerequisites["helm_chart"].id,
+            prerequisites["helm_repo"].id,
+        ),
+    )
+
+
+def _new_deployment(prerequisites: dict) -> DeploymentEntity:
+    deployment = DeploymentEntity(
+        id=uuid4(),
+        name=f"sequence-{uuid4().hex[:8]}",
+        application_version="1.0.0",
+        config={},
+        application_driver_version_id=prerequisites["app_driver_version"].id,
+        environment_id=prerequisites["environment"].id,
+        status=DeploymentStateEntity.PENDING,
+        created_by_user_id=prerequisites["creator"].id,
+    )
+    deployment.set_active_instance(_new_instance(deployment.id, prerequisites))
+    return deployment
+
+
+async def _sequences(session: AsyncSession, deployment_id) -> tuple[int | None, dict]:
+    deployment = (
+        await session.exec(
+            select(DeploymentModel).where(DeploymentModel.id == deployment_id)
+        )
+    ).one()
+    await session.refresh(deployment)
+    instances = (
+        await session.exec(
+            select(InstanceModel).where(InstanceModel.deployment_id == deployment_id)
+        )
+    ).all()
+    return deployment.last_instance_sequence, {i.id: i.sequence for i in instances}
+
+
+@pytest.mark.asyncio
+async def test_save_numbers_each_new_instance_of_a_deployment(
+    session: AsyncSession, prerequisites
+):
+    repo = SQLModelDeploymentRepository(session)
+    deployment = _new_deployment(prerequisites)
+    first = deployment.active_instance
+    assert first is not None
+
+    await repo.save(deployment)
+    await session.commit()
+
+    assert deployment.active_instance is not None
+    assert deployment.active_instance.sequence == 1
+    assert await _sequences(session, deployment.id) == (1, {first.id: 1})
+
+    # A save that keeps the instance, here after a find(), leaves the counter alone.
+    loaded = await repo.find(id=deployment.id)
+    assert loaded is not None
+    assert loaded.active_instance is not None
+    assert loaded.active_instance.sequence == 1
+    loaded.status = DeploymentStateEntity.RUNNING
+    await repo.save(loaded)
+    await session.commit()
+    assert await _sequences(session, deployment.id) == (1, {first.id: 1})
+
+    second = _new_instance(deployment.id, prerequisites)
+    loaded.set_active_instance(second)
+    await repo.save(loaded)
+    await session.commit()
+
+    assert loaded.active_instance is not None
+    assert loaded.active_instance.sequence == 2
+    assert await _sequences(session, deployment.id) == (2, {first.id: 1, second.id: 2})
+
+
+@pytest.mark.asyncio
+async def test_a_second_new_instance_waits_for_the_first_and_gets_the_next_sequence(
+    postgres_url: str,
+):
+    """Two updates that overlap: the instance committed last holds the highest sequence."""
+    engine = create_async_engine(postgres_url)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+        async with AsyncSession(engine, expire_on_commit=False) as setup:
+            prerequisites = await _create_prerequisites(setup)
+            deployment = _new_deployment(prerequisites)
+            await SQLModelDeploymentRepository(setup).save(deployment)
+            await setup.commit()
+
+        async with (
+            AsyncSession(engine, expire_on_commit=False) as first_session,
+            AsyncSession(engine, expire_on_commit=False) as second_session,
+        ):
+            first_repo = SQLModelDeploymentRepository(first_session)
+            second_repo = SQLModelDeploymentRepository(second_session)
+            first = await first_repo.find(id=deployment.id)
+            second = await second_repo.find(id=deployment.id)
+            assert first is not None and second is not None
+            first.set_active_instance(_new_instance(deployment.id, prerequisites))
+            second.set_active_instance(_new_instance(deployment.id, prerequisites))
+
+            await first_repo.save(first)
+            second_save = asyncio.create_task(second_repo.save(second))
+            await asyncio.sleep(0.5)
+            assert not second_save.done(), "the second save must wait for the row lock"
+            await first_session.commit()
+            await second_save
+            await second_session.commit()
+
+        assert first.active_instance is not None
+        assert second.active_instance is not None
+        assert (first.active_instance.sequence, second.active_instance.sequence) == (
+            2,
+            3,
+        )
+        async with AsyncSession(engine) as check:
+            counter, _ = await _sequences(check, deployment.id)
+            active_id = (
+                await check.exec(
+                    select(DeploymentModel.active_application_instance_id).where(
+                        DeploymentModel.id == deployment.id
+                    )
+                )
+            ).one()
+        assert counter == 3
+        assert active_id == second.active_instance.id
+    finally:
+        await engine.dispose()
 
 
 # ---------------------------------------------------------------------------

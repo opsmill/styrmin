@@ -12,11 +12,13 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+from kubernetes_asyncio.client.api_client import ApiException
 from pydantic import SecretStr
 
 from styrmin_backend import config
 from styrmin_backend.agent.tasks import orchestration
 from styrmin_backend.agent.tasks.orchestration import (
+    KeptInstance,
     create_instance_crd,
     update_instance_crd,
     upgrade_instance_crd,
@@ -43,6 +45,7 @@ from styrmin_backend.context.models.contexts import (
 )
 from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryInfo
 from styrmin_backend.domain.models import Instance, InstanceStatus
+from styrmin_backend.operator.config import ANNOTATION_INSTANCE_SEQUENCE
 from tests.helpers.step_api import FakeStepApi
 
 Event = tuple[Any, ...]
@@ -67,13 +70,22 @@ class Cluster:
     def __init__(self, events: list[Event]) -> None:
         self.events = events
         self.failing_action: UUID | None = None
+        #: Set when the StyrminDeployment holds a newer instance that the write keeps.
+        self.kept: KeptInstance | None = None
+        self.crd_bodies: list[dict[str, Any]] = []
+        self.k8s_events: list[dict[str, Any]] = []
         self.action_step_ids: dict[UUID, UUID | None] = {}
 
     async def namespace(self, **_: Any) -> None:
         self.events.append(("namespace",))
 
-    async def crd(self, **_: Any) -> None:
+    async def crd(self, **_: Any) -> KeptInstance | None:
         self.events.append(("crd",))
+        return self.kept
+
+    async def k8s_event(self, **kwargs: Any) -> None:
+        self.events.append(("k8s event",))
+        self.k8s_events.append(kwargs)
 
     async def status_reset(self, **_: Any) -> None:
         self.events.append(("status reset",))
@@ -116,15 +128,24 @@ def cluster(monkeypatch: pytest.MonkeyPatch, events: list[Event]) -> Cluster:
     fake = Cluster(events)
     for name, mock in (
         ("apply_kubernetes_namespace", fake.namespace),
-        ("upsert_custom_resource", fake.crd),
+        ("_apply_styrmin_deployment_crd", fake.crd),
+        ("create_event", fake.k8s_event),
         ("patch_custom_resource_status", fake.status_reset),
         ("apply_service_aliases", fake.aliases),
         ("run_driver_action_or_fail", fake.action),
     ):
         monkeypatch.setattr(orchestration, name, AsyncMock(side_effect=mock))
-    monkeypatch.setattr(
-        orchestration, "build_styrmin_deployment_body", lambda **_: {"spec": {}}
-    )
+
+    def build_body(**kwargs: Any) -> dict[str, Any]:
+        fake.crd_bodies.append(kwargs)
+        sequence = kwargs.get("instance_sequence")
+        annotations = {ANNOTATION_INSTANCE_SEQUENCE: str(sequence)} if sequence else {}
+        return {
+            "metadata": {"name": kwargs["namespace"], "annotations": annotations},
+            "spec": {"instanceId": "older-instance"},
+        }
+
+    monkeypatch.setattr(orchestration, "build_styrmin_deployment_body", build_body)
     return fake
 
 
@@ -257,7 +278,7 @@ async def test_create_failing_resource_write_records_failed(
 ) -> None:
     monkeypatch.setattr(
         orchestration,
-        "upsert_custom_resource",
+        "_apply_styrmin_deployment_crd",
         AsyncMock(side_effect=ValueError("admission webhook denied")),
     )
 
@@ -377,6 +398,138 @@ async def test_upgrade_failing_core_hook_records_failed_and_stops(
         ("FAILED", "hook:upgrade:core"),
     ]
     assert "hook broke" in api.failed("hook:upgrade:core")["error"]
+
+
+# A StyrminDeployment that already holds a newer instance (#386)
+
+NEWER = KeptInstance(instance_id="newer-instance", sequence=8, resource_uid="uid-1")
+
+
+def _older_instance() -> Instance:
+    return _instance().model_copy(update={"sequence": 7})
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("without_aliases")
+async def test_flows_record_the_instance_sequence_on_the_resource(
+    api: FakeStepApi, cluster: Cluster
+) -> None:
+    instance = _instance().model_copy(update={"sequence": 7})
+
+    await create_instance_crd(instance=instance, prehook=None, posthook=None)
+    await update_instance_crd(instance=instance)
+    await upgrade_instance_crd(
+        instance=instance, upgrade_hook=uuid4(), target_version="2.0.0"
+    )
+
+    assert [body["instance_sequence"] for body in cluster.crd_bodies] == [7] * 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("with_aliases")
+async def test_create_that_keeps_a_newer_instance_runs_its_hooks_without_aliases(
+    api: FakeStepApi, cluster: Cluster, events: list[Event]
+) -> None:
+    cluster.kept = NEWER
+    prehook, posthook = uuid4(), uuid4()
+
+    await create_instance_crd(
+        instance=_older_instance(), prehook=prehook, posthook=posthook
+    )
+
+    assert events == [
+        *_step("hook:setup:pre", ("action", prehook)),
+        *_step(
+            "resource:styrmindeployment",
+            ("namespace",),
+            ("crd",),
+            ("OUTPUT", "resource:styrmindeployment"),
+            ("k8s event",),
+        ),
+        *_step("hook:setup:post", ("action", posthook)),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("with_aliases")
+async def test_update_that_keeps_a_newer_instance_records_why_on_its_step(
+    api: FakeStepApi, cluster: Cluster, events: list[Event]
+) -> None:
+    cluster.kept = NEWER
+    instance = _older_instance()
+    namespace = instance.context.instance.namespace
+
+    await update_instance_crd(instance=instance)
+
+    assert events == _step(
+        "resource:styrmindeployment",
+        ("crd",),
+        ("OUTPUT", "resource:styrmindeployment"),
+        ("k8s event",),
+    )
+    message = (
+        f"Left StyrminDeployment {namespace}/{namespace} unchanged: it holds instance "
+        "newer-instance (sequence 8) of a later change. This task's instance is "
+        "older-instance (sequence 7)."
+    )
+    output = api.record("OUTPUT", "resource:styrmindeployment")
+    assert (output["output"], output["outputTruncated"]) == (message, False)
+    [k8s_event] = cluster.k8s_events
+    involved = k8s_event["involved_object"]
+    assert (involved.kind, involved.name, involved.namespace, involved.uid) == (
+        "StyrminDeployment",
+        namespace,
+        namespace,
+        "uid-1",
+    )
+    assert (k8s_event["reason"], k8s_event["message"]) == ("NewerInstanceKept", message)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("with_aliases")
+async def test_upgrade_that_keeps_a_newer_instance_keeps_its_status(
+    api: FakeStepApi, cluster: Cluster, events: list[Event]
+) -> None:
+    cluster.kept = NEWER
+    core = uuid4()
+
+    await upgrade_instance_crd(
+        instance=_instance(), upgrade_hook=core, target_version="2.0.0"
+    )
+
+    assert events == [
+        *_step(
+            "resource:styrmindeployment",
+            ("crd",),
+            ("OUTPUT", "resource:styrmindeployment"),
+            ("k8s event",),
+        ),
+        *_step("hook:upgrade:core", ("action", core)),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("without_aliases")
+async def test_a_failed_event_write_does_not_fail_the_step(
+    api: FakeStepApi,
+    cluster: Cluster,
+    events: list[Event],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cluster.kept = NEWER
+    monkeypatch.setattr(
+        orchestration,
+        "create_event",
+        AsyncMock(side_effect=ApiException(status=403, reason="Forbidden")),
+    )
+
+    await update_instance_crd(instance=_instance())
+
+    assert events == _step(
+        "resource:styrmindeployment",
+        ("crd",),
+        ("OUTPUT", "resource:styrmindeployment"),
+    )
 
 
 # Reporting off

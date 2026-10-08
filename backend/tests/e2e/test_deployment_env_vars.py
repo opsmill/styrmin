@@ -25,23 +25,29 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from typing import Any, AsyncGenerator, Callable
 
 import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import APIObject
+from kubernetes_asyncio import client as kubeclient
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
+from styrmin_sdk.models import ComponentConfigInput, EnvVarInput, UpdateDeploymentInput
 
 from tests.e2e.drivers import ScenarioDriver
-from tests.e2e.helpers.workloads import _wait_for_pod_template
+from tests.e2e.drivers.api_driver import ApiScenarioDriver
+from tests.e2e.helpers.workloads import _wait_for_pod_template, container_command_args
 
 pytestmark = [
     pytest.mark.shard_env,
 ]
 
 RECONCILE_TIMEOUT_SECONDS = 480.0
+# The image's CMD, which a server ``args`` override replaces.
+SERVER_ARGS = ["--host", "0.0.0.0", "--port", "8000"]
 
 
 def _container_envs(dep: Any, container: str | None = None) -> list[dict[str, str]]:
@@ -340,6 +346,109 @@ async def test_us1_deployment_level_env_var(
         "post-render patch must merge by name (FR-014a). Observed env entries "
         f"on the simple-app container: {sorted(env)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Two updates sent one after another (#386)
+# ---------------------------------------------------------------------------
+
+
+async def _wait_for_task_results(
+    client: StyrminClient, deployment_id: str, task_ids: list[str]
+) -> dict[str, str]:
+    """Read the timeline until none of ``task_ids`` is still ``RUNNING``."""
+    driver = ApiScenarioDriver(client)
+    deadline = time.monotonic() + RECONCILE_TIMEOUT_SECONDS
+    results: dict[str, str] = {}
+    while True:
+        timeline = await driver.get_deployment_timeline(deployment_id=deployment_id)
+        results = {e.task_id: e.result for e in timeline if e.task_id in task_ids}
+        if len(results) == len(task_ids) and "RUNNING" not in results.values():
+            return results
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"tasks still running after {RECONCILE_TIMEOUT_SECONDS}s: {results}"
+            )
+        await asyncio.sleep(3.0)
+
+
+@pytest.mark.api_only(
+    reason=(
+        "Sends two updateDeployment calls back to back through the SDK; the UI "
+        "driver's update_deployment only accepts the 'scheduling' sub-tree."
+    )
+)
+@pytest.mark.ci
+async def test_back_to_back_updates_keep_the_newest_config(
+    env_vars_environment: dict,
+    env_vars_deployment: dict,
+    vcluster: dict,
+    scenario_driver: ScenarioDriver,
+    _env_vars_driver_bound: None,
+) -> None:
+    """The StyrminDeployment ends with the second of two updates sent one after another.
+
+    Each update schedules its own flow, and the two flows can write the
+    StyrminDeployment in either order. Each update also changes the server's
+    ``args``, a Helm value: FluxCD's helm-controller v1.1.0 drops a change to
+    the post-render patches alone that arrives during an upgrade (#433).
+    Ends with ``LOG_LEVEL=debug``, as US1 does, and with the second ``args``.
+    """
+    client: StyrminClient = env_vars_environment["client"]
+    deployment_id = env_vars_deployment["deployment_id"]
+    namespace = env_vars_deployment["namespace"]
+
+    def update(log_level: str) -> UpdateDeploymentInput:
+        return UpdateDeploymentInput(
+            env_vars=[EnvVarInput(name="LOG_LEVEL", value=log_level)],
+            components=[
+                ComponentConfigInput(
+                    name="server", args=[*SERVER_ARGS, "--log-level", log_level]
+                )
+            ],
+        )
+
+    first = await client.deployments.update(deployment_id, input=update("info"))
+    second = await client.deployments.update(deployment_id, input=update("debug"))
+    assert first is not None and second is not None
+
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+
+    active = (await client.deployments.get(deployment_id)).application_instance
+    assert active is not None
+    resource = await kubeclient.CustomObjectsApi(
+        vcluster["api"]
+    ).get_namespaced_custom_object(
+        group="styrmin.io",
+        version="v1alpha1",
+        namespace=namespace,
+        plural="styrmindeployments",
+        name=namespace,
+    )
+    assert resource["spec"]["instanceId"] == str(active.id), (
+        "the StyrminDeployment does not hold the deployment's active instance"
+    )
+    assert resource["metadata"]["annotations"]["styrmin.io/instance-sequence"].isdigit()
+
+    second_args = [*SERVER_ARGS, "--log-level", "debug"]
+    dep = await _wait_for_pod_template(
+        vcluster,
+        namespace=namespace,
+        label_selector="app.kubernetes.io/name=simple-app",
+        predicate=lambda d: (
+            _literal(_simple_app_env(d), "LOG_LEVEL") == "debug"
+            and container_command_args(d, container_name="simple-app")[1] == second_args
+        ),
+        description="LOG_LEVEL=debug and the args of the second update to land",
+    )
+    assert _literal(_simple_app_env(dep), "LOG_LEVEL") == "debug"
+
+    results = await _wait_for_task_results(
+        client, deployment_id, [str(first.id), str(second.id)]
+    )
+    assert results == {str(first.id): "SUPERSEDED", str(second.id): "SUCCEEDED"}
 
 
 # ---------------------------------------------------------------------------

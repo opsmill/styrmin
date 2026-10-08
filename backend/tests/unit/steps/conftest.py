@@ -124,6 +124,7 @@ async def parents(uow: SqlModelUnitOfWork) -> Parents:
         application_driver_version_id=driver_version.id,
         environment_id=environment.id,
         created_by_user_id=user.id,
+        last_instance_sequence=1,
     )
     session.add(deployment)
     await session.flush()
@@ -133,6 +134,7 @@ async def parents(uow: SqlModelUnitOfWork) -> Parents:
         status=InstanceStatus.RUNNING,
         deployment_id=deployment.id,
         application_driver_version_id=driver_version.id,
+        sequence=1,
     )
     session.add(instance)
     await session.flush()

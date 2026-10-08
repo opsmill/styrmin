@@ -11,6 +11,7 @@ from typing import Any
 
 from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.operator.config import (
+    ANNOTATION_INSTANCE_SEQUENCE,
     CRD_GROUP,
     CRD_KIND,
     CRD_VERSION,
@@ -26,6 +27,7 @@ def build_styrmin_deployment_body(
     helm_chart_spec: dict[str, Any] | None = None,
     helm_repo_spec: dict[str, Any] | None = None,
     internal: bool = False,
+    instance_sequence: int | None = None,
 ) -> dict[str, Any]:
     """Build a StyrminDeployment CRD body from deployment context.
 
@@ -48,20 +50,25 @@ def build_styrmin_deployment_body(
         helm_chart_spec: Rendered Helm chart spec (optional, derived from context if not provided).
         helm_repo_spec: Rendered Helm repository spec (optional).
         internal: Whether this is an internal deployment (e.g., ingress controller). Defaults to False.
+        instance_sequence: The instance's sequence, recorded in the
+            ``styrmin.io/instance-sequence`` annotation (#386).
 
     Returns:
         Dict suitable for upsert_custom_resource.
     """
+    metadata: dict[str, Any] = {
+        "name": namespace,
+        "namespace": namespace,
+        "labels": {
+            LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE,
+        },
+    }
+    if instance_sequence is not None:
+        metadata["annotations"] = {ANNOTATION_INSTANCE_SEQUENCE: str(instance_sequence)}
     return {
         "apiVersion": f"{CRD_GROUP}/{CRD_VERSION}",
         "kind": CRD_KIND,
-        "metadata": {
-            "name": namespace,
-            "namespace": namespace,
-            "labels": {
-                LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE,
-            },
-        },
+        "metadata": metadata,
         "spec": {
             "deploymentId": str(context.instance.deployment_id),
             "instanceId": (

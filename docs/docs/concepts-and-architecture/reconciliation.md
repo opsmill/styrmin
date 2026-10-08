@@ -84,6 +84,69 @@ Reconciliation is what happens between them:
 6. **The new Instance becomes the active Instance** once the work
    succeeds. The next change starts from there.
 
+### Several changes in quick succession
+
+Each change to a deployment starts its own workflow, whether you make it
+on the deployment page, with `styrminctl` or through the API. When you
+make changes one after another, their workflows can still run at the
+same time and reach the cluster in any order.
+
+Styrmin numbers the Instances of each deployment in the order it saves
+them, and the `StyrminDeployment` records the number of the Instance it
+holds, in the `styrmin.io/instance-sequence` annotation. A workflow
+leaves a `StyrminDeployment` that holds a higher number unchanged. For
+changes made one after another, the deployment therefore runs the
+configuration of the last change, in whatever order the workflows
+finish.
+
+What you view for the earlier change:
+
+- Its task ends as `superseded` on the deployment page and in
+  `styrminctl tasks get`.
+- When its workflow left the `StyrminDeployment` unchanged, its "Write
+  the StyrminDeployment resource" step shows the reason under "Show
+  output", and `kubectl describe styrmindeployment` shows a
+  `NewerInstanceKept` event.
+- Its workflow still runs the driver actions of that change, such as
+  its setup or upgrade hooks. See
+  [Hooks of an earlier change](hooks-and-actions.md#hooks-of-an-earlier-change).
+
+#### Changes to environment variables or image overrides only
+
+Styrmin applies environment variables and image overrides through
+post-render patches of the deployment's HelmRelease. With the FluxCD
+helm-controller that Styrmin installs (v1.1.0), a change that changes
+only these patches can be dropped when it reaches the cluster while
+FluxCD still upgrades the previous change. The deployment then shows
+`running`, but its pods keep the previous values until the next change
+([#433](https://github.com/opsmill/styrmin/issues/433)). To apply the
+last values, make another change to the deployment after both tasks
+have ended.
+
+#### Changes made at the same time
+
+When two changes to the same deployment are made at the same time, for
+example from two browser windows, both can start from the same active
+Instance. The change that Styrmin saves second does not include the
+first one. The deployment runs that second change, and the deployment
+page shows its Instance as the active Instance. To apply the first
+change, make it again after both tasks have ended.
+
+#### Do not edit `styrmin.io/instance-sequence`
+
+Styrmin manages this annotation. If it holds a number higher than any
+Instance of the deployment, for example after someone edits it with
+`kubectl`, every workflow leaves the `StyrminDeployment` unchanged: the
+deployment stays `pending` and its newest task keeps running. To
+recover, remove the annotation, then make a change to the deployment:
+
+```bash
+kubectl annotate styrmindeployment <namespace> -n <namespace> styrmin.io/instance-sequence-
+```
+
+The workflow of that change writes the deployment's whole
+configuration, including the changes that did not reach the cluster.
+
 ### Why two Instances, not just "the deployment"?
 
 Two reasons.

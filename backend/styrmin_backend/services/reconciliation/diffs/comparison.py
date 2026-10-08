@@ -57,7 +57,12 @@ class Comparator:
             t1=self.current_instance.model_dump(),
             t2=self.new_instance.model_dump(),
             ignore_order=True,
-            exclude_paths={"root['id']", "root['name']", "root['status']"},
+            exclude_paths={
+                "root['id']",
+                "root['name']",
+                "root['status']",
+                "root['sequence']",
+            },
         ).to_dict()
 
         # No differences found between instances
