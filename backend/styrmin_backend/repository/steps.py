@@ -107,7 +107,7 @@ def _parent_column(parent: StepParent) -> tuple[str, UUID]:
 
 
 def _utc(value: datetime | None) -> datetime | None:
-    # SQLite returns naive datetimes; every stored time is UTC.
+    # SQLite returns naive datetimes; the step recorder stores every time in UTC.
     if value is None or value.tzinfo is not None:
         return value
     return value.replace(tzinfo=UTC)
