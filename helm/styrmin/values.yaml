@@ -274,6 +274,8 @@ styrmin:
 
   # Telemetry configuration
   telemetry:
+    # -- Send one anonymous report a day to OpsMill. Set to false to turn telemetry off.
+    enabled: true
     # -- Destination of the daily telemetry report. Leave empty for the OpsMill endpoint.
     endpoint: ""
 
