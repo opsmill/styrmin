@@ -324,6 +324,16 @@ class FakeTaskRepository(FakeRepository[Task], TaskRepository):
 
 
 class FakeBackupRepository(FakeRepository[Backup], BackupRepository):
+    """In-memory backup repository.
+
+    ``instance_source`` is wired by :class:`FakeUnitOfWork` so the deployment
+    lookup walks the same backup -> instance join as the production query.
+    """
+
+    def __init__(self, models: list[Backup] | None = None) -> None:
+        super().__init__(models)
+        self.instance_source: FakeApplicationInstanceRepository | None = None
+
     async def get_by_instance_id(
         self, instance_id: UUID, status: BackupStatus | None = None
     ) -> list[Backup]:
@@ -331,6 +341,16 @@ class FakeBackupRepository(FakeRepository[Backup], BackupRepository):
         if status is not None:
             results = [b for b in results if b.status == status]
         return results
+
+    async def get_by_deployment_id(
+        self, deployment_id: UUID, status: BackupStatus | None = None
+    ) -> list[Backup]:
+        instances = self.instance_source.models if self.instance_source else []
+        instance_ids = {i.id for i in instances if i.deployment_id == deployment_id}
+        results = [b for b in self.models if b.instance_id in instance_ids]
+        if status is not None:
+            results = [b for b in results if b.status == status]
+        return sorted(results, key=lambda b: b.created_on or _NO_TIME, reverse=True)
 
     async def has_in_progress_backup(self, instance_id: UUID) -> Backup | None:
         for b in self.models:
@@ -889,6 +909,7 @@ class FakeUnitOfWork(UnitOfWork):
         self.deployments = deployments or FakeDeploymentRepository()
         self.deployed_services = deployed_services or FakeDeployedServiceRepository()
         self.backups = backups or FakeBackupRepository()
+        self.backups.instance_source = self.instances
         self.restores = restores or FakeRestoreRepository()
         self.restores.backup_source = self.backups
         self.restores.instance_source = self.instances

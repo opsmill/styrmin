@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 
 from styrmin_backend.db.models import (
+    ApplicationInstance,
     Backup,
     BackupStatus,
     Restore,
@@ -29,6 +31,7 @@ from styrmin_backend.services.backup.strategies.mongodb import MongodbBackupStra
 from styrmin_backend.services.backup.strategies.neo4j import Neo4jBackupStrategy
 from styrmin_backend.services.backup.strategies.postgres import PostgresBackupStrategy
 from styrmin_backend.services.exceptions import (
+    AmbiguousIdentifierError,
     BackupAlreadyInProgressError,
     BackupNotFoundError,
 )
@@ -50,6 +53,7 @@ from tests.unit.services.fakes import (
 def make_uow(
     backups: list[Backup] | None = None,
     restores: list[Restore] | None = None,
+    instances: list[ApplicationInstance] | None = None,
 ) -> FakeUnitOfWork:
     return FakeUnitOfWork(
         clusters=FakeClusterRepository(),
@@ -57,7 +61,7 @@ def make_uow(
         helm_repositories=FakeHelmRepositoryRepository(),
         helm_charts=FakeHelmChartRepository(),
         application_driver_versions=FakeApplicationRepository(),
-        instances=FakeApplicationInstanceRepository(),
+        instances=FakeApplicationInstanceRepository(instances or []),
         actions=FakeActionRepository(),
         tasks=FakeTaskRepository(),
         backups=FakeBackupRepository(backups or []),
@@ -232,7 +236,7 @@ class TestGetBackups:
         )
         uow = make_uow(backups=[b1, b2, b3])
 
-        results = await get_backups(instance_id=instance_id, uow=uow)
+        results = await get_backups(uow, instance_id=instance_id)
         assert len(results) == 2
 
     @pytest.mark.anyio
@@ -251,10 +255,89 @@ class TestGetBackups:
         uow = make_uow(backups=[b1, b2])
 
         results = await get_backups(
-            instance_id=instance_id, uow=uow, status=BackupStatus.COMPLETED
+            uow, instance_id=instance_id, status=BackupStatus.COMPLETED
         )
         assert len(results) == 1
         assert results[0].name == "b1"
+
+    @staticmethod
+    def _deployment_history() -> tuple[FakeUnitOfWork, ApplicationInstance]:
+        """One deployment with an old and a new instance, plus another deployment."""
+        deployment_id = uuid4()
+        old = ApplicationInstance(
+            application_version="1.0.0", deployment_id=deployment_id
+        )
+        new = ApplicationInstance(
+            application_version="2.0.0", deployment_id=deployment_id
+        )
+        other = ApplicationInstance(application_version="1.0.0", deployment_id=uuid4())
+        base = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
+        backups = [
+            Backup(
+                name="before-upgrade",
+                status=BackupStatus.COMPLETED,
+                instance_id=old.id,
+                created_on=base,
+            ),
+            Backup(
+                name="after-upgrade",
+                status=BackupStatus.FAILED,
+                instance_id=new.id,
+                created_on=base + timedelta(minutes=2),
+            ),
+            Backup(
+                name="other-deployment",
+                status=BackupStatus.COMPLETED,
+                instance_id=other.id,
+                created_on=base + timedelta(minutes=1),
+            ),
+        ]
+        uow = make_uow(backups=backups, instances=[old, new, other])
+        return uow, old
+
+    @pytest.mark.anyio
+    async def test_get_backups_by_deployment_returns_every_instance(self) -> None:
+        uow, old = self._deployment_history()
+
+        results = await get_backups(uow, deployment_id=old.deployment_id)
+
+        assert [b.name for b in results] == ["after-upgrade", "before-upgrade"]
+
+    @pytest.mark.anyio
+    async def test_get_backups_by_deployment_with_status_filter(self) -> None:
+        uow, old = self._deployment_history()
+
+        results = await get_backups(
+            uow, deployment_id=old.deployment_id, status=BackupStatus.COMPLETED
+        )
+
+        assert [b.name for b in results] == ["before-upgrade"]
+
+    @pytest.mark.anyio
+    async def test_get_backups_by_instance_returns_only_that_instance(self) -> None:
+        uow, old = self._deployment_history()
+
+        results = await get_backups(uow, instance_id=old.id)
+
+        assert [b.name for b in results] == ["before-upgrade"]
+
+    @pytest.mark.anyio
+    async def test_get_backups_with_both_identifiers_raises(self) -> None:
+        uow, old = self._deployment_history()
+
+        with pytest.raises(AmbiguousIdentifierError, match="not both") as exc_info:
+            await get_backups(uow, deployment_id=old.deployment_id, instance_id=old.id)
+
+        assert exc_info.value.error_code == "VALIDATION_ERROR"
+
+    @pytest.mark.anyio
+    async def test_get_backups_with_no_identifier_raises(self) -> None:
+        uow, _ = self._deployment_history()
+
+        with pytest.raises(AmbiguousIdentifierError, match="is required") as exc_info:
+            await get_backups(uow)
+
+        assert exc_info.value.error_code == "VALIDATION_ERROR"
 
 
 class TestDeleteBackup:

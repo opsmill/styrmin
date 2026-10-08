@@ -44,8 +44,8 @@ description: "Task list for keeping a deployment's backup history when it gets a
 
 ### Repository
 
-- [ ] T003 Add the abstract method `get_by_deployment_id(self, deployment_id: UUID, status: BackupStatus | None = None) -> Sequence[Backup]` to `BackupRepository`, and implement it in `SQLModelBackupRepository` in `backend/styrmin_backend/repository/backup.py`: `select(Backup).join(ApplicationInstance, Backup.instance_id == ApplicationInstance.id).where(ApplicationInstance.deployment_id == deployment_id)`, optional `Backup.status == status`, `order_by(Backup.created_on.desc())`, as in [data-model.md](data-model.md). Keep `get_by_instance_id` unchanged.
-- [ ] T004 [P] Extend `backend/tests/unit/repository/backup/test_backup_repository.py` with tests for `get_by_deployment_id`:
+- [X] T003 Add the abstract method `get_by_deployment_id(self, deployment_id: UUID, status: BackupStatus | None = None) -> Sequence[Backup]` to `BackupRepository`, and implement it in `SQLModelBackupRepository` in `backend/styrmin_backend/repository/backup.py`: `select(Backup).join(ApplicationInstance, Backup.instance_id == ApplicationInstance.id).where(ApplicationInstance.deployment_id == deployment_id)`, optional `Backup.status == status`, `order_by(Backup.created_on.desc())`, as in [data-model.md](data-model.md). Keep `get_by_instance_id` unchanged.
+- [X] T004 [P] Extend `backend/tests/unit/repository/backup/test_backup_repository.py` with tests for `get_by_deployment_id`:
   - backups of two instances of one deployment are both returned, newest first
   - backups of an instance of another deployment are not returned
   - `status` filters the result
@@ -54,9 +54,9 @@ description: "Task list for keeping a deployment's backup history when it gets a
 
 ### Service
 
-- [ ] T005 Add `FakeBackupRepository.get_by_deployment_id` in `backend/tests/unit/services/fakes.py`, walking backup → instance → `deployment_id` through an `instance_source` attribute wired by `FakeUnitOfWork`, the same way `FakeRestoreRepository.instance_source` is wired. Return results newest first by `created_on`, honour `status`.
-- [ ] T006 Change `get_backups` in `backend/styrmin_backend/services/backup/service.py` to `async def get_backups(uow: UnitOfWork, *, deployment_id: UUID | None = None, instance_id: UUID | None = None, status: BackupStatus | None = None) -> Sequence[Backup]`. Raise `AmbiguousIdentifierError` (from `services/exceptions.py`) with "Provide either deployment_id or instance_id, not both" when both are set, and "Either deployment_id or instance_id is required" when neither is set, modelled on `resolve_cluster` in `services/clusters.py`. Dispatch to `uow.backups.get_by_deployment_id` or `uow.backups.get_by_instance_id`. Update the docstring to describe the backup history.
-- [ ] T007 Extend `backend/tests/unit/services/backup/test_backup_service.py`: update the two existing `get_backups(instance_id=...)` call sites (around lines 235 and 253) to the new keyword-only signature, and add tests that `deployment_id` returns backups of every instance of the deployment, that `instance_id` returns only that instance's backups, and that both or neither raise `AmbiguousIdentifierError` with `error_code == "VALIDATION_ERROR"` (research R3)
+- [X] T005 Add `FakeBackupRepository.get_by_deployment_id` in `backend/tests/unit/services/fakes.py`, walking backup → instance → `deployment_id` through an `instance_source` attribute wired by `FakeUnitOfWork`, the same way `FakeRestoreRepository.instance_source` is wired. Return results newest first by `created_on`, honour `status`.
+- [X] T006 Change `get_backups` in `backend/styrmin_backend/services/backup/service.py` to `async def get_backups(uow: UnitOfWork, *, deployment_id: UUID | None = None, instance_id: UUID | None = None, status: BackupStatus | None = None) -> Sequence[Backup]`. Raise `AmbiguousIdentifierError` (from `services/exceptions.py`) with "Provide either deployment_id or instance_id, not both" when both are set, and "Either deployment_id or instance_id is required" when neither is set, modelled on `resolve_cluster` in `services/clusters.py`. Dispatch to `uow.backups.get_by_deployment_id` or `uow.backups.get_by_instance_id`. Update the docstring to describe the backup history.
+- [X] T007 Extend `backend/tests/unit/services/backup/test_backup_service.py`: update the two existing `get_backups(instance_id=...)` call sites (around lines 235 and 253) to the new keyword-only signature, and add tests that `deployment_id` returns backups of every instance of the deployment, that `instance_id` returns only that instance's backups, and that both or neither raise `AmbiguousIdentifierError` with `error_code == "VALIDATION_ERROR"` (research R3)
 
 ### GraphQL
 

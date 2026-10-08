@@ -26,6 +26,7 @@ from styrmin_backend.services.backup.strategies.mongodb import MongodbBackupStra
 from styrmin_backend.services.backup.strategies.neo4j import Neo4jBackupStrategy
 from styrmin_backend.services.backup.strategies.postgres import PostgresBackupStrategy
 from styrmin_backend.services.exceptions import (
+    AmbiguousIdentifierError,
     BackupAlreadyInProgressError,
     BackupNotFoundError,
     DeploymentNotFoundError,
@@ -201,13 +202,31 @@ async def get_backup(backup_id: UUID, uow: UnitOfWork) -> Backup:
 
 
 async def get_backups(
-    instance_id: UUID,
     uow: UnitOfWork,
+    *,
+    deployment_id: UUID | None = None,
+    instance_id: UUID | None = None,
     status: BackupStatus | None = None,
 ) -> Sequence[Backup]:
-    """Get all backups for an instance."""
+    """List backups, newest first, for a deployment or for one instance.
+
+    With ``deployment_id``, return the deployment's backup history: the backups
+    of every instance the deployment has had, so earlier backups stay listed
+    after the deployment gets a new instance. With ``instance_id``, return only
+    that instance's backups. Exactly one of the two is required.
+    """
+    if deployment_id is not None and instance_id is not None:
+        raise AmbiguousIdentifierError(
+            "Provide either deployment_id or instance_id, not both"
+        )
     async with uow:
-        return await uow.backups.get_by_instance_id(instance_id, status=status)
+        if deployment_id is not None:
+            return await uow.backups.get_by_deployment_id(deployment_id, status=status)
+        if instance_id is not None:
+            return await uow.backups.get_by_instance_id(instance_id, status=status)
+        raise AmbiguousIdentifierError(
+            "Either deployment_id or instance_id is required"
+        )
 
 
 async def delete_backup(backup_id: UUID, uow: UnitOfWork) -> None:
