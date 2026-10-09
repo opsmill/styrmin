@@ -248,7 +248,7 @@ Startup sequence:
 - A value set in `styrmin.toml` takes precedence over its `STYRMIN_*` environment variable. A setting that the file does not set is read from the environment, then falls back to its default.
 - Each section (`database`, `workflow`, `kubernetes`, `driver`, `agent_code`, `agent`, `operator`, `url`, `telemetry`) reads its environment variables when the settings load, not when the module is imported.
 - `SETTINGS.initialize(path)` raises `InitializationError` when the settings were already loaded from another file, so a call made too late cannot silently ignore the requested file.
-- Settings classes with aliased fields (`Settings`, `DatabaseSettings`, `KubernetesSettings`, `OperatorSettings`) set `populate_by_name=True`, so `styrmin.toml` sets those fields by their field name, the name `styrmin config show` writes. A test loads the output of `styrmin config show` back as a config file.
+- Settings classes with aliased fields (`Settings`, `DatabaseSettings`, `KubernetesSettings`, `OperatorSettings`, `TelemetrySettings`) set `populate_by_name=True`, so `styrmin.toml` sets those fields by their field name, the name `styrmin config show` writes. A test loads the output of `styrmin config show` back as a config file.
 - `styrmin config show` leaves out the fields listed in `config.SECRET_FIELDS`:
   - `admin_password`
   - `[database]` `db_password` and `db_url`, because the Helm chart builds `db_url` with the database password in it

@@ -27,8 +27,8 @@ Export the variables, so that all four commands use the same PostgreSQL database
 
 Expected:
 
-- `styrmin db status` prints `Rev: 3b926acd0791 (head)`, `Parent: c2ff6dba5ffd` and the revision message `add installation`.
-- `styrmin db downgrade -1` removes the `installation` table and returns to `c2ff6dba5ffd`.
+- `styrmin db status` prints `Rev: 3b926acd0791 (head)`, `Parent: 69b12221e5df` and the revision message `add installation`.
+- `styrmin db downgrade -1` removes the `installation` table and returns to `69b12221e5df`.
 - The second `styrmin db migrate` creates the table again.
 - The migration unit test runs the same round trip on PostgreSQL and SQLite.
 

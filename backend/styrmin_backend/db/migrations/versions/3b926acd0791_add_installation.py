@@ -1,7 +1,7 @@
 """add installation
 
 Revision ID: 3b926acd0791
-Revises: c2ff6dba5ffd
+Revises: 69b12221e5df
 Create Date: 2026-10-08 22:30:54.674391
 
 The ``installation`` table holds the install ID that the daily telemetry report
@@ -16,7 +16,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "3b926acd0791"
-down_revision: Union[str, Sequence[str], None] = "c2ff6dba5ffd"
+down_revision: Union[str, Sequence[str], None] = "69b12221e5df"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
