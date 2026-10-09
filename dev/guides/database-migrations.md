@@ -56,6 +56,10 @@ leaves the other dangling. A multi-head chain is not a soft problem: `styrmin db
 init` and `styrmin db migrate` both target `head` (singular) and fail outright
 with `Multiple head revisions are present for given argument 'head'`.
 
+Each branch passes CI on its own, so the split shows up only once both are
+merged. `backend/tests/unit/db/test_migration_heads.py` then fails and names
+the heads.
+
 To check the current state:
 
 ```bash
