@@ -105,6 +105,13 @@ SIMPLE_APP_BACKUP_COMPONENTS = ("database",)
 # instance and the backup stays listed only through its history (#304).
 BACKUP_HISTORY_SERVER_ENV_VARS = {"STYRMIN_E2E_BACKUP_HISTORY": "1"}
 
+# The lifecycle test upgrades the session-shared simple-app deployment after the
+# backup (the #304 reproduction) and leaves it upgraded, as the other upgrade
+# tests do: a downgrade would run the driver's action Job a second time, which
+# fails while the first Job exists (#374).
+SIMPLE_APP_VERSION = "0.1.0"
+SIMPLE_APP_UPGRADED_VERSION = "0.2.0"
+
 # The steps of a completed restore, in the order the restore runs them.
 COMPLETED_RESTORE_STEPS = (
     ("restore:namespace", "Delete the namespace"),
@@ -220,7 +227,10 @@ async def wait_for_pods_ready(
     namespace: str,
     timeout: float = 180.0,
 ) -> None:
-    """Wait until all pods in *namespace* have ready containers."""
+    """Wait until all pods in *namespace* have ready containers.
+
+    A completed Job pod (phase ``Succeeded``) never becomes ready, so it is skipped.
+    """
     import time
 
     from kubernetes_asyncio import client as kubeclient, config as k8s_config
@@ -235,7 +245,9 @@ async def wait_for_pods_ready(
         if pods.items and all(
             c.ready
             for pod in pods.items
-            if pod.status and pod.status.container_statuses
+            if pod.status
+            and pod.status.container_statuses
+            and pod.status.phase != "Succeeded"
             for c in pod.status.container_statuses
         ):
             await api_client.close()
@@ -712,6 +724,31 @@ async def wait_for_env_fanout_steady_state(
     )
 
 
+async def served_simple_app_version(
+    kubeconfig_path: str, namespace: str, *, expected: str, timeout: float = 120.0
+) -> str | None:
+    """Poll the simple app's ``/version`` until it serves ``expected``; return the last value.
+
+    Pods restart after an upgrade or a restore, so a request can hit a
+    terminating pod; transport errors and a /health timeout count as "try again".
+    """
+    deadline = asyncio.get_running_loop().time() + timeout
+    last_version: str | None = None
+    while asyncio.get_running_loop().time() < deadline:
+        with suppress(httpx.HTTPError, TimeoutError):
+            async with portforward_simple_app(kubeconfig_path, namespace) as port:
+                async with httpx.AsyncClient() as http_client:
+                    response = await http_client.get(
+                        f"http://localhost:{port}/version", timeout=10
+                    )
+                    if response.status_code == 200:
+                        last_version = response.json()["version"]
+                        if last_version == expected:
+                            return last_version
+        await asyncio.sleep(3.0)
+    return last_version
+
+
 @pytest.mark.ci
 @pytest.mark.shard_backup
 async def test_backup_and_restore_lifecycle(
@@ -719,6 +756,7 @@ async def test_backup_and_restore_lifecycle(
     scenario_environment_id: str,
     styrmin_resources: dict,
     deployed_simple_app: dict,
+    simple_app_image_v2: str,  # noqa: ARG001 — ensures the 0.2.0 image is built
     velero_ready: None,  # noqa: ARG001 — ensures Velero is up before backup/restore
     vcluster: dict,
 ) -> None:
@@ -729,10 +767,12 @@ async def test_backup_and_restore_lifecycle(
     ``spec.ttl`` and be readable back off the backup record together with
     Velero's own expiry.
 
-    And #304: a config edit after the backup gives the deployment a new
-    instance; the backup stays in the deployment's backup history with the
-    application version it was taken at, and the restore and delete below
-    act on that backup of an earlier instance.
+    And #304: a config edit and then an upgrade after the backup each give
+    the deployment a new instance; the backup stays in the deployment's
+    backup history with the application version it was taken at, and the
+    restore and delete below act on that backup of an earlier instance. The
+    restore puts the 0.1.0 instance's resources back while the deployment
+    keeps its 0.2.0 active instance.
     """
     client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
@@ -903,9 +943,41 @@ async def test_backup_and_restore_lifecycle(
             f"Backup {backup.id} of an earlier instance should stay in the "
             f"deployment's backup history, got {[b.id for b in history]}"
         )
-        assert listed_backup.application_version == "0.1.0", (
+        assert listed_backup.application_version == SIMPLE_APP_VERSION, (
             "The backup should show the application version it was taken at, "
             f"got {listed_backup.application_version!r}"
+        )
+
+        # 2f. The #304 reproduction: an upgrade gives the deployment another
+        #     instance, and the backup taken at 0.1.0 stays listed.
+        await scenario_driver.upgrade_deployment(
+            deployment_id=deployment_id, version=SIMPLE_APP_UPGRADED_VERSION
+        )
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=deployment_id, timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS
+        )
+        await wait_for_pods_ready(kubeconfig_path, namespace)
+
+        upgraded_deployment = await client.deployments.get(deployment_id)
+        upgraded_instance = upgraded_deployment.application_instance
+        assert upgraded_instance is not None, (
+            "Deployment should have an active instance"
+        )
+        assert str(upgraded_instance.id) not in {
+            backed_up_instance_id,
+            str(edited_instance.id),
+        }, "The upgrade should give the deployment a new active instance"
+        assert upgraded_deployment.application_version == SIMPLE_APP_UPGRADED_VERSION
+
+        history = await scenario_driver.list_backups(deployment_id=deployment_id)
+        listed_backup = next((b for b in history if b.id == backup.id), None)
+        assert listed_backup is not None, (
+            f"Backup {backup.id} taken before the upgrade should stay in the "
+            f"deployment's backup history, got {[b.id for b in history]}"
+        )
+        assert listed_backup.application_version == SIMPLE_APP_VERSION, (
+            "After the upgrade the backup should still show the version it was "
+            f"taken at, got {listed_backup.application_version!r}"
         )
 
         # 3. Write more data (counter goes higher)
@@ -936,6 +1008,22 @@ async def test_backup_and_restore_lifecycle(
                 )
                 # Counter should be back near pre-backup value
                 assert resp.json()["counter"] == pre_backup_count + 1
+
+        # 5a. The restore put back the 0.1.0 instance's StyrminDeployment and
+        #     HelmRelease, and the deployment keeps its 0.2.0 active instance:
+        #     what the docs describe for a backup of an earlier instance.
+        assert (
+            await served_simple_app_version(
+                kubeconfig_path, namespace, expected=SIMPLE_APP_VERSION
+            )
+            == SIMPLE_APP_VERSION
+        )
+        restored_deployment = await client.deployments.get(deployment_id)
+        assert restored_deployment.application_version == SIMPLE_APP_UPGRADED_VERSION
+        assert restored_deployment.application_instance is not None
+        assert str(restored_deployment.application_instance.id) == str(
+            upgraded_instance.id
+        ), "The restore should not change the deployment's active instance"
 
         # 6. Delete backup and verify
         await scenario_driver.delete_backup(backup_id=backup.id)
