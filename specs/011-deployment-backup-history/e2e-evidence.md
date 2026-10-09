@@ -54,3 +54,27 @@ Each variant checks the following through its own entrypoint, the SDK for api-ch
 - Restoring that backup of an earlier instance, checking the restored counter in Postgres, and deleting the backup all succeed. These are the existing steps 3 to 6, unchanged.
 
 The restore was stable after the config edit in both variants, so the fallback in research R9 (moving the edit and the history check after step 5) was not needed.
+
+## Review round: the test with an upgrade, 2026-10-09
+
+After the review of #417, `test_backup_and_restore_lifecycle` also upgrades the deployment from 0.1.0 to 0.2.0 after the config edit, which reproduces #304 with the simple app. Both variants passed locally, each in its own pytest session, on the branch rebased onto `develop` at `2d738114`.
+
+Both runs used an image built before the runs with `STYRMIN_IMAGE_VER=local-f8kjf-review docker compose build`, for the same reason as above.
+
+| Item | api-chromium | ui-chromium |
+|---|---|---|
+| Exact command | `npm_config_ignore_workspace=true PYTHONUNBUFFERED=1 STYRMIN_IMAGE_VER=local-f8kjf-review uv run pytest "backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle" -k "api-chromium" -v -s --pdb < <(exec sleep 987654)` | The same command with `-k "ui-chromium"` |
+| Run started (UTC) | `2026-10-09T18:33:27Z` | `2026-10-09T18:39:07Z` |
+| `PASSED` line (UTC) | `18:39:01` | `18:45:26` |
+| vcluster id | `pytest-b48d790f-2f45-4f0b-9abe-f8b76f70819e` (deleted by the fixture teardown) | `pytest-7186b07b-49c9-47c8-bdb1-7aa72dcbfe0f` (deleted by the fixture teardown) |
+| Verbatim summary line | `============ 1 passed, 1 deselected, 1 warning in 337.56s (0:05:37) ============` | `============ 1 passed, 1 deselected, 1 warning in 381.97s (0:06:21) ============` |
+
+The added steps check, through each variant's entrypoint:
+
+- After the upgrade, the deployment has a new active instance at version 0.2.0, and `scenario_driver.list_backups(deployment_id=...)` still lists the backup with application version `0.1.0`.
+- After the restore of that backup, the application's `/version` endpoint answers `0.1.0`, and the deployment keeps version 0.2.0 and the same active instance.
+
+### Earlier runs in the review round
+
+- The first api-chromium run, with the default image tag, failed in the new upgrade step: `TimeoutError: Pods in styrmin-<deployment-id> did not become ready within 180.0s`. The upgrade runs the driver's action Job, and `wait_for_pods_ready` waited for its completed pod, which never becomes ready. The helper now skips pods in phase `Succeeded`. The `finally` block of that run also failed to downgrade the deployment to 0.1.0 with `Job styrmin-<deployment-id>-job already exists`, which is #374, so the test no longer downgrades.
+- A second api-chromium run with the default image tag passed (`1 passed, 1 deselected, 1 warning in 374.61s`). It is not counted, because other sessions on the host can replace the `latest` image during a run.
