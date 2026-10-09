@@ -79,6 +79,7 @@ class TestBackupResource:
                     "name": "test-backup",
                     "status": "completed",
                     "instanceId": "00000000-0000-0000-0000-000000000010",
+                    "instance": LISTED_INSTANCE,
                     "errorMessage": None,
                     "startedAt": "2026-01-01T00:00:00",
                     "completedAt": "2026-01-01T00:05:00",
@@ -94,6 +95,7 @@ class TestBackupResource:
 
         backup = await client.backups.get_backup("00000000-0000-0000-0000-000000000001")
         assert backup.status == "completed"
+        assert backup.instance.application_version == "0.1.0"
         assert backup.size_bytes == 1024
         assert backup.ttl == "2160h"
         assert backup.expires_at is not None
@@ -309,6 +311,7 @@ def _backup(backup_id: str, steps: list[dict[str, Any]]) -> dict[str, Any]:
         "name": f"backup-{backup_id[-1]}",
         "status": "failed",
         "instanceId": "00000000-0000-0000-0000-000000000010",
+        "instance": LISTED_INSTANCE,
         "errorMessage": "velero reported PartiallyFailed",
         "startedAt": "2026-01-01T00:00:00+00:00",
         "completedAt": "2026-01-01T00:01:10+00:00",
@@ -511,35 +514,21 @@ class TestListBackupsByDeploymentOrInstance:
     @staticmethod
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("kwargs", "message", "sent"),
+        "kwargs",
         [
-            pytest.param(
-                {"deployment_id": DEPLOYMENT_ID, "instance_id": INSTANCE_ID},
-                "Provide either deployment_id or instance_id, not both",
-                {"deploymentId": DEPLOYMENT_ID, "instanceId": INSTANCE_ID},
-                id="both",
-            ),
-            pytest.param({}, "Either deployment_id or instance_id is required", {}, id="neither"),
+            pytest.param({"deployment_id": DEPLOYMENT_ID, "instance_id": INSTANCE_ID}, id="both"),
+            pytest.param({}, id="neither"),
         ],
     )
-    async def test_validation_error_raises_operation_failed(
+    async def test_both_or_neither_id_raises_before_any_request(
         client: StyrminClient,
         mock_transport: AsyncMock,
         kwargs: dict[str, str],
-        message: str,
-        sent: dict[str, str],
     ) -> None:
-        mock_transport.execute.return_value = {
-            "data": None,
-            "errors": [{"message": message, "extensions": {"code": "VALIDATION_ERROR"}}],
-        }
-
-        with pytest.raises(OperationFailedError, match=message) as exc_info:
+        with pytest.raises(ValueError, match="exactly one of deployment_id or instance_id"):
             await client.backups.list_backups(**kwargs)
 
-        assert exc_info.value.typename == "VALIDATION_ERROR"
-        # The server owns the exactly-one rule, so the SDK sends what it was given.
-        assert _sent_variables(mock_transport) == sent
+        mock_transport.execute.assert_not_called()
 
 
 class TestScheduleResource:

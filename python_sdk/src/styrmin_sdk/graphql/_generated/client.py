@@ -851,6 +851,10 @@ class Client(AsyncBaseClient):
                 name
                 status
                 instanceId
+                instance {
+                  id
+                  applicationVersion
+                }
                 errorMessage
                 startedAt
                 completedAt

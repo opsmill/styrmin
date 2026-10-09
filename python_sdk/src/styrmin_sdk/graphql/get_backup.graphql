@@ -4,6 +4,10 @@ query GetBackup($backupId: UUID!) {
         name
         status
         instanceId
+        instance {
+            id
+            applicationVersion
+        }
         errorMessage
         startedAt
         completedAt
