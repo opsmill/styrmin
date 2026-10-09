@@ -75,7 +75,7 @@ Validation rules:
 | Field | Type | Default | Source |
 |---|---|---|---|
 | `enabled` | bool | `true` | `STYRMIN_TELEMETRY_ENABLED` or `[telemetry] enabled` |
-| `endpoint` | string | `https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin` | `STYRMIN_TELEMETRY_ENDPOINT` or `[telemetry] endpoint`; blank means the default |
+| `endpoint` | string | `https://telemetry.opsmill.cloud/styrmin` | `STYRMIN_TELEMETRY_ENDPOINT` or `[telemetry] endpoint`; blank means the default |
 | `do_not_track` | string or none | none | `DO_NOT_TRACK` |
 
 Derived: `disabled_by()` returns `"STYRMIN_TELEMETRY_ENABLED=false"`, `"DO_NOT_TRACK=1"` or `None`, in that order of precedence.

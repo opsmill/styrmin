@@ -164,7 +164,7 @@ Turning telemetry off and changing the destination:
 - **FR-004**: Operators MUST be able to turn telemetry off with the Helm value `styrmin.telemetry.enabled: false`, which sets `STYRMIN_TELEMETRY_ENABLED` in the server environment.
 - **FR-005**: Operators MUST be able to change the destination with `STYRMIN_TELEMETRY_ENDPOINT`.
 - **FR-020**: Operators MUST be able to set `STYRMIN_TELEMETRY_ENDPOINT` with the Helm value `styrmin.telemetry.endpoint`. When the value is empty, the chart does not set the variable. [CLAUDE RECOMMENDED – based on FR-011, which needs the E2E install to send to a local sink, and on the chart, which has no field for other environment variables ([values.yaml](../../helm/styrmin/values.yaml))]
-- **FR-015**: When `STYRMIN_TELEMETRY_ENDPOINT` is not set, reports MUST go to the OpsMill endpoint `https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin`. [CLAUDE RECOMMENDED – based on the `styrminctl` default endpoint `https://telemetry-endpoints.cloudflare-096.workers.dev/styrminctl` in `cli/src/styrminctl/telemetry/config.py`, which uses one path per reporting product. The PRD leaves the URL open. The owner of the ingestion endpoint must confirm the path accepts `kind: "styrmin"` before the release.]
+- **FR-015**: When `STYRMIN_TELEMETRY_ENDPOINT` is not set, reports MUST go to the OpsMill endpoint `https://telemetry.opsmill.cloud/styrmin`. The maintainer set this URL on 2026-10-09; the PRD leaves the URL open. The owner of the ingestion endpoint must confirm the path accepts `kind: "styrmin"` before the release.
 
 Sending:
 

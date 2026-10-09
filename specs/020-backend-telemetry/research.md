@@ -54,7 +54,7 @@ Each decision lists what was chosen, why, and what was rejected. File references
 
 ## D4: Default endpoint URL
 
-**Decision**: `https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin`. [CLAUDE RECOMMENDED – based on the `styrminctl` default `https://telemetry-endpoints.cloudflare-096.workers.dev/styrminctl` in `cli/src/styrminctl/telemetry/config.py:17`, which uses one path per reporting product]
+**Decision**: `https://telemetry.opsmill.cloud/styrmin`, set by the maintainer on 2026-10-09. It replaces the earlier choice `https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin`, which followed the `styrminctl` default `https://telemetry-endpoints.cloudflare-096.workers.dev/styrminctl` in `cli/src/styrminctl/telemetry/config.py:17`.
 
 **Rationale**: The PRD leaves the URL open. A path per `kind` keeps the two report streams apart on the ingestion side. The URL is one constant and can be changed before the release without other code changes. Whether the ingestion endpoint accepts this path is not known; the owner of the endpoint must confirm it before the release (recorded in [plan.md](plan.md), "Release prerequisite").
 

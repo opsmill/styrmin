@@ -215,9 +215,7 @@ class OperatorSettings(BaseSettings):
     )
 
 
-DEFAULT_TELEMETRY_ENDPOINT = (
-    "https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin"
-)
+DEFAULT_TELEMETRY_ENDPOINT = "https://telemetry.opsmill.cloud/styrmin"
 
 
 class TelemetrySettings(BaseSettings):

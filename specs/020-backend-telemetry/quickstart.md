@@ -74,7 +74,7 @@ kubectl -n styrmin exec deploy/styrmin-server -c styrmin-server -- styrmin telem
 kubectl -n styrmin logs deploy/styrmin-server -c styrmin-server | grep Telemetry
 ```
 
-These commands assume the release name `styrmin` in namespace `styrmin`; the install notes print the Deployment name of other releases. With default values, the log line contains `Telemetry is on: Styrmin sends one anonymous report a day to https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin.`
+These commands assume the release name `styrmin` in namespace `styrmin`; the install notes print the Deployment name of other releases. With default values, the log line contains `Telemetry is on: Styrmin sends one anonymous report a day to https://telemetry.opsmill.cloud/styrmin.`
 
 ## 4. E2E test (definition of done)
 

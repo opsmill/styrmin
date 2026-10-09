@@ -227,7 +227,7 @@ On every start, the server logs one line at INFO level. With telemetry on and
 the default endpoint, the line is:
 
 ```text
-Telemetry is on: Styrmin sends one anonymous report a day to https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin. To view it, run 'styrmin telemetry show'. To turn telemetry off, set STYRMIN_TELEMETRY_ENABLED=false (Helm value styrmin.telemetry.enabled=false) or DO_NOT_TRACK=1.
+Telemetry is on: Styrmin sends one anonymous report a day to https://telemetry.opsmill.cloud/styrmin. To view it, run 'styrmin telemetry show'. To turn telemetry off, set STYRMIN_TELEMETRY_ENABLED=false (Helm value styrmin.telemetry.enabled=false) or DO_NOT_TRACK=1.
 ```
 
 With telemetry off, the line names the setting that turned it off, for example
@@ -296,7 +296,7 @@ The command:
 
 The server sends the report as an HTTPS `POST` request with a JSON body, without
 authentication headers or cookies, to
-`https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin`.
+`https://telemetry.opsmill.cloud/styrmin`.
 
 To send the report to another address, for example to your own relay, set the
 Helm value `styrmin.telemetry.endpoint` or the environment variable
