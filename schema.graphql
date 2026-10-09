@@ -980,6 +980,11 @@ type Mutation {
     The hook step that starts the task; Styrmin's driver action primitives set it. Only the styrmin-actions user can set it, and the step must be a step of a task of the same deployment.
     """
     startedByStepId: UUID = null
+
+    """
+    Config, name, parameters and service name overrides written together with the version, with the semantics of updateDeployment. They are validated against the target driver version and application version, and one task reconciles them. parameters merge on top of the parameters argument when both are set.
+    """
+    input: UpdateDeploymentInput = null
   ): Task @requiresRole @startedByStepRequiresActionsServiceAccount
   reportPodStatuses(reports: [DeploymentPodStatusReport!]!): ReportPodStatusesResponse!
   reportDeploymentStatuses(reports: [DeploymentStatusReportInput!]!): ReportDeploymentStatusesResponse!

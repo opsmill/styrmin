@@ -442,9 +442,10 @@ a component the driver version does not declare fails with
 
 Adding or changing per-component `env_vars` or `image` on a component whose
 driver version declares no component container fails with
-`COMPONENT_CONTAINER_NOT_DECLARED`. `apply` writes `spec.config` before it
-moves the deployment to a new driver version, so the check runs against the
-current version. See
+`COMPONENT_CONTAINER_NOT_DECLARED`. `apply` writes `spec.config` together with
+the version change, so these checks run against the driver version and
+application version the manifest declares, whatever version the deployment was
+on before. A rejected apply changes nothing on the deployment. See
 [Migrating env var wiring](../drivers/migrating-env-vars.md).
 
 When a manifest changes an existing deployment's application version,
@@ -468,7 +469,7 @@ version.
 
 :::note Image override and version change in one apply
 
-`apply` writes `spec.config` before it changes the version, but the driver's
+`apply` writes `spec.config` together with the version, but the driver's
 upgrade action can read the component's workload before the new override
 reaches it. Its first Job can then run with the previous image repository.
 Apply the override on its own first, then change the version in a second

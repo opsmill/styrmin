@@ -117,10 +117,11 @@ Deployment- and environment-scope env vars are never rejected for this; they
 skip containerless components at render time.
 
 `updateDeployment` never switches driver versions, so the pinned version is
-the target. `styrminctl apply` calls `updateDeployment` before
-`updateDeploymentVersion` (ADR-048), so a manifest that switches version and
-adds component env vars in one go is validated against the pre-switch
-version — a known gap recorded in ADR-057.
+the target. `updateDeploymentVersion(input:)` runs the same checks against the
+driver version it moves the deployment to. `styrminctl apply` sends the
+manifest's config through that `input` (ADR-061), so a manifest that switches
+version and adds component env vars is validated against the version it
+declares.
 
 ## Driver-side documentation
 

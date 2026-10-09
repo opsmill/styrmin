@@ -506,20 +506,6 @@ def _deploy_response() -> dict[str, Any]:
     }
 
 
-def _update_response() -> dict[str, Any]:
-    return {
-        "data": {
-            "updateDeployment": {
-                "id": TASK_ID,
-                "type": "update",
-                "status": "pending",
-                "message": None,
-                "deploymentId": DEPLOYMENT_ID,
-            }
-        }
-    }
-
-
 def _update_version_response() -> dict[str, Any]:
     return {
         "data": {
@@ -585,18 +571,46 @@ async def test_apply_creates_when_lookup_returns_none(client: StyrminClient, moc
     assert deploy_vars["parameters"] == [{"name": "replicas", "value": 2}]
 
 
-async def test_apply_updates_config_only_when_version_unchanged(
-    client: StyrminClient, mock_transport: AsyncMock
-) -> None:
-    """The client no longer guesses what changed: it ALWAYS dispatches both
-    ``UpdateDeployment`` and ``UpdateDeploymentVersion``. The backend decides
-    no-op — here the version is unchanged, so ``UpdateDeploymentVersion``
-    returns ``null`` and the config task drives the ``updated`` outcome."""
+async def test_apply_sends_config_and_version_in_one_mutation(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """Config, parameters and version travel in one ``UpdateDeploymentVersion``,
+    so the backend validates the config against the target driver version (#388)."""
     mock_transport.execute.side_effect = [
         _list_environments_response(),
         _existing_deployment_response(version="1.0.0"),
-        _update_response(),
-        _update_version_noop_response(),
+        _update_version_response(),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(
+            version="2.0.0",
+            config={"components": [{"name": "server", "envVars": [{"name": "LOG_LEVEL", "value": "debug"}]}]},
+            parameters={"replicas": 2},
+        )
+    )
+
+    assert outcome.action == "updated"
+    assert str(outcome.task_id) == "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+    assert outcome.target_version == "2.0.0"
+    ops = _operation_names(mock_transport)
+    assert len(ops) == 3
+    assert ops[0].startswith("query ListEnvironments")
+    assert ops[1].startswith("query GetDeploymentByName")
+    assert ops[2].startswith("mutation UpdateDeploymentVersion(")
+    version_vars = mock_transport.execute.call_args_list[2].args[1]
+    assert version_vars["version"] == "2.0.0"
+    assert version_vars["input"] == {
+        "components": [{"name": "server", "envVars": [{"name": "LOG_LEVEL", "value": "debug"}]}],
+        "parameters": [{"name": "replicas", "value": 2}],
+    }
+
+
+async def test_apply_updates_config_when_version_unchanged(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """The client does not guess what changed: it dispatches ``UpdateDeploymentVersion``
+    with the unchanged version, and the backend's task drives the ``updated`` outcome."""
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
     ]
 
     outcome = await client.deployments.apply(
@@ -604,43 +618,13 @@ async def test_apply_updates_config_only_when_version_unchanged(
     )
 
     assert outcome.action == "updated"
-    assert str(outcome.deployment_id) == DEPLOYMENT_ID
-    assert str(outcome.task_id) == TASK_ID
-
+    assert outcome.target_version is None
     ops = _operation_names(mock_transport)
-    assert ops[0].startswith("query ListEnvironments")
-    assert ops[1].startswith("query GetDeploymentByName")
-    assert ops[2].startswith("mutation UpdateDeployment(")
-    assert ops[3].startswith("mutation UpdateDeploymentVersion(")
-    assert len(ops) == 4
-
-
-async def test_apply_updates_version_only_when_config_unchanged(
-    client: StyrminClient, mock_transport: AsyncMock
-) -> None:
-    """The client always dispatches both mutations. Here the config is a
-    no-op (``UpdateDeployment`` → ``null``) and only the version changes, so
-    the version task drives the ``updated`` outcome and ``task_id`` is the
-    version task's id (the last non-null task)."""
-    mock_transport.execute.side_effect = [
-        _list_environments_response(),
-        _existing_deployment_response(version="1.0.0"),
-        _update_noop_response(),
-        _update_version_response(),
-    ]
-
-    outcome = await client.deployments.apply(_resolved_manifest(version="2.0.0"))
-
-    assert outcome.action == "updated"
-    assert str(outcome.task_id) == "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
-    ops = _operation_names(mock_transport)
-    assert ops[0].startswith("query ListEnvironments")
-    assert ops[1].startswith("query GetDeploymentByName")
-    assert ops[2].startswith("mutation UpdateDeployment(")
-    assert ops[3].startswith("mutation UpdateDeploymentVersion(")
-    assert len(ops) == 4
-    version_vars = mock_transport.execute.call_args_list[3].args[1]
-    assert version_vars["version"] == "2.0.0"
+    assert len(ops) == 3
+    assert ops[2].startswith("mutation UpdateDeploymentVersion(")
+    version_vars = mock_transport.execute.call_args_list[2].args[1]
+    assert version_vars["version"] == "1.0.0"
+    assert version_vars["input"] == {"ipWhitelist": ["10.0.0.0/8"]}
 
 
 async def test_update_maps_null_payload_to_none(client: StyrminClient, mock_transport: AsyncMock) -> None:
@@ -666,15 +650,12 @@ async def test_update_version_maps_null_payload_to_none(client: StyrminClient, m
     assert result is None
 
 
-async def test_apply_unchanged_when_both_mutations_are_noops(client: StyrminClient, mock_transport: AsyncMock) -> None:
-    """The client always dispatches both ``UpdateDeployment`` and
-    ``UpdateDeploymentVersion``; when the backend reports both as no-ops
-    (``null`` + ``null``) the apply is a true idempotent no-op and returns
-    ``action="unchanged"`` with ``task_id=None``."""
+async def test_apply_unchanged_when_the_mutation_is_a_noop(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """When the backend reports a no-op (``null``) the apply is idempotent and
+    returns ``action="unchanged"`` with ``task_id=None``."""
     mock_transport.execute.side_effect = [
         _list_environments_response(),
         _existing_deployment_response(version="1.0.0"),
-        _update_noop_response(),
         _update_version_noop_response(),
     ]
 
@@ -686,19 +667,17 @@ async def test_apply_unchanged_when_both_mutations_are_noops(client: StyrminClie
     assert outcome.failure_reason is None
 
     ops = _operation_names(mock_transport)
-    assert len(ops) == 4
-    assert ops[2].startswith("mutation UpdateDeployment(")
-    assert ops[3].startswith("mutation UpdateDeploymentVersion(")
+    assert len(ops) == 3
+    assert ops[2].startswith("mutation UpdateDeploymentVersion(")
 
 
 async def test_apply_unchanged_against_failed_deployment(client: StyrminClient, mock_transport: AsyncMock) -> None:
     """A no-op re-apply against a FAILED deployment still resolves to
-    ``unchanged`` — the action is driven by the backend's null/null result,
+    ``unchanged`` — the action is driven by the backend's null result,
     not by the deployment's current status."""
     mock_transport.execute.side_effect = [
         _list_environments_response(),
         _existing_deployment_response(version="1.0.0", status="failed"),
-        _update_noop_response(),
         _update_version_noop_response(),
     ]
 
@@ -706,30 +685,6 @@ async def test_apply_unchanged_against_failed_deployment(client: StyrminClient, 
 
     assert outcome.action == "unchanged"
     assert outcome.task_id is None
-
-
-async def test_apply_runs_update_before_update_version_when_both_change(
-    client: StyrminClient, mock_transport: AsyncMock
-) -> None:
-    """Per research.md D8: config/parameters update MUST come before version
-    upgrade so the new version reconciles against the new config rather than
-    briefly observing stale config."""
-    mock_transport.execute.side_effect = [
-        _list_environments_response(),
-        _existing_deployment_response(version="1.0.0"),
-        _update_response(),
-        _update_version_response(),
-    ]
-
-    outcome = await client.deployments.apply(
-        _resolved_manifest(version="2.0.0", config={"ip_whitelist": ["10.0.0.0/8"]})
-    )
-
-    assert outcome.action == "updated"
-    ops = _operation_names(mock_transport)
-    update_idx = next(i for i, op in enumerate(ops) if op.startswith("mutation UpdateDeployment("))
-    version_idx = next(i for i, op in enumerate(ops) if op.startswith("mutation UpdateDeploymentVersion("))
-    assert update_idx < version_idx, "update_deployment must run before update_deployment_version per research.md D8"
 
 
 async def test_apply_raises_driver_mismatch_when_existing_driver_differs(
@@ -811,10 +766,7 @@ async def test_apply_handles_duplicate_name_race_by_pivoting_to_update(
         if first_line.startswith("mutation Deploy("):
             raise duplicate_error
         if first_line.startswith("mutation UpdateDeploymentVersion("):
-            # Version unchanged (1.0.0 == existing) — backend reports a no-op.
-            return _update_version_noop_response()
-        if first_line.startswith("mutation UpdateDeployment("):
-            return _update_response()
+            return _update_version_response()
         raise AssertionError(f"unexpected query: {first_line}")
 
     mock_transport.execute.side_effect = execute_side_effect
@@ -829,7 +781,7 @@ async def test_apply_handles_duplicate_name_race_by_pivoting_to_update(
     assert lookup_calls[0] == 2
     ops = _operation_names(mock_transport)
     assert sum(1 for op in ops if op.startswith("query GetDeploymentByName")) == 2
-    assert sum(1 for op in ops if op.startswith("mutation UpdateDeployment(")) == 1
+    assert sum(1 for op in ops if op.startswith("mutation UpdateDeploymentVersion(")) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1112,8 +1064,7 @@ async def test_apply_wait_returns_outcome_when_deployment_running(
     mock_transport.execute.side_effect = [
         _list_environments_response(),
         _existing_deployment_response(version="1.0.0"),
-        _update_response(),
-        _update_version_noop_response(),
+        _update_version_response(),
         _get_deployment_response(deployment_status="deploying"),
         _get_deployment_response(deployment_status="running"),
     ]
@@ -1345,8 +1296,7 @@ async def test_apply_wait_marks_outcome_failed_on_timeout(
     mock_transport.execute.side_effect = [
         _list_environments_response(),
         _existing_deployment_response(version="1.0.0"),
-        _update_response(),
-        _update_version_noop_response(),
+        _update_version_response(),
         _get_deployment_response(deployment_status="deploying"),
     ]
 
@@ -1372,8 +1322,7 @@ async def test_apply_wait_stops_at_max_wait(
     mock_transport.execute.side_effect = [
         _list_environments_response(),
         _existing_deployment_response(version="1.0.0"),
-        _update_response(),
-        _update_version_noop_response(),
+        _update_version_response(),
     ]
 
     outcome = await client.deployments.apply(
@@ -1384,7 +1333,7 @@ async def test_apply_wait_stops_at_max_wait(
 
     assert outcome.action == "failed"
     assert outcome.failure_reason == "wait timeout"
-    assert mock_transport.execute.await_count == 4
+    assert mock_transport.execute.await_count == 3
 
 
 @pytest.mark.parametrize(
@@ -1414,8 +1363,7 @@ async def test_apply_wait_never_sleeps_past_max_wait(
     mock_transport.execute.side_effect = [
         _list_environments_response(),
         _existing_deployment_response(version="1.0.0"),
-        _update_response(),
-        _update_version_noop_response(),
+        _update_version_response(),
         *[_get_deployment_response(deployment_status="deploying") for _ in expected_sleeps],
     ]
 
@@ -1576,13 +1524,12 @@ async def test_apply_files_wait_skips_terminal_event_for_submission_failures(
     assert events[0].outcome.action == "failed"
 
 
-async def test_apply_partial_update_failure_reports_partial_state(
+async def test_apply_rejected_update_writes_nothing_else(
     client: StyrminClient,
     mock_transport: AsyncMock,
 ) -> None:
-    """When ``update_deployment_version`` fails after ``update_deployment``
-    succeeded, the outcome's ``failure_reason`` MUST flag the partial-update
-    state explicitly per ``contracts/cli-apply.md``."""
+    """A rejected ``UpdateDeploymentVersion`` propagates and no other mutation ran,
+    so the config is never written without the version (#388)."""
 
     def execute_side_effect(query: str, _vars: dict[str, Any] | None = None) -> dict[str, Any]:
         first_line = query.splitlines()[0].strip()
@@ -1590,22 +1537,17 @@ async def test_apply_partial_update_failure_reports_partial_state(
             return _list_environments_response()
         if first_line.startswith("query GetDeploymentByName"):
             return _existing_deployment_response(version="1.0.0")
-        if first_line.startswith("mutation UpdateDeployment("):
-            return _update_response()
         if first_line.startswith("mutation UpdateDeploymentVersion("):
-            raise RuntimeError("driver-version not found")
+            raise RuntimeError("COMPONENT_CONTAINER_NOT_DECLARED")
         raise AssertionError(f"unexpected query: {first_line}")
 
     mock_transport.execute.side_effect = execute_side_effect
 
-    outcome = await client.deployments.apply(
-        _resolved_manifest(version="2.0.0", config={"ip_whitelist": ["10.0.0.0/8"]})
-    )
+    with pytest.raises(RuntimeError, match="COMPONENT_CONTAINER_NOT_DECLARED"):
+        await client.deployments.apply(_resolved_manifest(version="2.0.0", config={"ip_whitelist": ["10.0.0.0/8"]}))
 
-    assert outcome.action == "failed"
-    assert outcome.failure_reason is not None
-    assert outcome.failure_reason.startswith("config/parameters were updated; version upgrade failed:")
-    assert "driver-version not found" in outcome.failure_reason
+    mutations = [op for op in _operation_names(mock_transport) if op.startswith("mutation")]
+    assert len(mutations) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1627,8 +1569,7 @@ def _apply_update_side_effect(*, existing_version: str, stored_config: dict[str,
     return [
         _list_environments_response(),
         _existing_deployment_response(version=existing_version, config=stored_config),
-        _update_response(),
-        _update_version_response() if existing_version != "2.0.0" else _update_version_noop_response(),
+        _update_version_response(),
     ]
 
 

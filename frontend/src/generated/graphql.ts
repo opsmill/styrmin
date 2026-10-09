@@ -1035,6 +1035,7 @@ export type MutationUpdateDeploymentArgs = {
 export type MutationUpdateDeploymentVersionArgs = {
   deploymentId: Scalars['UUID']['input'];
   driverVersionId?: InputMaybe<Scalars['UUID']['input']>;
+  input?: InputMaybe<UpdateDeploymentInput>;
   parameters?: InputMaybe<Scalars['JSON']['input']>;
   startedByStepId?: InputMaybe<Scalars['UUID']['input']>;
   version: Scalars['String']['input'];

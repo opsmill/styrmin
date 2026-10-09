@@ -440,12 +440,17 @@ class DeploymentResource(BaseResource):
         *,
         parameters: JsonValue | None = None,
         driver_version_id: str | UUID | None = None,
+        input: UpdateDeploymentInput | None = None,
     ) -> UpdateDeploymentVersionUpdateDeploymentVersion | None:
         """Update a deployment's application version.
 
         Without ``driver_version_id`` the deployment is bound to the latest
         loaded driver version supporting ``version``; with it, the binding is
         pinned to that specific driver version.
+
+        ``input`` takes the same fields as :meth:`update`. The backend validates
+        them against the target driver version and writes them with the version,
+        so one task reconciles both.
 
         Returns ``None`` when the backend detects a no-op (the requested
         state equals the current one): the resolver returns ``null`` and no
@@ -459,6 +464,8 @@ class DeploymentResource(BaseResource):
             variables["parameters"] = parameters
         if driver_version_id is not None:
             variables["driverVersionId"] = str(driver_version_id)
+        if input is not None:
+            variables["input"] = input.model_dump(by_alias=True, exclude_none=True)
         result = await self._transport.execute(
             load_query("update_version"),
             variables,
@@ -582,11 +589,10 @@ class DeploymentResource(BaseResource):
           ``(name, environment_id)``;
         * if absent, dispatch ``deploy()`` and return ``action="created"``;
         * if present, validate the driver matches (raise
-          :class:`DriverMismatchError` otherwise), then dispatch
-          ``update_deployment`` for config/parameters and, if the version
-          differs, ``update_deployment_version``. The two run sequentially,
-          config-first — never parallel — so the upgraded version
-          reconciles against the new config rather than the stale one.
+          :class:`DriverMismatchError` otherwise), then dispatch one
+          ``update_deployment_version`` carrying the config, parameters and
+          version, so the config is validated against the version the
+          manifest declares and the upgrade reconciles against the new config.
 
         The lookup-then-create branch is non-atomic: a concurrent ``apply``
         run could race past the "not found" branch and both call
@@ -646,20 +652,14 @@ class DeploymentResource(BaseResource):
     async def _apply_update(self, manifest: ResolvedManifest, existing: GetDeploymentByNameDeployment) -> ApplyOutcome:
         """Dispatch the update branch of :meth:`apply`.
 
-        ``update_deployment`` (config/parameters) MUST run before
-        ``update_deployment_version`` so the upgraded version reconciles
-        against the new config rather than briefly observing stale values.
-
-        The client is intentionally thin: it does NOT guess what changed.
-        Both ``update`` and ``update_version`` are dispatched unconditionally
-        and the backend owns no-op detection — each resolver returns ``null``
-        (mapped here to ``None``) when the submitted state already matches the
-        current instance. When BOTH calls return ``None`` the apply is a true
-        no-op and returns ``action="unchanged"``; otherwise it is ``"updated"``
-        with ``task_id`` set to the last non-null task (the version task when a
-        version change happened, else the config task). An ``updated`` outcome that
-        changes the application version also carries ``target_version`` and the
-        token-free ``pinned_image_components`` (FR-008); ``apply`` never prompts.
+        Config, parameters and version go in one ``update_deployment_version``
+        call, so the backend validates the config against the driver version the
+        manifest moves to and one task reconciles everything (#388). The call is
+        dispatched even when the version is unchanged: the backend re-resolves the
+        driver version and owns no-op detection, returning ``None`` when nothing
+        changes (``action="unchanged"``). An ``updated`` outcome that changes the
+        application version also carries ``target_version`` and the token-free
+        ``pinned_image_components`` (FR-008); ``apply`` never prompts.
         """
         existing_driver_name = existing.application_driver_version.application_driver.name
         if existing_driver_name != manifest.driver:
@@ -669,40 +669,20 @@ class DeploymentResource(BaseResource):
             )
 
         update_input = _build_update_input(manifest)
-        update_task = await self.update(existing.id, input=update_input)
-
-        try:
-            version_task = await self.update_version(existing.id, manifest.version)
-        except Exception as exc:  # noqa: BLE001 — wrap so apply_files can attribute
-            # When the version mutation fails after the config/parameters update
-            # was dispatched, flag the partial-update state explicitly so the
-            # operator knows the deployment may now be half-updated.
-            prefix = "config/parameters were updated; " if update_task is not None else ""
-            return ApplyOutcome(
-                name=manifest.name,
-                action="failed",
-                deployment_id=existing.id,
-                task_id=update_task.id if update_task is not None else None,
-                failure_reason=f"{prefix}version upgrade failed: {exc}",
-            )
-
-        # Backend-driven no-op: both mutations reported nothing to do.
-        if update_task is None and version_task is None:
+        task = await self.update_version(existing.id, manifest.version, input=update_input)
+        if task is None:
             return ApplyOutcome(
                 name=manifest.name,
                 action="unchanged",
                 deployment_id=existing.id,
             )
 
-        # At least one mutation dispatched a task. The version task is the last
-        # non-null task (it runs after the config update), so prefer it.
-        last_task = version_task if version_task is not None else update_task
         version_changed = manifest.version != existing.application_version
         return ApplyOutcome(
             name=manifest.name,
             action="updated",
             deployment_id=existing.id,
-            task_id=last_task.id if last_task is not None else None,
+            task_id=task.id,
             target_version=manifest.version if version_changed else None,
             pinned_image_components=(
                 pinned_image_components(_effective_image_overrides(update_input, existing.config))

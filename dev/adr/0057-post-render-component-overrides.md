@@ -1,6 +1,7 @@
 # ADR-057: Post-Render Component Overrides into a Declared Component Container
 
-**Status**: Accepted — narrowed by [ADR-058](0058-image-overrides-and-component-container-guard.md)
+**Status**: Accepted — narrowed by [ADR-058](0058-image-overrides-and-component-container-guard.md);
+the `styrminctl apply` gap resolved by [ADR-061](0061-apply-writes-config-with-the-version.md)
 **Date**: 2026-10-02
 **Source**: specs/archive/017-post-render-env-vars/ (spec, plan, research D-001 – D-011, critique)
 
@@ -210,7 +211,9 @@ default applies, the same outcome as before.
   moves to a new driver version and adds component env vars is checked against the old
   version: it is rejected when the old version lacks the container, and stored inert when only
   the new version lacks it (flagged `isApplicable: false`, never injected). Validating against
-  the target version in the apply path is a follow-up.
+  the target version in the apply path is a follow-up. *Resolved by
+  [ADR-061](0061-apply-writes-config-with-the-version.md): `apply` sends the config with the
+  version, and it is validated against the target driver version.*
 - **Images are next.** Image overrides (#20) reuse the component container and the same
   post-render placement.
 

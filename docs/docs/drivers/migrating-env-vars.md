@@ -69,11 +69,9 @@ Do these steps in order.
 
 :::note With `styrminctl apply`
 
-`apply` writes `spec.config` before it moves the deployment to a new driver version. If one
-manifest both moves a deployment onto a migrated driver version and adds component env vars,
-the config write is checked against the old version, which declares no component containers,
-and is rejected with `COMPONENT_CONTAINER_NOT_DECLARED`. Run step 2 first, then apply the env
-var change.
+`apply` writes `spec.config` together with the version change, and checks it against the driver
+version the manifest moves to. One manifest can move a deployment onto a migrated driver version
+and add component env vars in the same apply.
 
 :::
 
