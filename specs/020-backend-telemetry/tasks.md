@@ -179,9 +179,9 @@ Run each E2E node with `--pdb` (in a non-interactive shell: `sleep infinity | uv
 - [X] T042 [P] Update `CONTEXT.md`: extend the **Telemetry** entry so it covers both sources (the CLI's per-command event and the server's daily report, with the server's off settings and `styrmin telemetry show`), and add an **Install ID** entry (random UUID; for the CLI stored next to the token store, for the server stored in the `installation` table, one per database; _Avoid_: "instance ID", "customer ID")
 - [X] T043 [P] Update developer knowledge: `dev/knowledge/architecture.md` (one sentence that the task worker sends one report a day to the telemetry endpoint, link to ADR-0061); `dev/knowledge/backend/data-models.md` (the `installation` table); `dev/knowledge/backend/orchestration-flows.md` (a `SEND_TELEMETRY_REPORT` row in the workflow catalogue table and the `PrefectAction` list)
 - [X] T044 [P] Add the towncrier fragment `changelog/274.added.md` with `uv run towncrier create -c "..." 274.added.md`, describing in one or two sentences what operators get: a daily anonymous report, how to turn it off, and `styrmin telemetry show`
-- [ ] T045 Run `uv run invoke format lint`, `uv run invoke test`, `uv run styrmin export graphql-schema schema.graphql && git diff --exit-code schema.graphql` (no change expected), and `cd docs && pnpm build`; fix every failure
-- [ ] T046 Run `backend/tests/e2e/test_server_telemetry.py::test_server_sends_daily_report` with `-k api-chromium` under the E2E evidence rule above and record the evidence in `specs/020-backend-telemetry/e2e-evidence.md`
-- [ ] T047 Walk through [quickstart.md](quickstart.md) sections 1 to 5 and correct any command or expected output that differs from the implementation
+- [X] T045 Run `uv run invoke format lint`, `uv run invoke test`, `uv run styrmin export graphql-schema schema.graphql && git diff --exit-code schema.graphql` (no change expected), and `cd docs && pnpm build`; fix every failure
+- [X] T046 Run `backend/tests/e2e/test_server_telemetry.py::test_server_sends_daily_report` with `-k api-chromium` under the E2E evidence rule above and record the evidence in `specs/020-backend-telemetry/e2e-evidence.md`
+- [X] T047 Walk through [quickstart.md](quickstart.md) sections 1 to 5 and correct any command or expected output that differs from the implementation
 
 ---
 
