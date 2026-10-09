@@ -431,8 +431,18 @@ Located in `workflows/catalogue.py`. Maps `PrefectAction` enums to `WorkflowDefi
 | `EXECUTE_RESTORE` | `execute_restore_workflow` | `workflows.templates.backup` | INTERNAL |
 | `EXECUTE_VELERO_BACKUP` | `execute_velero_backup_flow` | `workflows.templates.backup` | USER |
 | `EXECUTE_VELERO_RESTORE` | `execute_velero_restore_flow` | `workflows.templates.backup` | USER |
+| `EXECUTE_ENVIRONMENT_CLONE` | `execute_environment_clone_workflow` | `workflows.templates.clone` | INTERNAL |
+| `APPLY_UTILITY_RESOURCES` | `apply_utility_resources` | `agent.tasks.application` | USER |
+| `VALIDATE_CONNECTIVITY` | `validate_kubernetes_connectivity` | `workflows.connectivity` | USER |
+| `SYNC_BSL_CREATE` | `sync_bsl_create_flow` | `workflows.templates.bsl_sync` | USER |
+| `SYNC_BSL_DELETE` | `sync_bsl_delete_flow` | `workflows.templates.bsl_sync` | USER |
+| `SYNC_BSL_UPDATE_CREDENTIALS` | `sync_bsl_update_credentials_flow` | `workflows.templates.bsl_sync` | USER |
+| `CLEANUP_EXPIRED_SESSIONS` | `cleanup_expired_sessions_flow` | `workflows.templates.session_cleanup` | INTERNAL |
+| `SEND_TELEMETRY_REPORT` | `send_telemetry_report_flow` | `workflows.templates.telemetry` | INTERNAL |
 
 The `WorkflowType` distinction (`INTERNAL` vs `USER`) controls which Prefect work pool the flow runs on (`styrmin-work-pool` vs `user-work-pool`). User-defined driver actions, registered separately at driver-load time, use `GitSourceWorkflowDefinition` so the worker pulls the driver's repo at runtime.
+
+Two INTERNAL entries also carry a cron schedule, which Prefect reads as UTC, so they run without a caller: `CLEANUP_EXPIRED_SESSIONS` at 03:17 (`17 3 * * *`, [ADR-016](../../adr/0016-authentication-and-sessions.md)) and `SEND_TELEMETRY_REPORT` at 02:43 (`43 2 * * *`). `SEND_TELEMETRY_REPORT` reads the telemetry settings when it runs, sends nothing when telemetry is off or when the run starts more than one hour after its scheduled time, and never raises, so its run always ends `Completed`. See [ADR-061](../../adr/0061-server-anonymous-daily-telemetry.md).
 
 ## PrefectAction Enum
 
@@ -453,8 +463,16 @@ class PrefectAction(Enum):
 
     EXECUTE_BACKUP = "execute_backup"
     EXECUTE_RESTORE = "execute_restore"
+    EXECUTE_ENVIRONMENT_CLONE = "execute_environment_clone"
     EXECUTE_VELERO_BACKUP = "execute_velero_backup"
     EXECUTE_VELERO_RESTORE = "execute_velero_restore"
+    APPLY_UTILITY_RESOURCES = "apply_utility_resources"
+    VALIDATE_CONNECTIVITY = "validate_connectivity"
+    SYNC_BSL_CREATE = "sync_bsl_create"
+    SYNC_BSL_DELETE = "sync_bsl_delete"
+    SYNC_BSL_UPDATE_CREDENTIALS = "sync_bsl_update_credentials"
+    CLEANUP_EXPIRED_SESSIONS = "cleanup_expired_sessions"
+    SEND_TELEMETRY_REPORT = "send_telemetry_report"
 
     def to_tag(self) -> str:
         return f"action/{self.value}"
@@ -502,5 +520,6 @@ See ADR-006 for the rationale behind this responsibility shift.
 | [agent/tasks/shared.py](backend/styrmin_backend/agent/tasks/shared.py) | `get_context`, `render_helm_chart_specifications`, `render_helm_repository_specifications` |
 | [agent/tasks/extra.py](backend/styrmin_backend/agent/tasks/extra.py) | `install_utility`, `update_utility` |
 | [workflows/catalogue.py](backend/styrmin_backend/workflows/catalogue.py) | Workflow registry |
+| [workflows/templates/telemetry.py](backend/styrmin_backend/workflows/templates/telemetry.py) | `send_telemetry_report_flow`, the daily telemetry report |
 | [workflows/models.py](backend/styrmin_backend/workflows/models.py) | `PrefectAction`, `WorkflowDefinition` |
 | [workflows/manager.py](backend/styrmin_backend/workflows/manager.py) | `PrefectManager` |
