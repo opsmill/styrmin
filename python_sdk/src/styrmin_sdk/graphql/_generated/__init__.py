@@ -88,6 +88,7 @@ from .get_application_driver_versions import (
 from .get_backup import (
     GetBackup,
     GetBackupBackup,
+    GetBackupBackupInstance,
     GetBackupBackupSteps,
     GetBackupBackupStepsErrors,
 )
@@ -457,6 +458,7 @@ __all__ = [
     "GetApplicationDriverVersionsApplicationDriverVersions",
     "GetBackup",
     "GetBackupBackup",
+    "GetBackupBackupInstance",
     "GetBackupBackupSteps",
     "GetBackupBackupStepsErrors",
     "GetBackupSchedule",

@@ -20,6 +20,7 @@ class GetBackupBackup(BaseModel):
     name: str
     status: str
     instance_id: UUID = Field(alias="instanceId")
+    instance: "GetBackupBackupInstance"
     error_message: Optional[str] = Field(alias="errorMessage")
     started_at: Optional[datetime] = Field(alias="startedAt")
     completed_at: Optional[datetime] = Field(alias="completedAt")
@@ -29,6 +30,11 @@ class GetBackupBackup(BaseModel):
     ttl: Optional[str]
     expires_at: Optional[datetime] = Field(alias="expiresAt")
     steps: list["GetBackupBackupSteps"]
+
+
+class GetBackupBackupInstance(BaseModel):
+    id: UUID
+    application_version: str = Field(alias="applicationVersion")
 
 
 class GetBackupBackupSteps(BaseModel):

@@ -59,20 +59,21 @@ class BackupResource(BaseResource):
 
         ``deployment_id`` lists the deployment's backup history: the backups of
         every instance the deployment has had, including instances replaced by
-        an upgrade, a config edit, a refresh or an environment config change.
+        an upgrade, a config edit or an environment config change.
         ``instance_id`` lists the backups of that one instance. Each backup
         carries ``instance.application_version``, the application version of
         the instance it was taken of. ``status`` filters either list.
 
-        Pass exactly one of ``deployment_id`` and ``instance_id``. The server
-        enforces this rule and answers ``VALIDATION_ERROR``, which the SDK raises
-        as :class:`~styrmin_sdk.exceptions.OperationFailedError`.
+        Pass exactly one of ``deployment_id`` and ``instance_id``, or the call
+        raises :class:`ValueError` without sending a request.
 
         Examples::
 
             history = await client.backups.list_backups(deployment_id=deployment_id)
             completed = await client.backups.list_backups(instance_id, "completed")
         """
+        if (deployment_id is None) == (instance_id is None):
+            raise ValueError("Provide exactly one of deployment_id or instance_id")
         variables: dict[str, Any] = {}
         if deployment_id is not None:
             variables["deploymentId"] = str(deployment_id)
