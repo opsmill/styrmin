@@ -7,7 +7,7 @@ The server sends exactly this body to the telemetry endpoint once a day. It reus
 ## Transport
 
 - Method: `POST`
-- URL: `STYRMIN_TELEMETRY_ENDPOINT` when set and not blank, otherwise `https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin` (research D4).
+- URL: `STYRMIN_TELEMETRY_ENDPOINT` when set and not blank, otherwise `https://telemetry.opsmill.cloud/styrmin` (research D4).
 - Content-Type: `application/json`
 - Body: the envelope below, UTF-8 JSON.
 - No authentication header, no cookie, no timestamp and no network identifier. The ingestion endpoint adds the time it received the report.

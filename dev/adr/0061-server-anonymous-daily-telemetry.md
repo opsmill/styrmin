@@ -103,7 +103,7 @@ database, inside the `styrminctl` envelope with `kind: "styrmin"`.
 
 - **A new outbound request from the server side.** Every install with default
   settings sends the report in one HTTPS request a day to
-  `https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin`. The request
+  `https://telemetry.opsmill.cloud/styrmin`. The request
   leaves from the task worker, not the server pod. Network policies or proxies
   that operators configure have to account for it, or operators turn telemetry
   off. The task worker honours `HTTPS_PROXY` and `NO_PROXY`, but the chart has

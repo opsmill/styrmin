@@ -177,7 +177,7 @@ changelog/274.added.md                      # towncrier fragment
 
 ## Release prerequisite
 
-The owner of the ingestion endpoint confirms that `https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin` accepts the envelope with `kind: "styrmin"` (spec FR-015, research D4). This does not block implementation or the E2E test, which uses its own sink.
+The owner of the ingestion endpoint confirms that `https://telemetry.opsmill.cloud/styrmin` accepts the envelope with `kind: "styrmin"` (spec FR-015, research D4). This does not block implementation or the E2E test, which uses its own sink.
 
 ## Complexity Tracking
 

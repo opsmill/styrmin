@@ -9,7 +9,7 @@ A new settings group `TelemetrySettings` in `backend/styrmin_backend/config.py`,
 | Environment variable | Settings file key | Type | Default | Meaning |
 |---|---|---|---|---|
 | `STYRMIN_TELEMETRY_ENABLED` | `[telemetry] enabled` | boolean | `true` | `false` (also `0`, `no`, `off`) turns telemetry off. |
-| `STYRMIN_TELEMETRY_ENDPOINT` | `[telemetry] endpoint` | URL string | `https://telemetry-endpoints.cloudflare-096.workers.dev/styrmin` | Destination of the daily report. A blank value means the default. |
+| `STYRMIN_TELEMETRY_ENDPOINT` | `[telemetry] endpoint` | URL string | `https://telemetry.opsmill.cloud/styrmin` | Destination of the daily report. A blank value means the default. |
 | `DO_NOT_TRACK` | none | string | unset | Exactly `1` turns telemetry off, as in `styrminctl`. Any other value has no effect. |
 
 `STYRMIN_TELEMETRY_ENDPOINT` has the same name as the `styrminctl` override. The two are read by different processes: `styrminctl` on the operator's workstation, the server in its pod.
