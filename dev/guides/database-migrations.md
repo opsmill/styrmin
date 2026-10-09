@@ -68,6 +68,8 @@ command.heads(_get_alembic_config(), verbose=True)
 
 (Or grep `down_revision` across `backend/styrmin_backend/db/migrations/versions/*.py` to spot two files sharing the same parent — that's the head split.)
 
+`backend/tests/unit/db/test_migration_heads.py` fails when the chain has more than one head, so a split shows up in the unit tests as soon as both revisions are on one branch.
+
 When you need to add a migration on top of a multi-head state, write a **merge migration**: a single file whose `down_revision` is a tuple of both heads. Alembic recognises tuples and emits a `merge_revision` linking them. Example pattern:
 
 ```python
