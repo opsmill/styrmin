@@ -51,10 +51,16 @@ The `backups` commands take a deployment: `create` and `list` by name or by
 - `backups list` lists the deployment's backup history: the backups of every
   instance the deployment has had, newest first. Its `application_version`
   column shows the application version each backup was taken at. Backups taken
-  before an upgrade, a config edit, a refresh or an environment config change
-  stay in the list.
+  before an upgrade, a config edit or an environment config change stay in the
+  list.
 - `backups restore --last` restores the newest completed backup in that
-  history, whichever instance it was taken of.
+  history that has not expired. The backup can belong to the active instance
+  or to an earlier instance of the deployment. For a backup of an earlier
+  instance, the command shows the backup's application version and the
+  deployment's current one, and asks for confirmation. Pass `--yes` to skip the
+  question; without a terminal, the command refuses unless you pass `--yes`.
+  The restore puts the earlier instance's `StyrminDeployment` and `HelmRelease`
+  back in the namespace, and the deployment keeps its active instance.
 
 A raw `--instance-id` (`--target-instance-id` on `restore`) targets one
 instance instead: `create` backs up that instance, `list` lists only its
@@ -70,7 +76,8 @@ uv run styrminctl backups create --instance-id <instance-id> # escape hatch
 # List a deployment's backup history, with the application version of each backup
 uv run styrminctl backups list my-app
 
-# List the backup history of a deleted deployment (the name lookup does not find it)
+# List the backup history of a deleted deployment (the name lookup does not find it).
+# The id is the last part of the deleted deployment's page URL in the web UI.
 uv run styrminctl backups list --id <deployment-id>
 
 # List the backups of one instance only
@@ -82,7 +89,13 @@ uv run styrminctl backups restore <backup-id> --target-deployment my-app
 
 # Restore the newest completed backup in a deployment's history, in-place
 uv run styrminctl backups restore --last --target-deployment my-app
+
+# The same in a script: restore a backup of an earlier instance without the question
+uv run styrminctl backups restore --last --yes --target-deployment my-app
 ```
+
+A deleted deployment's backups cannot be restored: the server refuses the
+restore with `OPERATION_DENIED`.
 
 Name lookups search every environment by default; pass `--environment` when the
 same deployment name exists in more than one. When you restore to a raw
