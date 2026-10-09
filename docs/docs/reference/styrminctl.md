@@ -69,6 +69,11 @@ instance, and the `env-backups` commands target an environment:
   `backups restore --last` takes it with `--target-deployment` or
   `--target-deployment-id`. See [Backup history of a
   deployment](../concepts-and-architecture/backups-and-restores.md#backup-history-of-a-deployment).
+- `backups restore --last` skips backups whose expiry date has passed.
+  When the backup it chooses was taken of an earlier instance, it shows
+  the backup's application version and the deployment's current one,
+  and asks for confirmation. `--yes` skips the question, and without a
+  terminal the command refuses unless you pass `--yes`.
 - `--instance-id` on `backups list` and `--target-instance-id` on
   `backups restore` work on one instance only.
 

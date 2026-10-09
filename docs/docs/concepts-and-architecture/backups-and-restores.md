@@ -99,11 +99,10 @@ that each of Velero's `PodVolumeBackup` objects reports for the backup.
 Each backup is a backup of one instance of a deployment. When you back
 up a deployment, Styrmin backs up its active instance. A deployment gets
 a new instance, which becomes its active instance, after each of these
-four operations:
+operations:
 
 - an upgrade of the deployment to another application version
 - an edit of the deployment's config
-- a refresh of the deployment
 - a change to the config of the deployment's environment, which
   redeploys every deployment in that environment
 
@@ -113,11 +112,46 @@ backup history: the backups of every instance the deployment has had,
 newest first. A backup you created before one of these operations stays
 in the list. Each backup shows the application version of the instance
 it was taken of, in the "Application version" column of the Backups tab
-and the `application_version` column of `styrminctl backups list`.
+and the `application_version` column of `styrminctl backups list`. On
+the Backups tab, the backups of the active instance are marked "current
+instance".
 
 To list the backups of one instance only, run
 `styrminctl backups list --instance-id <instance-id>` or query
 `backups(instanceId:)`.
+
+#### Expired backups
+
+Velero deletes a backup when its expiry date has passed, but Styrmin
+keeps the backup's status `completed`. On the Backups tab, such a backup
+shows "Expired" under its expiry date, and its restore action is
+disabled. `styrminctl backups restore --last` skips it and chooses the
+newest completed backup that has not expired. An environment restore
+also skips expired backups.
+
+#### Restoring a backup of an earlier instance
+
+You can restore a backup of an earlier instance into the deployment,
+for example a backup taken before an upgrade. The restore puts the
+earlier instance's `StyrminDeployment` and `HelmRelease` back in the
+deployment's namespace, with that instance's application version and
+config. Styrmin does not change the deployment's active instance, so the
+deployment page and `styrminctl` keep showing the application version of
+the active instance.
+
+Before such a restore:
+
+- The Restore dialog on the Backups tab shows the backup's application
+  version and the deployment's current application version, and warns
+  that the backup was taken of an earlier instance.
+- `styrminctl backups restore --last` shows both versions and asks for
+  confirmation. Pass `--yes` to restore without the question. Without a
+  terminal and without `--yes`, the command refuses the restore.
+
+A restore of a backup whose ID you pass to `styrminctl backups restore`
+asks no question.
+
+#### Backup history of a deleted deployment
 
 A deleted deployment keeps its backup history:
 
@@ -126,16 +160,20 @@ A deleted deployment keeps its backup history:
   delete actions on each backup are disabled, as every action is on a
   deleted deployment.
 - From the CLI, run `styrminctl backups list --id <deployment-id>`. The
-  lookup by name does not find a deleted deployment.
+  lookup by name does not find a deleted deployment. To find the
+  deployment id, open the deleted deployment as described above: the id
+  is the last part of the page's URL,
+  `/environments/<environment-id>/deployments/<deployment-id>`.
+
+A deleted deployment's backups cannot be restored, into the deleted
+deployment or into another deployment. Styrmin refuses such a restore
+with the error code `OPERATION_DENIED`. An environment restore and an
+environment clone also skip a deleted deployment.
 
 A new deployment that reuses the name of a deleted deployment starts
 with an empty backup history, because the history is listed by
-deployment id, not by name.
-
-A restore does not check the application version. When you restore a
-backup that was taken at another application version than the one the
-deployment runs now, Styrmin does not compare the two versions and
-shows no warning about the difference.
+deployment id, not by name. The deleted deployment keeps its own
+history, which you reach by its id.
 
 ### What happens when you restore
 
