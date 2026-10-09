@@ -223,7 +223,9 @@ DEFAULT_TELEMETRY_ENDPOINT = (
 class TelemetrySettings(BaseSettings):
     """Daily anonymous report (spec 020). See the configuration contract."""
 
-    model_config = SettingsConfigDict(env_prefix="STYRMIN_TELEMETRY_")
+    model_config = SettingsConfigDict(
+        env_prefix="STYRMIN_TELEMETRY_", populate_by_name=True
+    )
 
     enabled: bool = True
     endpoint: str = DEFAULT_TELEMETRY_ENDPOINT

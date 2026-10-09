@@ -16,7 +16,7 @@ Holds the install ID. One row per database, created the first time the server st
 
 **SQLModel**: `Installation(SQLModel, table=True)` in `backend/styrmin_backend/db/models.py`. It does not inherit `StyrminModel` (research D10).
 
-**Alembic**: one revision, `add_installation`, `down_revision = "c2ff6dba5ffd"`. `upgrade()` creates the table with the check constraint. `downgrade()` drops it. The revision creates no row; the server creates it on the next start.
+**Alembic**: one revision, `add_installation`, `down_revision = "69b12221e5df"`, the revision on `develop` that merges the heads `c2ff6dba5ffd` and `f3a4b5c6d7e8`. `upgrade()` creates the table with the check constraint. `downgrade()` drops it. The revision creates no row; the server creates it on the next start.
 
 **Lifecycle**:
 

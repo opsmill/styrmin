@@ -13,7 +13,7 @@ from styrmin_backend.cli.db import _get_alembic_config
 from styrmin_backend.db import utils as db_utils
 
 INSTALLATION_REVISION = "3b926acd0791"
-PREVIOUS_REVISION = "c2ff6dba5ffd"
+PREVIOUS_REVISION = "69b12221e5df"
 INSTALLATION_COLUMNS = {"id", "install_id", "created_on"}
 
 
@@ -68,6 +68,21 @@ def _insert_rows(url: str, *ids: int) -> None:
     asyncio.run(insert())
 
 
+def _current_revisions(url: str) -> set[str]:
+    async def read() -> set[str]:
+        engine = create_async_engine(url)
+        try:
+            async with engine.connect() as connection:
+                result = await connection.execute(
+                    sa.text("SELECT version_num FROM alembic_version")
+                )
+                return set(result.scalars())
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(read())
+
+
 def test_installation_revision_upgrades_and_downgrades(database_url: str) -> None:
     alembic_config = _get_alembic_config()
 
@@ -80,3 +95,4 @@ def test_installation_revision_upgrades_and_downgrades(database_url: str) -> Non
 
     command.downgrade(alembic_config, PREVIOUS_REVISION)
     assert _installation_columns(database_url) is None
+    assert _current_revisions(database_url) == {PREVIOUS_REVISION}

@@ -31,7 +31,7 @@ Each chunk ran in its own subagent with a clean context, one after the other. Ph
 - **Chunk 1**:
   - The subagent's first `pnpm install` in `frontend/` ran against the parent emdash workspace. pnpm removed 312 packages from `/root/emdash/node_modules` and rewrote `/root/emdash/node_modules/.modules.yaml`. The emdash postinstall then failed because emdash needs Node 24.14.0 and this machine has Node 18.19.1. `pnpm-lock.yaml` and the tracked files in `/root/emdash` did not change. Nobody has repaired this yet.
   - Later chunks used `pnpm --ignore-workspace` only.
-- **Chunk 2**: Alembic revision `3b926acd0791` (`down_revision = "c2ff6dba5ffd"`). `installation.id` has `autoincrement=False` and `default=1`, so PostgreSQL creates no unused sequence. The repository does not commit; callers commit.
+- **Chunk 2**: Alembic revision `3b926acd0791` (`down_revision = "c2ff6dba5ffd"`; changed to `69b12221e5df` after the run, see "Changes after the run"). `installation.id` has `autoincrement=False` and `default=1`, so PostgreSQL creates no unused sequence. The repository does not commit; callers commit.
 - **Chunk 3**:
   - `list_usage()` groups by the driver version ID and every selected column, because PostgreSQL rejects the grouping that SQLite accepts. Chunk 3 added one PostgreSQL test for this.
   - Chunk 3 also added a test that records the SQL and checks that no source column is selected.
@@ -194,6 +194,16 @@ The review was done by hand in the main context instead of with `speckit-review-
   - Corrections to the spec documents: the `source_type` values in the contract, data model and FR-001, and the quickstart commands.
   - Documentation sync outside the task list: `orchestration-flows.md`, `vcluster-local.md`, `backend/overview.md` and the ADR index in `dev/README.md`.
 - **Not changed**: `demo/do-values.yaml` and `invoke local-run`, because the spec does not cover them. Both are listed under "Review findings".
+
+## Changes after the run
+
+Before the pull request was opened, the branch was rebased onto `develop`:
+
+- `develop` commit `a2a627d3` added Alembic revision `f3a4b5c6d7e8` on the same parent as `c2ff6dba5ffd`, which gave `develop` two heads. `develop` commit `fd2b34c4` then added revision `69b12221e5df`, which merges them. Revision `3b926acd0791` now has `down_revision = "69b12221e5df"`, and `develop`'s `test_migration_heads.py` checks that the chain has one head.
+- `develop` gave the settings classes with aliased fields `populate_by_name=True`, so that the output of `styrmin config show` loads back as a config file. `TelemetrySettings` has an aliased field (`DO_NOT_TRACK`), so it now sets the same option.
+- `dev/knowledge/backend/overview.md` had a conflict, resolved by keeping both changes.
+- The rebases changed every commit SHA. The SHAs in the chunk table and in [e2e-evidence.md](e2e-evidence.md) are the SHAs before the rebases.
+- The tests on the rebased code are recorded in [e2e-evidence.md](e2e-evidence.md) and in the pull request.
 
 ## Suggested next steps
 
