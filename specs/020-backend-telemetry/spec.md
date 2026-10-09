@@ -146,7 +146,7 @@ Report content:
 - **FR-001**: Each report MUST list every loaded application driver version, including versions that no deployment uses. Each entry contains:
   - the driver name, exactly as the operator named it
   - the driver version
-  - the source type (`git` or `local`)
+  - the source type (`git` or `local` for drivers the operator loads, `internal` for the ingress controller driver that Styrmin creates)
   - the number of live deployments that use it, not counting tombstoned deployments ([ADR-008](../../dev/adr/0008-deployment-soft-delete-tombstoning.md))
 
   Driver versions that have the same name, version and source type, and differ only in the fields that FR-002 removes, are reported as one entry with their deployment counts added. [CLAUDE RECOMMENDED – based on [research D9](research.md): without those fields the entries cannot be told apart]

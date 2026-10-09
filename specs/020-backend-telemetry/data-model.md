@@ -39,7 +39,7 @@ Holds the install ID. One row per database, created the first time the server st
 |---|---|
 | `name` | `applicationdriver.name` |
 | `version` | `applicationdriverversion.version` |
-| `source_type` | `applicationdriverversion.source_type` (`git` or `local`) |
+| `source_type` | `applicationdriverversion.source_type` (`git`, `local`, or `internal` for the ingress controller driver) |
 | `deployment_count` | `COUNT(deployment.id)` over deployments with `application_driver_version_id` equal to the row's ID and `deleted_at IS NULL`; `0` when there is none |
 
 The query never selects `source_repository`, `source_branch`, `source_path`, `content_hash` or `source_commit_sha` (FR-002).
