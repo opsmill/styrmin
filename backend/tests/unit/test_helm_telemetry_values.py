@@ -51,16 +51,21 @@ def _configmap_data(chart: Path, *set_values: str) -> dict[str, object]:
 
 
 def _install_notes(chart: Path, *set_values: str) -> str:
-    # `helm template` skips NOTES.txt; a client-side dry run renders it without a cluster.
-    command = ["helm", "install", "styrmin", str(chart)]
-    command += ["--namespace", "styrmin", "--dry-run=client"]
+    # `helm template` skips NOTES.txt and Helm 3's `helm install --dry-run` needs a cluster,
+    # so render the NOTES.txt text as a named template inside a ConfigMap.
+    notes = (chart / "templates" / "NOTES.txt").read_text()
+    (chart / "templates" / "notes-under-test.yaml").write_text(
+        '{{ define "notes-under-test" }}' + notes + "{{ end }}\n"
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: notes-under-test\n"
+        'data:\n  notes: {{ include "notes-under-test" . | toJson }}\n'
+    )
+    command = ["helm", "template", "styrmin", str(chart), "--namespace", "styrmin"]
+    command += ["--show-only", "templates/notes-under-test.yaml"]
     for value in set_values:
         command += ["--set", value]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
-    _, separator, notes = result.stdout.partition("\nNOTES:\n")
-    assert separator, result.stdout
-    return notes
+    return yaml.safe_load(result.stdout)["data"]["notes"]
 
 
 def test_install_notes_say_telemetry_is_on_and_how_to_view_and_turn_it_off(
