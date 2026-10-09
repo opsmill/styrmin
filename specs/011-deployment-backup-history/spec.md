@@ -78,7 +78,7 @@ An API or SDK user lists a deployment's backup history by deployment id, without
 
 ### User Story 4 - View the backup history of a deleted deployment (Priority: P3)
 
-An operator opens a deployment that was deleted and views its backup history, to review it or restore from it, as ADR-008 describes.
+An operator opens a deployment that was deleted and views its backup history, to review it. ADR-008 keeps the backups so that operators can also restore from them, but a restore into a deleted deployment is refused: the restore action is disabled on its Backups tab, and the server refuses the restore with `OPERATION_DENIED`. Restoring a deleted deployment's backup into another deployment is out of scope.
 
 **Why this priority**: ADR-008 keeps backups with a deleted deployment. Listing by deployment id keeps that history visible. This story is less frequent than the first three.
 

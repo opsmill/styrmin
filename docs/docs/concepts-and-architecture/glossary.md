@@ -42,6 +42,13 @@ Version that knows how to deploy it.
 
 ### B
 
+**Backup history** — The backups of every **Instance** a **Deployment**
+has had, newest first. Backups taken before an upgrade, a config edit or
+an environment config change stay in it, and a deleted deployment keeps
+it. The Backups tab and `styrminctl backups list` show it. See [Backup
+history of a
+deployment](backups-and-restores.md#backup-history-of-a-deployment).
+
 **Backup Storage Location (BSL)** — An S3-compatible object store
 registered as a destination for Velero backups. Assigned to an
 **Environment**; all deployments in that environment back up there.
