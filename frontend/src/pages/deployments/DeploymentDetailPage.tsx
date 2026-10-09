@@ -22,7 +22,7 @@ import { Tabs, TabPanel } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Collapsible,
   CollapsibleContent,
@@ -44,6 +44,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  AlertTriangle,
   Archive,
   ChevronRight,
   ExternalLink,
@@ -140,7 +141,13 @@ export default function DeploymentDetailPage() {
   >(null);
 
   // Lists every instance's backups, so the history survives a new instance.
-  const { data: backupsData, isLoading: backupsFetching } = useListBackupsQuery(
+  const {
+    data: backupsData,
+    isLoading: backupsFetching,
+    error: backupsError,
+    refetch: refetchBackups,
+    dataUpdatedAt: backupsUpdatedAt,
+  } = useListBackupsQuery(
     { deploymentId },
     { refetchInterval: autoRefreshEnabled ? 10_000 : false },
   );
@@ -259,6 +266,17 @@ export default function DeploymentDetailPage() {
   const isDeleted =
     deployment.status === "deleted" || deployment.deletedAt !== null;
   const isTerminal = isDeleting || isDeleted;
+  const terminalTitle = isDeleting
+    ? "This deployment is being deleted"
+    : isDeleted
+      ? "This deployment is deleted"
+      : undefined;
+  // Warn before restoring a backup of an earlier instance or another version.
+  const selectedBackupNeedsWarning =
+    !!selectedBackup &&
+    (selectedBackup.instance.id !== instanceId ||
+      selectedBackup.instance.applicationVersion !==
+        deployment.applicationVersion);
   const driverName =
     deployment.applicationDriverVersion?.applicationDriver?.name ?? null;
   const driverVersionLabel = deployment.applicationDriverVersion
@@ -338,17 +356,13 @@ export default function DeploymentDetailPage() {
               size="sm"
               disabled={!instanceId || isRestoring || isTerminal}
               onClick={() => setUpgradeOpen(true)}
-              title={isTerminal ? "This deployment is retired" : undefined}
+              title={terminalTitle}
             >
               Upgrade
             </Button>
           </IfRole>
           <IfRole minimum="READ_WRITE">
-            <Button
-              size="sm"
-              disabled={isTerminal}
-              title={isTerminal ? "This deployment is retired" : undefined}
-            >
+            <Button size="sm" disabled={isTerminal} title={terminalTitle}>
               Redeploy
             </Button>
           </IfRole>
@@ -360,7 +374,7 @@ export default function DeploymentDetailPage() {
               onClick={() => setDeleteDeploymentOpen(true)}
               title={
                 isTerminal
-                  ? "This deployment is retired"
+                  ? terminalTitle
                   : isRestoring
                     ? "Deletion is refused while a restore is in progress"
                     : undefined
@@ -601,7 +615,7 @@ export default function DeploymentDetailPage() {
                   isTerminal
                 }
                 onClick={handleBackup}
-                title={isTerminal ? "This deployment is retired" : undefined}
+                title={terminalTitle}
               >
                 <Archive className="h-4 w-4" />
                 {createBackupMutation.isPending
@@ -613,31 +627,46 @@ export default function DeploymentDetailPage() {
 
           {backupsFetching && !backupsData ? (
             <p className="text-sm text-muted-foreground">Loading backups...</p>
+          ) : backupsError && !backupsData ? (
+            <ErrorState
+              title="Could not load the backup history"
+              message={backupsError.message}
+              onRetry={() => refetchBackups()}
+            />
           ) : !backupsData?.backups || backupsData.backups.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No backups yet</p>
+            <div className="flex flex-col gap-1" data-testid="backups-empty">
+              <p className="text-sm text-muted-foreground">
+                {isDeleted ? "No backups" : "No backups yet"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {isDeleted
+                  ? "No backup was taken of this deployment before it was deleted."
+                  : 'This list shows the backups of this deployment only. If an earlier deployment with the same name was deleted, its backups stay with it: on the environment page, turn on "Show deleted" and open that deployment.'}
+              </p>
+            </div>
           ) : (
             <>
-              {/* Table header */}
-              <div className="flex items-center gap-4 px-4 py-2">
-                <span className="w-[200px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              {/* Table header. Fixed columns fit beside the sidebar at 1280px. */}
+              <div className="flex items-center gap-3 border-l-[3px] border-transparent px-4 py-2">
+                <span className="min-w-0 flex-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Name
                 </span>
-                <span className="w-[100px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <span className="w-[100px] shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Status
                 </span>
-                <span className="w-[150px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <span className="w-[120px] shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Application version
                 </span>
-                <span className="w-[150px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <span className="w-[130px] shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Created
                 </span>
-                <span className="w-[100px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <span className="w-[70px] shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Size
                 </span>
-                <span className="w-[150px] text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <span className="w-[110px] shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Expires
                 </span>
-                <span className="flex-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <span className="w-[110px] shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Actions
                 </span>
               </div>
@@ -658,6 +687,9 @@ export default function DeploymentDetailPage() {
                   }}
                   autoRefreshEnabled={autoRefreshEnabled}
                   deploymentTerminal={isTerminal}
+                  terminalTitle={terminalTitle}
+                  activeInstanceId={instanceId}
+                  listedAt={backupsUpdatedAt}
                 />
               ))}
             </>
@@ -700,6 +732,48 @@ export default function DeploymentDetailPage() {
               <code className="font-mono">{selectedBackup?.name}</code>
             </DialogDescription>
           </DialogHeader>
+          {selectedBackup && (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+              <dt className="text-muted-foreground">
+                Backup application version
+              </dt>
+              <dd
+                className="break-all font-mono"
+                data-testid="restore-backup-version"
+              >
+                {selectedBackup.instance.applicationVersion}
+              </dd>
+              <dt className="text-muted-foreground">
+                Current application version
+              </dt>
+              <dd
+                className="break-all font-mono"
+                data-testid="restore-current-version"
+              >
+                {deployment.applicationVersion}
+              </dd>
+            </dl>
+          )}
+          {selectedBackup && selectedBackupNeedsWarning && (
+            <Alert data-testid="restore-earlier-instance-warning">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>
+                {selectedBackup.instance.id !== instanceId
+                  ? "This backup was taken of an earlier instance"
+                  : "This backup was taken at another application version"}
+              </AlertTitle>
+              <AlertDescription>
+                The backup was taken at application version{" "}
+                {selectedBackup.instance.applicationVersion}. The deployment
+                runs version {deployment.applicationVersion} now. The restore
+                puts back the StyrminDeployment and HelmRelease that the backup
+                holds, with that application version and config. Styrmin keeps
+                the current instance as the deployment&apos;s active instance,
+                so this page keeps showing version{" "}
+                {deployment.applicationVersion}.
+              </AlertDescription>
+            </Alert>
+          )}
           {restoreError && (
             <Alert variant="destructive">
               <AlertDescription>{restoreError}</AlertDescription>
@@ -888,7 +962,7 @@ export default function DeploymentDetailPage() {
               This will tear down all workload resources for{" "}
               <code className="font-mono">{deployment.name}</code> and remove
               its namespace. Backups are retained against this deployment. The
-              retired deployment will appear in the deleted view for the
+              deleted deployment will appear in the deleted view for the
               configured forensic-retention window.
             </DialogDescription>
           </DialogHeader>
@@ -1014,6 +1088,9 @@ function BackupRow({
   onDelete,
   autoRefreshEnabled,
   deploymentTerminal,
+  terminalTitle,
+  activeInstanceId,
+  listedAt,
 }: {
   backup: {
     id: string;
@@ -1027,7 +1104,7 @@ function BackupRow({
     /** Expiration Velero reported for the backup. */
     expiresAt?: string | null;
     /** The instance the backup was taken of, possibly not the active one. */
-    instance: { applicationVersion: string };
+    instance: { id: string; applicationVersion: string };
     /** One step per component. */
     steps: StepListItem[];
   };
@@ -1042,6 +1119,12 @@ function BackupRow({
    * disabled while the deployment is being deleted or already deleted).
    */
   deploymentTerminal: boolean;
+  /** Why the actions are disabled on a deleting or deleted deployment. */
+  terminalTitle?: string;
+  /** The deployment's active instance, to mark the backups taken of it. */
+  activeInstanceId?: string;
+  /** When the list was fetched, in ms since the epoch; expiry is judged against it. */
+  listedAt: number;
 }) {
   const { data: restoresData } = useListRestoresQuery(
     { backupId: backup.id },
@@ -1056,11 +1139,7 @@ function BackupRow({
     (r: { status: string }) =>
       r.status === "pending" || r.status === "in_progress",
   );
-  const isRestoreDisabled =
-    backup.status !== "completed" || hasActiveRestore || deploymentTerminal;
-  const terminalTooltip = deploymentTerminal
-    ? "This deployment is retired"
-    : undefined;
+  const isCurrentInstance = backup.instance.id === activeInstanceId;
 
   // The applied retention TTL explains *why* the expiry date is what it is.
   // It rides a native `title` for pointer users, but is also rendered as
@@ -1072,11 +1151,25 @@ function BackupRow({
   // whose `toLocaleDateString()` is the literal string "Invalid Date". Fall
   // back to the same em-dash placeholder used for a missing expiry so a
   // corrupt stored timestamp reads as "unknown" rather than as an error.
-  const expiresAtLabel = ((): string => {
-    if (!backup.expiresAt) return "—";
+  const expiresAt = ((): Date | null => {
+    if (!backup.expiresAt) return null;
     const parsed = new Date(backup.expiresAt);
-    return isNaN(parsed.getTime()) ? "—" : parsed.toLocaleDateString();
+    return isNaN(parsed.getTime()) ? null : parsed;
   })();
+  const expiresAtLabel = expiresAt ? expiresAt.toLocaleDateString() : "—";
+  // Velero deletes a backup once its expiry date has passed.
+  const isExpired = expiresAt !== null && expiresAt.getTime() <= listedAt;
+
+  const isRestoreDisabled =
+    backup.status !== "completed" ||
+    hasActiveRestore ||
+    deploymentTerminal ||
+    isExpired;
+  const restoreTitle = deploymentTerminal
+    ? terminalTitle
+    : isExpired
+      ? "The expiry date of this backup has passed: Velero deletes a backup when it expires"
+      : undefined;
 
   const bc = getStatusColor(backup.status);
 
@@ -1089,47 +1182,71 @@ function BackupRow({
       data-backup-application-version={backup.instance.applicationVersion}
     >
       <div
-        className={`flex items-center gap-4 rounded-lg border-l-[3px] px-4 py-3 ${bc.border} ${
+        className={`flex items-center gap-3 rounded-lg border-l-[3px] px-4 py-3 ${bc.border} ${
           index % 2 === 0 ? "bg-surface" : ""
         }`}
       >
-        <div className="flex w-[200px] items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <div className={`h-2 w-2 flex-shrink-0 rounded-full ${bc.dot}`} />
-          <span className="text-[13px] font-medium text-foreground">
+          <span className="min-w-0 break-all text-[13px] font-medium text-foreground">
             {backup.name}
           </span>
         </div>
-        <div className="w-[100px]" data-testid="backup-status">
+        <div className="w-[100px] shrink-0" data-testid="backup-status">
           <StatusBadge status={backup.status} />
         </div>
+        <div className="w-[120px] shrink-0 text-[13px] text-muted-foreground">
+          <span className="sr-only">Application version </span>
+          <span
+            className="break-all font-mono"
+            data-testid="backup-application-version"
+          >
+            {backup.instance.applicationVersion}
+          </span>
+          {isCurrentInstance && (
+            <span
+              className="block text-[11px]"
+              data-testid="backup-current-instance"
+            >
+              current instance
+            </span>
+          )}
+        </div>
         <span
-          className="w-[150px] truncate font-mono text-[13px] text-muted-foreground"
-          data-testid="backup-application-version"
-          title={backup.instance.applicationVersion}
+          className="w-[130px] shrink-0 text-[13px] text-muted-foreground"
+          data-testid="backup-created"
         >
-          {backup.instance.applicationVersion}
+          {new Date(backup.createdOn).toLocaleString(undefined, {
+            dateStyle: "short",
+            timeStyle: "short",
+          })}
         </span>
-        <span className="w-[150px] text-[13px] text-muted-foreground">
-          {new Date(backup.createdOn).toLocaleDateString()}
-        </span>
-        <span className="w-[100px] text-[13px] text-muted-foreground">
+        <span className="w-[70px] shrink-0 text-[13px] text-muted-foreground">
           {backup.sizeBytes != null ? formatBytes(backup.sizeBytes) : "—"}
         </span>
         <span
-          className="w-[150px] text-[13px] text-muted-foreground"
+          className="w-[110px] shrink-0 text-[13px] text-muted-foreground"
           data-testid="backup-expires"
           title={retentionHint}
         >
           {expiresAtLabel}
+          {isExpired && (
+            <span
+              className="block text-[11px] font-medium text-destructive"
+              data-testid="backup-expired"
+            >
+              Expired
+            </span>
+          )}
           {retentionHint && <span className="sr-only"> ({retentionHint})</span>}
         </span>
-        <div className="flex flex-1 items-center gap-2">
+        <div className="flex w-[110px] shrink-0 items-center gap-2">
           <IfRole minimum="READ_WRITE">
             <button
               disabled={isRestoreDisabled}
               onClick={() => onRestore(backup.id)}
               className="text-xs font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
-              title={terminalTooltip}
+              title={restoreTitle}
             >
               Restore
             </button>
@@ -1138,7 +1255,7 @@ function BackupRow({
               disabled={deploymentTerminal}
               onClick={() => onDelete(backup.id)}
               className="text-xs font-medium text-destructive hover:underline disabled:text-muted-foreground disabled:no-underline"
-              title={terminalTooltip}
+              title={deploymentTerminal ? terminalTitle : undefined}
             >
               Delete
             </button>

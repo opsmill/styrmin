@@ -30,6 +30,8 @@ import type { GetDeploymentQuery, ListBackupsQuery } from "@/generated/graphql";
 type BackupItem = ListBackupsQuery["backups"][number];
 
 const EXPIRES_AT = "2026-11-01T12:04:06+00:00";
+// The list's fetch time, which the page judges expiry against.
+const LISTED_AT = Date.parse("2026-10-09T12:00:00+00:00");
 
 // Mock generated hooks so the page renders deterministically.
 const useGetDeploymentQueryMock = vi.fn();
@@ -191,6 +193,7 @@ function makeQueryClient(): QueryClient {
 async function renderBackupsTab(
   backups: BackupItem[],
   deployment: DeploymentShape = makeDeployment(),
+  listResult?: Record<string, unknown>,
 ) {
   useGetDeploymentQueryMock.mockReturnValue({
     data: { deployment } as GetDeploymentQuery,
@@ -204,7 +207,11 @@ async function renderBackupsTab(
     (_variables: unknown, options?: { enabled?: boolean }) =>
       options?.enabled === false
         ? noopQueryResult
-        : { ...noopQueryResult, data: { backups } as ListBackupsQuery },
+        : (listResult ?? {
+            ...noopQueryResult,
+            data: { backups } as ListBackupsQuery,
+            dataUpdatedAt: LISTED_AT,
+          }),
   );
 
   const router = makeTestRouter();
@@ -392,7 +399,8 @@ describe("DeploymentDetailPage backups tab backup history (#304)", () => {
       }),
     ]);
 
-    const header = screen.getByText("Application version");
+    // The header comes first; each row also labels its version for screen readers.
+    const [header] = screen.getAllByText("Application version");
     expect(header.previousElementSibling?.textContent).toBe("Status");
 
     const rows = screen.getAllByTestId("backup-row");
@@ -446,8 +454,163 @@ describe("DeploymentDetailPage backups tab backup history (#304)", () => {
       for (const name of ["Restore", "Delete"]) {
         const button = within(row).getByRole("button", { name });
         expect(button).toBeDisabled();
-        expect(button).toHaveAttribute("title", "This deployment is retired");
+        expect(button).toHaveAttribute("title", "This deployment is deleted");
       }
     }
+  });
+});
+
+describe("DeploymentDetailPage backups tab review follow-ups (#304)", () => {
+  beforeEach(() => {
+    useGetDeploymentQueryMock.mockReset();
+    useListBackupsQueryMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const olderBackup = () =>
+    makeBackup({
+      id: "backup-old",
+      name: "backup-old",
+      instance: { id: "inst-0", applicationVersion: "2.4.0" },
+    });
+
+  it("marks the backups of the current instance", async () => {
+    await renderBackupsTab([makeBackup(), olderBackup()]);
+
+    const [current, older] = screen.getAllByTestId("backup-row");
+    expect(
+      within(current).getByTestId("backup-current-instance"),
+    ).toHaveTextContent("current instance");
+    expect(
+      within(older).queryByTestId("backup-current-instance"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("labels the application version for screen readers and shows it in full", async () => {
+    const version = "2024.10.1-rc.1+build.5";
+    await renderBackupsTab([
+      makeBackup({ instance: { id: "inst-1", applicationVersion: version } }),
+    ]);
+
+    const row = screen.getByTestId("backup-row");
+    const cell = within(row).getByTestId("backup-application-version");
+    expect(cell).toHaveTextContent(version);
+    expect(cell).not.toHaveAttribute("title");
+    expect(cell.className).not.toContain("truncate");
+    expect(cell.parentElement?.textContent).toContain(
+      `Application version ${version}`,
+    );
+  });
+
+  it("shows the time a backup was created, not only the date", async () => {
+    await renderBackupsTab([makeBackup()]);
+
+    expect(screen.getByTestId("backup-created")).toHaveTextContent(
+      new Date("2026-08-03T12:04:06+00:00").toLocaleString(undefined, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }),
+    );
+  });
+
+  it("marks an expired backup and disables its restore", async () => {
+    await renderBackupsTab([
+      makeBackup({ expiresAt: "2026-10-01T00:00:00+00:00" }),
+    ]);
+
+    const row = screen.getByTestId("backup-row");
+    expect(within(row).getByTestId("backup-expired")).toHaveTextContent(
+      "Expired",
+    );
+    const restore = within(row).getByRole("button", { name: "Restore" });
+    expect(restore).toBeDisabled();
+    expect(restore.getAttribute("title")).toContain("expiry date");
+    expect(within(row).getByRole("button", { name: "Delete" })).toBeEnabled();
+  });
+
+  it("keeps restore enabled for a backup that has not expired", async () => {
+    await renderBackupsTab([makeBackup()]);
+
+    const row = screen.getByTestId("backup-row");
+    expect(within(row).queryByTestId("backup-expired")).not.toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Restore" })).toBeEnabled();
+  });
+
+  it("shows an error with a retry action when the history fails to load", async () => {
+    const refetch = vi.fn();
+    await renderBackupsTab([], makeDeployment(), {
+      ...noopQueryResult,
+      error: new Error("network down"),
+      refetch,
+    });
+
+    expect(
+      screen.getByText("Could not load the backup history"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("network down")).toBeInTheDocument();
+    expect(screen.queryByText("No backups yet")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it("explains that a deleted deployment with the same name keeps its own backups", async () => {
+    await renderBackupsTab([]);
+
+    const empty = screen.getByTestId("backups-empty");
+    expect(empty).toHaveTextContent("No backups yet");
+    expect(empty).toHaveTextContent("Show deleted");
+  });
+
+  it("explains the empty history of a deleted deployment", async () => {
+    await renderBackupsTab(
+      [],
+      makeDeployment({
+        status: "deleted",
+        deletedAt: "2026-09-01T08:00:00+00:00",
+      }),
+    );
+
+    expect(screen.getByTestId("backups-empty")).toHaveTextContent(
+      "No backup was taken of this deployment before it was deleted.",
+    );
+  });
+
+  it("shows both versions and warns before restoring a backup of an earlier instance", async () => {
+    await renderBackupsTab([makeBackup(), olderBackup()]);
+
+    const older = screen.getAllByTestId("backup-row")[1];
+    await userEvent.click(
+      within(older).getByRole("button", { name: "Restore" }),
+    );
+
+    expect(screen.getByTestId("restore-backup-version")).toHaveTextContent(
+      "2.4.0",
+    );
+    expect(screen.getByTestId("restore-current-version")).toHaveTextContent(
+      "2.5.0",
+    );
+    const warning = screen.getByTestId("restore-earlier-instance-warning");
+    expect(warning).toHaveTextContent("earlier instance");
+    expect(warning).toHaveTextContent("HelmRelease");
+  });
+
+  it("shows both versions without a warning for a backup of the current instance", async () => {
+    await renderBackupsTab([makeBackup()]);
+
+    const row = screen.getByTestId("backup-row");
+    await userEvent.click(within(row).getByRole("button", { name: "Restore" }));
+
+    expect(screen.getByTestId("restore-backup-version")).toHaveTextContent(
+      "2.5.0",
+    );
+    expect(screen.getByTestId("restore-current-version")).toHaveTextContent(
+      "2.5.0",
+    );
+    expect(
+      screen.queryByTestId("restore-earlier-instance-warning"),
+    ).not.toBeInTheDocument();
   });
 });
