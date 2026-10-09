@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from styrmin_backend.domain.payloads import (
     UtilityKind,
@@ -11,7 +13,7 @@ from styrmin_backend.domain.payloads import (
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 if TYPE_CHECKING:
-    pass
+    from styrmin_backend.db.models import ApplicationInstance
 
 
 async def get_utilities_payloads(uow: UnitOfWork) -> list[UtilityPayload]:
@@ -32,3 +34,12 @@ async def get_utilities_payloads(uow: UnitOfWork) -> list[UtilityPayload]:
         )
 
     return utilities_payload
+
+
+async def get_instances_by_ids(
+    instance_ids: Sequence[UUID], uow: UnitOfWork
+) -> dict[UUID, ApplicationInstance]:
+    """The application instances with these ids in one query, keyed by id."""
+    async with uow:
+        instances = await uow.application_instances.get_by_ids(instance_ids)
+    return {instance.id: instance for instance in instances}

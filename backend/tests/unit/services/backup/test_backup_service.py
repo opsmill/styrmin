@@ -325,7 +325,7 @@ class TestGetBackups:
     async def test_get_backups_with_both_identifiers_raises(self) -> None:
         uow, old = self._deployment_history()
 
-        with pytest.raises(AmbiguousIdentifierError, match="not both") as exc_info:
+        with pytest.raises(AmbiguousIdentifierError, match="exactly one") as exc_info:
             await get_backups(uow, deployment_id=old.deployment_id, instance_id=old.id)
 
         assert exc_info.value.error_code == "VALIDATION_ERROR"
@@ -334,10 +334,28 @@ class TestGetBackups:
     async def test_get_backups_with_no_identifier_raises(self) -> None:
         uow, _ = self._deployment_history()
 
-        with pytest.raises(AmbiguousIdentifierError, match="is required") as exc_info:
+        with pytest.raises(AmbiguousIdentifierError, match="exactly one") as exc_info:
             await get_backups(uow)
 
         assert exc_info.value.error_code == "VALIDATION_ERROR"
+
+    @pytest.mark.anyio
+    async def test_get_backups_breaks_a_created_on_tie_by_id(self) -> None:
+        uow, old = self._deployment_history()
+        twin = Backup(
+            name="same-time",
+            status=BackupStatus.COMPLETED,
+            instance_id=old.id,
+            created_on=uow.backups.models[0].created_on,
+        )
+        uow.backups.models.append(twin)
+
+        results = await get_backups(
+            uow, deployment_id=old.deployment_id, status=BackupStatus.COMPLETED
+        )
+
+        expected = sorted([twin.id, uow.backups.models[0].id], reverse=True)
+        assert [b.id for b in results] == expected
 
 
 class TestDeleteBackup:

@@ -15,15 +15,18 @@ import strawberry
 from strawberry.dataloader import DataLoader
 
 from styrmin_backend.domain.models import Step
+from styrmin_backend.services.instances import get_instances_by_ids
 from styrmin_backend.services.steps.reads import (
     list_steps_by_backup,
     list_steps_by_restore,
 )
 
 if TYPE_CHECKING:
+    from styrmin_backend.db.models import ApplicationInstance
     from styrmin_backend.services.unit_of_work import UnitOfWork
 
 type StepsLoader = DataLoader[UUID, list[Step]]
+type InstancesLoader = DataLoader[UUID, ApplicationInstance | None]
 type _StepsByParent = Callable[
     [Sequence[UUID], UnitOfWork], Awaitable[dict[UUID, list[Step]]]
 ]
@@ -37,6 +40,26 @@ def backup_steps(info: strawberry.Info) -> StepsLoader:
 def restore_steps(info: strawberry.Info) -> StepsLoader:
     """The steps of every restore in the response, by restore id, in one query."""
     return _steps_loader(info, "restore_steps", list_steps_by_restore)
+
+
+def application_instances(info: strawberry.Info) -> InstancesLoader:
+    """The application instances the response refers to, by id, in one query.
+
+    A missing instance loads as ``None``.
+    """
+    loaders: dict[str, InstancesLoader] = info.context.setdefault("loaders", {})
+    loader = loaders.get("application_instances")
+    if loader is None:
+        uow = info.context["uow"]
+
+        async def load(instance_ids: list[UUID]) -> list[ApplicationInstance | None]:
+            instances = await get_instances_by_ids(instance_ids, uow)
+            return [instances.get(instance_id) for instance_id in instance_ids]
+
+        loader = loaders["application_instances"] = DataLoader(
+            load_fn=load, cache=False
+        )
+    return loader
 
 
 def _steps_loader(

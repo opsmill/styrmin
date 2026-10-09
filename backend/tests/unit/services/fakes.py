@@ -1,5 +1,5 @@
 import contextlib
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from typing import TypeVar
 from uuid import UUID, uuid4
@@ -251,6 +251,9 @@ class FakeApplicationInstanceRepository(
     ) -> list[ApplicationInstance]:
         return [m for m in self.models if m.deployment_id == deployment_id]
 
+    async def get_by_ids(self, ids: Sequence[UUID]) -> list[ApplicationInstance]:
+        return [m for m in self.models if m.id in ids]
+
 
 class FakeApplicationDriverRepository(
     FakeRepository[ApplicationDriver], ApplicationDriverRepository
@@ -350,7 +353,9 @@ class FakeBackupRepository(FakeRepository[Backup], BackupRepository):
         results = [b for b in self.models if b.instance_id in instance_ids]
         if status is not None:
             results = [b for b in results if b.status == status]
-        return sorted(results, key=lambda b: b.created_on or _NO_TIME, reverse=True)
+        return sorted(
+            results, key=lambda b: (b.created_on or _NO_TIME, b.id), reverse=True
+        )
 
     async def has_in_progress_backup(self, instance_id: UUID) -> Backup | None:
         for b in self.models:

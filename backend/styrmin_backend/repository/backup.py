@@ -4,7 +4,12 @@ from uuid import UUID
 
 from sqlmodel import select
 
-from styrmin_backend.db.models import ApplicationInstance, Backup, BackupStatus
+from styrmin_backend.db.models import (
+    ApplicationInstance,
+    Backup,
+    BackupStatus,
+    Deployment,
+)
 from styrmin_backend.repository.base import BaseRepository
 from styrmin_backend.repository.sqlmodel import BaseSQLModelRepository
 
@@ -43,25 +48,40 @@ class SQLModelBackupRepository(BaseSQLModelRepository[Backup], BackupRepository)
         )
         if status is not None:
             statement = statement.where(self.model_class.status == status)
-        statement = statement.order_by(self.model_class.created_on.desc())  # type: ignore[union-attr]
+        statement = statement.order_by(
+            self.model_class.created_on.desc(),  # type: ignore[union-attr]
+            self.model_class.id.desc(),  # type: ignore[union-attr]
+        )
         result = await self.session.exec(statement)
         return result.all()
 
     async def get_by_deployment_id(
         self, deployment_id: UUID, status: BackupStatus | None = None
     ) -> Sequence[Backup]:
-        """Get the backups of every instance of a deployment, newest first."""
+        """Get the backups of every instance of a deployment, newest first.
+
+        An internal deployment has no listed backups, as the API hides it.
+        """
         statement = (
             select(self.model_class)
             .join(
                 ApplicationInstance,
                 self.model_class.instance_id == ApplicationInstance.id,  # type: ignore[arg-type]
             )
+            .join(
+                Deployment,
+                ApplicationInstance.deployment_id == Deployment.id,  # type: ignore[arg-type]
+            )
             .where(ApplicationInstance.deployment_id == deployment_id)
+            .where(Deployment.internal.is_(False))  # type: ignore[attr-defined]
         )
         if status is not None:
             statement = statement.where(self.model_class.status == status)
-        statement = statement.order_by(self.model_class.created_on.desc())  # type: ignore[union-attr]
+        # The id breaks ties, so --last picks the same backup on every call.
+        statement = statement.order_by(
+            self.model_class.created_on.desc(),  # type: ignore[union-attr]
+            self.model_class.id.desc(),  # type: ignore[union-attr]
+        )
         result = await self.session.exec(statement)
         return result.all()
 
