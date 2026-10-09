@@ -145,7 +145,7 @@ Defined on `type Mutation`:
 | `stopComponents` | `deploymentId, components, startedByStepId?` | `Task` |
 | `startComponents` | `deploymentId, components, startedByStepId?` | `Task` |
 | `runJob` | `deploymentId, commands, env, image` | `Task` |
-| `updateDeploymentVersion` | `deploymentId, version, parameters?, driverVersionId?, startedByStepId?` | `Task` — **`null` on a no-op** (see below) |
+| `updateDeploymentVersion` | `deploymentId, version, parameters?, driverVersionId?, startedByStepId?, input?: UpdateDeploymentInput` | `Task` — **`null` on a no-op** (see below). `input` is written with the version and validated against the target driver version (ADR-061) |
 | `reportPodStatuses` | `reports: [DeploymentPodStatusReport!]!` | `ReportPodStatusesResponse!` (agent → server) |
 | `reportDeploymentStatuses` | `reports: [DeploymentStatusReportInput!]!` | `ReportDeploymentStatusesResponse!` (agent → server) |
 
@@ -413,8 +413,9 @@ Writes raise `UNKNOWN_COMPONENT_IMAGE_OVERRIDE`, then `INVALID_IMAGE_REFERENCE` 
 `component_name`, `reference`, `reason`, `application_version`), then
 `COMPONENT_CONTAINER_NOT_DECLARED` with `override: "image"`. On `updateDeployment`, entries equal
 to the stored reference skip the `INVALID_IMAGE_REFERENCE` check. `updateDeploymentVersion` raises
-`INVALID_IMAGE_REFERENCE` before dispatching a task when a stored override that applies in the
-target driver version is invalid at the target application version. `COMPONENT_CONTAINER_NOT_FOUND`
+`INVALID_IMAGE_REFERENCE` before dispatching a task when an override that applies in the
+target driver version is invalid at the target application version; with `input`, it checks the
+submitted config instead of the stored one, against the target driver version. `COMPONENT_CONTAINER_NOT_FOUND`
 never reaches `extensions.code`: the operator writes its message to the StyrminDeployment status,
 read back as `Deployment.crdStatus.message`.
 

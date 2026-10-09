@@ -287,7 +287,8 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
 
     Baseline apply, then:
       - a config-only change → ``updated`` + exactly one new reconcile task;
-      - a version-only change → ``updated`` + exactly one further upgrade task.
+      - a version change that also adds component env vars → ``updated`` +
+        exactly one further upgrade task carrying both (#388).
 
     Task count is read via the deployment timeline (one entry per ``Task``),
     without the tasks that the upgrade hook starts; each real change must add
@@ -345,13 +346,19 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
         f"went {baseline_task_count} -> {after_config_task_count}"
     )
 
-    # --- Version-only change → exactly 1 upgrade ---------------------------
+    # --- Version + component config change → exactly 1 upgrade -----------
     manifest_doc["spec"]["version"] = "0.2.0"
+    manifest_doc["spec"]["config"] = {
+        "ip_whitelist": ["10.0.0.0/8"],
+        "components": [
+            {"name": "server", "env_vars": [{"name": "LOG_LEVEL", "value": "debug"}]}
+        ],
+    }
     version_outcome = await client.deployments.apply(
         _resolve_manifest_from_doc(manifest_doc, manifest_path), wait=True
     )
     assert version_outcome.action == "updated", (
-        f"a version-only change must be an update, got "
+        f"a version and config change must be an update, got "
         f"action={version_outcome.action!r} (reason={version_outcome.failure_reason!r})"
     )
     assert version_outcome.task_id is not None, "a version upgrade must dispatch a task"
@@ -368,9 +375,14 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
 
     after_version_task_count = await _dispatched_task_count(client, deployment_id)
     assert after_version_task_count == after_config_task_count + 1, (
-        f"a version-only change must dispatch exactly one upgrade; task count "
+        f"a version and config change must dispatch exactly one upgrade; task count "
         f"went {after_config_task_count} -> {after_version_task_count}"
     )
+    upgraded = await client.deployments.get(deployment_id)
+    assert upgraded.application_version == "0.2.0"
+    assert upgraded.config["components"] == {
+        "server": {"env_vars": {"LOG_LEVEL": "debug"}}
+    }, f"component env vars were not written with the version: {upgraded.config!r}"
 
 
 @pytest.mark.api_only(

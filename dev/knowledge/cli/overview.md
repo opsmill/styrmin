@@ -218,8 +218,15 @@ stderr, after its outcome line, and keeps the exit code. `apply` reads only the 
 also lists overrides that do not currently apply; the UI upgrade dialog lists only applicable ones.
 See [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md) §7.
 
-**Clearing config.** `updateDeployment` replaces the stored config with the submitted one, except
-when the submitted config is empty: the resolver then passes `None` and the stored config is kept.
+**One mutation per existing deployment.** `_apply_update` sends `updateDeploymentVersion` with the
+manifest's config and parameters as `input`, also when the version is unchanged, so the backend
+validates the config against the driver version the manifest resolves to and one task reconciles
+it. A `null` result is `unchanged`. See
+[ADR-061](../../adr/0061-apply-writes-config-with-the-version.md).
+
+**Clearing config.** The `input` replaces the stored config with the submitted one, as
+`updateDeployment` does, except when the submitted config is empty: the resolver then passes `None`
+and the stored config is kept.
 An omitted or empty `spec.config` therefore changes nothing. To clear the last per-component
 override, a manifest writes `components: []`.
 

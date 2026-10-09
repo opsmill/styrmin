@@ -1,0 +1,6 @@
+mutation UpdateDeploymentVersionWithInput($deploymentId: UUID!, $version: String!, $driverVersionId: UUID, $parameters: JSON, $input: UpdateDeploymentInput) {
+    updateDeploymentVersion(deploymentId: $deploymentId, version: $version, driverVersionId: $driverVersionId, parameters: $parameters, input: $input) {
+        id
+        type
+    }
+}

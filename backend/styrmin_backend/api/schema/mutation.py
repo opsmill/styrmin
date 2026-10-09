@@ -179,6 +179,14 @@ _STARTED_BY_STEP_ID = (
 )
 
 
+_UPDATE_VERSION_INPUT = (
+    "Config, name, parameters and service name overrides written together with the "
+    "version, with the semantics of updateDeployment. They are validated against "
+    "the target driver version and application version, and one task reconciles "
+    "them. parameters merge on top of the parameters argument when both are set."
+)
+
+
 def _started_by_step_gate() -> PermissionExtension:
     """READ_WRITE, and only the styrmin-actions user when ``startedByStepId`` is set."""
     return PermissionExtension(
@@ -1341,6 +1349,10 @@ class Mutation:
         started_by_step_id: Annotated[
             UUID | None, strawberry.argument(description=_STARTED_BY_STEP_ID)
         ] = None,
+        input: Annotated[
+            UpdateDeploymentInput | None,
+            strawberry.argument(description=_UPDATE_VERSION_INPUT),
+        ] = None,
     ) -> Task | None:
         """Update the version of an application instance.
 
@@ -1352,6 +1364,10 @@ class Mutation:
         deployment = await get_deployment(deployment_id=deployment_id, uow=uow)
         if deployment.internal:
             raise InternalDeploymentError()
+        payload = update_deployment_input_to_dict(input) if input is not None else {}
+        name = payload.pop("name", None)
+        parameter_updates = payload.pop("parameters", None)
+        service_name_overrides = payload.pop("service_name_overrides", None)
         task = await update_deployment_version(
             deployment_id=deployment_id,
             deployment_parameters=parameters,
@@ -1359,6 +1375,10 @@ class Mutation:
             uow=uow,
             driver_version_id=driver_version_id,
             started_by_step_id=started_by_step_id,
+            deployment_config=payload or None,
+            parameter_updates=parameter_updates,
+            deployment_name=name,
+            service_name_overrides=service_name_overrides,
         )
         return Task.from_instance(task) if task is not None else None
 

@@ -2862,15 +2862,17 @@ class Client(AsyncBaseClient):
         version: str,
         parameters: Union[Optional[Any], UnsetType] = UNSET,
         driver_version_id: Union[Optional[UUID], UnsetType] = UNSET,
+        input: Union[Optional[UpdateDeploymentInput], UnsetType] = UNSET,
         **kwargs: Any,
     ) -> UpdateDeploymentVersion:
         query = gql("""
-            mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!, $parameters: JSON, $driverVersionId: UUID) {
+            mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!, $parameters: JSON, $driverVersionId: UUID, $input: UpdateDeploymentInput) {
               updateDeploymentVersion(
                 deploymentId: $deploymentId
                 version: $version
                 parameters: $parameters
                 driverVersionId: $driverVersionId
+                input: $input
               ) {
                 id
                 status
@@ -2885,6 +2887,7 @@ class Client(AsyncBaseClient):
             "version": version,
             "parameters": parameters,
             "driverVersionId": driver_version_id,
+            "input": input,
         }
         response = await self.execute(
             query=query,
