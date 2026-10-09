@@ -326,6 +326,25 @@ class Utility(StyrminModel, table=True):
     resource_template: str = Field(default="")   # Jinja2 template producing K8s manifest(s)
 ```
 
+### Install ID Model
+
+#### Installation
+
+```python
+class Installation(SQLModel, table=True):
+    __table_args__ = (CheckConstraint("id = 1", name="ck_installation_single_row"),)
+
+    id: int = 1           # Primary key; the check constraint allows only 1
+    install_id: UUID      # Random UUID4; never changed
+    created_on: datetime  # Server default CURRENT_TIMESTAMP; not reported
+```
+
+- Holds the install ID that the daily telemetry report carries (spec 020). One install is one database, so the table has one row. It does not inherit `StyrminModel`, because a single fixed row needs neither a UUID primary key nor `updated_on`. It has no relationships.
+- `InstallationRepository.get_or_create_install_id()` (`repository/installation.py`) inserts `(1, uuid4())` with `INSERT … ON CONFLICT (id) DO NOTHING` (PostgreSQL or SQLite dialect) and then selects the row, so two server replicas that start at the same time agree on one ID without a lock. The caller commits.
+- Callers: the server start (`services/telemetry/install.py::ensure_install_id`, whether telemetry is on or off; a failure logs a warning and the server keeps starting), and `build_report_data` (`services/telemetry/payload.py`), which the daily telemetry flow and `styrmin telemetry show` use. Styrmin never updates or deletes the row.
+- A database dump restored into another install carries the row, so both installs report the same install ID. A database rebuilt from scratch gets a new one.
+- The table ships in the Alembic revision `3b926acd0791` (`3b926acd0791_add_installation.py`), which creates no row. See [ADR-061](../../adr/0061-server-anonymous-daily-telemetry.md).
+
 ### Observed State Models
 
 These records capture *observed* runtime state — what the agent sees in the cluster — as opposed to the *declared* intent expressed by `Deployment` / `Component`. They are written by the agent's status reporter on each poll cycle (~5 s) and are intentionally decoupled from declared state: the server records what was observed and does not validate it against the deployment's current configuration. Drift between observed values and declared values is expected (rollouts, renames) and is not an error.
@@ -766,6 +785,8 @@ Both FQDN fields default to `None` when `ResolvedConfig.fqdn_suffix` is unset. W
 | [repository/steps.py](backend/styrmin_backend/repository/steps.py) | Step data access (`insert_if_absent`, ordered lists, open operator-phase steps of a deployment) |
 | [services/steps/results.py](backend/styrmin_backend/services/steps/results.py) | Task result calculation |
 | [db/migrations/versions/e2f3a4b5c6d7_add_steps.py](backend/styrmin_backend/db/migrations/versions/e2f3a4b5c6d7_add_steps.py) | Alembic revision for `step`, `task.instance_id` and `task.started_by_step_id` |
+| [repository/installation.py](backend/styrmin_backend/repository/installation.py) | Install ID data access (`get_or_create_install_id`) |
+| [db/migrations/versions/3b926acd0791_add_installation.py](backend/styrmin_backend/db/migrations/versions/3b926acd0791_add_installation.py) | Alembic revision for the `installation` table |
 | [context/models/contexts.py](backend/styrmin_backend/context/models/contexts.py) | Deployment context models |
 | [context/models/config.py](backend/styrmin_backend/context/models/config.py) | Configuration models |
 | [context/models/helm.py](backend/styrmin_backend/context/models/helm.py) | Helm-related models |

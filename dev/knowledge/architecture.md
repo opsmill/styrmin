@@ -62,6 +62,12 @@ each snapshot in the `Deleting` or `Deleted` phase into the steps of the
 deployment's newest `delete_deployment` task — see
 [ADR-060](../adr/0060-steps-and-derived-task-result.md).
 
+Once a day, the server's task worker (the Prefect worker of
+`styrmin-work-pool`) runs the INTERNAL flow `send_telemetry_report`, which
+posts one anonymous report about the install to the telemetry endpoint unless
+telemetry is turned off — see
+[ADR-061](../adr/0061-server-anonymous-daily-telemetry.md).
+
 ### 1.3 What the agent does
 
 The agent is a single process but fulfils several distinct functions:
