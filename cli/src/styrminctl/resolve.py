@@ -16,6 +16,13 @@ if TYPE_CHECKING:
     from styrmin_sdk import StyrminClient
 
 
+#: Appended when a lookup by name finds nothing: a deleted deployment is reached by id only.
+DELETED_DEPLOYMENT_HINT = (
+    " The lookup by name does not find a deleted deployment: to list a deleted deployment's"
+    " backup history, pass its deployment id with --id."
+)
+
+
 @dataclass(frozen=True)
 class ResolvedTarget:
     """The outcome of resolving a deployment reference.
@@ -52,8 +59,16 @@ def _validate_selectors(
         raise ValueError("--environment only applies when looking up a deployment by name.")
 
 
-async def _resolve_by_name(sdk: StyrminClient, deployment_name: str, environment: str | None) -> Any:  # noqa: ANN401
-    """Find the single deployment matching ``deployment_name``, optionally scoped to ``environment``."""
+async def _resolve_by_name(
+    sdk: StyrminClient,
+    deployment_name: str,
+    environment: str | None,
+    not_found_hint: str = "",
+) -> Any:  # noqa: ANN401
+    """Find the single deployment matching ``deployment_name``, optionally scoped to ``environment``.
+
+    ``not_found_hint`` is appended to the error when no deployment matches.
+    """
     environments = await sdk.environments.list()
     if environment is not None:
         environments = [e for e in environments if e.name == environment]
@@ -68,7 +83,7 @@ async def _resolve_by_name(sdk: StyrminClient, deployment_name: str, environment
 
     if not matches:
         scope = f" in environment '{environment}'" if environment else ""
-        raise ValueError(f"No deployment named '{deployment_name}'{scope}.")
+        raise ValueError(f"No deployment named '{deployment_name}'{scope}.{not_found_hint}")
     if len(matches) > 1:
         raise ValueError(
             f"Multiple deployments named '{deployment_name}' across environments — "
@@ -82,12 +97,13 @@ async def _find_deployment(
     deployment_name: str | None,
     deployment_id: str | None,
     environment: str | None,
+    not_found_hint: str = "",
 ) -> Any:  # noqa: ANN401
     """Fetch the deployment selected by ``deployment_id`` or ``deployment_name``."""
     if deployment_id is not None:
         return await sdk.deployments.get(deployment_id)
     if deployment_name is not None:
-        return await _resolve_by_name(sdk, deployment_name, environment)
+        return await _resolve_by_name(sdk, deployment_name, environment, not_found_hint)
     # Unreachable after _validate_selectors.
     raise ValueError("Provide a deployment name, --id, or --instance-id.")  # pragma: no cover
 
@@ -108,7 +124,9 @@ async def resolve_deployment_id(
     name lookup does not list.
     """
     _validate_selectors(deployment_name, deployment_id, None, environment)
-    deployment = await _find_deployment(sdk, deployment_name, deployment_id, environment)
+    deployment = await _find_deployment(
+        sdk, deployment_name, deployment_id, environment, not_found_hint=DELETED_DEPLOYMENT_HINT
+    )
     return str(deployment.id)
 
 

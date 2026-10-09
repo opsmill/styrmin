@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import sys
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated
 
 from cyclopts import App, Parameter
+from rich.prompt import Confirm
 
 from styrminctl import client
 from styrminctl.output import console, print_error, print_success, print_table, styrmin_error_handler
@@ -12,6 +15,7 @@ from styrminctl.resolve import resolve_active_instance, resolve_deployment_id
 
 if TYPE_CHECKING:
     from styrmin_sdk import StyrminClient
+    from styrmin_sdk.graphql._generated.list_backups import ListBackupsBackups
 
     from styrminctl.resolve import ResolvedTarget
 from styrminctl.types import (
@@ -91,6 +95,7 @@ async def get(backup_id: BackupId) -> None:
     console.print(f"  Name: {backup.name}")
     console.print(f"  Status: {backup.status}")
     console.print(f"  Instance ID: {backup.instance_id}")
+    console.print(f"  Application version: {backup.instance.application_version}")
     console.print(f"  Started at: {backup.started_at or ''}")
     console.print(f"  Completed at: {backup.completed_at or ''}")
     console.print(f"  Size (bytes): {backup.size_bytes or ''}")
@@ -136,7 +141,14 @@ async def list_backups(
                 backups = await sdk.backups.list_backups(deployment_id=deployment_id, status=status)
 
     if not backups:
-        console.print("No backups found.")
+        if deployment is not None and instance_id is None:
+            # A deleted deployment's name can be reused, and its history stays with its id.
+            console.print(
+                f"No backups found for deployment '{deployment}'. If an earlier deployment named "
+                f"'{deployment}' was deleted, list its backup history with --id <deployment-id>."
+            )
+        else:
+            console.print("No backups found.")
         return
 
     rows = [
@@ -178,27 +190,90 @@ async def delete(backup_id: BackupId) -> None:
     print_success(f"Backup '{backup_id}' deleted")
 
 
-async def _latest_completed_backup_id(
+def _has_expired(backup: ListBackupsBackups, now: datetime) -> bool:
+    """Whether Velero's expiry for the backup has passed, so Velero may have deleted it."""
+    return backup.expires_at is not None and backup.expires_at <= now
+
+
+async def _latest_completed_backup(
     sdk: StyrminClient,
     target: ResolvedTarget,
     *,
     deployment_label: str | None,
-) -> str:
-    """Return the newest completed backup of the target deployment's history, or of a raw target instance.
+) -> ListBackupsBackups:
+    """Return the newest completed backup that has not expired.
 
-    The server lists backups newest first. ``deployment_label`` names the
-    deployment in the error message; the deployment id is used when it is ``None``.
+    It comes from the target deployment's backup history, or from a raw target
+    instance's backups. The server lists backups newest first.
+    ``deployment_label`` names the deployment in the error message; the
+    deployment id is used when it is ``None``.
     """
     if target.deployment_id is not None:
         backups_list = await sdk.backups.list_backups(deployment_id=target.deployment_id, status="completed")
-        if not backups_list:
-            label = deployment_label or target.deployment_id
-            raise ValueError(f"No completed backups found for deployment '{label}'")
+        scope = f"deployment '{deployment_label or target.deployment_id}'"
     else:
         backups_list = await sdk.backups.list_backups(instance_id=target.instance_id, status="completed")
-        if not backups_list:
-            raise ValueError(f"No completed backups found for instance {target.instance_id}")
-    return str(backups_list[0].id)
+        scope = f"instance {target.instance_id}"
+
+    now = datetime.now(UTC)
+    for skipped, backup in enumerate(backups_list):
+        if not _has_expired(backup, now):
+            if skipped:
+                console.print(f"Skipped {skipped} newer completed backup(s) whose expiry date has passed.")
+            return backup
+    if backups_list:
+        raise ValueError(
+            f"No completed backups found for {scope} that have not expired "
+            f"({len(backups_list)} completed backup(s) have passed their expiry date)"
+        )
+    raise ValueError(f"No completed backups found for {scope}")
+
+
+def _stdin_is_terminal() -> bool:
+    return sys.stdin.isatty()
+
+
+async def _confirm_backup_of_earlier_instance(
+    sdk: StyrminClient,
+    deployment_id: str,
+    active_instance_id: str,
+    backup: ListBackupsBackups,
+    *,
+    yes: bool,
+) -> None:
+    """Ask before ``--last`` restores a backup of an earlier instance, or of another version.
+
+    Refuses a deleted deployment, which the server also refuses.
+    """
+    deployment = await sdk.deployments.get(deployment_id)
+    if deployment.deleted_at is not None:
+        raise ValueError(
+            f"Deployment '{deployment.name}' was deleted. List its backups with "
+            f"'styrminctl backups list --id {deployment.id}'; a restore into it is refused."
+        )
+    backup_version = backup.instance.application_version
+    current_version = deployment.application_version
+    is_earlier_instance = str(backup.instance_id) != active_instance_id
+    if not is_earlier_instance and backup_version == current_version:
+        return
+
+    taken_of = "an earlier instance of deployment" if is_earlier_instance else "deployment"
+    console.print(
+        f"[yellow]Warning:[/yellow] backup {backup.id} was taken of {taken_of} '{deployment.name}', "
+        f"at application version {backup_version}. The deployment runs application version "
+        f"{current_version} now."
+    )
+    console.print(
+        "The restore puts back the StyrminDeployment and HelmRelease that the backup holds, with "
+        "that application version and config. Styrmin keeps the current instance as the "
+        "deployment's active instance."
+    )
+    if yes:
+        return
+    if not _stdin_is_terminal():
+        raise ValueError("Not restoring this backup without confirmation. Pass --yes to restore it.")
+    if not Confirm.ask("Restore this backup?", console=console, default=False):
+        raise ValueError("Restore cancelled.")
 
 
 async def _prepare_restore(
@@ -211,6 +286,7 @@ async def _prepare_restore(
     environment: str | None,
     target_namespace: str | None,
     last: bool,
+    yes: bool = False,
 ) -> tuple[str, str, str | None]:
     """Resolve the restore target, pick the backup for ``--last``, and derive the namespace.
 
@@ -238,8 +314,14 @@ async def _prepare_restore(
                 "--last requires a target deployment (--target-deployment/--target-deployment-id) "
                 "or --target-instance-id"
             )
-        backup_id = await _latest_completed_backup_id(sdk, target, deployment_label=target_deployment)
-        console.print(f"Selected latest completed backup: {backup_id}")
+        backup = await _latest_completed_backup(sdk, target, deployment_label=target_deployment)
+        backup_id = str(backup.id)
+        console.print(
+            f"Selected the newest completed backup: {backup_id} "
+            f"(application version {backup.instance.application_version})"
+        )
+        if target.deployment_id is not None:
+            await _confirm_backup_of_earlier_instance(sdk, target.deployment_id, target.instance_id, backup, yes=yes)
 
     if backup_id is None:
         raise ValueError("backup_id is required (or use --last with a target deployment/instance)")
@@ -272,9 +354,19 @@ async def restore(
         bool,
         Parameter(
             help=(
-                "Restore (in place) the newest completed backup from the target deployment's backup history, "
-                "whichever instance it was taken of, or from the instance's backups with --target-instance-id."
+                "Restore (in place) the newest completed backup that has not expired. It comes from the "
+                "target deployment's backup history, which holds the backups of the deployment's current "
+                "and earlier instances, or from the instance's backups with --target-instance-id. Restoring "
+                "a backup of an earlier instance needs confirmation, or --yes."
             )
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        Parameter(
+            name=["--yes", "-y"],
+            negative="",
+            help="With --last, restore a backup of an earlier instance without asking for confirmation.",
         ),
     ] = False,
     wait: Annotated[bool, Parameter(help="Wait for restore to complete.")] = False,
@@ -300,6 +392,7 @@ async def restore(
                 environment=environment,
                 target_namespace=target_namespace,
                 last=last,
+                yes=yes,
             )
 
             rst = await sdk.backups.create_restore(

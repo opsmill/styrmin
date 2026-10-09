@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from styrmin_sdk.exceptions import StyrminError
 from styrminctl.cli import app
+from styrminctl.commands import backups as backups_commands
 
 BACKUP_UUID = "d4e5f6a7-b8c9-0123-def0-123456789abc"
 INSTANCE_UUID = "e5f6a7b8-c9d0-1234-ef01-23456789abcd"
@@ -19,12 +21,32 @@ NS = "ns-1"
 APP_VERSION = "1.4.2"
 
 
-def _make_deployment(*, name: str, deployment_id: str = DEPLOYMENT_UUID, instance_id: str | None = INSTANCE_UUID):
+def _make_deployment(
+    *,
+    name: str,
+    deployment_id: str = DEPLOYMENT_UUID,
+    instance_id: str | None = INSTANCE_UUID,
+    application_version: str = APP_VERSION,
+    deleted_at: str | None = None,
+):
     """Build a mock deployment whose ``.name`` is a real string (the resolver matches on it)."""
-    deployment = MagicMock(id=deployment_id)
+    deployment = MagicMock(id=deployment_id, application_version=application_version, deleted_at=deleted_at)
     deployment.name = name
     deployment.application_instance = MagicMock(id=instance_id) if instance_id is not None else None
     return deployment
+
+
+def _make_completed_backup(
+    backup_id: str = BACKUP_UUID,
+    *,
+    instance_id: str = INSTANCE_UUID,
+    application_version: str = APP_VERSION,
+    expires_at: datetime | None = None,
+):
+    """A completed backup as ``list_backups`` returns it, with real expiry and version values."""
+    backup = MagicMock(id=backup_id, status="completed", instance_id=instance_id, expires_at=expires_at)
+    backup.instance.application_version = application_version
+    return backup
 
 
 def _make_environment(*, name: str, env_id: str = ENV_UUID):
@@ -306,6 +328,7 @@ def test_backups_get(mock_client: MagicMock, capsys: pytest.CaptureFixture[str])
         ttl="2160h",
         expires_at="2026-11-01T12:04:06+00:00",
     )
+    mock_backup.instance.application_version = APP_VERSION
     mock_client.backups.get_backup = AsyncMock(return_value=mock_backup)
 
     with pytest.raises(SystemExit) as exc:
@@ -314,6 +337,7 @@ def test_backups_get(mock_client: MagicMock, capsys: pytest.CaptureFixture[str])
     mock_client.backups.get_backup.assert_called_once_with(BACKUP_UUID)
     output = capsys.readouterr().out
     assert BACKUP_UUID in output
+    assert f"Application version: {APP_VERSION}" in output
     assert "TTL: 2160h" in output
     assert "Expires at: 2026-11-01T12:04:06+00:00" in output
 
@@ -411,16 +435,19 @@ def test_backups_restore_to_instance_requires_namespace(
     assert "--target-namespace is required" in capsys.readouterr().out
 
 
-def test_backups_restore_last_by_deployment(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+def test_backups_restore_last_by_deployment(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``--last`` picks the newest completed backup of the deployment's history, even of a replaced instance."""
+    monkeypatch.setenv("COLUMNS", "200")
     mock_client.deployments.get = AsyncMock(return_value=_make_deployment(name="demo"))
-    newest = MagicMock(id=BACKUP_UUID, status="completed", instance_id=PREVIOUS_INSTANCE_UUID)
-    older = MagicMock(id="11111111-2222-3333-4444-555555555555", status="completed", instance_id=INSTANCE_UUID)
+    newest = _make_completed_backup(instance_id=PREVIOUS_INSTANCE_UUID, application_version="1.4.1")
+    older = _make_completed_backup("11111111-2222-3333-4444-555555555555")
     mock_client.backups.list_backups = AsyncMock(return_value=[newest, older])
     mock_client.backups.create_restore = AsyncMock(return_value=MagicMock(id=RESTORE_UUID, status="pending"))
 
     with pytest.raises(SystemExit) as exc:
-        app(["backups", "restore", "--last", "--target-deployment-id", DEPLOYMENT_UUID])
+        app(["backups", "restore", "--last", "--yes", "--target-deployment-id", DEPLOYMENT_UUID])
     assert exc.value.code == 0
     mock_client.backups.list_backups.assert_called_once_with(deployment_id=DEPLOYMENT_UUID, status="completed")
     # The backup comes from the replaced instance; the restore still targets the active one.
@@ -433,7 +460,7 @@ def test_backups_restore_last_by_deployment(mock_client: MagicMock, capsys: pyte
 
 
 def test_backups_restore_last_by_instance_id(mock_client: MagicMock) -> None:
-    newest = MagicMock(id=BACKUP_UUID, status="completed")
+    newest = _make_completed_backup()
     mock_client.backups.list_backups = AsyncMock(return_value=[newest])
     mock_client.backups.create_restore = AsyncMock(return_value=MagicMock(id=RESTORE_UUID, status="pending"))
 
@@ -608,3 +635,160 @@ def test_backups_create_error(mock_client: MagicMock) -> None:
     with pytest.raises(SystemExit) as exc:
         app(["backups", "create", "--instance-id", INSTANCE_UUID])
     assert exc.value.code == 1
+
+
+# --- restore --last: expiry and earlier instances (#304 review) ------------
+
+
+def _arm_restore_last(mock_client: MagicMock, backups: list, *, deployment=None) -> None:
+    mock_client.deployments.get = AsyncMock(return_value=deployment or _make_deployment(name="demo"))
+    mock_client.backups.list_backups = AsyncMock(return_value=backups)
+    mock_client.backups.create_restore = AsyncMock(return_value=MagicMock(id=RESTORE_UUID, status="pending"))
+
+
+def _restore_last(*extra: str) -> int | str | None:
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "restore", "--last", "--target-deployment-id", DEPLOYMENT_UUID, *extra])
+    return exc.value.code
+
+
+def test_backups_restore_last_skips_expired_backups(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    expired = _make_completed_backup(
+        "11111111-2222-3333-4444-555555555555", expires_at=datetime.now(UTC) - timedelta(days=1)
+    )
+    usable = _make_completed_backup(expires_at=datetime.now(UTC) + timedelta(days=30))
+    _arm_restore_last(mock_client, [expired, usable])
+
+    assert _restore_last() == 0
+    mock_client.backups.create_restore.assert_called_once_with(
+        backup_id=BACKUP_UUID,
+        target_namespace=f"styrmin-{DEPLOYMENT_UUID}",
+        target_instance_id=INSTANCE_UUID,
+    )
+    output = capsys.readouterr().out
+    assert "Skipped 1 newer completed backup(s) whose expiry date has passed" in output
+    assert f"(application version {APP_VERSION})" in output
+
+
+def test_backups_restore_last_fails_when_every_backup_expired(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    _arm_restore_last(mock_client, [_make_completed_backup(expires_at=datetime.now(UTC) - timedelta(days=1))])
+
+    assert _restore_last() == 1
+    mock_client.backups.create_restore.assert_not_called()
+    output = capsys.readouterr().out
+    assert "that have not expired" in output
+    assert "1 completed backup(s) have passed their expiry date" in output
+
+
+def test_backups_restore_last_of_the_current_instance_does_not_ask(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(backups_commands, "_stdin_is_terminal", lambda: False)
+    _arm_restore_last(mock_client, [_make_completed_backup()])
+
+    assert _restore_last() == 0
+    mock_client.backups.create_restore.assert_called_once()
+    assert "Warning" not in capsys.readouterr().out
+
+
+def test_backups_restore_last_of_an_earlier_instance_needs_yes_without_a_terminal(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(backups_commands, "_stdin_is_terminal", lambda: False)
+    _arm_restore_last(
+        mock_client, [_make_completed_backup(instance_id=PREVIOUS_INSTANCE_UUID, application_version="1.4.1")]
+    )
+
+    assert _restore_last() == 1
+    mock_client.backups.create_restore.assert_not_called()
+    output = capsys.readouterr().out
+    assert "earlier instance" in output
+    assert "application version 1.4.1" in output
+    assert f"runs application version {APP_VERSION} now" in output
+    assert "HelmRelease" in output
+    assert "Pass --yes" in output
+
+
+@pytest.mark.parametrize(("answer", "code"), [(True, 0), (False, 1)])
+def test_backups_restore_last_of_an_earlier_instance_asks_in_a_terminal(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    answer: bool,
+    code: int,
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(backups_commands, "_stdin_is_terminal", lambda: True)
+    asked: list[str] = []
+
+    def _ask(prompt: str, **_: object) -> bool:
+        asked.append(prompt)
+        return answer
+
+    monkeypatch.setattr(backups_commands.Confirm, "ask", _ask)
+    _arm_restore_last(mock_client, [_make_completed_backup(instance_id=PREVIOUS_INSTANCE_UUID)])
+
+    assert _restore_last() == code
+    assert asked == ["Restore this backup?"]
+    assert mock_client.backups.create_restore.called is answer
+    if not answer:
+        assert "Restore cancelled." in capsys.readouterr().out
+
+
+def test_backups_restore_last_into_a_deleted_deployment_is_refused(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    _arm_restore_last(
+        mock_client,
+        [_make_completed_backup()],
+        deployment=_make_deployment(name="demo", deleted_at="2026-10-01T00:00:00+00:00"),
+    )
+
+    assert _restore_last("--yes") == 1
+    mock_client.backups.create_restore.assert_not_called()
+    output = capsys.readouterr().out
+    assert "Deployment 'demo' was deleted" in output
+    assert f"styrminctl backups list --id {DEPLOYMENT_UUID}" in output
+
+
+# --- list: pointing to --id for a deleted deployment (#304 review) -------
+
+
+def test_backups_list_by_name_without_backups_points_to_id(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    _seed_name_lookup(mock_client, deployments=[_make_deployment(name="demo")])
+    mock_client.backups.list_backups = AsyncMock(return_value=[])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "list", "demo"])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "No backups found for deployment 'demo'" in output
+    assert "--id <deployment-id>" in output
+
+
+def test_backups_list_unknown_name_points_to_id(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    _seed_name_lookup(mock_client, deployments=[_make_deployment(name="other")])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "list", "demo"])
+    assert exc.value.code == 1
+    mock_client.backups.list_backups.assert_not_called()
+    output = capsys.readouterr().out
+    assert "No deployment named 'demo'." in output
+    assert "does not find a deleted deployment" in output
+    assert "--id" in output
