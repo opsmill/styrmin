@@ -31,7 +31,7 @@ The server sends exactly this body to the telemetry endpoint once a day. It reus
     "drivers": [
       {"name": "infrahub", "version": "1.2.0", "source_type": "git", "deployment_count": 2},
       {"name": "semaphore", "version": "0.4.1", "source_type": "local", "deployment_count": 0},
-      {"name": "styrmin-ingress-controller", "version": "0.3.0", "source_type": "local", "deployment_count": 3}
+      {"name": "styrmin-ingress-controller", "version": "1.0.0", "source_type": "internal", "deployment_count": 3}
     ]
   },
   "checksum": "<sha256 hex of json.dumps(data)>",
@@ -61,7 +61,7 @@ The driver names and counts above are examples, not real values.
 - `drivers` has one entry per distinct `(name, version, source_type)` of the loaded application driver versions, including entries with `deployment_count: 0` (FR-001, research D9).
   - Each entry has exactly the keys `name`, `version`, `source_type`, `deployment_count`, in that order.
   - `name` is the application driver name as the operator wrote it.
-  - `source_type` is `git` or `local`.
+  - `source_type` is the stored `applicationdriverversion.source_type`: `git` or `local` for driver versions loaded from a driver source (`services/applications.py`), or `internal` for the ingress controller driver `styrmin-ingress-controller` that Styrmin creates (`services/ingress_controller/driver.py`). The column is a free string, so a future source type would be reported as stored.
   - `deployment_count` is the number of deployments that are not tombstoned and are bound to one of the driver versions merged into the entry.
   - Entries are sorted by `name`, then `version`, then `source_type`, so the same database state always gives the same `data` and the same checksum.
 - Forbidden anywhere in the body (FR-002, FR-006): driver source repository URL, branch or path, provenance fingerprint, cluster, environment or deployment names, hostnames, IP addresses, user names, tokens, configuration values, parameters.
