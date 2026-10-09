@@ -29,6 +29,7 @@ from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
     BackupAlreadyInProgressError,
     BackupNotFoundError,
+    DeletedDeploymentRestoreError,
     DeploymentNotFoundError,
     InternalDeploymentError,
     RestoreAlreadyInProgressError,
@@ -212,21 +213,19 @@ async def get_backups(
 
     With ``deployment_id``, return the deployment's backup history: the backups
     of every instance the deployment has had, so earlier backups stay listed
-    after the deployment gets a new instance. With ``instance_id``, return only
-    that instance's backups. Exactly one of the two is required.
+    after the deployment gets a new instance. The history of an internal
+    deployment is empty, as ``deployment(deploymentId:)`` hides the deployment.
+    With ``instance_id``, return only that instance's backups. Exactly one of
+    the two is required.
     """
-    if deployment_id is not None and instance_id is not None:
+    if (deployment_id is None) == (instance_id is None):
         raise AmbiguousIdentifierError(
-            "Provide either deployment_id or instance_id, not both"
+            "Provide exactly one of deployment_id or instance_id"
         )
     async with uow:
         if deployment_id is not None:
             return await uow.backups.get_by_deployment_id(deployment_id, status=status)
-        if instance_id is not None:
-            return await uow.backups.get_by_instance_id(instance_id, status=status)
-        raise AmbiguousIdentifierError(
-            "Either deployment_id or instance_id is required"
-        )
+        return await uow.backups.get_by_instance_id(instance_id, status=status)
 
 
 async def delete_backup(backup_id: UUID, uow: UnitOfWork) -> None:
@@ -441,7 +440,7 @@ async def create_restore(
 
     Resolves the target deployment (from the backup for an in-place restore,
     or from ``target_deployment_id`` for a cross-target one), blocks
-    restoring an internal deployment, blocks a second restore while one is
+    restoring an internal or a deleted deployment, blocks a second restore while one is
     still non-terminal for that deployment or for the same backup, and flips
     that deployment to RESTORING in the same transaction so the UI reflects
     the lifecycle immediately.
@@ -512,6 +511,14 @@ async def create_restore(
         if deployment.internal:
             raise InternalDeploymentError(
                 f"Cannot restore internal deployment {deployment_id}"
+            )
+        # A restore would recreate the deleted deployment's resources in the
+        # cluster and move it out of DELETED while deleted_at stays set.
+        if deployment.deleted_at is not None:
+            raise DeletedDeploymentRestoreError(
+                f"Cannot restore into deployment {deployment_id}: the deployment "
+                "was deleted. A deleted deployment's backups can be listed but "
+                "not restored."
             )
 
         # Concurrency guard: refuse a second restore into the same deployment,

@@ -10,8 +10,7 @@ from styrmin_backend.api.definitions.deployment.model import (
     ApplicationInstance as ApplicationInstanceType,
 )
 from styrmin_backend.api.definitions.step.model import Step
-from styrmin_backend.api.loaders import backup_steps
-from styrmin_backend.api.resolvers import resolve_related
+from styrmin_backend.api.loaders import application_instances, backup_steps
 from styrmin_backend.api.scalars import BigInt
 from styrmin_backend.db.models import Backup as BackupModel
 from styrmin_backend.db.models import BackupStatus as BackupStatusDB
@@ -65,13 +64,10 @@ class Backup:
 
     @strawberry.field
     async def instance(self, info: strawberry.Info) -> ApplicationInstanceType:
-        return await resolve_related(
-            info,
-            "application_instances",
-            self.instance_id,
-            ApplicationInstanceType,
-            InstanceNotFoundError,
-        )
+        instance = await application_instances(info).load(self.instance_id)
+        if instance is None:
+            raise InstanceNotFoundError()
+        return ApplicationInstanceType.from_instance(instance)  # type: ignore[arg-type]
 
     @strawberry.field
     def component_statuses(self) -> list[ComponentBackupStatus] | None:

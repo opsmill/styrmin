@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from uuid import UUID
 
 from sqlalchemy import asc
-from sqlmodel import select
+from sqlmodel import col, select
 
 from styrmin_backend.db.models import ApplicationInstance
 from styrmin_backend.repository.base import BaseRepository
@@ -25,6 +26,11 @@ class ApplicationInstanceRepository(BaseRepository[ApplicationInstance], ABC):
         self, deployment_id: UUID
     ) -> list[ApplicationInstance]:
         """Get all application instances for a deployment, ordered by created_on."""
+        raise NotImplementedError("Method not implemented yet.")
+
+    @abstractmethod
+    async def get_by_ids(self, ids: Sequence[UUID]) -> list[ApplicationInstance]:
+        """Get the application instances with these ids, in no particular order."""
         raise NotImplementedError("Method not implemented yet.")
 
 
@@ -52,5 +58,13 @@ class SQLModelApplicationInstanceRepository(
             .where(self.model_class.deployment_id == deployment_id)
             .order_by(asc(self.model_class.created_on))  # type: ignore[arg-type]
         )
+        result = await self.session.exec(statement)
+        return list(result.all())
+
+    async def get_by_ids(self, ids: Sequence[UUID]) -> list[ApplicationInstance]:
+        """Get the application instances with these ids, in no particular order."""
+        if not ids:
+            return []
+        statement = select(self.model_class).where(col(self.model_class.id).in_(ids))
         result = await self.session.exec(statement)
         return list(result.all())

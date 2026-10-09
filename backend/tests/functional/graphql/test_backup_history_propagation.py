@@ -9,7 +9,9 @@ instance's backups, and the service rejects both or neither id.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+import re
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,6 +20,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import event
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -175,6 +178,71 @@ async def test_backups_by_unknown_deployment_id_returns_empty_list(
 
 
 @pytest.mark.asyncio
+async def test_backups_by_internal_deployment_id_returns_empty_list(
+    client: AsyncClient, session: AsyncSession, history: BackupHistory
+) -> None:
+    deployment = await session.get(Deployment, UUID(history.deployment_id))
+    assert deployment is not None
+    deployment.internal = True
+    session.add(deployment)
+    await session.commit()
+
+    data = await gql(
+        client, "list_backup_history", {"deploymentId": history.deployment_id}
+    )
+
+    assert data["backups"] == []
+
+
+@contextmanager
+def _count_selects(session: AsyncSession) -> Iterator[list[str]]:
+    statements: list[str] = []
+    engine = session.bind.sync_engine  # type: ignore[union-attr]
+
+    def _record(
+        conn: Any,  # noqa: ARG001
+        cursor: Any,  # noqa: ARG001
+        statement: str,
+        parameters: Any,  # noqa: ARG001
+        context: Any,  # noqa: ARG001
+        executemany: bool,  # noqa: ARG001
+    ) -> None:
+        if statement.lstrip().lower().startswith("select"):
+            statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _record)
+    try:
+        yield statements
+    finally:
+        event.remove(engine, "before_cursor_execute", _record)
+
+
+_FROM_INSTANCE = re.compile(r"\bFROM applicationinstance\b")
+
+
+@pytest.mark.asyncio
+async def test_backups_read_every_instance_with_one_query(
+    client: AsyncClient, session: AsyncSession, history: BackupHistory
+) -> None:
+    deployment = await session.get(Deployment, UUID(history.deployment_id))
+    assert deployment is not None
+    for _ in range(8):
+        instance = await seed_application_instance(session, deployment=deployment)
+        await _seed_backup(
+            session, instance, status=BackupStatus.COMPLETED, created_on=BASE_TIME
+        )
+
+    with _count_selects(session) as statements:
+        data = await gql(
+            client, "list_backup_history", {"deploymentId": history.deployment_id}
+        )
+
+    assert len(data["backups"]) == 10
+    instance_queries = [s for s in statements if _FROM_INSTANCE.search(s)]
+    assert len(instance_queries) == 1, statements
+
+
+@pytest.mark.asyncio
 async def test_backups_by_inactive_instance_id_returns_only_its_backups(
     client: AsyncClient, history: BackupHistory
 ) -> None:
@@ -189,8 +257,8 @@ async def test_backups_by_inactive_instance_id_returns_only_its_backups(
 @pytest.mark.parametrize(
     ("use_deployment_id", "use_instance_id", "message"),
     [
-        (True, True, "Provide either deployment_id or instance_id, not both"),
-        (False, False, "Either deployment_id or instance_id is required"),
+        (True, True, "Provide exactly one of deployment_id or instance_id"),
+        (False, False, "Provide exactly one of deployment_id or instance_id"),
     ],
     ids=["both", "neither"],
 )

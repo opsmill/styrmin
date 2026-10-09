@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -44,6 +45,7 @@ from styrmin_backend.services.backup.service import (
 from styrmin_backend.services.deployment_status import report_deployment_statuses
 from styrmin_backend.services.exceptions import (
     BackupNotFoundError,
+    DeletedDeploymentRestoreError,
     DeploymentNotFoundError,
     InternalDeploymentError,
     RestoreAlreadyInProgressError,
@@ -189,6 +191,28 @@ class TestCreateRestore:
                 target_namespace=f"styrmin-{deployment.id}",
                 uow=uow,
             )
+
+    @pytest.mark.anyio
+    async def test_create_restore_deleted_deployment_rejected(self) -> None:
+        """A deleted deployment keeps its backups, but a restore into it is refused."""
+        deployment, instance, backup = make_chain(
+            deployment_status=DeploymentState.DELETED
+        )
+        deployment.deleted_at = datetime(2026, 10, 8, tzinfo=UTC)
+        uow = make_uow(backups=[backup], instances=[instance], deployments=[deployment])
+
+        with pytest.raises(DeletedDeploymentRestoreError, match="was deleted") as exc:
+            await create_restore(
+                backup_id=backup.id,
+                target_namespace=f"styrmin-{deployment.id}",
+                uow=uow,
+            )
+
+        assert exc.value.error_code == "OPERATION_DENIED"
+        stored = await uow.deployments.find(deployment.id)
+        assert stored is not None
+        assert stored.status == DeploymentState.DELETED
+        assert await uow.restores.get_all() == []
 
     @pytest.mark.anyio
     async def test_create_restore_blocks_when_already_restoring(self) -> None:

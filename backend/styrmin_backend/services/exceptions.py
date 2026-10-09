@@ -223,6 +223,16 @@ class InternalDeploymentError(ServiceError):
     default_message = "Operation not allowed on internal (system-managed) deployments"
 
 
+class DeletedDeploymentRestoreError(ServiceError):
+    """A restore was attempted into a deleted (tombstoned) deployment."""
+
+    error_code = "OPERATION_DENIED"
+    default_message = (
+        "Cannot restore into a deleted deployment. A deleted deployment's "
+        "backups can be listed but not restored."
+    )
+
+
 class ServiceNameConflictError(ServiceError):
     """A service name conflicts with an existing service in the environment."""
 

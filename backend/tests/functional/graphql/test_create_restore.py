@@ -6,12 +6,14 @@ values must have been committed rather than served from the seeding session.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import (
@@ -23,6 +25,7 @@ from styrmin_backend.db.models import (
     RestoreStatus,
 )
 
+from ._queries import load_query
 from .conftest import gql
 from .seeds import seed_application_instance
 
@@ -82,3 +85,50 @@ async def test_create_restore_fails_the_restore_when_its_dispatch_fails(
     assert restore.error_message == payload["errorMessage"]
     deployment = await _read_back(session, Deployment, instance.deployment_id)
     assert deployment.status == DeploymentState.FAILED
+
+
+@pytest.mark.asyncio
+async def test_create_restore_into_a_deleted_deployment_is_refused(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock, mocker
+) -> None:
+    """A deleted deployment lists its backups, but a restore into it is refused
+    before any restore row is written or any workflow is dispatched."""
+    instance = await seed_application_instance(session)
+    deployment_id = instance.deployment_id
+    assert deployment_id is not None
+    deployment = await session.get(Deployment, deployment_id)
+    assert deployment is not None
+    deployment.status = DeploymentState.DELETED
+    deployment.deleted_at = datetime(2026, 10, 8, tzinfo=UTC)
+    backup = Backup(
+        name="restore-deleted-seed",
+        status=BackupStatus.COMPLETED,
+        instance_id=instance.id,
+    )
+    session.add_all([deployment, backup])
+    await session.commit()
+    backup_id = backup.id
+    mocker.patch(
+        "styrmin_backend.api.schema.mutation.get_manager",
+        return_value=prefect_manager_mock,
+    )
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("create_restore"),
+            "variables": {
+                "backupId": str(backup_id),
+                "targetNamespace": f"styrmin-{deployment_id}",
+            },
+        },
+    )
+
+    [error] = response.json()["errors"]
+    assert error["extensions"]["code"] == "OPERATION_DENIED", error
+    assert "was deleted" in error["message"], error
+    prefect_manager_mock.run_action.assert_not_called()
+    stored = await _read_back(session, Deployment, deployment_id)
+    assert stored.status == DeploymentState.DELETED
+    restores = await session.exec(select(Restore).where(Restore.backup_id == backup_id))
+    assert restores.all() == []

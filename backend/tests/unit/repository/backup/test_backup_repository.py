@@ -363,3 +363,36 @@ async def test_get_by_deployment_id_includes_constituent_backup(
 
     assert [b.name for b in results] == ["constituent"]
     assert results[0].environment_backup_id == parent.id
+
+
+@pytest.mark.asyncio
+async def test_get_by_deployment_id_lists_nothing_for_an_internal_deployment(
+    session: AsyncSession,
+    repository: SQLModelBackupRepository,
+    deployment: Deployment,
+    instance: ApplicationInstance,
+):
+    deployment.internal = True
+    session.add(deployment)
+    await session.flush()
+    await repository.create(_history_backup("internal", instance.id, 0))
+
+    assert await repository.get_by_deployment_id(deployment.id) == []
+    assert [b.name for b in await repository.get_by_instance_id(instance.id)] == [
+        "internal"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_by_deployment_id_breaks_a_created_on_tie_by_id(
+    repository: SQLModelBackupRepository,
+    deployment: Deployment,
+    instance: ApplicationInstance,
+    second_instance: ApplicationInstance,
+):
+    first = await repository.create(_history_backup("first", instance.id, 0))
+    second = await repository.create(_history_backup("second", second_instance.id, 0))
+
+    results = await repository.get_by_deployment_id(deployment.id)
+
+    assert [b.id for b in results] == sorted([first.id, second.id], reverse=True)
