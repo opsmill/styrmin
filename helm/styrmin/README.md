@@ -229,6 +229,8 @@ Sizing guidance is in [`dev/guidelines/helm.md`](../../dev/guidelines/helm.md).
 | `styrmin.workflow.address` | Prefect address (auto-configured) | `""` |
 | `styrmin.workflow.port` | Prefect port | `4200` |
 | `styrmin.workflow.tlsEnabled` | Enable TLS for Prefect | `false` |
+| `styrmin.telemetry.enabled` | Send one anonymous report a day to OpsMill. Set to `false` to turn telemetry off. See [Telemetry & privacy](https://styrmin.pages.dev/docs/reference/telemetry#server-telemetry). | `true` |
+| `styrmin.telemetry.endpoint` | Destination of the daily telemetry report. Leave empty for the OpsMill endpoint. | `""` |
 
 ### Secrets Configuration
 

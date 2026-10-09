@@ -233,6 +233,8 @@ styrmin:
   adminUsername: admin
   adminPassword: styrmin
   sessionCookieSecure: false   # demo is plain HTTP; cookies would be dropped otherwise
+  telemetry:
+    enabled: false             # the local demo sends no telemetry reports
 
 velero:
   backupsEnabled: false        # Garage is wired up by the BSL in step 9 instead
