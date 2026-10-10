@@ -270,6 +270,33 @@ spec:
 If none of the built-in strategies fits, set `kind: action` and
 implement the backup logic as a driver action (see Step 7).
 
+:::caution hostPath volumes are not backed up
+
+Velero's [file-system backup](https://velero.io/docs/main/file-system-backup/#limitations)
+does not support `hostPath` volumes. Velero skips such a volume with a
+warning, and the backup still completes, without that volume's data. This
+applies to every volume a backup strategy copies:
+
+- the volumes that a `disk` strategy names
+- the data volume of a `neo4j-community` strategy
+- the dump volume (`backup`) of the `postgres`, `mariadb`, `mongodb` and
+  `neo4j` strategies
+
+A PersistentVolumeClaim is affected too when its storage class provisions
+hostPath PersistentVolumes, as the `local-path` provisioner does. Use
+`emptyDir` for dump volumes, and a storage class that does not provision
+hostPath PersistentVolumes (for example, one backed by a CSI driver) for
+the other volumes. When your values template reads the storage class from
+the cluster configuration (`instance.config.standard_storage.storage_class`
+or `instance.config.fast_storage.storage_class`), the cluster
+administrator chooses that class.
+
+To check a deployment, look at the PersistentVolume behind each backed-up
+claim: `kubectl get pv <name> -o jsonpath='{.spec.hostPath}'` prints
+nothing for a volume that Velero can back up.
+
+:::
+
 ### Step 5: Template the Helm values
 
 Create `values.j2.yml`. This is a [Jinja2](https://jinja.palletsprojects.com/)
@@ -529,7 +556,9 @@ uv run styrminctl deployments create my-app 0.1.0 <environment-id>
 Watch the deployment in the UI. Things to check:
 
 - All components report `Running` once the deployment finishes.
-- Triggering a backup completes successfully and lands in your BSL.
+- Triggering a backup completes successfully and lands in your BSL,
+  and a restore brings the data back. A backup can complete without the
+  data of a volume Velero skipped, such as a `hostPath` volume.
 - Triggering an upgrade (to another `supported_versions` value) runs
   the upgrade action and the new version comes up clean.
 - Deleting the deployment cleans up all resources.
@@ -552,7 +581,8 @@ Before you call the driver done:
       selects, and `values.j2.yml` wires neither env vars nor the
       image override.
 - [ ] Every stateful component has a `backup` block with the right
-      strategy.
+      strategy, and none of the volumes it backs up is a `hostPath`
+      volume.
 - [ ] Every externally reachable service is declared under
       `spec.services` with `scope: external`.
 - [ ] The values template uses `{{ instance.config.X }}` where

@@ -45,7 +45,7 @@ styrmin_backend/services/
 ├── backup/                        # Backup/restore (see backup-restore.md)
 │   ├── service.py                 # Backup/restore service functions and STRATEGY_MAP
 │   ├── scheduler.py               # Backup schedule management
-│   └── strategies/                # disk / postgres / mariadb / mongodb / neo4j / action
+│   └── strategies/                # disk / postgres / mariadb / mongodb / neo4j / neo4j-community / action
 │
 ├── helm/                          # Helm rendering helpers
 │   ├── renderer.py                # render_helm_repository_spec / render_helm_chart_spec

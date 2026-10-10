@@ -180,6 +180,87 @@ def neo4j_backup_hooks(
     )
 
 
+NEO4J_PID_FILE = "/var/lib/neo4j/run/neo4j.pid"
+# Matches DEFAULT_BACKUP_TIMEOUT: past it the backup has failed anyway.
+NEO4J_MAX_PAUSE_SECONDS = 3600
+
+# The watchdog resumes Neo4j if the post hook never runs (Velero restarted mid-backup).
+# Killing it with TERM also stops its sleep, so a disarmed watchdog leaves nothing behind.
+_NEO4J_PAUSE_SCRIPT = """\
+set -eu
+pid="$(cat {pid_file})"
+kill "$(cat {watchdog_pid_file} 2>/dev/null)" 2>/dev/null || true
+rm -f {watchdog_fired_file}
+(
+  set +eu
+  trap '' HUP
+  trap 'kill "$sleeper" 2>/dev/null; exit 0' TERM
+  sleep {max_pause} &
+  sleeper=$!
+  wait "$sleeper"
+  rm -f {watchdog_pid_file}
+  touch {watchdog_fired_file}
+  kill -CONT "$pid"
+) </dev/null >/dev/null 2>&1 &
+echo "$!" > {watchdog_pid_file}
+kill -STOP "$pid"
+sync || true
+"""
+
+_NEO4J_RESUME_SCRIPT = """\
+set -u
+pid="$(cat {pid_file})"
+if [ -f {watchdog_pid_file} ]; then
+  kill "$(cat {watchdog_pid_file})" 2>/dev/null || true
+  rm -f {watchdog_pid_file}
+fi
+kill -CONT "$pid"
+if [ -f {watchdog_fired_file} ]; then
+  echo "Neo4j was resumed after {max_pause}s, before the volume backup finished: this backup is not consistent" >&2
+  exit 1
+fi
+"""
+
+
+def neo4j_community_backup_hooks(
+    namespace: str,
+    component_name: str,
+    container: str | None = None,
+    pid_file: str = NEO4J_PID_FILE,
+    watchdog_dir: str = "/tmp",
+    max_pause_seconds: int = NEO4J_MAX_PAUSE_SECONDS,
+    timeout: str = "60s",
+) -> VeleroBackupHook:
+    """Create Velero pre/post backup hooks that pause Neo4j while Velero copies its data volume."""
+    params = {
+        "pid_file": pid_file,
+        "max_pause": max_pause_seconds,
+        "watchdog_pid_file": f"{watchdog_dir}/styrmin-neo4j-watchdog.pid",
+        "watchdog_fired_file": f"{watchdog_dir}/styrmin-neo4j-watchdog.fired",
+    }
+    return VeleroBackupHook(
+        name=f"{component_name}-neo4j-community-backup",
+        included_namespaces=[namespace],
+        label_selector={"matchLabels": {"styrmin/component": component_name}},
+        pre=[
+            VeleroBackupHookExec(
+                container=container,
+                command=["/bin/sh", "-c", _NEO4J_PAUSE_SCRIPT.format(**params)],
+                on_error="Fail",
+                timeout=timeout,
+            )
+        ],
+        post=[
+            VeleroBackupHookExec(
+                container=container,
+                command=["/bin/sh", "-c", _NEO4J_RESUME_SCRIPT.format(**params)],
+                on_error="Fail",
+                timeout=timeout,
+            )
+        ],
+    )
+
+
 def mariadb_backup_hooks(
     namespace: str,
     component_name: str,

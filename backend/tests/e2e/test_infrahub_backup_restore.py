@@ -7,8 +7,10 @@ debug iterations on the lighter simple-app backup tests.
 These tests exercise **two** independent backup paths in a single
 backup/restore cycle:
 
-* **Database** (``database`` component, ``kind: neo4j``) — a ``BuiltinTag``
-  node lives only in Neo4j.
+* **Database** (``database`` component) — a ``BuiltinTag`` node lives only
+  in Neo4j. The community driver uses ``kind: neo4j-community`` (Neo4j is
+  paused while Velero copies its ``data`` volume, #263); the enterprise driver
+  uses ``kind: neo4j`` (``neo4j-admin database backup``).
 * **Disk** (``server`` component, ``kind: disk``) — artifact content and
   file objects live in Infrahub's object store on the server's
   ``infrahub-server-storage-data`` PVC, mounted at ``/opt/infrahub/storage``.
@@ -103,7 +105,6 @@ async def portforward_infrahub(
     "not through a Styrmin-managed UI surface; scenario cannot meaningfully "
     "run through UiScenarioDriver."
 )
-@pytest.mark.skip(reason="backup/restore not supported with community")
 async def test_infrahub_backup_and_restore_lifecycle(
     load_infrahub: dict,
     velero_ready: None,  # noqa: ARG001 — ensures Velero is up before backup/restore

@@ -41,7 +41,8 @@ Each component in a driver can define a backup kind. The strategy pattern maps k
 | `postgres` | `PostgresBackupStrategy` | `pg_dump` to extra volume, then Velero snapshot |
 | `mariadb` | `MariadbBackupStrategy` | `mariadb-dump` to extra volume, then Velero snapshot |
 | `mongodb` | `MongodbBackupStrategy` | `mongodump` to extra volume, then Velero snapshot |
-| `neo4j` | `Neo4jBackupStrategy` | `neo4j-admin dump` to extra volume, then Velero snapshot |
+| `neo4j` | `Neo4jBackupStrategy` | `neo4j-admin database backup` (Enterprise only) to extra volume, then Velero snapshot |
+| `neo4j-community` | `Neo4jCommunityBackupStrategy` | Pause the Neo4j JVM while Velero copies its `data` volume; no restore hook |
 | `action` | `ActionBackupStrategy` | Custom driver action via Prefect (no Velero hooks) |
 
 ### Strategy Interface
@@ -56,8 +57,25 @@ class BackupStrategy(ABC):
 ```
 
 - **Disk:** No hooks needed, extracts volume names from `volume`/`volumes` config fields
-- **Postgres / Mariadb / Mongodb / Neo4j:** Pre-backup hooks run a dump command (e.g. `pg_dump`, `mariadb-dump`, `mongodump`, `neo4j-admin dump`) into an extra volume mounted at `backup_mount_path` (default `/backup`); post-restore hooks run the corresponding restore command. Default backup volume is `"backup"`.
+- **Postgres / Mariadb / Mongodb / Neo4j:** Pre-backup hooks run a dump command (e.g. `pg_dump`, `mariadb-dump`, `mongodump`, `neo4j-admin database backup`) into an extra volume mounted at `backup_mount_path` (default `/backup`); post-restore hooks run the corresponding restore command. Default backup volume is `"backup"`.
+- **Neo4j Community:** Backs up the database's own volume (`volume`, default `"data"`) instead of a dump; see [below](#the-neo4j-community-strategy-pauses-neo4j).
 - **Action:** No hooks or volumes — backup is handled entirely by the driver's Prefect action
+
+### The neo4j-community strategy pauses Neo4j
+
+`kind: neo4j` uses Neo4j Enterprise commands (`neo4j-admin database backup`, `STOP DATABASE`, `neo4j-admin database restore`). Neo4j Community has none of them and cannot stop a database without stopping the JVM, which is the container's main process. `kind: neo4j-community` ([ADR-061](../../adr/0061-neo4j-community-backup-pauses-neo4j-during-volume-copy.md), [#263](https://github.com/opsmill/styrmin/issues/263)) backs up the running database's files instead:
+
+1. The pre-backup hook (`neo4j_community_backup_hooks()` in `hooks.py`) reads the JVM process ID from `/var/lib/neo4j/run/neo4j.pid`, starts a watchdog subshell, and sends `SIGSTOP` to the JVM.
+2. Velero's file-system backup copies the annotated volume. The copy holds the files as they were at the pause, which Neo4j recovers from like a killed process.
+3. The post-backup hook stops the watchdog and sends `SIGCONT`. Velero 1.18 runs post hooks only after every PodVolumeBackup of the pod is completed, failed or canceled (`handleItemBlockPostHooks` in Velero's `pkg/backup/backup.go`).
+
+The watchdog sends `SIGCONT` after `NEO4J_MAX_PAUSE_SECONDS` (3600, the default backup timeout) and records that it did. The post hook then exits 1, so the backup ends `PartiallyFailed` instead of storing a copy taken after Neo4j resumed. The watchdog is needed because Velero skips post hooks when its wait for the PodVolumeBackups fails, and skips them for a pod whose pre hook failed; both hooks use `onError: Fail`, and the pre hook sends `SIGSTOP` last so that nothing after it can fail. The next pause stops a watchdog left by an earlier backup, so it cannot resume Neo4j in the middle of another backup.
+
+Velero's file-system backup skips `hostPath` PVs (the `local-path` provisioner's) with only a backup warning, so the database volume must come from a CSI storage class. The E2E cluster points both `standard_storage` and `fast_storage` at `csi-hostpath-sc` for this reason (`csi_hostpath_storage` fixture).
+
+There is no restore hook. The restore lays the volume down through Velero's `restore-wait` init container before the Neo4j container starts, and Neo4j replays its transaction logs on startup. The race described below for postgres therefore does not apply: no application can write to Neo4j before its data is in place.
+
+`backend/tests/unit/services/backup/test_strategies.py::TestNeo4jCommunityPauseScripts` runs the rendered scripts against a `sleep` process standing in for the JVM. `test_infrahub_backup_and_restore_lifecycle` covers the community Infrahub driver end to end.
 
 ### Hook timeouts: `timeout` vs `execTimeout`
 

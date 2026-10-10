@@ -12,6 +12,7 @@ class BackupKind(str, Enum):
     MONGODB = "mongodb"
     POSTGRES = "postgres"
     NEO4J = "neo4j"
+    NEO4J_COMMUNITY = "neo4j-community"
     ACTION = "action"
 
 
