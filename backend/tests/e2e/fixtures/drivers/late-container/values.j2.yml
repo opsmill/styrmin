@@ -1,10 +1,11 @@
 fullnameOverride: styrmin-simple-app
 
-# Only the 0.1.0 simple-app image is needed: the image does not follow the
-# application version.
+# The tag follows the application version, so a version change also changes the
+# values: Flux then upgrades the release even when the new HelmChart is not ready
+# yet on the first reconcile.
 image:
   repository: simple-app
-  tag: "0.1.0"
+  tag: "{{ app.version }}"
 
 ingress:
   enabled: true
