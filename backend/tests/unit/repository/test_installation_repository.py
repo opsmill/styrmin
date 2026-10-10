@@ -1,5 +1,6 @@
 """The install ID is created once and then read back (spec 020, D10)."""
 
+import asyncio
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -62,3 +63,27 @@ async def test_later_calls_return_the_same_id_on_postgresql(
             await _assert_one_stable_install_id(session)
     finally:
         await engine.dispose()
+
+
+async def test_concurrent_first_calls_agree_on_postgresql(postgres_url: str) -> None:
+    engine = create_async_engine(postgres_url)
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(SQLModel.metadata.create_all)
+        async with AsyncSession(engine) as first, AsyncSession(engine) as second:
+            first_id = await SQLModelInstallationRepository(
+                first
+            ).get_or_create_install_id()
+            second_call = asyncio.create_task(_get_or_create_and_commit(second))
+            await asyncio.sleep(0.5)
+            waited = not second_call.done()
+            await first.commit()
+            second_id = await asyncio.wait_for(second_call, timeout=10)
+            rows = await _row_count(second)
+    finally:
+        await engine.dispose()
+
+    # The second insert waits on the first transaction's uncommitted row, then does nothing.
+    assert waited
+    assert second_id == first_id
+    assert rows == 1

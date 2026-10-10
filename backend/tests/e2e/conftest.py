@@ -444,7 +444,9 @@ async def telemetry_sink(
     api: kubeclient.ApiClient = vcluster["api"]
     sink_dir = FIXTURES_DIR / "telemetry-sink"
 
-    subprocess.run(
+    # In a thread, so the build does not block the event loop of the async fixtures.
+    await asyncio.to_thread(
+        subprocess.run,
         [
             "docker",
             "build",

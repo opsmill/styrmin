@@ -2,7 +2,7 @@ import contextlib
 from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import TypeVar
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from styrmin_backend.db.models import (
     Action,
@@ -63,6 +63,7 @@ from styrmin_backend.repository.deployment_status import (
 from styrmin_backend.repository.pod_status import PodStatusRepository
 from styrmin_backend.repository.helm_chart import HelmChartRepository
 from styrmin_backend.repository.helm_repository import HelmRepositoryRepository
+from styrmin_backend.repository.installation import InstallationRepository
 from styrmin_backend.repository.restore import RestoreRepository
 from styrmin_backend.repository.tasks import TaskRepository
 from styrmin_backend.repository.utility import UtilityRepository
@@ -95,6 +96,9 @@ class FakeRepository(BaseRepository[ModelType]):
                 self.models.pop(i)
                 return
 
+    async def count(self) -> int:
+        return len(self.models)
+
 
 class FakeClusterRepository(FakeRepository[Cluster], ClusterRepository):
     """Fake cluster repository for testing purposes."""
@@ -104,9 +108,6 @@ class FakeClusterRepository(FakeRepository[Cluster], ClusterRepository):
             if cluster.name == name:
                 return cluster
         return None
-
-    async def count(self) -> int:
-        return len(self.models)
 
 
 class FakeBackupStorageLocationRepository(
@@ -135,9 +136,6 @@ class FakeEnvironmentRepository(FakeRepository[Environment], EnvironmentReposito
             if environment.name == name and environment.cluster_id == cluster_id:
                 return environment
         return None
-
-    async def count(self) -> int:
-        return len(self.models)
 
 
 class FakeHelmRepositoryRepository(
@@ -750,6 +748,9 @@ class FakeDeploymentRepository(DeploymentRepository):
         ]
         return doomed
 
+    async def count(self) -> int:
+        return len(self._deployments)
+
     async def count_live(self) -> int:
         return sum(1 for d in self._deployments if d.deleted_at is None)
 
@@ -807,6 +808,18 @@ class _FakeSession:
         return contextlib.nullcontext()
 
 
+class FakeInstallationRepository(InstallationRepository):
+    """Fake install ID store: creates the ID on the first call, then returns it."""
+
+    def __init__(self) -> None:
+        self.install_id: UUID | None = None
+
+    async def get_or_create_install_id(self) -> UUID:
+        if self.install_id is None:
+            self.install_id = uuid4()
+        return self.install_id
+
+
 class FakeUnitOfWork(UnitOfWork):
     backup_storage_locations: FakeBackupStorageLocationRepository  # type: ignore[assignment]
     clusters: FakeClusterRepository
@@ -829,6 +842,7 @@ class FakeUnitOfWork(UnitOfWork):
     pod_statuses: FakePodStatusRepository  # type: ignore[assignment]
     deployment_statuses: FakeDeploymentStatusRepository  # type: ignore[assignment]
     utilities: FakeUtilityRepository  # type: ignore[assignment]
+    installation: FakeInstallationRepository
 
     def __init__(
         self,
@@ -853,6 +867,7 @@ class FakeUnitOfWork(UnitOfWork):
         pod_statuses: FakePodStatusRepository | None = None,
         deployment_statuses: FakeDeploymentStatusRepository | None = None,
         utilities: FakeUtilityRepository | None = None,
+        installation: FakeInstallationRepository | None = None,
     ):
         self.backup_storage_locations = (
             backup_storage_locations or FakeBackupStorageLocationRepository()
@@ -900,6 +915,7 @@ class FakeUnitOfWork(UnitOfWork):
             deployment_statuses or FakeDeploymentStatusRepository()
         )
         self.utilities = utilities or FakeUtilityRepository()
+        self.installation = installation or FakeInstallationRepository()
         self.session = _FakeSession()  # type: ignore[assignment]
 
         self.committed = False

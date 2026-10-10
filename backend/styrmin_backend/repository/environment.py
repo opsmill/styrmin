@@ -3,7 +3,7 @@ from typing import Any, Sequence
 from uuid import UUID
 
 from sqlalchemy.orm import selectinload
-from sqlmodel import func, select
+from sqlmodel import select
 
 from styrmin_backend.db.models import Deployment as DeploymentModel
 from styrmin_backend.db.models import Environment
@@ -22,11 +22,6 @@ class EnvironmentRepository(BaseRepository[Environment], ABC):
     async def get_by_name_in_cluster(
         self, name: str, cluster_id: UUID
     ) -> Environment | None:
-        raise NotImplementedError()
-
-    @abstractmethod
-    async def count(self) -> int:
-        """Return the number of environments."""
         raise NotImplementedError()
 
 
@@ -88,10 +83,3 @@ class SQLModelEnvironmentRepository(
         )
         result = await self.session.exec(statement)
         return result.first()
-
-    async def count(self) -> int:
-        """Return the number of environments without loading them."""
-        result = await self.session.exec(
-            select(func.count()).select_from(self.model_class)
-        )
-        return result.one()
