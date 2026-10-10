@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-08
-**Source**: feature — `specs/020-backend-telemetry/` (research.md D1–D19, data-model.md, contracts/);
+**Source**: feature — `specs/archive/020-backend-telemetry/` (research.md D1–D19, data-model.md, contracts/);
 PRD and seed issue [#274](https://github.com/opsmill/styrmin/issues/274)
 **Related**: [ADR-047](0047-styrminctl-anonymous-fire-and-forget-telemetry.md) (the `styrminctl`
 event whose envelope and checksum this report reuses), [ADR-001](0001-alembic-database-migrations.md)

@@ -230,13 +230,19 @@ def create_app() -> FastAPI:
     return app
 ```
 
-Startup sequence:
+Startup sequence (`app_initialization`):
 
-1. Load configuration from `styrmin.toml` or environment
-2. Initialize database (SQLite or PostgreSQL)
-3. Configure logging with Loguru
-4. Initialize Prefect workflow manager
-5. Initialize infrastructure utilities
+<!-- Extracted from specs/020-backend-telemetry on 2026-10-10 -->
+
+1. Load the settings (`SETTINGS.initialize_and_exit()`)
+2. Configure logging with Loguru, with the redaction patcher installed before any sink
+3. Log the telemetry state line at INFO (`services/telemetry/state.py::startup_message`), before the database wait, so it appears even when the database is down
+4. Wait for the database, then initialize it (SQLite or PostgreSQL; `create_all` only builds a fresh database, see [ADR-001](../../adr/0001-alembic-database-migrations.md))
+5. Create the default admin user when it does not exist ([ADR-016](../../adr/0016-authentication-and-sessions.md))
+6. Create the telemetry install ID when it does not exist (`services/telemetry/install.py::ensure_install_id`), whether telemetry is on or off; a failure logs a warning and startup continues
+7. Initialize the Prefect workflow manager, which registers the flow catalogue and its cron schedules
+8. Initialize infrastructure utilities
+9. Initialize the internal drivers (the ingress controller driver)
 
 ### Settings loading
 
@@ -256,6 +262,7 @@ Startup sequence:
   - the `token` field of `[kubernetes]`, `[driver]` and `[agent_code]`
 
   An operator who saves that output as `styrmin.toml` therefore keeps setting these credentials through the environment, and rotating a credential in the environment still takes effect. Add any new credential field to `SECRET_FIELDS`.
+- `STYRMIN_WORKFLOW_ENABLE` (`WorkflowSettings.enable`) is declared and the Helm chart renders it, but no code reads it, so setting it to `false` turns off no flow, including the daily telemetry flow. Operators turn telemetry off with the telemetry settings ([ADR-061](../../adr/0061-server-anonymous-daily-telemetry.md)). <!-- Extracted from specs/020-backend-telemetry on 2026-10-10 -->
 
 Read configuration through `config.SETTINGS`, not `os.environ`. `AgentSettings` holds the `STYRMIN_AGENT_POLL_*` and `STYRMIN_AGENT_STATUS_POLL_INTERVAL` settings, and `api_token`, read from `STYRMIN_TOKEN`: the reconcile's API token that Styrmin sets on the remediation and driver action jobs (ADR-059). `api_token` is left out of `styrmin config show`. `KubernetesSettings.kubeconfig` reads `KUBECONFIG`. `RemoteAgentCodeSettings` holds `STYRMIN_AGENT_SOURCE_*`. `OperatorSettings` holds `STYRMIN_OPERATOR_*`, `DELETED_CR_TTL_HOURS` and `STYRMIN_JANITOR_INTERVAL`. `TelemetrySettings` holds `STYRMIN_TELEMETRY_ENABLED`, `STYRMIN_TELEMETRY_ENDPOINT`, `STYRMIN_TELEMETRY` and `DO_NOT_TRACK`; its `disabled_by()` names the setting that turned telemetry off, for the startup log line, `styrmin telemetry show` and the daily telemetry flow. `STYRMIN_TELEMETRY` and `DO_NOT_TRACK` are left out of `styrmin config show`, which prints `enabled = false` when one of them turns telemetry off ([ADR-061](../../adr/0061-server-anonymous-daily-telemetry.md)). Kopf timer intervals and Prefect task retries are read when their modules are imported, so they take the values present when the agent process starts.
 
