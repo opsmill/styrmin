@@ -26,8 +26,10 @@ from styrmin_sdk.exceptions import (
     DriverMismatchError,
     EnvironmentAmbiguityError,
     EnvironmentNotFoundError,
+    IncompatibleServerError,
     ManifestValidationError,
     ResourceAlreadyExistsError,
+    StyrminAPIError,
     StyrminError,
 )
 from styrmin_sdk.graphql._generated.delete_deployment import (
@@ -39,6 +41,10 @@ from styrmin_sdk.graphql._generated.get_deployment import GetDeployment, GetDepl
 from styrmin_sdk.graphql._generated.get_deployment_by_name import (
     GetDeploymentByName,
     GetDeploymentByNameDeployment,
+)
+from styrmin_sdk.graphql._generated.get_deployment_override_applicability import (
+    GetDeploymentOverrideApplicability,
+    GetDeploymentOverrideApplicabilityDeployment,
 )
 from styrmin_sdk.graphql._generated.get_deployment_pod_statuses import (
     GetDeploymentPodStatuses,
@@ -204,6 +210,28 @@ def _build_update_input(manifest: ResolvedManifest) -> UpdateDeploymentInput:
         raise ManifestValidationError(
             f"manifest {manifest.source_path}: spec.config does not match UpdateDeploymentInput: {exc}",
         ) from exc
+
+
+_VERSION_INPUT_UNKNOWN = "Unknown argument 'input' on field 'Mutation.updateDeploymentVersion'"
+
+
+def _raise_if_server_lacks_version_input(result: dict[str, Any]) -> None:
+    """Raise :class:`IncompatibleServerError` when the server predates ``updateDeploymentVersion(input:)``."""
+    for error in result.get("errors") or []:
+        if str(error.get("message", "")).startswith(_VERSION_INPUT_UNKNOWN):
+            raise IncompatibleServerError(
+                "this styrminctl or SDK sends the config with the version change, which the Styrmin "
+                "server does not accept: updateDeploymentVersion has no 'input' argument before #388. "
+                "Upgrade the Styrmin server before or together with styrminctl and the SDK.",
+                "",
+            )
+
+
+def _error_code(exc: BaseException) -> str | None:
+    """The server's ``extensions.code`` carried by ``exc``, if any."""
+    if isinstance(exc, StyrminAPIError) and exc.typename:
+        return exc.typename
+    return None
 
 
 def _effective_image_overrides(update_input: UpdateDeploymentInput, stored_config: object) -> dict[str, str | None]:
@@ -450,7 +478,9 @@ class DeploymentResource(BaseResource):
 
         ``input`` takes the same fields as :meth:`update`. The backend validates
         them against the target driver version and writes them with the version,
-        so one task reconciles both.
+        so one task reconciles both. ``input`` needs a Styrmin server that accepts
+        it (#388); an older server raises :class:`IncompatibleServerError`.
+        Without ``input`` the call works against older servers too.
 
         Returns ``None`` when the backend detects a no-op (the requested
         state equals the current one): the resolver returns ``null`` and no
@@ -464,12 +494,13 @@ class DeploymentResource(BaseResource):
             variables["parameters"] = parameters
         if driver_version_id is not None:
             variables["driverVersionId"] = str(driver_version_id)
+        query = load_query("update_version")
         if input is not None:
             variables["input"] = input.model_dump(by_alias=True, exclude_none=True)
-        result = await self._transport.execute(
-            load_query("update_version"),
-            variables,
-        )
+            query = load_query("update_deployment_version_with_input")
+        result = await self._transport.execute(query, variables)
+        if input is not None:
+            _raise_if_server_lacks_version_input(result)
         self._check_graphql_errors(result)
         if result["data"].get("updateDeploymentVersion") is None:
             return None
@@ -657,9 +688,12 @@ class DeploymentResource(BaseResource):
         manifest moves to and one task reconciles everything (#388). The call is
         dispatched even when the version is unchanged: the backend re-resolves the
         driver version and owns no-op detection, returning ``None`` when nothing
-        changes (``action="unchanged"``). An ``updated`` outcome that changes the
-        application version also carries ``target_version`` and the token-free
-        ``pinned_image_components`` (FR-008); ``apply`` never prompts.
+        changes (``action="unchanged"``). A rejected call returns ``action="failed"``
+        with the server's message and ``error_code``; nothing was written. An
+        ``updated`` outcome that changes the application version also carries
+        ``target_version`` and the token-free ``pinned_image_components`` (FR-008),
+        and ``inapplicable_components`` lists the manifest's overrides that the bound
+        driver version cannot apply; ``apply`` never prompts.
         """
         existing_driver_name = existing.application_driver_version.application_driver.name
         if existing_driver_name != manifest.driver:
@@ -669,7 +703,16 @@ class DeploymentResource(BaseResource):
             )
 
         update_input = _build_update_input(manifest)
-        task = await self.update_version(existing.id, manifest.version, input=update_input)
+        try:
+            task = await self.update_version(existing.id, manifest.version, input=update_input)
+        except StyrminError as exc:
+            return ApplyOutcome(
+                name=manifest.name,
+                action="failed",
+                deployment_id=existing.id,
+                failure_reason=str(exc),
+                error_code=_error_code(exc),
+            )
         if task is None:
             return ApplyOutcome(
                 name=manifest.name,
@@ -689,7 +732,34 @@ class DeploymentResource(BaseResource):
                 if version_changed
                 else []
             ),
+            inapplicable_components=await self._inapplicable_components(existing.id, update_input),
         )
+
+    async def _inapplicable_components(self, deployment_id: UUID, update_input: UpdateDeploymentInput) -> list[str]:
+        """Components whose env vars or image override in ``update_input`` are stored but not applied.
+
+        Unchanged values on a component that the bound driver version gives no component
+        container pass validation, so they are read back once the update is written. A failed
+        read returns no components: it never fails the apply.
+        """
+        submitted = {block.name for block in update_input.components or [] if block.env_vars or block.image is not None}
+        if not submitted:
+            return []
+        try:
+            result = await self._transport.execute(
+                load_query("get_deployment_override_applicability"), {"deploymentId": str(deployment_id)}
+            )
+            self._check_graphql_errors(result)
+            deployment = self._parse(
+                GetDeploymentOverrideApplicability,
+                result["data"],
+                "deployment",
+                GetDeploymentOverrideApplicabilityDeployment,
+            )
+        except StyrminError:
+            return []
+        blocks = [*deployment.component_env_vars, *deployment.component_image_overrides]
+        return sorted({block.component for block in blocks if not block.is_applicable} & submitted)
 
     async def _wait_for_terminal(self, outcome: ApplyOutcome, max_wait: float | None = None) -> ApplyOutcome:
         """Poll the deployment until its ``Deployment.status`` reaches a terminal state.
@@ -819,6 +889,7 @@ class DeploymentResource(BaseResource):
                 name=resolved.name,
                 action="failed",
                 failure_reason=f"manifest {resolved.source_path}: {exc}",
+                error_code=_error_code(exc),
             )
 
         if wait and on_event is not None:

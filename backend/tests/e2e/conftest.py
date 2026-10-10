@@ -563,6 +563,11 @@ async def git_server(
             "source": FIXTURES_DIR / "drivers" / "failing-actions",
             "chart_name": "simple-app",
         },
+        # Test driver of test_deployments_apply.py: `server` has no container yet (#388).
+        "late-container": {
+            "source": FIXTURES_DIR / "drivers" / "late-container",
+            "chart_name": "simple-app",
+        },
     }
 
     tmp_repo = tmp_path_factory.mktemp("driver-repo")

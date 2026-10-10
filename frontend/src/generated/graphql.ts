@@ -214,7 +214,7 @@ export type ComponentConfigInput = {
   envVars?: InputMaybe<Array<EnvVarInput>>;
   /** Image reference for this component's component container, scoped to this deployment. A full reference with an explicit tag or digest; every ``{{ app.version }}`` token is replaced with the deployment's application version at render time, and a literal tag pins the image. Under full-replacement semantics ``null``/omitting it CLEARS the override (the chart image applies). Raises ``UNKNOWN_COMPONENT_IMAGE_OVERRIDE``, ``INVALID_IMAGE_REFERENCE``, or ``COMPONENT_CONTAINER_NOT_DECLARED`` (adding or changing it on a component without a component container; removing it is always accepted). */
   image?: InputMaybe<Scalars['String']['input']>;
-  /** The component name as declared by the deployment's currently pinned application-driver version. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. Env vars on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``). */
+  /** The component name as declared by the application-driver version the deployment is bound to after the write: the pinned one on updateDeployment, the target one on updateDeploymentVersion. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. Env vars on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``). */
   name: Scalars['String']['input'];
 };
 

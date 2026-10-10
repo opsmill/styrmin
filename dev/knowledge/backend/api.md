@@ -145,7 +145,7 @@ Defined on `type Mutation`:
 | `stopComponents` | `deploymentId, components, startedByStepId?` | `Task` |
 | `startComponents` | `deploymentId, components, startedByStepId?` | `Task` |
 | `runJob` | `deploymentId, commands, env, image` | `Task` |
-| `updateDeploymentVersion` | `deploymentId, version, parameters?, driverVersionId?, startedByStepId?, input?: UpdateDeploymentInput` | `Task` — **`null` on a no-op** (see below). `input` is written with the version and validated against the target driver version (ADR-061) |
+| `updateDeploymentVersion` | `deploymentId, version, parameters?, driverVersionId?, startedByStepId?, input?: UpdateDeploymentInput` | `Task` — **`null` on a no-op** (see below). `input` is written with the version and validated against the target driver version (ADR-065) |
 | `reportPodStatuses` | `reports: [DeploymentPodStatusReport!]!` | `ReportPodStatusesResponse!` (agent → server) |
 | `reportDeploymentStatuses` | `reports: [DeploymentStatusReportInput!]!` | `ReportDeploymentStatusesResponse!` (agent → server) |
 
@@ -177,6 +177,14 @@ Two consequences worth knowing:
 - `Comparator` excludes `status` from the diff, so **resubmitting the same config
   will not retry a `FAILED` deployment** — it is a no-op. Recovery needs an
   explicit redeploy path.
+
+On `updateDeploymentVersion` with `input`, a change that the instance does not carry, such as a
+rename at the current version, is still written without a task, as `updateDeployment` writes it
+in its first phase, and the call returns `null`. The task is `UPGRADE_INSTANCE` (status
+`DEPLOYING`) only when the application version or the driver binding changes; otherwise it is
+`UPDATE_INSTANCE` (status `PENDING`). Deployed services are recreated only when the binding or a
+resolved service name changes. Every check, including the service name overrides, runs before
+`_ensure_ingress_controller`, so a rejected call starts no flow run.
 
 Clients map the null to "unchanged": the SDK returns
 `ApplyOutcome(action="unchanged")`. See

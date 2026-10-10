@@ -53,7 +53,7 @@ from styrmin_backend.api.definitions.deployment.inputs import (
     UpdateDeploymentInput,
     deployment_config_input_to_dict,
     parameter_inputs_to_dict,
-    update_deployment_input_to_dict,
+    split_update_deployment_input,
 )
 from styrmin_backend.api.definitions.environment.inputs import (
     UpdateEnvironmentInput,
@@ -179,11 +179,19 @@ _STARTED_BY_STEP_ID = (
 )
 
 
+_UPDATE_VERSION_PARAMETERS = (
+    "Parameter values as a JSON map that replace the stored parameters. To change "
+    "only some values, pass them in input.parameters instead: those merge on top of "
+    "this map, or on top of the stored parameters when this argument is null."
+)
+
+
 _UPDATE_VERSION_INPUT = (
     "Config, name, parameters and service name overrides written together with the "
     "version, with the semantics of updateDeployment. They are validated against "
     "the target driver version and application version, and one task reconciles "
-    "them. parameters merge on top of the parameters argument when both are set."
+    "them. input.parameters merge on top of the parameters argument, or on top of "
+    "the stored parameters when that argument is null."
 )
 
 
@@ -839,8 +847,8 @@ class Mutation:
 
         The typed :class:`UpdateDeploymentInput` is converted to a plain
         dict (``None``-valued fields omitted to express full-replacement
-        semantics) and split into the four legacy keyword arguments the
-        service-layer ``update_deployment`` accepts. List-shape fields
+        semantics) and split by ``split_update_deployment_input`` into the
+        four keyword arguments the service-layer ``update_deployment`` accepts. List-shape fields
         (``parameters``, ``service_name_overrides``, ``components``,
         ``env_vars``) are flattened to dicts with typed duplicate-name
         detection by ``update_deployment_input_to_dict`` so codes like
@@ -853,20 +861,13 @@ class Mutation:
         deployment = await get_deployment(deployment_id=deployment_id, uow=uow)
         if deployment.internal:
             raise InternalDeploymentError()
-        payload = update_deployment_input_to_dict(input)
-        name = payload.pop("name", None)
-        parameters = payload.pop("parameters", None)
-        service_name_overrides = payload.pop("service_name_overrides", None)
-        # If only legacy kwargs were set, remaining payload is `{}` — pass
-        # `None` so the service does not interpret an empty dict as
-        # "clear the persisted config" (fix-1 / regression guard).
-        deployment_config = payload if payload else None
+        update = split_update_deployment_input(input)
         task = await update_deployment(
             deployment_id=deployment_id,
-            deployment_config=deployment_config,
-            deployment_parameters=parameters,
-            deployment_name=name,
-            service_name_overrides=service_name_overrides,
+            deployment_config=update.config,
+            deployment_parameters=update.parameters,
+            deployment_name=update.name,
+            service_name_overrides=update.service_name_overrides,
             uow=uow,
         )
         return Task.from_instance(task) if task is not None else None
@@ -1344,7 +1345,9 @@ class Mutation:
         deployment_id: UUID,
         version: str,
         info: strawberry.Info,
-        parameters: JSON | None = None,
+        parameters: Annotated[
+            JSON | None, strawberry.argument(description=_UPDATE_VERSION_PARAMETERS)
+        ] = None,
         driver_version_id: UUID | None = None,
         started_by_step_id: Annotated[
             UUID | None, strawberry.argument(description=_STARTED_BY_STEP_ID)
@@ -1364,10 +1367,7 @@ class Mutation:
         deployment = await get_deployment(deployment_id=deployment_id, uow=uow)
         if deployment.internal:
             raise InternalDeploymentError()
-        payload = update_deployment_input_to_dict(input) if input is not None else {}
-        name = payload.pop("name", None)
-        parameter_updates = payload.pop("parameters", None)
-        service_name_overrides = payload.pop("service_name_overrides", None)
+        update = split_update_deployment_input(input)
         task = await update_deployment_version(
             deployment_id=deployment_id,
             deployment_parameters=parameters,
@@ -1375,10 +1375,10 @@ class Mutation:
             uow=uow,
             driver_version_id=driver_version_id,
             started_by_step_id=started_by_step_id,
-            deployment_config=payload or None,
-            parameter_updates=parameter_updates,
-            deployment_name=name,
-            service_name_overrides=service_name_overrides,
+            deployment_config=update.config,
+            parameter_updates=update.parameters,
+            deployment_name=update.name,
+            service_name_overrides=update.service_name_overrides,
         )
         return Task.from_instance(task) if task is not None else None
 

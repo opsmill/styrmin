@@ -1,7 +1,8 @@
 """Write-time validation of per-component image overrides (018, research D-008).
 
-Runs on the raw config dict at the ``deploy`` / ``updateDeployment`` boundary, before
-``DeploymentConfig`` is built, so the typed errors name the component and the substituted version.
+Runs on the raw config dict at the ``deploy`` / ``updateDeployment`` / ``updateDeploymentVersion``
+boundary, before ``DeploymentConfig`` is built, so the typed errors name the component and the
+substituted version.
 """
 
 from __future__ import annotations
@@ -26,7 +27,9 @@ def _submitted_images(config: dict[str, Any] | None) -> Iterator[tuple[str, Any]
 
 
 def validate_image_override_targets(
-    config: dict[str, Any] | None, known_names: Iterable[str]
+    config: dict[str, Any] | None,
+    known_names: Iterable[str],
+    checked_against: str = "",
 ) -> None:
     """Reject an image override on a component the driver version does not declare.
 
@@ -37,7 +40,9 @@ def validate_image_override_targets(
     for name, _image in _submitted_images(config):
         if name not in known:
             raise UnknownComponentImageOverrideError(
-                component_name=name, known_components=list(known)
+                component_name=name,
+                known_components=list(known),
+                checked_against=checked_against,
             )
 
 

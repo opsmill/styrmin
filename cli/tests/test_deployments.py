@@ -152,10 +152,30 @@ def test_deployments_update_version(mock_client: MagicMock, capsys: pytest.Captu
         app(["deployments", "update-version", DEPLOYMENT_UUID, "15.0"])
     assert exc.value.code == 0
     mock_client.deployments.update_version.assert_called_once_with(
-        DEPLOYMENT_UUID, version="15.0", driver_version_id=None
+        DEPLOYMENT_UUID, version="15.0", driver_version_id=None, input=None
     )
     output = capsys.readouterr().out
     assert "t-1" in output
+
+
+def test_deployments_update_version_with_config(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    """``--config`` is written with the version, so it is checked against the target driver version."""
+    mock_task = MagicMock(id="t-1", status="pending")
+    mock_client.deployments.update_version = AsyncMock(return_value=mock_task)
+    config = '{"components": [{"name": "server", "envVars": [{"name": "LOG_LEVEL", "value": "debug"}]}]}'
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "update-version", DEPLOYMENT_UUID, "15.0", "--config", config])
+    assert exc.value.code == 0
+    mock_client.deployments.update_version.assert_called_once_with(
+        DEPLOYMENT_UUID,
+        version="15.0",
+        driver_version_id=None,
+        input=UpdateDeploymentInput.model_validate(
+            {"components": [{"name": "server", "envVars": [{"name": "LOG_LEVEL", "value": "debug"}]}]}
+        ),
+    )
+    assert "t-1" in capsys.readouterr().out
 
 
 def test_deployments_update_version_with_driver_version_pin(
@@ -168,7 +188,7 @@ def test_deployments_update_version_with_driver_version_pin(
         app(["deployments", "update-version", DEPLOYMENT_UUID, "15.0", "--driver-version-id", "dv-2"])
     assert exc.value.code == 0
     mock_client.deployments.update_version.assert_called_once_with(
-        DEPLOYMENT_UUID, version="15.0", driver_version_id="dv-2"
+        DEPLOYMENT_UUID, version="15.0", driver_version_id="dv-2", input=None
     )
     output = capsys.readouterr().out
     assert "t-1" in output
@@ -830,32 +850,33 @@ def test_deployments_apply_wait_failed_line_names_the_failed_step(
     assert lines[-1] == "0 created, 0 updated, 0 unchanged, 1 failed"
 
 
-def test_deployments_apply_wait_partial_update_failure_message_format(
+def test_deployments_apply_wait_rejected_update_names_the_error_code(
     mock_client: MagicMock,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    """``--wait`` + partial-update failure → terminal line uses the contracted
-    format from ``contracts/cli-apply.md``: ``failed <name>: config/parameters
-    were updated; version upgrade failed: <error>``."""
+    """``--wait`` + an update the server rejects → the ``submitted`` event already
+    carries the failure, its line ends with the server's code, and no terminal fires."""
     manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
-    partial_reason = "config/parameters were updated; version upgrade failed: driver-version not found"
-    mock_client.deployments.apply_files = _wait_apply_files_stub(
-        [
-            # The SDK's ``apply()`` already returns a ``failed`` outcome for
-            # the partial-update case before the wait phase, so the
-            # ``submitted`` event carries the failure and no terminal fires.
-            ("submitted", _outcome("my-app", "failed", reason=partial_reason)),
-        ]
+    reason = "Environment variables target component 'server', which declares no component container"
+    rejected = ApplyOutcome(
+        name="my-app",
+        action="failed",
+        deployment_id=UUID(DEPLOYMENT_UUID),
+        failure_reason=reason,
+        error_code="COMPONENT_CONTAINER_NOT_DECLARED",
     )
+    mock_client.deployments.apply_files = _wait_apply_files_stub([("submitted", rejected)])
 
     with pytest.raises(SystemExit) as exc:
         app(["deployments", "apply", "-f", str(manifest), "--wait"])
     assert exc.value.code == 1
 
-    output = capsys.readouterr().out
-    assert f"failed my-app: {partial_reason}" in output
-    assert "0 created, 0 updated, 0 unchanged, 1 failed" in output
+    lines = [line for line in capsys.readouterr().out.splitlines() if line]
+    assert lines == [
+        f"failed my-app: {reason} [COMPONENT_CONTAINER_NOT_DECLARED]",
+        "0 created, 0 updated, 0 unchanged, 1 failed",
+    ]
 
 
 def test_deployments_apply_wait_timeout_emits_failed_wait_timeout(
@@ -1032,6 +1053,27 @@ def test_deployments_apply_pinned_warning_keeps_failure_exit_code(
     assert exc.value.code == 1
 
     assert capsys.readouterr().err.splitlines() == [_PINNED_WARNING]
+
+
+def test_deployments_apply_warns_about_overrides_the_driver_version_cannot_apply(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    outcome = _outcome("my-app", "updated").model_copy(update={"inapplicable_components": ["worker"]})
+    mock_client.deployments.apply_files = AsyncMock(return_value=[outcome])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest)])
+    assert exc.value.code == 0
+
+    captured = capsys.readouterr()
+    assert captured.err.splitlines() == [
+        "warning: my-app: env vars and image overrides on worker are stored but not applied "
+        "(no component container in the driver version)"
+    ]
+    assert captured.out.splitlines() == ["updated my-app", "0 created, 1 updated, 0 unchanged, 0 failed"]
 
 
 def test_deployments_apply_wait_prints_pinned_warning_once_on_submit(

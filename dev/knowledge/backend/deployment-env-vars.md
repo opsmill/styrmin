@@ -119,9 +119,13 @@ skip containerless components at render time.
 `updateDeployment` never switches driver versions, so the pinned version is
 the target. `updateDeploymentVersion(input:)` runs the same checks against the
 driver version it moves the deployment to. `styrminctl apply` sends the
-manifest's config through that `input` (ADR-061), so a manifest that switches
-version and adds component env vars is validated against the version it
-declares.
+manifest's config through that `input` (ADR-065), so a manifest that switches
+version and adds component env vars is validated against the driver version
+that `spec.version` resolves to. The errors name the driver, driver version and
+application version they checked. Unchanged env vars on a component that this
+driver version declares without a container pass and are stored inert;
+`apply` warns about them (`ApplyOutcome.inapplicable_components`). Env vars on
+a component it does not declare are rejected even when unchanged.
 
 ## Driver-side documentation
 

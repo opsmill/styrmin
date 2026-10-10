@@ -24,6 +24,7 @@ layer expects, with typed duplicate-name detection.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import strawberry
@@ -77,8 +78,10 @@ class ParameterValueInput:
 class ComponentConfigInput:
     name: str = strawberry.field(
         description=(
-            "The component name as declared by the deployment's currently "
-            "pinned application-driver version. Must match a known "
+            "The component name as declared by the application-driver version "
+            "the deployment is bound to after the write: the pinned one on "
+            "updateDeployment, the target one on updateDeploymentVersion. "
+            "Must match a known "
             "component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. "
             "Env vars on a component that declares no component container "
             "raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``)."
@@ -382,6 +385,38 @@ def update_deployment_input_to_dict(input: UpdateDeploymentInput) -> dict[str, A
     return result
 
 
+@dataclass(frozen=True)
+class DeploymentUpdate:
+    """The fields of an :class:`UpdateDeploymentInput` as the deployment services take them."""
+
+    config: dict[str, Any] | None = None
+    name: str | None = None
+    parameters: dict[str, Any] | None = None
+    service_name_overrides: dict[str, str] | None = None
+
+
+def split_update_deployment_input(
+    input: UpdateDeploymentInput | None,
+) -> DeploymentUpdate:
+    """Split an :class:`UpdateDeploymentInput` into config, name, parameters and overrides.
+
+    ``config`` is ``None`` when no config field is set, so the service does not read an
+    empty dict as "clear the stored config".
+    """
+    if input is None:
+        return DeploymentUpdate()
+    payload = update_deployment_input_to_dict(input)
+    name = payload.pop("name", None)
+    parameters = payload.pop("parameters", None)
+    service_name_overrides = payload.pop("service_name_overrides", None)
+    return DeploymentUpdate(
+        config=payload or None,
+        name=name,
+        parameters=parameters,
+        service_name_overrides=service_name_overrides,
+    )
+
+
 def deployment_config_input_to_dict(input: DeploymentConfigInput) -> dict[str, Any]:
     """Convert a :class:`DeploymentConfigInput` into a plain config dict.
 
@@ -501,9 +536,11 @@ def _flatten_components(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
 __all__ = [
     "ComponentConfigInput",
     "DeploymentConfigInput",
+    "DeploymentUpdate",
     "ParameterValueInput",
     "UpdateDeploymentInput",
     "deployment_config_input_to_dict",
     "parameter_inputs_to_dict",
+    "split_update_deployment_input",
     "update_deployment_input_to_dict",
 ]

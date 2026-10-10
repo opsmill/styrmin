@@ -148,12 +148,20 @@ async def update_version(
             help="Pin a specific driver version (UUID). Defaults to the latest loaded driver version supporting the application version."
         ),
     ] = None,
+    config: Annotated[
+        str | None,
+        Parameter(
+            help="JSON UpdateDeploymentInput payload (inline or @filepath) written with the version and "
+            "validated against the target driver version. Needs a Styrmin server with #388."
+        ),
+    ] = None,
 ) -> None:
     """Update a deployment's application version (internal API)."""
     with styrmin_error_handler():
+        update_input = UpdateDeploymentInput.model_validate(parse_json_argument(config)) if config else None
         async with client.get_client() as sdk:
             task = await sdk.deployments.update_version(
-                deployment_id, version=version, driver_version_id=driver_version_id
+                deployment_id, version=version, driver_version_id=driver_version_id, input=update_input
             )
 
     if task is None:
@@ -229,7 +237,8 @@ _APPLY_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
 def _failed_line(outcome: ApplyOutcome) -> str:
-    return f"failed {outcome.name}: {outcome.failure_reason or 'unknown error'}"
+    code = f" [{outcome.error_code}]" if outcome.error_code else ""
+    return f"failed {outcome.name}: {outcome.failure_reason or 'unknown error'}{code}"
 
 
 def _format_outcome_line(outcome: ApplyOutcome) -> str:
@@ -274,6 +283,25 @@ def _print_pinned_image_warning(outcome: ApplyOutcome) -> None:
         file=sys.stderr,
         flush=True,
     )
+
+
+def _print_inapplicable_warning(outcome: ApplyOutcome) -> None:
+    """Warn on stderr about overrides stored but not applied; never changes the exit code."""
+    components = outcome.inapplicable_components
+    if not components:
+        return
+    sys.stdout.flush()
+    print(
+        f"warning: {outcome.name}: env vars and image overrides on {', '.join(components)} "
+        "are stored but not applied (no component container in the driver version)",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def _print_warnings(outcome: ApplyOutcome) -> None:
+    _print_pinned_image_warning(outcome)
+    _print_inapplicable_warning(outcome)
 
 
 def _summary_line(outcomes: list[ApplyOutcome]) -> str:
@@ -339,7 +367,7 @@ async def apply(
             print(line)
         # Warn with the submitted line, before the wait, so it is not lost behind a long poll.
         if event.type == "submitted":
-            _print_pinned_image_warning(event.outcome)
+            _print_warnings(event.outcome)
 
     on_event = _stream_event if wait else None
 
@@ -356,7 +384,7 @@ async def apply(
     if not wait:
         for outcome in outcomes:
             print(_format_outcome_line(outcome))
-            _print_pinned_image_warning(outcome)
+            _print_warnings(outcome)
     print(_summary_line(outcomes))
 
     if any(o.action == "failed" for o in outcomes):

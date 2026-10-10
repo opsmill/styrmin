@@ -224,8 +224,9 @@ class UnknownComponentEnvVarError(ServiceError):
     """A component-level env var block targets a component the driver does not declare.
 
     Raised at the GraphQL mutation boundary (FR-010). The error metadata
-    includes the list of component names declared by the deployment's current
-    driver so the operator can fix the typo without a round-trip.
+    includes the list of component names declared by the checked driver
+    version so the operator can fix the typo without a round-trip.
+    ``checked_against`` names that driver version and the application version.
     """
 
     error_code = "UNKNOWN_COMPONENT_ENV_VAR"
@@ -236,6 +237,7 @@ class UnknownComponentEnvVarError(ServiceError):
         message: str = "",
         component_name: str = "",
         known_components: list[str] | None = None,
+        checked_against: str = "",
     ) -> None:
         self.component_name = component_name
         self.known_components = known_components or []
@@ -243,7 +245,7 @@ class UnknownComponentEnvVarError(ServiceError):
             message
             or (
                 f"Environment variables target component {component_name!r} "
-                "which is not declared by the deployment's current driver. "
+                f"which is not declared by {checked_against or 'the driver version'}. "
                 f"Known components: {self.known_components}"
             )
         )
@@ -276,22 +278,24 @@ class ComponentContainerNotDeclaredError(ServiceError):
         component_name: str = "",
         components_with_container: list[str] | None = None,
         override: Literal["env_vars", "image"] = "env_vars",
+        checked_against: str = "",
     ) -> None:
         self.component_name = component_name
         self.components_with_container = sorted(components_with_container or [])
         self.override: Literal["env_vars", "image"] = override
+        self.checked_against = checked_against or "the driver version"
         super().__init__(message or self._build_default_message())
 
     def _build_default_message(self) -> str:
         if self.override == "image":
             return (
                 f"Image override targets component {self.component_name!r}, "
-                "which declares no component container in the deployment's driver. "
+                f"which declares no component container in {self.checked_against}. "
                 f"Components that accept overrides: {self.components_with_container}"
             )
         return (
             f"Environment variables target component {self.component_name!r}, "
-            "which declares no component container in the deployment's driver. "
+            f"which declares no component container in {self.checked_against}. "
             "Components that accept env vars: "
             f"{self.components_with_container}"
         )

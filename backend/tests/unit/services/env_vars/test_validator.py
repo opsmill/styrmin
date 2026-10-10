@@ -330,8 +330,18 @@ class TestComponentContainerNotDeclaredError:
         }
         assert str(error) == (
             "Environment variables target component 'worker', which declares no "
-            "component container in the deployment's driver. Components that accept "
+            "component container in the driver version. Components that accept "
             "env vars: ['api', 'web']"
+        )
+
+    def test_message_names_the_checked_versions(self) -> None:
+        error = ComponentContainerNotDeclaredError(
+            component_name="worker",
+            components_with_container=["web"],
+            checked_against="driver acme version 3 (application version 2.0.0)",
+        )
+        assert "no component container in driver acme version 3 (application " in str(
+            error
         )
 
     def test_image_override_message_and_metadata(self) -> None:
@@ -347,7 +357,7 @@ class TestComponentContainerNotDeclaredError:
         }
         assert str(error) == (
             "Image override targets component 'database', which declares no component "
-            "container in the deployment's driver. Components that accept overrides: "
+            "container in the driver version. Components that accept overrides: "
             "['server']"
         )
 

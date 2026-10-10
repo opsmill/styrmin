@@ -68,11 +68,15 @@ from styrmin_backend.services.reconciliation import (
 from deepdiff import DeepDiff
 
 from styrmin_backend.domain.models import Instance
+from styrmin_backend.services.driver.models.resources.services import (
+    ServiceDefinition,
+)
 from styrmin_backend.services.services_discovery import (
     create_services_for_deployment,
     delete_services_for_deployment,
     parse_service_definitions,
     reconcile_services_on_upgrade,
+    resolve_service_names,
 )
 from styrmin_backend.services.steps.recorder import (
     add_pending_steps,
@@ -87,6 +91,7 @@ from styrmin_backend.services.unit_of_work import UnitOfWork
 def _validate_component_env_var_targets(
     deployment_config: dict | None,
     known_component_names: list[str],
+    checked_against: str = "",
 ) -> None:
     """Reject ``config.components.<name>.env_vars`` targeting unknown components.
 
@@ -97,12 +102,12 @@ def _validate_component_env_var_targets(
     instead of being collapsed into ``ValidationError`` and re-wrapped as the
     generic ``INVALID_CONTEXT`` error code (008-deployment-env-vars / FR-010).
     The known-components list is sourced from the driver version the
-    deployment is pinned to after the write and surfaced in the error metadata so operators can fix the typo
-    without a round-trip.
+    deployment is pinned to after the write and surfaced in the error
+    metadata so operators can fix the typo without a round-trip.
 
     Read-vs-write asymmetry (US5 / FR-029..FR-033): this validator runs on
     the **write** path only (``deploy``, ``update_deployment``,
-    ``update_deployment_config``). The read path
+    ``update_deployment_version``). The read path
     (``EnvVarsResolver.resolve_for_deployment`` consumed by
     ``Deployment.componentEnvVars``) does NOT raise on unknown components —
     it tolerates orphan state and exposes ``ComponentEnvVars.isOrphaned=true``
@@ -127,6 +132,7 @@ def _validate_component_env_var_targets(
             raise UnknownComponentEnvVarError(
                 component_name=name,
                 known_components=sorted(known),
+                checked_against=checked_against,
             )
 
 
@@ -167,6 +173,7 @@ def _validate_component_container_targets(
     stored_config: dict | None,
     containers_by_component: dict[str, str | None],
     slots: tuple[ComponentContainerSlot, ...] = ("env_vars", "image"),
+    checked_against: str = "",
 ) -> None:
     """Reject added or changed component-container overrides on containerless components.
 
@@ -194,6 +201,7 @@ def _validate_component_container_targets(
                         if container
                     ],
                     override=slot,
+                    checked_against=checked_against,
                 )
 
 
@@ -250,6 +258,7 @@ def _prevalidate_deployment_env_vars(deployment_config: dict | None) -> None:
 def _validate_component_container_overrides(
     deployment_config: dict | None,
     known_component_names: list[str],
+    checked_against: str = "",
 ) -> None:
     """Reject malformed / mis-targeted ``command``/``args`` overrides at the write boundary.
 
@@ -264,7 +273,7 @@ def _validate_component_container_overrides(
     For each ``components[<name>]`` block carrying a non-null ``command`` or
     ``args``:
 
-    * if ``<name>`` is not declared by the deployment's current driver →
+    * if ``<name>`` is not declared by the checked driver version →
       :class:`UnknownComponentContainerOverrideError` (FR-004, US4 Sc.1) — no
       reconcile is planned on rejection;
     * each present ``command``/``args`` is shape-validated via
@@ -299,6 +308,7 @@ def _validate_component_container_overrides(
             raise UnknownComponentContainerOverrideError(
                 component_name=name,
                 known_components=sorted(known),
+                checked_against=checked_against,
             )
         if has_command:
             validate_container_override("command", command, component_name=name)
@@ -306,10 +316,21 @@ def _validate_component_container_overrides(
             validate_container_override("args", args, component_name=name)
 
 
+def _checked_against(
+    driver_name: str, driver_version: ApplicationDriverVersion, application_version: str
+) -> str:
+    """Name the driver version and application version a config write is checked against."""
+    return (
+        f"driver {driver_name} version {driver_version.version} "
+        f"(application version {application_version})"
+    )
+
+
 def _validate_config_write(
     deployment_config: dict,
     *,
     stored_config: dict | None,
+    driver_name: str,
     driver_version: ApplicationDriverVersion,
     application_version: str,
 ) -> None:
@@ -318,12 +339,15 @@ def _validate_config_write(
     The typed checks run ahead of Pydantic validation so their error codes reach the
     GraphQL caller instead of collapsing into ``INVALID_CONTEXT`` (008, 014, 018).
     """
+    checked_against = _checked_against(driver_name, driver_version, application_version)
     known_names = [cc.name for cc in (driver_version.component_configs or [])]
-    _validate_component_env_var_targets(deployment_config, known_names)
-    _validate_component_container_overrides(deployment_config, known_names)
+    _validate_component_env_var_targets(deployment_config, known_names, checked_against)
+    _validate_component_container_overrides(
+        deployment_config, known_names, checked_against
+    )
     # Unknown component first, then grammar and substitution, so the error names the
     # component. Unchanged references skip the grammar check (018).
-    validate_image_override_targets(deployment_config, known_names)
+    validate_image_override_targets(deployment_config, known_names, checked_against)
     prevalidate_image_overrides(
         deployment_config, version=application_version, stored_config=stored_config
     )
@@ -333,7 +357,10 @@ def _validate_config_write(
     except InvalidDeploymentContextError as e:
         raise InvalidContextError(str(e)) from e
     _validate_component_container_targets(
-        deployment_config, stored_config, _containers_by_component(driver_version)
+        deployment_config,
+        stored_config,
+        _containers_by_component(driver_version),
+        checked_against=checked_against,
     )
 
 
@@ -571,9 +598,14 @@ async def update_deployment(
                 id=deployment.application_driver_version_id
             )
             assert adv is not None, "Application driver version not found"
+            application_driver = await uow.application_drivers.get(
+                id=adv.application_driver_id
+            )
+            assert application_driver is not None, "Application driver not found"
             _validate_config_write(
                 deployment_config,
                 stored_config=deployment.config,
+                driver_name=application_driver.name,
                 driver_version=adv,
                 application_version=deployment.application_version,
             )
@@ -786,7 +818,9 @@ async def update_deployment_version(
 
     The config, name, parameters and service names given with the version are
     validated against the target driver version and written in the same
-    transaction, so a single task reconciles them (#388).
+    transaction, so a single task reconciles them (#388). The task is an
+    ``UPGRADE_INSTANCE`` when the application version or the driver binding
+    changes, otherwise an ``UPDATE_INSTANCE``, as on :func:`update_deployment`.
 
     The driver binding is always re-resolved: without an explicit pin the
     latest driver version (per :func:`_driver_version_sort_key`) whose
@@ -796,7 +830,8 @@ async def update_deployment_version(
 
     Returns ``None`` without dispatching a Task when the requested state
     already matches the persisted deployment (no-op detection, FR-002 /
-    FR-006).
+    FR-006). A change that the instance does not carry, such as a rename, is
+    then written without a task, as :func:`update_deployment` writes it.
 
     Args:
         deployment_id (UUID): The ID of the deployment to update.
@@ -826,6 +861,11 @@ async def update_deployment_version(
         UnknownComponentEnvVarError, UnknownComponentContainerOverrideError,
         ComponentContainerNotDeclaredError: If ``deployment_config`` targets a
             component the target driver version cannot apply it to.
+        DeploymentNameValidationError, DeploymentNameConflictError: If
+            ``deployment_name`` is invalid or used by another deployment.
+        InvalidServiceOverrideError, ServiceNameConflictError: If a service
+            name override names no service of the target driver version, or
+            its name is in use in the environment.
         StepNotFoundError: If ``started_by_step_id`` names no step, also on a
             no-op.
         InvalidStartingStepError: If the step is not a step of a task of the
@@ -833,7 +873,7 @@ async def update_deployment_version(
 
     Returns:
         Task | None: The task created for the deployment update, or ``None``
-            when the requested state matches the persisted deployment (no-op).
+            when the instance matches the current one (no-op).
     """
 
     logger.info(
@@ -907,6 +947,7 @@ async def update_deployment_version(
             _validate_config_write(
                 deployment_config,
                 stored_config=deployment.config,
+                driver_name=application_driver.name,
                 driver_version=target_driver_version,
                 application_version=version,
             )
@@ -932,6 +973,17 @@ async def update_deployment_version(
             definitions=parse_parameter_definitions(target_driver_version.parameters),
             values=values_to_validate,
         )
+        driver_changed = (
+            target_driver_version.id != deployment.application_driver_version_id
+        )
+        service_definitions = parse_service_definitions(target_driver_version.services)
+        service_overrides, service_names_change = await _resolve_service_overrides(
+            deployment=deployment,
+            service_definitions=service_definitions,
+            service_name_overrides=service_name_overrides,
+            uow=uow,
+        )
+        reconcile_services = driver_changed or service_names_change
 
         # After validation: creating the ingress deployment dispatches its flow run immediately.
         await _ensure_ingress_controller(
@@ -940,7 +992,7 @@ async def update_deployment_version(
             created_by_user_id=deployment.created_by_user_id,
         )
 
-        if target_driver_version.id != deployment.application_driver_version_id:
+        if driver_changed:
             # Store components state
             components_state = {}
             for component in deployment.components:
@@ -973,11 +1025,12 @@ async def update_deployment_version(
                 target_driver_version.id,
             )
 
+        # Only a new application version or driver binding is an upgrade; a change of
+        # config, name or parameters alone is an update, as on updateDeployment.
+        is_upgrade = driver_changed or version != deployment.application_version
+
         # Snapshot the pre-mutation desired-state fields so the no-op path can
-        # leave the deployment exactly as it found it (FR-002 / FR-006). The
-        # no-op return happens before save/commit, so the DB row is never
-        # written; restoring the in-memory object too keeps the entity
-        # consistent for any caller that retains the reference.
+        # leave the deployment exactly as it found it (FR-002 / FR-006).
         status_before = deployment.status
         version_before = deployment.application_version
         parameters_before = deployment.parameters
@@ -987,19 +1040,20 @@ async def update_deployment_version(
         deployment.parameters = resolved_parameters
         deployment.config = effective_config
         deployment.name = new_name
-
-        # Update the deployment version
         deployment.application_version = version
-        deployment.set_status(DeploymentState.DEPLOYING)
-
-        # Before instance generation, so the context carries the services and
-        # names of the target driver version (#237).
-        await _reconcile_services_for_version(
-            deployment=deployment,
-            driver_version=target_driver_version,
-            service_name_overrides=service_name_overrides,
-            uow=uow,
+        deployment.set_status(
+            DeploymentState.DEPLOYING if is_upgrade else DeploymentState.PENDING
         )
+
+        if reconcile_services:
+            # Before instance generation, so the context carries the services and
+            # names of the target driver version (#237).
+            await _reconcile_services_for_version(
+                deployment=deployment,
+                service_definitions=service_definitions,
+                service_name_overrides=service_overrides,
+                uow=uow,
+            )
 
         # Get the current instance
         current_instance = deployment.active_instance
@@ -1015,29 +1069,34 @@ async def update_deployment_version(
             uow=uow,
         )
 
-        # No-op detection (spec 014 / FR-002): requesting the deployment's
-        # current version (with no other change) resolves to the current
-        # realised instance. Short circuit before any side effect — no new
-        # instance persisted, no reconcile dispatched. The in-memory mutations
-        # above (status -> DEPLOYING, version, parameters, config, name) and the
-        # recreated services are never committed on this path, so the persisted
-        # deployment is untouched.
-        if _update_is_noop(
+        # No-op detection (spec 014 / FR-002): the candidate resolves to the current
+        # realised instance, so no instance is persisted and no reconcile dispatched.
+        # A driver or service change always reaches the instance, so nothing above
+        # wrote to the database yet.
+        if not reconcile_services and _update_is_noop(
             current_instance=current_instance, new_instance=new_instance
         ):
-            # Roll back the in-memory desired-state mutations so the entity is
-            # left untouched (status/version/parameters/config/name), mirroring the fact
-            # that nothing is saved or committed on this path.
             deployment.application_version = version_before
-            deployment.parameters = parameters_before
-            deployment.config = config_before
-            deployment.name = name_before
             deployment.set_status(status_before)
+            if (new_name, effective_config, resolved_parameters) == (
+                name_before,
+                config_before,
+                parameters_before,
+            ):
+                logger.info(
+                    "Version update is a no-op for deployment_id={} version={}; "
+                    "no instance persisted, no reconcile dispatched",
+                    deployment.id,
+                    version,
+                )
+                return None
+            # A write the instance does not carry, such as a rename, is kept without
+            # a task, as updateDeployment keeps it.
+            await uow.deployments.save(deployment=deployment)
+            await uow.commit()
             logger.info(
-                "Version update is a no-op for deployment_id={} version={}; "
-                "no instance persisted, no reconcile dispatched",
+                "Deployment row updated without a reconcile: deployment_id={}",
                 deployment.id,
-                version,
             )
             return None
 
@@ -1050,7 +1109,9 @@ async def update_deployment_version(
             deployment=deployment,
             current_instance=current_instance,
             uow=uow,
-            task_type=TaskType.UPGRADE_INSTANCE,
+            task_type=(
+                TaskType.UPGRADE_INSTANCE if is_upgrade else TaskType.UPDATE_INSTANCE
+            ),
             started_by_step_id=started_by_step_id,
         )
 
@@ -1070,33 +1131,53 @@ async def update_deployment_version(
         return result
 
 
+async def _resolve_service_overrides(
+    *,
+    deployment: Deployment,
+    service_definitions: list[ServiceDefinition],
+    service_name_overrides: dict[str, str] | None,
+    uow: UnitOfWork,
+) -> tuple[dict[str, str], bool]:
+    """Check the deployed services ``service_definitions`` give, without writing.
+
+    Returns the service name overrides to reconcile with, which are the overrides in
+    effect when ``service_name_overrides`` is ``None``, and whether a resolved name changes.
+    """
+    existing_services = await uow.deployed_services.get_by_deployment_id(deployment.id)
+    current_names = {
+        svc.driver_service_name: svc.resolved_name for svc in existing_services
+    }
+    if service_name_overrides is None:
+        service_name_overrides = {
+            name: resolved
+            for name, resolved in current_names.items()
+            if name != resolved
+        }
+    if not service_definitions:
+        return service_name_overrides, bool(current_names)
+    desired_names = await resolve_service_names(
+        deployment_id=deployment.id,
+        environment_id=deployment.environment_id,
+        service_definitions=service_definitions,
+        uow=uow,
+        service_name_overrides=service_name_overrides,
+    )
+    return service_name_overrides, desired_names != current_names
+
+
 async def _reconcile_services_for_version(
     *,
     deployment: Deployment,
-    driver_version: ApplicationDriverVersion,
-    service_name_overrides: dict[str, str] | None,
+    service_definitions: list[ServiceDefinition],
+    service_name_overrides: dict[str, str],
     uow: UnitOfWork,
 ) -> None:
-    """Recreate the deployed services from ``driver_version``.
-
-    Without ``service_name_overrides`` the overrides in effect are kept, so an
-    upgrade does not rename a service back to the driver's default name.
-    """
-    if service_name_overrides is None:
-        existing_services = await uow.deployed_services.get_by_deployment_id(
-            deployment.id
-        )
-        service_name_overrides = {
-            svc.driver_service_name: svc.resolved_name
-            for svc in existing_services
-            if svc.resolved_name != svc.driver_service_name
-        }
-    new_service_defs = parse_service_definitions(driver_version.services)
-    if new_service_defs:
+    """Recreate the deployed services from ``service_definitions``."""
+    if service_definitions:
         await reconcile_services_on_upgrade(
             deployment_id=deployment.id,
             environment_id=deployment.environment_id,
-            new_service_definitions=new_service_defs,
+            new_service_definitions=service_definitions,
             uow=uow,
             service_name_overrides=service_name_overrides or None,
         )
@@ -1454,17 +1535,24 @@ async def deploy_application(
         known_names = [
             cc.name for cc in (application_driver_version.component_configs or [])
         ]
-        _validate_component_env_var_targets(deployment_config, known_names)
+        checked_against = _checked_against(
+            driver_name, application_driver_version, version
+        )
+        _validate_component_env_var_targets(
+            deployment_config, known_names, checked_against
+        )
 
         # Reject component-level container command/args overrides submitted at
         # create time (via the deploy mutation's config JSON) that target an
         # unknown component or carry a malformed list, before any reconcile
         # (014 / FR-002 covers both deploy and update flows; FR-004, FR-006).
-        _validate_component_container_overrides(deployment_config, known_names)
+        _validate_component_container_overrides(
+            deployment_config, known_names, checked_against
+        )
 
         # Image overrides: unknown component, then grammar and substitution at
         # the requested application version, so the error names the component (018).
-        validate_image_override_targets(deployment_config, known_names)
+        validate_image_override_targets(deployment_config, known_names, checked_against)
         prevalidate_image_overrides(deployment_config, version=version)
 
         # Pre-validate env-var bundles so the typed error codes
@@ -1484,6 +1572,7 @@ async def deploy_application(
             deployment_config,
             None,
             _containers_by_component(application_driver_version),
+            checked_against=checked_against,
         )
 
         # Get the environment

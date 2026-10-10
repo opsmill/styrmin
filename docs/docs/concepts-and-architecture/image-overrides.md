@@ -182,14 +182,22 @@ its image.
   target version: with the token, the Job runs your build at the new
   version; with a pinned override, it runs your repository at the new
   version while the component stays pinned.
-- **Set the override and change the version in separate applies.** In
-  one apply, the config is written first, but the upgrade action can
-  read the workload before the override reaches it, so its first Job
-  can use the previous image repository.
+- **Set the override in an earlier apply when the upgrade action must
+  use it.** `styrminctl deployments apply` checks an override against the
+  target driver version, so it can go in the apply that changes the
+  version. The upgrade action can, however, read the workload before the
+  override reaches it, so its first Job can use the previous image
+  repository. An earlier apply that keeps the version avoids that, but
+  only when the current driver version declares the component and its
+  component container; otherwise there is no workaround yet
+  ([#431](https://github.com/opsmill/styrmin/issues/431)).
 - **A driver upgrade keeps your overrides.** If the new driver version
-  drops the component or its component container, the override is kept,
-  reads back as not applicable, and is not applied until a driver
-  version declares the container again.
+  drops the component container, the override is kept, reads back as not
+  applicable, and is not applied until a driver version declares the
+  container again; `styrminctl deployments apply` warns about it. If the
+  new driver version drops the component, an apply that still sets the
+  override is rejected, while an upgrade from the UI or with
+  `deployments update-version` keeps it as orphaned.
 
 ### When something goes wrong
 

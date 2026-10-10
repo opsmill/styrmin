@@ -329,6 +329,51 @@ async def test_update_version_defaults_to_latest_wins(client: StyrminClient, moc
         "deploymentId": "11111111-2222-3333-4444-555555555555",
         "version": "2.0.0",
     }
+    # Without input, the operation leaves out the argument older servers do not know.
+    assert mock_transport.execute.await_args.args[0].lstrip().startswith("mutation UpdateDeploymentVersion(")
+
+
+async def test_update_version_with_input_uses_its_own_operation(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    from styrmin_sdk.models import UpdateDeploymentInput
+
+    mock_transport.execute.return_value = _UPDATE_VERSION_RESPONSE
+
+    task = await client.deployments.update_version(
+        "11111111-2222-3333-4444-555555555555",
+        "2.0.0",
+        input=UpdateDeploymentInput.model_validate({"ipWhitelist": ["10.0.0.0/8"]}),
+    )
+
+    assert task is not None
+    query, variables = mock_transport.execute.await_args.args
+    assert query.lstrip().startswith("mutation UpdateDeploymentVersionWithInput(")
+    assert variables["input"] == {"ipWhitelist": ["10.0.0.0/8"]}
+
+
+async def test_update_version_with_input_against_an_older_server_says_to_upgrade_it(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    from styrmin_sdk import IncompatibleServerError
+    from styrmin_sdk.models import UpdateDeploymentInput
+
+    mock_transport.execute.return_value = {
+        "data": None,
+        "errors": [
+            {
+                "message": "Unknown argument 'input' on field 'Mutation.updateDeploymentVersion'.",
+                "locations": [{"line": 2, "column": 5}],
+            }
+        ],
+    }
+
+    with pytest.raises(IncompatibleServerError, match="Upgrade the Styrmin server"):
+        await client.deployments.update_version(
+            "11111111-2222-3333-4444-555555555555",
+            "2.0.0",
+            input=UpdateDeploymentInput.model_validate({"ipWhitelist": ["10.0.0.0/8"]}),
+        )
 
 
 async def test_update_version_with_driver_version_pin(client: StyrminClient, mock_transport: AsyncMock) -> None:
@@ -530,6 +575,26 @@ def _update_version_noop_response() -> dict[str, Any]:
     return {"data": {"updateDeploymentVersion": None}}
 
 
+def _applicability_response(*, env_vars: dict[str, bool], images: dict[str, bool] | None = None) -> dict[str, Any]:
+    return {
+        "data": {
+            "deployment": {
+                "id": DEPLOYMENT_ID,
+                "componentEnvVars": [
+                    {"component": name, "isApplicable": applicable} for name, applicable in env_vars.items()
+                ],
+                "componentImageOverrides": [
+                    {"component": name, "isApplicable": applicable} for name, applicable in (images or {}).items()
+                ],
+            }
+        }
+    }
+
+
+def _rejected_response(code: str, message: str) -> dict[str, Any]:
+    return {"data": None, "errors": [{"message": message, "extensions": {"code": code}}]}
+
+
 def _operation_names(mock: AsyncMock) -> list[str]:
     """Return the leading line of each GraphQL document executed, e.g. 'query GetDeploymentByName(...)'."""
     return [call.args[0].splitlines()[0].strip() for call in mock.execute.call_args_list]
@@ -578,6 +643,7 @@ async def test_apply_sends_config_and_version_in_one_mutation(client: StyrminCli
         _list_environments_response(),
         _existing_deployment_response(version="1.0.0"),
         _update_version_response(),
+        _applicability_response(env_vars={"server": True}),
     ]
 
     outcome = await client.deployments.apply(
@@ -591,11 +657,13 @@ async def test_apply_sends_config_and_version_in_one_mutation(client: StyrminCli
     assert outcome.action == "updated"
     assert str(outcome.task_id) == "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
     assert outcome.target_version == "2.0.0"
+    assert outcome.inapplicable_components == []
     ops = _operation_names(mock_transport)
-    assert len(ops) == 3
+    assert len(ops) == 4
     assert ops[0].startswith("query ListEnvironments")
     assert ops[1].startswith("query GetDeploymentByName")
-    assert ops[2].startswith("mutation UpdateDeploymentVersion(")
+    assert ops[2].startswith("mutation UpdateDeploymentVersionWithInput(")
+    assert ops[3].startswith("query GetDeploymentOverrideApplicability(")
     version_vars = mock_transport.execute.call_args_list[2].args[1]
     assert version_vars["version"] == "2.0.0"
     assert version_vars["input"] == {
@@ -620,8 +688,9 @@ async def test_apply_updates_config_when_version_unchanged(client: StyrminClient
     assert outcome.action == "updated"
     assert outcome.target_version is None
     ops = _operation_names(mock_transport)
+    # No component overrides in the manifest, so no applicability read.
     assert len(ops) == 3
-    assert ops[2].startswith("mutation UpdateDeploymentVersion(")
+    assert ops[2].startswith("mutation UpdateDeploymentVersionWithInput(")
     version_vars = mock_transport.execute.call_args_list[2].args[1]
     assert version_vars["version"] == "1.0.0"
     assert version_vars["input"] == {"ipWhitelist": ["10.0.0.0/8"]}
@@ -668,7 +737,81 @@ async def test_apply_unchanged_when_the_mutation_is_a_noop(client: StyrminClient
 
     ops = _operation_names(mock_transport)
     assert len(ops) == 3
-    assert ops[2].startswith("mutation UpdateDeploymentVersion(")
+    assert ops[2].startswith("mutation UpdateDeploymentVersionWithInput(")
+
+
+async def test_apply_returns_a_failed_outcome_when_the_server_rejects_the_manifest(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """A rejected update is a ``failed`` outcome with the server's code, not an
+    exception, so a loop over manifests goes on; nothing was written."""
+    message = "Environment variables target component 'server', which declares no component container"
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _rejected_response("COMPONENT_CONTAINER_NOT_DECLARED", message),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(
+            version="2.0.0",
+            config={"components": [{"name": "server", "envVars": [{"name": "LOG_LEVEL", "value": "debug"}]}]},
+        )
+    )
+
+    assert outcome.action == "failed"
+    assert str(outcome.deployment_id) == DEPLOYMENT_ID
+    assert outcome.task_id is None
+    assert outcome.failure_reason == message
+    assert outcome.error_code == "COMPONENT_CONTAINER_NOT_DECLARED"
+
+
+async def test_apply_lists_components_whose_overrides_the_driver_version_cannot_apply(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """Unchanged env vars on a component that loses its container pass validation;
+    the outcome names the component so the CLI can warn."""
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+        _applicability_response(env_vars={"server": True, "worker": False}, images={"cron": False}),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(
+            version="2.0.0",
+            config={
+                "components": [
+                    {"name": "server", "envVars": [{"name": "A", "value": "1"}]},
+                    {"name": "worker", "envVars": [{"name": "B", "value": "2"}]},
+                ]
+            },
+        )
+    )
+
+    assert outcome.action == "updated"
+    # ``cron`` keeps a stored override the manifest does not set, so it is not listed.
+    assert outcome.inapplicable_components == ["worker"]
+
+
+async def test_apply_ignores_a_failed_applicability_read(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+        _rejected_response("FORBIDDEN", "nope"),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(
+            version="2.0.0",
+            config={"components": [{"name": "worker", "envVars": [{"name": "B", "value": "2"}]}]},
+        )
+    )
+
+    assert outcome.action == "updated"
+    assert outcome.inapplicable_components == []
 
 
 async def test_apply_unchanged_against_failed_deployment(client: StyrminClient, mock_transport: AsyncMock) -> None:
@@ -765,7 +908,7 @@ async def test_apply_handles_duplicate_name_race_by_pivoting_to_update(
             return _existing_deployment_response(version="1.0.0")
         if first_line.startswith("mutation Deploy("):
             raise duplicate_error
-        if first_line.startswith("mutation UpdateDeploymentVersion("):
+        if first_line.startswith("mutation UpdateDeploymentVersionWithInput("):
             return _update_version_response()
         raise AssertionError(f"unexpected query: {first_line}")
 
@@ -781,7 +924,7 @@ async def test_apply_handles_duplicate_name_race_by_pivoting_to_update(
     assert lookup_calls[0] == 2
     ops = _operation_names(mock_transport)
     assert sum(1 for op in ops if op.startswith("query GetDeploymentByName")) == 2
-    assert sum(1 for op in ops if op.startswith("mutation UpdateDeploymentVersion(")) == 1
+    assert sum(1 for op in ops if op.startswith("mutation UpdateDeploymentVersionWithInput(")) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1537,7 +1680,7 @@ async def test_apply_rejected_update_writes_nothing_else(
             return _list_environments_response()
         if first_line.startswith("query GetDeploymentByName"):
             return _existing_deployment_response(version="1.0.0")
-        if first_line.startswith("mutation UpdateDeploymentVersion("):
+        if first_line.startswith("mutation UpdateDeploymentVersionWithInput("):
             raise RuntimeError("COMPONENT_CONTAINER_NOT_DECLARED")
         raise AssertionError(f"unexpected query: {first_line}")
 
@@ -1570,6 +1713,7 @@ def _apply_update_side_effect(*, existing_version: str, stored_config: dict[str,
         _list_environments_response(),
         _existing_deployment_response(version=existing_version, config=stored_config),
         _update_version_response(),
+        _applicability_response(env_vars={}),
     ]
 
 

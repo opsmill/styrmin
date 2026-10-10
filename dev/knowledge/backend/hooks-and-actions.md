@@ -304,7 +304,7 @@ the rollout, so the image read is usually the pre-upgrade pod template; rebuildi
 moves the Job to the target version. With a `{{ app.version }}` image override the Job runs the
 override's repository at the target version once the override has rendered: an `apply` that sets the
 override and changes the version together can race the action, whose first Job may then use the
-previous repository (ADR-058, Consequences), so set the override in a separate apply; with a pinned override the Job does the same while the
+previous repository (ADR-058, Consequences), so set the override in an earlier apply when the current driver version accepts it (otherwise see #431); with a pinned override the Job does the same while the
 component stays pinned (the upgrade dialog and `styrminctl apply` warn about it). Taking
 `images[0]` replaced a substring match on the image name, which missed overrides. See
 [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md) §6.

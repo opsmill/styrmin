@@ -328,7 +328,7 @@ At setup time, the fixture:
 3. Initializes a git repository using [dulwich](https://www.dulwich.io/) (pure Python git)
 4. Port-forwards the git-daemon service and pushes the repo
 
-The test drivers exist only for E2E scenarios. `failing-actions` reuses the simple-app chart, and its upgrade action fails on purpose for some target versions; `test_task_steps.py` uses it to cause the failures of spec 019.
+The test drivers exist only for E2E scenarios. `failing-actions` reuses the simple-app chart, and its upgrade action fails on purpose for some target versions; `test_task_steps.py` uses it to cause the failures of spec 019. `late-container` reuses the simple-app chart without a component container on `server`; `test_deployments_apply.py` pushes its next version, which declares that container, to a branch, and moves a deployment onto it with component env vars in one apply (#388).
 
 ### Telemetry Sink
 

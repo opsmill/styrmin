@@ -35,7 +35,8 @@ entry replaces it, including a chart entry that uses `valueFrom`.
 
 ### If you run deployments
 
-Do these steps in order.
+Do these steps in order. With `styrminctl deployments apply`, steps 2 and 3 are one apply:
+see [Steps 2 and 3 with `styrminctl apply`](#steps-2-and-3-with-styrminctl-apply).
 
 1. **Load driver versions that declare component containers.** The example drivers that ship
    in the Styrmin image at `/styrmin/drivers/<name>` are already migrated. After upgrading
@@ -67,11 +68,23 @@ Do these steps in order.
    drops the env entries the old template wrote into its Helm values, so clearing an env var
    later brings the chart default back.
 
-:::note With `styrminctl apply`
+#### Steps 2 and 3 with `styrminctl apply`
 
-`apply` writes `spec.config` together with the version change, and checks it against the driver
-version the manifest moves to. One manifest can move a deployment onto a migrated driver version
-and add component env vars in the same apply.
+Load the migrated driver version (step 1), then add the component env vars to the manifest and
+keep `spec.version` at the deployment's application version. Every apply binds the deployment
+to the newest loaded driver version that supports `spec.version`, so this apply moves the
+deployment onto the migrated version (step 2). It writes `spec.config` together with that
+change and checks the env vars against the migrated version, so it sets them in the same
+reconcile (step 3).
+
+The upgrade before an environment env var edit still applies: apply every manifest of the
+environment before you edit its env vars.
+
+:::note Env vars on a component the migrated version drops
+
+If the migrated driver version removes or renames a component, an apply that still carries env
+vars on that component is rejected with `UNKNOWN_COMPONENT_ENV_VAR`. Remove them from the
+manifest in the same change.
 
 :::
 
