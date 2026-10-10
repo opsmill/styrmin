@@ -45,8 +45,8 @@ uv run invoke format lint
 Expected, among others:
 
 - The payload builder test asserts the exact FR-006 key set, a driver version with `deployment_count: 0`, a tombstoned deployment that is not counted, merged and sorted driver entries, and no repository URL, branch or path.
-- The sender tests cover a 200 response, 404, 503, connection refused, a host name that does not resolve, a malformed endpoint and a server that never answers. Each failure returns `False` within 2 seconds, logs one line at debug level and does not raise. The test with the server that never answers lowers the 10-second limit to 1 second.
-- The flow tests show no HTTP request with `STYRMIN_TELEMETRY_ENABLED=false`, with `DO_NOT_TRACK=1`, and for a run that starts more than one hour late.
+- The sender tests cover a 200 response, 404, 503, connection refused, a host name that does not resolve, a malformed endpoint and a server that never answers. Each failure returns `False` within 2 seconds, logs one line at INFO level that names the endpoint and does not raise. A sent report logs `Telemetry report sent to <endpoint>`. The test with the server that never answers lowers the 10-second limit to 1 second.
+- The flow tests show no HTTP request with `STYRMIN_TELEMETRY_ENABLED=false`, with `DO_NOT_TRACK=1`, with `STYRMIN_TELEMETRY=0`, and for a run that starts more than one hour late.
 - The checksum test computes the same digest as `styrminctl.telemetry.envelope.checksum`.
 - The Helm test renders `STYRMIN_TELEMETRY_ENABLED: "false"` for `--set styrmin.telemetry.enabled=false`, and renders `STYRMIN_TELEMETRY_ENDPOINT` only when `styrmin.telemetry.endpoint` is set.
 
@@ -94,7 +94,7 @@ Expected: `PASSED`. The test:
 2. Reads the number of reports the in-cluster sink holds.
 3. Runs `styrmin telemetry show` in the server pod, parses the JSON, and checks that the sink still holds the same number of reports.
 4. Starts `send_telemetry_report/send_telemetry_report` through the Prefect API and waits for `COMPLETED`.
-5. Asserts the sink holds exactly one new report, with `kind: "styrmin"`, `payload_format: "1.0"`, a checksum that matches its `data`, and `data` equal to the output of step 3, including `cluster_count: 1`, the simple-app driver with at least one deployment and a `styrmin_version` other than `"unknown"`.
+5. Asserts the flow run logs contain the INFO line `Telemetry report sent to <sink endpoint>`, and the sink holds exactly one new report, with `kind: "styrmin"`, `payload_format: "1.0"`, a checksum that matches its `data`, and `data` equal to the output of step 3, including `cluster_count: 1`, the simple-app driver with at least one deployment and a `styrmin_version` other than `"unknown"`.
 
 Record the evidence that Constitution §V requires: node ID, command, ISO 8601 time of the passing run, vcluster ID and kubeconfig path, and the `PASSED` line.
 

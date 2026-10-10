@@ -53,11 +53,14 @@ database, inside the `styrminctl` envelope with `kind: "styrmin"`.
   in the same way as the daily session cleanup flow, so the rule "at most one
   report a day" needs no extra code. The flow reads the telemetry settings when
   it runs, builds the report data, and posts it once. The post stops after 10 seconds in total
-  (`asyncio.timeout` around the `httpx` request). A send failure is logged at
-  debug level; a failure to build the report is logged at warning level. The
-  flow never raises, so its run always ends `Completed`.
+  (`asyncio.timeout` around the `httpx` request). Each run logs one INFO line
+  that says whether the report was sent, and to which endpoint, so a send
+  failure is never a warning; a failure to build the report is logged at
+  warning level. The flow never raises, so its run always ends `Completed`.
+  The PRD asked for debug level; the code review of 2026-10-10 found that an
+  operator could not tell from a run whether a report was sent.
 - **Late runs are skipped.** A run that starts more than one hour after its
-  scheduled time logs at debug level and sends nothing. Without this check, a
+  scheduled time logs one INFO line and sends nothing. Without this check, a
   report missed while the task worker was down would be sent when the worker
   comes back. Prefect has no setting that drops runs that are too late. A run
   started by hand has its start time as its scheduled time, so it sends.
@@ -72,9 +75,12 @@ database, inside the `styrminctl` envelope with `kind: "styrmin"`.
   database state gives the same data and checksum.
 - **The install ID is stored in the single-row `installation` table.** One
   install is one Styrmin database. The table has an integer primary key with
-  `CHECK (id = 1)`, so a second row cannot exist. The repository inserts
-  `(1, uuid4())` with `ON CONFLICT (id) DO NOTHING` and then selects the row, so
-  two replicas that start at the same time agree on one ID without a lock. The
+  `CHECK (id = 1)`, so a second row cannot exist. The repository selects the
+  row, and only when there is none inserts `(1, uuid4())` with
+  `ON CONFLICT (id) DO NOTHING` and selects the row again. When two replicas
+  start at the same time, PostgreSQL makes the second insert wait until the
+  first transaction ends; the second insert then does nothing, and both replicas
+  read the same ID. The
   server creates the ID on every start, whether telemetry is on or off, so the ID
   does not change when an operator turns telemetry on later. A failure to
   create it logs one warning and does not stop the server.
@@ -91,9 +97,14 @@ database, inside the `styrminctl` envelope with `kind: "styrmin"`.
   chart version or the image tag from Helm was rejected, because an operator who
   sets `image.tag` would report the wrong version, and docker-compose has no
   chart.
-- **Three settings turn it off; one value changes the destination.**
-  `STYRMIN_TELEMETRY_ENABLED=false` (Helm value `styrmin.telemetry.enabled`) or
-  `DO_NOT_TRACK=1` turns telemetry off. `STYRMIN_TELEMETRY_ENDPOINT` (Helm value
+- **Four settings turn it off; one value changes the destination.**
+  `STYRMIN_TELEMETRY_ENABLED=false` (Helm value `styrmin.telemetry.enabled`),
+  `DO_NOT_TRACK=1` (or `true`, `yes`, `on`) or the `styrminctl` opt-out
+  `STYRMIN_TELEMETRY=0` (or `false`, `no`, `off`) turns telemetry off. The
+  settings loader reads no `STYRMIN_<GROUP>` variable as a whole settings group,
+  so `STYRMIN_TELEMETRY`, which `styrminctl` users set, cannot stop the server
+  from starting. The chart reads its values with `dig`, so an upgrade with
+  `--reuse-values` from a chart without `styrmin.telemetry` renders. `STYRMIN_TELEMETRY_ENDPOINT` (Helm value
   `styrmin.telemetry.endpoint`) changes the destination; the chart renders it only
   when it is not empty. The server logs one INFO line on every start that says
   whether telemetry is on, and `styrmin telemetry show` prints the report data
@@ -129,8 +140,8 @@ database, inside the `styrminctl` envelope with `kind: "styrmin"`.
 - **The ingestion path must be confirmed before the release.** It is not known
   whether the ingestion endpoint accepts the `/styrmin` path and
   `kind: "styrmin"`. The owner of the endpoint must confirm it before the release
-  that ships this feature. Until then, a refused report is a debug-level
-  failure that the install does not show.
+  that ships this feature. Until then, a refused report shows only as one INFO
+  line in each flow run.
 
 ## Alternatives Considered
 

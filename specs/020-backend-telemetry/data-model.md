@@ -20,7 +20,7 @@ Holds the install ID. One row per database, created the first time the server st
 
 **Lifecycle**:
 
-- Created by `InstallationRepository.get_or_create_install_id()`: `INSERT (1, uuid4()) ON CONFLICT (id) DO NOTHING`, then `SELECT install_id WHERE id = 1`. Callers: server startup, the daily flow, `styrmin telemetry show`.
+- Created by `InstallationRepository.get_or_create_install_id()`: `SELECT install_id WHERE id = 1`; only when there is no row, `INSERT (1, uuid4()) ON CONFLICT (id) DO NOTHING` and the `SELECT` again (code review of 2026-10-10, finding 15). Callers: server startup, the daily flow, `styrmin telemetry show`.
 - Never updated and never deleted by Styrmin.
 - A database dump restored into another install carries the same row, so both installs report the same ID (spec edge case). A database rebuilt from scratch gets a new ID.
 
@@ -76,6 +76,7 @@ Validation rules:
 |---|---|---|---|
 | `enabled` | bool | `true` | `STYRMIN_TELEMETRY_ENABLED` or `[telemetry] enabled` |
 | `endpoint` | string | `https://telemetry.opsmill.cloud/styrmin` | `STYRMIN_TELEMETRY_ENDPOINT` or `[telemetry] endpoint`; blank means the default |
-| `do_not_track` | string or none | none | `DO_NOT_TRACK` |
+| `styrmin_telemetry` | string or none | none | `STYRMIN_TELEMETRY`, the `styrminctl` opt-out; left out of `styrmin config show` |
+| `do_not_track` | string or none | none | `DO_NOT_TRACK`; left out of `styrmin config show` |
 
-Derived: `disabled_by()` returns `"STYRMIN_TELEMETRY_ENABLED=false"`, `"DO_NOT_TRACK=1"` or `None`, in that order of precedence.
+Derived: `disabled_by()` returns `"STYRMIN_TELEMETRY_ENABLED=false"`, `"STYRMIN_TELEMETRY=<value>"` (for `0`, `false`, `no`, `off`), `"DO_NOT_TRACK=<value>"` (for `1`, `true`, `yes`, `on`) or `None`, in that order of precedence. `styrmin config show` prints `enabled` as `disabled_by() is None`.
