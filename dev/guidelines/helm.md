@@ -102,6 +102,42 @@ ConfigMap name agreement, and that no overlay re-points the fullname.
 cycle on the repository a real backup wrote to and fails if Velero cannot
 complete it.
 
+## Read values that a chart upgrade adds with `dig`
+
+<!-- Extracted from specs/020-backend-telemetry on 2026-10-10 -->
+
+[CLAUDE RECOMMENDED – based on the telemetry Helm values of spec 020 (contracts/configuration.md,
+code review finding 4 of 2026-10-10)] When a chart version adds a nested value, read it in
+templates through a helper in `_helpers.tpl` that uses `dig` with the default, not as
+`.Values.a.b.c`.
+
+### Why
+
+`helm upgrade --reuse-values` reuses the values stored with the release and does not merge in
+the new chart's `values.yaml`. A release installed from a chart version without the new map has
+no such map, so `.Values.styrmin.telemetry.enabled` failed to render with
+`nil pointer evaluating interface {}.enabled`. `dig` returns the default instead.
+
+```yaml
+{{- define "styrmin.telemetry.endpoint" -}}
+{{- dig "telemetry" "endpoint" "" .Values.styrmin -}}
+{{- end }}
+```
+
+### Booleans that the server also reads
+
+An operator can set a boolean with `--set-string`, which gives the template the string `"false"`.
+In a template condition a non-empty string is true, while the server reads `"false"` as false,
+so the install notes and the server would disagree. A helper that renders such a value accepts
+the strings the server accepts (`true`, `1`, `t`, `y`, `yes`, `on`, `false`, `0`, `f`, `n`, `no`,
+`off`, in any case), returns `"true"` or `"false"`, and stops the render with `fail` on any other
+value. See `styrmin.telemetry.enabled` in `helm/styrmin/templates/_helpers.tpl`.
+
+### Enforcement
+
+`backend/tests/unit/test_helm_telemetry_values.py` renders the chart with the values of a
+release that has no `styrmin.telemetry` map, as `--reuse-values` gives it.
+
 ## Reconcile cadence for third-party controllers
 
 `velero server` defaults `--backup-sync-period` and

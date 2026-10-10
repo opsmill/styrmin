@@ -64,5 +64,5 @@
 - 058-frontend-testing: Added TypeScript 5.9.3, React 19.2.4, Node 22 + Vite 8.0.1, urql 5.0.1 (GraphQL), Radix UI, React Router 7, React Hook Form 7
 
 <!-- SPECKIT START -->
-Active feature plan: [specs/020-backend-telemetry/plan.md](specs/020-backend-telemetry/plan.md)
+Active feature plan: [specs/archive/020-backend-telemetry/plan.md](specs/archive/020-backend-telemetry/plan.md)
 <!-- SPECKIT END -->

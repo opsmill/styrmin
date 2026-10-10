@@ -617,6 +617,54 @@ depends on where the code runs:
 See [Steps recorded by the flows](../../knowledge/backend/orchestration-flows.md#steps-recorded-by-the-flows)
 for the steps that each flow records today.
 
+### Decide whether a cron flow acts when its run starts late
+
+<!-- Extracted from specs/020-backend-telemetry on 2026-10-10 -->
+
+[CLAUDE RECOMMENDED – based on research D14 of spec 020 and the daily telemetry flow] When you
+add a catalogue entry with a cron schedule, decide whether a run that starts late should still
+do its work. Prefect keeps a run that was due while no worker was available in the `Late`
+state, which is a `SCHEDULED` state type, and a worker starts it as soon as it comes back.
+Prefect has no deployment or work-pool setting that drops runs that are too late.
+
+- An idempotent cleanup, such as `cleanup_expired_sessions`, can run late without harm.
+- A flow that must not act late compares `prefect.runtime.flow_run.scheduled_start_time` with
+  the current time, logs one line and returns without doing the work. A run started on demand
+  has its start time as its scheduled time, so it is not affected.
+
+```python
+from prefect.runtime import flow_run as flow_run_ctx
+
+LATE_RUN_LIMIT = timedelta(hours=1)
+
+scheduled = flow_run_ctx.scheduled_start_time
+if scheduled is not None and datetime.now(UTC) - scheduled > LATE_RUN_LIMIT:
+    log.info("No report sent: the run scheduled at %s started late", scheduled.isoformat())
+    return False
+```
+
+`workflows/templates/telemetry.py` does this, so a report missed while the task worker was down
+is not sent later.
+
+## Outbound HTTP requests
+
+<!-- Extracted from specs/020-backend-telemetry on 2026-10-10 -->
+
+[CLAUDE RECOMMENDED – based on research D8 of spec 020 and ADR-047] When a request to an
+external endpoint must stop after a fixed total time, wrap it in `asyncio.timeout`. An `httpx`
+timeout applies to DNS, connect, write and read separately, so an endpoint that answers one
+byte at a time can keep a request open far longer than the timeout value.
+
+```python
+async with asyncio.timeout(SEND_TIMEOUT_SECONDS):
+    async with httpx.AsyncClient(timeout=SEND_TIMEOUT_SECONDS) as client:
+        response = await client.post(endpoint, json=envelope)
+```
+
+`services/telemetry/sender.py` does this for the daily telemetry report. `styrminctl`, which
+is synchronous, gets the same limit by running the request on a daemon thread and joining it
+with a budget ([ADR-047](../../adr/0047-styrminctl-anonymous-fire-and-forget-telemetry.md)).
+
 ## Invoke Tasks
 
 When a task does not use `context`, suppress with `# noqa: ARG001`:

@@ -484,6 +484,53 @@ def initialize_utilities():
     """Initialize built-in utilities on startup"""
 ```
 
+## Telemetry Services (`services/telemetry/`)
+
+<!-- Extracted from specs/020-backend-telemetry on 2026-10-10 -->
+
+This package builds and sends the anonymous daily report about the install
+([ADR-061](../../adr/0061-server-anonymous-daily-telemetry.md)). The INTERNAL flow
+`send_telemetry_report` (`workflows/templates/telemetry.py`) runs it in the task worker; see
+[orchestration-flows.md](orchestration-flows.md) for the schedule and the late-run check.
+
+| Module | What it does |
+|---|---|
+| `install.py` | `ensure_install_id()` runs on every server start, whether telemetry is on or off. It calls `InstallationRepository.get_or_create_install_id()` and commits. On any exception it logs one warning and returns `None`, so the server keeps starting. |
+| `payload.py` | `build_report_data(uow)` builds the `data` object of the report. The daily flow and `styrmin telemetry show` both call it, so the command prints exactly what the flow sends. It may create the install ID, so the caller commits. |
+| `sender.py` | `build_envelope(data)` wraps the data in the `styrminctl` envelope with `kind: "styrmin"` and `payload_format: "1.0"`. `send_report(data, endpoint, logger)` posts it once and returns whether the endpoint answered 2xx. It never raises. |
+| `state.py` | `startup_message(settings)` returns the line the server logs on every start. `show_status_message(settings)` returns the line `styrmin telemetry show` prints to standard error. |
+
+How `payload.py` fills the report:
+
+- **Counts** come from repository methods: `count()` on the cluster and environment repositories,
+  `DeploymentRepository.count_live()` (deployments with `deleted_at IS NULL`), and
+  `ApplicationDriverVersionRepository.list_usage()`, which returns one `DriverVersionUsage` per
+  driver version with its name, version, source type and number of live deployments. The query
+  never selects the driver source repository, branch, path or fingerprint.
+- **Driver entries** with the same name, version and source type are merged with their counts
+  added, and sorted by name, version and source type. Driver versions that differ only in the
+  fields the report leaves out would otherwise look like duplicates, and the same database state
+  gives the same data and checksum.
+- **`styrmin_version()`** reads `project.version` from the workspace root `pyproject.toml`
+  (`/source/pyproject.toml` in the image) and accepts it only when `project.name` is
+  `styrmin-mvp`. Otherwise it returns `"unknown"`. The release workflow bumps only that file;
+  `styrmin-backend` stays at `0.1.0`, so `importlib.metadata` cannot give the release version.
+
+How `sender.py` sends:
+
+- `checksum(data)` is the SHA-256 hex digest of `json.dumps(data)`, the same rule as
+  `styrminctl`. The server has its own copy instead of importing the CLI package, and
+  `tests/unit/services/telemetry/test_sender.py::test_checksum_matches_styrminctl` asserts both
+  give the same digest.
+- The post runs inside `asyncio.timeout(10)`, which limits DNS, connect, write and read together.
+  An `httpx` timeout alone applies to each phase separately.
+- Every exception, timeout or answer outside 2xx counts as a failed send and is logged in one INFO
+  line with the error type or HTTP status.
+
+`styrmin telemetry show` (`cli/telemetry.py`) prints the report data as JSON on standard output and
+the state line on standard error. It sends nothing. It creates the install ID when the database has
+none, which is its only write.
+
 ## Exception Hierarchy
 
 All service-layer exceptions inherit from `ServiceError`, which carries an `error_code` (string) and a `default_message` and is mapped to GraphQL extensions by the `StructuredErrorExtension` middleware. Defined in `services/exceptions.py`:
@@ -605,5 +652,6 @@ The resolver hands the user-supplied list straight in; normalisation (dedup, ord
 | [services/applications.py](backend/styrmin_backend/services/applications.py) | Driver management |
 | [services/reconciliation/remediation.py](backend/styrmin_backend/services/reconciliation/remediation.py) | State reconciliation |
 | [services/driver/provider.py](backend/styrmin_backend/services/driver/provider.py) | Git-based driver loading |
+| [services/telemetry/payload.py](backend/styrmin_backend/services/telemetry/payload.py) | Data of the daily telemetry report |
 | [api/auth/admin_guards.py](backend/styrmin_backend/api/auth/admin_guards.py) | Pure last-admin guard functions over `AdminSnapshot` |
 | [api/auth/membership.py](backend/styrmin_backend/api/auth/membership.py) | Set-semantics membership replacement (diff-and-mutate) |

@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-08
 
-**Status**: Implemented
+**Status**: Extracted
 
 **Input**: PRD "Anonymous daily telemetry from the Styrmin backend" — [opsmill/styrmin#274 (comment)](https://github.com/opsmill/styrmin/issues/274#issuecomment-6069930520). Seed issue: [#274](https://github.com/opsmill/styrmin/issues/274). The PRD is the source of truth, including its section "Differences from issue #274".
 
