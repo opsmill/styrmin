@@ -210,6 +210,8 @@ async def test_server_sends_daily_report(
         f"{new_reports}\nFlow run logs:\n{run_logs}"
     )
     report = new_reports[0]
+    # One INFO (20) line says that the run sent the report, and where.
+    assert f"20 Telemetry report sent to {_sink_endpoint()}" in run_logs, run_logs
 
     assert list(report) == _ENVELOPE_KEYS
     assert report["kind"] == "styrmin"

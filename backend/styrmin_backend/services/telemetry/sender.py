@@ -35,7 +35,7 @@ def build_envelope(data: dict[str, Any]) -> dict[str, Any]:
 async def send_report(
     data: dict[str, Any], endpoint: str, logger: TelemetryLogger
 ) -> bool:
-    """Post the report once. Return True on a 2xx answer; log any failure at debug level and never raise."""
+    """Post the report once. Return True on a 2xx answer; log the outcome at info level and never raise."""
     envelope = build_envelope(data)
     try:
         # The asyncio deadline bounds DNS, connect, write and read together.
@@ -45,9 +45,14 @@ async def send_report(
     except Exception as error:  # noqa: BLE001
         # Not only httpx.HTTPError, TimeoutError and OSError: httpx.InvalidURL and the
         # ExceptionGroup of an out-of-range port are send failures too (FR-008).
-        logger.debug("Telemetry report not sent: %s", type(error).__name__)
+        logger.info(
+            "Telemetry report not sent to %s: %s", endpoint, type(error).__name__
+        )
         return False
     if not response.is_success:
-        logger.debug("Telemetry report not sent: HTTP %s", response.status_code)
+        logger.info(
+            "Telemetry report not sent to %s: HTTP %s", endpoint, response.status_code
+        )
         return False
+    logger.info("Telemetry report sent to %s", endpoint)
     return True

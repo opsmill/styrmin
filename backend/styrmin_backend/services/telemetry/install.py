@@ -19,6 +19,10 @@ async def ensure_install_id() -> UUID | None:
             install_id = await uow.installation.get_or_create_install_id()
             await uow.commit()
     except Exception as error:  # noqa: BLE001 - telemetry must never stop the server (critique E2)
-        logger.warning("Could not create the telemetry install ID: {}", error)
+        logger.warning(
+            "Could not create the telemetry install ID: {}. No action is needed: the server "
+            "keeps running, and the next start or daily report creates the ID.",
+            error,
+        )
         return None
     return install_id

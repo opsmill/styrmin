@@ -3,7 +3,10 @@
 import pytest
 
 from styrmin_backend.config import DEFAULT_TELEMETRY_ENDPOINT, TelemetrySettings
-from styrmin_backend.services.telemetry.state import startup_message
+from styrmin_backend.services.telemetry.state import (
+    show_status_message,
+    startup_message,
+)
 
 SINK_ENDPOINT = "http://telemetry-sink.default.svc.cluster.local:8080/report"
 
@@ -13,6 +16,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "STYRMIN_TELEMETRY_ENABLED",
         "STYRMIN_TELEMETRY_ENDPOINT",
+        "STYRMIN_TELEMETRY",
         "DO_NOT_TRACK",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -27,7 +31,8 @@ def test_on_text_is_the_contract_text_with_the_endpoint(
 
     assert message == (
         f"Telemetry is on: Styrmin sends one anonymous report a day to {SINK_ENDPOINT}. "
-        "To view it, run 'styrmin telemetry show'. To turn telemetry off, set "
+        "To view it, run 'styrmin telemetry show' in the server container. "
+        "To turn telemetry off, set "
         "STYRMIN_TELEMETRY_ENABLED=false (Helm value styrmin.telemetry.enabled=false) "
         "or DO_NOT_TRACK=1."
     )
@@ -91,3 +96,25 @@ def test_text_is_one_line(
 
     assert "\n" not in message
     assert "\r" not in message
+
+
+def test_show_status_names_the_endpoint_and_the_task_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STYRMIN_TELEMETRY_ENDPOINT", SINK_ENDPOINT)
+
+    assert show_status_message(TelemetrySettings()) == (
+        "Telemetry is on in this container. With the same settings, the task worker "
+        f"sends this report once a day to {SINK_ENDPOINT}."
+    )
+
+
+def test_show_status_names_the_setting_that_turns_telemetry_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STYRMIN_TELEMETRY", "0")
+
+    assert show_status_message(TelemetrySettings()) == (
+        "Telemetry is off in this container (STYRMIN_TELEMETRY=0). "
+        "With the same settings, the task worker sends no report."
+    )
