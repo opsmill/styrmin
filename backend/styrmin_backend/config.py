@@ -11,10 +11,17 @@ from pydantic import (
     Field,
     SecretStr,
     ValidationError,
+    field_serializer,
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic.fields import FieldInfo
+from pydantic_settings import (
+    BaseSettings,
+    EnvSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 from styrmin_backend.db.constants import DatabaseType
 from styrmin_backend.exceptions import InitializationError
@@ -216,6 +223,9 @@ class OperatorSettings(BaseSettings):
 
 
 DEFAULT_TELEMETRY_ENDPOINT = "https://telemetry.opsmill.cloud/styrmin"
+# styrminctl reads the same two variables, but accepts only STYRMIN_TELEMETRY=0 and DO_NOT_TRACK=1.
+STYRMIN_TELEMETRY_OFF_VALUES = frozenset({"0", "false", "no", "off"})
+DO_NOT_TRACK_ON_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
 class TelemetrySettings(BaseSettings):
@@ -227,7 +237,13 @@ class TelemetrySettings(BaseSettings):
 
     enabled: bool = True
     endpoint: str = DEFAULT_TELEMETRY_ENDPOINT
-    do_not_track: str | None = Field(default=None, validation_alias="DO_NOT_TRACK")
+    # Environment variables, not Styrmin settings: `styrmin config show` leaves them out.
+    styrmin_telemetry: str | None = Field(
+        default=None, validation_alias="STYRMIN_TELEMETRY", exclude=True
+    )
+    do_not_track: str | None = Field(
+        default=None, validation_alias="DO_NOT_TRACK", exclude=True
+    )
 
     @field_validator("endpoint", mode="before")
     @classmethod
@@ -236,13 +252,37 @@ class TelemetrySettings(BaseSettings):
             return DEFAULT_TELEMETRY_ENDPOINT
         return value
 
+    @field_serializer("enabled")
+    def serialize_enabled(self, _enabled: bool) -> bool:
+        """`styrmin config show` prints false when an environment variable turns telemetry off."""
+        return self.disabled_by() is None
+
     def disabled_by(self) -> str | None:
         """Name the setting that turns telemetry off, or None when it is on."""
         if not self.enabled:
             return "STYRMIN_TELEMETRY_ENABLED=false"
-        if self.do_not_track == "1":
-            return "DO_NOT_TRACK=1"
+        styrmin_telemetry = (self.styrmin_telemetry or "").strip()
+        if styrmin_telemetry.lower() in STYRMIN_TELEMETRY_OFF_VALUES:
+            return f"STYRMIN_TELEMETRY={styrmin_telemetry}"
+        do_not_track = (self.do_not_track or "").strip()
+        if do_not_track.lower() in DO_NOT_TRACK_ON_VALUES:
+            return f"DO_NOT_TRACK={do_not_track}"
         return None
+
+
+class GroupSkippingEnvSettingsSource(EnvSettingsSource):
+    """Read no STYRMIN_<GROUP> variable: each settings group reads its STYRMIN_<GROUP>_* variables.
+
+    Otherwise the styrminctl opt-out STYRMIN_TELEMETRY=0 stops the server with a validation error.
+    """
+
+    def get_field_value(
+        self, field: FieldInfo, field_name: str
+    ) -> tuple[Any, str, bool]:
+        annotation = field.annotation
+        if isinstance(annotation, type) and issubclass(annotation, BaseSettings):
+            return None, field_name, False
+        return super().get_field_value(field, field_name)
 
 
 class Settings(BaseSettings):
@@ -282,6 +322,22 @@ class Settings(BaseSettings):
             "non-HTTPS, non-localhost origins."
         ),
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            GroupSkippingEnvSettingsSource(settings_cls),
+            dotenv_settings,
+            file_secret_settings,
+        )
 
 
 # Left out of `styrmin config show`: a value in styrmin.toml overrides its STYRMIN_* env var,
