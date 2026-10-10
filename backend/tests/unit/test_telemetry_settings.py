@@ -4,6 +4,7 @@ import pytest
 
 from styrmin_backend.config import (
     DEFAULT_TELEMETRY_ENDPOINT,
+    Settings,
     TelemetrySettings,
     load,
 )
@@ -17,6 +18,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "STYRMIN_TELEMETRY_ENABLED",
         "STYRMIN_TELEMETRY_ENDPOINT",
+        "STYRMIN_TELEMETRY",
         "DO_NOT_TRACK",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -45,13 +47,61 @@ def test_do_not_track_1_turns_telemetry_off(monkeypatch: pytest.MonkeyPatch) -> 
     assert TelemetrySettings().disabled_by() == DNT_OFF
 
 
-@pytest.mark.parametrize("value", ["true", "0"])
+@pytest.mark.parametrize("value", ["true", "TRUE", "yes", "on", " 1 "])
+def test_do_not_track_common_true_values_turn_telemetry_off(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("DO_NOT_TRACK", value)
+
+    assert TelemetrySettings().disabled_by() == f"DO_NOT_TRACK={value.strip()}"
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", ""])
 def test_do_not_track_other_values_have_no_effect(
     monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
     monkeypatch.setenv("DO_NOT_TRACK", value)
 
     assert TelemetrySettings().disabled_by() is None
+
+
+@pytest.mark.parametrize("value", ["0", "false", "No", "off"])
+def test_styrmin_telemetry_off_values_turn_telemetry_off(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("STYRMIN_TELEMETRY", value)
+
+    assert TelemetrySettings().disabled_by() == f"STYRMIN_TELEMETRY={value}"
+
+
+@pytest.mark.parametrize("value", ["1", "true", "", '{"enabled": false}'])
+def test_styrmin_telemetry_other_values_have_no_effect(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("STYRMIN_TELEMETRY", value)
+
+    assert TelemetrySettings().disabled_by() is None
+
+
+@pytest.mark.parametrize("value", ["0", "1", "off", '{"enabled": true}'])
+def test_server_settings_load_with_the_styrminctl_variable_set(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    # STYRMIN_TELEMETRY is the styrminctl opt-out; it is not the [telemetry] settings group.
+    monkeypatch.setenv("STYRMIN_TELEMETRY", value)
+
+    settings = Settings()
+
+    assert isinstance(settings.telemetry, TelemetrySettings)
+    assert settings.telemetry.endpoint == DEFAULT_TELEMETRY_ENDPOINT
+
+
+def test_server_settings_ignore_a_variable_named_after_another_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STYRMIN_AGENT", "0")
+
+    assert Settings().agent.poll_retries == 60
 
 
 def test_enabled_false_is_checked_before_do_not_track(

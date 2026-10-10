@@ -16,6 +16,7 @@ from styrmin_backend.config import (
     KubernetesSettings,
     RemoteAgentCodeSettings,
     Settings,
+    TelemetrySettings,
     WorkflowDriver,
     WorkflowSettings,
 )
@@ -206,3 +207,22 @@ def test_saved_config_show_output_reads_credentials_from_env(
     monkeypatch.setenv("STYRMIN_DB_PASSWORD", "rotated")
 
     assert config.load(str(path)).database.db_password == "rotated"
+
+
+@pytest.mark.parametrize("name", ["DO_NOT_TRACK", "STYRMIN_TELEMETRY"])
+def test_config_show_prints_telemetry_off_when_an_environment_variable_turns_it_off(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+) -> None:
+    monkeypatch.setenv(name, "1" if name == "DO_NOT_TRACK" else "0")
+    settings = Settings(telemetry=TelemetrySettings())
+    monkeypatch.setattr(config, "SETTINGS", ConfiguredSettings(settings=settings))
+
+    with pytest.raises(SystemExit):
+        config_app(["show", "--format", "json"])
+    output = capsys.readouterr().out
+
+    assert '"enabled": false' in output
+    assert "do_not_track" not in output
+    assert "styrmin_telemetry" not in output
