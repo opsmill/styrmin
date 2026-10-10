@@ -429,7 +429,8 @@ async def test_apply_sets_env_vars_with_the_version_that_adds_their_container(
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
     apply_environment_id: str,
     styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL loaded
-    simple_app_image: str,  # noqa: ARG001 — the chart runs the 0.1.0 image
+    simple_app_image: str,  # noqa: ARG001 — ensures the 0.1.0 image is built
+    simple_app_image_v2: str,  # noqa: ARG001 — ensures the 0.2.0 image is built
     git_server: dict[str, str],
     vcluster: dict,
     tmp_path: Path,
