@@ -1,7 +1,7 @@
 from typing import Sequence, Type, TypeVar
 from uuid import UUID
 
-from sqlmodel import select
+from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import StyrminModel
@@ -50,3 +50,10 @@ class BaseSQLModelRepository(BaseRepository[ModelType]):
     async def delete(self, entity: ModelType) -> None:
         """Delete an entity."""
         await self.session.delete(entity)
+
+    async def count(self) -> int:
+        """Return the number of entities without loading them."""
+        result = await self.session.exec(
+            select(func.count()).select_from(self.model_class)
+        )
+        return result.one()

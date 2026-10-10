@@ -1,6 +1,5 @@
 """Storage of the install ID that telemetry reports (spec 020)."""
 
-import warnings
 from abc import ABC, abstractmethod
 from uuid import UUID, uuid4
 
@@ -30,21 +29,18 @@ class SQLModelInstallationRepository(InstallationRepository):
         self.session = session
 
     async def get_or_create_install_id(self) -> UUID:
+        select_install_id = select(Installation.install_id).where(
+            Installation.id == _INSTALLATION_ROW_ID
+        )
+        install_id = (await self.session.exec(select_install_id)).first()
+        if install_id is not None:
+            return install_id
         dialect = self.session.bind.dialect.name  # type: ignore[union-attr]
         insert = pg_insert if dialect == "postgresql" else sqlite_insert
-        statement = (
+        await self.session.exec(
             insert(Installation.__table__)  # type: ignore[attr-defined]
             .values(id=_INSTALLATION_ROW_ID, install_id=uuid4())
             .on_conflict_do_nothing(index_elements=["id"])
         )
-        # SQLModel's exec() is for SELECT; the DeprecationWarning that
-        # execute() raises is a false positive for DML.
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            await self.session.execute(statement)
-        result = await self.session.exec(
-            select(Installation.install_id).where(
-                Installation.id == _INSTALLATION_ROW_ID
-            )
-        )
-        return result.one()
+        # A concurrent first start may have inserted its ID first, so read the stored one.
+        return (await self.session.exec(select_install_id)).one()

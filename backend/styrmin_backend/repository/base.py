@@ -23,3 +23,7 @@ class BaseRepository(ABC, Generic[ModelType]):
     @abstractmethod
     async def delete(self, entity: ModelType) -> None:
         """Delete an entity."""
+
+    @abstractmethod
+    async def count(self) -> int:
+        """Return the number of entities."""
