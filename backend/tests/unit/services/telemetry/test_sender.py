@@ -95,7 +95,7 @@ async def test_send_report_posts_the_envelope_and_returns_true_on_200(
     assert body["payload_format"] == "1.0"
     assert body["data"] == FIXED_DATA
     assert body["checksum"] == styrminctl_envelope.checksum(body["data"])
-    logger.debug.assert_not_called()
+    logger.info.assert_called_once_with("Telemetry report sent to %s", sink.url)
 
 
 async def _timed_send(endpoint: str, logger: MagicMock) -> tuple[bool, float]:
@@ -105,7 +105,7 @@ async def _timed_send(endpoint: str, logger: MagicMock) -> tuple[bool, float]:
 
 
 def _log_methods(logger: MagicMock) -> list[str]:
-    """Return the logger methods called, in order (``debug``, ``warning`` and so on)."""
+    """Return the logger methods called, in order (``info``, ``warning`` and so on)."""
     return [name for name, _args, _kwargs in logger.method_calls]
 
 
@@ -117,7 +117,7 @@ async def test_send_report_returns_false_when_the_connection_is_refused() -> Non
 
     assert sent is False
     assert elapsed < FAILURE_TIME_LIMIT_SECONDS
-    assert _log_methods(logger) == ["debug"]
+    assert _log_methods(logger) == ["info"]
 
 
 async def test_send_report_returns_false_when_the_host_name_does_not_resolve(
@@ -142,7 +142,7 @@ async def test_send_report_returns_false_when_the_host_name_does_not_resolve(
     assert sent is False
     assert elapsed < FAILURE_TIME_LIMIT_SECONDS
     assert looked_up == [UNRESOLVABLE_HOST]
-    assert _log_methods(logger) == ["debug"]
+    assert _log_methods(logger) == ["info"]
 
 
 @pytest.mark.parametrize("status", [404, 503])
@@ -155,8 +155,8 @@ async def test_send_report_returns_false_on_an_error_status(status: int) -> None
     assert sent is False
     assert elapsed < FAILURE_TIME_LIMIT_SECONDS
     assert len(error_sink.requests) == 1
-    assert _log_methods(logger) == ["debug"]
-    assert status in logger.debug.call_args.args
+    assert _log_methods(logger) == ["info"]
+    assert status in logger.info.call_args.args
 
 
 async def test_send_report_stops_when_the_endpoint_never_answers(
@@ -171,7 +171,7 @@ async def test_send_report_stops_when_the_endpoint_never_answers(
     assert sent is False
     assert 0.9 <= elapsed < FAILURE_TIME_LIMIT_SECONDS
     assert len(silent_sink.requests) == 1
-    assert _log_methods(logger) == ["debug"]
+    assert _log_methods(logger) == ["info"]
 
 
 @pytest.mark.parametrize(
@@ -190,4 +190,4 @@ async def test_send_report_returns_false_for_a_malformed_endpoint(
 
     assert sent is False
     assert elapsed < FAILURE_TIME_LIMIT_SECONDS
-    assert _log_methods(logger) == ["debug"]
+    assert _log_methods(logger) == ["info"]

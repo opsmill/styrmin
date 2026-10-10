@@ -17,6 +17,7 @@ from cyclopts import App
 from styrmin_backend import config
 from styrmin_backend.db.utils import get_async_engine
 from styrmin_backend.services.telemetry.payload import build_report_data
+from styrmin_backend.services.telemetry.state import show_status_message
 from styrmin_backend.services.unit_of_work import get_unit_of_work
 
 telemetry_app = App(name="telemetry", help="Telemetry commands.")
@@ -43,6 +44,7 @@ def show(
         config_file: Path to configuration file.
     """
     config.SETTINGS.initialize_and_exit(str(config_file) if config_file else None)
+    print(show_status_message(config.SETTINGS.telemetry), file=sys.stderr)
 
     try:
         # Standard output carries only the JSON; other output (e.g. SQL echo) goes to stderr.
@@ -51,7 +53,11 @@ def show(
     except Exception as error:
         # One line (contract): SQLAlchemy appends the SQL and a help link on later lines.
         reason = str(error).partition("\n")[0]
-        print(f"Could not read the telemetry report: {reason}", file=sys.stderr)
+        print(
+            f"Could not read the telemetry report: {reason}. "
+            "Check that you run this command in the server container.",
+            file=sys.stderr,
+        )
         raise SystemExit(1) from error
 
     print(json.dumps(data, indent=2))

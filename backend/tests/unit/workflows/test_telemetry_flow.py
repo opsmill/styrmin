@@ -29,6 +29,7 @@ OFF_SETTINGS = [
         "STYRMIN_TELEMETRY_ENABLED", "false", id="STYRMIN_TELEMETRY_ENABLED=false"
     ),
     pytest.param("DO_NOT_TRACK", "1", id="DO_NOT_TRACK=1"),
+    pytest.param("STYRMIN_TELEMETRY", "0", id="STYRMIN_TELEMETRY=0"),
 ]
 
 
@@ -46,6 +47,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "STYRMIN_TELEMETRY_ENABLED",
         "STYRMIN_TELEMETRY_ENDPOINT",
+        "STYRMIN_TELEMETRY",
         "DO_NOT_TRACK",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -98,7 +100,7 @@ async def _run_flow(
 
 
 def _log_methods(logger: MagicMock) -> list[str]:
-    """Return the logger methods called, in order (``debug``, ``warning`` and so on)."""
+    """Return the logger methods called, in order (``info``, ``warning`` and so on)."""
     return [name for name, _args, _kwargs in logger.method_calls]
 
 
@@ -128,8 +130,8 @@ async def test_run_that_starts_61_minutes_late_sends_nothing() -> None:
     assert run.result is False
     run.build_report_data.assert_not_awaited()
     run.send_report.assert_not_awaited()
-    run.logger.debug.assert_called_once()
-    run.logger.warning.assert_not_called()
+    assert _log_methods(run.logger) == ["info"]
+    assert "No telemetry report sent" in run.logger.info.call_args.args[0]
 
 
 async def test_run_that_starts_59_minutes_late_sends() -> None:
@@ -167,6 +169,11 @@ async def test_off_setting_builds_and_sends_nothing(
     assert run.result is False
     run.build_report_data.assert_not_awaited()
     run.send_report.assert_not_awaited()
+    assert _log_methods(run.logger) == ["info"]
+    assert run.logger.info.call_args.args == (
+        "Telemetry is off (%s); no report sent",
+        f"{name}={value}",
+    )
 
 
 @pytest.mark.parametrize(("name", "value"), OFF_SETTINGS)
@@ -198,9 +205,10 @@ async def test_on_setting_sends_one_request_with_the_real_sender(
 
     assert run.result is True
     assert len(sink.requests) == 1
+    run.logger.info.assert_called_once_with("Telemetry report sent to %s", sink.url)
 
 
-async def test_failed_send_returns_false_and_logs_nothing_above_debug() -> None:
+async def test_failed_send_returns_false_and_logs_no_warning() -> None:
     run = await _run_flow(
         scheduled_start_time=datetime.now(UTC),
         send_report=AsyncMock(return_value=False),
@@ -208,7 +216,7 @@ async def test_failed_send_returns_false_and_logs_nothing_above_debug() -> None:
 
     assert run.result is False
     run.send_report.assert_awaited_once()
-    assert set(_log_methods(run.logger)) <= {"debug"}
+    assert set(_log_methods(run.logger)) <= {"debug", "info"}
 
 
 async def test_report_build_error_returns_false_and_logs_one_warning() -> None:
@@ -221,6 +229,9 @@ async def test_report_build_error_returns_false_and_logs_one_warning() -> None:
     run.uow.commit.assert_not_awaited()
     run.send_report.assert_not_awaited()
     assert _log_methods(run.logger) == ["warning"]
+    assert run.logger.warning.call_args.args[0].startswith(
+        "Could not build the telemetry report"
+    )
     assert "RuntimeError" in run.logger.warning.call_args.args
 
 
@@ -237,4 +248,8 @@ async def test_refused_endpoint_with_the_real_sender_returns_false_without_raisi
 
     assert run.result is False
     run.send_report.assert_awaited_once_with(REPORT_DATA, url, run.logger)
-    assert _log_methods(run.logger) == ["debug"]
+    assert _log_methods(run.logger) == ["info"]
+    assert run.logger.info.call_args.args[:2] == (
+        "Telemetry report not sent to %s: %s",
+        url,
+    )

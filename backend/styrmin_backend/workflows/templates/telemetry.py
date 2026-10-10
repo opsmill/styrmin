@@ -18,20 +18,23 @@ LATE_RUN_LIMIT = timedelta(hours=1)
 
 @flow(name="send_telemetry_report")
 async def send_telemetry_report_flow() -> bool:
-    """Send one report. Return True when the endpoint accepted it; never raise, so the run ends Completed."""
+    """Send one report. Return True when the endpoint accepted it; never raise, so the run ends Completed.
+
+    Each run logs one info line that says whether the report was sent.
+    """
     log = get_run_logger()
     settings = config.SETTINGS.telemetry
 
     disabled_by = settings.disabled_by()
     if disabled_by is not None:
-        log.debug("Telemetry is off (%s); no report sent", disabled_by)
+        log.info("Telemetry is off (%s); no report sent", disabled_by)
         return False
 
     # A run with no scheduled time counts as on time.
     scheduled = flow_run_ctx.scheduled_start_time
     if scheduled is not None and datetime.now(UTC) - scheduled > LATE_RUN_LIMIT:
-        log.debug(
-            "Run scheduled at %s started more than %s late; a missed report is not sent later",
+        log.info(
+            "No telemetry report sent: the run scheduled at %s started more than %s late",
             scheduled.isoformat(),
             LATE_RUN_LIMIT,
         )
@@ -42,8 +45,8 @@ async def send_telemetry_report_flow() -> bool:
             data = await build_report_data(uow)
             await uow.commit()
         return await send_report(data, settings.endpoint, log)
-    except Exception as error:  # noqa: BLE001 - send failures are logged at debug in send_report
+    except Exception as error:  # noqa: BLE001 - send_report logs its own failures and never raises
         log.warning(
-            "Could not send the telemetry report: %s: %s", type(error).__name__, error
+            "Could not build the telemetry report: %s: %s", type(error).__name__, error
         )
         return False

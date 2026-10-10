@@ -70,10 +70,11 @@ async def test_ensure_install_id_logs_one_warning_and_returns_none_on_failure(
 
     assert await ensure_install_id() is None
 
-    assert len(warnings) == 1
-    assert warnings[0].startswith(
-        "WARNING|Could not create the telemetry install ID: database is not ready"
-    )
+    assert warnings == [
+        "WARNING|Could not create the telemetry install ID: database is not ready. "
+        "No action is needed: the server keeps running, and the next start or daily "
+        "report creates the ID.\n"
+    ]
 
 
 async def test_ensure_install_id_survives_a_missing_table(
