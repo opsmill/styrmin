@@ -191,3 +191,27 @@ Create the image name
 {{- printf "%s:%s" $repository $tag }}
 {{- end }}
 {{- end }}
+
+{{/*
+Whether telemetry is on, as "true" or "false". dig: a release upgraded with --reuse-values from a
+chart without styrmin.telemetry has no telemetry map. The values are the ones the server accepts,
+so a value set with --set-string gives the same answer in the install notes and in the server.
+*/}}
+{{- define "styrmin.telemetry.enabled" -}}
+{{- $value := dig "telemetry" "enabled" true .Values.styrmin -}}
+{{- $enabled := $value | toString | trim | lower -}}
+{{- if has $enabled (list "true" "1" "t" "y" "yes" "on") -}}
+true
+{{- else if has $enabled (list "false" "0" "f" "n" "no" "off") -}}
+false
+{{- else -}}
+{{- fail (printf "styrmin.telemetry.enabled must be true or false, not %q" (toString $value)) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Destination of the telemetry report, or "" for the OpsMill endpoint. See styrmin.telemetry.enabled.
+*/}}
+{{- define "styrmin.telemetry.endpoint" -}}
+{{- dig "telemetry" "endpoint" "" .Values.styrmin -}}
+{{- end }}
