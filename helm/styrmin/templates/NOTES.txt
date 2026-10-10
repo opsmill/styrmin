@@ -50,9 +50,9 @@ GETTING STARTED
 =============================================================================
 TELEMETRY
 =============================================================================
-{{- if .Values.styrmin.telemetry.enabled }}
+{{- if eq (include "styrmin.telemetry.enabled" .) "true" }}
 
-Telemetry is on: Styrmin sends one anonymous report a day to {{ .Values.styrmin.telemetry.endpoint | default "OpsMill" }}.
+Telemetry is on: Styrmin sends one anonymous report a day to {{ include "styrmin.telemetry.endpoint" . | default "OpsMill" }}.
 
 To view the report, run:
   kubectl exec --namespace {{ .Release.Namespace }} deploy/{{ include "styrmin.server.fullname" . }} -c styrmin-server -- styrmin telemetry show

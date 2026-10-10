@@ -40,12 +40,27 @@ def chart(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _configmap_data(chart: Path, *set_values: str) -> dict[str, object]:
-    command = ["helm", "template", "t", str(chart)]
-    command += ["--show-only", "templates/configmap.yaml"]
+def _set_arguments(set_values: tuple[str, ...]) -> list[str]:
+    """``--set`` for each value; a value that starts with ``string:`` uses ``--set-string``."""
+    arguments: list[str] = []
     for value in set_values:
-        command += ["--set", value]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if value.startswith("string:"):
+            arguments += ["--set-string", value.removeprefix("string:")]
+        else:
+            arguments += ["--set", value]
+    return arguments
+
+
+def _render_configmap(
+    chart: Path, *set_values: str
+) -> subprocess.CompletedProcess[str]:
+    command = ["helm", "template", "t", str(chart)]
+    command += ["--show-only", "templates/configmap.yaml", *_set_arguments(set_values)]
+    return subprocess.run(command, capture_output=True, text=True, check=False)
+
+
+def _configmap_data(chart: Path, *set_values: str) -> dict[str, object]:
+    result = _render_configmap(chart, *set_values)
     assert result.returncode == 0, result.stderr
     return yaml.safe_load(result.stdout)["data"]
 
@@ -61,8 +76,7 @@ def _install_notes(chart: Path, *set_values: str) -> str:
     )
     command = ["helm", "template", "styrmin", str(chart), "--namespace", "styrmin"]
     command += ["--show-only", "templates/notes-under-test.yaml"]
-    for value in set_values:
-        command += ["--set", value]
+    command += _set_arguments(set_values)
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     return yaml.safe_load(result.stdout)["data"]["notes"]
@@ -106,6 +120,45 @@ def test_install_notes_say_telemetry_is_off(chart: Path) -> None:
     )
     assert "Telemetry is on" not in notes
     assert "styrmin telemetry show" not in notes
+
+
+# A release installed from a chart without styrmin.telemetry, upgraded with --reuse-values.
+NO_TELEMETRY_MAP = "styrmin.telemetry=null"
+
+
+def test_install_notes_render_without_the_telemetry_map(chart: Path) -> None:
+    notes = _install_notes(chart, NO_TELEMETRY_MAP)
+
+    assert (
+        "Telemetry is on: Styrmin sends one anonymous report a day to OpsMill." in notes
+    )
+
+
+def test_configmap_renders_without_the_telemetry_map(chart: Path) -> None:
+    data = _configmap_data(chart, NO_TELEMETRY_MAP)
+
+    assert data["STYRMIN_TELEMETRY_ENABLED"] == "true"
+    assert "STYRMIN_TELEMETRY_ENDPOINT" not in data
+
+
+@pytest.mark.parametrize("value", ["false", "False", "0", "no", "off"])
+def test_set_string_false_values_agree_in_the_notes_and_the_configmap(
+    chart: Path, value: str
+) -> None:
+    set_value = f"string:styrmin.telemetry.enabled={value}"
+
+    notes = _install_notes(chart, set_value)
+    data = _configmap_data(chart, set_value)
+
+    assert "Telemetry is off (styrmin.telemetry.enabled=false)." in notes
+    assert data["STYRMIN_TELEMETRY_ENABLED"] == "false"
+
+
+def test_unknown_enabled_value_fails_the_render(chart: Path) -> None:
+    result = _render_configmap(chart, "string:styrmin.telemetry.enabled=disabled")
+
+    assert result.returncode != 0
+    assert "styrmin.telemetry.enabled must be true or false" in result.stderr
 
 
 def test_default_values_turn_telemetry_on_without_an_endpoint(chart: Path) -> None:
