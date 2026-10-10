@@ -22,10 +22,12 @@ styrmin telemetry show [--config-file PATH]
 ## Output
 
 - Standard output: the `data` object only, as JSON with 2-space indentation and the key order of the [wire format](telemetry-report-wire-format.md). No envelope, no checksum, no other text, so the output parses with `json.loads` and compares equal to the `data` the endpoint receives when the database did not change in between.
-- Standard error: nothing on success.
+- Standard error: one line, printed before the report is read, that says whether telemetry is on in the settings of this container (the code review of 2026-10-10, finding 8). The task worker sends the report, and the Helm chart gives it the same settings:
+  - On: `Telemetry is on in this container. With the same settings, the task worker sends this report once a day to <endpoint>.`
+  - Off: `Telemetry is off in this container (<setting that turned it off>). With the same settings, the task worker sends no report.`
 - Exit code `0` on success.
 
 ## Errors
 
 - The settings are not valid: the validation errors are printed and the exit code is `1`, as for `styrmin db` commands.
-- The database cannot be reached or the query fails: one line `Could not read the telemetry report: <error>` on standard error, exit code `1`. The command does not retry.
+- The database cannot be reached or the query fails: one line `Could not read the telemetry report: <error>. Check that you run this command in the server container.` on standard error, after the state line, exit code `1`. The command does not retry. Outside the server container, the default settings point at a SQLite file `styrmin.db` in the current directory; the command creates that file empty and fails with `no such table: installation`.

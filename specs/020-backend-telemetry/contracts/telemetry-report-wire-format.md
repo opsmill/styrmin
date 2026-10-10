@@ -13,7 +13,7 @@ The server sends exactly this body to the telemetry endpoint once a day. It reus
 - No authentication header, no cookie, no timestamp and no network identifier. The ingestion endpoint adds the time it received the report.
 - One attempt per daily run. No retry, no queue, no batching (spec FR-012, edge case "install is down").
 - The attempt stops after 10 seconds in total, whatever the endpoint does (FR-009, research D8).
-- Any status outside 2xx counts as a failed send. A failed send is logged at debug level and the flow run ends `Completed` (FR-008).
+- Any status outside 2xx counts as a failed send. A failed send is logged in one INFO line, not as a warning, and the flow run ends `Completed` (FR-008).
 
 ## Envelope
 

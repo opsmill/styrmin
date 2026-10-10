@@ -13,7 +13,7 @@ The approach, from [research.md](research.md):
 - A new INTERNAL Prefect flow, `send_telemetry_report`, runs on the cron `43 2 * * *` (UTC) from the workflow catalogue, like the session cleanup flow (D16). Prefect's idempotent registration gives one run a day whatever the number of restarts or replicas. The flow skips runs that start more than an hour late, so a missed report is not sent later (D14).
 - The flow runs in the task worker, so the settings reach it through the shared Helm ConfigMap. Two new Helm values set them: `styrmin.telemetry.enabled` and `styrmin.telemetry.endpoint` (D11).
 - A payload builder in `services/telemetry/` reads the counts and driver usage through new repository queries, and is shared by the flow and the CLI command (D1, D2, D9).
-- The sender wraps the data in the `styrminctl` envelope with `kind: "styrmin"` and `payload_format: "1.0"`, using its own copy of the checksum that a test checks against `styrminctl` (D3, D5). Each send stops after 10 seconds in total and failures are logged at debug level (D8).
+- The sender wraps the data in the `styrminctl` envelope with `kind: "styrmin"` and `payload_format: "1.0"`, using its own copy of the checksum that a test checks against `styrminctl` (D3, D5). Each send stops after 10 seconds in total and failures are logged at debug level (D8). After the code review of 2026-10-10, each run logs its outcome in one INFO line instead (FR-008).
 - The install ID is a single row in a new `installation` table, created on server start with an insert that two replicas can run at the same time (D10). A failure there logs a warning and the server keeps starting.
 - The Styrmin version is read from the root `pyproject.toml` that the release workflow bumps, because no installed package carries it (D6).
 - The E2E test reuses the Styrmin install and the simple-app deployment of `shard_general` and sends to a sink inside the vcluster (D12, D13, D19).
@@ -34,7 +34,7 @@ The approach, from [research.md](research.md):
 
 **Performance Goals**: One HTTP request a day per install. The report needs four aggregate queries; the number of rows they return grows with the number of driver versions, not with the number of deployments.
 
-**Constraints**: Each send stops after 10 seconds (FR-009). The flow never ends in a failed state (FR-008). No log entry above debug for a failed send (SC-004). No change to the GraphQL schema, the frontend, the SDK or `styrminctl`.
+**Constraints**: Each send stops after 10 seconds (FR-009). The flow never ends in a failed state (FR-008). No log entry above debug for a failed send (SC-004); after the code review of 2026-10-10, no warning or error for a failed send. No change to the GraphQL schema, the frontend, the SDK or `styrminctl`.
 
 **Scale/Scope**: One cluster per install (ADR-039), tens of environments, hundreds of deployments, tens of driver versions.
 

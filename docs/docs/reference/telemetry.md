@@ -7,15 +7,26 @@ description: What anonymous data the styrminctl CLI and the Styrmin server send 
 ## Telemetry & privacy
 
 Styrmin sends anonymous telemetry from two places. Each one has its own
-settings, read by a different process:
+settings, read by a different process, and its own endpoint:
 
-- **[CLI telemetry](#cli-telemetry)**: `styrminctl` sends one event after each
-  eligible command. It runs on your workstation.
-- **[Server telemetry](#server-telemetry)**: the Styrmin server sends one report
-  a day about the install. It runs in your cluster.
+| | [CLI telemetry](#cli-telemetry) | [Server telemetry](#server-telemetry) |
+|---|---|---|
+| Sent by | `styrminctl`, on your workstation | The task worker of the Styrmin server, in your cluster |
+| What is sent | One event after each eligible command | One report a day about the install |
+| Endpoint | `https://telemetry-endpoints.cloudflare-096.workers.dev/styrminctl` | `https://telemetry.opsmill.cloud/styrmin` |
+| Setting that turns only this one off | `styrminctl telemetry disable` | Helm value `styrmin.telemetry.enabled: false` |
 
-Turning one off does not turn the other off. `DO_NOT_TRACK=1` turns off either
-one, but only in the environment where it is set.
+To turn telemetry off:
+
+- On your workstation, run `styrminctl telemetry disable`, or set
+  `DO_NOT_TRACK=1` or `STYRMIN_TELEMETRY=0`.
+- In your cluster, set the Helm value `styrmin.telemetry.enabled: false`. See
+  [Turning server telemetry off](#turning-server-telemetry-off) for the other
+  settings.
+
+Turning one off does not turn the other off. `DO_NOT_TRACK=1` and
+`STYRMIN_TELEMETRY=0` turn off either one, but only in the environment where
+they are set.
 
 ### CLI telemetry
 
@@ -103,8 +114,9 @@ shell-completion command never emit anything themselves.
 
 #### Endpoint and state
 
-Telemetry POSTs to a fixed production endpoint by default; set
-`STYRMIN_TELEMETRY_ENDPOINT=<url>` to redirect it (used by the test suite and a
+Telemetry POSTs to
+`https://telemetry-endpoints.cloudflare-096.workers.dev/styrminctl` by default;
+set `STYRMIN_TELEMETRY_ENDPOINT=<url>` to redirect it (used by the test suite and a
 local sink). State is `{install_id, enabled}` stored as JSON at
 `${XDG_DATA_HOME:-$HOME/.local/share}/styrminctl/telemetry.json`, written
 atomically with strict permissions (`0600` file, `0700` directory). The
@@ -215,11 +227,13 @@ timestamp; the endpoint records when it received the report.
   reports, because Prefect creates one scheduled run a day and gives it to one
   worker.
 - A send attempt stops after 10 seconds. When the endpoint cannot be reached,
-  does not answer or returns an error status, the flow logs the failure at debug
-  level and the flow run ends `Completed`. An install without internet access
-  therefore has no failed flow runs and no warnings from telemetry.
+  does not answer or returns an error status, the flow run ends `Completed`. An
+  install without internet access therefore has no failed flow runs and no
+  warnings from telemetry.
 - When the report cannot be built, for example because the database cannot be
-  reached, the flow logs one warning and the flow run ends `Completed`.
+  reached, the flow logs one warning,
+  `Could not build the telemetry report: <error>`, and the flow run ends
+  `Completed`.
 
 #### Checking whether telemetry is on
 
@@ -227,12 +241,23 @@ On every start, the server logs one line at INFO level. With telemetry on and
 the default endpoint, the line is:
 
 ```text
-Telemetry is on: Styrmin sends one anonymous report a day to https://telemetry.opsmill.cloud/styrmin. To view it, run 'styrmin telemetry show'. To turn telemetry off, set STYRMIN_TELEMETRY_ENABLED=false (Helm value styrmin.telemetry.enabled=false) or DO_NOT_TRACK=1.
+Telemetry is on: Styrmin sends one anonymous report a day to https://telemetry.opsmill.cloud/styrmin. To view it, run 'styrmin telemetry show' in the server container. To turn telemetry off, set STYRMIN_TELEMETRY_ENABLED=false (Helm value styrmin.telemetry.enabled=false) or DO_NOT_TRACK=1.
 ```
 
 With telemetry off, the line names the setting that turned it off, for example
 `Telemetry is off (DO_NOT_TRACK=1).` The install notes that `helm install` and
 `helm upgrade` print also say whether telemetry is on.
+
+Each run of the `send_telemetry_report` flow logs one line at INFO level that
+says whether the report was sent. You can read it in the logs of the flow run in
+the Prefect UI:
+
+| Outcome | Line |
+|---|---|
+| Telemetry is off | `Telemetry is off (DO_NOT_TRACK=1); no report sent` |
+| The report was sent | `Telemetry report sent to https://telemetry.opsmill.cloud/styrmin` |
+| The endpoint was not reached or returned an error | `Telemetry report not sent to https://telemetry.opsmill.cloud/styrmin: ConnectError` |
+| The run started more than one hour late | `No telemetry report sent: the run scheduled at <time> started more than 1:00:00 late` |
 
 #### Turning server telemetry off
 
@@ -248,19 +273,33 @@ Any one of these settings turns server telemetry off:
 
 - The environment variable `STYRMIN_TELEMETRY_ENABLED=false`. The values `0`,
   `no` and `off` also turn telemetry off.
-- The environment variable `DO_NOT_TRACK=1`. Only the value `1` turns telemetry
-  off; other values, such as `true`, have no effect.
+- The environment variable `DO_NOT_TRACK=1`. The values `true`, `yes` and `on`
+  also turn server telemetry off; other values, such as `0`, have no effect.
+  `styrminctl` accepts only `1`.
+- The environment variable `STYRMIN_TELEMETRY=0`, which also turns off
+  `styrminctl` telemetry. The values `false`, `no` and `off` also turn server
+  telemetry off; other values have no effect. `styrminctl` accepts only `0`.
 - `enabled = false` in the `[telemetry]` section of the Styrmin settings file
   (`styrmin.toml`).
+
+`styrmin config show` prints `enabled = false` in the `[telemetry]` section when
+any of these settings turns telemetry off.
+
+The Helm value `styrmin.telemetry.enabled` accepts `true` and `false`, and the
+other values that the server accepts, such as `"false"` set with
+`--set-string`. Any other value stops `helm install` and `helm upgrade` with an
+error. An upgrade with `--reuse-values` from a chart version that has no
+`styrmin.telemetry` values keeps telemetry on.
 
 The setting must reach two processes: the server, which logs whether telemetry
 is on, and the task worker, which runs the daily flow and decides whether to
 send the report. The Helm value does this: it sets `STYRMIN_TELEMETRY_ENABLED`
 in the ConfigMap that the server and the task worker both load, and a
 `helm upgrade` that changes the value restarts both. If you set
-`STYRMIN_TELEMETRY_ENABLED` or `DO_NOT_TRACK` by other means, set it on both
-containers. Otherwise the server can log that telemetry is off while the task
-worker still sends reports.
+`STYRMIN_TELEMETRY_ENABLED`, `DO_NOT_TRACK` or `STYRMIN_TELEMETRY` by other
+means, set it on both containers. Otherwise the server can log that telemetry is
+off while the task worker still sends reports. To check that a report is no
+longer sent, read the INFO line of the next `send_telemetry_report` flow run.
 
 The Helm value `styrmin.workflow.enable` does not stop the reports. Use one of
 the settings above.
@@ -272,7 +311,8 @@ turn telemetry off.
 #### Viewing the report with `styrmin telemetry show`
 
 Run `styrmin telemetry show` in the server container to print the data of the
-next report:
+next report. Outside the server container, the command does not find the
+Styrmin database:
 
 ```shell
 kubectl exec --namespace styrmin deploy/styrmin-server -c styrmin-server -- styrmin telemetry show
@@ -283,14 +323,22 @@ notes print the command for your release.
 
 The command:
 
-- prints the `data` object as JSON, without the envelope, so it is the same as
-  the data the endpoint receives when nothing in the install changes in between
+- prints the `data` object as JSON, without the envelope, to standard output,
+  so it is the same as the data the endpoint receives when nothing in the
+  install changes in between
+- prints one line to standard error that says whether telemetry is on in the
+  settings of the server container, and to which endpoint the task worker sends
+  the report, for example
+  `Telemetry is on in this container. With the same settings, the task worker sends this report once a day to https://telemetry.opsmill.cloud/styrmin.`
+  The task worker reads its own settings; the Helm chart gives both containers
+  the same settings.
 - sends nothing, whether telemetry is on or off, so you can check the report
   before you turn telemetry on
 - creates the install ID when the database has none yet, which is the only
   change it makes
-- prints `Could not read the telemetry report: <error>` to standard error and
-  exits with code `1` when it cannot read the database
+- prints
+  `Could not read the telemetry report: <error>. Check that you run this command in the server container.`
+  to standard error and exits with code `1` when it cannot read the database
 
 #### Endpoint and proxy
 

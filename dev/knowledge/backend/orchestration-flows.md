@@ -442,7 +442,7 @@ Located in `workflows/catalogue.py`. Maps `PrefectAction` enums to `WorkflowDefi
 
 The `WorkflowType` distinction (`INTERNAL` vs `USER`) controls which Prefect work pool the flow runs on (`styrmin-work-pool` vs `user-work-pool`). User-defined driver actions, registered separately at driver-load time, use `GitSourceWorkflowDefinition` so the worker pulls the driver's repo at runtime.
 
-Two INTERNAL entries also carry a cron schedule, which Prefect reads as UTC, so they run without a caller: `CLEANUP_EXPIRED_SESSIONS` at 03:17 (`17 3 * * *`, [ADR-016](../../adr/0016-authentication-and-sessions.md)) and `SEND_TELEMETRY_REPORT` at 02:43 (`43 2 * * *`). `SEND_TELEMETRY_REPORT` reads the telemetry settings when it runs, sends nothing when telemetry is off or when the run starts more than one hour after its scheduled time, and never raises, so its run always ends `Completed`. See [ADR-061](../../adr/0061-server-anonymous-daily-telemetry.md).
+Two INTERNAL entries also carry a cron schedule, which Prefect reads as UTC, so they run without a caller: `CLEANUP_EXPIRED_SESSIONS` at 03:17 (`17 3 * * *`, [ADR-016](../../adr/0016-authentication-and-sessions.md)) and `SEND_TELEMETRY_REPORT` at 02:43 (`43 2 * * *`). `SEND_TELEMETRY_REPORT` reads the telemetry settings when it runs, sends nothing when telemetry is off or when the run starts more than one hour after its scheduled time, logs one INFO line that says whether the report was sent, and never raises, so its run always ends `Completed`. See [ADR-061](../../adr/0061-server-anonymous-daily-telemetry.md).
 
 ## PrefectAction Enum
 

@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-08
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: PRD "Anonymous daily telemetry from the Styrmin backend" — [opsmill/styrmin#274 (comment)](https://github.com/opsmill/styrmin/issues/274#issuecomment-6069930520). Seed issue: [#274](https://github.com/opsmill/styrmin/issues/274). The PRD is the source of truth, including its section "Differences from issue #274".
 
@@ -12,7 +12,7 @@
 
 OpsMill maintainers have no data on how many Styrmin installs are running, which Styrmin versions they run, or which **application drivers** they use ([#274](https://github.com/opsmill/styrmin/issues/274)). So decisions about how long to support a version, and which drivers to invest in, are made without data. `styrminctl` already sends anonymous **telemetry** ([ADR-047](../../dev/adr/0047-styrminctl-anonymous-fire-and-forget-telemetry.md)), but it reports CLI commands only and says nothing about the installs themselves.
 
-With this feature, the **server** (called "the backend" in the PRD) sends one anonymous report a day to an OpsMill endpoint. The report contains a random install ID, the Styrmin, Python and operating system versions, the number of **clusters**, **environments** and live **deployments**, and every loaded **application driver version** with the number of live deployments that use it. Telemetry is on by default. An operator turns it off with one Helm value, with `STYRMIN_TELEMETRY_ENABLED=false`, or with `DO_NOT_TRACK=1`, and views the exact report with `styrmin telemetry show` in the server pod.
+With this feature, the **server** (called "the backend" in the PRD) sends one anonymous report a day to an OpsMill endpoint. The report contains a random install ID, the Styrmin, Python and operating system versions, the number of **clusters**, **environments** and live **deployments**, and every loaded **application driver version** with the number of live deployments that use it. Telemetry is on by default. An operator turns it off with one Helm value, with `STYRMIN_TELEMETRY_ENABLED=false`, with `DO_NOT_TRACK=1` or with the `styrminctl` opt-out `STYRMIN_TELEMETRY=0`, and views the exact report with `styrmin telemetry show` in the server pod.
 
 Driver names are sent exactly as the operator named them, because driver usage is one of the two questions the reports must answer. A custom driver name can identify the operator's organisation, and the documentation states this ([PRD, "Differences from issue #274"](https://github.com/opsmill/styrmin/issues/274#issuecomment-6069930520)).
 
@@ -76,17 +76,17 @@ An operator who wants to check what leaves the install runs `styrmin telemetry s
 
 ### User Story 4 - Telemetry does not cause failed flow runs or alerts (Priority: P2)
 
-An operator runs Styrmin where the server cannot reach the internet, or where outbound traffic is blocked. The daily telemetry flow fails to send its report every day, but no flow run fails and no log entry above debug level appears, so telemetry does not trigger the operator's alerts.
+An operator runs Styrmin where the server cannot reach the internet, or where outbound traffic is blocked. The daily telemetry flow fails to send its report every day, but no flow run fails and no warning or error is logged, so telemetry does not trigger the operator's alerts. Each run logs one INFO line that says the report was not sent and why.
 
 **Why this priority**: Many installs run without internet access. Failed flow runs or warnings every day would make operators turn telemetry off or report bugs (PRD user story 8; SC-004).
 
-**Independent Test**: Point the endpoint at an address that refuses connections, at one that never responds, and at one that returns a 4xx and a 5xx status. For each, run the daily telemetry flow and confirm the flow run ends `Completed`, the send attempt stops within 10 seconds, and the failure is logged at debug level only.
+**Independent Test**: Point the endpoint at an address that refuses connections, at one that never responds, and at one that returns a 4xx and a 5xx status. For each, run the daily telemetry flow and confirm the flow run ends `Completed`, the send attempt stops within 10 seconds, and the failure is logged in one INFO line, with no warning.
 
 **Acceptance Scenarios**:
 
-1. **Given** the endpoint refuses the connection, **When** the daily telemetry flow runs, **Then** the flow run ends `Completed` and the failure is logged at debug level.
+1. **Given** the endpoint refuses the connection, **When** the daily telemetry flow runs, **Then** the flow run ends `Completed` and the failure is logged in one INFO line.
 2. **Given** the endpoint accepts the connection but never responds, **When** the daily telemetry flow runs, **Then** the send attempt stops after 10 seconds and the flow run ends `Completed`.
-3. **Given** the endpoint returns a 4xx or 5xx status, **When** the daily telemetry flow runs, **Then** the flow run ends `Completed` and the failure is logged at debug level.
+3. **Given** the endpoint returns a 4xx or 5xx status, **When** the daily telemetry flow runs, **Then** the flow run ends `Completed` and the failure is logged in one INFO line.
 
 ---
 
@@ -123,7 +123,7 @@ A Styrmin developer runs E2E tests, docker-compose or `invoke dev`. These instal
 
 ### Edge Cases
 
-- The endpoint cannot be reached because the install has no internet access or outbound traffic is blocked: the flow run ends `Completed` and the failure is logged at debug level, every day.
+- The endpoint cannot be reached because the install has no internet access or outbound traffic is blocked: the flow run ends `Completed` and the failure is logged in one INFO line, every day.
 - The endpoint never responds: the send attempt stops after 10 seconds.
 - The install is down at the scheduled time: no report is sent that day, and the missed report is not sent later. This also holds when only the process that runs the daily flow is down: a run that starts more than one hour after its scheduled time sends nothing ([research D14](research.md)).
 - A database dump is restored into a second install: both installs report the same install ID.
@@ -131,7 +131,8 @@ A Styrmin developer runs E2E tests, docker-compose or `invoke dev`. These instal
 - An operator sets `STYRMIN_WORKFLOW_ENABLE=false`: the PRD says the daily flow then does not run. In the current code no part of Styrmin reads this setting, so it does not stop the daily flow or the report ([research D15](research.md)). Operators turn telemetry off with the settings in FR-003 and FR-004. This feature does not change `STYRMIN_WORKFLOW_ENABLE`.
 - No cluster has been added: the report contains `cluster_count: 0`. [ADR-039](../../dev/adr/0039-single-cluster-platform-scope.md) limits an install to one cluster, so the value is 0 or 1.
 - Both `STYRMIN_TELEMETRY_ENABLED=false` and `DO_NOT_TRACK=1` are set: telemetry is off. Any one setting that turns telemetry off is enough.
-- `DO_NOT_TRACK` is set to a value other than `1`, such as `true`: it does not turn telemetry off, as in `styrminctl` ([eligibility.py](../../cli/src/styrminctl/telemetry/eligibility.py)).
+- `DO_NOT_TRACK` is set to `true`, `yes` or `on`, in any case: it turns server telemetry off, like `1`. Other values, such as `0` or `false`, have no effect. `styrminctl` accepts only `1` ([eligibility.py](../../cli/src/styrminctl/telemetry/eligibility.py)). [CLAUDE RECOMMENDED – based on the code review of 2026-10-10, finding 9: the server ignored `DO_NOT_TRACK=true` without a message]
+- The `styrminctl` opt-out `STYRMIN_TELEMETRY` is set in the server environment: `0`, `false`, `no` or `off` turns server telemetry off, and other values have no effect. Before this change, any value stopped the server from starting, because the settings loader read the variable as the whole `[telemetry]` settings group. [CLAUDE RECOMMENDED – based on the code review of 2026-10-10, finding 2]
 - An environment has the internal ingress controller deployment that Styrmin creates for it: that deployment is counted like any other live deployment, and the internal driver version it uses appears in `drivers`. [CLAUDE RECOMMENDED – based on PRD FR-001 and FR-006, which count all live deployments without exceptions, and on `services/deployment.py`, where the ingress controller is a deployment with a driver version]
 - A driver version was loaded but no deployment uses it: it appears in `drivers` with a deployment count of 0.
 
@@ -160,7 +161,7 @@ Report content:
 
 Turning telemetry off and changing the destination:
 
-- **FR-003**: The server MUST send no request when `STYRMIN_TELEMETRY_ENABLED=false` or `DO_NOT_TRACK=1` is set.
+- **FR-003**: The server MUST send no request when `STYRMIN_TELEMETRY_ENABLED=false`, `DO_NOT_TRACK=1` or `STYRMIN_TELEMETRY=0` is set. The server MUST start whatever value `STYRMIN_TELEMETRY` has. [CLAUDE RECOMMENDED for `STYRMIN_TELEMETRY` – based on the code review of 2026-10-10, finding 2]
 - **FR-004**: Operators MUST be able to turn telemetry off with the Helm value `styrmin.telemetry.enabled: false`, which sets `STYRMIN_TELEMETRY_ENABLED` in the server environment.
 - **FR-005**: Operators MUST be able to change the destination with `STYRMIN_TELEMETRY_ENDPOINT`.
 - **FR-020**: Operators MUST be able to set `STYRMIN_TELEMETRY_ENDPOINT` with the Helm value `styrmin.telemetry.endpoint`. When the value is empty, the chart does not set the variable. [CLAUDE RECOMMENDED – based on FR-011, which needs the E2E install to send to a local sink, and on the chart, which has no field for other environment variables ([values.yaml](../../helm/styrmin/values.yaml))]
@@ -168,7 +169,7 @@ Turning telemetry off and changing the destination:
 
 Sending:
 
-- **FR-008**: The daily telemetry flow MUST end in the `Completed` state when the endpoint refuses the connection, does not respond, or returns a 4xx or 5xx status. A failed send MUST be logged at debug level only.
+- **FR-008**: The daily telemetry flow MUST end in the `Completed` state when the endpoint refuses the connection, does not respond, or returns a 4xx or 5xx status. Each run MUST log one INFO line that says whether the report was sent, and to which endpoint. A failed send MUST NOT be logged as a warning or an error. [CLAUDE RECOMMENDED for the INFO line – based on the code review of 2026-10-10, finding 7; the PRD asks for debug level]
 - **FR-009**: Each send attempt MUST stop after 10 seconds.
 - **FR-012**: The server MUST send at most one report a day, at a fixed time of day, from a scheduled flow in the same way as the daily session cleanup flow ([ADR-016](../../dev/adr/0016-authentication-and-sessions.md)). Restarts of the server and extra server replicas MUST NOT cause extra reports.
 - **FR-014**: The install ID MUST be a random UUID that is created the first time the server starts and stored in the Styrmin database. Every later report from the same database MUST carry the same install ID, across restarts and server replicas. The install ID MUST be created whether telemetry is on or off, so that it does not change when an operator turns telemetry on later. A failure to create the install ID MUST NOT stop the server from starting; the daily flow and `styrmin telemetry show` create it later. [CLAUDE RECOMMENDED – based on issue #274, "never block or degrade the backend", and critique finding E2]
@@ -176,7 +177,7 @@ Sending:
 Viewing the report and the startup log line:
 
 - **FR-010**: On every start, the server MUST log one line at INFO level that says whether telemetry is on or off. When it is on, the line says how to turn it off and how to view the report. When it is off, the line names the setting that turned it off.
-- **FR-013**: Operators MUST be able to print the data of the next report with `styrmin telemetry show` in the server pod, without sending it. The command prints the data whether telemetry is on or off.
+- **FR-013**: Operators MUST be able to print the data of the next report with `styrmin telemetry show` in the server pod, without sending it. The command prints the data whether telemetry is on or off, and prints one line on standard error that says whether telemetry is on in the settings of the container and to which endpoint the task worker sends the report. [CLAUDE RECOMMENDED for the standard error line – based on the code review of 2026-10-10, finding 8]
 
 Test and development installs:
 
@@ -203,7 +204,7 @@ Documentation, in the same change ([Constitution §VII](../../dev/constitution.m
 - **SC-001**: An install with default settings that is running at the time of the daily run has one report received at the endpoint within 24 hours of its first start.
 - **SC-002**: With any one of the settings that turn telemetry off, the endpoint receives no request from the install.
 - **SC-003**: Every received report contains only the keys listed in FR-006.
-- **SC-004**: When the endpoint refuses connections, does not respond or returns errors, the install shows no failed flow runs and no telemetry log entries above debug level.
+- **SC-004**: When the endpoint refuses connections, does not respond or returns errors, the install shows no failed flow runs and no telemetry warnings or errors.
 - **SC-005**: Within 30 days of the release that ships this feature, maintainers can answer both questions from the received reports: how many installs run each Styrmin version, and how many installs use each driver and driver version.
 
 ## Assumptions
@@ -213,7 +214,7 @@ Documentation, in the same change ([Constitution §VII](../../dev/constitution.m
 - The ingestion endpoint accepts anonymous POST requests without authentication, as ADR-047 assumes for `styrminctl` (PRD).
 - Installs with workflows turned off are not normal production setups, because deployments do not run in that mode (PRD). As the edge cases note, `STYRMIN_WORKFLOW_ENABLE=false` does not turn workflows off in the current code.
 - The Helm values and the environment variables reach every process that builds or sends a report: the server and the task worker, which runs the daily telemetry flow.
-- `DO_NOT_TRACK` turns telemetry off only when its value is exactly `1`, as in `styrminctl`.
+- `DO_NOT_TRACK` turns server telemetry off when its value is `1`, `true`, `yes` or `on`. `styrminctl` accepts only `1`.
 - The time of day of the daily run is not decided in the PRD. The plan chooses it.
 
 ## Out of Scope
@@ -228,6 +229,13 @@ From the PRD's "Out of scope for v1":
 - Telemetry from the **agent**.
 - The ingestion endpoint, the storage of reports and dashboards.
 - Changes to the GraphQL schema, the frontend, the SDK or `styrminctl`.
+
+### Possible follow-ups, not decided
+
+The code review of 2026-10-10 proposed these. Nobody has decided to build them.
+
+- A view in the admin settings of the web interface that shows whether telemetry is on and the next report.
+- A setting that sends the counts without the driver names. Today an operator who does not want to send driver names can only turn telemetry off.
 
 ## Sources
 
