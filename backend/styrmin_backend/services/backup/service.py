@@ -24,6 +24,9 @@ from styrmin_backend.services.backup.strategies.disk import DiskSnapshotStrategy
 from styrmin_backend.services.backup.strategies.mariadb import MariadbBackupStrategy
 from styrmin_backend.services.backup.strategies.mongodb import MongodbBackupStrategy
 from styrmin_backend.services.backup.strategies.neo4j import Neo4jBackupStrategy
+from styrmin_backend.services.backup.strategies.neo4j_community import (
+    Neo4jCommunityBackupStrategy,
+)
 from styrmin_backend.services.backup.strategies.postgres import PostgresBackupStrategy
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
@@ -52,6 +55,7 @@ STRATEGY_MAP: dict[str, type[BackupStrategy]] = {
     "mongodb": MongodbBackupStrategy,
     "postgres": PostgresBackupStrategy,
     "neo4j": Neo4jBackupStrategy,
+    "neo4j-community": Neo4jCommunityBackupStrategy,
     "action": ActionBackupStrategy,
 }
 

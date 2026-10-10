@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import subprocess
+import sys
+import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+
+from styrmin_backend.agent.service.kubernetes.velero.hooks import (
+    neo4j_community_backup_hooks,
+)
 
 from styrmin_backend.services.backup.strategies.action import ActionBackupStrategy
 from styrmin_backend.services.backup.strategies.base import BackupStrategy
@@ -13,6 +20,9 @@ from styrmin_backend.services.backup.strategies.disk import DiskSnapshotStrategy
 from styrmin_backend.services.backup.strategies.mariadb import MariadbBackupStrategy
 from styrmin_backend.services.backup.strategies.mongodb import MongodbBackupStrategy
 from styrmin_backend.services.backup.strategies.neo4j import Neo4jBackupStrategy
+from styrmin_backend.services.backup.strategies.neo4j_community import (
+    Neo4jCommunityBackupStrategy,
+)
 from styrmin_backend.services.backup.strategies.postgres import PostgresBackupStrategy
 
 
@@ -316,6 +326,162 @@ class TestNeo4jBackupStrategy:
             config={"kind": "neo4j", "backup_volume": "neo4j-dump"},
         )
         assert volumes == ["neo4j-dump"]
+
+
+class TestNeo4jCommunityBackupStrategy:
+    def test_get_hooks_pause_before_and_resume_after(self) -> None:
+        hooks = Neo4jCommunityBackupStrategy().get_hooks(
+            namespace="test-ns",
+            component_name="graph",
+            config={"kind": "neo4j-community"},
+        )
+        assert len(hooks) == 1
+        hook = hooks[0]
+        assert hook.name == "graph-neo4j-community-backup"
+        assert hook.included_namespaces == ["test-ns"]
+        pre_cmd = hook.pre[0].command[-1]  # type: ignore[index]
+        post_cmd = hook.post[0].command[-1]  # type: ignore[index]
+        assert 'kill -STOP "$pid"' in pre_cmd
+        assert 'kill -CONT "$pid"' in post_cmd
+        assert "neo4j-admin" not in pre_cmd
+
+    def test_both_hooks_fail_the_backup_on_error(self) -> None:
+        """A failed pause must skip the volume; a late resume must flag the backup."""
+        hook = Neo4jCommunityBackupStrategy().get_hooks(
+            namespace="test-ns",
+            component_name="graph",
+            config={"kind": "neo4j-community"},
+        )[0]
+        assert hook.pre[0].on_error == "Fail"  # type: ignore[index]
+        assert hook.post[0].on_error == "Fail"  # type: ignore[index]
+
+    def test_get_hooks_custom_container(self) -> None:
+        hooks = Neo4jCommunityBackupStrategy().get_hooks(
+            namespace="test-ns",
+            component_name="graph",
+            config={"kind": "neo4j-community", "container": "my-neo4j"},
+        )
+        assert hooks[0].pre[0].container == "my-neo4j"  # type: ignore[index]
+        assert hooks[0].post[0].container == "my-neo4j"  # type: ignore[index]
+
+    def test_get_restore_hooks_returns_empty(self) -> None:
+        """Velero restores the data volume before Neo4j starts; no hook is needed."""
+        hooks = Neo4jCommunityBackupStrategy().get_restore_hooks(
+            namespace="test-ns",
+            component_name="graph",
+            config={"kind": "neo4j-community"},
+        )
+        assert hooks == []
+
+    def test_get_backup_volumes_default(self) -> None:
+        volumes = Neo4jCommunityBackupStrategy().get_backup_volumes(
+            component_name="graph",
+            config={"kind": "neo4j-community"},
+        )
+        assert volumes == ["data"]
+
+    def test_get_backup_volumes_custom(self) -> None:
+        volumes = Neo4jCommunityBackupStrategy().get_backup_volumes(
+            component_name="graph",
+            config={"kind": "neo4j-community", "volume": "neo4j-data"},
+        )
+        assert volumes == ["neo4j-data"]
+
+
+def _process_state(pid: int) -> str:
+    for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+        if line.startswith("State:"):
+            return line.split()[1]
+    raise AssertionError(f"no State line for pid {pid}")
+
+
+def _wait_for_state(pid: int, expected: str, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while _process_state(pid) != expected:
+        assert time.monotonic() < deadline, f"pid {pid} never reached state {expected}"
+        time.sleep(0.05)
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="reads process state from /proc"
+)
+class TestNeo4jCommunityPauseScripts:
+    """Run the rendered hook scripts against a stand-in for the Neo4j JVM."""
+
+    @pytest.fixture
+    def neo4j_process(self, tmp_path: Path) -> Iterator[tuple[int, Path]]:
+        proc = subprocess.Popen(["sleep", "300"])
+        pid_file = tmp_path / "neo4j.pid"
+        pid_file.write_text(f"{proc.pid}\n")
+        try:
+            yield proc.pid, pid_file
+        finally:
+            proc.kill()
+            proc.wait()
+
+    def _scripts(
+        self, pid_file: Path, watchdog_dir: Path, max_pause_seconds: int
+    ) -> tuple[str, str]:
+        hook = neo4j_community_backup_hooks(
+            namespace="test-ns",
+            component_name="graph",
+            pid_file=str(pid_file),
+            watchdog_dir=str(watchdog_dir),
+            max_pause_seconds=max_pause_seconds,
+        )
+        return hook.pre[0].command[-1], hook.post[0].command[-1]  # type: ignore[index]
+
+    def test_pause_then_resume(
+        self, neo4j_process: tuple[int, Path], tmp_path: Path
+    ) -> None:
+        pid, pid_file = neo4j_process
+        pause, resume = self._scripts(pid_file, tmp_path, max_pause_seconds=300)
+
+        subprocess.run(["/bin/sh", "-c", pause], check=True, timeout=10)
+        _wait_for_state(pid, "T")
+
+        result = subprocess.run(
+            ["/bin/sh", "-c", resume], capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 0, result.stderr
+        _wait_for_state(pid, "S")
+        assert not (tmp_path / "styrmin-neo4j-watchdog.pid").exists()
+
+    def test_watchdog_resumes_and_resume_flags_the_backup(
+        self, neo4j_process: tuple[int, Path], tmp_path: Path
+    ) -> None:
+        """Neo4j never stays paused, and a backup it outlived is reported as failed."""
+        pid, pid_file = neo4j_process
+        pause, resume = self._scripts(pid_file, tmp_path, max_pause_seconds=1)
+
+        subprocess.run(["/bin/sh", "-c", pause], check=True, timeout=10)
+        _wait_for_state(pid, "T")
+        _wait_for_state(pid, "S")
+
+        result = subprocess.run(
+            ["/bin/sh", "-c", resume], capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 1
+        assert "not consistent" in result.stderr
+
+    def test_next_pause_disarms_an_earlier_watchdog(
+        self, neo4j_process: tuple[int, Path], tmp_path: Path
+    ) -> None:
+        """A watchdog left by an earlier backup must not resume Neo4j mid-backup."""
+        pid, pid_file = neo4j_process
+        stale_pause, _ = self._scripts(pid_file, tmp_path, max_pause_seconds=2)
+        pause, resume = self._scripts(pid_file, tmp_path, max_pause_seconds=300)
+
+        subprocess.run(["/bin/sh", "-c", stale_pause], check=True, timeout=10)
+        subprocess.run(["/bin/sh", "-c", pause], check=True, timeout=10)
+        time.sleep(3)
+        assert _process_state(pid) == "T"
+
+        result = subprocess.run(
+            ["/bin/sh", "-c", resume], capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 0, result.stderr
+        _wait_for_state(pid, "S")
 
 
 class TestMariadbBackupStrategy:

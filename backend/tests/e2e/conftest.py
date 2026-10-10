@@ -951,9 +951,10 @@ async def csi_hostpath_storage(vcluster: dict) -> str:
     provisions PVs of type `csi`, which Velero FSB backs up normally — so
     disk-backed components can actually be captured and restored.
 
-    We point the cluster's ``standard_storage`` at this class so that
-    components backed up with ``kind: disk`` (e.g. the Infrahub server's
-    object store) land on FSB-capable storage.
+    We point the cluster's ``standard_storage`` and ``fast_storage`` at this
+    class so that components whose volumes Velero copies (``kind: disk``, e.g.
+    the Infrahub server's object store, and ``kind: neo4j-community``, the
+    Infrahub database) land on FSB-capable storage.
     """
     kubeconfig_path = vcluster["kubeconfig_path"]
     manifest = FIXTURES_DIR / "csi-hostpath" / "csi-hostpath-driver.yaml"
@@ -1018,12 +1019,13 @@ async def styrmin_resources(
                 "service": {"type": "LoadBalancer"},
             },
             "runtime_class": "default",
-            # `standard_storage` uses the CSI hostpath driver (not local-path)
-            # so PVCs bind to CSI-backed PVs that Velero file-system backup can
-            # capture — required for `kind: disk` backups (e.g. the Infrahub
-            # server object store). See the `csi_hostpath_storage` fixture.
+            # Both classes use the CSI hostpath driver (not local-path) so PVCs
+            # bind to CSI-backed PVs that Velero file-system backup can capture
+            # — required for `kind: disk` (the Infrahub server object store) and
+            # `kind: neo4j-community` (the Infrahub database on fast storage).
+            # See the `csi_hostpath_storage` fixture.
             "standard_storage": {"storage_class": csi_hostpath_storage},
-            "fast_storage": {"storage_class": "local-path"},
+            "fast_storage": {"storage_class": csi_hostpath_storage},
             "external_dns_endpoints_type": "NodeExternalIP",
         },
     )
@@ -1252,7 +1254,18 @@ async def deployed_infrahub_app(
     environment_id = load_infrahub["environment_id"]
 
     deployment = await driver.create_deployment(
-        driver="infrahub", version="1.6.0", environment_id=environment_id
+        driver="infrahub",
+        version="1.6.0",
+        environment_id=environment_id,
+        # The enterprise stack shares this environment and keeps `task-manager`
+        # (test_infrahub_services.py asserts on it); service names are unique
+        # per environment.
+        service_name_overrides=[
+            {
+                "driverServiceName": "task-manager",
+                "overrideName": "task-manager-community",
+            }
+        ],
     )
     # Infrahub has many components — wait longer than the default.
     deployment = await driver.wait_for_deployment_running(

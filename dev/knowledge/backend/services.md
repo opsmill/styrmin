@@ -49,7 +49,7 @@ styrmin_backend/services/
 │   ├── clone.py                   # Environment clone records and their derived status (ADR-056)
 │   ├── ttl.py                     # Backup retention TTL resolution
 │   ├── scheduler.py               # Backup schedule management
-│   └── strategies/                # disk / postgres / mariadb / mongodb / neo4j / action
+│   └── strategies/                # disk / postgres / mariadb / mongodb / neo4j / neo4j-community / action
 │
 ├── helm/                          # Helm rendering helpers
 │   ├── renderer.py                # render_helm_repository_spec / render_helm_chart_spec

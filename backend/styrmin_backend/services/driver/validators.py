@@ -174,6 +174,7 @@ class BackupConfigValidator(Validator):
                 | BackupKind.MONGODB
                 | BackupKind.POSTGRES
                 | BackupKind.NEO4J
+                | BackupKind.NEO4J_COMMUNITY
             ):
                 # Database kinds have no extra cross-referencing requirements
                 pass
