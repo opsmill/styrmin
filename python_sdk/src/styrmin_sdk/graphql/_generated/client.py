@@ -44,6 +44,7 @@ from .get_deployment_component_env_vars_full import GetDeploymentComponentEnvVar
 from .get_deployment_component_image_overrides_full import (
     GetDeploymentComponentImageOverridesFull,
 )
+from .get_deployment_override_applicability import GetDeploymentOverrideApplicability
 from .get_deployment_pod_statuses import GetDeploymentPodStatuses
 from .get_deployment_resolved_scheduling import GetDeploymentResolvedScheduling
 from .get_deployment_services import GetDeploymentServices
@@ -105,6 +106,7 @@ from .update_backup_schedule import UpdateBackupSchedule
 from .update_backup_storage_location import UpdateBackupStorageLocation
 from .update_deployment import UpdateDeployment
 from .update_deployment_version import UpdateDeploymentVersion
+from .update_deployment_version_with_input import UpdateDeploymentVersionWithInput
 from .update_environment import UpdateEnvironment
 from .update_group import UpdateGroup
 from .update_user import UpdateUser
@@ -1146,6 +1148,34 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return GetDeploymentComponentImageOverridesFull.model_validate(data)
+
+    async def get_deployment_override_applicability(
+        self, deployment_id: UUID, **kwargs: Any
+    ) -> GetDeploymentOverrideApplicability:
+        query = gql("""
+            query GetDeploymentOverrideApplicability($deploymentId: UUID!) {
+              deployment(deploymentId: $deploymentId) {
+                id
+                componentEnvVars {
+                  component
+                  isApplicable
+                }
+                componentImageOverrides {
+                  component
+                  isApplicable
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"deploymentId": deployment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetDeploymentOverrideApplicability",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetDeploymentOverrideApplicability.model_validate(data)
 
     async def get_deployment_pod_statuses(
         self, deployment_id: UUID, **kwargs: Any
@@ -2734,6 +2764,48 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return UpdateDeployment.model_validate(data)
 
+    async def update_deployment_version_with_input(
+        self,
+        deployment_id: UUID,
+        version: str,
+        input: UpdateDeploymentInput,
+        parameters: Union[Optional[Any], UnsetType] = UNSET,
+        driver_version_id: Union[Optional[UUID], UnsetType] = UNSET,
+        **kwargs: Any,
+    ) -> UpdateDeploymentVersionWithInput:
+        query = gql("""
+            mutation UpdateDeploymentVersionWithInput($deploymentId: UUID!, $version: String!, $parameters: JSON, $driverVersionId: UUID, $input: UpdateDeploymentInput!) {
+              updateDeploymentVersion(
+                deploymentId: $deploymentId
+                version: $version
+                parameters: $parameters
+                driverVersionId: $driverVersionId
+                input: $input
+              ) {
+                id
+                status
+                type
+                message
+                deploymentId
+              }
+            }
+            """)
+        variables: dict[str, object] = {
+            "deploymentId": deployment_id,
+            "version": version,
+            "parameters": parameters,
+            "driverVersionId": driver_version_id,
+            "input": input,
+        }
+        response = await self.execute(
+            query=query,
+            operation_name="UpdateDeploymentVersionWithInput",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return UpdateDeploymentVersionWithInput.model_validate(data)
+
     async def update_environment(
         self, environment_id: UUID, input: UpdateEnvironmentInput, **kwargs: Any
     ) -> UpdateEnvironment:
@@ -2862,17 +2934,15 @@ class Client(AsyncBaseClient):
         version: str,
         parameters: Union[Optional[Any], UnsetType] = UNSET,
         driver_version_id: Union[Optional[UUID], UnsetType] = UNSET,
-        input: Union[Optional[UpdateDeploymentInput], UnsetType] = UNSET,
         **kwargs: Any,
     ) -> UpdateDeploymentVersion:
         query = gql("""
-            mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!, $parameters: JSON, $driverVersionId: UUID, $input: UpdateDeploymentInput) {
+            mutation UpdateDeploymentVersion($deploymentId: UUID!, $version: String!, $parameters: JSON, $driverVersionId: UUID) {
               updateDeploymentVersion(
                 deploymentId: $deploymentId
                 version: $version
                 parameters: $parameters
                 driverVersionId: $driverVersionId
-                input: $input
               ) {
                 id
                 status
@@ -2887,7 +2957,6 @@ class Client(AsyncBaseClient):
             "version": version,
             "parameters": parameters,
             "driverVersionId": driver_version_id,
-            "input": input,
         }
         response = await self.execute(
             query=query,

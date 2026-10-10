@@ -106,10 +106,15 @@ class ApplyOutcome(BaseModel):
     deployment_id: UUID | None = None
     task_id: UUID | None = None
     failure_reason: str | None = None
+    # The server's error code (`extensions.code`) when the server rejected the manifest.
+    error_code: str | None = None
     # Set only when `apply` changes an existing deployment's application version.
     target_version: str | None = None
     # Components whose effective image override has no `{{ app.version }}` token (FR-008).
     pinned_image_components: list[str] = Field(default_factory=list)
+    # Components whose env vars or image override the manifest sets but the bound driver
+    # version cannot apply: they are stored, not injected.
+    inapplicable_components: list[str] = Field(default_factory=list)
 
 
 class ApplyEvent(BaseModel):

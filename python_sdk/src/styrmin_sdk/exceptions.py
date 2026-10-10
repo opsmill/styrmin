@@ -42,6 +42,10 @@ class OperationFailedError(StyrminAPIError):
     """A mutation operation failed."""
 
 
+class IncompatibleServerError(OperationFailedError):
+    """The Styrmin server does not accept an operation this SDK sends; upgrade the server."""
+
+
 class StyrminAuthenticationError(StyrminAPIError):
     """Authentication failed (UNAUTHENTICATED or INVALID_CREDENTIALS)."""
 

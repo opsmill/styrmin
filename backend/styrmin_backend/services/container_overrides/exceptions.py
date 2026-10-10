@@ -152,7 +152,7 @@ class UnknownComponentContainerOverrideError(ServiceError):
 
     Raised at the GraphQL mutation boundary (FR-004), before any reconcile is
     planned. The error metadata includes the sorted list of component names
-    declared by the deployment's current driver so the operator can fix the
+    declared by the checked driver version so the operator can fix the
     typo without a round-trip. Independent of the env-vars
     :class:`UnknownComponentEnvVarError` — a block carrying only
     ``command``/``args`` (no ``env_vars``) is rejected here.
@@ -166,6 +166,7 @@ class UnknownComponentContainerOverrideError(ServiceError):
         message: str = "",
         component_name: str = "",
         known_components: list[str] | None = None,
+        checked_against: str = "",
     ) -> None:
         self.component_name = component_name
         self.known_components = known_components or []
@@ -173,7 +174,7 @@ class UnknownComponentContainerOverrideError(ServiceError):
             message
             or (
                 f"Container override targets component {component_name!r} "
-                "which is not declared by the deployment's current driver. "
+                f"which is not declared by {checked_against or 'the driver version'}. "
                 f"Declared components: {_format_known_components(self.known_components)}."
             )
         )

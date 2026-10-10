@@ -221,8 +221,19 @@ See [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md) Â
 **One mutation per existing deployment.** `_apply_update` sends `updateDeploymentVersion` with the
 manifest's config and parameters as `input`, also when the version is unchanged, so the backend
 validates the config against the driver version the manifest resolves to and one task reconciles
-it. A `null` result is `unchanged`. See
-[ADR-061](../../adr/0061-apply-writes-config-with-the-version.md).
+it. A `null` result is `unchanged`. A rejected call is `failed` with `ApplyOutcome.error_code`, and
+the CLI prints the code in brackets at the end of the `failed` line. After an `updated` outcome
+whose manifest sets component env vars or images, `_apply_update` reads `isApplicable` back
+(`get_deployment_override_applicability.graphql`) and lists the components it cannot apply in
+`ApplyOutcome.inapplicable_components`; the CLI warns about them on stderr, like the pinned-image
+warning, and a failed read lists nothing. See
+[ADR-065](../../adr/0065-apply-writes-config-with-the-version.md).
+
+**Server compatibility.** `update_version()` sends `input` in its own operation
+(`update_deployment_version_with_input.graphql`), so a call without `input`, such as
+`deployments update-version` without `--config`, still works with a server that predates #388.
+With `input`, such a server answers `Unknown argument 'input'`, and the SDK raises
+`IncompatibleServerError`, which says to upgrade the server.
 
 **Clearing config.** The `input` replaces the stored config with the submitted one, as
 `updateDeployment` does, except when the submitted config is empty: the resolver then passes `None`

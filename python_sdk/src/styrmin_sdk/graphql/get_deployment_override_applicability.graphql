@@ -1,0 +1,13 @@
+query GetDeploymentOverrideApplicability($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        componentEnvVars {
+            component
+            isApplicable
+        }
+        componentImageOverrides {
+            component
+            isApplicable
+        }
+    }
+}

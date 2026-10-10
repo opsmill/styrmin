@@ -18,14 +18,21 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 
+import kr8s.asyncio
 import pytest
 import yaml
+from dulwich import porcelain
+from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
+from styrmin_sdk._queries import load_query
 from styrmin_sdk.exceptions import StyrminError
 from styrmin_sdk.models.deployment_manifest import ResolvedManifest
 
+from tests.e2e.conftest import _portforward
 from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.helpers.workloads import _wait_for_pod_template
 
 # Own shard: every test here is api_only and deploys fresh simple-apps, which
 # made it the bulk of `general` (see `dev/guides/e2e-parallelism.md`).
@@ -287,8 +294,7 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
 
     Baseline apply, then:
       - a config-only change → ``updated`` + exactly one new reconcile task;
-      - a version change that also adds component env vars → ``updated`` +
-        exactly one further upgrade task carrying both (#388).
+      - a version-only change → ``updated`` + exactly one further upgrade task.
 
     Task count is read via the deployment timeline (one entry per ``Task``),
     without the tasks that the upgrade hook starts; each real change must add
@@ -346,19 +352,13 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
         f"went {baseline_task_count} -> {after_config_task_count}"
     )
 
-    # --- Version + component config change → exactly 1 upgrade -----------
+    # --- Version-only change → exactly 1 upgrade ---------------------------
     manifest_doc["spec"]["version"] = "0.2.0"
-    manifest_doc["spec"]["config"] = {
-        "ip_whitelist": ["10.0.0.0/8"],
-        "components": [
-            {"name": "server", "env_vars": [{"name": "LOG_LEVEL", "value": "debug"}]}
-        ],
-    }
     version_outcome = await client.deployments.apply(
         _resolve_manifest_from_doc(manifest_doc, manifest_path), wait=True
     )
     assert version_outcome.action == "updated", (
-        f"a version and config change must be an update, got "
+        f"a version-only change must be an update, got "
         f"action={version_outcome.action!r} (reason={version_outcome.failure_reason!r})"
     )
     assert version_outcome.task_id is not None, "a version upgrade must dispatch a task"
@@ -375,14 +375,139 @@ async def test_apply_partial_change_dispatches_exactly_one_reconcile(
 
     after_version_task_count = await _dispatched_task_count(client, deployment_id)
     assert after_version_task_count == after_config_task_count + 1, (
-        f"a version and config change must dispatch exactly one upgrade; task count "
+        f"a version-only change must dispatch exactly one upgrade; task count "
         f"went {after_config_task_count} -> {after_version_task_count}"
     )
-    upgraded = await client.deployments.get(deployment_id)
-    assert upgraded.application_version == "0.2.0"
-    assert upgraded.config["components"] == {
-        "server": {"env_vars": {"LOG_LEVEL": "debug"}}
-    }, f"component env vars were not written with the version: {upgraded.config!r}"
+
+
+async def _publish_late_container_v2(*, vcluster: dict, tmp_path: Path) -> str:
+    """Push the next ``late-container`` driver version, which gives ``server`` its
+    component container and supports 0.2, to a branch; return the branch."""
+    branch = "server-container"
+    repo_dir = tmp_path / "late-container-v2"
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
+    git_svc = await AsyncService.get("git-server", namespace="default", api=kr8s_api)
+    async with _portforward(git_svc, remote_port=9418) as local_port:
+        local_url = f"git://localhost:{local_port}/late-container.git"
+        await asyncio.to_thread(porcelain.clone, local_url, str(repo_dir))
+        spec_path = repo_dir / "driver.styrmin.yml"
+        spec = yaml.safe_load(spec_path.read_text())
+        spec["spec"]["version"] = "2"
+        spec["spec"]["supported_versions"] = ">=0.2,<1.0"
+        spec["spec"]["components"]["server"]["container"] = "simple-app"
+        spec_path.write_text(yaml.dump(spec, default_flow_style=False))
+        await asyncio.to_thread(
+            porcelain.add, str(repo_dir), paths=["driver.styrmin.yml"]
+        )
+        await asyncio.to_thread(
+            porcelain.commit,
+            str(repo_dir),
+            message=b"declare the server component container",
+            author=b"test <test@test.com>",
+            committer=b"test <test@test.com>",
+        )
+        await asyncio.to_thread(
+            porcelain.push,
+            str(repo_dir),
+            remote_location=local_url,
+            refspecs=[f"HEAD:refs/heads/{branch}".encode()],
+        )
+    return branch
+
+
+def _server_env(workload: Any) -> dict[str, str | None]:
+    for container in workload.spec.template.spec.containers or []:
+        if container.name == "simple-app":
+            return {entry.name: entry.value for entry in container.env or []}
+    return {}
+
+
+@pytest.mark.api_only(
+    reason="apply has no UI flow; api/sdk and ui variants would re-run identical SDK calls",
+)
+async def test_apply_sets_env_vars_with_the_version_that_adds_their_container(
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    apply_environment_id: str,
+    styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL loaded
+    simple_app_image: str,  # noqa: ARG001 — the chart runs the 0.1.0 image
+    git_server: dict[str, str],
+    vcluster: dict,
+    tmp_path: Path,
+) -> None:
+    """#388: one apply moves a deployment to the driver version that gives ``server``
+    a component container and sets env vars on ``server``.
+
+    ``late-container`` version 1 (application 0.1) declares no ``server`` container,
+    version 2 (application 0.2) declares it. Checked against version 1, as the
+    config write was before #388, the env vars fail with
+    ``COMPONENT_CONTAINER_NOT_DECLARED``. Checked against version 2, they are
+    accepted, written with the version in one task, applicable, and injected.
+    """
+    driver, client = session_scenario_driver
+    await driver.load_driver_version(git_url=git_server["late-container"], ref="master")
+    branch = await _publish_late_container_v2(vcluster=vcluster, tmp_path=tmp_path)
+    v2 = await driver.load_driver_version(
+        git_url=git_server["late-container"], ref=branch
+    )
+
+    environment = await client.environments.get(environment_id=apply_environment_id)
+    manifest_doc = {
+        "apiVersion": "styrmin/v1",
+        "kind": "Deployment",
+        "metadata": {"name": f"apply-late-container-{tmp_path.name[-8:]}"},
+        "spec": {
+            "driver": "late-container",
+            "version": "0.1.0",
+            "environment": environment.name,
+            "config": {},
+            "parameters": {},
+        },
+    }
+    manifest_path = tmp_path / "deployment.yaml"
+    created = await client.deployments.apply(
+        _resolve_manifest_from_doc(manifest_doc, manifest_path), wait=True
+    )
+    assert created.action == "created", created
+    assert created.deployment_id is not None
+    deployment_id = str(created.deployment_id)
+    tasks_before = await _dispatched_task_count(client, deployment_id)
+
+    manifest_doc["spec"]["version"] = "0.2.0"
+    manifest_doc["spec"]["config"] = {
+        "components": [
+            {"name": "server", "env_vars": [{"name": "LOG_LEVEL", "value": "debug"}]}
+        ]
+    }
+    updated = await client.deployments.apply(
+        _resolve_manifest_from_doc(manifest_doc, manifest_path), wait=True
+    )
+
+    assert updated.action == "updated", (
+        f"the env vars must be checked against driver version 2, got "
+        f"action={updated.action!r} reason={updated.failure_reason!r} "
+        f"code={updated.error_code!r}"
+    )
+    assert updated.inapplicable_components == []
+    assert await _dispatched_task_count(client, deployment_id) == tasks_before + 1
+    deployment = await client.deployments.get(deployment_id)
+    assert deployment.application_version == "0.2.0"
+    assert str(deployment.application_driver_version_id) == v2.id
+    raw = await client._transport.execute(
+        load_query("get_deployment_component_env_vars_full"),
+        {"deploymentId": deployment_id},
+    )
+    assert "errors" not in raw, raw
+    rows = {
+        row["component"]: row for row in raw["data"]["deployment"]["componentEnvVars"]
+    }
+    assert rows["server"]["isApplicable"] is True, rows
+    await _wait_for_pod_template(
+        vcluster,
+        namespace=f"styrmin-{deployment_id}",
+        label_selector="app.kubernetes.io/name=simple-app",
+        predicate=lambda workload: _server_env(workload).get("LOG_LEVEL") == "debug",
+        description="LOG_LEVEL=debug on the simple-app container",
+    )
 
 
 @pytest.mark.api_only(

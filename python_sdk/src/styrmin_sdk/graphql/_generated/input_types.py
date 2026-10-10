@@ -54,7 +54,7 @@ class ComponentConfigInput(BaseModel):
     """Per-component override block for a deployment: env vars, the container ``command``/``args``, and the component container's ``image``. Future per-component knobs (e.g. replicas) slot into this same input without a schema renumber."""
 
     name: str
-    "The component name as declared by the deployment's currently pinned application-driver version. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. Env vars on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``)."
+    "The component name as declared by the application-driver version the deployment is bound to after the write: the pinned one on updateDeployment, the target one on updateDeploymentVersion. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. Env vars on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``)."
     env_vars: Optional[list["EnvVarInput"]] = Field(alias="envVars", default=None)
     "Environment-variable overrides scoped to this component. Submitted as a list of ``{name, value}`` rows; duplicates within the list raise ``DUPLICATE_ENV_VAR_NAME`` with the component scope in the payload. Adding or changing a value on a component that declares no component container raises ``COMPONENT_CONTAINER_NOT_DECLARED``; removing values or re-submitting the stored ones unchanged is accepted."
     command: Optional[list[str]] = None

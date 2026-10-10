@@ -99,6 +99,7 @@ class UnknownComponentImageOverrideError(ServiceError):
         message: str = "",
         component_name: str = "",
         known_components: list[str] | None = None,
+        checked_against: str = "",
     ) -> None:
         self.component_name = component_name
         self.known_components = sorted(known_components or [])
@@ -106,7 +107,7 @@ class UnknownComponentImageOverrideError(ServiceError):
             message
             or (
                 f"Image override targets component {component_name!r} "
-                "which is not declared by the deployment's current driver. "
+                f"which is not declared by {checked_against or 'the driver version'}. "
                 f"Declared components: {_format_known_components(self.known_components)}."
             )
         )

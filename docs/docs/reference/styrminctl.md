@@ -317,7 +317,10 @@ Each deployment in a run is reported with its outcome:
   dispatched.
 - `unchanged <name>` — the resolved desired state already matched the
   live state; nothing was done.
-- `failed <name>` — the apply errored for that deployment.
+- `failed <name>: <reason>` — the apply errored for that deployment. When
+  the server rejected the manifest, the line ends with the server's error
+  code, for example `[COMPONENT_CONTAINER_NOT_DECLARED]`, and nothing on
+  the deployment changed.
 
 A run ends with a summary line counting each outcome, for example:
 
@@ -327,6 +330,13 @@ A run ends with a summary line counting each outcome, for example:
 
 A run consisting solely of no-ops still exits with a success code, so
 `apply` is safe to run repeatedly in a declarative loop.
+
+For an existing deployment, `apply` sends the manifest's config,
+parameters and version in one request. This needs a Styrmin server with
+[#388](https://github.com/opsmill/styrmin/issues/388): against an older
+server, every update fails with a message that says to upgrade the
+server. Upgrade the server before or together with `styrminctl` and the
+SDK.
 
 :::note Re-applying a failed deployment
 
@@ -370,6 +380,20 @@ deployment take longer than about 5 minutes, raise `--max-wait`, or the
 wait can end with `wait timeout` instead of the failed step. Read the steps
 with `styrminctl tasks get <task-id>`; `styrminctl tasks list` shows the
 type and deployment of each task.
+
+### `deployments update-version`
+
+`styrminctl deployments update-version <deployment-id> <version>` moves a
+deployment to an application version. The deployment is bound to the
+newest loaded driver version that supports that version, or to
+`--driver-version-id`.
+
+`--config` takes a JSON `UpdateDeploymentInput` payload, inline or as
+`@<file>`, the same payload as `deployments update`. It is written with
+the version and checked against the target driver version, and one task
+reconciles both. `--config` needs a Styrmin server with
+[#388](https://github.com/opsmill/styrmin/issues/388);
+`update-version` without `--config` works with older servers too.
 
 ### `tasks get` — a task's steps
 
@@ -442,11 +466,30 @@ a component the driver version does not declare fails with
 
 Adding or changing per-component `env_vars` or `image` on a component whose
 driver version declares no component container fails with
-`COMPONENT_CONTAINER_NOT_DECLARED`. `apply` writes `spec.config` together with
-the version change, so these checks run against the driver version and
-application version the manifest declares, whatever version the deployment was
-on before. A rejected apply changes nothing on the deployment. See
-[Migrating env var wiring](../drivers/migrating-env-vars.md).
+`COMPONENT_CONTAINER_NOT_DECLARED`. A manifest has no driver version field:
+`apply` writes `spec.config` together with the version change, and runs these
+checks against `spec.version` and the newest loaded driver version that
+supports it (see
+[Selecting a driver version](../drivers/loading-drivers.md#selecting-a-driver-version-when-deploying-or-upgrading)),
+whatever versions the deployment was on before. The error names the driver
+version and application version it checked. A rejected apply changes nothing on
+the deployment.
+
+Component config on a component that this driver version does not declare is
+rejected even when it is unchanged. When a driver version removes or renames a
+component, remove its block from the manifest in the same change that moves
+`spec.version`. Unchanged `env_vars` or `image` on a component that the driver
+version declares without a component container are accepted, stored and not
+applied, and `apply` prints a warning on stderr:
+
+```text
+updated my-app
+warning: my-app: env vars and image overrides on worker are stored but not applied (no component container in the driver version)
+0 created, 1 updated, 0 unchanged, 0 failed
+```
+
+The SDK returns these components as `ApplyOutcome.inapplicable_components`.
+See [Migrating env var wiring](../drivers/migrating-env-vars.md).
 
 When a manifest changes an existing deployment's application version,
 `styrminctl deployments apply` prints a warning on stderr for each
@@ -467,13 +510,17 @@ components as `ApplyOutcome.pinned_image_components`, with
 `ApplyOutcome.target_version` set on an `updated` outcome that changes the
 version.
 
-:::note Image override and version change in one apply
+:::note Overrides in the apply that changes the version
 
-`apply` writes `spec.config` together with the version, but the driver's
-upgrade action can read the component's workload before the new override
-reaches it. Its first Job can then run with the previous image repository.
-Apply the override on its own first, then change the version in a second
-apply.
+Every component override (`env_vars`, `command`, `args`, `image`) is checked
+against the target driver version, so all of them can go in the apply that
+changes `spec.version`. The driver's upgrade action can, however, read the
+component's workload before the new values render, so its first Job can run
+with the previous image or env vars. When the upgrade action must see a new
+override, set it in an earlier apply that keeps `spec.version`. That works only
+when the current driver version declares the component and its component
+container; otherwise the override can only go with the version change, and
+[#431](https://github.com/opsmill/styrmin/issues/431) tracks the problem.
 
 :::
 

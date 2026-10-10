@@ -222,7 +222,7 @@ Per-component override block for a deployment: env vars, the container ``command
 """
 input ComponentConfigInput {
   """
-  The component name as declared by the deployment's currently pinned application-driver version. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. Env vars on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``).
+  The component name as declared by the application-driver version the deployment is bound to after the write: the pinned one on updateDeployment, the target one on updateDeploymentVersion. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. Env vars on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``).
   """
   name: String!
 
@@ -973,6 +973,10 @@ type Mutation {
   updateDeploymentVersion(
     deploymentId: UUID!
     version: String!
+
+    """
+    Parameter values as a JSON map that replace the stored parameters. To change only some values, pass them in input.parameters instead: those merge on top of this map, or on top of the stored parameters when this argument is null.
+    """
     parameters: JSON = null
     driverVersionId: UUID = null
 
@@ -982,7 +986,7 @@ type Mutation {
     startedByStepId: UUID = null
 
     """
-    Config, name, parameters and service name overrides written together with the version, with the semantics of updateDeployment. They are validated against the target driver version and application version, and one task reconciles them. parameters merge on top of the parameters argument when both are set.
+    Config, name, parameters and service name overrides written together with the version, with the semantics of updateDeployment. They are validated against the target driver version and application version, and one task reconciles them. input.parameters merge on top of the parameters argument, or on top of the stored parameters when that argument is null.
     """
     input: UpdateDeploymentInput = null
   ): Task @requiresRole @startedByStepRequiresActionsServiceAccount

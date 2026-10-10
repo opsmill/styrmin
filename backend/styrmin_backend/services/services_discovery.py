@@ -173,6 +173,34 @@ async def reconcile_services_on_upgrade(
     return created
 
 
+async def resolve_service_names(
+    deployment_id: UUID,
+    environment_id: UUID,
+    service_definitions: list[ServiceDefinition],
+    uow: UnitOfWork,
+    service_name_overrides: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Run the checks of :func:`reconcile_services_on_upgrade` without writing anything.
+
+    Returns the resolved name of each driver service.
+    """
+    overrides = service_name_overrides or {}
+    _validate_override_keys(overrides, service_definitions)
+    resolved: dict[str, str] = {}
+    for svc_def in service_definitions:
+        resolved_name = overrides.get(svc_def.name, svc_def.name)
+        if svc_def.name in overrides:
+            validate_dns_label(resolved_name)
+        await _check_name_uniqueness(
+            resolved_name=resolved_name,
+            environment_id=environment_id,
+            exclude_deployment_id=deployment_id,
+            uow=uow,
+        )
+        resolved[svc_def.name] = resolved_name
+    return resolved
+
+
 async def delete_services_for_deployment(
     deployment_id: UUID,
     uow: UnitOfWork,

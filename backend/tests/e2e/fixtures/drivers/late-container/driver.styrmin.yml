@@ -1,0 +1,40 @@
+---
+# E2E test driver for #388 (backend/tests/e2e/test_deployments_apply.py): the
+# simple-app chart, with no component container on `server`. The test pushes
+# the next driver version, which gives `server` its container, to a branch.
+# The git-server fixture points `helm.main.location` at the in-cluster chart
+# server.
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: late-container
+spec:
+  version: "1"
+  supported_versions: ">=0.1,<0.2"
+  info:
+    description: Test driver whose next version declares the server container
+    authors: [opsmill]
+    license: Apache-2.0
+  helm:
+    main:
+      location: simple-app
+      version: 0.1.0
+
+  components:
+    server:
+      identifier:
+        label:
+          app.kubernetes.io/name: simple-app
+
+    database:
+      container: postgresql
+      identifier:
+        label:
+          app.kubernetes.io/name: postgresql
+
+  services:
+    - name: simple-app
+      kind: http
+      scope: internal
+      port: 8000
+      component: server

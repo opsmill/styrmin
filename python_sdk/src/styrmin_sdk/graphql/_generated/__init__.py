@@ -133,6 +133,12 @@ from .get_deployment_component_image_overrides_full import (
     GetDeploymentComponentImageOverridesFullDeployment,
     GetDeploymentComponentImageOverridesFullDeploymentComponentImageOverrides,
 )
+from .get_deployment_override_applicability import (
+    GetDeploymentOverrideApplicability,
+    GetDeploymentOverrideApplicabilityDeployment,
+    GetDeploymentOverrideApplicabilityDeploymentComponentEnvVars,
+    GetDeploymentOverrideApplicabilityDeploymentComponentImageOverrides,
+)
 from .get_deployment_pod_statuses import (
     GetDeploymentPodStatuses,
     GetDeploymentPodStatusesDeployment,
@@ -374,6 +380,10 @@ from .update_deployment_version import (
     UpdateDeploymentVersion,
     UpdateDeploymentVersionUpdateDeploymentVersion,
 )
+from .update_deployment_version_with_input import (
+    UpdateDeploymentVersionWithInput,
+    UpdateDeploymentVersionWithInputUpdateDeploymentVersion,
+)
 from .update_environment import (
     UpdateEnvironment,
     UpdateEnvironmentUpdateEnvironment,
@@ -492,6 +502,10 @@ __all__ = [
     "GetDeploymentDeploymentComponents",
     "GetDeploymentDeploymentCreatedBy",
     "GetDeploymentDeploymentDeployedServices",
+    "GetDeploymentOverrideApplicability",
+    "GetDeploymentOverrideApplicabilityDeployment",
+    "GetDeploymentOverrideApplicabilityDeploymentComponentEnvVars",
+    "GetDeploymentOverrideApplicabilityDeploymentComponentImageOverrides",
     "GetDeploymentPodStatuses",
     "GetDeploymentPodStatusesDeployment",
     "GetDeploymentPodStatusesDeploymentPodStatuses",
@@ -682,6 +696,8 @@ __all__ = [
     "UpdateDeploymentUpdateDeployment",
     "UpdateDeploymentVersion",
     "UpdateDeploymentVersionUpdateDeploymentVersion",
+    "UpdateDeploymentVersionWithInput",
+    "UpdateDeploymentVersionWithInputUpdateDeploymentVersion",
     "UpdateEnvironment",
     "UpdateEnvironmentInput",
     "UpdateEnvironmentUpdateEnvironment",

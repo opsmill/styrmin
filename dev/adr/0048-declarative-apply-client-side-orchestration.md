@@ -1,6 +1,6 @@
 # ADR-048: Declarative apply is orchestrated client-side in the SDK
 
-**Status**: Accepted — narrowed by [ADR-061](0061-apply-writes-config-with-the-version.md)
+**Status**: Accepted — narrowed by [ADR-065](0065-apply-writes-config-with-the-version.md)
 **Date**: 2026-08-04
 **Source**: specs/archive/009-deployments-apply/research.md (D1, D8, and the D2 race follow-up)
 **Related**: [ADR-049](0049-styrmin-v1-manifest-contract.md) (the manifest contract this
@@ -9,7 +9,7 @@ that makes the upsert possible), [ADR-054](0054-backend-authoritative-noop-detec
 (what makes a re-apply idempotent), [ADR-037](0037-sdk-typed-bindings-outer-wrapper-and-facade.md)
 (the SDK layering this sits on).
 
-> **Narrowed by [ADR-061](0061-apply-writes-config-with-the-version.md)** (2026-10-08, #388).
+> **Narrowed by [ADR-065](0065-apply-writes-config-with-the-version.md)** (2026-10-08, #388).
 > For an existing deployment, `apply` sends one `updateDeploymentVersion` with the config and
 > parameters as `input` instead of `updateDeployment` followed by `updateDeploymentVersion`.
 > The config is validated against the target driver version, one task reconciles everything,

@@ -179,7 +179,11 @@ including ones that do not apply; the UI lists only applicable ones.
   config first, but the action may read the workload before the override is rendered, so its first
   Job can use the previous image repository. Env vars have the same race. Setting the override in
   a separate apply avoids it. The config write is also validated against the pre-switch driver
-  version ([#388](https://github.com/opsmill/styrmin/issues/388), ADR-057).
+  version ([#388](https://github.com/opsmill/styrmin/issues/388), ADR-057). *Since
+  [ADR-065](0065-apply-writes-config-with-the-version.md), `apply` validates the config against
+  the target driver version, so the separate apply is possible only when the current driver
+  version accepts the override; the race itself is tracked in
+  [#431](https://github.com/opsmill/styrmin/issues/431).*
 - **A pinned override diverges from upgrade Jobs.** The in-repo actions rebuild the tag from
   `images[0]`, so with a pinned override the Job runs the override's repository at the target
   version while the component stays pinned. The warning (§7) is the mitigation.
@@ -232,7 +236,8 @@ including ones that do not apply; the UI lists only applicable ones.
 - Release-wide registry mirror and image pull secrets (separate issues).
 - Surface other HelmRelease failures with their cause instead of the readiness timeout.
 - Show each token override's target reference in the upgrade dialog, next to the pinned notice.
-- Validate `apply`'s config write against the target driver version (#388).
+- Validate `apply`'s config write against the target driver version (#388). *Done in
+  [ADR-065](0065-apply-writes-config-with-the-version.md).*
 - Driver `upgrade` action Jobs fail under default-deny auth because the action primitives call the
   API unauthenticated ([#381](https://github.com/opsmill/styrmin/issues/381)). Pre-existing; until it
   is fixed, the image-override E2E does not assert the upgrade Job's image.
