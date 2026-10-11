@@ -11,7 +11,7 @@ Every test in the files that this change touches passes before the change. No te
 
 ## Backend, SDK and CLI tests (T002)
 
-The T002 command runs the six files in one pytest session. That session stops before it runs any test, with `_pytest.pathlib.ImportPathMismatchError`, because `backend/tests/conftest.py` and `python_sdk/tests/conftest.py` both import as `tests.conftest`. CI runs the backend, SDK and CLI suites in separate pytest sessions ([ci.yml](../../.github/workflows/ci.yml)), so the baseline runs each file on its own.
+The T002 command runs the six files in one pytest session. That session stops before it runs any test, with `_pytest.pathlib.ImportPathMismatchError`, because `backend/tests/conftest.py` and `python_sdk/tests/conftest.py` both import as `tests.conftest`. CI runs the backend, SDK and CLI suites in separate pytest sessions ([ci.yml](../../../.github/workflows/ci.yml)), so the baseline runs each file on its own.
 
 | Test file | Passed | Failed | Pytest summary |
 |-----------|--------|--------|----------------|
