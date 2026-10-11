@@ -40,7 +40,7 @@ spec:
         fsGroup: 1337
       containers:
       - name: manager
-        image: fluxcd/source-controller:v1.4.0
+        image: fluxcd/source-controller:v1.9.6
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false

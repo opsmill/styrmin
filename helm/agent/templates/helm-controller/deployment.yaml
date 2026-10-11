@@ -38,7 +38,7 @@ spec:
         fsGroup: 1337
       containers:
       - name: manager
-        image: fluxcd/helm-controller:v1.1.0
+        image: fluxcd/helm-controller:v1.6.5
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
@@ -65,6 +65,8 @@ spec:
           - --log-level=info
           - --log-encoding=json
           - --enable-leader-election
+          # Keep Helm v3's client-side apply and health checks after the move to Helm v4.
+          - --feature-gates=UseHelm3Defaults=true
         readinessProbe:
           httpGet:
             path: /readyz
