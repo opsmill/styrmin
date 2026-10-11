@@ -2329,6 +2329,7 @@ class Client(AsyncBaseClient):
                 version
                 contentHash
                 sourceCommitSha
+                loadWarnings
                 supportedVersions
                 components
                 componentConfigs {
@@ -2379,6 +2380,7 @@ class Client(AsyncBaseClient):
                 version
                 contentHash
                 sourceCommitSha
+                loadWarnings
                 supportedVersions
                 components
                 componentConfigs {

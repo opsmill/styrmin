@@ -5,7 +5,7 @@ import {
   type DriverListVersion,
   type FilteredDriver,
   versionSource,
-  latestVersion,
+  findLatestVersion,
   filterDrivers,
   flattenVersions,
   showsLatestBadge,
@@ -60,13 +60,13 @@ describe("versionSource", () => {
   });
 });
 
-describe("latestVersion", () => {
+describe("findLatestVersion", () => {
   it("returns the newest version by createdOn", () => {
     const driver = mkDriver("infrahub", [
       mkVersion({ id: "old", version: "1", createdOn: "2026-01-01T00:00:00Z" }),
       mkVersion({ id: "new", version: "2", createdOn: "2026-03-01T00:00:00Z" }),
     ]);
-    expect(latestVersion(driver)?.id).toBe("new");
+    expect(findLatestVersion(driver)?.id).toBe("new");
   });
 });
 
@@ -116,13 +116,32 @@ describe("filterDrivers", () => {
     expect(filterDrivers(drivers, "postgres")).toHaveLength(0);
   });
 
+  it("matches the description of a version, ignoring case", () => {
+    const described = [
+      mkDriver("infrahub", [
+        mkVersion({
+          id: "i1",
+          version: "2.0.3",
+          createdOn: "2026-01-01T00:00:00Z",
+          description: "Source of truth for infrastructure",
+        }),
+      ]),
+      mkDriver("grafana", [
+        mkVersion({ id: "g1", version: "1.0.0", createdOn: "2026-01-01" }),
+      ]),
+    ];
+    const res = filterDrivers(described, "SOURCE OF TRUTH");
+    expect(res.map((d) => d.name)).toEqual(["infrahub"]);
+    expect(res[0].versions.map((v) => v.id)).toEqual(["i1"]);
+  });
+
   it("keeps the unfiltered latest identity when narrowing to an older version", () => {
     const res = filterDrivers(drivers, "2.0.3");
     expect(res).toHaveLength(1);
     // only the older version is displayed…
     expect(res[0].versions.map((v) => v.id)).toEqual(["i1"]);
     // …but the latest-wins winner is still the hidden i2, over all 2 versions
-    expect(res[0].latestVersionId).toBe("i2");
+    expect(res[0].latestVersion?.id).toBe("i2");
     expect(res[0].totalVersions).toBe(2);
     expect(showsLatestBadge(res[0], res[0].versions[0])).toBe(false);
   });

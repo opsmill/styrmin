@@ -8,6 +8,7 @@ query GetDriverInfo($applicationDriverId: UUID!) {
                 label
                 url
             }
+            loadWarnings
         }
     }
 }

@@ -14,6 +14,9 @@ Scenario (per T020):
    two rows are now exposed — same ``version`` string, two distinct
    ``contentHash`` values, both retrievable.  The original row is NOT
    deleted.
+5. Replace ``spec.info.icon`` with the old ``xxxx`` placeholder and reload
+   twice.  Both loads succeed and return the same row with a warning that
+   names ``spec.info.icon`` (spec 020, PR #418 review item 2).
 
 Marker policy:
 
@@ -240,3 +243,26 @@ async def test_local_driver_reload_creates_new_row_on_content_change(
     assert first_id in ids, "original row must still be present (no delete)"
     assert third_id in ids
     assert hashes == {first_hash, third_hash}
+
+    # ---- Step 4: a placeholder icon loads, with a warning ------------------
+    _kubectl_exec(
+        kubeconfig,
+        pod,
+        "sed",
+        "-i",
+        "s#^    icon: .*#    icon: xxxx#",
+        f"{pod_driver_dir}/driver.styrmin.yml",
+    )
+    icon_warning = (
+        "spec.info.icon must be an absolute https URL, such as "
+        "https://example.com/logo.svg (found 'xxxx'). The icon was not stored."
+    )
+    fourth = await client.drivers.load_local_version(pod_driver_dir)
+    assert str(fourth.id) not in ids, "the edited file must produce a new row"
+    assert fourth.load_warnings == [icon_warning]
+    assert third.load_warnings == [], "a valid icon must load without warnings"
+
+    # Reloading the stored file returns the same row and the same warning.
+    fifth = await client.drivers.load_local_version(pod_driver_dir)
+    assert str(fifth.id) == str(fourth.id)
+    assert fifth.load_warnings == [icon_warning]

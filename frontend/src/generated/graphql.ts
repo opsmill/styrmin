@@ -75,11 +75,13 @@ export type ApplicationDriverVersion = {
   /** Doc-only env var declarations from the driver's spec.env_vars block. Empty when the driver omits the block. */
   envVars: Array<DriverEnvVarDoc>;
   helmChart: HelmChart;
-  /** URL of the driver's logo image, from `spec.info.icon` in the driver specification file. An absolute http or https URL; the browser of each viewer loads the image from it. Null when the driver does not set it. */
+  /** URL of the driver's logo image, from `spec.info.icon` in the driver specification file. An absolute https URL; the browser of each viewer loads the image from it. Null when the driver does not set it, or when the server setting `STYRMIN_DRIVER_SHOW_LOGOS` is false. */
   icon?: Maybe<Scalars['String']['output']>;
   id: Scalars['UUID']['output'];
   /** Links from `spec.info.links`, in file order. Empty when the driver does not set any. */
   links: Array<DriverLink>;
+  /** Values of `spec.info` that the load left out of this driver version, with the reason, such as an icon that is not an https URL. The load still succeeds. Filled only in the result of `loadLocalApplicationDriverVersion` and `loadRemoteApplicationDriverVersion`; empty everywhere else. */
+  loadWarnings: Array<Scalars['String']['output']>;
   parameters: Array<ParameterDefinition>;
   services: Array<ServiceDefinition>;
   sourceBranch?: Maybe<Scalars['String']['output']>;
@@ -1980,7 +1982,7 @@ export type LoadLocalDriverMutationVariables = Exact<{
 }>;
 
 
-export type LoadLocalDriverMutation = { __typename?: 'Mutation', loadLocalApplicationDriverVersion?: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriverId: string } | null };
+export type LoadLocalDriverMutation = { __typename?: 'Mutation', loadLocalApplicationDriverVersion?: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriverId: string, loadWarnings: Array<string> } | null };
 
 export type LoadRemoteDriverMutationVariables = Exact<{
   repositoryUrl: Scalars['String']['input'];
@@ -1988,7 +1990,7 @@ export type LoadRemoteDriverMutationVariables = Exact<{
 }>;
 
 
-export type LoadRemoteDriverMutation = { __typename?: 'Mutation', loadRemoteApplicationDriverVersion?: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriverId: string } | null };
+export type LoadRemoteDriverMutation = { __typename?: 'Mutation', loadRemoteApplicationDriverVersion?: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriverId: string, loadWarnings: Array<string> } | null };
 
 export type LoginMutationVariables = Exact<{
   username: Scalars['String']['input'];
@@ -3697,6 +3699,7 @@ export const LoadLocalDriverDocument = `
     contentHash
     sourceCommitSha
     applicationDriverId
+    loadWarnings
   }
 }
     `;
@@ -3725,6 +3728,7 @@ export const LoadRemoteDriverDocument = `
     contentHash
     sourceCommitSha
     applicationDriverId
+    loadWarnings
   }
 }
     `;

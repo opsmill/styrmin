@@ -28,6 +28,10 @@ Turning one off does not turn the other off. `DO_NOT_TRACK=1` and
 `STYRMIN_TELEMETRY=0` turn off either one, but only in the environment where
 they are set.
 
+The driver pages also make each viewer's browser request driver logos from
+the hosts named in the driver files. See
+[Requests for driver logos](#requests-for-driver-logos).
+
 ### CLI telemetry
 
 `styrminctl` collects **anonymous, opt-out** usage telemetry so the Styrmin
@@ -375,3 +379,24 @@ are. One install is one Styrmin database:
 
 The server install ID is not linked to the install ID of `styrminctl`, which is
 stored on your workstation.
+
+### Requests for driver logos
+
+The driver list page and the driver detail page show the logo that each
+driver version sets in `spec.info.icon`. Styrmin does not download these
+images. The browser of each person who opens the driver pages requests
+the logo from the URL in the driver file, so the host of that URL
+receives the IP address of each viewer. The browser does not send the
+address of the Styrmin page (it uses `referrerpolicy="no-referrer"`).
+
+The Infrahub example drivers in the server image set their logo to
+`https://docs.infrahub.app/img/infrahub-logo.svg`, a host that OpsMill
+operates. Viewing a driver loaded from these examples sends a request
+to that host.
+
+To stop all logo requests for an installation, set the Helm value
+`styrmin.driver.showLogos` to `false`, or the server environment
+variable `STYRMIN_DRIVER_SHOW_LOGOS` to `false`. The API then returns no
+`icon` for any driver version, and the pages show a generic package
+icon. Styrmin keeps the stored logo URLs, so setting the value back to
+`true` shows the logos again without loading the drivers again.

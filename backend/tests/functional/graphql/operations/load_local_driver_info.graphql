@@ -8,5 +8,6 @@ mutation LoadLocalDriverInfo($path: String!) {
             label
             url
         }
+        loadWarnings
     }
 }

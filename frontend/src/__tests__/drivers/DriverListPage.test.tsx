@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, waitFor, act, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  act,
+  within,
+  fireEvent,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -207,8 +214,10 @@ describe("DriverListPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("grafana")).not.toBeInTheDocument();
     });
-    const mark = screen.getByText("infra");
-    expect(mark.tagName).toBe("MARK");
+    // the name, and the description ("…infrastructure"), both match
+    const marks = screen.getAllByText("infra");
+    expect(marks.length).toBeGreaterThan(0);
+    marks.forEach((mark) => expect(mark.tagName).toBe("MARK"));
   });
 
   it("shows the Latest badge only on a multi-version driver's latest-wins winner", async () => {
@@ -241,8 +250,14 @@ describe("DriverListPage", () => {
     useListDriversQueryMock.mockReturnValue(ok(data(DRIVERS)));
     await renderPage();
     const logo = groupLogo("infrahub");
-    expect(logo).toHaveAttribute("data-logo-state", "image");
+    // the package icon stays until the image has loaded
+    expect(logo).toHaveAttribute("data-logo-state", "loading");
+    expect(logo.querySelector("svg")).not.toBeNull();
     expect(logo.querySelector("img")).toHaveAttribute("src", INFRAHUB_NEW_LOGO);
+    expect(logo.querySelector("img")).toHaveAttribute("loading", "lazy");
+    fireEvent.load(logo.querySelector("img")!);
+    expect(logo).toHaveAttribute("data-logo-state", "image");
+    expect(logo.querySelector("svg")).toBeNull();
 
     // filtering down to the older version keeps the latest version's logo
     const user = userEvent.setup();
@@ -280,8 +295,8 @@ describe("DriverListPage", () => {
     expect(logos).toHaveLength(3);
     expect(logos.map((l) => l.getAttribute("data-logo-state"))).toEqual([
       "fallback",
-      "image",
-      "image",
+      "loading",
+      "loading",
     ]);
     expect(logos[1].querySelector("img")).toHaveAttribute(
       "src",
@@ -293,15 +308,14 @@ describe("DriverListPage", () => {
     );
   });
 
-  it("shows the latest version's description in the group header, with the full text as its title", async () => {
+  it("shows the latest version's description in the group header, cut to one line", async () => {
     useListDriversQueryMock.mockReturnValue(ok(data(DRIVERS)));
     await renderPage();
     const description = within(driverGroup("infrahub")).getByTestId(
       "driver-description",
     );
     expect(description).toHaveTextContent(INFRAHUB_NEW_DESCRIPTION);
-    expect(description).toHaveAttribute("title", INFRAHUB_NEW_DESCRIPTION);
-    expect(description).toHaveClass("truncate");
+    expect(description).toHaveClass("line-clamp-1");
     expect(
       screen.queryByText(INFRAHUB_OLD_DESCRIPTION),
     ).not.toBeInTheDocument();
@@ -315,6 +329,50 @@ describe("DriverListPage", () => {
     expect(
       within(driverGroup("infrahub")).getByTestId("driver-description"),
     ).toHaveTextContent(INFRAHUB_NEW_DESCRIPTION);
+  });
+
+  it("lets keyboard and touch users expand a description cut in the group header", async () => {
+    useListDriversQueryMock.mockReturnValue(ok(data(DRIVERS)));
+    // jsdom has no layout: report text wider than its one-line box.
+    const scrollHeight = vi
+      .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockReturnValue(40);
+    const clientHeight = vi
+      .spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockReturnValue(20);
+    try {
+      await renderPage();
+      const group = driverGroup("infrahub");
+      const description = within(group).getByTestId("driver-description");
+      const toggle = within(group).getByRole("button", { name: "Show more" });
+
+      const user = userEvent.setup();
+      toggle.focus();
+      await user.keyboard("{Enter}");
+      expect(description).not.toHaveClass("line-clamp-1");
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(toggle).toHaveTextContent("Show less");
+    } finally {
+      scrollHeight.mockRestore();
+      clientHeight.mockRestore();
+    }
+  });
+
+  it("filters on the description and highlights the match in the group header", async () => {
+    useListDriversQueryMock.mockReturnValue(ok(data(DRIVERS)));
+    await renderPage();
+    const user = userEvent.setup();
+    const term = INFRAHUB_NEW_DESCRIPTION.split(" ").slice(-2).join(" ");
+    await user.type(screen.getByLabelText("Filter drivers"), term);
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-driver-name="grafana"]'),
+      ).not.toBeInTheDocument();
+    });
+    const description = within(driverGroup("infrahub")).getByTestId(
+      "driver-description",
+    );
+    expect(description.querySelector("mark")).toHaveTextContent(term);
   });
 
   it("omits the description when the latest version has none", async () => {

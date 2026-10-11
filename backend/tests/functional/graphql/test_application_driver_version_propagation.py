@@ -27,7 +27,9 @@ the DB row and the ``applicationDriver`` query.
 020-driver-info-display (T010) adds ``icon``, ``description`` and ``links``:
 the ``spec.info`` values, loaded through ``loadLocalApplicationDriverVersion``,
 read back from the DB row and projected through ``applicationDriver.versions``.
-T028 adds the rejected-load case: an invalid ``icon`` stores nothing (FR-005).
+T028 adds the invalid-value case: an invalid ``icon`` or link is left out and
+returned in ``loadWarnings``, and the load succeeds (PR #418 review, item 2).
+``STYRMIN_DRIVER_SHOW_LOGOS=false`` hides ``icon`` from every response (item 5).
 T033 adds the reload case: an unchanged driver fills in a pre-feature row (FR-006).
 
 Test location note: the task list specifies
@@ -49,13 +51,9 @@ from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from styrmin_backend.db.models import (
-    ApplicationDriver,
-    ApplicationDriverVersion,
-    ComponentConfig,
-)
+from styrmin_backend import config
+from styrmin_backend.db.models import ApplicationDriverVersion, ComponentConfig
 
-from ._queries import load_query
 from .conftest import gql
 from .seeds import seed_application_driver_version
 
@@ -323,38 +321,113 @@ async def test_driver_info_empty_description_and_links_are_stored_as_null(
     assert read_back["links"] == []
 
 
+INVALID_ICON_WARNING = (
+    "spec.info.icon must be an absolute https URL, such as "
+    "https://example.com/logo.svg (found 'xxxx'). The icon was not stored."
+)
+INVALID_LINK_WARNING = (
+    "spec.info.links[1] has keys other than `link` and `url`: name. "
+    "The link was not stored."
+)
+
+
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("prefect_manager_mock")
-async def test_driver_info_invalid_icon_fails_load_and_stores_nothing(
+async def test_driver_info_invalid_values_are_dropped_and_returned_as_warnings(
     client: AsyncClient, session: AsyncSession, tmp_path: Path
 ) -> None:
-    """A placeholder ``icon`` fails the load with an error naming
-    ``spec.info.icon``, and no ``ApplicationDriver`` row is created."""
-    _write_info_driver(tmp_path, {"icon": "xxxx"})
-
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": load_query("load_local_driver_info"),
-            "variables": {"path": str(tmp_path)},
+    """A placeholder ``icon`` and a link with an unknown key do not fail the
+    load: they are left out of the row and named in ``loadWarnings``. A reload
+    of the same file returns the same row and the same warnings."""
+    _write_info_driver(
+        tmp_path,
+        {
+            "icon": "xxxx",
+            "links": [
+                INFO_LINKS[1],
+                {"link": "Old", "url": "https://example.com/old", "name": "x"},
+            ],
         },
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" in payload, payload
-    error = payload["errors"][0]
-    assert (error.get("extensions") or {}).get("code") == "VALIDATION_ERROR", error
-    assert "spec.info.icon" in error["message"], error
-    assert payload["data"] == {"loadLocalApplicationDriverVersion": None}
 
-    rows = (
-        await session.exec(
-            select(ApplicationDriver).where(
-                ApplicationDriver.name == "info-propagation"
-            )
-        )
-    ).all()
-    assert rows == []
+    loaded = await gql(client, "load_local_driver_info", {"path": str(tmp_path)})
+    first = loaded["loadLocalApplicationDriverVersion"]
+    assert first["icon"] is None
+    assert first["links"] == [
+        {"label": "Documentation", "url": "https://docs.example.com/guide"}
+    ]
+    assert first["loadWarnings"] == [INVALID_ICON_WARNING, INVALID_LINK_WARNING]
+
+    row = await session.get(
+        ApplicationDriverVersion, UUID(first["id"]), populate_existing=True
+    )
+    assert row is not None
+    assert row.icon is None
+    assert row.links == [STORED_INFO_LINKS[1]]
+
+    reloaded = await gql(client, "load_local_driver_info", {"path": str(tmp_path)})
+    second = reloaded["loadLocalApplicationDriverVersion"]
+    assert second["id"] == first["id"]
+    assert second["loadWarnings"] == first["loadWarnings"]
+
+    # The warnings belong to the load, not to the stored driver version.
+    data = await gql(
+        client,
+        "get_driver_info",
+        {"applicationDriverId": first["applicationDriverId"]},
+    )
+    [read_back] = [
+        v for v in data["applicationDriver"]["versions"] if v["id"] == first["id"]
+    ]
+    assert read_back["loadWarnings"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_driver_info_valid_load_returns_no_warnings(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    """A driver whose ``spec.info`` is valid loads with an empty ``loadWarnings``."""
+    _write_info_driver(tmp_path, {"icon": INFO_ICON, "links": INFO_LINKS})
+
+    loaded = await gql(client, "load_local_driver_info", {"path": str(tmp_path)})
+
+    assert loaded["loadLocalApplicationDriverVersion"]["loadWarnings"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_driver_info_icon_is_hidden_when_show_logos_is_off(
+    client: AsyncClient,
+    session: AsyncSession,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With ``STYRMIN_DRIVER_SHOW_LOGOS=false`` the API returns no ``icon``, so
+    no browser requests the logo; the row still stores it."""
+    monkeypatch.setattr(config.SETTINGS.driver, "show_logos", False)
+    _write_info_driver(tmp_path, {"icon": INFO_ICON, "description": INFO_DESCRIPTION})
+
+    loaded = await gql(client, "load_local_driver_info", {"path": str(tmp_path)})
+    version = loaded["loadLocalApplicationDriverVersion"]
+    assert version["icon"] is None
+    assert version["description"] == INFO_DESCRIPTION
+
+    data = await gql(
+        client,
+        "get_driver_info",
+        {"applicationDriverId": version["applicationDriverId"]},
+    )
+    [read_back] = [
+        v for v in data["applicationDriver"]["versions"] if v["id"] == version["id"]
+    ]
+    assert read_back["icon"] is None
+
+    row = await session.get(
+        ApplicationDriverVersion, UUID(version["id"]), populate_existing=True
+    )
+    assert row is not None
+    assert row.icon == INFO_ICON
 
 
 @pytest.mark.asyncio

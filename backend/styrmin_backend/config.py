@@ -157,6 +157,14 @@ class DriverSettings(BaseSettings):
     spec_file: str = Field(default="driver.styrmin.yml")
     values_template: str = Field(default="values.j2.yml")
     actions_code_file: str = Field(default="actions.py")
+    show_logos: bool = Field(
+        default=True,
+        description=(
+            "Whether the API returns the `spec.info.icon` URL of driver versions. "
+            "Each viewer's browser requests the logo from that URL; set to False "
+            "to stop these requests. The driver pages then show a generic icon."
+        ),
+    )
 
 
 class DatabaseSettings(BaseSettings):

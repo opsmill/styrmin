@@ -8,5 +8,6 @@ mutation LoadRemoteDriver($repositoryUrl: String!, $branch: String!) {
     contentHash
     sourceCommitSha
     applicationDriverId
+    loadWarnings
   }
 }

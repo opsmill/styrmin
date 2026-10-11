@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { LatestBadge, OlderBadge } from "./VersionStatusBadge";
 import { DriverLogo } from "./DriverLogo";
+import { ClampedText } from "@/components/ClampedText";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ParametersTab } from "./driver-detail/tabs/ParametersTab";
 import { ComponentsTab } from "./driver-detail/tabs/ComponentsTab";
@@ -82,7 +83,7 @@ export default function DriverDetailPage() {
   return (
     <PageLayout
       title={driver.name}
-      icon={<DriverLogo icon={selected.icon} size="md" />}
+      icon={<DriverLogo icon={selected.icon} size="md" loading="eager" />}
       breadcrumbs={[
         { label: "Drivers", href: "/drivers" },
         {
@@ -166,12 +167,16 @@ export default function DriverDetailPage() {
         </div>
 
         {selected.description && (
-          <p
-            data-testid="driver-description"
-            className="whitespace-pre-line pb-5 text-sm text-muted-foreground"
-          >
-            {selected.description}
-          </p>
+          <div className="pb-5">
+            <ClampedText
+              key={selected.id}
+              lines={3}
+              data-testid="driver-description"
+              className="whitespace-pre-line text-sm text-muted-foreground"
+            >
+              {selected.description}
+            </ClampedText>
+          </div>
         )}
 
         <Tabs
@@ -292,7 +297,10 @@ function OverviewPanel({ version }: { version: DriverVersionDetail }) {
             className="divide-y divide-border/60 text-sm"
           >
             {version.links.map((link, i) => (
-              <li key={i} className="px-4 py-2.5">
+              <li
+                key={i}
+                className="flex flex-wrap items-baseline gap-x-2 px-4 py-2.5"
+              >
                 <a
                   href={link.url}
                   target="_blank"
@@ -301,7 +309,15 @@ function OverviewPanel({ version }: { version: DriverVersionDetail }) {
                 >
                   {link.label}
                   <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                  {/* A flex container drops this space from the layout, not from the name. */}{" "}
+                  <span className="sr-only">(opens in a new tab)</span>
                 </a>
+                <span
+                  data-testid="driver-link-host"
+                  className="text-xs text-muted-foreground"
+                >
+                  {linkHost(link.url)}
+                </span>
               </li>
             ))}
           </ul>
@@ -309,6 +325,15 @@ function OverviewPanel({ version }: { version: DriverVersionDetail }) {
       )}
     </div>
   );
+}
+
+/** Host the link goes to, such as `docs.example.com`. */
+function linkHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 function CopyButton({ text }: { text: string }) {

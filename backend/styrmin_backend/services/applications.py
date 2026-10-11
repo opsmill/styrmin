@@ -1,6 +1,7 @@
 """Provides the application service."""
 
 import asyncio
+from dataclasses import dataclass
 from uuid import UUID
 
 from fast_depends import Depends, inject
@@ -59,6 +60,29 @@ from styrmin_backend.services.utils import (
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.manager import PrefectManager
 from styrmin_backend.workflows.models import PrefectAction
+
+
+@dataclass(frozen=True)
+class LoadedDriverVersion:
+    """A stored driver version and the warnings its specification file produced."""
+
+    version: ApplicationDriverVersionModel
+    # Values of ``spec.info`` that were left out, and why (spec 020).
+    warnings: list[str]
+
+
+async def _store_loaded_driver(
+    driver_object: ApplicationDriver, uow: UnitOfWork
+) -> LoadedDriverVersion:
+    warnings = driver_object.driver_spec.spec.info.warnings
+    for warning in warnings:
+        logger.warning(
+            "Driver {}: {}", driver_object.driver_spec.metadata.name, warning
+        )
+    version = await load_application_driver_from_object(
+        driver_object=driver_object, uow=uow
+    )
+    return LoadedDriverVersion(version=version, warnings=warnings)
 
 
 def _driver_info_columns(info: Info) -> dict[str, object]:
@@ -368,7 +392,7 @@ async def load_application_driver_from_object(
 
 async def load_application_driver_from_git_repository(
     repository_url: str, branch: str, uow: UnitOfWork
-) -> ApplicationDriverVersion:
+) -> LoadedDriverVersion:
     """Load an application driver from a git repository.
 
     Args:
@@ -376,7 +400,7 @@ async def load_application_driver_from_git_repository(
         branch (str): The branch to clone.
 
     Returns:
-        Application: The loaded application driver.
+        LoadedDriverVersion: The stored driver version and the load warnings.
     """
 
     # TODO: Token setup
@@ -393,14 +417,12 @@ async def load_application_driver_from_git_repository(
     application_driver = driver_loader.load_driver()
 
     # Create the application driver objects in database
-    return await load_application_driver_from_object(
-        driver_object=application_driver, uow=uow
-    )
+    return await _store_loaded_driver(application_driver, uow)
 
 
 async def load_application_driver_from_local_directory(
     path: str, uow: UnitOfWork
-) -> ApplicationDriverVersionModel:
+) -> LoadedDriverVersion:
     """Load an application driver from a local filesystem directory.
 
     Args:
@@ -408,7 +430,7 @@ async def load_application_driver_from_local_directory(
         uow (UnitOfWork): The unit of work to use.
 
     Returns:
-        ApplicationDriverVersion: The loaded application driver version.
+        LoadedDriverVersion: The stored driver version and the load warnings.
 
     Notes:
         Spec 013 / T024 — the previous ``get_by_source_path_and_version`` +
@@ -425,9 +447,7 @@ async def load_application_driver_from_local_directory(
 
     # Create the application driver objects in database (idempotent on
     # identity-tuple via ``get_by_identity`` inside).
-    return await load_application_driver_from_object(
-        driver_object=application_driver, uow=uow
-    )
+    return await _store_loaded_driver(application_driver, uow)
 
 
 @inject(cast_result=False)  # type: ignore[arg-type]

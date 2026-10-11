@@ -55,7 +55,7 @@ type ApplicationDriverVersion {
   components: JSON
 
   """
-  URL of the driver's logo image, from `spec.info.icon` in the driver specification file. An absolute http or https URL; the browser of each viewer loads the image from it. Null when the driver does not set it.
+  URL of the driver's logo image, from `spec.info.icon` in the driver specification file. An absolute https URL; the browser of each viewer loads the image from it. Null when the driver does not set it, or when the server setting `STYRMIN_DRIVER_SHOW_LOGOS` is false.
   """
   icon: String
 
@@ -63,6 +63,11 @@ type ApplicationDriverVersion {
   Description of the application, from `spec.info.description`. Null when the driver does not set it.
   """
   description: String
+
+  """
+  Values of `spec.info` that the load left out of this driver version, with the reason, such as an icon that is not an https URL. The load still succeeds. Filled only in the result of `loadLocalApplicationDriverVersion` and `loadRemoteApplicationDriverVersion`; empty everywhere else.
+  """
+  loadWarnings: [String!]!
   applicationDriver: ApplicationDriver!
   services: [ServiceDefinition!]!
   parameters: [ParameterDefinition!]!

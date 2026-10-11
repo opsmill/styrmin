@@ -5,6 +5,7 @@ mutation LoadLocalApplicationDriverVersion($path: String!) {
         version
         contentHash
         sourceCommitSha
+        loadWarnings
         supportedVersions
         components
         componentConfigs {

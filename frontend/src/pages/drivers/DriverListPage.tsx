@@ -14,6 +14,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { LoadDriverDrawer } from "@/pages/drivers/LoadDriverDrawer";
 import { LatestBadge } from "@/pages/drivers/VersionStatusBadge";
 import { DriverLogo } from "@/pages/drivers/DriverLogo";
+import { ClampedText } from "@/components/ClampedText";
 import { highlightMatch } from "@/lib/highlight";
 import { collidingVersions, displayDriverVersion } from "@/lib/driverVersion";
 import { cn } from "@/lib/utils";
@@ -311,18 +312,18 @@ function AppGroup({
     >
       <div className="flex items-center gap-3 border-b border-border bg-muted/40 px-4 py-3">
         <DriverLogo icon={driver.latestVersion?.icon} size="md" />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <span className="text-[13.5px] font-semibold">
             {highlightMatch(driver.name, query)}
           </span>
           {description && (
-            <p
+            <ClampedText
+              lines={1}
               data-testid="driver-description"
-              title={description}
-              className="truncate text-xs text-muted-foreground"
+              className="text-xs text-muted-foreground"
             >
-              {description}
-            </p>
+              {highlightMatch(description, query)}
+            </ClampedText>
           )}
         </div>
         <span className="ml-auto shrink-0 text-xs text-muted-foreground">

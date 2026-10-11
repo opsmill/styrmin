@@ -121,16 +121,20 @@ async def test_local_load_same_content_is_noop(
     """
     uow = SqlModelUnitOfWork(session=db_session)
 
-    first = await load_application_driver_from_local_directory(
-        path=str(driver_dir), uow=uow
-    )
+    first = (
+        await load_application_driver_from_local_directory(
+            path=str(driver_dir), uow=uow
+        )
+    ).version
     assert first is not None
     assert first.content_hash is not None and len(first.content_hash) == 64
     assert await _row_count(db_session) == 1
 
-    second = await load_application_driver_from_local_directory(
-        path=str(driver_dir), uow=uow
-    )
+    second = (
+        await load_application_driver_from_local_directory(
+            path=str(driver_dir), uow=uow
+        )
+    ).version
     assert await _row_count(db_session) == 1
     # Same row returned (idempotent on identity tuple).
     assert second.id == first.id
@@ -154,9 +158,11 @@ async def test_local_load_new_content_creates_new_row_without_deleting_old(
     """
     uow = SqlModelUnitOfWork(session=db_session)
 
-    first = await load_application_driver_from_local_directory(
-        path=str(driver_dir), uow=uow
-    )
+    first = (
+        await load_application_driver_from_local_directory(
+            path=str(driver_dir), uow=uow
+        )
+    ).version
     assert await _row_count(db_session) == 1
     first_hash = first.content_hash
     first_id = first.id
@@ -169,9 +175,11 @@ async def test_local_load_new_content_creates_new_row_without_deleting_old(
     values_template = driver_dir / "values.j2.yml"
     values_template.write_bytes(values_template.read_bytes() + b"\n# touched\n")
 
-    second = await load_application_driver_from_local_directory(
-        path=str(driver_dir), uow=uow
-    )
+    second = (
+        await load_application_driver_from_local_directory(
+            path=str(driver_dir), uow=uow
+        )
+    ).version
 
     rows = await _all_rows(db_session)
     assert len(rows) == 2, (
@@ -217,9 +225,11 @@ async def test_local_load_resolves_race_when_concurrent_insert_wins(
     """
     # First load — happy path, creates the row.
     uow = SqlModelUnitOfWork(session=db_session)
-    first = await load_application_driver_from_local_directory(
-        path=str(driver_dir), uow=uow
-    )
+    first = (
+        await load_application_driver_from_local_directory(
+            path=str(driver_dir), uow=uow
+        )
+    ).version
     assert first is not None
     assert await _row_count(db_session) == 1
 
@@ -271,9 +281,11 @@ async def test_local_load_resolves_race_when_concurrent_insert_wins(
     )
 
     uow2 = SqlModelUnitOfWork(session=db_session)
-    second = await load_application_driver_from_local_directory(
-        path=str(driver_dir), uow=uow2
-    )
+    second = (
+        await load_application_driver_from_local_directory(
+            path=str(driver_dir), uow=uow2
+        )
+    ).version
 
     # No new row was committed; the loser observed the winner's row.
     assert await _row_count(db_session) == 1

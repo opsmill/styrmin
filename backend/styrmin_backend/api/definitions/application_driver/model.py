@@ -5,6 +5,7 @@ from uuid import UUID
 
 import strawberry
 
+from styrmin_backend import config as styrmin_config
 from styrmin_backend.api.definitions.action.model import Action
 from styrmin_backend.api.definitions.application_driver.parameter import (
     ParameterDefinition,
@@ -187,8 +188,9 @@ class ApplicationDriverVersion:
         default=None,
         description=(
             "URL of the driver's logo image, from `spec.info.icon` in the driver "
-            "specification file. An absolute http or https URL; the browser of each "
-            "viewer loads the image from it. Null when the driver does not set it."
+            "specification file. An absolute https URL; the browser of each viewer "
+            "loads the image from it. Null when the driver does not set it, or when "
+            "the server setting `STYRMIN_DRIVER_SHOW_LOGOS` is false."
         ),
     )
     description: str | None = strawberry.field(
@@ -196,6 +198,17 @@ class ApplicationDriverVersion:
         description=(
             "Description of the application, from `spec.info.description`. Null "
             "when the driver does not set it."
+        ),
+    )
+
+    load_warnings: list[str] = strawberry.field(
+        default_factory=list,
+        description=(
+            "Values of `spec.info` that the load left out of this driver version, "
+            "with the reason, such as an icon that is not an https URL. The load "
+            "still succeeds. Filled only in the result of "
+            "`loadLocalApplicationDriverVersion` and "
+            "`loadRemoteApplicationDriverVersion`; empty everywhere else."
         ),
     )
 
@@ -296,7 +309,7 @@ class ApplicationDriverVersion:
             content_hash=instance.content_hash,
             source_commit_sha=instance.source_commit_sha,
             created_on=instance.created_on,
-            icon=instance.icon,
+            icon=instance.icon if styrmin_config.SETTINGS.driver.show_logos else None,
             description=instance.description,
             instance=instance,
         )

@@ -101,6 +101,8 @@ spec:
             {{- end }}
             - name: STYRMIN_SESSION_COOKIE_SECURE
               value: {{ .Values.styrmin.sessionCookieSecure | quote }}
+            - name: STYRMIN_DRIVER_SHOW_LOGOS
+              value: {{ .Values.styrmin.driver.showLogos | quote }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:

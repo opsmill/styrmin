@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 from styrmin_sdk.exceptions import StyrminError
 
@@ -63,6 +64,11 @@ def print_error(message: str) -> None:
 def print_success(message: str) -> None:
     """Print a success message in green."""
     console.print(f"[green]Success:[/green] {message}")
+
+
+def print_warning(message: str) -> None:
+    """Print a warning message in yellow."""
+    console.print(f"[yellow]Warning:[/yellow] {escape(message)}")
 
 
 @contextmanager

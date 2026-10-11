@@ -38,7 +38,7 @@ spec:
   version: <string>        # Driver version
   supported_versions: <string>  # Semver specifier for supported app versions
   info:                    # Required block; every key is optional
-    icon: <string>         # Absolute http or https URL of the logo image
+    icon: <string>         # Absolute https URL of the logo image
     description: <string>  # Plain text that describes the application
     authors: [<string>]
     license: <string>
@@ -180,9 +180,9 @@ The `spec.info` block describes the application that the driver deploys. Styrmin
 
 | Key | Accepted format | Where users view it |
 |-----|-----------------|---------------------|
-| `icon` | Absolute `http` or `https` URL of an image | Driver list page: the driver header in the "Group by application" view (latest driver version), and each row in the "Flat list" view (the driver version of the row). Driver detail page: next to the driver name (selected driver version). |
-| `description` | Plain text | Driver list page: under the driver name in the "Group by application" view, on one line, with the full text on hover (latest driver version). Driver detail page: the full text above the tabs, with its line breaks (selected driver version). |
-| `links` | List of entries with exactly two keys: `link` (the label) and `url` (an absolute `http` or `https` URL) | Driver detail page: the "Links" section of the Overview tab, in file order (selected driver version). Each link opens in a new browser tab. |
+| `icon` | Absolute `https` URL of an image, without a username or password | Driver list page: the driver header in the "Group by application" view (latest driver version), and each row in the "Flat list" view (the driver version of the row). Driver detail page: next to the driver name (selected driver version). |
+| `description` | Plain text | Driver list page: under the driver name in the "Group by application" view, cut to one line, with a "Show more" button when it is longer (latest driver version). Driver detail page: above the tabs, with its line breaks, cut to three lines with a "Show more" button when it is longer (selected driver version). The driver list filter matches it. |
+| `links` | List of entries with exactly two keys: `link` (the label) and `url` (an absolute `http` or `https` URL, without a username or password) | Driver detail page: the "Links" section of the Overview tab, in file order, with the host name of each URL (selected driver version). Each link opens in a new browser tab. |
 | `authors` | List of strings | Not shown |
 | `license` | String | Not shown |
 
@@ -191,16 +191,17 @@ An empty `description` or an empty `links` list counts as not set.
 The logo image:
 
 - Styrmin does not download the image. The browser of each person who opens the driver pages loads it from the `icon` URL, so the URL must be reachable from those browsers. In an installation without internet access, host the image on an internal server or leave `icon` out.
-- The browser does not send the address of the Styrmin page to the image host, but the host receives a request with the IP address of each viewer. Use an image host that you trust.
-- Use a square SVG or PNG image. The pages show the logo at 32 by 32 pixels or smaller.
-- When `icon` is not set, or the browser cannot load the image, the pages show a generic package icon in the same place.
+- The browser does not send the address of the Styrmin page to the image host, but the host receives a request with the IP address of each viewer. Use an image host that you trust. An operator can stop these requests for the whole installation with the Helm value `styrmin.driver.showLogos: false` (environment variable `STYRMIN_DRIVER_SHOW_LOGOS=false`); the pages then show the generic package icon for every driver.
+- The URL must use `https`. A Styrmin server served over HTTPS cannot show an `http` image, because browsers block it as mixed content.
+- The pages show the logo on a white square tile, in the light and the dark theme. Use a square SVG or PNG image that is visible on a white background, for example with a transparent background and dark or colored marks. The pages show the logo at 32 by 32 pixels or smaller.
+- The pages show a generic package icon in the same place until the image has loaded, and when `icon` is not set or the browser cannot load the image.
 
-Loading the driver fails when:
+Loading the driver does not fail because of an invalid `icon` or `links` entry. The load leaves out:
 
-- `icon` is not an absolute `http` or `https` URL, for example `xxxx`, `logo.svg` or `javascript:alert(1)`.
-- A `links` entry has a key other than `link` and `url`, does not have one of them, or has a `url` that is not an absolute `http` or `https` URL.
+- `icon`, when it is not an absolute `https` URL (for example `xxxx`, `logo.svg`, `http://example.com/logo.png` or `javascript:alert(1)`), or when it contains a username or password.
+- Each `links` entry that has a key other than `link` and `url`, does not have one of them, has a `link` that is not text, or has a `url` that is not an absolute `http` or `https` URL or that contains a username or password. The other entries are kept.
 
-The error names the field, for example `spec.info.icon` or `spec.info.links.0.url`, and Styrmin stores nothing for that load. Driver versions that are already stored are not checked again.
+For each value it leaves out, the load returns a warning that names the field, for example `spec.info.icon` or `spec.info.links[1].url`, and says why. `styrminctl drivers load-version` and `styrminctl drivers load-local-version` print the warnings, the Load driver drawer shows them in a notification, and the GraphQL load mutations return them in `loadWarnings`. Styrmin does not store the warnings, so loading the same file again returns them again.
 
 To change the logo, description or links, edit `spec.info` and load the driver again. For a local driver, the changed file creates a new driver version. For a Git driver, a new commit creates a new driver version.
 

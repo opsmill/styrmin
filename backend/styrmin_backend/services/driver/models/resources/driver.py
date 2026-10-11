@@ -65,7 +65,7 @@ Example:
 """
 
 import re
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import Version
@@ -74,7 +74,11 @@ from pydantic import (
     ConfigDict,
     Field,
     HttpUrl,
+    ModelWrapValidatorHandler,
+    PrivateAttr,
     RootModel,
+    TypeAdapter,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -116,7 +120,54 @@ class InfoLink(BaseModel):
     url: HttpUrl
 
 
+_HTTP_URL: TypeAdapter[HttpUrl] = TypeAdapter(HttpUrl)
+
+
+def _url_problem(
+    value: object, *, field: str, schemes: tuple[str, ...], example: str
+) -> str | None:
+    """Why ``value`` cannot be stored at ``field``, or None when it can."""
+    try:
+        url: HttpUrl | None = _HTTP_URL.validate_python(value)
+    except ValidationError:
+        url = None
+    if url is not None and (url.username or url.password):
+        # The value holds a credential, so the message does not repeat it.
+        return f"{field} must not contain a username or password"
+    if url is None or url.scheme not in schemes:
+        kind = " or ".join(schemes)
+        return f"{field} must be an absolute {kind} URL, such as {example} (found {value!r})"
+    return None
+
+
+def _link_problem(entry: object, field: str) -> str | None:
+    """Why the ``spec.info.links`` entry at ``field`` cannot be stored, or None."""
+    if not isinstance(entry, dict):
+        return f"{field} must be a mapping with `link` and `url` keys"
+    missing = [f"`{key}`" for key in ("link", "url") if key not in entry]
+    if missing:
+        noun = "key" if len(missing) == 1 else "keys"
+        return f"{field} is missing the {' and '.join(missing)} {noun}"
+    extra = sorted(str(key) for key in entry if key not in ("link", "url"))
+    if extra:
+        return f"{field} has keys other than `link` and `url`: {', '.join(extra)}"
+    if not isinstance(entry["link"], str):
+        return f"{field}.link must be text (found {entry['link']!r})"
+    return _url_problem(
+        entry["url"],
+        field=f"{field}.url",
+        schemes=("http", "https"),
+        example="https://example.com/docs",
+    )
+
+
 class Info(BaseModel):
+    """``spec.info``: what the driver pages show about the application.
+
+    An invalid ``icon`` or ``links`` entry does not fail the load. It is left
+    out and described in :attr:`warnings`, so files that loaded before still load.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     links: list[InfoLink] | None = None
@@ -124,6 +175,52 @@ class Info(BaseModel):
     description: str | None = None
     license: str | None = None
     icon: HttpUrl | None = None
+
+    _warnings: list[str] = PrivateAttr(default_factory=list)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _drop_invalid_icon_and_links(
+        cls, data: Any, handler: ModelWrapValidatorHandler[Self]
+    ) -> Self:
+        if not isinstance(data, dict):
+            return handler(data)
+        data = dict(data)
+        warnings: list[str] = []
+        if data.get("icon") is not None:
+            problem = _url_problem(
+                data["icon"],
+                field="spec.info.icon",
+                schemes=("https",),
+                example="https://example.com/logo.svg",
+            )
+            if problem:
+                warnings.append(f"{problem}. The icon was not stored.")
+                del data["icon"]
+        links = data.get("links")
+        if links is not None and not isinstance(links, list):
+            warnings.append(
+                "spec.info.links must be a list of entries with `link` and `url` "
+                f"keys (found {type(links).__name__}). The links were not stored."
+            )
+            del data["links"]
+        elif links is not None:
+            kept = []
+            for index, entry in enumerate(links):
+                problem = _link_problem(entry, f"spec.info.links[{index}]")
+                if problem:
+                    warnings.append(f"{problem}. The link was not stored.")
+                else:
+                    kept.append(entry)
+            data["links"] = kept
+        info = handler(data)
+        info._warnings = warnings
+        return info
+
+    @property
+    def warnings(self) -> list[str]:
+        """Why an ``icon`` or ``links`` value of the file was not stored."""
+        return list(self._warnings)
 
 
 class LabelIdentifier(RootModel):

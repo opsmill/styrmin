@@ -180,11 +180,13 @@ async def test_git_load_records_resolved_commit_sha(
     patch_git_loader.set_commit_sha(expected_sha)
 
     uow = SqlModelUnitOfWork(session=db_session)
-    row = await load_application_driver_from_git_repository(
-        repository_url="https://example.com/fake.git",
-        branch="main",
-        uow=uow,
-    )
+    row = (
+        await load_application_driver_from_git_repository(
+            repository_url="https://example.com/fake.git",
+            branch="main",
+            uow=uow,
+        )
+    ).version
 
     assert row is not None
     assert row.source_type == "git"
@@ -211,16 +213,20 @@ async def test_git_load_same_commit_is_noop(
 
     uow = SqlModelUnitOfWork(session=db_session)
 
-    first = await load_application_driver_from_git_repository(
-        repository_url="https://example.com/fake.git",
-        branch="main",
-        uow=uow,
-    )
-    second = await load_application_driver_from_git_repository(
-        repository_url="https://example.com/fake.git",
-        branch="main",
-        uow=uow,
-    )
+    first = (
+        await load_application_driver_from_git_repository(
+            repository_url="https://example.com/fake.git",
+            branch="main",
+            uow=uow,
+        )
+    ).version
+    second = (
+        await load_application_driver_from_git_repository(
+            repository_url="https://example.com/fake.git",
+            branch="main",
+            uow=uow,
+        )
+    ).version
 
     rows = await _all_rows(db_session)
     assert len(rows) == 1, (
@@ -249,18 +255,22 @@ async def test_git_load_new_commit_creates_new_row(
 
     patch_git_loader.set_commit_sha(sha1)
     uow = SqlModelUnitOfWork(session=db_session)
-    first = await load_application_driver_from_git_repository(
-        repository_url="https://example.com/fake.git",
-        branch="main",
-        uow=uow,
-    )
+    first = (
+        await load_application_driver_from_git_repository(
+            repository_url="https://example.com/fake.git",
+            branch="main",
+            uow=uow,
+        )
+    ).version
 
     patch_git_loader.set_commit_sha(sha2)
-    second = await load_application_driver_from_git_repository(
-        repository_url="https://example.com/fake.git",
-        branch="main",
-        uow=uow,
-    )
+    second = (
+        await load_application_driver_from_git_repository(
+            repository_url="https://example.com/fake.git",
+            branch="main",
+            uow=uow,
+        )
+    ).version
 
     rows = await _all_rows(db_session)
     assert len(rows) == 2, (
