@@ -138,11 +138,11 @@ def test_deserialize_driver_spec_without_actions():
         ("kind", "wrong"),
         ("metadata.name", 123),
         ("spec.version", 123),
-        ("spec.info.icon", 123),
+        # An invalid spec.info.icon or spec.info.links is dropped with a
+        # warning instead (see test_driver_info.py).
         ("spec.info.description", 123),
         ("spec.info.authors", 123),
         ("spec.info.license", 123),
-        ("spec.info.links", 123),
         ("spec.helm.main.location", 123),
         ("spec.helm.main.version", 123),
     ],

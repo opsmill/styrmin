@@ -219,6 +219,7 @@ Sizing guidance is in [`dev/guidelines/helm.md`](../../dev/guidelines/helm.md).
 | `styrmin.agentSource.branch` | Git branch | `develop` |
 | `styrmin.agentSource.token` | Git token (use existingSecret) | `""` |
 | `styrmin.driver.token` | Driver token (use existingSecret) | `""` |
+| `styrmin.driver.showLogos` | Return driver logo URLs from the API, so each viewer's browser requests the logos (see the telemetry and privacy page of the docs) | `true` |
 | `styrmin.database.type` | Database type | `postgres` |
 | `styrmin.database.name` | Database name | `styrmin` |
 | `styrmin.database.host` | Database host (auto-configured) | `""` |

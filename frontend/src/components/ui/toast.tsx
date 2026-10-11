@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Toast } from "@base-ui/react/toast";
-import { Check, X } from "lucide-react";
+import { AlertTriangle, Check, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -8,7 +8,9 @@ import { cn } from "@/lib/utils";
  * App-wide toast host. Wrap the app once (see App.tsx) so any view can raise a
  * transient notification via {@link useToast}. Built on Base UI's Toast (the
  * app's component library) — no extra dependency. Toasts auto-dismiss after the
- * provider timeout; a `type: "success"` toast gets the green check treatment.
+ * provider timeout; a `type: "success"` toast gets the green check treatment
+ * and a `type: "warning"` toast the amber triangle. Line breaks in a
+ * description are kept.
  */
 export function Toaster({ children }: { children: React.ReactNode }) {
   return (
@@ -41,12 +43,20 @@ function ToastList() {
           <Check className="h-3.5 w-3.5 text-success" />
         </span>
       )}
+      {toast.type === "warning" && (
+        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-warning/10">
+          <AlertTriangle
+            className="h-3.5 w-3.5 text-warning"
+            aria-hidden="true"
+          />
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         <Toast.Title className="font-medium text-foreground">
           {toast.title}
         </Toast.Title>
         {toast.description && (
-          <Toast.Description className="mt-0.5 text-muted-foreground">
+          <Toast.Description className="mt-0.5 whitespace-pre-line break-words text-muted-foreground">
             {toast.description}
           </Toast.Description>
         )}

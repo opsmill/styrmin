@@ -728,20 +728,22 @@ class Mutation:
         self, path: str, info: strawberry.Info
     ) -> ApplicationDriverVersion | None:
         uow = info.context["uow"]
-        application = await load_application_driver_from_local_directory(
-            path=path, uow=uow
-        )
-        return ApplicationDriverVersion.from_instance(application)
+        loaded = await load_application_driver_from_local_directory(path=path, uow=uow)
+        result = ApplicationDriverVersion.from_instance(loaded.version)
+        result.load_warnings = loaded.warnings
+        return result
 
     @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def load_remote_application_driver_version(
         self, repository_url: str, branch: str, info: strawberry.Info
     ) -> ApplicationDriverVersion | None:
         uow = info.context["uow"]
-        application = await load_application_driver_from_git_repository(
+        loaded = await load_application_driver_from_git_repository(
             repository_url=repository_url, branch=branch, uow=uow
         )
-        return ApplicationDriverVersion.from_instance(application)
+        result = ApplicationDriverVersion.from_instance(loaded.version)
+        result.load_warnings = loaded.warnings
+        return result
 
     @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def deploy(

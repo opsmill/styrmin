@@ -15,7 +15,8 @@
  *   (e) no <pre> JSON-dump fallback renders across tabs (SC-002),
  *   (f) the header logo follows the selected version, with a fallback,
  *   (g) the description and the Overview links follow the selected version,
- *       render as plain text, and are absent when not set.
+ *       render as plain text, and are absent when not set,
+ *   (h) a long description is cut to three lines with a "Show more" button.
  */
 import {
   describe,
@@ -26,7 +27,14 @@ import {
   vi,
   type Mock,
 } from "vitest";
-import { render, screen, waitFor, act, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  act,
+  within,
+  fireEvent,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -352,6 +360,13 @@ describe("DriverDetailPage", () => {
     const user = userEvent.setup();
     await renderPage();
 
+    // The header logo is always in view, so it loads without waiting.
+    expect(headerLogo().querySelector("img")).toHaveAttribute(
+      "loading",
+      "eager",
+    );
+    expect(headerLogo()).toHaveAttribute("data-logo-state", "loading");
+    fireEvent.load(headerLogo().querySelector("img")!);
     expect(headerLogo()).toHaveAttribute("data-logo-state", "image");
     expect(headerLogo().querySelector("img")).toHaveAttribute("src", NEW_LOGO);
 
@@ -363,7 +378,7 @@ describe("DriverDetailPage", () => {
         screen.getByTestId("driver-detail").getAttribute("data-version-id"),
       ).toBe("old");
     });
-    expect(headerLogo()).toHaveAttribute("data-logo-state", "image");
+    expect(headerLogo()).toHaveAttribute("data-logo-state", "loading");
     expect(headerLogo().querySelector("img")).toHaveAttribute("src", OLD_LOGO);
   });
 
@@ -437,13 +452,20 @@ describe("DriverDetailPage", () => {
       within(overview).getByTestId("driver-links"),
     ).getAllByRole("link");
     expect(anchors.map((a) => a.textContent)).toEqual(
-      links.map((l) => l.label),
+      links.map((l) => `${l.label} (opens in a new tab)`),
     );
     anchors.forEach((a, i) => {
       expect(a).toHaveAttribute("href", links[i].url);
       expect(a).toHaveAttribute("target", "_blank");
       expect(a).toHaveAttribute("rel", "noopener noreferrer");
+      // screen readers announce the new tab; the icon is decorative
+      expect(a).toHaveAccessibleName(`${links[i].label} (opens in a new tab)`);
     });
+    expect(
+      within(overview)
+        .getAllByTestId("driver-link-host")
+        .map((el) => el.textContent),
+    ).toEqual(["example.com", "docs.example.com", "github.com"]);
 
     // the links belong to the Overview tab only
     await user.click(screen.getByRole("button", { name: /parameters/i }));
@@ -462,9 +484,76 @@ describe("DriverDetailPage", () => {
     );
     expect(
       within(screen.getByTestId("driver-links")).getByRole("link", {
-        name: "Docs",
+        name: /^Docs/,
       }),
     ).toHaveAttribute("href", "https://example.com/docs/v1");
+  });
+
+  it("cuts a long description to three lines with a Show more button", async () => {
+    const description = "Line one.\nLine two.\nLine three.\nLine four.";
+    useGetDriverQueryMock.mockReturnValue(
+      makeQueryResult(
+        makeDriver([
+          makeVersion({
+            id: "v1",
+            version: "1.0.0",
+            createdOn: "2026-03-01T00:00:00Z",
+            description,
+          }),
+        ]),
+      ),
+    );
+    // jsdom has no layout: report text taller than its clamped box.
+    const scrollHeight = vi
+      .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockReturnValue(80);
+    const clientHeight = vi
+      .spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockReturnValue(60);
+    try {
+      const user = userEvent.setup();
+      await renderPage();
+
+      const el = screen.getByTestId("driver-description");
+      expect(el).toHaveClass("line-clamp-3");
+      const toggle = screen.getByRole("button", { name: "Show more" });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveAttribute("aria-controls", el.id);
+
+      await user.click(toggle);
+      expect(el).not.toHaveClass("line-clamp-3");
+      expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+    } finally {
+      scrollHeight.mockRestore();
+      clientHeight.mockRestore();
+    }
+  });
+
+  it("shows no Show more button when the description fits", async () => {
+    useGetDriverQueryMock.mockReturnValue(
+      makeQueryResult(
+        makeDriver([
+          makeVersion({
+            id: "v1",
+            version: "1.0.0",
+            createdOn: "2026-03-01T00:00:00Z",
+            description: "Short.",
+          }),
+        ]),
+      ),
+    );
+
+    await renderPage();
+
+    expect(screen.getByTestId("driver-description")).toHaveTextContent(
+      "Short.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Show more" }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders no description area and no links section when the version has neither", async () => {

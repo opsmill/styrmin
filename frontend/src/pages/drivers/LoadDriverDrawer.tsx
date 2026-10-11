@@ -56,8 +56,8 @@ interface LoadDriverDrawerProps {
  *
  * One-shot load: the backend has no scan/preview step, so submitting calls the
  * load mutation directly. On success the drawer closes, a success toast
- * confirms which version was loaded, and we navigate to the new version's
- * detail page.
+ * confirms which version was loaded (or a warning toast lists the `spec.info`
+ * values the load left out), and we navigate to the new version's detail page.
  */
 export function LoadDriverDrawer({
   open,
@@ -76,14 +76,27 @@ export function LoadDriverDrawer({
     applicationDriverId: string;
     id: string;
     version: string;
+    loadWarnings?: readonly string[];
   }) => {
     queryClient.invalidateQueries({ queryKey: ["ListDrivers"] });
     onOpenChange(false);
-    toast.add({
-      title: "Driver loaded",
-      description: `Version ${v.version} is now selectable when deploying or upgrading.`,
-      type: "success",
-    });
+    const selectable = `Version ${v.version} is now selectable when deploying or upgrading.`;
+    const warnings = v.loadWarnings ?? [];
+    if (warnings.length > 0) {
+      // Kept on screen until dismissed: the warnings are not stored anywhere.
+      toast.add({
+        title: "Driver loaded with warnings",
+        description: [selectable, ...warnings.map((w) => `• ${w}`)].join("\n"),
+        type: "warning",
+        timeout: 0,
+      });
+    } else {
+      toast.add({
+        title: "Driver loaded",
+        description: selectable,
+        type: "success",
+      });
+    }
     navigate({
       to: "/drivers/$driverId",
       params: { driverId: v.applicationDriverId },
@@ -204,7 +217,9 @@ export function LoadDriverDrawer({
               <Alert variant="destructive" className="mt-4">
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>Couldn't load the driver</AlertTitle>
-                <AlertDescription>{submitError}</AlertDescription>
+                <AlertDescription className="whitespace-pre-line">
+                  {submitError}
+                </AlertDescription>
               </Alert>
             )}
 

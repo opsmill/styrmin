@@ -128,21 +128,25 @@ A few notes:
   directory.
 - **`info.icon`, `info.description` and `info.links`** describe the
   application on the driver list page and the driver detail page:
-  - `icon` is the absolute `http` or `https` URL of the logo image. Use
-    a square SVG or PNG. The pages show it next to the driver name, and
-    show a generic package icon when it is not set or cannot be loaded.
-  - `description` is plain text. The driver list page shows it on one
-    line, and the driver detail page shows it in full.
+  - `icon` is the absolute `https` URL of the logo image. Use a square
+    SVG or PNG that is visible on a white background: the pages show it
+    on a white tile next to the driver name, in the light and the dark
+    theme. They show a generic package icon until the image has loaded,
+    and when `icon` is not set or cannot be loaded.
+  - `description` is plain text. The driver list page shows its first
+    line, and the driver detail page its first three lines, each with a
+    "Show more" button when the text is longer.
   - Each `links` entry has exactly two keys: `link`, the label, and
     `url`, an absolute `http` or `https` URL. The Overview tab of the
-    driver detail page lists the links.
+    driver detail page lists the links with the host name of each URL.
 
   Styrmin does not download the logo. The browser of each person who
   opens the driver pages loads it from the URL, so use an image host
-  that you trust and that those browsers can reach. Loading the driver
-  fails, with an error that names the field, when `icon` or a link
-  `url` is not an `http` or `https` URL, or when a `links` entry has
-  other keys.
+  that you trust and that those browsers can reach. Neither URL can
+  contain a username or password. When `icon` or a `links` entry is
+  invalid, the driver still loads: the load leaves that value out and
+  returns a warning that names the field (see
+  [Warnings about spec.info values](./loading-drivers.md#warnings-about-specinfo-values)).
 
 ### Step 3: Declare the components
 

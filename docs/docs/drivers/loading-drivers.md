@@ -104,6 +104,29 @@ are `contentHash` (populated for `sourceType == "local"`) and
 `sourceCommitSha` (populated for `sourceType == "git"`); exactly one is
 non-null per row.
 
+### Warnings about spec.info values
+
+A driver loads even when its `spec.info.icon` or a `spec.info.links`
+entry is invalid. The load leaves that value out of the driver version
+and returns one warning for it, which names the field and says why, for
+example:
+
+```text
+Warning: spec.info.icon must be an absolute https URL, such as https://example.com/logo.svg (found 'xxxx'). The icon was not stored.
+```
+
+`drivers load-version` and `drivers load-local-version` print the
+warnings after the success line, the Load driver drawer shows them in a
+notification that stays until you close it, and the GraphQL load
+mutations return them in `loadWarnings`. Styrmin does not store the
+warnings: loading the same file again returns them again. To stop a
+warning, fix or remove the value in `driver.styrmin.yml` and load the
+driver again. See [Creating a driver](./creating-a-driver.md) for the
+accepted values.
+
+A load that fails for another reason lists one line per invalid field,
+for example `- spec.version: Field required`.
+
 ### Reloading a local driver while you iterate
 
 You do **not** need to bump `spec.version` in `driver.styrmin.yml` to

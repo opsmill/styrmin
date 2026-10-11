@@ -236,6 +236,10 @@ styrmin:
   driver:
     # -- Token for driver authentication (use existingSecret for production)
     token: ""
+    # -- Show the logo of each driver version (`spec.info.icon`). Each viewer's
+    # browser requests the logo from the URL in the driver file. Set to
+    # ``false`` to stop these requests; the driver pages then show a generic icon.
+    showLogos: true
 
   # Database configuration for Styrmin
   database:

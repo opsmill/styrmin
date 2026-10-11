@@ -7,6 +7,7 @@ spec:
   version: "2"
   supported_versions: ">=1.1,<2.0"
   info:
+    icon: https://docs.infrahub.app/img/infrahub-logo.svg
     description: >-
       Infrahub MCP server — exposes an existing Infrahub instance to AI agents
       and IDE clients over the Model Context Protocol (token-passthrough auth).

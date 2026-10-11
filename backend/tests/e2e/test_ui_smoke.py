@@ -217,17 +217,15 @@ async def _serve_simple_app_logo(route: "Route") -> None:
 
 
 async def _expect_simple_app_logo_loaded(logo: "Locator") -> None:
-    await expect(logo).to_have_attribute("data-logo-state", "image")
     img = logo.locator("img")
     await expect(img).to_have_attribute("src", SIMPLE_APP_LOGO_URL)
-    # The <img> is loading="lazy": bring it into view so Chromium requests it.
-    await img.scroll_into_view_if_needed()
+    # The frame shows the package icon until the image has loaded, and the
+    # fallback icon (without the <img>) if the load fails.
+    await expect(logo).to_have_attribute("data-logo-state", "image")
     await logo.page.wait_for_function(
         "img => img.complete && img.naturalWidth > 0",
         arg=await img.element_handle(),
     )
-    # A failed load would have switched the frame to the fallback icon.
-    await expect(logo).to_have_attribute("data-logo-state", "image")
 
 
 async def test_driver_logo_description_and_links_render(
@@ -245,26 +243,26 @@ async def test_driver_logo_description_and_links_render(
         await page.route(SIMPLE_APP_LOGO_URL, _serve_simple_app_logo)
 
         # 1. List page: the group header shows the latest version's logo and
-        # its description, truncated to one line with the full text as title.
+        # its description. List logos load lazily, so scroll the group into
+        # view as a user would.
         drivers_list = DriversListPage(page)
         await drivers_list.goto()
-        await _expect_simple_app_logo_loaded(
-            drivers_list.driver_group_logo("simple-app")
-        )
+        group_logo = drivers_list.driver_group_logo("simple-app")
+        await group_logo.scroll_into_view_if_needed()
+        await _expect_simple_app_logo_loaded(group_logo)
         list_description = page.locator(
             '[data-testid=driver-group][data-driver-name="simple-app"] '
             "[data-testid=driver-description]"
         )
         await expect(list_description).to_have_text(SIMPLE_APP_DESCRIPTION)
-        await expect(list_description).to_have_attribute(
-            "title", SIMPLE_APP_DESCRIPTION
-        )
 
-        # 2. Detail page: the header logo of the selected version and its
-        # description.
+        # 2. Detail page: the header logo of the selected version, loaded
+        # without scrolling, and the description.
         await page.goto(f"/drivers/{driver_id}")
         await expect(page.locator("[data-testid=driver-detail]")).to_be_visible()
-        await _expect_simple_app_logo_loaded(page.locator("[data-testid=driver-logo]"))
+        header_logo = page.locator("[data-testid=driver-logo]")
+        await expect(header_logo.locator("img")).to_have_attribute("loading", "eager")
+        await _expect_simple_app_logo_loaded(header_logo)
         await expect(page.locator("[data-testid=driver-description]")).to_contain_text(
             SIMPLE_APP_DESCRIPTION
         )
@@ -280,6 +278,10 @@ async def test_driver_logo_description_and_links_render(
         )
         await expect(link).to_have_attribute("target", "_blank")
         await expect(link).to_have_attribute("rel", re.compile(r"\bnoopener\b"))
+        await expect(link).to_have_accessible_name("Documentation (opens in a new tab)")
+        await expect(
+            page.locator("[data-testid=driver-links] [data-testid=driver-link-host]")
+        ).to_have_text("styrmin-e2e.invalid")
     finally:
         # The page is shared by the whole session: never leave the route on it.
         await page.unroute(SIMPLE_APP_LOGO_URL, _serve_simple_app_logo)

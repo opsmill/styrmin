@@ -8,7 +8,7 @@ from cyclopts import App, Parameter
 
 from styrminctl import client
 from styrminctl.labels import format_driver_version_label
-from styrminctl.output import console, print_success, print_table, styrmin_error_handler
+from styrminctl.output import console, print_success, print_table, print_warning, styrmin_error_handler
 
 if TYPE_CHECKING:
     from typing import Any
@@ -26,6 +26,8 @@ def _print_version_details(version: Any) -> None:  # noqa: ANN401
         source_commit_sha=source_commit_sha,
     )
     print_success(f"Application driver version '{label}' loaded (id: {version.id})")
+    for warning in getattr(version, "load_warnings", None) or []:
+        print_warning(warning)
     console.print(f"  Driver ID: {version.application_driver_id}")
     console.print(f"  Supported versions: {version.supported_versions}")
     if content_hash:

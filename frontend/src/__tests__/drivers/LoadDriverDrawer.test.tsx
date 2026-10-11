@@ -147,4 +147,50 @@ describe("LoadDriverDrawer", () => {
     expect(screen.getByText("Driver loaded")).toBeInTheDocument();
     expect(screen.getByText(/version 2\.1\.0/i)).toBeInTheDocument();
   });
+
+  it("lists the load warnings in a toast that stays until dismissed", async () => {
+    const warning =
+      "spec.info.icon must be an absolute https URL, such as " +
+      "https://example.com/logo.svg (found 'xxxx'). The icon was not stored.";
+    loadLocalMutateAsync.mockResolvedValue({
+      loadLocalApplicationDriverVersion: {
+        id: "v1",
+        applicationDriverId: "d1",
+        version: "2.1.0",
+        loadWarnings: [warning],
+      },
+    });
+    await renderDrawer();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Local directory" }));
+    await user.type(screen.getByLabelText("Directory path"), "/opt/drivers/x");
+    await user.click(screen.getByRole("button", { name: /^load driver$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("detail")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Driver loaded with warnings")).toBeInTheDocument();
+    expect(screen.queryByText("Driver loaded")).not.toBeInTheDocument();
+    expect(screen.getByText(/version 2\.1\.0/i)).toHaveTextContent(
+      `• ${warning}`,
+    );
+  });
+
+  it("shows each line of a load error on its own line", async () => {
+    loadRemoteMutateAsync.mockRejectedValue(
+      new Error(
+        "The driver specification is invalid:\n- spec.version: Field required",
+      ),
+    );
+    await renderDrawer();
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText("Repository URL"),
+      "https://github.com/org/repo",
+    );
+    await user.click(screen.getByRole("button", { name: /^load driver$/i }));
+
+    const message = await screen.findByText(/spec\.version: Field required/);
+    expect(message).toHaveClass("whitespace-pre-line");
+  });
 });

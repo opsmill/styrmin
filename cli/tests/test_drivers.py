@@ -138,3 +138,32 @@ def test_drivers_load_version_renders_label_and_full_commit_sha(
     # T041: full fingerprint exposed on detail
     assert f"Commit SHA: {full_sha}" in output
     assert "Content hash:" not in output
+
+
+def test_drivers_load_local_version_prints_load_warnings(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Spec 020: a value of spec.info that the load left out is printed as a warning."""
+    warning = (
+        "spec.info.links[0].url must be an absolute http or https URL, such as "
+        "https://example.com/docs (found 'xxxx'). The link was not stored."
+    )
+    mock_version = MagicMock(
+        id="v-2",
+        version="2.0.0",
+        application_driver_id="d-1",
+        supported_versions=">=14",
+        content_hash=None,
+        source_commit_sha=None,
+        load_warnings=[warning],
+        component_configs=[],
+        actions=[],
+        helm_chart=None,
+    )
+    mock_client.drivers.load_local_version = AsyncMock(return_value=mock_version)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["drivers", "load-local-version", str(tmp_path)])
+    assert exc.value.code == 0
+    output = " ".join(capsys.readouterr().out.split())
+    assert f"Warning: {warning}" in output
