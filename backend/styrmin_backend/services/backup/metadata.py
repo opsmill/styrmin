@@ -30,6 +30,9 @@ from typing import Any, TypedDict, cast
 
 from styrmin_backend.services.backup.ttl import BackupTtlSource
 
+# Seconds a backup may run; the neo4j-community watchdog resumes Neo4j after the same time.
+DEFAULT_BACKUP_TIMEOUT: int = 3600
+
 
 class BackupMetadata(TypedDict, total=False):
     """Keys the backup pipeline may write to, and read from, ``metadata_``.

@@ -70,6 +70,8 @@ class WorkflowRun:
     events: list[str] = field(default_factory=list)
     #: What the flow body raised, when the caller asked for it to be captured.
     raised: BaseException | None = None
+    #: The ``arun_deployment`` mock that dispatches the USER flow.
+    dispatch: AsyncMock = field(default_factory=AsyncMock)
 
     def metadata_writes(self) -> list[dict[str, Any]]:
         return [
@@ -99,6 +101,8 @@ async def _run_backup_workflow(
     velero_phase: str = "Completed",
     velero_expiration: str | None = VELERO_EXPIRATION,
     velero_volume_bytes: int | None = None,
+    velero_problems: dict[str, str] | None = None,
+    component_statuses: dict[str, Any] | None = None,
     record_deleted_after_status_writes: int | None = None,
     capture_exception: bool = False,
 ) -> WorkflowRun:
@@ -124,6 +128,8 @@ async def _run_backup_workflow(
         velero_phase: ``status.phase`` the USER flow reports back.
         velero_expiration: ``status.expiration`` the USER flow reports back.
         velero_volume_bytes: ``volume_bytes`` the USER flow reports back.
+        velero_problems: ``problems`` the USER flow reports back.
+        component_statuses: The backup's ``component_statuses``.
         record_deleted_after_status_writes: Simulate the backup row being
             deleted after this many successful ``update_backup_status`` calls —
             every call from then on raises ``BackupNotFoundError``, including the
@@ -142,7 +148,7 @@ async def _run_backup_workflow(
     backup = MagicMock()
     backup.name = "styrmin-backup-1"
     backup.instance_id = uuid4()
-    backup.component_statuses = None
+    backup.component_statuses = component_statuses
     backup.metadata_ = {"timeout": 1800}
 
     deployment = MagicMock()
@@ -200,9 +206,11 @@ async def _run_backup_workflow(
     flow_run.state = MagicMock()
     flow_run.state.type = StateType.COMPLETED
     flow_run.state.is_failed.return_value = False
+    run.dispatch = AsyncMock(return_value=flow_run)
 
     velero_result = {
         "volume_bytes": velero_volume_bytes,
+        "problems": velero_problems or {},
         "status": {
             "phase": velero_phase,
             "failureReason": "velero said no",
@@ -222,7 +230,7 @@ async def _run_backup_workflow(
         patch(f"{MODULE}.get_backup", AsyncMock(return_value=backup)),
         patch(f"{MODULE}.update_backup_status", AsyncMock(side_effect=_record_status)),
         patch(f"{MODULE}.build_velero_backup", MagicMock(side_effect=_record_build)),
-        patch(f"{MODULE}.arun_deployment", AsyncMock(return_value=flow_run)),
+        patch(f"{MODULE}.arun_deployment", run.dispatch),
         patch(f"{MODULE}.Variable", variable),
         patch(f"{MODULE}.action_api_token", _fake_action_api_token),
         patch(f"{MODULE}.fail_open_steps", AsyncMock()),
@@ -636,3 +644,36 @@ async def test_failed_backup_records_no_size() -> None:
     terminal = run.status_calls[-1]
     assert terminal["status"] == BackupStatus.FAILED
     assert terminal.get("size_bytes") is None
+
+
+# ---------------------------------------------------------------------------
+# A backup that lacks a component's data fails (#263)
+# ---------------------------------------------------------------------------
+
+
+async def test_completed_velero_backup_with_problems_fails() -> None:
+    run = await _run_backup_workflow(
+        velero_problems={"database": "Velero did not back up volume data"}
+    )
+
+    terminal = run.status_calls[-1]
+    assert terminal["status"] == BackupStatus.FAILED
+    assert terminal["error_message"] == "velero said no"
+
+
+async def test_user_flow_receives_each_component_volumes_and_hook_meaning() -> None:
+    run = await _run_backup_workflow(
+        component_statuses={
+            "database": {"status": "pending", "kind": "neo4j-community"},
+            "task-db": {"status": "pending", "kind": "postgres"},
+            "server": {"status": "pending", "kind": "disk", "volume": "storage"},
+        }
+    )
+
+    parameters = run.dispatch.await_args.kwargs["parameters"]
+    assert parameters["volumes"] == {
+        "database": ["data"],
+        "task-db": ["backup"],
+        "server": ["storage"],
+    }
+    assert list(parameters["post_hook_failures"]) == ["database"]

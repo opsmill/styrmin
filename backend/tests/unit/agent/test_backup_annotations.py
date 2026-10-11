@@ -104,6 +104,35 @@ class TestBuildBackupVolumeAnnotationPatches:
             assert "backup" in rendered
             assert "apiVersion: apps/v1" in rendered
 
+    def test_neo4j_community_kind_produces_data_volume(self) -> None:
+        configs = {
+            "graph": ComponentBackupConfig(
+                enabled=True, kind=BackupKind.NEO4J_COMMUNITY
+            ),
+        }
+        selectors = {"graph": "app.kubernetes.io/name=neo4j"}
+        patches = build_backup_volume_annotation_patches(configs, selectors)
+
+        assert len(patches) == 2
+        for patch in patches:
+            assert patch.patch.annotations == {  # type: ignore[attr-defined]
+                VELERO_BACKUP_VOLUMES_ANNOTATION: "data"
+            }
+
+    def test_neo4j_community_kind_honours_volume(self) -> None:
+        configs = {
+            "graph": ComponentBackupConfig(
+                enabled=True, kind=BackupKind.NEO4J_COMMUNITY, volume="graph-data"
+            ),
+        }
+        selectors = {"graph": "app.kubernetes.io/name=neo4j"}
+        patches = build_backup_volume_annotation_patches(configs, selectors)
+
+        for patch in patches:
+            assert patch.patch.annotations == {  # type: ignore[attr-defined]
+                VELERO_BACKUP_VOLUMES_ANNOTATION: "graph-data"
+            }
+
     def test_mariadb_kind_produces_backup_volume(self) -> None:
         configs = {
             "db": ComponentBackupConfig(enabled=True, kind=BackupKind.MARIADB),

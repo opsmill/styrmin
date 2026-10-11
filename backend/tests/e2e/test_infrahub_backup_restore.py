@@ -7,8 +7,10 @@ debug iterations on the lighter simple-app backup tests.
 These tests exercise **two** independent backup paths in a single
 backup/restore cycle:
 
-* **Database** (``database`` component, ``kind: neo4j``) — a ``BuiltinTag``
-  node lives only in Neo4j.
+* **Database** (``database`` component) — a ``BuiltinTag`` node lives only
+  in Neo4j. The community driver uses ``kind: neo4j-community`` (Neo4j is
+  paused while Velero copies its ``data`` volume, #263); the enterprise driver
+  uses ``kind: neo4j`` (``neo4j-admin database backup``).
 * **Disk** (``server`` component, ``kind: disk``) — artifact content and
   file objects live in Infrahub's object store on the server's
   ``infrahub-server-storage-data`` PVC, mounted at ``/opt/infrahub/storage``.
@@ -33,6 +35,7 @@ from styrmin_sdk.exceptions import ResourceNotFoundError
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.test_backup_restore import (
     assert_velero_backup_uses_bsl,
+    read_velero_backup,
     wait_for_pods_ready,
 )
 
@@ -103,7 +106,6 @@ async def portforward_infrahub(
     "not through a Styrmin-managed UI surface; scenario cannot meaningfully "
     "run through UiScenarioDriver."
 )
-@pytest.mark.skip(reason="backup/restore not supported with community")
 async def test_infrahub_backup_and_restore_lifecycle(
     load_infrahub: dict,
     velero_ready: None,  # noqa: ARG001 — ensures Velero is up before backup/restore
@@ -160,6 +162,13 @@ async def test_infrahub_backup_and_restore_lifecycle(
         backup_name=backup.name,
         expected_bsl_name=load_infrahub["bsl_name"],
     )
+
+    # 2c. Neo4j is idle here, so only the hook counts prove the pause ran: the Neo4j
+    # pause and resume, and the task-manager-db dump and cleanup, on one pod each.
+    velero_backup = await read_velero_backup(kubeconfig_path, backup.name)
+    hook_status = velero_backup["status"].get("hookStatus") or {}
+    assert hook_status.get("hooksFailed", 0) == 0, hook_status
+    assert hook_status.get("hooksAttempted") == 4, hook_status
 
     # 3. Delete the tag (modify data post-backup)
     async with portforward_infrahub(kubeconfig_path, namespace) as port:

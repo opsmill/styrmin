@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from styrmin_backend.agent.service.kubernetes.velero.resources import (
@@ -12,6 +12,9 @@ if TYPE_CHECKING:
 
 class BackupStrategy(ABC):
     """Abstract base class for backup strategies."""
+
+    #: What a failed post-backup hook means for the component's copy; None when nothing.
+    post_hook_failure: ClassVar[str | None] = None
 
     @abstractmethod
     def get_hooks(

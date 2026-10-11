@@ -42,14 +42,6 @@ infrahubTaskWorker:
 nats:
   enabled: false
 neo4j:
-  additionalVolumeMounts:
-    - mountPath: /backup
-      name: backup
-  additionalVolumes:
-    - emptyDir: {}
-      name: backup
-  config:
-    server.backup.enabled: "true"
   disableLookups: true
   fullnameOverride: styrmin-database
   services:

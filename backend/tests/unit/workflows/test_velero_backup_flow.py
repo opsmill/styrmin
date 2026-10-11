@@ -36,15 +36,23 @@ async def _run_flow(
     *,
     phase: str,
     pod_volume_backups: list[dict[str, Any]] | Exception | None = None,
+    hook_status: dict[str, int] | None = None,
+    volumes: dict[str, list[str]] | None = None,
+    post_hook_failures: dict[str, str] | None = None,
+    pod_components: dict[str, str] | None = None,
 ) -> FlowRun:
-    velero_backup = {
-        "metadata": {"name": "styrmin-backup-1"},
+    velero_backup: dict[str, Any] = {
+        "metadata": {"name": "styrmin-backup-1", "namespace": "styrmin"},
         "status": {
             "phase": phase,
             "backupItemOperationsCompleted": 7,
             "expiration": "2026-11-05T10:00:00Z",
         },
     }
+    if phase == "PartiallyFailed":
+        velero_backup["status"]["errors"] = 1
+    if hook_status is not None:
+        velero_backup["status"]["hookStatus"] = hook_status
     velero_client = MagicMock()
     velero_client.create_backup_from_dict = AsyncMock()
     velero_client.poll_backup_status = AsyncMock(return_value=velero_backup)
@@ -59,12 +67,21 @@ async def _run_flow(
 
     api_client = MagicMock()
     api_client.close = AsyncMock()
+    pods = []
+    for pod, component in (pod_components or {}).items():
+        item = MagicMock()
+        item.metadata.name = pod  # ``MagicMock(name=...)`` names the mock instead
+        item.metadata.labels = {"styrmin/component": component}
+        pods.append(item)
+    core_api = MagicMock()
+    core_api.list_namespaced_pod = AsyncMock(return_value=MagicMock(items=pods))
     variable = MagicMock()
     variable.set = AsyncMock()
     logger = MagicMock()
 
     with (
         patch("kubernetes_asyncio.client.ApiClient", return_value=api_client),
+        patch("kubernetes_asyncio.client.CoreV1Api", return_value=core_api),
         patch(LOAD_CONFIG, AsyncMock()),
         patch(VELERO_CLIENT, return_value=velero_client),
         patch(f"{MODULE}.config", MagicMock()),
@@ -76,6 +93,8 @@ async def _run_flow(
             crd_body={"kind": "Backup"},
             velero_backup_name="styrmin-backup-1",
             velero_namespace="styrmin",
+            volumes=volumes,
+            post_hook_failures=post_hook_failures,
         )
 
     variable.set.assert_awaited_once()
@@ -103,10 +122,100 @@ async def test_completed_backup_reports_pod_volume_bytes_not_operation_count() -
 
 @pytest.mark.parametrize("phase", ["PartiallyFailed", "Failed"])
 async def test_backup_that_did_not_complete_reports_no_size(phase: str) -> None:
-    run = await _run_flow(phase=phase)
+    run = await _run_flow(
+        phase=phase,
+        pod_volume_backups=[
+            {"status": {"phase": "Completed", "progress": {"totalBytes": 2_048}}}
+        ],
+    )
 
     assert run.payload["volume_bytes"] is None
+
+
+async def test_failed_backup_checks_no_volume() -> None:
+    """Velero stored nothing, so the failure is Velero's own."""
+    run = await _run_flow(phase="Failed", volumes={"database": ["data"]})
+
+    assert run.payload["problems"] == {}
     run.velero_client.list_pod_volume_backups.assert_not_awaited()
+
+
+def _pvb(pod: str, volume: str) -> dict[str, Any]:
+    return {
+        "spec": {"pod": {"namespace": "app", "name": pod}, "volume": volume},
+        "status": {"phase": "Completed", "progress": {"totalBytes": 1}},
+    }
+
+
+async def test_completed_backup_without_a_named_volume_fails() -> None:
+    """Velero skips hostPath volumes with only a warning, and completes the backup."""
+    run = await _run_flow(
+        phase="Completed",
+        pod_volume_backups=[_pvb("server-0", "storage")],
+        volumes={"server": ["storage"], "database": ["data"]},
+        pod_components={"server-0": "server", "database-0": "database"},
+    )
+
+    assert list(run.payload["problems"]) == ["database"]
+    assert "did not back up volume data" in run.payload["problems"]["database"]
+    reason = run.payload["status"]["failureReason"]
+    assert reason.startswith("component database: Velero did not back up volume data")
+
+
+async def test_completed_backup_with_every_named_volume_has_no_problem() -> None:
+    run = await _run_flow(
+        phase="Completed",
+        pod_volume_backups=[_pvb("database-0", "data")],
+        volumes={"database": ["data"]},
+        pod_components={"database-0": "database"},
+    )
+
+    assert run.payload["problems"] == {}
+    assert run.payload["status"]["failureReason"] == ""
+
+
+async def test_unreadable_pod_volume_backups_fail_a_backup_with_named_volumes() -> None:
+    run = await _run_flow(
+        phase="Completed",
+        pod_volume_backups=VeleroClientError("403 Forbidden"),
+        volumes={"database": ["data"], "worker": []},
+    )
+
+    assert list(run.payload["problems"]) == ["database"]
+    assert "403 Forbidden" in run.payload["problems"]["database"]
+
+
+async def test_failed_post_hook_is_reported_on_its_component() -> None:
+    run = await _run_flow(
+        phase="PartiallyFailed",
+        pod_volume_backups=[_pvb("database-0", "data")],
+        hook_status={"hooksAttempted": 4, "hooksFailed": 1},
+        volumes={"database": ["data"], "task-db": []},
+        post_hook_failures={"database": "Neo4j was not paused"},
+        pod_components={"database-0": "database"},
+    )
+
+    problem = run.payload["problems"]["database"]
+    assert problem.startswith("Neo4j was not paused. 1 of 4 backup hooks failed")
+    assert "`velero backup logs styrmin-backup-1 -n styrmin`" in problem
+    assert run.payload["status"]["failureReason"] == (
+        f"Velero backup phase: PartiallyFailed (1 errors); component database: {problem}"
+    )
+
+
+async def test_failed_hooks_without_a_component_meaning_are_reported_on_the_backup() -> (
+    None
+):
+    run = await _run_flow(
+        phase="PartiallyFailed",
+        hook_status={"hooksAttempted": 2, "hooksFailed": 1},
+    )
+
+    assert run.payload["problems"] == {}
+    assert run.payload["status"]["failureReason"] == (
+        "Velero backup phase: PartiallyFailed (1 errors); 1 of 2 backup hooks failed; "
+        "`velero backup logs styrmin-backup-1 -n styrmin` prints their output"
+    )
 
 
 async def test_unreadable_size_warns_and_still_reports_the_completed_backup() -> None:

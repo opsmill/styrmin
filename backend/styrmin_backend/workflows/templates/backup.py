@@ -40,6 +40,9 @@ from styrmin_backend.agent.service.kubernetes.velero.resources import (
 from styrmin_backend.agent.steps.backup_components import (
     BackupComponentSteps,
     PodComponents,
+    component_problems,
+    failed_hooks_message,
+    items_by_component,
 )
 from styrmin_backend.agent.steps.reporter import StepReporter
 from styrmin_backend.agent.tasks.utils import action_job_variables
@@ -48,6 +51,7 @@ from styrmin_backend.domain import steps
 from styrmin_backend.domain.models import StepParent
 from styrmin_backend.services.auth.action_token import action_api_token
 from styrmin_backend.services.backup.metadata import (
+    DEFAULT_BACKUP_TIMEOUT,
     BackupMetadata,
     read_backup_metadata,
 )
@@ -91,6 +95,16 @@ def _failure_reason(resource: str, status: dict[str, Any]) -> str:
     if status.get("phase") == "Completed":
         return ""
     return status.get("failureReason") or failure_message(resource, status)
+
+
+def _backup_failure_reason(backup: dict[str, Any], problems: dict[str, str]) -> str:
+    """Why a backup failed: Velero's reason, the components it lacks, and its failed hooks."""
+    reasons = [_failure_reason("backup", backup.get("status") or {})]
+    reasons += [f"component {name}: {problem}" for name, problem in problems.items()]
+    hooks = failed_hooks_message(backup)
+    if hooks and not any(hooks in problem for problem in problems.values()):
+        reasons.append(hooks)
+    return "; ".join(reason for reason in reasons if reason)
 
 
 # ---------------------------------------------------------------------------
@@ -140,8 +154,10 @@ async def execute_velero_backup_flow(
     crd_body: dict[str, Any],
     velero_backup_name: str,
     velero_namespace: str,
-    timeout: int = 3600,
+    timeout: int = DEFAULT_BACKUP_TIMEOUT,
     components: list[str] | None = None,
+    volumes: dict[str, list[str]] | None = None,
+    post_hook_failures: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Create a Velero Backup CRD and poll until completion.
 
@@ -153,6 +169,10 @@ async def execute_velero_backup_flow(
         velero_namespace: Namespace where Velero resources live.
         timeout: Maximum seconds to wait for backup completion.
         components: The backup's components; each one is recorded as a step.
+        volumes: The volumes each component's backup strategy names. A stored
+            backup without a PodVolumeBackup for one of them fails.
+        post_hook_failures: What a failed post-backup hook means, for the
+            components whose post-backup hook can fail the backup.
 
     Returns:
         The final Velero Backup resource dict from the K8s API.
@@ -164,7 +184,6 @@ async def execute_velero_backup_flow(
     )
     from styrmin_backend.agent.service.kubernetes.velero.client import (
         VeleroClient,
-        VeleroClientError,
         pod_volume_bytes,
     )
 
@@ -174,15 +193,16 @@ async def execute_velero_backup_flow(
     try:
         logger = get_run_logger()
         client = VeleroClient(api_client=api_client)
+        pod_components = PodComponents(k8s_client.CoreV1Api(api_client))
         component_steps = BackupComponentSteps(
             StepReporter.from_env(),
             components or [],
             list_items=partial(
                 client.list_pod_volume_backups, velero_namespace, velero_backup_name
             ),
-            component_of_pod=PodComponents(
-                k8s_client.CoreV1Api(api_client)
-            ).component_of,
+            component_of_pod=pod_components.component_of,
+            volumes=volumes,
+            post_hook_failures=post_hook_failures,
         )
         await client.create_backup_from_dict(crd_body)
         logger.info(
@@ -200,27 +220,47 @@ async def execute_velero_backup_flow(
 
         status = result.get("status", {})
         volume_bytes: int | None = None
-        if status.get("phase") == "Completed":
-            # Velero's Backup status has no byte size, only on its PodVolumeBackups.
-            # A size we cannot read must not fail a backup that Velero stored.
+        problems: dict[str, str] = {}
+        pod_volume_backups: list[dict[str, Any]] | None = None
+        if status.get("phase") in ("Completed", "PartiallyFailed"):
             try:
-                volume_bytes = pod_volume_bytes(
-                    await client.list_pod_volume_backups(
-                        velero_namespace, velero_backup_name
-                    )
+                pod_volume_backups = await client.list_pod_volume_backups(
+                    velero_namespace, velero_backup_name
                 )
-            except VeleroClientError as e:
-                logger.warning(f"Could not read the size of {velero_backup_name}: {e}")
+                problems = component_problems(
+                    await items_by_component(
+                        pod_volume_backups, pod_components.component_of
+                    ),
+                    result,
+                    volumes or {},
+                    post_hook_failures or {},
+                )
+            except Exception as e:  # noqa: BLE001 - an unchecked backup fails below
+                # A backup that may lack a database must not count as completed.
+                problems = {
+                    name: f"Could not check which volumes Velero backed up: {e}"
+                    for name, names in (volumes or {}).items()
+                    if names
+                }
+                logger.warning(
+                    f"Could not read the PodVolumeBackups of {velero_backup_name}: {e}"
+                )
+        for name, problem in problems.items():
+            logger.error(f"Backup {velero_backup_name}, component {name}: {problem}")
+        if status.get("phase") == "Completed" and pod_volume_backups is not None:
+            # Velero's Backup status has no byte size, only on its PodVolumeBackups.
+            volume_bytes = pod_volume_bytes(pod_volume_backups)
 
         # Store result for cross-worker retrieval via Prefect Variable
         await Variable.set(  # type: ignore[misc]
             name=f"velero-result-{flow_run_ctx.id}",
             value={
-                # Computed by Styrmin, so it sits outside Velero's ``status``.
+                # Computed by Styrmin, so they sit outside Velero's ``status``.
                 "volume_bytes": volume_bytes,
+                "problems": problems,
                 "status": {
                     "phase": status.get("phase", ""),
-                    "failureReason": _failure_reason("backup", status),
+                    "failureReason": _backup_failure_reason(result, problems),
                     # Velero's own expiration timestamp (creation + spec.ttl),
                     # recorded on the backup record so operators can read
                     # "when does this disappear?" without cluster access.
@@ -603,8 +643,10 @@ async def execute_backup_workflow(
                 metadata_updates={"ttl": ttl, "ttl_source": ttl_source},
             )
 
-        # Build hooks from component configs
+        # Build hooks from component configs, and what the USER flow checks per component
         hooks: list[VeleroBackupHook] = []
+        volumes: dict[str, list[str]] = {}
+        post_hook_failures: dict[str, str] = {}
         if backup.component_statuses:
             for comp_name, comp_data in backup.component_statuses.items():
                 if isinstance(comp_data, dict):
@@ -614,6 +656,12 @@ async def execute_backup_workflow(
                         component_config=comp_data,
                     )
                     hooks.extend(comp_hooks)
+                    strategy = get_strategy(comp_data.get("kind", "disk"))
+                    volumes[comp_name] = strategy.get_backup_volumes(
+                        comp_name, comp_data
+                    )
+                    if strategy.post_hook_failure is not None:
+                        post_hook_failures[comp_name] = strategy.post_hook_failure
 
         # Build Velero backup CRD and pre-render to dict
         velero_backup = build_velero_backup(
@@ -629,9 +677,11 @@ async def execute_backup_workflow(
         crd_body = velero_backup.render()
 
         # Determine timeout
-        timeout = 3600
+        timeout = DEFAULT_BACKUP_TIMEOUT
         if backup.metadata_ and isinstance(backup.metadata_, dict):
-            timeout = read_backup_metadata(backup.metadata_).get("timeout", 3600)
+            timeout = read_backup_metadata(backup.metadata_).get(
+                "timeout", DEFAULT_BACKUP_TIMEOUT
+            )
 
         components = [
             name
@@ -650,6 +700,8 @@ async def execute_backup_workflow(
                     "velero_namespace": velero_namespace,
                     "timeout": timeout,
                     "components": components,
+                    "volumes": volumes,
+                    "post_hook_failures": post_hook_failures,
                 },
                 job_variables=action_job_variables(api_token, backup_id=backup_uuid),
                 poll_interval=config.SETTINGS.agent.poll_interval,
@@ -699,7 +751,8 @@ async def execute_backup_workflow(
         )
 
         async with get_unit_of_work() as uow:
-            if velero_phase == "Completed":
+            # The USER flow found a component whose data this backup lacks.
+            if velero_phase == "Completed" and not result.get("problems"):
                 await update_backup_status(
                     backup_id=backup_uuid,
                     status=BackupStatus.COMPLETED,

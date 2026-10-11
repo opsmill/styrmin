@@ -31,13 +31,13 @@ beta release:
   applications) into a new, network-isolated environment. Tracked in
   [opsmill/styrmin#6](https://github.com/opsmill/styrmin/issues/6).
 
-### Known broken features
+### Known limitations
 
-- **Infrahub Application backup is currently failing.** The Neo4j
-  pre-backup hook uses a Neo4j Enterprise-only command against the
-  Community image bundled with the Infrahub driver, so the backup
-  finishes in a `PartiallyFailed` state. Tracked in
-  [opsmill/styrmin#263](https://github.com/opsmill/styrmin/issues/263).
+- **Infrahub does not answer queries while its database is backed up.**
+  The Infrahub driver backs up Neo4j Community by pausing Neo4j while
+  Velero copies its data volume, so Infrahub API requests wait or time out
+  until the backup finishes. See
+  [Backups and restores](./concepts-and-architecture/backups-and-restores.md).
 
 If you hit something that looks broken and it's not listed above, please
 file an issue — see below.

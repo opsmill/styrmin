@@ -8,9 +8,10 @@
 #
 # The CSI hostpath driver provisions PVs of type `csi` (spec.csi, not
 # spec.hostPath), which Velero FSB backs up normally. We point the cluster's
-# `standard_storage` class at `csi-hostpath-sc` so disk-backed components
-# (e.g. the Infrahub server's object store at /opt/infrahub/storage) can be
-# captured and restored by FSB.
+# `standard_storage` and `fast_storage` classes at `csi-hostpath-sc` so
+# volumes Velero copies (the Infrahub server's object store at
+# /opt/infrahub/storage, the Infrahub Neo4j data volume) can be captured and
+# restored by FSB.
 #
 # Trimmed from kubernetes-csi/csi-driver-host-path v1.15.0
 # (deploy/kubernetes-latest/hostpath) to the parts needed for dynamic

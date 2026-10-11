@@ -154,6 +154,8 @@ class BackupConfigValidator(Validator):
                 self._validate_disk(component_name, config)
             case BackupKind.ACTION:
                 self._validate_action(component_name)
+            case BackupKind.NEO4J_COMMUNITY:
+                self._validate_neo4j_community(component_name, config)
             case (
                 BackupKind.MARIADB
                 | BackupKind.MONGODB
@@ -198,6 +200,25 @@ class BackupConfigValidator(Validator):
                         f"Component '{component_name}': volume '{vol}' is not defined. "
                         f"Available volumes: {known_volumes}"
                     )
+
+    def _validate_neo4j_community(
+        self, component_name: str, config: ComponentBackupConfig
+    ) -> None:
+        """Reject the fields that neo4j-community ignores, so a misplaced setting is not lost.
+
+        Raises:
+            ValidationError: If ``volumes``, ``database_name`` or ``credentials_secret`` is set.
+        """
+        ignored = sorted(
+            field
+            for field in ("volumes", "database_name", "credentials_secret")
+            if getattr(config, field) is not None
+        )
+        if ignored:
+            raise ValidationError(
+                f"Component '{component_name}': neo4j-community backup does not use "
+                f"{ignored}; it backs up one volume, set with 'volume' (default 'data')"
+            )
 
     def _validate_action(self, component_name: str) -> None:
         """Validate action backup configuration hooks.

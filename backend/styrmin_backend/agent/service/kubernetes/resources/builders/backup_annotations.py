@@ -31,8 +31,9 @@ def build_backup_volume_annotation_patches(
     matching Deployments and StatefulSets.
 
     The annotation value is a comma-separated list of volume names to back up. For
-    ``disk`` kind, this comes from the ``volume``/``volumes`` fields. For ``postgres``
-    and ``neo4j`` kinds, this defaults to ``"backup"`` (or the configured
+    ``disk`` kind, this comes from the ``volume``/``volumes`` fields. For
+    ``neo4j-community``, it is the ``volume`` field, defaulting to ``"data"``. For
+    ``postgres`` and ``neo4j`` kinds, this defaults to ``"backup"`` (or the configured
     ``backup_volume`` field if set, but that is handled at a higher level).
 
     Args:
@@ -89,6 +90,10 @@ def _resolve_backup_volumes(config: ComponentBackupConfig) -> list[str]:
         if config.volume:
             return [config.volume]
         return []
+
+    if config.kind == BackupKind.NEO4J_COMMUNITY:
+        # Velero copies the paused database's own data volume, not a dump.
+        return [config.volume or "data"]
 
     if config.kind in (
         BackupKind.POSTGRES,
