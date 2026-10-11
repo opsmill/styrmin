@@ -399,6 +399,94 @@ async def test_a_component_still_running_when_the_backup_fails_gets_its_error(
     assert _at(failed["occurredAt"]) == _at(BACKUP_END)
 
 
+async def test_a_component_without_a_named_volume_fails(
+    api: FakeStepApi, events: list[Event]
+) -> None:
+    """Velero completes a backup that skipped a hostPath volume, with only a warning."""
+    items = Items()
+    steps = BackupComponentSteps(
+        StepReporter.from_env(),
+        ["db", "web"],
+        list_items=items,
+        component_of_pod=_component_of_pod,
+        volumes={"db": ["data"], "web": ["data", "uploads"]},
+    )
+    items.current = [_pvb("web-0", "Completed", start=T0, end=T1)]
+
+    await steps.on_poll(_backup("Completed"))
+    await steps.finish(_backup("Completed"))
+
+    assert events == [
+        ("STARTED", "backup:component:web"),
+        ("FAILED", "backup:component:web"),
+        ("STARTED", "backup:component:db"),
+        ("FAILED", "backup:component:db"),
+    ]
+    web = api.record("FAILED", "backup:component:web")["error"]
+    assert web.startswith(
+        "Velero did not back up volume uploads. Velero skips hostPath"
+    )
+    assert _at(api.record("FAILED", "backup:component:web")["occurredAt"]) == _at(T1)
+    db = api.record("FAILED", "backup:component:db")["error"]
+    assert db.startswith("Velero did not back up volume data.")
+    assert _at(api.record("FAILED", "backup:component:db")["occurredAt"]) == _at(
+        BACKUP_END
+    )
+
+
+async def test_a_failed_post_hook_fails_the_component_whose_hook_can_fail(
+    api: FakeStepApi, events: list[Event]
+) -> None:
+    items = Items()
+    steps = BackupComponentSteps(
+        StepReporter.from_env(),
+        ["db", "web"],
+        list_items=items,
+        component_of_pod=_component_of_pod,
+        volumes={"db": ["data"], "web": ["data"]},
+        post_hook_failures={"db": "Neo4j was not paused"},
+    )
+    items.current = [
+        _pvb("db-0", "Completed", start=T0, end=T1),
+        _pvb("web-0", "Completed", start=T0, end=T2),
+    ]
+    backup = _backup(
+        "PartiallyFailed", errors=1, hookStatus={"hooksAttempted": 2, "hooksFailed": 1}
+    )
+
+    await steps.on_poll(backup)
+    await steps.finish(backup)
+
+    assert ("SUCCEEDED", "backup:component:web") in events
+    failed = api.record("FAILED", "backup:component:db")
+    assert failed["error"] == (
+        "Neo4j was not paused. 1 of 2 backup hooks failed; "
+        "`velero backup logs styrmin-backup-1 -n ` prints their output"
+    )
+
+
+async def test_volumes_are_not_checked_while_velero_can_still_create_items(
+    api: FakeStepApi, events: list[Event]
+) -> None:
+    items = Items()
+    steps = BackupComponentSteps(
+        StepReporter.from_env(),
+        ["db"],
+        list_items=items,
+        component_of_pod=_component_of_pod,
+        volumes={"db": ["data"]},
+    )
+
+    await steps.on_poll(_backup("InProgress"))
+    items.current = [_pvb("db-0", "Completed", start=T0, end=T1)]
+    await steps.on_poll(_backup("Completed"))
+
+    assert events == [
+        ("STARTED", "backup:component:db"),
+        ("SUCCEEDED", "backup:component:db"),
+    ]
+
+
 class FlakyStepApi(FakeStepApi):
     """Answers the first ``failures`` writes of ``event`` with a GraphQL error."""
 

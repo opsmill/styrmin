@@ -35,6 +35,7 @@ from styrmin_sdk.exceptions import ResourceNotFoundError
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.test_backup_restore import (
     assert_velero_backup_uses_bsl,
+    read_velero_backup,
     wait_for_pods_ready,
 )
 
@@ -161,6 +162,13 @@ async def test_infrahub_backup_and_restore_lifecycle(
         backup_name=backup.name,
         expected_bsl_name=load_infrahub["bsl_name"],
     )
+
+    # 2c. Neo4j is idle here, so only the hook counts prove the pause ran: the Neo4j
+    # pause and resume, and the task-manager-db dump and cleanup, on one pod each.
+    velero_backup = await read_velero_backup(kubeconfig_path, backup.name)
+    hook_status = velero_backup["status"].get("hookStatus") or {}
+    assert hook_status.get("hooksFailed", 0) == 0, hook_status
+    assert hook_status.get("hooksAttempted") == 4, hook_status
 
     # 3. Delete the tag (modify data post-backup)
     async with portforward_infrahub(kubeconfig_path, namespace) as port:

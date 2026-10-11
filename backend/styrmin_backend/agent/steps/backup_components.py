@@ -4,8 +4,10 @@ Velero backs up the whole namespace and creates one PodVolumeBackup per pod
 volume while the backup is ``InProgress``. Each pod belongs to a component
 through its ``styrmin/component`` label. A component's step starts at its
 earliest item, ends at its latest item once all have ended and the backup has
-left ``InProgress``, and fails when any item failed. A component that has not
-ended when the backup ends gets the backup's result and times.
+left ``InProgress``, and fails when any item failed, when Velero did not back up
+a volume that its backup strategy names, or when its post-backup hook can have
+failed. A component that has not ended when the backup ends gets the backup's
+result and times.
 """
 
 from __future__ import annotations
@@ -28,6 +30,8 @@ _FAILED_PHASES = frozenset({"Failed", "Canceled"})
 _ENDED_PHASES = _FAILED_PHASES | {"Completed"}
 #: Backup phases in which Velero can still create PodVolumeBackups ("" before it sets one).
 _CREATING_ITEMS_PHASES = frozenset({"", "New", "InProgress"})
+#: Backup phases in which Velero stored nothing, so there are no volumes to check.
+_NOTHING_STORED_PHASES = frozenset({"Failed", "FailedValidation"})
 #: How many times ``finish`` sends a step write that was not recorded, and the wait between.
 FINISH_ATTEMPTS = 3
 FINISH_RETRY_DELAY_SECONDS = 2.0
@@ -80,6 +84,69 @@ def component_progress(items: Sequence[Mapping[str, Any]]) -> ComponentProgress:
     return ComponentProgress(started_at, ended_at, "; ".join(errors) or None)
 
 
+def failed_hooks_message(backup: Mapping[str, Any]) -> str | None:
+    """How many backup hooks failed and how to print their output; None when none failed."""
+    hook_status = (backup.get("status") or {}).get("hookStatus") or {}
+    failed = hook_status.get("hooksFailed") or 0
+    if not failed:
+        return None
+    metadata = backup.get("metadata") or {}
+    return (
+        f"{failed} of {hook_status.get('hooksAttempted', failed)} backup hooks failed; "
+        f"`velero backup logs {metadata.get('name', '')} -n {metadata.get('namespace', '')}` "
+        "prints their output"
+    )
+
+
+def component_problems(
+    items_by_component: Mapping[str, Sequence[Mapping[str, Any]]],
+    backup: Mapping[str, Any],
+    volumes: Mapping[str, Sequence[str]],
+    post_hook_failures: Mapping[str, str],
+) -> dict[str, str]:
+    """Why a stored backup lacks a consistent copy of a component's data, by component.
+
+    ``volumes`` names the volumes each component's backup strategy needs, and
+    ``post_hook_failures`` what a failed post-backup hook means for a component.
+    Empty until Velero has stopped creating PodVolumeBackups, and when it stored nothing.
+    """
+    phase = (backup.get("status") or {}).get("phase") or ""
+    if phase in _CREATING_ITEMS_PHASES or phase in _NOTHING_STORED_PHASES:
+        return {}
+    hooks = failed_hooks_message(backup)
+    problems: dict[str, str] = {}
+    for component, names in volumes.items():
+        backed_up = {
+            (item.get("spec") or {}).get("volume")
+            for item in items_by_component.get(component, [])
+        }
+        missing = [name for name in names if name not in backed_up]
+        if missing:
+            problems[component] = (
+                f"Velero did not back up volume {', '.join(missing)}. Velero skips "
+                "hostPath volumes, such as local-path ones, the volumes of pods that are "
+                "not running, and the volumes of a pod whose pre-backup hook failed"
+            ) + (f". {hooks}" if hooks else "")
+        elif hooks and component in post_hook_failures:
+            problems[component] = f"{post_hook_failures[component]}. {hooks}"
+    return problems
+
+
+async def items_by_component(
+    items: Sequence[Mapping[str, Any]], component_of_pod: ComponentOfPod
+) -> dict[str, list[Mapping[str, Any]]]:
+    """Group PodVolumeBackups by the component of their pod; items of other pods are left out."""
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for item in items:
+        pod = (item.get("spec") or {}).get("pod") or {}
+        component = await component_of_pod(
+            pod.get("namespace", ""), pod.get("name", "")
+        )
+        if component is not None:
+            grouped.setdefault(component, []).append(item)
+    return grouped
+
+
 class PodComponents:
     """The component of each pod, from its ``styrmin/component`` label.
 
@@ -117,11 +184,15 @@ class BackupComponentSteps:
         *,
         list_items: ListItems,
         component_of_pod: ComponentOfPod,
+        volumes: Mapping[str, Sequence[str]] | None = None,
+        post_hook_failures: Mapping[str, str] | None = None,
     ) -> None:
         self._reporter = reporter
         self._components = list(dict.fromkeys(components))
         self._list_items = list_items
         self._component_of_pod = component_of_pod
+        self._volumes = volumes or {}
+        self._post_hook_failures = post_hook_failures or {}
         self._progress: dict[str, ComponentProgress] = {}
         self._started: set[str] = set()
         self._ended: set[str] = set()
@@ -140,11 +211,21 @@ class BackupComponentSteps:
             return
         phase = (backup.get("status") or {}).get("phase") or ""
         try:
-            items = await self._items_by_component()
+            items = await items_by_component(
+                await self._list_items(), self._component_of_pod
+            )
+            problems = component_problems(
+                items, backup, self._volumes, self._post_hook_failures
+            )
             for component in self._components:
                 progress = component_progress(items.get(component, []))
                 if phase in _CREATING_ITEMS_PHASES:
                     progress = ComponentProgress(started_at=progress.started_at)
+                if problem := problems.get(component):
+                    error = "; ".join(filter(None, [progress.error, problem]))
+                    progress = ComponentProgress(
+                        progress.started_at, progress.ended_at, error
+                    )
                 self._progress[component] = progress
                 await self._record(component, progress)
         except Exception as exc:  # noqa: BLE001 - a step write never fails the backup
@@ -193,17 +274,6 @@ class BackupComponentSteps:
             )
         except Exception as exc:  # noqa: BLE001 - a step write never fails the backup
             logger.warning("Could not end the backup's component steps: {}", exc)
-
-    async def _items_by_component(self) -> dict[str, list[dict[str, Any]]]:
-        grouped: dict[str, list[dict[str, Any]]] = {}
-        for item in await self._list_items():
-            pod = (item.get("spec") or {}).get("pod") or {}
-            component = await self._component_of_pod(
-                pod.get("namespace", ""), pod.get("name", "")
-            )
-            if component is not None:
-                grouped.setdefault(component, []).append(item)
-        return grouped
 
     async def _record(self, component: str, progress: ComponentProgress) -> None:
         """Send what changed; a write that was not recorded is sent again on the next call."""

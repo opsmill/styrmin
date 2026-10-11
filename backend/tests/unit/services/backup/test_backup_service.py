@@ -8,19 +8,22 @@ from uuid import uuid4
 import pytest
 
 from styrmin_backend.db.models import (
+    ApplicationDriverVersion,
     ApplicationInstance,
     Backup,
     BackupStatus,
+    ComponentConfig,
     Restore,
     RestoreStatus,
 )
+from styrmin_backend.services.backup.metadata import DEFAULT_BACKUP_TIMEOUT
 from styrmin_backend.services.backup.service import (
-    DEFAULT_BACKUP_TIMEOUT,
     create_backup,
     delete_backup,
     get_backup,
     get_backups,
     get_strategy,
+    resolve_backup_target,
     update_backup_component_status,
     update_backup_status,
 )
@@ -54,13 +57,14 @@ def make_uow(
     backups: list[Backup] | None = None,
     restores: list[Restore] | None = None,
     instances: list[ApplicationInstance] | None = None,
+    driver_versions: list[ApplicationDriverVersion] | None = None,
 ) -> FakeUnitOfWork:
     return FakeUnitOfWork(
         clusters=FakeClusterRepository(),
         environments=FakeEnvironmentRepository(),
         helm_repositories=FakeHelmRepositoryRepository(),
         helm_charts=FakeHelmChartRepository(),
-        application_driver_versions=FakeApplicationRepository(),
+        application_driver_versions=FakeApplicationRepository(driver_versions or []),
         instances=FakeApplicationInstanceRepository(instances or []),
         actions=FakeActionRepository(),
         tasks=FakeTaskRepository(),
@@ -97,6 +101,51 @@ class TestGetStrategy:
     def test_unknown_strategy_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown backup kind"):
             get_strategy("unknown")
+
+
+class TestResolveBackupTarget:
+    @pytest.mark.anyio
+    async def test_component_container_reaches_the_hooks(self) -> None:
+        """The backup config forbids extra keys, so the container comes from the component."""
+        version = ApplicationDriverVersion(
+            id=uuid4(),
+            application_driver_id=uuid4(),
+            version="4.0.0",
+            application_supported_versions=">=1.0",
+            source_type="git",
+            source_repository="https://github.com/test/repo",
+            source_branch="main",
+        )
+        backup = {"enabled": True, "kind": "neo4j-community"}
+        version.component_configs = [
+            ComponentConfig(
+                name="database",
+                config={"container": "neo4j", "backup": backup},
+                application_driver_version_id=version.id,
+            ),
+            ComponentConfig(
+                name="cache",
+                config={"backup": {"enabled": True, "kind": "disk", "volume": "x"}},
+                application_driver_version_id=version.id,
+            ),
+        ]
+        instance = ApplicationInstance(
+            application_version="1.0.0",
+            deployment_id=uuid4(),
+            application_driver_version_id=version.id,
+        )
+        uow = make_uow(instances=[instance], driver_versions=[version])
+
+        target = await resolve_backup_target(instance.id, uow)
+
+        assert target.component_configs is not None
+        database = target.component_configs["database"]
+        assert database == {**backup, "container": "neo4j"}
+        assert "container" not in target.component_configs["cache"]
+        hooks = get_strategy("neo4j-community").get_hooks(
+            namespace="ns", component_name="database", config=database
+        )
+        assert hooks[0].pre[0].container == "neo4j"  # type: ignore[index]
 
 
 class TestCreateBackup:

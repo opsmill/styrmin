@@ -17,7 +17,10 @@ from styrmin_backend.db.models import (
 from styrmin_backend.repository.environment_backup import (
     NON_TERMINAL_RESTORE_STATUSES,
 )
-from styrmin_backend.services.backup.metadata import BackupMetadata
+from styrmin_backend.services.backup.metadata import (
+    DEFAULT_BACKUP_TIMEOUT,
+    BackupMetadata,
+)
 from styrmin_backend.services.backup.strategies.action import ActionBackupStrategy
 from styrmin_backend.services.backup.strategies.base import BackupStrategy
 from styrmin_backend.services.backup.strategies.disk import DiskSnapshotStrategy
@@ -43,7 +46,6 @@ if TYPE_CHECKING:
     from styrmin_backend.services.unit_of_work import UnitOfWork
 
 # Default timeout values (seconds)
-DEFAULT_BACKUP_TIMEOUT: int = 3600  # 1 hour
 DEFAULT_RESTORE_TIMEOUT: int = 7200  # 2 hours
 
 # Every deployment runs in its own ``styrmin-<deployment id>`` namespace.
@@ -115,7 +117,13 @@ async def resolve_backup_target(instance_id: UUID, uow: UnitOfWork) -> BackupTar
                 for component_config in driver_version.component_configs:
                     backup_raw = component_config.config.get("backup")
                     if isinstance(backup_raw, dict) and backup_raw.get("enabled"):
-                        resolved[component_config.name] = backup_raw
+                        # The hooks run in the component's declared container.
+                        container = component_config.config.get("container")
+                        resolved[component_config.name] = (
+                            {**backup_raw, "container": container}
+                            if container
+                            else backup_raw
+                        )
                 if resolved:
                     component_configs = resolved
 

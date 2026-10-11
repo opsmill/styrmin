@@ -19,6 +19,11 @@ class Neo4jCommunityBackupStrategy(BackupStrategy):
     and Neo4j replays its transaction logs on startup.
     """
 
+    post_hook_failure = (
+        "The post-backup hook of this component fails when Neo4j was not paused for "
+        "the whole copy of its data volume, so this copy may not be consistent"
+    )
+
     def get_hooks(
         self,
         namespace: str,
