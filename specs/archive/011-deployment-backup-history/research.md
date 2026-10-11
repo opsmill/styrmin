@@ -37,7 +37,7 @@ Each one calls `generate_instance_from_deployment`, then `deployment.set_active_
 
 ## R3. Validation of the two arguments (exactly one of `deploymentId` or `instanceId`)
 
-**Finding**: [ADR-031](../../dev/adr/0031-dual-identifier-resolution-service-layer.md) puts the "exactly one of two identifiers" rule in the service layer. `AmbiguousIdentifierError` (`backend/styrmin_backend/services/exceptions.py`) is the existing `ServiceError` subclass for it, with `error_code = "VALIDATION_ERROR"`. `resolve_cluster` (`services/clusters.py`) is the reference shape: it raises the error with a specific message for "both" and for "neither".
+**Finding**: [ADR-031](../../../dev/adr/0031-dual-identifier-resolution-service-layer.md) puts the "exactly one of two identifiers" rule in the service layer. `AmbiguousIdentifierError` (`backend/styrmin_backend/services/exceptions.py`) is the existing `ServiceError` subclass for it, with `error_code = "VALIDATION_ERROR"`. `resolve_cluster` (`services/clusters.py`) is the reference shape: it raises the error with a specific message for "both" and for "neither".
 
 **Decision**: `get_backups(uow, *, deployment_id=None, instance_id=None, status=None)` in `services/backup/service.py` raises `AmbiguousIdentifierError` with a specific message when both or neither are passed. The resolver only forwards its arguments. No new exception class.
 

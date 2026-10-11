@@ -198,7 +198,7 @@ class BackupSchedule(StyrminModel, table=True):
 | `resolve_backup_target(instance_id, uow)` | Walk instance → deployment (namespace) and instance → driver version → backup-enabled component configs, returning a `BackupTarget(deployment_id, target_namespace, component_configs)`. Best-effort: any failure degrades to `BackupTarget(None, "", None)` — a hookless backup — and logs a warning. Shared by the `createBackup` mutation and the environment fan-out so both build identical constituents (FR-014) |
 | `create_backup(instance_id, uow, ...)` | Create on-demand backup with component configs. `environment_backup_id` links it as an environment-backup constituent. The row id is generated up front so the unique auto-generated name is final before the `INSERT` |
 | `get_backup(backup_id, uow)` | Get backup by ID |
-| `get_backups(uow, *, deployment_id=None, instance_id=None, status=None)` | List backups, newest first (`created_on` descending, then `id` descending, so `restore --last` picks the same backup on a tie). Exactly one of `deployment_id` or `instance_id` is required; both or neither raise `AmbiguousIdentifierError` (`VALIDATION_ERROR`) before the unit of work opens. `deployment_id` returns the deployment's backup history: the backups of every instance the deployment has had, found by joining `Backup.instance_id` to `ApplicationInstance.deployment_id` (`BackupRepository.get_by_deployment_id`, which also joins `Deployment` and lists nothing for an internal deployment, as `deployment(deploymentId:)` hides it; an unknown id lists nothing), so backups stay listed after an upgrade, a config edit, a refresh (`refresh_deployment`, which no code path calls today) or an environment config change gives the deployment a new active instance, and after the deployment is deleted. `instance_id` returns that one instance's backups (`get_by_instance_id`). See [issue #304](https://github.com/opsmill/styrmin/issues/304) |
+| `get_backups(uow, *, deployment_id=None, instance_id=None, status=None)` | List backups, newest first (`created_on` descending, then `id` descending, so `restore --last` picks the same backup on a tie). Exactly one of `deployment_id` or `instance_id` is required; both or neither raise `AmbiguousIdentifierError` (`VALIDATION_ERROR`) before the unit of work opens. `deployment_id` returns the deployment's backup history: the backups of every instance the deployment has had, found by joining `Backup.instance_id` to `ApplicationInstance.deployment_id` (`BackupRepository.get_by_deployment_id`, which also joins `Deployment` and lists nothing for an internal deployment, as `deployment(deploymentId:)` hides it; an unknown id lists nothing), so backups stay listed after an upgrade, a config edit, a refresh (`refresh_deployment`, which no code path calls today) or an environment config change gives the deployment a new active instance, and after the deployment is deleted. `instance_id` returns that one instance's backups (`get_by_instance_id`). See [issue #304](https://github.com/opsmill/styrmin/issues/304) and [ADR-062](../../adr/0062-backup-history-derived-through-instances.md). `applicationinstance.deployment_id`, which the history query filters on, has no index; adding one needs an Alembic revision and was deferred. <!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 --> |
 | `delete_backup(backup_id, uow)` | Delete backup (cascades to restores) |
 | `update_backup_status(backup_id, status, uow, ...)` | Update overall backup status; `metadata_updates` merges keys into `Backup.metadata_` by reassignment |
 | `update_backup_component_status(backup_id, component_name, ...)` | Update component status, derives overall status |
@@ -370,6 +370,24 @@ A restore is a multi-stage operation: velero recreates the namespace and its res
    - `reapply_and_finalize` — strips kopf state-tracking annotations, re-applies prerequisites (`execute_phase_prerequisites`) and utility resources (`execute_phase_services`), then patches the CRD to `phase=Ready` / `displayState=Running`.
    - `mark_failed` — used on any failure with a message that distinguishes velero failure from post-restore reapply failure.
 5. **Final DB transition (INTERNAL flow).** `deployment.status` is moved from `RESTORING` to `RUNNING` (or `FAILED`) inline so the UI reflects the transition immediately rather than waiting on the next agent status poll.
+
+<!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 -->
+
+### Restoring a backup of an earlier instance
+
+The backup history (`get_backups(deployment_id=...)`) lists backups of instances that are no longer active, for example a backup taken before an upgrade. An in-place restore of such a backup goes through the same stages:
+
+- The restore puts the earlier instance's `StyrminDeployment` and `HelmRelease` back in the deployment's namespace, with that instance's application version and config.
+- `create_restore` does not compare the backup's application version with the deployment's, and does not change `deployment.active_application_instance_id`. The deployment page and `styrminctl` keep showing the active instance's application version. `test_backup_and_restore_lifecycle` checks this after an upgrade from 0.1.0 to 0.2.0.
+- The restored `StyrminDeployment` carries the earlier instance's spec. What the status reporter's stale-instance guard ([data-models.md](data-models.md)) does with its reports after such a restore is not known. No test covers it.
+
+The clients, not the server, warn before such a restore:
+
+- The Restore dialog on the Backups tab (`DeploymentDetailPage.tsx`) shows both application versions and a warning when the backup's instance is not the active instance or its application version differs.
+- `styrminctl backups restore --last` picks the newest completed backup in the history whose expiry date has not passed, and prints how many expired backups it skipped. For a backup of an earlier instance or of another version it prints both versions and asks for confirmation; `--yes` skips the question, and without a terminal the command refuses unless `--yes` is passed. It refuses a deleted deployment before it asks.
+- The Backups tab marks a backup whose expiry date has passed as expired and disables its restore, because Velero deletes a backup when it expires.
+
+Design rationale: [ADR-063](../../adr/0063-restore-of-earlier-instance-backup.md).
 
 ### Display state mapping
 

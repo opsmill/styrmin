@@ -65,7 +65,7 @@ The full list, in the order they appear on `type Query` in `schema.graphql`:
 | `environment` | `environmentId?, environmentName?, clusterId?, clusterName?` | `Environment` |
 | `deployment` | `deploymentId?` **or** `(name?, environmentId?)` | `Deployment` (two argument shapes, never mixed — see below) |
 | `backup` | `backupId` | `Backup` |
-| `backups` | `instanceId, status?` | `[Backup!]!` |
+| `backups` | exactly one of `deploymentId?` or `instanceId?`, plus `status?` | `[Backup!]!` (`deploymentId` lists the deployment's backup history; both or neither give `VALIDATION_ERROR`; see [ADR-062](../../adr/0062-backup-history-derived-through-instances.md)) <!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 --> |
 | `restore` | `restoreId` | `Restore` |
 | `restores` | `backupId, status?` | `[Restore!]!` |
 | `backupSchedule` | `scheduleId` | `BackupSchedule` |

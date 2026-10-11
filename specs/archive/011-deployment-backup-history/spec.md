@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-08
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: User description: "Fix issue #304 (opsmill/styrmin): backup history disappears after a deployment gets a new instance." Source PRD: [issue #304, comment 6070292805](https://github.com/opsmill/styrmin/issues/304#issuecomment-6070292805), confirmed in a review session on 2026-10-08. Code references in the PRD point to commit `a2a627d3` on `develop`.
 
@@ -19,7 +19,7 @@ The backup drops out of view because each backup belongs to one instance, and th
 - a refresh of the deployment
 - an environment config change, which redeploys every deployment in the environment
 
-[ADR-008](../../dev/adr/0008-deployment-soft-delete-tombstoning.md) already treats the deployment as the stable id that its backups are kept under.
+[ADR-008](../../../dev/adr/0008-deployment-soft-delete-tombstoning.md) already treats the deployment as the stable id that its backups are kept under.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -109,7 +109,7 @@ An operator opens a deployment that was deleted and views its backup history, to
 - **FR-001**: Styrmin MUST list, as a deployment's backup history, every backup taken of any of the deployment's instances, newest first, whichever of the four operations created each instance.
 - **FR-002**: The Backups tab and `styrminctl backups list` MUST show, for each backup, the application version of the instance the backup was taken of.
 - **FR-003**: API users MUST be able to list a deployment's backup history with `backups(deploymentId:)`.
-  - A call MUST pass exactly one of `deploymentId` or `instanceId`. A call that passes both or neither MUST fail with `VALIDATION_ERROR`, as [ADR-031](../../dev/adr/0031-dual-identifier-resolution-service-layer.md) describes.
+  - A call MUST pass exactly one of `deploymentId` or `instanceId`. A call that passes both or neither MUST fail with `VALIDATION_ERROR`, as [ADR-031](../../../dev/adr/0031-dual-identifier-resolution-service-layer.md) describes.
   - `backups(instanceId:)` MUST keep returning the backups of that one instance.
   - The existing `status` filter MUST apply to either argument.
 - **FR-004**: SDK users MUST be able to list a deployment's backup history by deployment id. `styrminctl backups list <deployment>` and `styrminctl backups restore --last` with a target deployment MUST use the deployment's backup history. `styrminctl backups list --instance-id` MUST keep listing the backups of one instance, and `styrminctl backups restore --last --target-instance-id` MUST keep choosing from the backups of that one instance, because no deployment is named.
@@ -117,6 +117,7 @@ An operator opens a deployment that was deleted and views its backup history, to
 - **FR-006**: The backup history of a deleted deployment MUST stay listable by its deployment id.
 - **FR-007**: A deployment's backup history MUST NOT include backups of instances that belong to another deployment, including a counterpart deployment in a cloned environment and a new deployment that reuses a deleted deployment's name.
 - **FR-008**: Restores MUST behave as they do today. A backup taken at another application version restores with no check and no confirmation.
+  - Superseded in the review round: the Backups tab warns and `styrminctl backups restore --last` asks for confirmation (or `--yes`) before restoring a backup of an earlier instance or of another application version, `--last` skips expired backups, and the server refuses a restore into a deleted deployment. See [ADR-063](../../../dev/adr/0063-restore-of-earlier-instance-backup.md). The Edge Cases and Out of Scope sections below keep the original decision.
 - **FR-009**: New backups MUST still be taken of the deployment's active instance.
 
 ### Key Entities

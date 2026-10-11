@@ -62,7 +62,7 @@ A test that calls **any** dual-entrypoint method on `scenario_driver`
 (`create_deployment` / `update_deployment` / `update_environment_via_form` /
 `set_environment_backup_ttl` / `set_component_env_vars` / `set_component_image` /
 `upgrade_deployment` / `pinned_image_components` / `create_backup` /
-`start_components` / `stop_components` / `run_job` / `delete_*`) MUST run
+`list_backups` / `start_components` / `stop_components` / `run_job` / `delete_*`) MUST run
 under both variants — these methods
 exercise both the UI form and the API code path, and the parametrisation
 **is** the parity check. Marking such a test `api_only` short-circuits half
@@ -287,7 +287,7 @@ ScenarioDriver methods return **driver-neutral ref dataclasses**, not SDK models
 | `BSLRef` | `id`, `name` | Backup storage location. |
 | `DriverVersionRef` | `id`, `application_driver_id`, `version` | |
 | `DeploymentRef` | `id`, `status`, `application_version`, `instance_id` | **No `name`.** Look up via `client.deployments.get(id).name` if you need it. |
-| `BackupRef` | `id`, `name`, `status` | |
+| `BackupRef` | `id`, `name`, `status`, `steps`, `application_version` | `application_version` is set by `list_backups` only: the application version of the instance the backup was taken of. <!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 --> |
 | `RestoreRef` | `id`, `status` | |
 | `TimelineEntry` | `task_id`, `task_type`, `task_status`, `application_version`, `created_on` | Returned from `get_deployment_timeline`. |
 

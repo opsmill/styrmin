@@ -130,6 +130,25 @@ class SQLModelClusterRepository(BaseSQLModelRepository[Cluster], ClusterReposito
 
 Use `_eager_load_options()` for relationships to prevent N+1 queries.
 
+<!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 -->
+
+### Break timestamp ties by id when a client picks "the latest"
+
+When a list ordered by a timestamp is used to pick one row, such as "the newest completed backup"
+for `styrminctl backups restore --last`, add `id` as a second sort key. Two rows can share a
+timestamp, and without the second key the database can return them in any order, so the same
+call can pick a different row each time.
+
+```python
+statement = statement.order_by(
+    self.model_class.created_on.desc(),  # type: ignore[union-attr]
+    self.model_class.id.desc(),  # type: ignore[union-attr]
+)
+```
+
+`BackupRepository.get_by_instance_id` and `get_by_deployment_id` in
+`backend/styrmin_backend/repository/backup.py` follow this rule.
+
 ## Error Handling
 
 Custom exceptions inherit from `ServiceError` with `error_code` and `default_message`:

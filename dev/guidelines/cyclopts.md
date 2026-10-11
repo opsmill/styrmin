@@ -220,6 +220,40 @@ already carries. `styrminctl`'s telemetry buckets failures by exception **type**
 using the SDK hierarchy plus `styrminctl.errors` as-is; adding classes for
 categorisation would be a governance gate for no benefit.
 
+<!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 -->
+
+## Confirm before acting on a target the operator did not name
+
+When a command chooses the thing it acts on (for example `backups restore --last`, which picks a
+backup from the deployment's history), and that choice can change the deployment in a way the
+operator may not expect, print what will happen and ask before acting:
+
+- Print the facts the operator needs to decide, such as the backup's application version and the
+  deployment's current one.
+- Ask with `rich.prompt.Confirm.ask(..., default=False)`, so pressing Enter cancels.
+- Add a `--yes` / `-y` flag with `negative=""` that skips the question.
+- When standard input is not a terminal and `--yes` is not passed, refuse with a one-line error
+  that names `--yes`. Do not wait for input that cannot arrive.
+- Ask no question when the operator named the target exactly, for example by passing a backup id.
+
+```python
+yes: Annotated[
+    bool,
+    Parameter(name=["--yes", "-y"], negative="", help="... without asking for confirmation."),
+] = False
+
+if yes:
+    return
+if not sys.stdin.isatty():
+    raise ValueError("Not restoring this backup without confirmation. Pass --yes to restore it.")
+if not Confirm.ask("Restore this backup?", console=console, default=False):
+    raise ValueError("Restore cancelled.")
+```
+
+Only `backups restore --last` uses this today
+(`_confirm_backup_of_earlier_instance` in `cli/src/styrminctl/commands/backups.py`). See
+[ADR-063](../adr/0063-restore-of-earlier-instance-backup.md).
+
 ## CLI-local persisted state
 
 Both the token store and the telemetry store follow one contract. Copy it for any

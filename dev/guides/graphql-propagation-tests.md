@@ -206,6 +206,14 @@ don't decide on your own.
 - **Asserting only on the GraphQL response.** Read back through
   `session.get(...)`. The resolver may have correctly returned the value
   while never persisting it — that's the regression §V exists to catch.
+<!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 -->
+- **Asserting only `extensions.code == "VALIDATION_ERROR"`.** graphql-core's own
+  request-validation errors (a wrong variable type, a missing required
+  argument) use the same code. Also assert the service's message and
+  `path`, so the test proves the service rule fired. Example:
+  `backend/tests/functional/graphql/test_backup_history_propagation.py`
+  checks `"Provide exactly one of deployment_id or instance_id"` and
+  `path == ["backups"]`.
 
 ## See Also
 
