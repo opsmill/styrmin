@@ -35,19 +35,17 @@ from kr8s.asyncio.objects import APIObject
 from kubernetes_asyncio import client as kubeclient
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
-from styrmin_sdk.models import ComponentConfigInput, EnvVarInput, UpdateDeploymentInput
+from styrmin_sdk.models import EnvVarInput, UpdateDeploymentInput
 
 from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.drivers.api_driver import ApiScenarioDriver
-from tests.e2e.helpers.workloads import _wait_for_pod_template, container_command_args
+from tests.e2e.helpers.workloads import _wait_for_pod_template
 
 pytestmark = [
     pytest.mark.shard_env,
 ]
 
 RECONCILE_TIMEOUT_SECONDS = 480.0
-# The image's CMD, which a server ``args`` override replaces.
-SERVER_ARGS = ["--host", "0.0.0.0", "--port", "8000"]
 
 
 def _container_envs(dep: Any, container: str | None = None) -> list[dict[str, str]]:
@@ -389,10 +387,10 @@ async def test_back_to_back_updates_keep_the_newest_config(
     """The StyrminDeployment ends with the second of two updates sent one after another.
 
     Each update schedules its own flow, and the two flows can write the
-    StyrminDeployment in either order. Each update also changes the server's
-    ``args``, a Helm value: FluxCD's helm-controller v1.1.0 drops a change to
-    the post-render patches alone that arrives during an upgrade (#433).
-    Ends with ``LOG_LEVEL=debug``, as US1 does, and with the second ``args``.
+    StyrminDeployment in either order. The updates change only env vars, so
+    only the HelmRelease's post-render patches change: helm-controller v1.1.0
+    dropped the second change when it arrived during the first upgrade (#433).
+    Ends with ``LOG_LEVEL=debug``, as US1 does.
     """
     client: StyrminClient = env_vars_environment["client"]
     deployment_id = env_vars_deployment["deployment_id"]
@@ -400,12 +398,7 @@ async def test_back_to_back_updates_keep_the_newest_config(
 
     def update(log_level: str) -> UpdateDeploymentInput:
         return UpdateDeploymentInput(
-            env_vars=[EnvVarInput(name="LOG_LEVEL", value=log_level)],
-            components=[
-                ComponentConfigInput(
-                    name="server", args=[*SERVER_ARGS, "--log-level", log_level]
-                )
-            ],
+            env_vars=[EnvVarInput(name="LOG_LEVEL", value=log_level)]
         )
 
     first = await client.deployments.update(deployment_id, input=update("info"))
@@ -432,16 +425,12 @@ async def test_back_to_back_updates_keep_the_newest_config(
     )
     assert resource["metadata"]["annotations"]["styrmin.io/instance-sequence"].isdigit()
 
-    second_args = [*SERVER_ARGS, "--log-level", "debug"]
     dep = await _wait_for_pod_template(
         vcluster,
         namespace=namespace,
         label_selector="app.kubernetes.io/name=simple-app",
-        predicate=lambda d: (
-            _literal(_simple_app_env(d), "LOG_LEVEL") == "debug"
-            and container_command_args(d, container_name="simple-app")[1] == second_args
-        ),
-        description="LOG_LEVEL=debug and the args of the second update to land",
+        predicate=lambda d: _literal(_simple_app_env(d), "LOG_LEVEL") == "debug",
+        description="LOG_LEVEL=debug of the second update to land",
     )
     assert _literal(_simple_app_env(dep), "LOG_LEVEL") == "debug"
 
