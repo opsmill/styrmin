@@ -849,3 +849,109 @@ class _FakeClient:
 
     async def __aexit__(self, *_: object) -> None:
         return None
+
+
+# --- A guard failure that FluxCD then reported in sync (helm-controller v1.5.0 and later) ---
+
+T_INSTALLED = "2026-10-11T17:18:25Z"
+T_GUARD_FAILED = "2026-10-11T17:18:43Z"
+
+
+def _guard_skipped_helmrelease() -> dict[str, Any]:
+    """The HelmRelease of ``test_misnamed_container_never_added`` on helm-controller v1.6.5.
+
+    The upgrade to generation 2 failed in the post-renderer and stored no release; 0.8 s
+    later FluxCD found release v1 in sync with generation 2.
+    """
+    released = "Helm upgrade succeeded for release styrmin-deadbeef/my-release.v1 with chart simple-app@0.1.0"
+    helmrelease = _helmrelease(
+        generation=2,
+        last_attempted_generation=2,
+        conditions=[
+            _hr_condition("Ready", "True", "UpgradeSucceeded", released, 2),
+            _hr_condition("Released", "True", "UpgradeSucceeded", released, 2),
+        ],
+    )
+    helmrelease["status"].update(
+        {
+            "observedGeneration": 2,
+            "failures": 1,
+            "lastAttemptedReleaseAction": "upgrade",
+            "history": [
+                {
+                    "version": 1,
+                    "status": "deployed",
+                    "action": "install",
+                    "firstDeployed": T_INSTALLED,
+                    "lastDeployed": T_INSTALLED,
+                }
+            ],
+        }
+    )
+    return helmrelease
+
+
+def _guard_failed_event() -> dict[str, Any]:
+    return {
+        "type": "Warning",
+        "reason": "UpgradeFailed",
+        "message": f"{GUARD_FAILURE_MESSAGE}\n\nLast Helm logs:\n\nupgrade failed",
+        "lastTimestamp": T_GUARD_FAILED,
+    }
+
+
+def _mock_failure_events(mocker: Any, *events: dict[str, Any]) -> Any:
+    return mocker.patch.object(
+        reconciler_module,
+        "_list_release_failure_events",
+        new=mocker.AsyncMock(return_value=list(events)),
+    )
+
+
+@pytest.mark.anyio
+async def test_guard_failure_reported_in_sync_fails_creating_deployment(
+    mocker: Any,
+) -> None:
+    _mock_helmrelease(mocker, _guard_skipped_helmrelease())
+    list_events = _mock_failure_events(mocker, _guard_failed_event())
+    patch = _Patch()
+
+    await _run_timer(
+        {
+            "phase": DeploymentPhase.CREATING_HELM_RELEASE.value,
+            "displayState": DisplayState.DEPLOYING.value,
+            "rolloutStartedAt": datetime.now(tz=timezone.utc).isoformat(),
+            "conditions": [],
+        },
+        patch,
+    )
+
+    _assert_failed_on_guard(patch)
+    list_events.assert_awaited_once_with(
+        namespace="styrmin-deadbeef", release_reference="my-release"
+    )
+
+
+@pytest.mark.anyio
+async def test_guard_failure_reported_in_sync_fails_ready_deployment(
+    mocker: Any,
+) -> None:
+    """The timer moved the CR to Ready before it read the failure event."""
+    _mock_helmrelease(mocker, _guard_skipped_helmrelease())
+    _mock_failure_events(mocker, _guard_failed_event())
+    list_resources = mocker.patch.object(
+        reconciler_module, "list_managed_resources", new=mocker.AsyncMock()
+    )
+    patch = _Patch()
+
+    await _run_timer(
+        {
+            "phase": DeploymentPhase.READY.value,
+            "displayState": DisplayState.RUNNING.value,
+            "conditions": [_stale_hr_ready_condition()],
+        },
+        patch,
+    )
+
+    _assert_failed_on_guard(patch)
+    list_resources.assert_not_called()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from kubernetes_asyncio import client as kubeclient
@@ -386,6 +387,74 @@ async def _get_helmrelease(
     return None
 
 
+# FluxCD's Warning events for an install or upgrade that failed.
+_RELEASE_FAILURE_REASONS = frozenset({"InstallFailed", "UpgradeFailed"})
+
+
+async def _list_release_failure_events(
+    namespace: str,
+    release_reference: str,
+) -> list[dict[str, Any]]:
+    """LIST FluxCD's install and upgrade failure Events of a HelmRelease; empty when unreadable."""
+    from styrmin_backend.operator.kubernetes import get_kubernetes_client
+
+    selector = (
+        "involvedObject.kind=HelmRelease,"
+        f"involvedObject.name={release_reference},type=Warning"
+    )
+    try:
+        async with get_kubernetes_client() as client:
+            core_api = kubeclient.CoreV1Api(client)
+            events = await core_api.list_namespaced_event(
+                namespace=namespace, field_selector=selector
+            )
+            items = client.sanitize_for_serialization(events).get("items") or []
+    except Exception:
+        logger.exception("Failed to list Events of HelmRelease %s", release_reference)
+        return []
+    return [item for item in items if item.get("reason") in _RELEASE_FAILURE_REASONS]
+
+
+def _parse_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+@dataclass(frozen=True)
+class FluxEvent:
+    """A FluxCD Warning event of a failed install or upgrade."""
+
+    reason: str
+    message: str
+    time: datetime
+
+    @classmethod
+    def from_dict(cls, event: dict[str, Any]) -> FluxEvent | None:
+        time = next(
+            (
+                parsed
+                for value in (
+                    (event.get("series") or {}).get("lastObservedTime"),
+                    event.get("lastTimestamp"),
+                    event.get("eventTime"),
+                    event.get("firstTimestamp"),
+                    (event.get("metadata") or {}).get("creationTimestamp"),
+                )
+                if (parsed := _parse_time(value)) is not None
+            ),
+            None,
+        )
+        if time is None:
+            return None
+        # FluxCD appends the last Helm log lines after a blank line.
+        message = str(event.get("message") or "").split("\n\n", 1)[0].strip()
+        return cls(reason=str(event.get("reason") or ""), message=message, time=time)
+
+
 @dataclass(frozen=True)
 class FluxCondition:
     """One FluxCD condition of a HelmRelease."""
@@ -423,6 +492,7 @@ class HelmReleaseObservation:
     stalled: FluxCondition | None = None
     guard_failure: tuple[str, str] | None = None
     rolled_back_version: int | None = None
+    skipped_failure: FluxEvent | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -471,12 +541,18 @@ def _current_generation_conditions(helmrelease: dict[str, Any]) -> list[dict[str
     ]
 
 
-def _helmrelease_guard_failure(helmrelease: dict[str, Any]) -> tuple[str, str] | None:
+def _helmrelease_guard_failure(
+    helmrelease: dict[str, Any], skipped_failure: FluxEvent | None = None
+) -> tuple[str, str] | None:
     """Return ``(component, container)`` when the HelmRelease's current generation failed on the guard.
 
     Ready must not be True, and the guard key must be in the message of a condition observed for
     ``metadata.generation`` (its ``observedGeneration``, else ``status.lastAttemptedGeneration``).
+    When FluxCD reports Ready after it skipped the failure, the guard key is read from the
+    failure's event.
     """
+    if skipped_failure is not None:
+        return parse_guard_failure(skipped_failure.message)
     conditions = (helmrelease.get("status") or {}).get("conditions") or []
     if any(
         condition.get("type") == "Ready" and condition.get("status") == "True"
@@ -520,13 +596,73 @@ def _rolled_back_version(helmrelease: dict[str, Any]) -> int | None:
     return failed
 
 
+def _may_have_skipped_failure(helmrelease: dict[str, Any]) -> bool:
+    """FluxCD reports Ready for the current generation although it counted a failure for it.
+
+    FluxCD resets ``status.failures`` for each new generation, and keeps it after a release that
+    succeeds, so the failure events decide (see ``_skipped_failure``).
+    """
+    generation = (helmrelease.get("metadata") or {}).get("generation")
+    status = helmrelease.get("status") or {}
+    ready = next(
+        (
+            c
+            for c in _current_generation_conditions(helmrelease)
+            if c.get("type") == "Ready"
+        ),
+        None,
+    )
+    return (
+        ready is not None
+        and ready.get("status") == "True"
+        and bool(status.get("failures"))
+        and status.get("lastAttemptedGeneration") == generation
+    )
+
+
+def _newest_release_time(helmrelease: dict[str, Any]) -> datetime | None:
+    times = [
+        parsed
+        for snapshot in (helmrelease.get("status") or {}).get("history") or []
+        for value in (snapshot.get("lastDeployed"), snapshot.get("firstDeployed"))
+        if (parsed := _parse_time(value)) is not None
+    ]
+    return max(times, default=None)
+
+
+def _skipped_failure(
+    helmrelease: dict[str, Any], events: list[dict[str, Any]]
+) -> FluxEvent | None:
+    """The failed install or upgrade of this generation that FluxCD then reported in sync.
+
+    helm-controller v1.5.0 and later record the post-renderers digest after a failed attempt
+    too. When the attempt stored no release (a post-render error, for example), the next
+    reconcile compares only the chart and the values, finds the release in sync and reports
+    ``Ready=True`` without retrying. The newest failure event is then newer than FluxCD's
+    newest release.
+    """
+    if not _may_have_skipped_failure(helmrelease):
+        return None
+    failures = [e for e in map(FluxEvent.from_dict, events) if e is not None]
+    if not failures:
+        return None
+    newest = max(failures, key=lambda event: event.time)
+    released = _newest_release_time(helmrelease)
+    if released is not None and newest.time <= released:
+        return None
+    return newest
+
+
 def observe_helmrelease_conditions(
     helmrelease: dict[str, Any],
+    events: list[dict[str, Any]] | None = None,
 ) -> HelmReleaseObservation:
     """Read FluxCD's ``Ready``, ``Released``, ``Remediated=True`` and ``Stalled=True`` of the current generation.
 
-    Also reads whether FluxCD's newest release is the rollback of a failed release.
+    Also reads whether FluxCD's newest release is the rollback of a failed release, and, from
+    FluxCD's failure ``events``, whether FluxCD reports Ready after it skipped a failure.
     """
+    skipped_failure = _skipped_failure(helmrelease, events or [])
     current = {
         str(condition.get("type")): FluxCondition.from_dict(condition)
         for condition in _current_generation_conditions(helmrelease)
@@ -540,8 +676,20 @@ def observe_helmrelease_conditions(
         if remediated is not None and remediated.is_true
         else None,
         stalled=stalled if stalled is not None and stalled.is_true else None,
-        guard_failure=_helmrelease_guard_failure(helmrelease),
+        guard_failure=_helmrelease_guard_failure(helmrelease, skipped_failure),
         rolled_back_version=_rolled_back_version(helmrelease),
+        skipped_failure=skipped_failure,
+    )
+
+
+async def _read_failure_events(
+    namespace: str, release_reference: str, helmrelease: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """FluxCD's failure events, read only when FluxCD may have skipped a failure."""
+    if not _may_have_skipped_failure(helmrelease):
+        return []
+    return await _list_release_failure_events(
+        namespace=namespace, release_reference=release_reference
     )
 
 
@@ -555,7 +703,8 @@ async def observe_helmrelease(
     )
     if helmrelease is None:
         return None
-    return observe_helmrelease_conditions(helmrelease)
+    events = await _read_failure_events(namespace, release_reference, helmrelease)
+    return observe_helmrelease_conditions(helmrelease, events)
 
 
 async def read_helmrelease_guard_failure(
@@ -568,7 +717,10 @@ async def read_helmrelease_guard_failure(
     )
     if helmrelease is None:
         return None
-    return _helmrelease_guard_failure(helmrelease)
+    events = await _read_failure_events(namespace, release_reference, helmrelease)
+    return _helmrelease_guard_failure(
+        helmrelease, _skipped_failure(helmrelease, events)
+    )
 
 
 async def _check_any_pod_ready(namespace: str) -> bool:

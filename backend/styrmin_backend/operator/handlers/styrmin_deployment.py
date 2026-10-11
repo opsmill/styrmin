@@ -44,7 +44,7 @@ from styrmin_backend.services.component_container.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from styrmin_backend.operator.reconciler import HelmReleaseObservation
+    from styrmin_backend.operator.reconciler import FluxEvent, HelmReleaseObservation
 
 #: Phases of a rollout in progress, which the readiness timeout watches.
 _ROLLOUT_PHASES = frozenset(
@@ -642,6 +642,16 @@ async def _wait_for_helm_release(
             logger=logger,
         )
         return False
+    if observation is not None and observation.skipped_failure is not None:
+        _fail_on_skipped_failure(
+            observation.skipped_failure,
+            conditions=conditions,
+            namespace=namespace,
+            name=name,
+            patch=patch,
+            logger=logger,
+        )
+        return False
 
     changed = observation is not None and _copy_remediation(conditions, observation)
     rolled_back = observation is not None and observation.is_ready_after_rollback
@@ -798,6 +808,37 @@ def _fail_on_rollback(
     # Phase Failed must not sit next to Ready=True of the previous rollout.
     set_condition(
         conditions, ConditionType.READY, ConditionStatus.FALSE, "RolledBack", message
+    )
+    patch.status["conditions"] = conditions
+    set_phase(patch.status, DeploymentPhase.FAILED, message)
+    patch.status["displayState"] = DisplayState.ERROR.value
+    logger.warning("Deployment %s/%s failed: %s", namespace, name, message)
+
+
+def _fail_on_skipped_failure(
+    failure: FluxEvent,
+    *,
+    conditions: list[dict[str, str]],
+    namespace: str,
+    name: str,
+    patch: Any,
+    logger: Any,
+) -> None:
+    """FluxCD reported Ready after an install or upgrade of this generation failed without a release.
+
+    FluxCD does not retry, so the change never reaches the cluster.
+    """
+    message = f"FluxCD reported the release in sync after the change failed: {failure.message}"
+    set_condition(
+        conditions,
+        ConditionType.HELM_RELEASE_READY,
+        ConditionStatus.FALSE,
+        failure.reason,
+        failure.message,
+    )
+    # Phase Failed must not sit next to Ready=True of the previous rollout.
+    set_condition(
+        conditions, ConditionType.READY, ConditionStatus.FALSE, failure.reason, message
     )
     patch.status["conditions"] = conditions
     set_phase(patch.status, DeploymentPhase.FAILED, message)
