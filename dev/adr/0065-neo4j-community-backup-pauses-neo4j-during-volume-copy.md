@@ -1,4 +1,4 @@
-# ADR-061: Back Up Neo4j Community by Pausing It While Velero Copies Its Data Volume
+# ADR-065: Back Up Neo4j Community by Pausing It While Velero Copies Its Data Volume
 
 **Status**: Accepted
 **Date**: 2026-10-08
@@ -16,8 +16,8 @@ backup E2E passes with `kind: neo4j`.
 
 Neo4j Community has no online backup. Its offline tool, `neo4j-admin database dump`,
 needs the database stopped, and Community cannot stop a database while the server runs.
-In the official image the JVM is the container's main process, so stopping it restarts
-the container.
+In the official image, PID 1 is `tini -g`, which runs the JVM as its child and exits when
+the JVM exits, so stopping the JVM restarts the container.
 
 Decision drivers:
 
@@ -30,17 +30,26 @@ Decision drivers:
 
 Add a `neo4j-community` backup kind (`Neo4jCommunityBackupStrategy`):
 
-1. The pre-backup hook reads the JVM process ID from `/var/lib/neo4j/run/neo4j.pid`, starts a
-   watchdog that resumes the JVM after 3600 s (the default backup timeout), and pauses the
-   JVM with `SIGSTOP`.
+1. The pre-backup hook reads the JVM process ID from `/var/lib/neo4j/run/neo4j.pid` and
+   records it with the process start time, starts a watchdog that resumes the JVM after
+   the backup timeout (`DEFAULT_BACKUP_TIMEOUT`, 3600 s), and pauses the JVM with `SIGSTOP`.
+   `SIGSTOP` is the hook's last command, so no later command can fail the hook while Neo4j
+   is paused.
 2. Velero copies the component's `data` volume (or the volume named in `backup.volume`)
    with file-system backup. The copy holds the files as they were at the pause, the same
    state a killed process leaves.
 3. The post-backup hook stops the watchdog and resumes the JVM with `SIGCONT`. Velero 1.18
-   runs post hooks only after the pod's PodVolumeBackups finish. If the watchdog already
-   resumed Neo4j, the hook exits non-zero and the backup ends `PartiallyFailed`.
+   runs post hooks only after the pod's PodVolumeBackups finish. The hook exits non-zero,
+   and the backup ends `PartiallyFailed`, unless the recorded process was still paused
+   when the hook ran and `SIGCONT` reached it. The process is no longer paused when the
+   watchdog resumed it, when Neo4j restarted (a restart also wipes the record in `/tmp`),
+   or when another backup of the same pod resumed it first.
 4. The restore has no hook. Velero restores the volume before the Neo4j container starts,
    and Neo4j replays its transaction logs on startup.
+5. After the backup, Styrmin fails it when no PodVolumeBackup exists for the data volume,
+   and fails the component's step when Velero reports failed hooks, since only the
+   post-backup hook can fail once the volume is backed up. The hook's own message is in
+   Velero's backup log only, so the step gives the `velero backup logs` command.
 
 `kind: neo4j` stays the Enterprise online backup. The example `infrahub` driver moves its
 `database` component to `neo4j-community`.
@@ -51,11 +60,14 @@ only, and passed `neo4j-admin database check`.
 
 ## Alternatives considered
 
-- **Offline dump**, the method `infrahub-backup` uses. Community stops the database only
-  by stopping the JVM, which ends the container. `infrahub-backup` copies a compiled
-  watchdog binary into the container to pause the JVM after shutdown; a Velero exec hook
-  has only the image's shell tools. `neo4j-admin database dump` refuses a paused copy until
-  recovery has run.
+- **Offline dump**, the method `infrahub-backup` uses. It sends `SIGTERM` to the JVM. A
+  watchdog binary that it copies into the container sends `SIGSTOP` to the JVM when the JVM
+  deletes its PID file during shutdown, so the container keeps running while
+  `neo4j-admin database dump` reads the stopped database. `SIGCONT` then lets the JVM exit,
+  and the container restarts. A Velero exec hook has only the image's shell tools, and
+  `neo4j-admin database dump` refuses a paused, running copy until recovery has run. The
+  two methods produce different backups: `infrahub-backup` restores its dump with
+  `neo4j-admin database load`, and Styrmin restores the volume through Velero.
 - **Copy `/data` into the `backup` emptyDir while paused.** The pause would last only for a
   local copy. Restore would have to replace the store under a running server: pause the
   JVM, replace the files, and kill the container from the hook.
@@ -74,16 +86,22 @@ only, and passed `neo4j-admin database check`.
   requests wait or time out for the length of the backup. The pause grows with the volume
   size and the upload speed to the backup storage location.
 - Bad: a backup that takes longer than 3600 s is resumed by the watchdog and fails. The
-  limit is a constant (`NEO4J_MAX_PAUSE_SECONDS`), not a setting.
+  limit is the backup timeout (`NEO4J_MAX_PAUSE_SECONDS` is `DEFAULT_BACKUP_TIMEOUT`), not
+  a setting. When Velero skips the post hook, for example because Velero restarted, Neo4j
+  stays paused until the watchdog fires. The remedy for longer backups is Neo4j Enterprise
+  with `kind: neo4j`.
+- Bad: two backups that overlap on the same pod share one pause. The first post hook
+  resumes Neo4j, so the backup that ends last fails.
 - Bad: the strategy depends on the official image (process ID file path, `sh`, `kill`, `sleep`)
   and on Velero running post hooks after pod volume backups finish. A Velero release that
   changes that order would produce inconsistent backups without any error.
 - Bad: Velero's file-system backup skips `hostPath` volumes (for example from the
-  `local-path` provisioner). On such a storage class the backup completes with a Velero
-  warning and without the database, like `kind: disk`.
+  `local-path` provisioner) with only a warning. On such a storage class the backup fails,
+  because Styrmin finds no PodVolumeBackup for the data volume.
 - Bad: the backup holds the whole volume (store files, transaction logs, server logs)
   instead of a compressed dump, so it is larger.
 
 Confirmation: `test_strategies.py::TestNeo4jCommunityPauseScripts` runs the rendered hook
 scripts against a stand-in process, and `test_infrahub_backup_and_restore_lifecycle`
-backs up and restores the community Infrahub stack end to end.
+backs up and restores the community Infrahub stack end to end and checks that Velero ran
+every hook without a failure.

@@ -89,8 +89,14 @@ What to expect from a `neo4j-community` backup:
 - Neo4j does not answer queries while Velero uploads the volume. Clients of
   the database, such as the Infrahub API, wait or time out until the backup
   finishes. The pause grows with the size of the volume.
-- If the backup takes longer than one hour, Styrmin resumes Neo4j anyway and
-  the backup is marked failed, because the copy is no longer consistent.
+- If the backup takes longer than one hour, the backup timeout, Styrmin
+  resumes Neo4j anyway and the backup is marked failed, because the copy is
+  no longer consistent. When backups of a database run longer than that,
+  for example because the volume is large or the upload to the backup
+  storage location is slow, use Neo4j Enterprise Edition with
+  `kind: neo4j`, which backs up without pausing Neo4j.
+- The backup is also marked failed when Neo4j restarts during the backup,
+  or when another backup of the same pod resumes it first.
 - A restore lays the volume down before Neo4j starts. Neo4j replays its
   transaction logs when it starts, so the restored database contains whole
   transactions only.
@@ -98,11 +104,23 @@ What to expect from a `neo4j-community` backup:
   process ID to `/var/lib/neo4j/run/neo4j.pid`.
 - Velero's file-system backup skips `hostPath` volumes, such as the ones the
   `local-path` provisioner creates. The data volume must use a storage class
-  that provisions CSI volumes, or the backup completes without the database.
+  that provisions CSI volumes; otherwise the backup fails, because Velero
+  did not back up the database's volume.
 
 The `volume` field defaults to `data`, the name the Neo4j Helm chart gives
-its data volume. See
-[ADR-061](https://github.com/opsmill/styrmin/blob/develop/dev/adr/0061-neo4j-community-backup-pauses-neo4j-during-volume-copy.md)
+its data volume. The strategy reads no other field: a driver that sets
+`volumes`, `database_name` or `credentials_secret` on a `neo4j-community`
+component fails to load.
+
+The [`infrahub-backup`](https://github.com/opsmill/infrahub-backup) tool
+backs up Neo4j Community differently. It stops Neo4j, keeps the container
+running while `neo4j-admin database dump` writes a dump of the stopped
+database, and then lets Neo4j restart. `neo4j-community` does not stop or
+restart Neo4j: it pauses Neo4j while Velero copies the data volume as it
+is. The two produce different backups: Styrmin restores a
+`neo4j-community` backup through Velero, and `infrahub-backup` restores
+its own dump with `neo4j-admin database load`. See
+[ADR-065](https://github.com/opsmill/styrmin/blob/develop/dev/adr/0065-neo4j-community-backup-pauses-neo4j-during-volume-copy.md)
 for why Styrmin pauses Neo4j instead of dumping it.
 
 :::
@@ -117,8 +135,22 @@ for why Styrmin pauses Neo4j instead of dumping it.
 4. The agent creates a Velero `Backup` object describing what to snapshot
    and which hooks to run.
 5. Velero does the snapshotting and ships the result to the BSL.
-6. Styrmin records the backup, including the underlying Velero backup
+6. Styrmin checks that Velero backed up every volume that each
+   component's strategy names (the `disk` volumes, the dump volume of the
+   database strategies, or the data volume of `neo4j-community`). When a
+   volume is missing, the backup fails and the component's step names the
+   volume. Velero skips, for example, `hostPath` volumes, the volumes of
+   pods that are not running, and the volumes of a pod whose pre-backup
+   hook failed.
+7. Styrmin records the backup, including the underlying Velero backup
    name, so it can be referenced later.
+
+When a backup hook fails, the backup's error says how many hooks failed and
+gives the command that prints their output from Velero's log:
+`velero backup logs <backup-name> -n styrmin`. Styrmin shows the failure on
+the step of the component that the hook belongs to when it can tell: a
+missing volume after a failed pre-backup hook, or the post-backup hook of a
+`neo4j-community` component.
 
 #### Backup size
 

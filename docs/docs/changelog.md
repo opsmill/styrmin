@@ -8,6 +8,41 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### Back up Infrahub on Neo4j Community
+
+Backups of the example `infrahub` driver used to fail without the
+database, because the driver ran Neo4j Enterprise commands against the
+Neo4j Community image that the Infrahub chart deploys. Driver version 4
+backs up the database with the new `neo4j-community` backup kind. See
+[Backups and restores](./concepts-and-architecture/backups-and-restores.md).
+
+#### What's new
+
+- The `neo4j-community` backup kind pauses Neo4j while Velero copies its
+  data volume, then resumes it. A restore needs no hook. Neo4j does not
+  answer queries while the backup runs, so Infrahub API requests wait or
+  time out until it finishes.
+- A backup now fails when Velero did not back up a volume that a
+  component's backup strategy names, for example a `hostPath` volume from
+  the `local-path` provisioner. Such a backup used to be marked completed
+  without that volume's data. The component's step names the volume.
+- A failed backup hook is reported in the backup's error with the command
+  that prints the hook's output: `velero backup logs <backup-name> -n styrmin`.
+
+#### Migration
+
+- Deployments of the `infrahub` driver stay on driver version 3 until you
+  move them to version 4, for example with
+  `styrminctl deployments update-version <deployment-id> <application-version>`.
+- Moving to driver version 4 removes the `backup` volume from the Neo4j
+  pod template, so Kubernetes restarts Neo4j.
+- Backups taken with driver version 3 do not contain the database. Take a
+  new backup after the move.
+- Backups of deployments whose volumes use the `local-path` storage class,
+  as the local development cluster does, now fail instead of completing
+  without the data. Use a storage class backed by a CSI driver for the
+  volumes that a backup strategy names.
+
 ### Run a custom image on one component
 
 A deployment can now point one component at a custom or patched build

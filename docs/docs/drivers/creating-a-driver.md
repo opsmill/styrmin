@@ -274,8 +274,9 @@ implement the backup logic as a driver action (see Step 7).
 
 Velero's [file-system backup](https://velero.io/docs/main/file-system-backup/#limitations)
 does not support `hostPath` volumes. Velero skips such a volume with a
-warning, and the backup still completes, without that volume's data. This
-applies to every volume a backup strategy copies:
+warning, and Styrmin then marks the backup failed and names the volume on
+the component's step. This applies to every volume a backup strategy
+copies:
 
 - the volumes that a `disk` strategy names
 - the data volume of a `neo4j-community` strategy
@@ -557,8 +558,8 @@ Watch the deployment in the UI. Things to check:
 
 - All components report `Running` once the deployment finishes.
 - Triggering a backup completes successfully and lands in your BSL,
-  and a restore brings the data back. A backup can complete without the
-  data of a volume Velero skipped, such as a `hostPath` volume.
+  and a restore brings the data back. A backup fails when Velero skipped
+  a volume that a backup strategy names, such as a `hostPath` volume.
 - Triggering an upgrade (to another `supported_versions` value) runs
   the upgrade action and the new version comes up clean.
 - Deleting the deployment cleans up all resources.

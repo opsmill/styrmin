@@ -61,21 +61,35 @@ class BackupStrategy(ABC):
 - **Neo4j Community:** Backs up the database's own volume (`volume`, default `"data"`) instead of a dump; see [below](#the-neo4j-community-strategy-pauses-neo4j).
 - **Action:** No hooks or volumes — backup is handled entirely by the driver's Prefect action
 
+`resolve_backup_target` adds the component's declared `container` to the backup config it stores in `Backup.component_statuses`, so every strategy's hooks run in that container. `ComponentBackupConfig` forbids extra keys, so the driver's `backup` block cannot carry it. A component without `container` runs its hooks in Velero's default, the pod's first container.
+
+`get_backup_volumes` is also what Styrmin checks after the backup: `execute_backup_workflow` passes each component's volumes to the USER flow, and a stored backup without a `PodVolumeBackup` for one of them fails (see [Backup steps](#backup-and-restore-steps)). `BackupStrategy.post_hook_failure` says what a failed post-backup hook means for a component; only `Neo4jCommunityBackupStrategy` sets it.
+
 ### The neo4j-community strategy pauses Neo4j
 
-`kind: neo4j` uses Neo4j Enterprise commands (`neo4j-admin database backup`, `STOP DATABASE`, `neo4j-admin database restore`). Neo4j Community has none of them and cannot stop a database without stopping the JVM, which is the container's main process. `kind: neo4j-community` ([ADR-061](../../adr/0061-neo4j-community-backup-pauses-neo4j-during-volume-copy.md), [#263](https://github.com/opsmill/styrmin/issues/263)) backs up the running database's files instead:
+`kind: neo4j` uses Neo4j Enterprise commands (`neo4j-admin database backup`, `STOP DATABASE`, `neo4j-admin database restore`). Neo4j Community has none of them and cannot stop a database without stopping the JVM. In the official image the JVM is the only child of PID 1, `tini -g`, so stopping the JVM restarts the container. `kind: neo4j-community` ([ADR-065](../../adr/0065-neo4j-community-backup-pauses-neo4j-during-volume-copy.md), [#263](https://github.com/opsmill/styrmin/issues/263)) backs up the running database's files instead:
 
-1. The pre-backup hook (`neo4j_community_backup_hooks()` in `hooks.py`) reads the JVM process ID from `/var/lib/neo4j/run/neo4j.pid`, starts a watchdog subshell, and sends `SIGSTOP` to the JVM.
+1. The pre-backup hook (`neo4j_community_backup_hooks()` in `hooks.py`) reads the JVM process ID from `/var/lib/neo4j/run/neo4j.pid`, writes it with the process start time (field 22 of `/proc/<pid>/stat`) to the pause record `/tmp/styrmin-neo4j-pause`, starts a watchdog subshell, and sends `SIGSTOP` to the JVM.
 2. Velero's file-system backup copies the annotated volume. The copy holds the files as they were at the pause, which Neo4j recovers from like a killed process.
-3. The post-backup hook stops the watchdog and sends `SIGCONT`. Velero 1.18 runs post hooks only after every PodVolumeBackup of the pod is completed, failed or canceled (`handleItemBlockPostHooks` in Velero's `pkg/backup/backup.go`).
+3. The post-backup hook reads and removes the pause record, sends `SIGCONT`, and stops the watchdog. Velero 1.18 runs post hooks only after every PodVolumeBackup of the pod is completed, failed or canceled (`handleItemBlockPostHooks` in Velero's `pkg/backup/backup.go`).
 
-The watchdog sends `SIGCONT` after `NEO4J_MAX_PAUSE_SECONDS` (3600, the default backup timeout) and records that it did. The post hook then exits 1, so the backup ends `PartiallyFailed` instead of storing a copy taken after Neo4j resumed. The watchdog is needed because Velero skips post hooks when its wait for the PodVolumeBackups fails, and skips them for a pod whose pre hook failed; both hooks use `onError: Fail`, and the pre hook sends `SIGSTOP` last so that nothing after it can fail. The next pause stops a watchdog left by an earlier backup, so it cannot resume Neo4j in the middle of another backup.
+The post hook exits 1, so the backup ends `PartiallyFailed`, unless the recorded process was still in state `T` with the recorded start time when the hook ran and `SIGCONT` succeeded. Its stderr names the case:
 
-Velero's file-system backup skips `hostPath` PVs (the `local-path` provisioner's) with only a backup warning, so the database volume must come from a CSI storage class. The E2E cluster points both `standard_storage` and `fast_storage` at `csi-hostpath-sc` for this reason (`csi_hostpath_storage` fixture).
+- No pause record: Neo4j restarted, which wipes `/tmp`, or another backup's post hook removed it.
+- The watchdog fired: it sends `SIGCONT` after `NEO4J_MAX_PAUSE_SECONDS`, which is `DEFAULT_BACKUP_TIMEOUT` (3600 s, `services/backup/metadata.py`), and touches a marker file.
+- The process was not paused: Neo4j restarted, or another backup resumed it.
+
+The watchdog is needed because Velero skips post hooks when its wait for the PodVolumeBackups fails, and skips them for a pod whose pre hook failed; both hooks use `onError: Fail`. The pre hook sends `SIGSTOP` last (`test_pause_script_sends_sigstop_last`), so no later command can fail or time out the hook while Neo4j is paused. Two backups that overlap on one pod share the pause: the second pre hook replaces the watchdog, the first post hook resumes Neo4j, and the backup that ends last finds no pause record and fails.
+
+Velero writes a hook's stderr only to its backup log, at info level (`pkg/podexec/pod_command_executor.go`); the Backup's `status.hookStatus` holds only `hooksAttempted` and `hooksFailed`. Styrmin therefore reports a failed hook with `failed_hooks_message`, which gives the `velero backup logs` command.
+
+Velero's file-system backup skips `hostPath` PVs (the `local-path` provisioner's) with only a backup warning. Styrmin then fails the backup, because no PodVolumeBackup exists for the data volume, so the database volume must come from a CSI storage class. The E2E cluster points both `standard_storage` and `fast_storage` at `csi-hostpath-sc` for this reason (`csi_hostpath_storage` fixture).
+
+The driver validator rejects `volumes`, `database_name` and `credentials_secret` on a `neo4j-community` component at load time (`_validate_neo4j_community`); the strategy reads only `volume`.
 
 There is no restore hook. The restore lays the volume down through Velero's `restore-wait` init container before the Neo4j container starts, and Neo4j replays its transaction logs on startup. The race described below for postgres therefore does not apply: no application can write to Neo4j before its data is in place.
 
-`backend/tests/unit/services/backup/test_strategies.py::TestNeo4jCommunityPauseScripts` runs the rendered scripts against a `sleep` process standing in for the JVM. `test_infrahub_backup_and_restore_lifecycle` covers the community Infrahub driver end to end.
+`backend/tests/unit/services/backup/test_strategies.py::TestNeo4jCommunityPauseScripts` runs the rendered scripts against a `sleep` process standing in for the JVM, including a resumed, a restarted and an overlapping pause. `test_infrahub_backup_and_restore_lifecycle` covers the community Infrahub driver end to end and asserts the Velero Backup's `hookStatus` (4 hooks attempted, none failed), because Neo4j is idle in the test and a copy taken without the pause would pass too.
 
 ### Hook timeouts: `timeout` vs `execTimeout`
 
@@ -334,7 +348,7 @@ Results are passed between workers via **Prefect Variables** (a cross-worker com
 **Backup:**
 
 1. `execute_backup_workflow` (INTERNAL) — marks backup IN_PROGRESS, resolves the retention TTL and records it (see [Retention TTL](#retention-ttl-servicesbackupttlpy)), builds Velero CRD, creates an action token, dispatches to USER flow with the token and `STYRMIN_BACKUP_ID`, updates status, `size_bytes` and `expires_at` from result
-2. `execute_velero_backup_flow` (USER) — creates Velero Backup CRD, polls completion, records one step per component, sums the PodVolumeBackup bytes on `Completed`, stores result (phase + `status.expiration` + `volume_bytes`) in Prefect Variable
+2. `execute_velero_backup_flow` (USER) — creates Velero Backup CRD, polls completion, records one step per component, checks each component's volumes and hooks (`component_problems`), sums the PodVolumeBackup bytes on `Completed`, stores result (phase + failure reason + `status.expiration` + `volume_bytes` + `problems`) in Prefect Variable. The INTERNAL flow marks the backup `COMPLETED` only when the phase is `Completed` and `problems` is empty.
 
 **Restore:**
 
@@ -363,6 +377,7 @@ A step is created when it starts, so a restore that fails while deleting the nam
 
 - On each poll of `poll_backup_status` (`on_poll` callback), it lists the backup's `PodVolumeBackup` objects (`VeleroClient.list_pod_volume_backups`, label `velero.io/backup-name`, with Velero's cut-and-hash rule for names longer than 63 characters) and maps each pod to its component through the pod's `styrmin/component` label.
 - A component's step starts at the earliest `startTimestamp` of its items. It ends at the latest `completionTimestamp` once every item has ended (`Completed`, `Failed` or `Canceled`) and the Velero backup has left the `New` and `InProgress` phases. Velero creates `PodVolumeBackup` objects only while the backup is `InProgress`, so before that a component whose listed items have all ended can still get another item, and its step stays running. It fails when an item failed, with "Pod volume <pod>/<volume>: <message>" for each failed item, joined by "; ".
+- Once the backup has left `New` and `InProgress`, and unless it ended `Failed` or `FailedValidation`, `component_problems` adds a problem to a component's step: "Velero did not back up volume <names>. …" when a volume that its strategy names (`volumes`) has no `PodVolumeBackup`, or, when Velero reports failed hooks and every volume is there, the strategy's `post_hook_failure` (`post_hook_failures`). Both end with `failed_hooks_message` ("<n> of <m> backup hooks failed; `velero backup logs <name> -n <namespace>` prints their output") when hooks failed. The USER flow runs the same check once after polling, even when no step is recorded, lists every problem as "component <name>: <problem>" in the failure reason, and fails the backup when it cannot list the PodVolumeBackups of a stored backup with named volumes.
 - When the Velero backup ends, `finish` ends every component that has not ended with the backup's result and its start and completion times. This covers components without pod volumes, and components whose items were last listed while the backup was `InProgress`. A backup that did not complete gives those components `failure_message("backup", status)`.
 - Failures to list or record are logged and never fail the backup. A write made during polling that was not recorded is sent again on the next poll. `finish` sends a write that was not recorded again up to 3 attempts in total, 2 seconds apart (`FINISH_ATTEMPTS`, `FINISH_RETRY_DELAY_SECONDS`), then logs the components whose steps it could not end.
 
@@ -370,7 +385,7 @@ A step is created when it starts, so a restore that fails while deleting the nam
 
 **Velero's `FailedValidation` phase.** `poll_backup_status` and `poll_restore_status` return on every phase in `TERMINAL_PHASES`: `Completed`, `PartiallyFailed`, `Failed` and `FailedValidation`. Before spec 019, `FailedValidation` was not final, so a restore of a Velero backup that no longer exists was polled until the 7,200-second timeout. It now fails within one poll, and `restore:velero` fails with Velero's validation errors.
 
-**Error message of the record.** When Velero does not complete a backup or restore, the USER flow passes Velero's `failureReason` through the Prefect Variable. When Velero gives none, as for `FailedValidation` and `PartiallyFailed`, it passes the text of the failed step instead (`failure_message`, for example "Velero restore failed validation: …"). The INTERNAL flow stores it as the `Backup` or `Restore` record's error message, and falls back to "Velero backup phase: <phase>" or "Velero restore phase: <phase>" when the Variable holds an empty reason.
+**Error message of the record.** When Velero does not complete a backup or restore, the USER flow passes Velero's `failureReason` through the Prefect Variable. For a backup it adds the component problems and, when no component problem carries it, `failed_hooks_message` (`_backup_failure_reason`). When Velero gives none, as for `FailedValidation` and `PartiallyFailed`, it passes the text of the failed step instead (`failure_message`, for example "Velero restore failed validation: …"). The INTERNAL flow stores it as the `Backup` or `Restore` record's error message, and falls back to "Velero backup phase: <phase>" or "Velero restore phase: <phase>" when the Variable holds an empty reason.
 
 **RBAC.** The agent's role grants `get` and `list` on `podvolumebackups` in `velero.io` (`helm/agent/templates/roles.yaml`), for the backup component steps.
 
