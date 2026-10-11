@@ -6,6 +6,8 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]>=0.115.0",
     "sqlmodel>=0.0.22",
+    # The asyncio extra installs greenlet, which SQLAlchemy 2.1 no longer installs by default.
+    "sqlalchemy[asyncio]>=2.0.14",
     "asyncpg>=0.30.0",
     "pydantic-settings>=2.6.0",
     "uvicorn>=0.32.0",
