@@ -53,6 +53,16 @@ resources:
 
 terminationGracePeriodSeconds: 60
 
+# Applies the chart's CRDs (FluxCD, kopf, StyrminDeployment) in a pre-install and pre-upgrade
+# hook Job, because Helm never updates the files in `crds/`. Disable it only when you apply
+# these CRDs yourself before each upgrade.
+crdUpgrade:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
 nodeSelector: {}
 
 tolerations: []
