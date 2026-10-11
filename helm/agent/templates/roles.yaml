@@ -95,7 +95,8 @@ rules:
   - secrets
   verbs:
   - "*"
-# We need to create events on CRs about things happening during reconciliation
+# We need to create events on CRs about things happening during reconciliation, and to list
+# FluxCD's events of a HelmRelease whose failure FluxCD reported in sync
 - apiGroups:
   - ""
   resources:
@@ -103,6 +104,7 @@ rules:
   verbs:
   - create
   - patch
+  - list
 # We need to watch Prefect worker pods
 - apiGroups:
   - ""

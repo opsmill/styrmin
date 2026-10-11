@@ -718,6 +718,166 @@ async def test_internal_deployment_with_a_ready_pod_reaches_ready(
 # --- Handlers: start of a rollout ---
 
 
+# --- Timer: a failed change that FluxCD reported in sync (helm-controller v1.5.0 and later) ---
+
+T_RELEASED = "2026-10-06T10:00:00Z"
+T_CHANGE_FAILED = "2026-10-06T10:05:00Z"
+IN_SYNC_MESSAGE = (
+    "Helm upgrade succeeded for release styrmin-deadbeef/my-release.v1 with chart "
+    "simple-app@0.1.0"
+)
+
+
+def _in_sync_after_failure_helmrelease(
+    *,
+    failures: int = 1,
+    last_attempted_generation: int = 2,
+    released_at: str = T_RELEASED,
+) -> dict[str, Any]:
+    """FluxCD reports v1 in sync with generation 2 after the upgrade to it failed without a release."""
+    helmrelease = _helmrelease(
+        _flux("Ready", "True", "UpgradeSucceeded", IN_SYNC_MESSAGE, 2, T_READY),
+        _flux("Released", "True", "UpgradeSucceeded", IN_SYNC_MESSAGE, 2, T_READY),
+        last_attempted_generation=last_attempted_generation,
+        history=[{**_snapshot(1, "deployed"), "lastDeployed": released_at}],
+    )
+    helmrelease["status"]["failures"] = failures
+    return helmrelease
+
+
+def _failure_event(
+    message: str = UPGRADE_FAILURE, at: str = T_CHANGE_FAILED
+) -> dict[str, Any]:
+    return {
+        "type": "Warning",
+        "reason": "UpgradeFailed",
+        "message": f"{message}\n\nLast Helm logs:\n\nupgrade failed",
+        "lastTimestamp": at,
+    }
+
+
+def _serve_events(mocker, *events: dict[str, Any]) -> Any:
+    return mocker.patch.object(
+        reconciler_module,
+        "_list_release_failure_events",
+        new=mocker.AsyncMock(return_value=list(events)),
+    )
+
+
+@pytest.mark.anyio
+async def test_failure_reported_in_sync_fails_the_deployment(mocker, services) -> None:
+    """FluxCD does not retry a change it found in sync, so the change never reaches the cluster."""
+    _serve(mocker, _in_sync_after_failure_helmrelease())
+    _serve_events(mocker, _failure_event())
+
+    patch = await _tick(_rolling_out_status())
+
+    message = f"FluxCD reported the release in sync after the change failed: {UPGRADE_FAILURE}"
+    assert patch.status["phase"] == DeploymentPhase.FAILED.value
+    assert patch.status["displayState"] == DisplayState.ERROR.value
+    assert patch.status["message"] == message
+    hr_ready = _condition(patch, ConditionType.HELM_RELEASE_READY)
+    assert hr_ready is not None
+    assert (hr_ready["status"], hr_ready["reason"], hr_ready["message"]) == (
+        "False",
+        "UpgradeFailed",
+        UPGRADE_FAILURE,
+    )
+    ready = _condition(patch, ConditionType.READY)
+    assert ready is not None
+    assert (ready["status"], ready["reason"]) == ("False", "UpgradeFailed")
+    services.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("helmrelease", "events"),
+    [
+        # A release that succeeded after the failure, as a retry stores one.
+        (
+            _in_sync_after_failure_helmrelease(released_at="2026-10-06T10:06:00Z"),
+            [_failure_event()],
+        ),
+        # The failure and the release in the same second do not count.
+        (
+            _in_sync_after_failure_helmrelease(released_at=T_CHANGE_FAILED),
+            [_failure_event()],
+        ),
+        # No failure event, for example after the Event expired.
+        (_in_sync_after_failure_helmrelease(), []),
+        (
+            _in_sync_after_failure_helmrelease(),
+            [{**_failure_event(), "lastTimestamp": None}],
+        ),
+    ],
+    ids=["release-after-failure", "same-second", "no-event", "event-without-time"],
+)
+@pytest.mark.anyio
+async def test_ready_after_a_failure_with_a_newer_release_reaches_ready(
+    mocker, services, helmrelease: dict[str, Any], events: list[dict[str, Any]]
+) -> None:
+    _serve(mocker, helmrelease)
+    _serve_events(mocker, *events)
+
+    patch = await _tick(_rolling_out_status())
+
+    assert patch.status["phase"] == DeploymentPhase.READY.value
+    services.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "helmrelease",
+    [
+        _in_sync_after_failure_helmrelease(failures=0),
+        # FluxCD resets the counters when it first attempts a new generation.
+        _in_sync_after_failure_helmrelease(last_attempted_generation=1),
+    ],
+    ids=["no-failures", "failures-of-another-generation"],
+)
+@pytest.mark.anyio
+async def test_failure_events_are_read_only_after_a_counted_failure(
+    mocker, services, helmrelease: dict[str, Any]
+) -> None:
+    _serve(mocker, helmrelease)
+    list_events = _serve_events(mocker, _failure_event())
+
+    patch = await _tick(_rolling_out_status())
+
+    assert patch.status["phase"] == DeploymentPhase.READY.value
+    list_events.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [
+        ({"lastTimestamp": T_CHANGE_FAILED}, T_CHANGE_FAILED),
+        (
+            {
+                "series": {"lastObservedTime": "2026-10-06T10:07:00.123456Z"},
+                "lastTimestamp": T_CHANGE_FAILED,
+            },
+            "2026-10-06T10:07:00.123456Z",
+        ),
+        ({"eventTime": "2026-10-06T10:08:00.5Z"}, "2026-10-06T10:08:00.5Z"),
+        ({"metadata": {"creationTimestamp": T_RELEASED}}, T_RELEASED),
+    ],
+    ids=["last-timestamp", "series", "event-time", "creation-timestamp"],
+)
+def test_failure_event_time(event: dict[str, Any], expected: str) -> None:
+    parsed = reconciler_module.FluxEvent.from_dict(
+        {"reason": "UpgradeFailed", "message": "failed", **event}
+    )
+
+    assert parsed is not None
+    assert parsed.time == datetime.fromisoformat(expected)
+
+
+def test_failure_event_message_leaves_out_the_helm_logs() -> None:
+    parsed = reconciler_module.FluxEvent.from_dict(_failure_event())
+
+    assert parsed is not None
+    assert parsed.message == UPGRADE_FAILURE
+
+
 @pytest.fixture
 def phases(mocker) -> dict[str, Any]:
     return {
