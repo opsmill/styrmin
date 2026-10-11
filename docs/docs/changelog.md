@@ -8,6 +8,42 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### Env vars and image overrides reach the pods after every change
+
+The agent now installs the FluxCD controllers of Flux v2.9.6:
+helm-controller v1.6.5 and source-controller v1.9.6, in place of
+helm-controller v1.1.0 and source-controller v1.4.0. helm-controller
+v1.1.0 could report a change of env vars or image overrides in sync
+without applying it, and the pods kept the previous values.
+
+#### What's new
+
+- An upgrade to another driver version applies the new env vars and
+  image overrides, also when the Helm values stay the same
+  ([#432](https://github.com/opsmill/styrmin/issues/432)).
+- A change of env vars or image overrides that reaches the cluster
+  while FluxCD still upgrades the previous change is applied after that
+  upgrade ([#433](https://github.com/opsmill/styrmin/issues/433)).
+- Before each `helm install` and `helm upgrade`, a Job of the agent
+  chart applies the agent's CRDs, because Helm never updates the files
+  in a chart's `crds/` directory. Set `styrmin-agent.crdUpgrade.enabled`
+  to `false` to apply them yourself.
+
+#### Migration
+
+- The FluxCD v2.9 controllers support Kubernetes 1.34.1 and later.
+- `helm upgrade` runs the CRD Job first. It deletes and creates again
+  the `ocirepositories.source.toolkit.fluxcd.io` CRD, which Styrmin does
+  not use, because the new CRD no longer lists the `v1beta2` version
+  that the old one stored. The Job fails the upgrade instead if the
+  cluster has `OCIRepository` objects.
+- When you disable the CRD Job, apply the files of `helm/agent/crds/`
+  before you upgrade. Otherwise helm-controller and source-controller
+  cannot start, and no change of a deployment reaches the cluster.
+- A deployment whose pods kept older env vars or images because of
+  #432 or #433 keeps them after the upgrade. Its next change applies
+  the current values.
+
 ### Run a custom image on one component
 
 A deployment can now point one component at a custom or patched build

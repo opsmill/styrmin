@@ -109,6 +109,17 @@ A timer handler fires every 60s to compare desired vs actual state for all manag
 
 In `CreatingHelmRelease` and, for non-internal deployments, `Ready`, the timer also reads the HelmRelease once per tick. When its current generation failed on the component-container guard (the guard key `styrmin.io~1component-container~1…` in a condition message, Ready not `True`), the CR goes to `Failed` / `Error` at once with `HelmReleaseReady=False` and `Ready=False`, reason `ComponentContainerNotFound`, and the typed `COMPONENT_CONTAINER_NOT_FOUND` message naming the component and container (spec 018, FR-007). During a rollout, the timer also follows FluxCD's state of the current generation, as described in the next section. Once the CR is `Ready`, the timer checks only the guard: a later HelmRelease failure without a spec change is not reflected in the CR status.
 
+## FluxCD controllers
+
+The agent chart installs FluxCD's helm-controller v1.6.5 and source-controller v1.9.6 (Flux v2.9.6) in its namespace: `helm/agent/templates/helm-controller/` and `helm/agent/templates/source-controller/`, with the CRDs in `helm/agent/crds/`. The integration fixtures in `backend/tests/integration/fixtures/` hold copies of the CRDs and the two Deployments; `backend/tests/unit/test_helm_agent_crd_upgrade.py` fails when they differ from the chart. Flux v2.9 supports Kubernetes 1.34.1 and later.
+
+- **Helm v3 behaviour.** From v1.5.0, helm-controller uses Helm v4, whose defaults install new HelmReleases with server-side apply, check health with kstatus, and send hooks to the post-renderers. helm-controller runs with `--feature-gates=UseHelm3Defaults=true`, which keeps client-side apply, Helm's legacy health checks and `postRenderStrategy: nohooks`. The readiness and rollback rules below were observed with Helm v3's behaviour.
+- **Post-renderers digest.** helm-controller upgrades a release whose chart, values or post-renderers changed. It compares the post-renderers digest with `status.observedPostRenderersDigest` only for a generation it has not finished (`status.observedGeneration` differs from `metadata.generation`; [state.go at v1.6.5](https://github.com/fluxcd/helm-controller/blob/v1.6.5/internal/reconcile/state.go)). v1.1.0 compared the `Ready` condition's `observedGeneration` instead, which helm-controller advanced before it applied the generation, so a change of `spec.postRenderers` alone (env vars, image overrides) was reported in sync without an upgrade:
+  - when an upgrade to another driver version switched `chartRef` to a HelmChart that was not ready yet, `SourceNotReady` set the condition's generation ([#432](https://github.com/opsmill/styrmin/issues/432));
+  - when a change arrived while helm-controller was still upgrading the previous one, a status patch during the upgrade set it ([#433](https://github.com/opsmill/styrmin/issues/433), fixed upstream by [fluxcd/helm-controller#1412](https://github.com/fluxcd/helm-controller/pull/1412)).
+- **A failed change reported in sync.** fluxcd/helm-controller#1412 also records the post-renderers digest after a failed install or upgrade (`summarize()` in [release.go at v1.6.5](https://github.com/fluxcd/helm-controller/blob/v1.6.5/internal/reconcile/release.go)). When the attempt stored no release, for example after a post-render error such as the component-container guard, the next reconcile 0.8 seconds later (in E2E) finds the previous release in sync and reports `Ready=True` with reason `UpgradeSucceeded`. It does not try again. The operator detects this state: see [A failed change reported in sync](#a-failed-change-reported-in-sync).
+- **CRD upgrades.** Helm installs `crds/` only when a CRD is missing and never updates it. The chart's pre-install and pre-upgrade hook (`templates/crd-upgrade.yaml`, `crdUpgrade.enabled`, `true` by default) runs `styrmin agent apply-crds /crds` with the agent image, its own ServiceAccount and ClusterRole, and the chart's CRD files in a ConfigMap. `operator/crd/install.py` server-side applies each CRD (field manager `styrmin-agent`). A CRD that would drop a version listed in its `status.storedVersions` is deleted and created again when it has no objects, and fails the hook otherwise: the API server rejects such an update, and helm-controller v1.6.5 does not start without the `v1` `OCIRepository` CRD, which source-controller v1.4.0's CRD (`storedVersions: [v1beta2]`) does not serve.
+
 ## HelmRelease readiness during a rollout
 
 <!-- Extracted from specs/019-task-steps on 2026-10-06 -->
@@ -138,6 +149,7 @@ A FluxCD condition of the HelmRelease counts only when its `observedGeneration` 
 | `Ready` not `True` | `HelmReleaseReady` gets FluxCD's `Ready` status and transition time. When `Ready=False`, the reason and message come from `Released=False` when FluxCD has it (after a rollback, `Ready` describes the rollback), else from `Ready` |
 | `Remediated=True` | Copied into `HelmReleaseRemediated` (status, reason such as `RollbackSucceeded` or `UninstallSucceeded`, message, transition time). The phase does not change, because FluxCD tries again after each rollback (`remediation.retries: 3` for install and upgrade) |
 | `Stalled=True` | Phase `Failed`, `displayState: Error`, message `"<Stalled message>: <failure message>"`, and `Ready=False` with the `Stalled` reason, for example `RetriesExceeded`. FluxCD has used all its retries |
+| `Ready=True` after a failed install or upgrade of this generation that stored no release | Phase `Failed`, `displayState: Error`. With the guard key in FluxCD's failure event, as for the guard failure; otherwise message `"FluxCD reported the release in sync after the change failed: <event message>"`, and `HelmReleaseReady=False` and `Ready=False` with the event's reason, for example `UpgradeFailed`. See [A failed change reported in sync](#a-failed-change-reported-in-sync) |
 | `Ready=True` for FluxCD's rollback of a failed release of this generation | Phase `Failed`, `displayState: Error`, message `"FluxCD rolled the release back after release v<N> failed: <failure message>"`, and `Ready=False` with reason `RolledBack`. `HelmReleaseReady` keeps FluxCD's failure, or becomes `False` with reason `RolledBack` when the timer did not see the failure |
 
 The timer writes a condition only when its status, reason, message or transition time changes (`operator/crd/status.py::replace_condition`), so a slow rollout does not write the status on every tick.
@@ -150,12 +162,23 @@ While the phase is not `Ready`, `Failed` or `Deleting`, the timer compares the t
 
 ### Rollback reported Ready
 
-FluxCD can report `Ready=True` for the current generation after it rolled that generation back. With helm-controller v1.1.0, the version in `helm/agent`, this happens to a change that only adds or changes post-render overrides (image or environment variable overrides, [ADR-057](../../adr/0057-post-render-component-overrides.md) and [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md)). Observed in `test_task_steps.py::test_helmrelease_failure_shows_fluxcd_reason`:
+FluxCD can report `Ready=True` for the current generation after it rolled that generation back. With helm-controller v1.1.0, which the agent chart installed before [#433](https://github.com/opsmill/styrmin/issues/433), this happens to a change that only adds or changes post-render overrides (image or environment variable overrides, [ADR-057](../../adr/0057-post-render-component-overrides.md) and [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md)). Observed in `test_task_steps.py::test_helmrelease_failure_shows_fluxcd_reason`:
 
 1. The upgrade to release v3 fails at FluxCD's 5-minute timeout. FluxCD rolls back to v2, which creates release v4 ("Rollback to 2"), and sets `Released=False` (`UpgradeFailed`) and `Remediated=True` (`RollbackSucceeded`).
 2. 11 to 38 seconds later in E2E runs, FluxCD finds v4 in sync with the current generation, because after an attempt at a generation it compares only the chart and the values, not the post-renderers. It sets `Ready=True` and `Released=True`, both with reason `UpgradeSucceeded` and the message "Helm upgrade succeeded for release <name>.v4", removes `Remediated`, and records the new post-renderers digest. It does not try again.
 
 So FluxCD's conditions cannot tell this state from a retry that succeeded, and with the default 60-second timer interval the timer can miss `Remediated` altogether. FluxCD's release history can: the timer counts FluxCD's `Ready=True` as a rollback when FluxCD counted a failed install or upgrade for the current generation (`status.installFailures` or `status.upgradeFailures`, which FluxCD resets for each new generation), and the newest entry of `status.history` is `deployed` and has the version right after a `failed` entry. While failures are counted, FluxCD rolls back each failed release before it tries again, so that entry is the rollback. A retry that succeeds adds a newer release after the rollback, so it still moves the CR to `Ready`. The timer then fails the CR as described in the table above. An internal deployment with a ready pod still counts as ready.
+
+With helm-controller v1.6.5, `test_helmrelease_failure_shows_fluxcd_reason` passes. Whether v1.6.5 still reports the rollback of a post-renderers change as `Ready` was not checked; the rule stays in place either way.
+
+### A failed change reported in sync
+
+helm-controller v1.6.5 can report `Ready=True` for the current generation after an install or upgrade of it failed without storing a release (see [FluxCD controllers](#fluxcd-controllers)). Its conditions then name the previous release, so the operator reads the failure from FluxCD's Events. `operator/reconciler.py::observe_helmrelease` and `read_helmrelease_guard_failure` list the HelmRelease's `Warning` Events with reason `InstallFailed` or `UpgradeFailed` only when:
+
+- `Ready` is `True` for the current generation;
+- `status.failures` is above 0 and `status.lastAttemptedGeneration` equals `metadata.generation`. FluxCD resets the counters when it first attempts a new generation, and keeps them after a release that succeeds.
+
+The state is a skipped failure when the newest such Event (by `series.lastObservedTime`, else `lastTimestamp`, `eventTime`, `firstTimestamp`, `metadata.creationTimestamp`) is newer than the newest `lastDeployed` (or `firstDeployed`) of `status.history`. A retry or a rollback that stores a release after the failure is newer, and a failure in the same second as the release does not count. The Event's message, without the Helm log lines after its first blank line, is the failure message. With the guard key in it, the timer fails the CR as for the guard failure, in `CreatingHelmRelease` and in `Ready`; otherwise it fails the CR in `CreatingHelmRelease` (see the table above). The agent's ClusterRole allows `list` on `events` for this. When the Event is gone, for example after the API server's event TTL (one hour by default), the CR is not failed.
 
 ## Steps of a rollout
 
@@ -278,11 +301,11 @@ A StyrminDeployment without the annotation, written before this change or by the
 cross-target restore, is written as before.
 
 The order of the StyrminDeployment writes does not cover FluxCD. helm-controller v1.1.0,
-which the agent chart installs, records a HelmRelease generation that arrives during an
-upgrade as observed, with its post-renderers digest, so a change to `spec.postRenderers`
-alone (env vars, image overrides) can be dropped
-([#433](https://github.com/opsmill/styrmin/issues/433)). FluxCD fixed it in helm-controller
-v1.5.0.
+which the agent chart installed before, recorded a HelmRelease generation that arrived during
+an upgrade as observed, with its post-renderers digest, so a change to `spec.postRenderers`
+alone (env vars, image overrides) could be dropped
+([#433](https://github.com/opsmill/styrmin/issues/433)). helm-controller v1.6.5 applies it
+after the running upgrade (see [FluxCD controllers](#fluxcd-controllers)).
 
 ## Kubernetes Events
 
