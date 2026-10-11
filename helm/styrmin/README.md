@@ -4,7 +4,7 @@ Helm chart for deploying Styrmin - a deployment orchestration platform for Kuber
 
 ## Prerequisites
 
-- Kubernetes 1.23+
+- Kubernetes 1.34.1+ (the FluxCD v2.9 controllers that the agent installs support 1.34.1 and later)
 - Helm 3.8+
 - PV provisioner support in the underlying infrastructure (for PostgreSQL persistence)
 
@@ -310,6 +310,13 @@ The secret should contain these keys:
 ```bash
 helm upgrade styrmin ./helm/styrmin -n styrmin -f my-values.yaml
 ```
+
+Helm never updates the CRDs in a chart's `crds/` directory. Before each install and upgrade, a
+hook Job of the agent subchart (`styrmin-agent.crdUpgrade.enabled`, `true` by default) applies the
+agent's CRDs: FluxCD's, kopf's and the `StyrminDeployment` CRD. When a new CRD no longer lists a
+version that the cluster stored objects in, the Job recreates that CRD if it has no objects, and
+fails the upgrade if it has some. When you disable the Job, apply the files of `helm/agent/crds/`
+yourself before each upgrade, or FluxCD's controllers can fail to start.
 
 ## Uninstalling
 

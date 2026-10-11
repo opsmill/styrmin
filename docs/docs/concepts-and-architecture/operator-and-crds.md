@@ -94,6 +94,22 @@ operator (the **helm-controller**) watches `HelmRelease` objects and
 does the actual `helm install` / `helm upgrade` work. Styrmin doesn't
 run Helm itself — it asks Flux to do it.
 
+The agent chart installs FluxCD's helm-controller v1.6.5 and
+source-controller v1.9.6, the controllers of Flux v2.9.6. They support
+Kubernetes 1.34.1 and later. helm-controller runs with the
+`UseHelm3Defaults` feature gate, so it installs and upgrades releases
+with Helm v3's client-side apply and health checks.
+
+Helm installs the CRDs in a chart's `crds/` directory only when they do
+not exist yet, and never updates them. The agent chart therefore applies
+its CRDs (FluxCD's, kopf's and the `StyrminDeployment` CRD) in a Job
+before each `helm install` and `helm upgrade`. When a new CRD no longer
+lists a version that the cluster stored objects in, the Job deletes and
+creates that CRD again if it has no objects, and fails the install or
+upgrade if it has some. To apply the CRDs yourself, set
+`styrmin-agent.crdUpgrade.enabled` to `false` and apply the files of
+`helm/agent/crds/` before each upgrade.
+
 So the chain inside the cluster is:
 
 ```text
@@ -203,6 +219,23 @@ the failure message when it recorded one, and the
 HelmRelease step and the task stay failed. A retry by FluxCD that
 succeeds creates a newer release after the rollback, so the deployment
 still reaches `Ready`.
+
+FluxCD can also report a change in sync after it failed to apply it.
+When an install or upgrade fails before Helm stores a release, for
+example because a post-render patch fails, helm-controller v1.6.5 still
+records the new post-renderers as applied. On its next run it compares
+only the chart and the values, reports the previous release `Ready`, and
+does not try again. The operator recognises this state: FluxCD counted a
+failure for the current generation of the HelmRelease
+(`status.failures`), and FluxCD's newest `InstallFailed` or
+`UpgradeFailed` event of the HelmRelease is newer than its newest
+release. The operator then sets the phase `Failed` and the display state
+`Error`. When the event names a component container that the chart does
+not render, the message is the `COMPONENT_CONTAINER_NOT_FOUND` message
+(see [Image overrides](./image-overrides.md)). Otherwise it is
+`FluxCD reported the release in sync after the change failed:` followed
+by FluxCD's message, and the `Ready` condition becomes `False` with the
+reason of the event.
 
 ### What this means in practice
 

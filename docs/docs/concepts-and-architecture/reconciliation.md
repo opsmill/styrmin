@@ -111,18 +111,6 @@ What you view for the earlier change:
   its setup or upgrade hooks. See
   [Hooks of an earlier change](hooks-and-actions.md#hooks-of-an-earlier-change).
 
-#### Changes to environment variables or image overrides only
-
-Styrmin applies environment variables and image overrides through
-post-render patches of the deployment's HelmRelease. With the FluxCD
-helm-controller that Styrmin installs (v1.1.0), a change that changes
-only these patches can be dropped when it reaches the cluster while
-FluxCD still upgrades the previous change. The deployment then shows
-`running`, but its pods keep the previous values until the next change
-([#433](https://github.com/opsmill/styrmin/issues/433)). To apply the
-last values, make another change to the deployment after both tasks
-have ended.
-
 #### Changes made at the same time
 
 When two changes to the same deployment are made at the same time, for

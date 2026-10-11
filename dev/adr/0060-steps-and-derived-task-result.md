@@ -306,3 +306,8 @@ one backup for the whole namespace and creates one `PodVolumeBackup` per backed-
 - The rollback rule of decision 13 reads FluxCD's release history and failure counters, which
   depend on helm-controller's behaviour (v1.1.0 in `helm/agent`). It assumes that FluxCD rolls
   back each failed upgrade before it tries again, which `remediation.retries: 3` guarantees.
+
+  > **Note (#432, #433):** the agent chart now installs helm-controller v1.6.5, and
+  > `test_helmrelease_failure_shows_fluxcd_reason` passes with it. The operator also fails a
+  > rollout that FluxCD reports `Ready` after a failed attempt that stored no release; see
+  > [A failed change reported in sync](../knowledge/agent/operator.md#a-failed-change-reported-in-sync).
