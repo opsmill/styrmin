@@ -1,3 +1,4 @@
+from styrmin_backend import config
 from styrmin_backend.agent.service.kubernetes.resources.blocks.metadata import Name
 from styrmin_backend.agent.service.kubernetes.resources.blocks.spec import (
     ChartRef,
@@ -13,6 +14,11 @@ from styrmin_backend.agent.service.kubernetes.resources.custom_resource import (
 )
 
 
+def flux_duration(seconds: int) -> str:
+    """A Go duration for FluxCD; whole minutes keep the "5m" existing HelmReleases carry."""
+    return f"{seconds // 60}m" if seconds % 60 == 0 else f"{seconds}s"
+
+
 def build_minimal_helm_release(
     release_reference: str,
     chart_reference: str,
@@ -22,7 +28,7 @@ def build_minimal_helm_release(
         metadata=[Name(value=release_reference)],
         spec=[
             Interval.one_hour(),
-            Timeout(value="5m"),
+            Timeout(value=flux_duration(config.SETTINGS.operator.helm_release_timeout)),
             ChartRef(name=chart_reference, namespace="styrmin"),
             ReleaseName(value=release_reference),
             Install(remediation=Remediation(retries=3)),

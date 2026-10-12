@@ -82,6 +82,22 @@ def test_operator_settings_accept_the_existing_env_var_names(
     assert operator.janitor_interval == 90
 
 
+def test_operator_rollout_timing_defaults_and_env_vars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("RETRY_DELAY", "HELM_RELEASE_TIMEOUT", "DEPLOYMENT_READY_TIMEOUT"):
+        monkeypatch.delenv(f"STYRMIN_OPERATOR_{name}", raising=False)
+    defaults = OperatorSettings()
+    monkeypatch.setenv("STYRMIN_OPERATOR_RETRY_DELAY", "5")
+    monkeypatch.setenv("STYRMIN_OPERATOR_HELM_RELEASE_TIMEOUT", "150")
+
+    operator = OperatorSettings()
+
+    assert (defaults.retry_delay, defaults.helm_release_timeout) == (30, 300)
+    assert defaults.deployment_ready_timeout < defaults.helm_release_timeout
+    assert (operator.retry_delay, operator.helm_release_timeout) == (5, 150)
+
+
 @pytest.mark.parametrize(
     ("env_var", "settings_class"),
     [
@@ -89,6 +105,8 @@ def test_operator_settings_accept_the_existing_env_var_names(
         ("STYRMIN_AGENT_POLL_INTERVAL", AgentSettings),
         ("STYRMIN_AGENT_STATUS_POLL_INTERVAL", AgentSettings),
         ("STYRMIN_OPERATOR_RECONCILE_INTERVAL", OperatorSettings),
+        ("STYRMIN_OPERATOR_RETRY_DELAY", OperatorSettings),
+        ("STYRMIN_OPERATOR_HELM_RELEASE_TIMEOUT", OperatorSettings),
         ("STYRMIN_JANITOR_INTERVAL", OperatorSettings),
     ],
 )

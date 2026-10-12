@@ -91,7 +91,7 @@ async def on_helmrelease_create(
         )
         raise kopf.TemporaryError(
             f"Failed to fetch context for deployment {deployment_id}",
-            delay=30,
+            delay=config.SETTINGS.operator.retry_delay,
         )
 
     all_resources = build_desired_resources(
@@ -138,7 +138,7 @@ async def on_helmrelease_create(
         )
         raise kopf.TemporaryError(
             f"Failed to create some NetworkPolicies: {result.errors}",
-            delay=30,
+            delay=config.SETTINGS.operator.retry_delay,
         )
 
     if result.created > 0:
