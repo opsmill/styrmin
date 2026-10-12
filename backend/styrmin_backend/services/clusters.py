@@ -22,6 +22,14 @@ if TYPE_CHECKING:
     pass
 
 
+def _apply_cluster_defaults(config: dict) -> dict:
+    """Return a copy of ``config`` with the cluster defaults set for missing keys."""
+    result = dict(config)
+    result.setdefault("ingress_class", "traefik")
+    result.setdefault("runtime_class", "default")
+    return result
+
+
 async def create_cluster(
     uow: UnitOfWork, name: str = "default", config: dict | None = None
 ) -> Cluster:
@@ -40,12 +48,7 @@ async def create_cluster(
         if cluster:
             raise ClusterAlreadyExistsError("A cluster with this name already exists.")
 
-        if config is None:
-            config = {}
-
-        # Apply cluster defaults
-        config.setdefault("ingress_class", "traefik")
-        config.setdefault("runtime_class", "default")
+        config = _apply_cluster_defaults(config or {})
 
         try:
             validate_cluster_config(config)

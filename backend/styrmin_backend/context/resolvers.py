@@ -110,6 +110,15 @@ def _resolve_instance_config(
     return ResolvedConfig(**resolved_context)
 
 
+def resolve_instance_config(
+    cluster: ClusterConfig, environment: EnvironmentConfig, deployment: DeploymentConfig
+) -> ResolvedConfig:
+    """Return the config an instance resolves to, without building a whole ``GlobalContext``."""
+    return _resolve_instance_config(
+        cluster=cluster, environment=environment, deployment=deployment
+    )
+
+
 def _resolve_application_context(
     application: ApplicationInput,
 ) -> ApplicationContext:

@@ -41,10 +41,10 @@ description: "Task list for the cluster config update (021-cluster-config-update
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T002 [P] Add public `resolve_instance_config(cluster: ClusterConfig, environment: EnvironmentConfig, deployment: DeploymentConfig) -> ResolvedConfig` in `backend/styrmin_backend/context/resolvers.py` that delegates to `_resolve_instance_config` (D1), and unit tests for it (override wins, `env_vars` per-key merge, cluster `scheduling` ignored) in `backend/tests/unit/context/test_resolve_instance_config.py`
-- [ ] T003 [P] Extract `_apply_cluster_defaults(config: dict) -> dict` (`ingress_class: traefik`, `runtime_class: default`) in `backend/styrmin_backend/services/clusters.py` and use it from `create_cluster`; existing cluster tests must still pass (`uv run pytest backend/tests -k cluster -q`)
-- [ ] T004 [P] Extract `_create_ingress_controller(environment_id, uow, created_by_user_id) -> Deployment` from `_ensure_ingress_controller` in `backend/styrmin_backend/services/deployment.py`, keeping `_ensure_ingress_controller`'s behaviour unchanged; run the existing ingress controller unit tests
-- [ ] T005 [P] Add `StandardStorageInput` and `FastStorageInput` (`storage_class: str`) to `backend/styrmin_backend/api/definitions/config/inputs.py`, one Strawberry input per Pydantic class (D2)
+- [X] T002 [P] Add public `resolve_instance_config(cluster: ClusterConfig, environment: EnvironmentConfig, deployment: DeploymentConfig) -> ResolvedConfig` in `backend/styrmin_backend/context/resolvers.py` that delegates to `_resolve_instance_config` (D1), and unit tests for it (override wins, `env_vars` per-key merge, cluster `scheduling` ignored) in `backend/tests/unit/context/test_resolve_instance_config.py`
+- [X] T003 [P] Extract `_apply_cluster_defaults(config: dict) -> dict` (`ingress_class: traefik`, `runtime_class: default`) in `backend/styrmin_backend/services/clusters.py` and use it from `create_cluster`; existing cluster tests must still pass (`uv run pytest backend/tests -k cluster -q`)
+- [X] T004 [P] Extract `_create_ingress_controller(environment_id, uow, created_by_user_id) -> Deployment` from `_ensure_ingress_controller` in `backend/styrmin_backend/services/deployment.py`, keeping `_ensure_ingress_controller`'s behaviour unchanged; run the existing ingress controller unit tests
+- [X] T005 [P] Add `StandardStorageInput` and `FastStorageInput` (`storage_class: str`) to `backend/styrmin_backend/api/definitions/config/inputs.py`, one Strawberry input per Pydantic class (D2). Already present before this feature (added in `0271271d`, used by `UpdateDeploymentInput`); no code change, schema export unchanged
 
 **Checkpoint**: Foundation ready.
 

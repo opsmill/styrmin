@@ -1265,7 +1265,18 @@ async def _ensure_ingress_controller(
         # PENDING — still deploying, let it proceed
         return
 
-    # Create the internal ingress controller deployment
+    await _create_ingress_controller(environment_id, uow, created_by_user_id)
+
+
+async def _create_ingress_controller(
+    environment_id: UUID,
+    uow: UnitOfWork,
+    created_by_user_id: UUID,
+) -> Deployment:
+    """Create the environment's internal ingress controller deployment and dispatch it.
+
+    Callers check first that no live controller exists for the environment.
+    """
     ingress_driver = await uow.application_drivers.get_by_name(
         name=INTERNAL_DRIVER_NAME
     )
@@ -1321,6 +1332,7 @@ async def _ensure_ingress_controller(
 
     await uow.deployments.save(ingress_deployment)
     await uow.tasks.save(ingress_task)
+    return ingress_deployment
 
 
 async def deploy_application(
