@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING
 
 from playwright.async_api import expect
 
+from tests.e2e.pages._dom import submit_dialog, wait_for_dialog_open
+
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
 
@@ -41,8 +43,7 @@ class GroupsAdminPage:
     async def open_create_dialog(self) -> None:
         """Click the "Create group" button and wait for the dialog to mount."""
         await self._page.locator("[data-testid=groups-create-button]").click()
-        dialog = self._page.get_by_role("dialog")
-        await dialog.wait_for(state="visible")
+        await wait_for_dialog_open(self._page.get_by_role("dialog"))
 
     async def fill_create_form(
         self,
@@ -84,12 +85,10 @@ class GroupsAdminPage:
 
     async def submit_create(self) -> None:
         """Submit the create-group dialog and wait for it to close."""
-        dialog = self._page.get_by_role("dialog")
-        await dialog.get_by_role("button", name="Create", exact=True).click()
-        # Successful close == success; on error the inline alert renders
-        # and the wait-for hidden times out, pointing the test at the
-        # dialog.
-        await dialog.wait_for(state="hidden", timeout=10_000)
+        # Successful close == success.
+        await submit_dialog(
+            self._page.get_by_role("dialog"), button="Create", timeout=10_000
+        )
 
     def find_row(self, name: str) -> Locator:
         """Return the table row locator for ``name``."""

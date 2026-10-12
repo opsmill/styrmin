@@ -23,7 +23,11 @@ from tests.e2e.drivers.refs import (
     EnvironmentRestoreRef,
     EnvironmentRestoreSkipRef,
 )
-from tests.e2e.pages._dom import required_attr as _required_attr
+from tests.e2e.pages._dom import (
+    required_attr as _required_attr,
+    submit_dialog,
+    wait_for_dialog_open,
+)
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
@@ -94,7 +98,7 @@ class EnvironmentsListPage:
         await self.goto()
         await self._page.get_by_role("button", name="New Environment").click()
         dialog = self._page.get_by_role("dialog", name="Create Environment")
-        await dialog.wait_for()
+        await wait_for_dialog_open(dialog)
 
         await dialog.locator("#env-name").fill(name)
 
@@ -134,8 +138,7 @@ class EnvironmentsListPage:
                 if di.get("type"):
                     await dialog.locator("#env-di-type").select_option(di["type"])
 
-        await dialog.get_by_role("button", name="Create", exact=True).click()
-        await dialog.wait_for(state="hidden")
+        await submit_dialog(dialog, button="Create")
 
         card = self._page.locator(
             f"[data-testid=environment-card][data-environment-name='{name}']"
@@ -1308,7 +1311,7 @@ class EnvironmentClonesTabPage:
             )
         await trigger.click()
         dialog = self._page.locator("[data-testid=clone-environment-dialog]").first
-        await dialog.wait_for(state="visible")
+        await wait_for_dialog_open(dialog)
 
         await dialog.locator("[data-testid=clone-environment-name-input]").fill(name)
         await self._fill_selection(dialog, deployment_ids=deployment_ids)

@@ -15,6 +15,7 @@ from playwright.async_api import expect
 
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.refs import ClusterRef
+from tests.e2e.pages._dom import submit_dialog, wait_for_dialog_open
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -54,7 +55,7 @@ class SettingsPage:
         trigger = self._page.get_by_role("button", name="New Cluster")
         await trigger.click()
         dialog = self._page.get_by_role("dialog", name="Create Cluster")
-        await dialog.wait_for()
+        await wait_for_dialog_open(dialog)
 
         await dialog.locator("#cluster-name").fill(name)
 
@@ -99,8 +100,7 @@ class SettingsPage:
                 if ss.get("storage_class"):
                     await dialog.locator("#cluster-sc").fill(ss["storage_class"])
 
-        await dialog.get_by_role("button", name="Create", exact=True).click()
-        await dialog.wait_for(state="hidden")
+        await submit_dialog(dialog, button="Create")
 
         # After creation the Clusters page refreshes and renders the cluster
         # card with a stable data-cluster-id attribute.
@@ -153,15 +153,14 @@ class BackupStorageLocationsListPage:
         await self.goto()
         await self._page.get_by_role("button", name="New Storage Location").click()
         dialog = self._page.get_by_role("dialog", name="Create Backup Storage Location")
-        await dialog.wait_for()
+        await wait_for_dialog_open(dialog)
         await dialog.locator("#bsl-name").fill(name)
         await dialog.locator("#bsl-endpoint").fill(endpoint)
         await dialog.locator("#bsl-bucket").fill(bucket)
         await dialog.locator("#bsl-region").fill(region)
         await dialog.locator("#bsl-access-key").fill(access_key_id)
         await dialog.locator("#bsl-secret-key").fill(secret_access_key)
-        await dialog.get_by_role("button", name="Create", exact=True).click()
-        await dialog.wait_for(state="hidden")
+        await submit_dialog(dialog, button="Create")
 
         card = self._page.locator(
             f"[data-testid=bsl-card][data-bsl-name='{name}']"
