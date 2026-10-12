@@ -60,6 +60,7 @@ from styrmin_sdk.models import (
     Restore,
     SkippedConstituent,
     Task,
+    UpdateClusterInput,
     UpdateEnvironmentInput,
     resolve_overrides,
 )
@@ -120,6 +121,7 @@ __all__ = [
     "StyrminTransportError",
     "Task",
     "Transport",
+    "UpdateClusterInput",
     "UpdateEnvironmentInput",
     "resolve_overrides",
 ]

@@ -376,6 +376,7 @@ from .update_backup_storage_location import (
     UpdateBackupStorageLocation,
     UpdateBackupStorageLocationUpdateBackupStorageLocation,
 )
+from .update_cluster import UpdateCluster, UpdateClusterUpdateCluster
 from .update_deployment import UpdateDeployment, UpdateDeploymentUpdateDeployment
 from .update_deployment_version import (
     UpdateDeploymentVersion,
@@ -692,7 +693,9 @@ __all__ = [
     "UpdateBackupScheduleUpdateBackupSchedule",
     "UpdateBackupStorageLocation",
     "UpdateBackupStorageLocationUpdateBackupStorageLocation",
+    "UpdateCluster",
     "UpdateClusterInput",
+    "UpdateClusterUpdateCluster",
     "UpdateDeployment",
     "UpdateDeploymentInput",
     "UpdateDeploymentUpdateDeployment",

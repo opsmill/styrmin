@@ -1,0 +1,10 @@
+mutation UpdateCluster($input: UpdateClusterInput!, $clusterId: UUID, $clusterName: String) {
+    updateCluster(input: $input, clusterId: $clusterId, clusterName: $clusterName) {
+        id
+        name
+        config
+        capabilities
+        createdOn
+        updatedOn
+    }
+}
