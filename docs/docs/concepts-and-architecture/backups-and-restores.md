@@ -105,6 +105,9 @@ operations:
 - an edit of the deployment's config
 - a change to the config of the deployment's environment, which
   redeploys every deployment in that environment
+- a change to the cluster config that changes the deployment's resolved
+  config (see
+  [When an environment or cluster config changes](./reconciliation.md#when-an-environment-or-cluster-config-changes))
 
 The deployment's Backups tab, `styrminctl backups list <deployment>`
 and the `backups(deploymentId:)` GraphQL query list the deployment's

@@ -84,6 +84,40 @@ Reconciliation is what happens between them:
 6. **The new Instance becomes the active Instance** once the work
    succeeds. The next change starts from there.
 
+### When an environment or cluster config changes
+
+A deployment takes every value that it does not set itself from its
+environment's config, and every value that neither sets from the
+cluster's config. A change to an environment or cluster config therefore
+starts a reconciliation of each deployment that it affects. These
+redeploys are called a config fan-out, and there are two:
+
+- The environment config fan-out. After you update an environment's
+  config, Styrmin redeploys each deployment of the environment that is
+  not yet at the new environment config.
+- The cluster config fan-out. After you update the cluster's config
+  with `styrminctl clusters update`, the SDK, the API or the cluster
+  detail page, Styrmin redeploys each deployment, in every environment
+  of the cluster, whose resolved config differs from the config of its
+  active Instance. The resolved config is the cluster config, then the
+  environment config, then the deployment config, where the deepest
+  value wins. So a deployment in an environment that sets the changed
+  value itself is not redeployed. When `dedicated_ingress` changes, the
+  redeploys are ordered around each environment's ingress controller;
+  see
+  [Changing the dedicated ingress on the cluster](./ingress-and-networking.md#changing-the-dedicated-ingress-on-the-cluster).
+
+Both fan-outs redeploy each deployment at its current application
+version and driver version, through the steps above. Both skip deleted
+deployments and deployments with a restore in progress. Neither
+redeploys an internal deployment, such as an ingress controller, as an
+application; the cluster config fan-out handles ingress controllers by
+their own rules, which the ingress page describes. A redeploy that cannot be
+started does not stop the others. Because each deployment is compared on
+its own, submitting the same config again redeploys only the deployments
+that are not yet at it, which also recovers a redeploy that could not be
+started.
+
 ### Several changes in quick succession
 
 Each change to a deployment starts its own workflow, whether you make it

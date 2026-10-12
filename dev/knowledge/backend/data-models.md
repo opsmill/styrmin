@@ -68,6 +68,10 @@ class Cluster(StyrminModel, table=True):
     environments: list["Environment"]  # Relationship
 ```
 
+`config` is validated against `ClusterConfig` (`extra="forbid"`) by `validate_cluster_config`; a failure raises `InvalidContextError` (`VALIDATION_ERROR`). `createCluster` sets it, and `updateCluster` (`services.clusters.update_cluster`) replaces it in full: a key left out of the input is removed, except `ingress_class` and `runtime_class`, which get the `createCluster` defaults (`traefik` and `default`) through `_apply_cluster_defaults`. Both mutations compute `capabilities` with `compute_cluster_capabilities` in the transaction that writes `config` ([ADR-026](../../adr/0026-capabilities-recalculation-in-service-layer.md)). The update writes the existing `config` and `capabilities` JSON columns, so it shipped without an Alembic revision.
+
+After `update_cluster` commits the row, the cluster config fan-out redeploys each live, non-internal deployment whose resolved config changed, and creates, redeploys or removes the dedicated ingress controllers of the environments whose effective `dedicated_ingress` changed. No fan-out state is stored: the deployments to redeploy are recomputed from each active instance's `context.instance.config`. See [ADR-065](../../adr/0065-cluster-config-fanout.md) and [`../architecture.md` §3.5](../architecture.md#35-why-context-is-the-unit-of-state).
+
 #### Environment
 
 ```python

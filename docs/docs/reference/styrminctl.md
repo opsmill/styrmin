@@ -55,6 +55,130 @@ Once auto-generation lands, this page will document, command by command:
 - **Build step**: TBD — walk the Cyclopts tree, emit one Markdown
   section per command, write it into this file
 
+### `clusters update` — change a cluster's config
+
+`styrminctl clusters update` replaces the config of an existing cluster
+and redeploys the deployments that take a changed value. You keep every
+deployment and environment of the cluster. The command requires the
+administrator role.
+
+```text
+styrminctl clusters update [NAME] [--id UUID] --config JSON|@FILE
+```
+
+- `NAME`: the name of the cluster.
+- `--id`: the UUID of the cluster. Pass either a name or `--id`, not
+  both.
+- `--config`: required. The whole cluster config, as inline JSON or as
+  `@path/to/file.json`.
+
+```bash
+styrminctl clusters update default --config @cluster.json
+```
+
+The same update is available as the `updateCluster` GraphQL mutation,
+as `clusters.update()` in the Python SDK, and from the **Edit** button
+on the cluster detail page, which the page shows only to administrators. The edit
+dialog keeps the values it does not show: scheduling, the node selector,
+the database size, the backup retention, and the dedicated ingress
+service annotations and load balancer IP.
+
+#### The file holds the whole config
+
+The config you submit replaces the stored config. A key that you leave
+out is removed from the cluster, except `ingress_class` and
+`runtime_class`, which get `traefik` and `default`, as with
+`clusters create`. For example, a file without `dedicated_ingress` turns
+the dedicated ingress off, and a file without `fqdn_suffix` removes the
+FQDN suffix.
+
+The file uses the same keys as `clusters create --config`, in
+snake_case. camelCase keys, the GraphQL spelling, are accepted too. The
+command refuses a key that it does not know, at any depth, before it
+sends anything to the server, so that a misspelled key cannot remove a
+value:
+
+```text
+Error: Unknown config key(s): fqdn_sufix, dedicated_ingress.servce
+```
+
+To start from the stored config, run `styrminctl clusters get <name>`.
+It prints the config as JSON in the `config` column, and `clusters
+update` accepts that JSON as it is, including values such as
+`"external_url_scheme": "http"`. In a narrow terminal the table wraps
+the JSON over several lines; set `COLUMNS` to a large value to print it
+on one line:
+
+```bash
+COLUMNS=1000 styrminctl clusters get default
+```
+
+Two updates are not merged: the update saved last wins. A file that you
+saved before another administrator's update reverts that update, so read
+the stored config with `clusters get` immediately before you edit it.
+
+The update is refused, and nothing is saved, in these cases:
+
+- The config does not pass validation (`VALIDATION_ERROR`).
+- An environment clone is building an environment of the cluster.
+  Environment backups and restores in progress do not block the update.
+- You do not have the administrator role.
+
+#### Which deployments are redeployed
+
+For each deployment, Styrmin computes the config that the deployment
+resolves to now: the cluster config, then its environment's config, then
+its own config, where the deepest value wins. When this config differs
+from the one that the deployment's active instance was deployed with,
+Styrmin redeploys the deployment at its current application version and
+driver version. As a result:
+
+- A deployment in an environment that sets the changed value itself is
+  not redeployed.
+- Submitting the stored config again redeploys nothing, except the
+  deployments whose redeploy could not be started during an earlier
+  update.
+- Deleted deployments are not redeployed. A deployment with a restore in
+  progress is skipped; submit the config again after the restore has
+  ended.
+- The cluster's `scheduling` value is saved, but no deployment's config
+  reads it, so a change to it redeploys nothing.
+- When `dedicated_ingress` changes, the applications of an environment
+  that takes the cluster's value move onto the environment's ingress
+  controller only once the controller is ready, and the controller is
+  removed only after the applications have moved off it. See
+  [Changing the dedicated ingress on the cluster](../concepts-and-architecture/ingress-and-networking.md#changing-the-dedicated-ingress-on-the-cluster).
+
+After the update, the command prints the stored config and says that
+the deployments are being redeployed. Each redeploy is an
+`update_instance` task, which `styrminctl tasks list` lists with the ID
+of its deployment. The server log has one `cluster_config_fanout` line
+per update, with the number of deployments evaluated, redeployed,
+skipped and failed.
+
+#### Reverting an update
+
+To revert an update, submit the previous file again. Styrmin redeploys
+the deployments whose config changes back. Keep a copy of the file
+before you edit it, or save the output of `clusters get` first.
+
+#### Storage class change on a StatefulSet
+
+Kubernetes refuses any change to the volume claim templates of an
+existing StatefulSet, and an application driver can write the storage
+class there (the Infrahub example drivers do). When you change
+`standard_storage` or `fast_storage`, the redeploy of such a deployment
+fails and the deployment becomes `FAILED`. Its existing volumes keep
+their storage class. Styrmin makes the new instance active before the
+rollout runs, so submitting the same config again does not retry the
+redeploy. To recover, do one of the following:
+
+- Submit the config with the previous storage class again. Styrmin
+  redeploys the deployment with the storage class of its volumes.
+- Delete the deployment and deploy it again. The new deployment gets
+  volumes with the new storage class. The data in the old volumes is
+  not moved.
+
 ### `env-backups` — environment-level backup and restore
 
 The `env-backups` group covers whole-environment snapshots: one command
