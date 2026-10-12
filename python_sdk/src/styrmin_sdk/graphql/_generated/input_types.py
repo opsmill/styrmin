@@ -350,6 +350,34 @@ class TopologySpreadConstraintInput(BaseModel):
     match_label_keys: Optional[list[str]] = Field(alias="matchLabelKeys", default=None)
 
 
+class UpdateClusterInput(BaseModel):
+    """Full-replacement input for cluster configuration updates. Submit the complete desired configuration; any field omitted (null) is removed from the stored config, except ingressClass and runtimeClass, which default to "traefik" and "default" as on createCluster."""
+
+    ingress_class: Optional[str] = Field(alias="ingressClass", default=None)
+    runtime_class: Optional[str] = Field(alias="runtimeClass", default=None)
+    node_selector: Optional[str] = Field(alias="nodeSelector", default=None)
+    fqdn_suffix: Optional[str] = Field(alias="fqdnSuffix", default=None)
+    external_url_scheme: Optional[ExternalUrlScheme] = Field(
+        alias="externalUrlScheme", default=None
+    )
+    external_url_port: Optional[int] = Field(alias="externalUrlPort", default=None)
+    external_dns_endpoints_type: Optional[ExternalDnsEndpointsType] = Field(
+        alias="externalDnsEndpointsType", default=None
+    )
+    dedicated_ingress: Optional["DedicatedIngressInput"] = Field(
+        alias="dedicatedIngress", default=None
+    )
+    standard_storage: Optional["StandardStorageInput"] = Field(
+        alias="standardStorage", default=None
+    )
+    fast_storage: Optional["FastStorageInput"] = Field(
+        alias="fastStorage", default=None
+    )
+    scheduling: Optional["SchedulingInput"] = None
+    db_size: Optional[str] = Field(alias="dbSize", default=None)
+    backup_ttl: Optional[str] = Field(alias="backupTtl", default=None)
+
+
 class UpdateDeploymentInput(BaseModel):
     """Full-replacement input for the ``updateDeployment`` mutation. Inherits every config field from ``DeploymentConfigInput`` (shared with the ``deploy`` create mutation) and adds the update-only ``name`` / ``parameters`` / ``serviceNameOverrides`` fields. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive)."""
 
@@ -458,6 +486,7 @@ LabelSelectorInput.model_rebuild()
 ResourceRequirementsInput.model_rebuild()
 SchedulingInput.model_rebuild()
 TopologySpreadConstraintInput.model_rebuild()
+UpdateClusterInput.model_rebuild()
 UpdateDeploymentInput.model_rebuild()
 UpdateEnvironmentInput.model_rebuild()
 WeightedAffinityTermInput.model_rebuild()

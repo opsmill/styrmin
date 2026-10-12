@@ -922,6 +922,11 @@ type Mutation {
   deleteGroup(id: UUID!): Boolean! @requiresRole
   createCluster(name: String! = "default", config: JSON = null): Cluster @requiresRole
   deleteCluster(clusterId: UUID = null, clusterName: String = null): String @requiresRole
+
+  """
+  Replace a cluster's config and redeploy every deployment whose resolved config changes. Requires the ADMIN role. Identify the cluster by id or name.
+  """
+  updateCluster(input: UpdateClusterInput!, clusterId: UUID = null, clusterName: String = null): Cluster @requiresRole
   createEnvironment(name: String!, clusterId: UUID = null, clusterName: String = null, config: JSON = null): Environment @requiresRole
   updateEnvironment(environmentId: UUID!, input: UpdateEnvironmentInput!): Environment @requiresRole
   deleteEnvironment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): String @requiresRole
@@ -1389,6 +1394,25 @@ input TopologySpreadConstraintInput {
 }
 
 scalar UUID
+
+"""
+Full-replacement input for cluster configuration updates. Submit the complete desired configuration; any field omitted (null) is removed from the stored config, except ingressClass and runtimeClass, which default to "traefik" and "default" as on createCluster.
+"""
+input UpdateClusterInput {
+  ingressClass: String = null
+  runtimeClass: String = null
+  nodeSelector: String = null
+  fqdnSuffix: String = null
+  externalUrlScheme: ExternalUrlScheme = null
+  externalUrlPort: Int = null
+  externalDnsEndpointsType: ExternalDnsEndpointsType = null
+  dedicatedIngress: DedicatedIngressInput = null
+  standardStorage: StandardStorageInput = null
+  fastStorage: FastStorageInput = null
+  scheduling: SchedulingInput = null
+  dbSize: String = null
+  backupTtl: String = null
+}
 
 """
 Full-replacement input for the ``updateDeployment`` mutation. Inherits every config field from ``DeploymentConfigInput`` (shared with the ``deploy`` create mutation) and adds the update-only ``name`` / ``parameters`` / ``serviceNameOverrides`` fields. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive).

@@ -770,6 +770,8 @@ export type Mutation = {
   unassignBackupStorageLocation?: Maybe<Environment>;
   updateBackupSchedule?: Maybe<BackupSchedule>;
   updateBackupStorageLocation?: Maybe<BackupStorageLocation>;
+  /** Replace a cluster's config and redeploy every deployment whose resolved config changes. Requires the ADMIN role. Identify the cluster by id or name. */
+  updateCluster?: Maybe<Cluster>;
   updateDeployment?: Maybe<Task>;
   updateDeploymentVersion?: Maybe<Task>;
   updateEnvironment?: Maybe<Environment>;
@@ -1023,6 +1025,13 @@ export type MutationUpdateBackupStorageLocationArgs = {
   name?: InputMaybe<Scalars['String']['input']>;
   region?: InputMaybe<Scalars['String']['input']>;
   secretAccessKey?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationUpdateClusterArgs = {
+  clusterId?: InputMaybe<Scalars['UUID']['input']>;
+  clusterName?: InputMaybe<Scalars['String']['input']>;
+  input: UpdateClusterInput;
 };
 
 
@@ -1559,6 +1568,23 @@ export type TopologySpreadConstraintInput = {
   nodeTaintsPolicy?: InputMaybe<Scalars['String']['input']>;
   topologyKey: Scalars['String']['input'];
   whenUnsatisfiable: WhenUnsatisfiable;
+};
+
+/** Full-replacement input for cluster configuration updates. Submit the complete desired configuration; any field omitted (null) is removed from the stored config, except ingressClass and runtimeClass, which default to "traefik" and "default" as on createCluster. */
+export type UpdateClusterInput = {
+  backupTtl?: InputMaybe<Scalars['String']['input']>;
+  dbSize?: InputMaybe<Scalars['String']['input']>;
+  dedicatedIngress?: InputMaybe<DedicatedIngressInput>;
+  externalDnsEndpointsType?: InputMaybe<ExternalDnsEndpointsType>;
+  externalUrlPort?: InputMaybe<Scalars['Int']['input']>;
+  externalUrlScheme?: InputMaybe<ExternalUrlScheme>;
+  fastStorage?: InputMaybe<FastStorageInput>;
+  fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
+  ingressClass?: InputMaybe<Scalars['String']['input']>;
+  nodeSelector?: InputMaybe<Scalars['String']['input']>;
+  runtimeClass?: InputMaybe<Scalars['String']['input']>;
+  scheduling?: InputMaybe<SchedulingInput>;
+  standardStorage?: InputMaybe<StandardStorageInput>;
 };
 
 /** Full-replacement input for the ``updateDeployment`` mutation. Inherits every config field from ``DeploymentConfigInput`` (shared with the ``deploy`` create mutation) and adds the update-only ``name`` / ``parameters`` / ``serviceNameOverrides`` fields. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive). */

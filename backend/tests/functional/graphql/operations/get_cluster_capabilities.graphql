@@ -1,0 +1,7 @@
+query GetClusterCapabilities($clusterId: UUID!) {
+    cluster(clusterId: $clusterId) {
+        id
+        config
+        capabilities
+    }
+}
