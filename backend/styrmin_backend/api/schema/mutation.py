@@ -46,6 +46,10 @@ from styrmin_backend.api.definitions.deployment_status.model import (
     DeploymentStatusReportInput,
     ReportDeploymentStatusesResponse,
 )
+from styrmin_backend.api.definitions.cluster.inputs import (
+    UpdateClusterInput,
+    update_cluster_input_to_dict,
+)
 from styrmin_backend.api.definitions.cluster.model import Cluster
 from styrmin_backend.api.definitions.deployment.inputs import (
     DeploymentConfigInput,
@@ -114,6 +118,7 @@ from styrmin_backend.services.clusters import (
     create_cluster,
     delete_cluster,
     resolve_cluster,
+    update_cluster,
 )
 from styrmin_backend.services.deployment import (
     delete_deployment,
@@ -445,6 +450,36 @@ class Mutation:
         )
         await delete_cluster(cluster_id=cluster.id, uow=uow)
         return "Cluster deleted"
+
+    @strawberry.mutation(
+        extensions=[_requires(Role.ADMIN)],
+        description=(
+            "Replace a cluster's config and redeploy every deployment whose resolved "
+            "config changes. Requires the ADMIN role. Identify the cluster by id or name."
+        ),
+    )
+    async def update_cluster(
+        self,
+        info: strawberry.Info,
+        input: UpdateClusterInput,
+        cluster_id: UUID | None = None,
+        cluster_name: str | None = None,
+    ) -> Cluster | None:
+        uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        assert current_user is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
+        cluster = await resolve_cluster(
+            uow, cluster_id=cluster_id, cluster_name=cluster_name
+        )
+        updated = await update_cluster(
+            uow=uow,
+            cluster_id=cluster.id,
+            config=update_cluster_input_to_dict(input),
+            acting_user_id=current_user.id,
+        )
+        return Cluster.from_instance(updated)
 
     @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def create_environment(
