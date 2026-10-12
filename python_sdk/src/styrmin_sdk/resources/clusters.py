@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from styrmin_sdk._queries import load_query
 from styrmin_sdk.graphql._generated.create_cluster import CreateCluster, CreateClusterCreateCluster
 from styrmin_sdk.graphql._generated.get_cluster import GetCluster, GetClusterCluster
 from styrmin_sdk.graphql._generated.list_clusters import ListClusters, ListClustersClusters
+from styrmin_sdk.graphql._generated.update_cluster import UpdateCluster, UpdateClusterUpdateCluster
 from styrmin_sdk.resources._base import BaseResource, JsonValue
+
+if TYPE_CHECKING:
+    from styrmin_sdk.graphql._generated.input_types import UpdateClusterInput
 
 
 class ClusterResource(BaseResource):
@@ -41,6 +45,27 @@ class ClusterResource(BaseResource):
         result = await self._transport.execute(load_query("get_cluster"), variables)
         self._check_graphql_errors(result)
         return self._parse(GetCluster, result["data"], "cluster", GetClusterCluster)
+
+    async def update(
+        self,
+        input: UpdateClusterInput,
+        cluster_id: str | UUID | None = None,
+        cluster_name: str | None = None,
+    ) -> UpdateClusterUpdateCluster:
+        """Replace a cluster's config with a typed ``UpdateClusterInput``.
+
+        Full replacement: a field left out (``None``) is removed from the stored
+        config. The server redeploys every deployment whose resolved config changes.
+        Pass exactly one of ``cluster_id`` and ``cluster_name``.
+        """
+        variables: dict[str, Any] = {"input": input.model_dump(by_alias=True, exclude_none=True)}
+        if cluster_id is not None:
+            variables["clusterId"] = str(cluster_id)
+        if cluster_name is not None:
+            variables["clusterName"] = cluster_name
+        result = await self._transport.execute(load_query("update_cluster"), variables)
+        self._check_graphql_errors(result)
+        return self._parse(UpdateCluster, result["data"], "update_cluster", UpdateClusterUpdateCluster)
 
     async def delete(
         self,

@@ -66,6 +66,7 @@ from styrmin_sdk.graphql._generated.input_types import (
     ResourceSpecInput,
     SchedulingInput,
     StandardStorageInput,
+    UpdateClusterInput,
     UpdateDeploymentInput,
     UpdateEnvironmentInput,
 )
@@ -143,6 +144,7 @@ __all__ = [
     "Task",
     "TaskResult",
     "TaskStep",
+    "UpdateClusterInput",
     "UpdateDeploymentInput",
     "UpdateEnvironmentInput",
     "has_app_version_token",

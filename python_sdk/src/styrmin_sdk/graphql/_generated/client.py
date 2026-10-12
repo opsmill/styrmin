@@ -72,6 +72,7 @@ from .input_types import (
     DeploymentStatusReportInput,
     ParameterValueInput,
     ServiceNameOverride,
+    UpdateClusterInput,
     UpdateDeploymentInput,
     UpdateEnvironmentInput,
     UpdateGroupInput,
@@ -104,6 +105,7 @@ from .stop_components import StopComponents
 from .unassign_backup_storage_location import UnassignBackupStorageLocation
 from .update_backup_schedule import UpdateBackupSchedule
 from .update_backup_storage_location import UpdateBackupStorageLocation
+from .update_cluster import UpdateCluster
 from .update_deployment import UpdateDeployment
 from .update_deployment_version import UpdateDeploymentVersion
 from .update_deployment_version_with_input import UpdateDeploymentVersionWithInput
@@ -2739,6 +2741,36 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return UpdateBackupStorageLocation.model_validate(data)
+
+    async def update_cluster(
+        self,
+        input: UpdateClusterInput,
+        cluster_id: Union[Optional[UUID], UnsetType] = UNSET,
+        cluster_name: Union[Optional[str], UnsetType] = UNSET,
+        **kwargs: Any,
+    ) -> UpdateCluster:
+        query = gql("""
+            mutation UpdateCluster($input: UpdateClusterInput!, $clusterId: UUID, $clusterName: String) {
+              updateCluster(input: $input, clusterId: $clusterId, clusterName: $clusterName) {
+                id
+                name
+                config
+                capabilities
+                createdOn
+                updatedOn
+              }
+            }
+            """)
+        variables: dict[str, object] = {
+            "input": input,
+            "clusterId": cluster_id,
+            "clusterName": cluster_name,
+        }
+        response = await self.execute(
+            query=query, operation_name="UpdateCluster", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return UpdateCluster.model_validate(data)
 
     async def update_deployment(
         self, deployment_id: UUID, input: UpdateDeploymentInput, **kwargs: Any
