@@ -177,12 +177,17 @@ upgrade and delete slept ~60s *after* Kubernetes had finished:
 duration, check this value reached the agent pod before looking anywhere
 else.
 
-The E2E stack keeps the production `STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT`
-of 270 s. FluxCD rolls a failed Helm upgrade back at its 5-minute timeout, and
-the rollback removes the failing pods; `test_task_steps.py` asserts that the
+FluxCD rolls a failed Helm upgrade back at its HelmRelease timeout, and the
+rollback removes the failing pods; `test_task_steps.py` asserts that the
 failed HelmRelease step lists those pods' reasons (for example
 `ImagePullBackOff`), which holds only while the readiness timeout stays below
-FluxCD's.
+FluxCD's. The E2E values lower both, keeping that order:
+`STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT` is 210 s (270 s in production) and
+`STYRMIN_OPERATOR_HELM_RELEASE_TIMEOUT` is 240 s (300 s). Every E2E rollout
+must be ready within those, or FluxCD rolls it back; the slowest, Infrahub's,
+reached `running` in 95 s locally. 150 s / 180 s were measured to pass locally
+but were rejected as too close for CI, where the Infrahub cell's duration
+varies by up to 1.8×.
 
 The next cost is **Prefect scheduling latency**. The agent runs its own
 Prefect `ProcessWorker` (`entrypoint/combined.py`), which polls its work
@@ -227,6 +232,24 @@ delete-then-redeploy regression and the service-rename test also reuse
 deployments their siblings already pay for. Locally, `general` / `api`
 went from **711s to 344s**, and the new `apply` / `api` cell runs in
 **296s**.
+
+`general` then grew again with `test_task_steps.py`, whose HelmRelease
+failure scenario waits out timeouts rather than doing work, so it took
+~460s on every host (CI 1233s for `general` / `api`, 472s of it in that one
+test). Measured locally, it spent 55s waiting for the deployment to recover
+from the prerequisites scenario (the operator's hardcoded 30 s retry delay),
+287s until the step failed (the 270 s readiness timeout), 24s until FluxCD's
+rollback (its 5-minute timeout) and a fixed 90s checking that the failure
+stays. The module now runs as its own `task_steps` shard, the operator's
+retry delay and both timeouts are settings that the E2E values lower
+(`STYRMIN_OPERATOR_RETRY_DELAY` 5 s, readiness 210 s, HelmRelease 240 s),
+and the check ends 15 s after the operator answers FluxCD's rolled-back
+`Ready=True` with `Ready=False RolledBack` (about 16 s after the rollback).
+Measured locally (four cells at a time), `general` / `api` went from
+**1175s to 520s** and `general` / `ui` from **863s to 391s**; the HelmRelease
+scenario takes 312s instead of 463s, and the new `task_steps` cells take
+**523s** (`api`) and **436s** (`ui`). `backup` / `api` (617s) is now the
+slowest cell.
 
 **Two plausible fixture optimisations that do *not* pay** — both were
 measured and rejected, so don't re-derive them:

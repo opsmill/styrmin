@@ -29,7 +29,8 @@ must not depend on another's state.
 - **Shard:** `general` for most short mutation tests, `env` for
   env-var / env-update tests, `compute` for pod-scheduling or
   ingress-controller tests, `apply` for manifest `apply` /
-  `apply_files` tests.
+  `apply_files` tests, `task_steps` for tests that fail a rollout on
+  purpose and wait out the operator's or FluxCD's timeouts.
 - **Examples:** `test_deploy_app`, `test_delete_deployment_*`,
   `test_environment_update`.
 - **Review rule:** Reuse `deployed_simple_app` if your test only reads —
@@ -107,9 +108,10 @@ Net new heavy boots: zero.
 2. Does it touch Velero or Garage? → Yes: `backup` (isolated).
 3. Is it a config-drawer UI flow? → Yes: `configuration`.
 4. Is it a manifest `apply` / `apply_files` flow? → Yes: `apply`.
-5. Is it about env vars or environment updates? → Yes: `env`.
-6. Is it about pod scheduling or the ingress controller? → Yes: `compute`.
-7. Otherwise → `general`.
+5. Does it fail a rollout on purpose and wait out the operator's or FluxCD's timeouts? → Yes: `task_steps`.
+6. Is it about env vars or environment updates? → Yes: `env`.
+7. Is it about pod scheduling or the ingress controller? → Yes: `compute`.
+8. Otherwise → `general`.
 
 A `configuration` module does not create its own deployment. Declare it
 at module level — `DRAWER_DEPLOYMENT = DrawerDeployment(name="drawer-…")`,
@@ -125,7 +127,7 @@ Seed the baseline through `config` rather than a follow-up
 Every `@pytest.mark.ci` E2E test MUST carry exactly one bare-name
 shard marker (`shard_general`, `shard_env`, `shard_compute`,
 `shard_backup`, `shard_env_backup`, `shard_infrahub`,
-`shard_configuration`, or `shard_apply`). The conftest collection hook (`enforce_shard_markers`)
+`shard_configuration`, `shard_apply`, or `shard_task_steps`). The conftest collection hook (`enforce_shard_markers`)
 rejects the suite if any test is missing the marker or carries more
 than one.
 

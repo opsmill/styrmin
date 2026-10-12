@@ -68,6 +68,17 @@ styrmin-agent:
       # post-hook), so each start waited ~9s on average.
       - name: PREFECT_WORKER_QUERY_SECONDS
         value: "1"
+      # A failed phase (e.g. prerequisites over a ResourceQuota) retries after
+      # 30s by default; test_task_steps.py waits for two attempts and a recovery.
+      - name: STYRMIN_OPERATOR_RETRY_DELAY
+        value: "5"
+      # test_task_steps.py waits for both timeouts. The slowest E2E rollout
+      # (Infrahub, 95s locally) must stay well inside them; the readiness
+      # timeout must stay below FluxCD's.
+      - name: STYRMIN_OPERATOR_HELM_RELEASE_TIMEOUT
+        value: "240"
+      - name: STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT
+        value: "210"
 
 postgresql:
   primary:
