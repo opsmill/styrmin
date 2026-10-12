@@ -1,13 +1,15 @@
-"""Provides the cluster config fan-out (021-cluster-config-update, research D1 and D7).
+"""Provides the cluster config fan-out (021-cluster-config-update, research D1, D4, D5 and D7).
 
 After a cluster's config is saved, every live, non-internal deployment of every
 environment of the cluster whose resolved config differs from the resolved
-config of its active instance is redeployed.
+config of its active instance is redeployed. The redeploys are ordered around
+each environment's dedicated ingress controller, and the status reporter
+continues the fan-out of an environment once its controller is ready.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -15,12 +17,19 @@ from pydantic import BaseModel, ValidationError
 
 from styrmin_backend.context.models.config import (
     ClusterConfig,
+    DedicatedIngressConfig,
     DeploymentConfig,
     EnvironmentConfig,
     ResolvedConfig,
 )
 from styrmin_backend.context.resolvers import resolve_instance_config
-from styrmin_backend.services.deployment import redeploy_for_environment_update
+from styrmin_backend.domain.models import DeploymentState
+from styrmin_backend.services.deployment import (
+    _create_ingress_controller,
+    _rendered_dedicated_ingress,
+    redeploy_for_environment_update,
+    tear_down_unused_ingress_controller,
+)
 from styrmin_backend.services.exceptions import ServiceError
 
 if TYPE_CHECKING:
@@ -81,37 +90,73 @@ def _deployment_at_resolved_config(
     return _canonical(desired) == stored
 
 
-def _waits_for_ingress_controller(
-    deployment: Deployment,  # noqa: ARG001
-    cluster_config: ClusterConfig,  # noqa: ARG001
-    environment_config: EnvironmentConfig,  # noqa: ARG001
-) -> bool:
-    """Return True when the application must wait until its dedicated ingress controller is ready.
+def _effective_dedicated_ingress(
+    environment_config: EnvironmentConfig, cluster_config: ClusterConfig
+) -> DedicatedIngressConfig | None:
+    """The environment's own ``dedicated_ingress``, else the cluster's (data-model §3)."""
+    if environment_config.dedicated_ingress is not None:
+        return environment_config.dedicated_ingress
+    return cluster_config.dedicated_ingress
 
-    Seam for the dedicated ingress ordering (research D4). It is not applied yet, so no application waits.
+
+def _ingress_values(value: DedicatedIngressConfig | None) -> dict[str, Any] | None:
+    return None if value is None else value.model_dump(exclude_none=True, mode="json")
+
+
+def _rendered_ingress_values(deployment: Deployment) -> dict[str, Any] | None:
+    return _ingress_values(_rendered_dedicated_ingress(deployment))
+
+
+async def _apply_controller_action(
+    environment_id: UUID,
+    controller: Deployment | None,
+    target: dict[str, Any] | None,
+    *,
+    has_applications: bool,
+    has_waiting_applications: bool,
+    acting_user_id: UUID | None,
+    uow: UnitOfWork,
+    counts: FanOutCounts,
+) -> Deployment | None:
+    """Create or redeploy the environment's dedicated ingress controller (research D4).
+
+    Without an acting user (the status reporter continuation) no controller is
+    created. Turning the value off leaves the removal to the removal check (D5).
     """
-    return False
+    if target is None:
+        return controller
+    try:
+        if controller is None:
+            if has_applications and acting_user_id is not None:
+                controller = await _create_ingress_controller(
+                    environment_id, uow, acting_user_id
+                )
+                counts.ingress_controllers_created += 1
+            return controller
+        if controller.status == DeploymentState.DELETING:
+            return controller
+        values_changed = _rendered_ingress_values(controller) != target
+        retry_failed = (
+            controller.status == DeploymentState.FAILED and has_waiting_applications
+        )
+        if not (values_changed or retry_failed):
+            return controller
+        if await redeploy_for_environment_update(controller, uow) is not None:
+            counts.ingress_controllers_redeployed += 1
+    except Exception:  # noqa: BLE001 — one environment's controller must not stop the others
+        counts.dispatch_failed += 1
+        logger.exception(
+            "cluster_config_fanout_ingress_controller_error environment_id={}",
+            environment_id,
+        )
+    return controller
 
 
 async def _redeploy_application(
-    deployment: Deployment,
-    cluster_config: ClusterConfig,
-    environment_config: EnvironmentConfig,
-    uow: UnitOfWork,
-    counts: FanOutCounts,
+    deployment: Deployment, uow: UnitOfWork, counts: FanOutCounts
 ) -> None:
-    """Redeploy one application unless it is already at config, and count the outcome."""
+    """Redeploy one application and count the outcome."""
     try:
-        if _deployment_at_resolved_config(
-            deployment, cluster_config, environment_config
-        ):
-            counts.skipped_noop += 1
-            return
-        if _waits_for_ingress_controller(
-            deployment, cluster_config, environment_config
-        ):
-            counts.skipped_waiting_for_ingress += 1
-            return
         task = await redeploy_for_environment_update(deployment, uow)
     except Exception:  # noqa: BLE001 — one deployment must not stop the others (FR-002)
         counts.dispatch_failed += 1
@@ -128,36 +173,121 @@ async def _redeploy_application(
     counts.dispatched += 1
 
 
+def _applications_to_redeploy(
+    applications: list[Deployment],
+    cluster_config: ClusterConfig,
+    environment_config: EnvironmentConfig,
+    counts: FanOutCounts,
+) -> list[Deployment]:
+    """The applications whose resolved config differs from their active instance's."""
+    changed = []
+    for application in applications:
+        try:
+            at_config = _deployment_at_resolved_config(
+                application, cluster_config, environment_config
+            )
+        except Exception:  # noqa: BLE001 — one deployment must not stop the others (FR-002)
+            counts.dispatch_failed += 1
+            logger.exception(
+                "cluster_config_fanout_dispatch_error environment_id={} deployment_id={}",
+                application.environment_id,
+                application.id,
+            )
+            continue
+        if at_config:
+            counts.skipped_noop += 1
+        else:
+            changed.append(application)
+    return changed
+
+
+async def _remove_unused_controller(
+    environment_id: UUID, uow: UnitOfWork, counts: FanOutCounts
+) -> None:
+    try:
+        counts.ingress_controllers_removed += await tear_down_unused_ingress_controller(
+            environment_id, uow
+        )
+    except Exception:  # noqa: BLE001 — the redeploys already started must still commit
+        logger.exception(
+            "cluster_config_fanout_ingress_removal_error environment_id={}",
+            environment_id,
+        )
+
+
 async def _fan_out_environment(
     environment: Environment,
     cluster_config: ClusterConfig,
     uow: UnitOfWork,
     counts: FanOutCounts,
+    acting_user_id: UUID | None,
 ) -> None:
-    """Redeploy the applications of one environment that are not at their resolved config."""
+    """Redeploy the applications of one environment that are not at their resolved config.
+
+    An application whose ``dedicated_ingress`` changes to a set value moves only
+    onto a controller that is RUNNING with that value; it waits otherwise
+    (research D4). The controller removal check runs last (research D5).
+    """
     environment_config = EnvironmentConfig.model_validate(environment.config or {})
     counts.environments += 1
-    for deployment in await uow.deployments.find_all_by_environment(environment.id):
-        if deployment.deleted_at is not None:
+    deployments = [
+        deployment
+        for deployment in await uow.deployments.find_all_by_environment(environment.id)
+        if deployment.deleted_at is None
+    ]
+    counts.evaluated += len(deployments)
+    applications = [deployment for deployment in deployments if not deployment.internal]
+    changed = _applications_to_redeploy(
+        applications, cluster_config, environment_config, counts
+    )
+
+    target = _ingress_values(
+        _effective_dedicated_ingress(environment_config, cluster_config)
+    )
+    moving_onto_controller = {
+        application.id
+        for application in changed
+        if target is not None and _rendered_ingress_values(application) != target
+    }
+    controller = await _apply_controller_action(
+        environment.id,
+        await uow.deployments.find_internal_by_environment(environment.id),
+        target,
+        has_applications=bool(applications),
+        has_waiting_applications=bool(moving_onto_controller),
+        acting_user_id=acting_user_id,
+        uow=uow,
+        counts=counts,
+    )
+    controller_ready = (
+        controller is not None
+        and controller.status == DeploymentState.RUNNING
+        and _rendered_ingress_values(controller) == target
+    )
+
+    for application in changed:
+        if application.id in moving_onto_controller and not controller_ready:
+            counts.skipped_waiting_for_ingress += 1
             continue
-        counts.evaluated += 1
-        if deployment.internal:
-            continue
-        await _redeploy_application(
-            deployment, cluster_config, environment_config, uow, counts
-        )
+        await _redeploy_application(application, uow, counts)
+
+    await _remove_unused_controller(environment.id, uow, counts)
+
+
+def _format_counts(counts: FanOutCounts) -> str:
+    return " ".join(f"{name}={value}" for name, value in asdict(counts).items())
 
 
 async def fan_out_cluster_config(
     cluster: Cluster,
     uow: UnitOfWork,
-    acting_user_id: UUID,  # noqa: ARG001
+    acting_user_id: UUID,
 ) -> FanOutCounts:
     """Redeploy every deployment of the cluster whose resolved config changed (research D1, D7).
 
-    The caller commits the cluster row first (FR-001). ``acting_user_id`` is the
-    administrator who submitted the config; it is reserved for attributing the
-    dedicated ingress controllers that the fan-out creates (research D4).
+    The caller commits the cluster row first (FR-001). The dedicated ingress
+    controllers that the fan-out creates are attributed to ``acting_user_id``,
+    the administrator who submitted the config (research D4).
     """
     counts = FanOutCounts()
     async with uow:
@@ -168,23 +298,45 @@ async def fan_out_cluster_config(
             if env.cluster_id == cluster.id
         ]
         for environment in environments:
-            await _fan_out_environment(environment, cluster_config, uow, counts)
+            await _fan_out_environment(
+                environment, cluster_config, uow, counts, acting_user_id
+            )
         await uow.commit()
 
     logger.info(
-        "cluster_config_fanout cluster_id={} environments={} evaluated={} dispatched={} "
-        "skipped_noop={} skipped_restoring={} skipped_waiting_for_ingress={} dispatch_failed={} "
-        "ingress_controllers_created={} ingress_controllers_redeployed={} ingress_controllers_removed={}",
-        cluster.id,
-        counts.environments,
-        counts.evaluated,
-        counts.dispatched,
-        counts.skipped_noop,
-        counts.skipped_restoring,
-        counts.skipped_waiting_for_ingress,
-        counts.dispatch_failed,
-        counts.ingress_controllers_created,
-        counts.ingress_controllers_redeployed,
-        counts.ingress_controllers_removed,
+        "cluster_config_fanout cluster_id={} {}", cluster.id, _format_counts(counts)
+    )
+    return counts
+
+
+async def continue_environment_fan_out(
+    environment_id: UUID,
+    uow: UnitOfWork,
+    trigger_deployment_id: UUID,
+) -> FanOutCounts:
+    """Run the fan-out for one environment again, from the status reporter (research D4).
+
+    Called when the environment's dedicated ingress controller reaches RUNNING,
+    so the applications that waited for it move. No controller is created, as
+    no administrator acts here. Runs in the caller's transaction and does not commit.
+    """
+    counts = FanOutCounts()
+    environment = await uow.environments.get(environment_id)
+    cluster = (
+        await uow.clusters.get(environment.cluster_id)
+        if environment is not None
+        else None
+    )
+    if environment is not None and cluster is not None:
+        cluster_config = ClusterConfig.model_validate(cluster.config or {})
+        await _fan_out_environment(
+            environment, cluster_config, uow, counts, acting_user_id=None
+        )
+
+    logger.info(
+        "cluster_config_fanout_continued environment_id={} trigger_deployment_id={} {}",
+        environment_id,
+        trigger_deployment_id,
+        _format_counts(counts),
     )
     return counts

@@ -8,8 +8,9 @@ from uuid import UUID
 from loguru import logger
 
 from styrmin_backend.db.models import DeploymentState, DeploymentStatus
-from styrmin_backend.domain.models import Task, TaskStatus
+from styrmin_backend.domain.models import Deployment, Task, TaskStatus
 from styrmin_backend.services.backup.service import has_in_flight_restore
+from styrmin_backend.services.cluster_config_fanout import continue_environment_fan_out
 from styrmin_backend.services.deployment import tear_down_unused_ingress_controller
 from styrmin_backend.services.steps.operator_history import apply_operator_report
 from styrmin_backend.services.steps.reads import get_starting_task
@@ -37,6 +38,39 @@ async def _record_operator_steps(report: dict, now: datetime, uow: UnitOfWork) -
         logger.exception(
             "Could not record the operator steps of deployment {}",
             report["deployment_id"],
+        )
+
+
+async def _run_cluster_config_fanout_hook(
+    deployment: Deployment, target_state: DeploymentState, uow: UnitOfWork
+) -> None:
+    """Continue the config fan-out or check the controller removal after a state change (research D4, D7).
+
+    Runs in a savepoint, so its failure keeps the rest of the report.
+    """
+    continues = deployment.internal and target_state == DeploymentState.RUNNING
+    checks_removal = not continues and target_state in (
+        DeploymentState.RUNNING,
+        DeploymentState.FAILED,
+    )
+    if not (continues or checks_removal):
+        return
+    try:
+        async with uow.session.begin_nested():
+            if continues:
+                await continue_environment_fan_out(
+                    deployment.environment_id, uow, trigger_deployment_id=deployment.id
+                )
+            else:
+                await tear_down_unused_ingress_controller(
+                    environment_id=deployment.environment_id, uow=uow
+                )
+    except Exception:  # noqa: BLE001 - the fan-out never fails the status report
+        logger.exception(
+            "cluster_config_fanout_hook_error deployment_id={} environment_id={} state={}",
+            deployment.id,
+            deployment.environment_id,
+            target_state.value,
         )
 
 
@@ -85,6 +119,11 @@ async def report_deployment_statuses(
     A ``Running`` report does not set ``RUNNING`` while the task that rolls out
     the reported instance, or the task whose hook step started it, is pending
     or running. The first report after that task finishes sets it.
+
+    On a state change, a dedicated ingress controller that reaches ``RUNNING``
+    continues its environment's config fan-out, and a controller that reaches
+    ``FAILED`` or an application that reaches ``RUNNING`` or ``FAILED`` runs the
+    controller removal check, each in its own savepoint (021 research D4, D7).
 
     Args:
         reports: List of dicts with keys: deployment_id (UUID), phase (str),
@@ -213,6 +252,7 @@ async def report_deployment_statuses(
                     await tear_down_unused_ingress_controller(
                         environment_id=deployment.environment_id, uow=uow
                     )
+                await _run_cluster_config_fanout_hook(deployment, target_state, uow)
 
         await uow.commit()
         return statuses_updated, deployments_updated
