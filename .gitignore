@@ -227,3 +227,6 @@ docs/.docusaurus/
 
 # Bug analysis working-tree artifacts
 .bug-analysis-*.md
+
+# Claude Design handoff working files (design-implement-handoff skill)
+docs/handoffs/
