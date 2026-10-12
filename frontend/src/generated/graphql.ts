@@ -2067,6 +2067,15 @@ export type UpdateBackupStorageLocationMutationVariables = Exact<{
 
 export type UpdateBackupStorageLocationMutation = { __typename?: 'Mutation', updateBackupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string, endpoint: string, bucket: string, region: string, createdOn: any, updatedOn?: any | null, environmentCount: number } | null };
 
+export type UpdateClusterMutationVariables = Exact<{
+  input: UpdateClusterInput;
+  clusterId?: InputMaybe<Scalars['UUID']['input']>;
+  clusterName?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type UpdateClusterMutation = { __typename?: 'Mutation', updateCluster?: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown>, capabilities: Record<string, unknown>, createdOn: any, updatedOn?: any | null } | null };
+
 export type UpdateDeploymentMutationVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
   input: UpdateDeploymentInput;
@@ -3921,6 +3930,32 @@ export const useUpdateBackupStorageLocationMutation = <
       {
     mutationKey: ['UpdateBackupStorageLocation'],
     mutationFn: (variables?: UpdateBackupStorageLocationMutationVariables) => graphqlFetcher<UpdateBackupStorageLocationMutation, UpdateBackupStorageLocationMutationVariables>(UpdateBackupStorageLocationDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const UpdateClusterDocument = `
+    mutation UpdateCluster($input: UpdateClusterInput!, $clusterId: UUID, $clusterName: String) {
+  updateCluster(input: $input, clusterId: $clusterId, clusterName: $clusterName) {
+    id
+    name
+    config
+    capabilities
+    createdOn
+    updatedOn
+  }
+}
+    `;
+
+export const useUpdateClusterMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<UpdateClusterMutation, TError, UpdateClusterMutationVariables, TContext>) => {
+    
+    return useMutation<UpdateClusterMutation, TError, UpdateClusterMutationVariables, TContext>(
+      {
+    mutationKey: ['UpdateCluster'],
+    mutationFn: (variables?: UpdateClusterMutationVariables) => graphqlFetcher<UpdateClusterMutation, UpdateClusterMutationVariables>(UpdateClusterDocument, variables)(),
     ...options
   }
     )};

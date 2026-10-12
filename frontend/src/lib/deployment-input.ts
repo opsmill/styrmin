@@ -282,7 +282,23 @@ function normalizeTopologySpreadConstraint(c: unknown): unknown {
   return r;
 }
 
-function normalizeSchedulingEnums(
+function normalizeResourceRequirements(resources: unknown): unknown {
+  if (resources == null || typeof resources !== "object") return resources;
+  const out: Record<string, unknown> = {
+    ...(resources as Record<string, unknown>),
+  };
+  for (const key of ["requests", "limits"]) {
+    const spec = out[key];
+    if (spec == null || typeof spec !== "object") continue;
+    const r: Record<string, unknown> = { ...(spec as Record<string, unknown>) };
+    renameKey(r, "ephemeral_storage", "ephemeralStorage");
+    out[key] = r;
+  }
+  return out;
+}
+
+/** Project a stored `scheduling` block onto `SchedulingInput` (camelCase keys, GraphQL enum names). */
+export function normalizeSchedulingEnums(
   scheduling: unknown,
 ): SchedulingInput | undefined {
   if (scheduling == null || typeof scheduling !== "object") return undefined;
@@ -324,6 +340,9 @@ function normalizeSchedulingEnums(
     normalizeAffinityBlock,
   );
   renameKey(out, "runtime_class", "runtimeClass");
+  if ("resources" in out) {
+    out.resources = normalizeResourceRequirements(out.resources);
+  }
   if ("inject" in out) {
     out.inject = normalizeInject(out.inject);
   }
