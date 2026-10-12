@@ -1861,24 +1861,73 @@ async def request_cluster_teardown(deployment_id: UUID) -> bool:
     return True
 
 
+_ROLLOUT_STATES = (DeploymentState.PENDING, DeploymentState.DEPLOYING)
+
+
+def _rendered_dedicated_ingress(
+    deployment: Deployment,
+) -> DedicatedIngressConfig | None:
+    """The ``dedicated_ingress`` value the deployment's active instance was rendered with."""
+    active = deployment.active_instance
+    if active is None:
+        return None
+    return active.context.instance.config.dedicated_ingress
+
+
+async def _applications_moved_off_controller(
+    environment_id: UUID, applications: list[Deployment], uow: UnitOfWork
+) -> bool:
+    """Return True when no application uses or waits for the environment's controller (research D5)."""
+    if any(application.status in _ROLLOUT_STATES for application in applications):
+        return False
+    if any(
+        _rendered_dedicated_ingress(application) is not None
+        for application in applications
+    ):
+        return False
+    return await _resolve_dedicated_ingress(environment_id, uow) is None
+
+
 async def tear_down_unused_ingress_controller(
     environment_id: UUID,
     uow: UnitOfWork,
-) -> None:
+) -> int:
     """Request deletion of the environment's internal ingress controller once
-    no user-facing deployment is left for it to route to.
+    no application depends on it.
+
+    That is the case when no user-facing deployment is left (#252), or when
+    the environment no longer takes a dedicated ingress, every application's
+    active instance was rendered without one, and neither the applications nor
+    the controller are still rolling out (021 research D5). A controller that
+    is still rolling out is checked again once it reaches RUNNING or FAILED.
 
     Runs inside the caller's unit of work and does not commit. The row goes to
     ``DELETING`` at once so new deployments stop reusing it; the status
     reporter tombstones it like any other deployment (ADR-008).
+
+    Returns:
+        The number of controllers whose deletion was requested.
     """
     deployments = await uow.deployments.find_all_by_environment(environment_id)
-    if any(not deployment.internal for deployment in deployments):
-        return
+    controllers = [
+        deployment
+        for deployment in deployments
+        if deployment.internal and deployment.status != DeploymentState.DELETING
+    ]
+    applications = [deployment for deployment in deployments if not deployment.internal]
+    if not controllers:
+        return 0
+    if applications:
+        if not await _applications_moved_off_controller(
+            environment_id, applications, uow
+        ):
+            return 0
+        controllers = [
+            ingress for ingress in controllers if ingress.status not in _ROLLOUT_STATES
+        ]
 
-    for ingress in deployments:
-        if ingress.status == DeploymentState.DELETING:
-            continue
+    removed = 0
+    for ingress in controllers:
         requested_at = datetime.now(UTC)
         try:
             await _patch_deletion_requested(ingress.id)
@@ -1898,7 +1947,7 @@ async def tear_down_unused_ingress_controller(
 
         logger.info(
             "Requested deletion of internal ingress controller deployment={} "
-            "for environment={}: no user-facing deployment is left",
+            "for environment={}: no application uses it",
             ingress.id,
             environment_id,
         )
@@ -1907,6 +1956,8 @@ async def tear_down_unused_ingress_controller(
         task = _born_complete_delete_task(ingress.id)
         await uow.tasks.save(task=task)
         await _record_delete_steps(task, requested_at, datetime.now(UTC), uow)
+        removed += 1
+    return removed
 
 
 async def _patch_deletion_requested(deployment_id: UUID) -> None:

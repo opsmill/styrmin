@@ -20,16 +20,7 @@ from styrmin_backend.context.models.config import (
     EnvironmentConfig,
     ResolvedConfig,
 )
-from styrmin_backend.context.models.contexts import GlobalContext
-from styrmin_backend.db.models import (
-    ApplicationDriver,
-    ApplicationDriverVersion,
-    Cluster,
-    Environment,
-    HelmChart,
-    HelmRepository,
-)
-from styrmin_backend.domain.models import Deployment, DeploymentState, Task, TaskType
+from styrmin_backend.domain.models import Deployment, DeploymentState, Task
 from styrmin_backend.services import cluster_config_fanout
 from styrmin_backend.services.cluster_config_fanout import (
     FanOutCounts,
@@ -37,23 +28,15 @@ from styrmin_backend.services.cluster_config_fanout import (
     fan_out_cluster_config,
 )
 from styrmin_backend.services.deployment import redeploy_for_environment_update
-from styrmin_backend.services.reconciliation import generate_instance_from_deployment
-from tests.unit.services.fakes import (
-    FakeActionRepository,
-    FakeApplicationDriverRepository,
-    FakeApplicationInstanceRepository,
-    FakeApplicationRepository,
-    FakeClusterRepository,
-    FakeDeploymentRepository,
-    FakeEnvironmentRepository,
-    FakeHelmChartRepository,
-    FakeHelmRepositoryRepository,
-    FakeTaskRepository,
-    FakeUnitOfWork,
+from tests.unit.services.cluster_fanout_support import (
+    CLUSTER_CONFIG,
+    USER_ID,
+    build_graph,
+    deploy,
+    task_deployment_ids,
+    update_tasks,
 )
-
-USER_ID = UUID("11111111-1111-1111-1111-111111111111")
-CLUSTER_CONFIG = {"ingress_class": "traefik", "runtime_class": "default"}
+from tests.unit.services.fakes import FakeUnitOfWork
 
 
 @pytest.fixture(autouse=True)
@@ -64,87 +47,7 @@ def prefect(prefect_manager_mock: MagicMock) -> MagicMock:
 
 @pytest.fixture
 def graph() -> SimpleNamespace:
-    """A cluster with environment A (takes every cluster value) and B (sets ``ingress_class``)."""
-    cluster = Cluster(name="default", config=dict(CLUSTER_CONFIG))
-    env_a = Environment(name="env-a", cluster_id=cluster.id, config={})
-    env_b = Environment(
-        name="env-b", cluster_id=cluster.id, config={"ingress_class": "traefik"}
-    )
-    repository = HelmRepository(url="https://helm.example.com/test")
-    chart = HelmChart(
-        name="simple-app",
-        version="1.0.0",
-        values_template="",
-        repository_id=repository.id,
-    )
-    driver = ApplicationDriver(name="simple-app")
-    version = ApplicationDriverVersion(
-        application_driver_id=driver.id,
-        version="1.0.0",
-        application_supported_versions=">=1.0.0,<2.0.0",
-        default_version="1.0.0",
-        source_repository="https://example.com/driver",
-        helm_chart_id=chart.id,
-    )
-    version.component_configs = []
-    driver.versions = [version]
-    uow = FakeUnitOfWork(
-        clusters=FakeClusterRepository([cluster]),
-        environments=FakeEnvironmentRepository([env_a, env_b]),
-        helm_repositories=FakeHelmRepositoryRepository([repository]),
-        helm_charts=FakeHelmChartRepository([chart]),
-        application_driver_versions=FakeApplicationRepository([version]),
-        instances=FakeApplicationInstanceRepository(),
-        actions=FakeActionRepository(),
-        tasks=FakeTaskRepository(),
-        application_drivers=FakeApplicationDriverRepository([driver]),
-        deployments=FakeDeploymentRepository(),
-    )
-    return SimpleNamespace(
-        cluster=cluster, env_a=env_a, env_b=env_b, driver_version=version, uow=uow
-    )
-
-
-async def _deploy(
-    graph: SimpleNamespace,
-    environment: Environment,
-    name: str,
-    *,
-    config: dict | None = None,
-    internal: bool = False,
-    status: DeploymentState = DeploymentState.RUNNING,
-) -> Deployment:
-    """Seed a deployment whose active instance is generated from the current configs."""
-    deployment = Deployment.create(
-        application_version="1.0.0",
-        application_driver_version_id=graph.driver_version.id,
-        environment_id=environment.id,
-        created_by_user_id=USER_ID,
-        config=config,
-        name=name,
-        internal=internal,
-    )
-    instance = await generate_instance_from_deployment(
-        deployment=deployment, uow=graph.uow
-    )
-    # Round-trip the context through JSON, as the repository stores and reloads it.
-    instance.context = GlobalContext.model_validate(
-        instance.context.model_dump(mode="json")
-    )
-    deployment.set_active_instance(instance)
-    deployment.set_status(status)
-    await graph.uow.deployments.save(deployment)
-    return deployment
-
-
-def _update_tasks(graph: SimpleNamespace) -> list[Task]:
-    return [
-        task for task in graph.uow.tasks.models if task.type == TaskType.UPDATE_INSTANCE
-    ]
-
-
-def _task_deployment_ids(tasks: list[Task]) -> list[UUID]:
-    return [task.deployment_id for task in tasks]
+    return build_graph()
 
 
 async def _fan_out(graph: SimpleNamespace, config: dict) -> FanOutCounts:
@@ -183,7 +86,7 @@ async def test_instance_generated_from_the_deployment_is_at_config_when_nothing_
         "env_vars": {"LOG_LEVEL": "info", "REGION": "eu"},
         "scheduling": {"tolerations": [{"key": "env", "operator": "Exists"}]},
     }
-    deployment = await _deploy(
+    deployment = await deploy(
         graph,
         graph.env_a,
         "web",
@@ -200,7 +103,7 @@ async def test_instance_generated_from_the_deployment_is_at_config_when_nothing_
         EnvironmentConfig.model_validate(graph.env_a.config),
     )
     counts = await fan_out_cluster_config(graph.cluster, graph.uow, USER_ID)
-    assert _update_tasks(graph) == []
+    assert update_tasks(graph) == []
     assert counts.skipped_noop == 1
 
 
@@ -219,7 +122,7 @@ async def test_deployment_without_active_instance_is_not_at_config(graph):
 
 
 async def test_deployment_with_invalid_stored_config_is_not_at_config(graph):
-    deployment = await _deploy(graph, graph.env_a, "web")
+    deployment = await deploy(graph, graph.env_a, "web")
     instance = deployment.active_instance
     assert instance is not None
     instance.context.instance.config = ResolvedConfig.model_construct(
@@ -239,16 +142,16 @@ async def test_deployment_with_invalid_stored_config_is_not_at_config(graph):
 
 async def test_only_the_deployment_that_takes_the_changed_value_is_redeployed(graph):
     """FR-002, User Story 1 scenario 1: B overrides ``ingress_class`` and is left alone."""
-    app_a = await _deploy(graph, graph.env_a, "app-a")
-    await _deploy(graph, graph.env_b, "app-b")
+    app_a = await deploy(graph, graph.env_a, "app-a")
+    await deploy(graph, graph.env_b, "app-b")
     commits_before = graph.uow.commit_count
 
     counts = await _fan_out(
         graph, {"ingress_class": "nginx", "runtime_class": "default"}
     )
 
-    tasks = _update_tasks(graph)
-    assert _task_deployment_ids(tasks) == [app_a.id]
+    tasks = update_tasks(graph)
+    assert task_deployment_ids(tasks) == [app_a.id]
     redeployed = await graph.uow.deployments.find(app_a.id)
     assert redeployed is not None
     assert redeployed.active_instance is not None
@@ -263,8 +166,8 @@ async def test_only_the_deployment_that_takes_the_changed_value_is_redeployed(gr
 
 async def test_resubmitting_the_same_config_starts_no_redeploy(graph):
     """SC-003: a second submission of the stored config creates zero tasks."""
-    await _deploy(graph, graph.env_a, "app-a")
-    await _deploy(graph, graph.env_b, "app-b")
+    await deploy(graph, graph.env_a, "app-a")
+    await deploy(graph, graph.env_b, "app-b")
     new_config = {"ingress_class": "nginx", "runtime_class": "default"}
     await _fan_out(graph, new_config)
     tasks_after_first = len(graph.uow.tasks.models)
@@ -280,8 +183,8 @@ async def test_resubmission_after_a_dispatch_failure_redeploys_only_that_deploym
     graph, mocker
 ):
     """FR-002, User Story 1 scenario 3: a failed start does not stop the others, and is retried."""
-    first = await _deploy(graph, graph.env_a, "first")
-    failing = await _deploy(graph, graph.env_a, "failing")
+    first = await deploy(graph, graph.env_a, "first")
+    failing = await deploy(graph, graph.env_a, "failing")
     attempts: list[UUID] = []
 
     async def _fail_once(deployment: Deployment, uow: FakeUnitOfWork) -> Task | None:
@@ -297,13 +200,13 @@ async def test_resubmission_after_a_dispatch_failure_redeploys_only_that_deploym
 
     first_counts = await _fan_out(graph, new_config)
 
-    assert _task_deployment_ids(_update_tasks(graph)) == [first.id]
+    assert task_deployment_ids(update_tasks(graph)) == [first.id]
     assert first_counts.dispatched == 1
     assert first_counts.dispatch_failed == 1
 
     second_counts = await _fan_out(graph, dict(new_config))
 
-    assert _task_deployment_ids(_update_tasks(graph)) == [first.id, failing.id]
+    assert task_deployment_ids(update_tasks(graph)) == [first.id, failing.id]
     assert second_counts.dispatched == 1
     assert second_counts.skipped_noop == 1
     assert second_counts.dispatch_failed == 0
@@ -312,18 +215,18 @@ async def test_resubmission_after_a_dispatch_failure_redeploys_only_that_deploym
 async def test_tombstoned_internal_and_restoring_deployments_are_skipped_and_counted(
     graph,
 ):
-    live = await _deploy(graph, graph.env_a, "live")
-    tombstoned = await _deploy(graph, graph.env_a, "tombstoned")
+    live = await deploy(graph, graph.env_a, "live")
+    tombstoned = await deploy(graph, graph.env_a, "tombstoned")
     tombstoned.deleted_at = datetime.now(UTC)
     await graph.uow.deployments.save(tombstoned)
-    await _deploy(graph, graph.env_a, "styrmin-ingress-controller", internal=True)
-    await _deploy(graph, graph.env_a, "restoring", status=DeploymentState.RESTORING)
+    await deploy(graph, graph.env_a, "styrmin-ingress-controller", internal=True)
+    await deploy(graph, graph.env_a, "restoring", status=DeploymentState.RESTORING)
 
     counts = await _fan_out(
         graph, {"ingress_class": "nginx", "runtime_class": "default"}
     )
 
-    assert _task_deployment_ids(_update_tasks(graph)) == [live.id]
+    assert task_deployment_ids(update_tasks(graph)) == [live.id]
     # Environment A: live, internal and restoring are seen; the tombstone is not listed.
     assert counts.evaluated == 3
     assert counts.dispatched == 1
@@ -338,8 +241,8 @@ async def test_standard_storage_change_redeploys_the_deployments_that_take_it(gr
         **CLUSTER_CONFIG,
         "standard_storage": {"storage_class": "standard"},
     }
-    takes_it = await _deploy(graph, graph.env_a, "takes-it")
-    await _deploy(
+    takes_it = await deploy(graph, graph.env_a, "takes-it")
+    await deploy(
         graph,
         graph.env_a,
         "overrides-it",
@@ -350,7 +253,7 @@ async def test_standard_storage_change_redeploys_the_deployments_that_take_it(gr
         graph, {**CLUSTER_CONFIG, "standard_storage": {"storage_class": "premium"}}
     )
 
-    assert _task_deployment_ids(_update_tasks(graph)) == [takes_it.id]
+    assert task_deployment_ids(update_tasks(graph)) == [takes_it.id]
     redeployed = await graph.uow.deployments.find(takes_it.id)
     assert redeployed is not None
     assert redeployed.active_instance is not None
@@ -363,8 +266,8 @@ async def test_standard_storage_change_redeploys_the_deployments_that_take_it(gr
 
 async def test_cluster_scheduling_change_starts_no_redeploy(graph):
     """The resolution does not read the cluster's ``scheduling``, so nothing changes."""
-    await _deploy(graph, graph.env_a, "app-a")
-    await _deploy(graph, graph.env_b, "app-b")
+    await deploy(graph, graph.env_a, "app-a")
+    await deploy(graph, graph.env_b, "app-b")
 
     counts = await _fan_out(
         graph,
@@ -374,17 +277,17 @@ async def test_cluster_scheduling_change_starts_no_redeploy(graph):
         },
     )
 
-    assert _update_tasks(graph) == []
+    assert update_tasks(graph) == []
     assert counts.dispatched == 0
     assert counts.skipped_noop == 2
 
 
 async def test_fan_out_logs_one_line_with_every_count(graph, mocker):
     """FR-010, data-model §6: one ``cluster_config_fanout`` line per update."""
-    await _deploy(graph, graph.env_a, "live")
-    await _deploy(graph, graph.env_a, "restoring", status=DeploymentState.RESTORING)
-    await _deploy(graph, graph.env_a, "styrmin-ingress-controller", internal=True)
-    await _deploy(graph, graph.env_b, "app-b")
+    await deploy(graph, graph.env_a, "live")
+    await deploy(graph, graph.env_a, "restoring", status=DeploymentState.RESTORING)
+    await deploy(graph, graph.env_a, "styrmin-ingress-controller", internal=True)
+    await deploy(graph, graph.env_b, "app-b")
     log_info = mocker.patch.object(cluster_config_fanout.logger, "info")
 
     counts = await _fan_out(
