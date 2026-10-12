@@ -15,6 +15,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle, Plus } from "lucide-react";
 import { useState } from "react";
+import { fieldError } from "@/lib/field-error";
 
 const createBslSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -115,7 +116,7 @@ export function CreateBackupStorageLocationDialog({
                 />
                 {field.state.meta.errors.length > 0 && (
                   <p className="text-sm text-destructive">
-                    {field.state.meta.errors[0]?.toString()}
+                    {fieldError(field.state.meta.errors[0])}
                   </p>
                 )}
               </div>
@@ -135,7 +136,7 @@ export function CreateBackupStorageLocationDialog({
                 />
                 {field.state.meta.errors.length > 0 && (
                   <p className="text-sm text-destructive">
-                    {field.state.meta.errors[0]?.toString()}
+                    {fieldError(field.state.meta.errors[0])}
                   </p>
                 )}
               </div>
@@ -156,7 +157,7 @@ export function CreateBackupStorageLocationDialog({
                   />
                   {field.state.meta.errors.length > 0 && (
                     <p className="text-sm text-destructive">
-                      {field.state.meta.errors[0]?.toString()}
+                      {fieldError(field.state.meta.errors[0])}
                     </p>
                   )}
                 </div>
@@ -176,7 +177,7 @@ export function CreateBackupStorageLocationDialog({
                   />
                   {field.state.meta.errors.length > 0 && (
                     <p className="text-sm text-destructive">
-                      {field.state.meta.errors[0]?.toString()}
+                      {fieldError(field.state.meta.errors[0])}
                     </p>
                   )}
                 </div>
@@ -197,7 +198,7 @@ export function CreateBackupStorageLocationDialog({
                 />
                 {field.state.meta.errors.length > 0 && (
                   <p className="text-sm text-destructive">
-                    {field.state.meta.errors[0]?.toString()}
+                    {fieldError(field.state.meta.errors[0])}
                   </p>
                 )}
               </div>
@@ -218,7 +219,7 @@ export function CreateBackupStorageLocationDialog({
                 />
                 {field.state.meta.errors.length > 0 && (
                   <p className="text-sm text-destructive">
-                    {field.state.meta.errors[0]?.toString()}
+                    {fieldError(field.state.meta.errors[0])}
                   </p>
                 )}
               </div>

@@ -25,6 +25,7 @@ import { useForm, useStore } from "@tanstack/react-form";
 import { z } from "zod/v4";
 import { IfRole } from "@/auth/IfRole";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { fieldError } from "@/lib/field-error";
 
 const updateCredentialsSchema = z.object({
   accessKeyId: z.string().min(1, "Access key ID is required"),
@@ -140,7 +141,7 @@ export default function BackupStorageLocationDetailPage() {
                         />
                         {field.state.meta.errors.length > 0 && (
                           <p className="text-sm text-destructive">
-                            {field.state.meta.errors[0]?.toString()}
+                            {fieldError(field.state.meta.errors[0])}
                           </p>
                         )}
                       </div>
@@ -161,7 +162,7 @@ export default function BackupStorageLocationDetailPage() {
                         />
                         {field.state.meta.errors.length > 0 && (
                           <p className="text-sm text-destructive">
-                            {field.state.meta.errors[0]?.toString()}
+                            {fieldError(field.state.meta.errors[0])}
                           </p>
                         )}
                       </div>

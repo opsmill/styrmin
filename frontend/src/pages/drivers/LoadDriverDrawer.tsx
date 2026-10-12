@@ -17,6 +17,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { fieldError } from "@/lib/field-error";
 
 const localSchema = z.object({
   path: z.string().min(1, "Path is required"),
@@ -30,19 +31,6 @@ const remoteSchema = z.object({
 type SourceTab = "git" | "local";
 
 const FORM_ID = "load-driver-form";
-
-/**
- * Extract a human-readable message from a TanStack Form field error, which may
- * be a plain string or a standard-schema issue object (`{ message }`). Avoids
- * rendering "[object Object]".
- */
-function fieldError(error: unknown): string {
-  if (typeof error === "string") return error;
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message: unknown }).message);
-  }
-  return "Invalid value";
-}
 
 interface LoadDriverDrawerProps {
   open: boolean;
