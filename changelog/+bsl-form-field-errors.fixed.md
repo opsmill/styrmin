@@ -1,0 +1,1 @@
+Fixed the backup storage location forms showing "[object Object]" instead of the error message under a field that fails validation. This affected the dialog that creates a backup storage location and the credentials form on the backup storage location page.
