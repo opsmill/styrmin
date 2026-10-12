@@ -54,6 +54,20 @@ class TestBuildVeleroBackup:
         assert "hooks" in rendered["spec"]
         assert len(rendered["spec"]["hooks"]["resources"]) == 1
 
+    def test_backup_leaves_out_cilium_endpoints(self) -> None:
+        """Cilium recreates each pod's CiliumEndpoint, so a backup has no use for it."""
+        backup = build_velero_backup(
+            name="test-backup",
+            velero_namespace="velero",
+            target_namespace="app-ns",
+            instance_id="inst-123",
+            driver_name="mydriver",
+            ttl="720h",
+        )
+        assert backup.render()["spec"]["excludedResources"] == [
+            "ciliumendpoints.cilium.io"
+        ]
+
 
 class TestBuildVeleroRestore:
     def test_basic_restore_same_namespace(self) -> None:
@@ -240,10 +254,12 @@ class TestBuildVeleroRestore:
             driver_name="mydriver",
         )
         assert restore.render()["spec"]["excludedResources"] == [
-            "helmreleases.helm.toolkit.fluxcd.io"
+            "ciliumendpoints.cilium.io",
+            "helmreleases.helm.toolkit.fluxcd.io",
         ]
 
-    def test_in_place_restore_excludes_nothing(self) -> None:
+    def test_in_place_restore_leaves_out_only_cilium_endpoints(self) -> None:
+        """A restored CiliumEndpoint holds the source pod's addresses."""
         restore = build_velero_restore(
             name="test-restore",
             velero_namespace="velero",
@@ -253,4 +269,30 @@ class TestBuildVeleroRestore:
             instance_id="inst-123",
             driver_name="mydriver",
         )
-        assert "excludedResources" not in restore.render()["spec"]
+        assert restore.render()["spec"]["excludedResources"] == [
+            "ciliumendpoints.cilium.io"
+        ]
+
+    def test_restores_do_not_share_the_excluded_list(self) -> None:
+        """Building a cross-target restore must not add the HelmRelease to later in-place ones."""
+        build_velero_restore(
+            name="clone-restore",
+            velero_namespace="velero",
+            backup_name="test-backup",
+            source_namespace="styrmin-source",
+            target_namespace="styrmin-counterpart",
+            instance_id="source-inst",
+            driver_name="mydriver",
+        )
+        restore = build_velero_restore(
+            name="test-restore",
+            velero_namespace="velero",
+            backup_name="test-backup",
+            source_namespace="app-ns",
+            target_namespace="app-ns",
+            instance_id="inst-123",
+            driver_name="mydriver",
+        )
+        assert restore.render()["spec"]["excludedResources"] == [
+            "ciliumendpoints.cilium.io"
+        ]

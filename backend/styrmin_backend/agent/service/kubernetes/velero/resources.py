@@ -56,6 +56,7 @@ class VeleroBackup:
     hooks: list[VeleroBackupHook] = field(default_factory=list)
     include_cluster_resources: bool = False
     storage_location: str | None = None
+    excluded_resources: list[str] = field(default_factory=list)
 
     def render(self) -> dict[str, Any]:
         spec: dict[str, Any] = {
@@ -63,6 +64,8 @@ class VeleroBackup:
             "includeClusterResources": self.include_cluster_resources,
             "ttl": self.ttl,
         }
+        if self.excluded_resources:
+            spec["excludedResources"] = self.excluded_resources
         if self.storage_location:
             spec["storageLocation"] = self.storage_location
         if self.hooks:
