@@ -29,6 +29,7 @@ In this document, "administrator" means a signed-in user with the `ADMIN` role. 
   - The value is turned off, and the controller has failed: Styrmin redeploys the applications to the shared ingress class and then removes the controller.
 - Q: Does "the controller is created before the applications are redeployed" mean that the redeploy of the controller is started first, or that the controller is ready first? → A: The controller is ready first. The PRD gives the reason for the order as "so that the applications stay reachable" (user stories 7 and 8), and an application that moves to a controller that does not answer yet is not reachable. In the same way, the controller is removed only after the redeploys of the applications in that environment have finished.
 - Q: Does a change to a cluster value that no deployment's resolved config reads start redeploys? → A: No. Redeploys depend only on the resolved config. Today the resolution does not read the cluster's `scheduling` value (only the environment and deployment `scheduling` values are merged), so a change to it is saved and starts no redeploys. Changing that resolution rule is out of scope.
+- Q: The PRD names the invalid-config error `INVALID_CONTEXT`. Which error is meant? → A: `InvalidContextError`, the error that `createCluster` raises for an invalid config. Its error code is `VALIDATION_ERROR` ([exceptions.py](../../backend/styrmin_backend/services/exceptions.py)). `INVALID_CONTEXT` appears only in code comments.
 - Typed GraphQL input or JSON argument for `updateCluster`, and whether the rules that differ from ADR-012 need a new ADR: left to the plan, as the PRD asks.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -52,7 +53,7 @@ The administrator edits the cluster config file they passed to `styrminctl clust
 5. **Given** a cluster config file that leaves out `ingress_class` and `runtime_class`, **When** the administrator submits it, **Then** the cluster stores `ingress_class: traefik` and `runtime_class: default`, the same defaults as when the cluster is created.
 6. **Given** a cluster without `fqdn_suffix`, **When** the administrator submits a config that adds `fqdn_suffix`, **Then** the cluster capabilities include the ingress capability as soon as the update returns.
 7. **Given** a cluster that has running deployments, **When** the administrator changes `standard_storage` or `fast_storage`, **Then** the new storage class is saved and the deployments that take it get a redeploy task.
-8. **Given** a cluster config that does not pass validation, **When** the administrator submits it, **Then** the update is refused with the `INVALID_CONTEXT` error code and the stored config is unchanged.
+8. **Given** a cluster config that does not pass validation, **When** the administrator submits it, **Then** the update is refused with `InvalidContextError` (error code `VALIDATION_ERROR`) and the stored config is unchanged.
 9. **Given** an environment of the cluster that an environment clone is still building, **When** the administrator submits a new cluster config, **Then** the update is refused with `EnvironmentOperationInProgressError` and the stored config is unchanged.
 10. **Given** an environment backup or an environment restore in progress, and no clone in progress, **When** the administrator submits a new cluster config, **Then** the update is accepted.
 11. **Given** a signed-in user without the `ADMIN` role, **When** they submit a cluster config through GraphQL, the SDK or `styrminctl`, **Then** the update is refused and the stored config is unchanged.
@@ -132,7 +133,7 @@ On the cluster detail page, the administrator edits the cluster config in a form
   - Verified by: a unit test.
 - **FR-007**: The system MUST recompute the cluster capabilities in the same transaction as the config ([ADR-026](../../dev/adr/0026-capabilities-recalculation-in-service-layer.md)).
   - Verified by: a unit test that adds `fqdn_suffix` and checks the ingress capability appears.
-- **FR-008**: The system MUST refuse an invalid config with `INVALID_CONTEXT` and save nothing.
+- **FR-008**: The system MUST refuse an invalid config with `InvalidContextError` (error code `VALIDATION_ERROR`) and save nothing.
   - Verified by: a unit test.
 - **FR-009**: Users with the `ADMIN` role MUST be able to update the cluster config through GraphQL, the SDK and `styrminctl clusters update`. Other users are refused.
   - `styrminctl clusters update` takes the config with `--config`, as inline JSON or as `@file`, like `styrminctl clusters create`.
@@ -166,7 +167,7 @@ On the cluster detail page, the administrator edits the cluster config in a form
 - When two updates overlap, the update saved last wins, as for environments in ADR-012.
 - No process changes the cluster config except the service layer, so recomputing the capabilities in the update keeps them correct (ADR-026).
 - The cluster config stays in the existing JSON column. No database migration is needed.
-- The update reuses the existing errors `ClusterNotFoundError`, `InvalidContextError` (`INVALID_CONTEXT`) and `EnvironmentOperationInProgressError`.
+- The update reuses the existing errors `ClusterNotFoundError`, `InvalidContextError` (`VALIDATION_ERROR`) and `EnvironmentOperationInProgressError`.
 - The `ADMIN` role that `createCluster` requires also protects the update. No authorization rule changes.
 - The documentation is updated in the same change: the CLI and GraphQL pages in `docs/`, [architecture.md §3.5](../../dev/knowledge/architecture.md), [data-models.md](../../dev/knowledge/backend/data-models.md), the CONTEXT.md config fan-out entry and a changelog fragment.
 
