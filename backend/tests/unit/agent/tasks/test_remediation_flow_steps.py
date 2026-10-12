@@ -73,11 +73,13 @@ class Cluster:
         #: Set when the StyrminDeployment holds a newer instance that the write keeps.
         self.kept: KeptInstance | None = None
         self.crd_bodies: list[dict[str, Any]] = []
+        self.namespaces: list[dict[str, Any]] = []
         self.k8s_events: list[dict[str, Any]] = []
         self.action_step_ids: dict[UUID, UUID | None] = {}
 
-    async def namespace(self, **_: Any) -> None:
+    async def namespace(self, **kwargs: Any) -> None:
         self.events.append(("namespace",))
+        self.namespaces.append(kwargs)
 
     async def crd(self, **_: Any) -> KeptInstance | None:
         self.events.append(("crd",))
@@ -306,7 +308,7 @@ async def test_update_with_aliases_records_each_step_in_order(
     await update_instance_crd(instance=_instance())
 
     assert events == [
-        *_step("resource:styrmindeployment", ("crd",)),
+        *_step("resource:styrmindeployment", ("namespace",), ("crd",)),
         *_step("resource:service-aliases", ("aliases",)),
     ]
     _assert_started_records(api, step_env)
@@ -319,7 +321,26 @@ async def test_update_without_aliases_records_the_resource_write(
 ) -> None:
     await update_instance_crd(instance=_instance())
 
-    assert events == _step("resource:styrmindeployment", ("crd",))
+    assert events == _step("resource:styrmindeployment", ("namespace",), ("crd",))
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("without_aliases")
+async def test_update_and_upgrade_create_a_missing_namespace_with_its_labels(
+    api: FakeStepApi, cluster: Cluster
+) -> None:
+    """An instance whose create flow stopped before the namespace existed (#313)."""
+    instance = _instance()
+    instance.context.labels = {"environment": "env", "deployment": "app"}
+    namespace = instance.context.instance.namespace
+
+    await update_instance_crd(instance=instance)
+    await upgrade_instance_crd(
+        instance=instance, upgrade_hook=uuid4(), target_version="2.0.0"
+    )
+
+    labels = {"styrmin/environment": "env", "styrmin/deployment": "app"}
+    assert cluster.namespaces == [{"namespace": namespace, "labels": labels}] * 2
 
 
 # upgrade_instance_crd
@@ -341,7 +362,9 @@ async def test_upgrade_with_hooks_and_aliases_records_each_step_in_order(
     )
 
     assert events == [
-        *_step("resource:styrmindeployment", ("crd",), ("status reset",)),
+        *_step(
+            "resource:styrmindeployment", ("namespace",), ("crd",), ("status reset",)
+        ),
         *_step("hook:upgrade:pre", ("action", prehook)),
         *_step("hook:upgrade:core", ("action", core)),
         *_step("resource:service-aliases", ("aliases",)),
@@ -367,7 +390,9 @@ async def test_upgrade_without_optional_hooks_and_aliases(
     )
 
     assert events == [
-        *_step("resource:styrmindeployment", ("crd",), ("status reset",)),
+        *_step(
+            "resource:styrmindeployment", ("namespace",), ("crd",), ("status reset",)
+        ),
         *_step("hook:upgrade:core", ("action", core)),
     ]
     assert cluster.action_step_ids == {core: api.ids["hook:upgrade:core"]}
@@ -391,7 +416,9 @@ async def test_upgrade_failing_core_hook_records_failed_and_stops(
         )
 
     assert events == [
-        *_step("resource:styrmindeployment", ("crd",), ("status reset",)),
+        *_step(
+            "resource:styrmindeployment", ("namespace",), ("crd",), ("status reset",)
+        ),
         *_step("hook:upgrade:pre", ("action", prehook)),
         ("STARTED", "hook:upgrade:core"),
         ("action", core),
@@ -463,6 +490,7 @@ async def test_update_that_keeps_a_newer_instance_records_why_on_its_step(
 
     assert events == _step(
         "resource:styrmindeployment",
+        ("namespace",),
         ("crd",),
         ("OUTPUT", "resource:styrmindeployment"),
         ("k8s event",),
@@ -500,6 +528,7 @@ async def test_upgrade_that_keeps_a_newer_instance_keeps_its_status(
     assert events == [
         *_step(
             "resource:styrmindeployment",
+            ("namespace",),
             ("crd",),
             ("OUTPUT", "resource:styrmindeployment"),
             ("k8s event",),
@@ -527,6 +556,7 @@ async def test_a_failed_event_write_does_not_fail_the_step(
 
     assert events == _step(
         "resource:styrmindeployment",
+        ("namespace",),
         ("crd",),
         ("OUTPUT", "resource:styrmindeployment"),
     )
@@ -551,6 +581,7 @@ async def test_without_token_flows_run_unchanged_and_actions_get_no_step(
     )
 
     assert events == [
+        ("namespace",),
         ("crd",),
         ("status reset",),
         ("action", core),

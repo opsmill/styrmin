@@ -237,15 +237,19 @@ Execution order:
 ```text
 1. Extract context, release_reference, namespace from instance.context
 2. Build the new StyrminDeployment CRD body  step resource:styrmindeployment
-3. Write the CRD, unless it holds a       ──> operator reconciles
+                                             (steps 2 to 4)
+3. Apply the deployment namespace with labels
+4. Write the CRD, unless it holds a       ──> operator reconciles
    higher sequence                            the new HelmRelease and
                                               utility resources
-4. Apply cross-namespace service aliases   step resource:service-aliases
-   (if any, and only when step 3 wrote
+5. Apply cross-namespace service aliases   step resource:service-aliases
+   (if any, and only when step 4 wrote
    the CRD)
 ```
 
 Called via `Remediation(type=UPDATE_INSTANCE, flow_id=<UPDATE_INSTANCE deployment>, parameters={instance})`. No hooks are involved in updates.
+
+Step 3 creates the namespace when it does not exist, for example when the deployment's create flow stopped before it reached its own namespace step ([#313](https://github.com/opsmill/styrmin/issues/313)). An existing namespace keeps its labels. The three CRD flows run this step in `_write_styrmin_deployment`, before the CRD write.
 
 ## Flow: upgrade_instance_crd
 
@@ -265,7 +269,8 @@ async def upgrade_instance_crd(
 Execution order:
 
 ```text
-1. Build and write StyrminDeployment CRD (the new spec),   step resource:styrmindeployment
+1. Apply the deployment namespace with labels, then       step resource:styrmindeployment
+   build and write StyrminDeployment CRD (the new spec),
    unless it holds a higher sequence
 2. Patch CRD status to displayState=Deploying / phase=Pending atomically
    with the spec change. Without this, a stale "Running" displayState

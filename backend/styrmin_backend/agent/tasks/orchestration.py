@@ -235,9 +235,16 @@ def _instance_sequence(resource: dict) -> int | None:
 
 
 async def _write_styrmin_deployment(
-    reporter: StepReporter, step: ReportedStep, *, body: dict, namespace: str
+    reporter: StepReporter,
+    step: ReportedStep,
+    *,
+    body: dict,
+    namespace: str,
+    namespace_labels: dict[str, str],
 ) -> bool:
     """Write the StyrminDeployment; False, recorded on the step, when it holds a newer instance."""
+    # The namespace is missing when the create flow stopped before it (#313).
+    await apply_kubernetes_namespace(namespace=namespace, labels=namespace_labels)
     kept = await _apply_styrmin_deployment_crd(body=body, namespace=namespace)
     if kept is None:
         return True
@@ -925,11 +932,12 @@ async def create_instance_crd(
             instance_sequence=instance.sequence,
         )
 
-        namespace_labels = _build_namespace_labels(context)
-        await apply_kubernetes_namespace(namespace=namespace, labels=namespace_labels)
-
         written = await _write_styrmin_deployment(
-            reporter, step, body=crd_body, namespace=namespace
+            reporter,
+            step,
+            body=crd_body,
+            namespace=namespace,
+            namespace_labels=_build_namespace_labels(context),
         )
 
     # A later change wrote its own StyrminDeployment and service aliases.
@@ -972,7 +980,11 @@ async def update_instance_crd(
         )
 
         written = await _write_styrmin_deployment(
-            reporter, step, body=crd_body, namespace=namespace
+            reporter,
+            step,
+            body=crd_body,
+            namespace=namespace,
+            namespace_labels=_build_namespace_labels(context),
         )
 
     if written:
@@ -1012,7 +1024,11 @@ async def upgrade_instance_crd(
             instance_sequence=instance.sequence,
         )
         written = await _write_styrmin_deployment(
-            reporter, step, body=crd_body, namespace=namespace
+            reporter,
+            step,
+            body=crd_body,
+            namespace=namespace,
+            namespace_labels=_build_namespace_labels(context),
         )
 
         # Reset the status with the spec, so the previous rollout's Running cannot
