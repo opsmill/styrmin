@@ -73,7 +73,8 @@ A redeploy uses `redeploy_for_environment_update`: a new instance from the curre
 | Count | Meaning |
 |---|---|
 | `environments` | Environments of the cluster evaluated. |
-| `evaluated` | Live deployments seen, internal ones included. |
+| `environments_failed` | Environments whose fan-out failed. Their writes are rolled back and their other counts are left out. |
+| `evaluated` | Live deployments seen, internal and `DELETING` ones included. A `DELETING` application is not redeployed. |
 | `dispatched` | Application redeploys started. |
 | `skipped_noop` | Applications already at the resolved config. |
 | `skipped_restoring` | `RESTORING` applications. |

@@ -130,6 +130,7 @@ async def test_controller_running_continues_the_fan_out_and_moves_the_waiting_ap
         "environment_id": str(graph.env_a.id),
         "trigger_deployment_id": str(controller.id),
         "environments": "1",
+        "environments_failed": "0",
         "evaluated": "2",
         "dispatched": "1",
         "skipped_noop": "0",
@@ -140,6 +141,22 @@ async def test_controller_running_continues_the_fan_out_and_moves_the_waiting_ap
         "ingress_controllers_redeployed": "0",
         "ingress_controllers_removed": "0",
     }
+
+
+async def test_controller_running_does_not_redeploy_an_application_being_deleted(graph):
+    """Review F3: an application deleted while it waited for the controller is left to its teardown."""
+    waiting = await deploy(graph, graph.env_a, "waiting")
+    deleting = await deploy(graph, graph.env_a, "deleting")
+    graph.cluster.config = dict(INGRESS_ON)
+    controller = await deploy_controller(
+        graph, graph.env_a, status=DeploymentState.DEPLOYING
+    )
+    deleting.set_status(DeploymentState.DELETING)
+
+    await report_deployment_statuses([_report(controller, "Running")], graph.uow)
+
+    assert task_deployment_ids(update_tasks(graph)) == [waiting.id]
+    assert deleting.status == DeploymentState.DELETING
 
 
 @pytest.mark.parametrize("display_state", ["Running", "Error"])
@@ -187,6 +204,8 @@ async def test_controller_turned_off_during_its_creation_is_removed_once_it_sett
         (False, DeploymentState.RUNNING, "Running", None),
         (True, DeploymentState.FAILED, "Error", None),
         (False, DeploymentState.FAILED, "Error", None),
+        (False, DeploymentState.DELETING, "Deleted", "removal"),
+        (True, DeploymentState.DELETING, "Deleted", None),
     ],
 )
 async def test_hooks_run_only_on_their_state_change(
@@ -223,21 +242,37 @@ async def test_hooks_run_only_on_their_state_change(
 
 
 @pytest.mark.parametrize(
-    ("internal", "hook"),
+    ("internal", "hook", "before", "display_state", "after"),
     [
-        (True, "continue_environment_fan_out"),
-        (False, "tear_down_unused_ingress_controller"),
+        (
+            True,
+            "continue_environment_fan_out",
+            DeploymentState.DEPLOYING,
+            "Running",
+            DeploymentState.RUNNING,
+        ),
+        (
+            False,
+            "tear_down_unused_ingress_controller",
+            DeploymentState.DEPLOYING,
+            "Running",
+            DeploymentState.RUNNING,
+        ),
+        (
+            False,
+            "tear_down_unused_ingress_controller",
+            DeploymentState.DELETING,
+            "Deleted",
+            DeploymentState.DELETED,
+        ),
     ],
+    ids=["continuation", "removal-check", "removal-check-after-deletion"],
 )
 async def test_failing_hook_is_logged_and_rolled_back_and_the_report_still_commits(
-    graph, mocker, internal, hook
+    graph, mocker, internal, hook, before, display_state, after
 ):
     subject = await deploy(
-        graph,
-        graph.env_a,
-        "subject",
-        internal=internal,
-        status=DeploymentState.DEPLOYING,
+        graph, graph.env_a, "subject", internal=internal, status=before
     )
     mocker.patch.object(
         deployment_status,
@@ -250,11 +285,11 @@ async def test_failing_hook_is_logged_and_rolled_back_and_the_report_still_commi
     log_exception = mocker.patch.object(deployment_status.logger, "exception")
 
     statuses_updated, deployments_updated = await report_deployment_statuses(
-        [_report(subject, "Running")], graph.uow
+        [_report(subject, display_state)], graph.uow
     )
 
     assert (statuses_updated, deployments_updated) == (1, 1)
-    assert subject.status == DeploymentState.RUNNING
+    assert subject.status == after
     assert await graph.uow.deployment_statuses.find_by_deployment(subject.id)
     assert graph.uow.committed
     assert session.savepoint_exits == [RuntimeError]

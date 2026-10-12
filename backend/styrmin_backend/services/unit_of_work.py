@@ -213,6 +213,19 @@ class SqlModelUnitOfWork(UnitOfWork):
         self.installation = SQLModelInstallationRepository(session=self.session)
         return self
 
+    async def __aexit__(
+        self,
+        type_: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None:
+        savepoint = self.session.get_nested_transaction()
+        if type_ is not None and savepoint is not None:
+            # Inside a caller's savepoint, undo only that savepoint, so the caller can isolate the failure.
+            await savepoint.rollback()
+            return None
+        return await super().__aexit__(type_, value, traceback)
+
     async def rollback(self) -> None:
         await self.session.rollback()
 

@@ -150,30 +150,39 @@ async def test_update_cluster_commits_the_cluster_row_before_the_first_task(
     environment = await _seed_environment(uow, cluster, "staging")
     await _seed_deployment(uow, environment, "web")
 
-    committed_configs: list[dict] = []
+    committed: list[tuple[dict, dict | None]] = []
     original_commit = uow.commit
 
     async def _recording_commit() -> None:
         stored = await uow.clusters.get(cluster.id)
         assert stored is not None
-        committed_configs.append(deepcopy(stored.config))
+        committed.append((deepcopy(stored.config), deepcopy(stored.capabilities)))
         await original_commit()
 
     mocker.patch.object(uow, "commit", side_effect=_recording_commit)
 
-    committed_when_task_created: list[list[dict]] = []
+    committed_when_task_created: list[list[tuple[dict, dict | None]]] = []
 
     async def _record(deployment: Deployment, uow: FakeUnitOfWork) -> Task:
-        committed_when_task_created.append(list(committed_configs))
+        committed_when_task_created.append(list(committed))
         return Task.create(type=TaskType.UPDATE_INSTANCE, deployment_id=deployment.id)
 
     mocker.patch(REDEPLOY, side_effect=_record)
 
-    new_config = {"ingress_class": "nginx", "runtime_class": "default"}
+    new_config = {
+        "ingress_class": "nginx",
+        "runtime_class": "default",
+        "fqdn_suffix": "apps.example.com",
+    }
     await update_cluster(uow, cluster.id, new_config, USER_ID)
 
-    assert len(committed_when_task_created) == 1
-    assert committed_when_task_created[0][-1] == new_config
+    # FR-007: the capabilities are committed in the same commit as the config.
+    capabilities = {
+        "ingress": {
+            "external": {"ingress_class": "nginx", "fqdn_suffix": "apps.example.com"}
+        }
+    }
+    assert committed_when_task_created == [[(new_config, capabilities)]]
 
 
 async def test_update_cluster_clears_omitted_values_and_applies_defaults(
