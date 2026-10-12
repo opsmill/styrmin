@@ -67,6 +67,9 @@ QUOTA_NAME = "task-steps-network-policies"
 
 # An image in the reserved ``.invalid`` domain: every pull fails at once.
 MISSING_IMAGE = "registry.invalid/styrmin-e2e/simple-app:missing"
+# The kubelet reports ErrImagePull after each pull attempt and ImagePullBackOff while
+# it waits for the next one; the readiness timeout can land on either.
+IMAGE_PULL_REASONS = ("ImagePullBackOff", "ErrImagePull")
 
 HOOK_FAILURE_TIMEOUT = 300.0
 PREREQUISITE_ATTEMPTS_TIMEOUT = 240.0
@@ -519,11 +522,11 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
 
     Runs last in the module: it applies an image override that cannot be pulled with
     ``apply(wait=True)``. The HelmRelease step fails at the operator's readiness
-    timeout with FluxCD's reason as its detail and the pods' ``ImagePullBackOff`` in
-    its error, and the apply's ``failure_reason`` names that step. A ``READ_ONLY``
-    user then reads the same steps, errors and command output as the admin. After
-    FluxCD's rollback, the operator fails the rollout, so the step, the task result
-    and the deployment stay failed.
+    timeout with FluxCD's reason as its detail and the pods' ``ImagePullBackOff`` or
+    ``ErrImagePull`` in its error, and the apply's ``failure_reason`` names that
+    step. A ``READ_ONLY`` user then reads the same steps, errors and command output
+    as the admin. After FluxCD's rollback, the operator fails the rollout, so the
+    step, the task result and the deployment stay failed.
     """
     admin: StyrminClient = failing_actions_deployment["client"]
     deployment_id = failing_actions_deployment["deployment_id"]
@@ -562,9 +565,11 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
     assert entry.result == "FAILED", entry
     assert step.name == "Install or upgrade the HelmRelease", step
     assert step.detail, f"the HelmRelease step has no FluxCD reason: {step}"
-    assert any("ImagePullBackOff" in error.message for error in step.errors), (
-        step.errors
-    )
+    assert any(
+        reason in error.message
+        for error in step.errors
+        for reason in IMAGE_PULL_REASONS
+    ), step.errors
     steps = {s.key: s.status for s in entry.steps}
     assert steps[PREREQUISITES] == "SUCCEEDED", steps
 

@@ -179,9 +179,11 @@ else.
 
 FluxCD rolls a failed Helm upgrade back at its HelmRelease timeout, and the
 rollback removes the failing pods; `test_task_steps.py` asserts that the
-failed HelmRelease step lists those pods' reasons (for example
-`ImagePullBackOff`), which holds only while the readiness timeout stays below
-FluxCD's. The E2E values lower both, keeping that order:
+failed HelmRelease step lists those pods' reasons, which holds only while the
+readiness timeout stays below FluxCD's. For the missing image the reason is
+`ImagePullBackOff` or `ErrImagePull`: the kubelet reports `ErrImagePull` for
+about 12 s after each pull attempt, and at 210 s the timeout can land in that
+window. The E2E values lower both, keeping that order:
 `STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT` is 210 s (270 s in production) and
 `STYRMIN_OPERATOR_HELM_RELEASE_TIMEOUT` is 240 s (300 s). Every E2E rollout
 must be ready within those, or FluxCD rolls it back; the slowest, Infrahub's,
