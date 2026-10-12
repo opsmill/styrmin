@@ -262,7 +262,8 @@ async def on_styrmin_deployment_create(
             )
             patch.status["displayState"] = DisplayState.ERROR.value
             raise kopf.TemporaryError(
-                f"HelmRelease creation failed: {result.errors}", delay=30
+                f"HelmRelease creation failed: {result.errors}",
+                delay=config.SETTINGS.operator.retry_delay,
             )
         return
 
@@ -309,7 +310,8 @@ async def on_styrmin_deployment_create(
             )
             patch.status["displayState"] = DisplayState.ERROR.value
             raise kopf.TemporaryError(
-                f"HelmRelease creation failed: {hr_result.errors}", delay=30
+                f"HelmRelease creation failed: {hr_result.errors}",
+                delay=config.SETTINGS.operator.retry_delay,
             )
     else:
         set_condition(
@@ -324,7 +326,7 @@ async def on_styrmin_deployment_create(
         patch.status["displayState"] = DisplayState.ERROR.value
         raise kopf.TemporaryError(
             f"Phase 1 failed: {result.errors}",
-            delay=30,
+            delay=config.SETTINGS.operator.retry_delay,
         )
 
 
@@ -366,7 +368,8 @@ async def on_styrmin_deployment_resume(
                 )
             else:
                 raise kopf.TemporaryError(
-                    f"HelmRelease resume failed: {result.errors}", delay=30
+                    f"HelmRelease resume failed: {result.errors}",
+                    delay=config.SETTINGS.operator.retry_delay,
                 )
         return
 
@@ -398,7 +401,8 @@ async def on_styrmin_deployment_resume(
                 set_phase(patch.status, DeploymentPhase.CREATING_HELM_RELEASE)
             else:
                 raise kopf.TemporaryError(
-                    f"Phase 1 resume failed: {result.errors}", delay=30
+                    f"Phase 1 resume failed: {result.errors}",
+                    delay=config.SETTINGS.operator.retry_delay,
                 )
 
     if phase in (
@@ -419,7 +423,8 @@ async def on_styrmin_deployment_resume(
                 patch.status["conditions"] = conditions
             else:
                 raise kopf.TemporaryError(
-                    f"Phase 2 resume failed: {result.errors}", delay=30
+                    f"Phase 2 resume failed: {result.errors}",
+                    delay=config.SETTINGS.operator.retry_delay,
                 )
 
 
@@ -545,7 +550,8 @@ async def _roll_out_spec_update(
             )
             patch.status["displayState"] = DisplayState.ERROR.value
             raise kopf.TemporaryError(
-                f"HelmRelease update failed: {result.errors}", delay=30
+                f"HelmRelease update failed: {result.errors}",
+                delay=config.SETTINGS.operator.retry_delay,
             )
         return
 
@@ -596,14 +602,18 @@ async def _roll_out_spec_update(
             )
             patch.status["displayState"] = DisplayState.ERROR.value
             raise kopf.TemporaryError(
-                f"HelmRelease update failed: {hr_result.errors}", delay=30
+                f"HelmRelease update failed: {hr_result.errors}",
+                delay=config.SETTINGS.operator.retry_delay,
             )
     else:
         set_phase(
             patch.status, DeploymentPhase.FAILED, f"Update failed: {result.errors}"
         )
         patch.status["displayState"] = DisplayState.ERROR.value
-        raise kopf.TemporaryError(f"Phase 1 update failed: {result.errors}", delay=30)
+        raise kopf.TemporaryError(
+            f"Phase 1 update failed: {result.errors}",
+            delay=config.SETTINGS.operator.retry_delay,
+        )
 
 
 # --- The HelmRelease's current generation (spec 019, research D5) ---

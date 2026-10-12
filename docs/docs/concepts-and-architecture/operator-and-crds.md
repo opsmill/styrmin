@@ -185,21 +185,27 @@ deployment, such as the per-environment ingress controller, also counts as
 ready as soon as one of its pods is ready, even when FluxCD reports
 `Stalled`.
 
+Styrmin's HelmReleases give FluxCD
+`STYRMIN_OPERATOR_HELM_RELEASE_TIMEOUT` seconds (300, that is 5 minutes,
+by default) for each install or upgrade. At that timeout FluxCD fails the
+attempt and rolls the release back, which removes its pods.
+
 The readiness timeout is the safety net when FluxCD never reports
 `Stalled`. When a rollout has not reached `Ready` or `Failed` within
 `STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT` seconds (270 by default), the
 operator sets the display state `Error` with the message "Deployment did
 not reach Ready within" followed by the timeout and the phase. The phase
-does not change, so the rollout can still become `Ready` later. The
-default is below FluxCD's 5-minute HelmRelease timeout. At that timeout
-FluxCD rolls the failed release back, which removes its pods, so a failed
-rollout reports the pods that are not ready and why before they are
-removed. The
+does not change, so the rollout can still become `Ready` later. Keep the
+readiness timeout below the HelmRelease timeout, as the defaults are: a
+failed rollout then reports the pods that are not ready and why before
+FluxCD's rollback removes them. The
 timeout counts from `status.rolloutStartedAt`, or from the CR's creation
 time when that field is missing. When the operator restarts and resumes a
 rollout, it keeps the recorded start, so a restart does not extend the
-timeout. When kopf runs the create or update handler again after a
-temporary error, the handler records a new start.
+timeout. When a step of the rollout fails with a temporary error, for
+example when the operator cannot create a network policy, kopf runs the
+create or update handler again `STYRMIN_OPERATOR_RETRY_DELAY` seconds
+(30 by default) later, and the handler records a new start.
 
 FluxCD can also report the release `Ready` after it rolled back the
 failed upgrade. This happens when a change only adds or changes

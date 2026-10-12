@@ -12,6 +12,7 @@ from typing import Any
 import kopf
 import pytest
 
+from styrmin_backend import config
 from styrmin_backend.operator.crd.schema import ConditionType, DeploymentPhase
 from styrmin_backend.operator.handlers import styrmin_deployment as handlers_module
 from styrmin_backend.operator.handlers.styrmin_deployment import (
@@ -146,6 +147,29 @@ async def test_handler_writes_the_instance_when_it_raises(
         await _run(handler, spec=_spec(), status=status, patch=patch, **extra)
 
     assert patch.status["instanceId"] == INSTANCE_ID
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failing_phase", ["prerequisites", "helmrelease"])
+@pytest.mark.parametrize("handler_name", list(HANDLERS))
+async def test_handler_retries_after_the_configured_delay(
+    phases: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    handler_name: str,
+    failing_phase: str,
+) -> None:
+    monkeypatch.setattr(config.SETTINGS.operator, "retry_delay", 7)
+    handler, extra, phase = HANDLERS[handler_name]
+    phases[failing_phase].return_value = PhaseResult(success=False, errors=["boom"])
+    status = _status(phase)
+    if handler_name == "resume" and failing_phase == "prerequisites":
+        status = {**status, "phase": DeploymentPhase.CREATING_PREREQUISITES.value}
+        status["conditions"] = []
+
+    with pytest.raises(kopf.TemporaryError) as raised:
+        await _run(handler, spec=_spec(), status=status, patch=_Patch(), **extra)
+
+    assert raised.value.delay == 7
 
 
 @pytest.mark.anyio

@@ -11,6 +11,7 @@ from typing import Any
 
 import kopf
 
+from styrmin_backend import config
 from styrmin_backend.operator.config import (
     ANNOTATION_DEPLOYMENT_ID,
     ANNOTATION_DEPLOYMENT_IN_PROGRESS,
@@ -139,7 +140,7 @@ async def _reconcile_resource_drift(
         )
         raise kopf.TemporaryError(
             f"Failed to fetch context for deployment {deployment_id}",
-            delay=30,
+            delay=config.SETTINGS.operator.retry_delay,
         )
 
     desired_all = build_desired_resources(
