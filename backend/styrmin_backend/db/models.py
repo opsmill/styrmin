@@ -501,6 +501,8 @@ class InstanceStatus(str, Enum):
 
 class ApplicationInstance(StyrminModel, table=True):
     __table_args__ = (
+        # Its index leads with ``deployment_id``, so it also serves the lookups
+        # of a deployment's instances, such as its backup history (#427).
         UniqueConstraint(
             "deployment_id",
             "sequence",
@@ -685,7 +687,7 @@ class Backup(StyrminModel, table=True):
     component_statuses: dict | None = Field(default=None, sa_column=Column(JSON))
     metadata_: dict | None = Field(default=None, sa_column=Column("metadata", JSON))
 
-    instance_id: UUID = Field(foreign_key="applicationinstance.id")
+    instance_id: UUID = Field(foreign_key="applicationinstance.id", index=True)
     instance: ApplicationInstance = Relationship()
 
     schedule_id: UUID | None = Field(default=None, foreign_key="backupschedule.id")
@@ -711,7 +713,7 @@ class Restore(StyrminModel, table=True):
     component_statuses: dict | None = Field(default=None, sa_column=Column(JSON))
     metadata_: dict | None = Field(default=None, sa_column=Column("metadata", JSON))
 
-    backup_id: UUID = Field(foreign_key="backup.id")
+    backup_id: UUID = Field(foreign_key="backup.id", index=True)
     backup: Backup = Relationship(back_populates="restores")
 
     target_instance_id: UUID | None = Field(
