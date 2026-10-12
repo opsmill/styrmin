@@ -7,7 +7,9 @@ import { ErrorState } from "@/components/ErrorState";
 import { EmptyState } from "@/components/EmptyState";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { IfRole } from "@/auth/IfRole";
 import { ClusterConfiguration } from "./ClusterConfiguration";
+import { EditClusterDialog } from "./EditClusterDialog";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString();
@@ -42,12 +44,17 @@ export default function ClusterDetailPage() {
         { label: cluster.name },
       ]}
       actions={
-        <AutoRefreshIndicator
-          enabled={autoRefreshEnabled}
-          onToggle={setAutoRefreshEnabled}
-          lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
-          onRefreshNow={() => refetch()}
-        />
+        <div className="flex items-center gap-2">
+          <AutoRefreshIndicator
+            enabled={autoRefreshEnabled}
+            onToggle={setAutoRefreshEnabled}
+            lastRefreshedAt={dataUpdatedAt ? new Date(dataUpdatedAt) : null}
+            onRefreshNow={() => refetch()}
+          />
+          <IfRole minimum="ADMIN">
+            <EditClusterDialog cluster={cluster} />
+          </IfRole>
+        </div>
       }
     >
       <div className="mb-6 space-y-1">

@@ -401,6 +401,24 @@ describe("deploymentConfigToInput", () => {
     expect(input.externalUrlScheme).toBe("HTTPS");
     expect(input.externalDnsEndpointsType).toBe("NODE_EXTERNAL_IP");
   });
+
+  it("renames scheduling.resources ephemeral_storage to ephemeralStorage", () => {
+    const input = deploymentConfigToInput({
+      scheduling: {
+        resources: {
+          requests: { cpu: "100m", ephemeral_storage: "1Gi" },
+          limits: {
+            ephemeral_storage: "2Gi",
+            extended: { "nvidia.com/gpu": "1" },
+          },
+        },
+      },
+    });
+    expect(input.scheduling?.resources).toEqual({
+      requests: { cpu: "100m", ephemeralStorage: "1Gi" },
+      limits: { ephemeralStorage: "2Gi", extended: { "nvidia.com/gpu": "1" } },
+    });
+  });
 });
 
 describe("componentsFormToInput", () => {
