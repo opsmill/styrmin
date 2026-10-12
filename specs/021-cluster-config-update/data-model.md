@@ -44,16 +44,25 @@ A deployment without an active instance, or whose stored resolved config fails v
 
 A `Deployment` row with `internal = true`, at most one live per environment (`find_internal_by_environment`). Its active instance's `context.instance.config.dedicated_ingress` holds the values it was rendered with.
 
-State use in this feature (`DeploymentState`):
+State use in this feature (`DeploymentState`), see [research.md](research.md) D4 and D5:
 
 | Controller state | Meaning for the fan-out |
 |---|---|
-| `PENDING`, `DEPLOYING` | Not ready. Applications that would move to it wait. |
-| `RUNNING` | Ready. Applications move now. Entering this state runs the environment's fan-out (research D4). |
-| `FAILED` | Not ready. Redeployed when its values change; otherwise left alone and applications are redeployed anyway (Clarifications). |
-| `DELETING` | Being removed. No second controller is created; applications that would move to a controller are skipped. |
+| `PENDING`, `DEPLOYING` | Not ready. Applications whose `dedicated_ingress` changes wait. The controller is not removed in this state. |
+| `RUNNING` | Ready. Entering this state runs the environment's fan-out, which moves the waiting applications, then the removal check. |
+| `FAILED` | Not ready. Redeployed when its values change, or again when applications wait to move onto it. Applications already on it whose `dedicated_ingress` does not change are redeployed anyway (Clarifications). Entering this state runs the removal check. |
+| `DELETING` | Being removed. No second controller is created; applications that would move onto a controller wait. |
 
-**Removal rule** (research D5): the controller is removed when no live non-internal deployment is left (existing #252 rule), or when the effective `dedicated_ingress` is off, every live non-internal deployment's active instance has no `dedicated_ingress`, and none of them is `PENDING` or `DEPLOYING`.
+**Application rule**: an application whose resolved `dedicated_ingress` changes to a set value is redeployed only when the controller is `RUNNING` with that value. Every other application whose resolved config differs is redeployed at once.
+
+**Removal rule**: the controller is removed when no live non-internal deployment is left (existing #252 rule), or when all of these hold:
+
+- the environment's effective `dedicated_ingress` is off;
+- every live non-internal deployment's active instance has no `dedicated_ingress`;
+- no live non-internal deployment is `PENDING` or `DEPLOYING`;
+- the controller is not `PENDING` or `DEPLOYING`.
+
+The rules depend only on stored state, so they also apply after an environment update (research D5).
 
 ## 5. Deployment (existing)
 
@@ -72,7 +81,7 @@ A redeploy uses `redeploy_for_environment_update`: a new instance from the curre
 | `dispatch_failed` | Redeploys that could not be started. |
 | `ingress_controllers_created`, `ingress_controllers_redeployed`, `ingress_controllers_removed` | Controller actions. |
 
-FR-010's "skipped" is the sum of the three `skipped_*` counts; "failed" is `dispatch_failed`.
+FR-010's "skipped" is the sum of the three `skipped_*` counts; "failed" is `dispatch_failed`. The update logs these counts once as `cluster_config_fanout`; each status-reporter continuation logs them for one environment as `cluster_config_fanout_continued`.
 
 ## 7. Glossary
 

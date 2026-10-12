@@ -26,6 +26,7 @@ In this document, "administrator" means a signed-in user with the `ADMIN` role. 
   - The value does not change: Styrmin redeploys the applications as for any other environment and leaves the controller as it is. A redeploy does not create a controller, so the reason that today's deploy refuses such an environment (a second controller would collide with the first one) does not apply. The environment update behaves the same way today.
   - The value is turned on or its values change, and the controller has failed: Styrmin redeploys the controller with the new values first, and moves the applications once the controller is ready.
   - The value is turned on, and the controller is being removed: Styrmin does not create a second controller and leaves the applications on their current config, where they stay reachable through the shared ingress class. They are counted as skipped. A resubmission after the removal has finished creates the controller and moves them.
+  - The value is turned on, and the new controller fails: the applications stay on their current config, where they stay reachable through the shared ingress class. A resubmission redeploys the controller again and moves them once it is ready. Styrmin never moves an application onto a controller that is not ready.
   - The value is turned off, and the controller has failed: Styrmin redeploys the applications to the shared ingress class and then removes the controller.
 - Q: Does "the controller is created before the applications are redeployed" mean that the redeploy of the controller is started first, or that the controller is ready first? → A: The controller is ready first. The PRD gives the reason for the order as "so that the applications stay reachable" (user stories 7 and 8), and an application that moves to a controller that does not answer yet is not reachable. In the same way, the controller is removed only after the redeploys of the applications in that environment have finished.
 - Q: Does a change to a cluster value that no deployment's resolved config reads start redeploys? → A: No. Redeploys depend only on the resolved config. Today the resolution does not read the cluster's `scheduling` value (only the environment and deployment `scheduling` values are merged), so a change to it is saved and starts no redeploys. Changing that resolution rule is out of scope.
@@ -102,7 +103,9 @@ On the cluster detail page, the administrator edits the cluster config in a form
 - **An environment takes the cluster's `dedicated_ingress` and has no applications.** No controller is created when the setting is turned on. The controller is created on the first deploy, as today.
 - **The config file leaves out `dedicated_ingress`.** The update turns it off and removes the controllers, because the update replaces the whole config.
 - **The redeploy of one deployment cannot be started.** The other redeploys still start. A resubmission starts only the missed redeploys.
-- **The dedicated ingress controller does not become ready after `dedicated_ingress` is turned on.** The applications of that environment stay on their current config and stay reachable through the shared ingress class. A resubmission after the controller is repaired moves them.
+- **The dedicated ingress controller does not become ready after `dedicated_ingress` is turned on.** The applications of that environment stay on their current config and stay reachable through the shared ingress class. A resubmission redeploys the controller again and moves them once it is ready.
+- **`dedicated_ingress` is turned off right after it was turned on.** A controller that is still being created is removed only once its creation has finished, so no controller is left running without a record in Styrmin.
+- **An environment update turns the environment's own `dedicated_ingress` off.** Because the removal rule depends only on the current state, the controller is now removed once the applications of that environment have been redeployed to the shared ingress class. Today it stays until the last application is deleted. This is a change to the environment update, and the documentation states it.
 - **The dedicated ingress controller has failed or is being removed.** See Clarifications.
 - **Two updates overlap.** The update saved last wins, as for environments in ADR-012.
 - **A deleted (tombstoned), internal or `RESTORING` deployment.** It is not redeployed by the general rule. The dedicated ingress controller is redeployed only by the rules of User Story 2.
@@ -175,7 +178,7 @@ On the cluster detail page, the administrator edits the cluster config in a form
 
 - Renaming the cluster.
 - Partial updates that change only the submitted values.
-- The same dedicated ingress controller gap in the environment update: `updateEnvironment` neither creates, redeploys nor removes the controller when `dedicated_ingress` changes. It needs a separate issue.
+- The rest of the dedicated ingress controller gap in the environment update: `updateEnvironment` neither creates nor redeploys the controller when `dedicated_ingress` changes. It needs a separate issue. (The removal after the applications move is covered by this feature's state-based rule, see Edge Cases.)
 - Moving existing volumes to a new storage class.
 - Deleting a cluster that has environments ([#366](https://github.com/opsmill/styrmin/issues/366)).
 - Declaring the cluster config in `styrminctl apply` manifests.

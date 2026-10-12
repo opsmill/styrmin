@@ -35,9 +35,13 @@ Behaviour:
 1. Parse `--config` with `parse_json_argument`.
 2. Refuse unknown keys at any depth with `validate_input_strict(UpdateClusterInput, data)`; the error names each unknown key path and the command exits non-zero without calling the server (research D3).
 3. Call `sdk.clusters.update(...)`.
-4. On success, print `Cluster '<name>' updated (id: <id>)` and the stored config, like `clusters get`.
+4. On success, print `Cluster '<name>' updated (id: <id>)`, the stored config as JSON, and a line saying that the deployments that take a changed value are being redeployed, with a pointer to `styrminctl deployments list` (critique P3).
 
 Errors go through `styrmin_error_handler` (existing): the validation error, the not-found error, the clone-in-progress error and the permission error print their messages and exit non-zero.
+
+### `styrminctl clusters get` (changed)
+
+The `config` value is printed as JSON (`json.dumps`, sorted keys) instead of the Python `str()` of the dict, so an administrator who no longer has the creation file can copy the current config into one (critique P2). The table layout is unchanged.
 
 ## CLI tests
 
@@ -46,3 +50,4 @@ Errors go through `styrmin_error_handler` (existing): the validation error, the 
 - the parsed file reaches `sdk.clusters.update` as an `UpdateClusterInput`, for snake_case and camelCase files;
 - an unknown top-level key and an unknown nested key (`dedicated_ingress.servce`) are refused before any SDK call;
 - name and `--id` are mutually exclusive, and one is required.
+- `clusters get` prints the config as valid JSON (parsed back with `json.loads` in the test).

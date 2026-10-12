@@ -57,24 +57,29 @@ A new public function `resolve_instance_config(cluster, environment, deployment)
 
 **Decision**: The ordering of FR-004 is enforced in two places.
 
-1. **In the update call** (`fan_out_cluster_config`, per environment): Styrmin resolves the environment's new effective `dedicated_ingress` (environment value, else cluster value) and the state of its live controller (`find_internal_by_environment`), then decides:
+1. **In the update call** (`fan_out_cluster_config`, per environment). Styrmin resolves the environment's new effective `dedicated_ingress` (environment value, else cluster value) and finds its live controller (`find_internal_by_environment`).
 
-   | New effective value | Controller state | Controller action | Applications whose resolved config differs |
-   |---|---|---|---|
-   | Set, environment has applications | None | Create (new `_create_ingress_controller`, attributed to the administrator) | Wait |
-   | Set | Exists, its instance has a different `dedicated_ingress` (any state but `DELETING`) | Redeploy with `redeploy_for_environment_update` | Wait |
-   | Set | `PENDING` or `DEPLOYING`, same values | None | Wait |
-   | Set | `RUNNING`, same values | None | Redeploy now |
-   | Set | `FAILED`, same values | None | Redeploy now (Clarifications) |
-   | Set | `DELETING` | None, no second controller | Skip, counted as waiting |
-   | Not set | Exists, not `DELETING` | Remove once the applications have moved (step 2) | Redeploy now |
-   | Not set | None or `DELETING` | None | Redeploy now |
+   **Controller action** (critique E1):
 
-   "Wait" means the deployment is not redeployed in this call and is counted under `skipped_waiting_for_ingress`.
+   | New effective value | Controller | Action |
+   |---|---|---|
+   | Set, environment has applications | None | Create it (new `_create_ingress_controller`, attributed to the administrator). |
+   | Set | Exists, not `DELETING`, its instance has a different `dedicated_ingress` | Redeploy it with the new values (`redeploy_for_environment_update`). |
+   | Set | `FAILED`, same values, and at least one application waits to move onto it | Redeploy it again (retry). |
+   | Set | `DELETING` | None. No second controller while the first is being removed. |
+   | Not set | Exists | None here. Removal follows D5. |
+   | Any other case | | None. |
+
+   **Application action**, for each live non-internal deployment whose resolved config differs (D1), decided from the deployment's own change, not only from the controller state:
+
+   - Its `dedicated_ingress` changes and the new value is set (it moves onto the controller, or the controller's values change): redeployed now only if the controller is `RUNNING` and its instance has the new values. Otherwise it waits, and stays on its current config, where it is still reachable.
+   - Any other change (its `dedicated_ingress` stays the same, or is removed): redeployed now, whatever the controller state. This keeps the Clarifications rule for applications already on a failed controller, and moves applications off a controller that is being turned off.
+
+   "Waits" means the deployment is not redeployed in this call and is counted under `skipped_waiting_for_ingress`.
 
 2. **In the status reporter** (`report_deployment_statuses`, on a state transition):
-   - When an internal deployment moves to `RUNNING`, Styrmin runs the fan-out for that one environment (`continue_environment_fan_out`). The per-deployment comparison of D1 makes this idempotent: deployments already at the resolved config are skipped, and the ones that waited are redeployed.
-   - When a non-internal deployment moves to `RUNNING` or `FAILED`, Styrmin calls the extended teardown check (D5).
+   - When an internal deployment moves to `RUNNING`, Styrmin runs the fan-out for that one environment (`continue_environment_fan_out`), which ends with the D5 removal check. The per-deployment comparison of D1 makes this idempotent: deployments already at the resolved config are skipped, and the ones that waited are redeployed.
+   - When an internal deployment moves to `FAILED`, or a non-internal deployment moves to `RUNNING` or `FAILED`, Styrmin runs the D5 removal check.
 
 **Rationale**:
 
@@ -100,10 +105,13 @@ A new public function `resolve_instance_config(cluster, environment, deployment)
 - The environment's effective `dedicated_ingress` (environment value, else cluster value) is not set.
 - Every live non-internal deployment of the environment has an active instance whose resolved config has no `dedicated_ingress`.
 - No live non-internal deployment is in `PENDING` or `DEPLOYING`.
+- The controller itself is not `PENDING` or `DEPLOYING` (critique E3). The `apply_state` flow that creates or redeploys a controller does not check for `DELETING`, so a deletion requested before that flow has written the StyrminDeployment would leave a controller running on the cluster after its row is tombstoned. The check runs again when the controller reaches `RUNNING` or `FAILED`.
 
-The check runs at the end of each environment's fan-out (so an environment whose applications are already on the shared class loses its controller at once) and from the status reporter when a non-internal deployment moves to `RUNNING` or `FAILED`.
+The check runs at the end of each environment's fan-out (so an environment whose applications are already on the shared class loses its controller at once), and from the status reporter on the transitions listed in D4 step 2.
 
 **Rationale**: This removes the controller only after every application's redeploy has finished (FR-004, SC-005), and it reuses the deletion path that #252 built (born-complete delete task, `DELETING` state, operator teardown, tombstone by the status reporter). An application whose redeploy could not be started keeps an active instance with `dedicated_ingress`, so the controller stays until a resubmission moves it. An application that is `RESTORING` keeps its old instance, so the controller stays until the restore has finished and a later update moves it.
+
+**Effect on the environment update** (critique E2): both rules depend only on the stored state, so they also act after `updateEnvironment`. When an environment update turns the environment's own `dedicated_ingress` off and no cluster value applies, the environment fan-out redeploys the applications as today, and the controller is now removed once they have moved. Today it stays until the last application is deleted. When a controller of any environment becomes `RUNNING`, its environment's deployments that are not at their resolved config are redeployed. The environment update's other gaps (it neither creates nor redeploys the controller) stay out of scope. The spec, ADR-0065 and `docs/` state this change.
 
 **Alternatives considered**: remove the controller in the update call after starting the application redeploys. Rejected: the redeploys run asynchronously, so the controller would disappear before the applications have moved to the shared ingress class.
 
@@ -121,7 +129,9 @@ The check runs at the end of each environment's fan-out (so an environment whose
 2. For each environment, in the same unit of work: evaluate and start the redeploys, then commit. A failure to start one redeploy is caught and counted, as in `update_environment` (`dispatch_failed`).
 3. Log one line: `cluster_config_fanout cluster_id=… environments=… evaluated=… dispatched=… skipped_noop=… skipped_restoring=… skipped_waiting_for_ingress=… dispatch_failed=… ingress_controllers_created=… ingress_controllers_redeployed=… ingress_controllers_removed=…` (FR-010).
 
-The status reporter continuation runs inside the status report's transaction, inside a savepoint (`uow.session.begin_nested()`), like `_record_operator_steps`. A failure is logged and does not fail the status report.
+The status reporter continuation runs inside the status report's transaction, inside a savepoint (`uow.session.begin_nested()`), like `_record_operator_steps`. A failure is logged and does not fail the status report. It logs `cluster_config_fanout_continued environment_id=… trigger_deployment_id=…` with the same counts (critique E8).
+
+Each redeploy start keeps its own `try/except`, as in `update_environment`, so a Prefect dispatch failure is counted and never reaches the savepoint (critique E4). A window remains: `apply_state` dispatches the flow before the commit, so if the savepoint or the status report's commit fails after a dispatch, the flow refers to a task row that does not exist. `update_environment` and `deploy_application` have the same window today; this feature does not widen it.
 
 **Rationale**: Same commit order as ADR-012 decision 4. The savepoint keeps the status reporter's main job (state and snapshots) independent of the fan-out.
 
