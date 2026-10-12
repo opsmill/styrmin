@@ -289,7 +289,8 @@ A flow whose write returned a `KeptInstance`:
   `superseded`;
 - skips its service aliases, because the flow of the later change writes its own;
 - in `upgrade_instance_crd`, skips the status reset;
-- still runs its driver hooks. A create still creates the namespace.
+- still runs its driver hooks. A create, an update and an upgrade still create the namespace
+  when it is missing.
 
 The annotation is the only input of the comparison. When it holds a sequence higher than any
 instance of the deployment, for example after an edit with `kubectl`, every later flow

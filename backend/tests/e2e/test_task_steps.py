@@ -11,11 +11,13 @@ the target version:
   exits with 3 (the hook step keeps the end of the output).
 
 The prerequisites scenario fills a ``ResourceQuota`` so the operator cannot
-re-create a network policy, and the HelmRelease scenario applies a manifest
-with ``apply(wait=True)`` whose image override cannot be pulled. The HelmRelease
-scenario runs last in the module, because it leaves the deployment failed.
+re-create a network policy, the missing-namespace scenario (#313) deletes the
+deployment's namespace before an update, and the HelmRelease scenario applies a
+manifest with ``apply(wait=True)`` whose image override cannot be pulled. The
+HelmRelease scenario runs last in the module, because it leaves the deployment
+failed.
 
-The first three tests are ``api_only``: they read the steps through the SDK,
+The first four tests are ``api_only``: they read the steps through the SDK,
 and the frontend component tests (``StepListFailures.test.tsx``) cover how each
 failure looks on the page. The HelmRelease test runs under both entrypoints.
 """
@@ -31,6 +33,7 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 import pytest
 from kubernetes_asyncio import client as kubeclient
+from kubernetes_asyncio.client.exceptions import ApiException
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
 from styrmin_sdk.exceptions import StyrminError
@@ -58,6 +61,7 @@ COMMAND_VERSION = "0.9.0+command"
 RAISE_MESSAGE = "failing-actions: the upgrade action raised on purpose"
 
 UPGRADE_HOOK = "hook:upgrade:core"
+RESOURCE_WRITE = "resource:styrmindeployment"
 PREREQUISITES = "operator:prerequisites"
 HELMRELEASE = "operator:helmrelease"
 
@@ -73,6 +77,10 @@ IMAGE_PULL_REASONS = ("ImagePullBackOff", "ErrImagePull")
 
 HOOK_FAILURE_TIMEOUT = 300.0
 PREREQUISITE_ATTEMPTS_TIMEOUT = 240.0
+# The operator's teardown and FluxCD's uninstall run before the namespace goes.
+NAMESPACE_GONE_TIMEOUT = 180.0
+# The update's task ends when the operator has rolled out the recreated deployment.
+RECREATE_TIMEOUT = 300.0
 # The operator's readiness timeout (210 s in the E2E values, so it fails before
 # FluxCD's 4-minute timeout and rollback), its 5-second check, the agent report and
 # the page refresh, with margin.
@@ -262,6 +270,22 @@ async def _wait_for_quota(core: kubeclient.CoreV1Api, namespace: str) -> None:
             return
         await asyncio.sleep(1.0)
     raise AssertionError(f"ResourceQuota {QUOTA_NAME} has no usage after 60s")
+
+
+async def _wait_for_namespace_gone(core: kubeclient.CoreV1Api, namespace: str) -> None:
+    deadline = time.monotonic() + NAMESPACE_GONE_TIMEOUT
+    while True:
+        try:
+            await core.read_namespace(name=namespace)
+        except ApiException as exc:
+            if exc.status == 404:
+                return
+            raise
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"namespace {namespace} still exists after {NAMESPACE_GONE_TIMEOUT}s"
+            )
+        await asyncio.sleep(POLL_INTERVAL)
 
 
 def _steps_by_task(timeline: list[TimelineEntry]) -> dict[str, tuple[StepRef, ...]]:
@@ -510,6 +534,56 @@ async def test_prerequisite_failure_shows_attempts(
         if s.key.startswith("operator:") and s.key != PREREQUISITES
     }
     assert set(later.values()) == {"PENDING"}, later
+
+
+@pytest.mark.api_only(
+    reason=(
+        "Deletes the namespace with the Kubernetes API and updates through the SDK; "
+        "the namespace write happens in the agent, so the page adds no coverage."
+    )
+)
+@pytest.mark.ci
+async def test_update_recreates_a_missing_namespace(
+    failing_actions_deployment: dict[str, Any],
+) -> None:
+    """#313: an update of a deployment whose namespace does not exist creates it.
+
+    Deleting the namespace leaves the deployment's instance in the database, as a
+    create task that stopped before its namespace step does, so the update runs
+    ``update_instance_crd``.
+    """
+    client: StyrminClient = failing_actions_deployment["client"]
+    deployment_id = failing_actions_deployment["deployment_id"]
+    namespace = failing_actions_deployment["namespace"]
+    api = failing_actions_deployment["api"]
+    driver = ApiScenarioDriver(client)
+    await driver.wait_for_deployment_running(deployment_id=deployment_id)
+
+    core = kubeclient.CoreV1Api(api)
+    await core.delete_namespace(name=namespace)
+    await _wait_for_namespace_gone(core, namespace)
+
+    task = await client.deployments.update(
+        deployment_id,
+        input=UpdateDeploymentInput(
+            envVars=[EnvVarInput(name="TASK_STEPS_E2E", value="missing-namespace")]
+        ),
+    )
+    assert task is not None, "the update dispatched no task"
+    entry, step = await _wait_for_step(
+        _timeline_reader(client, deployment_id),
+        lambda entry: entry.task_id == str(task.id),
+        RESOURCE_WRITE,
+        lambda entry, _: entry.result != "RUNNING",
+        timeout=RECREATE_TIMEOUT,
+    )
+
+    assert entry.task_type == "update_instance", entry
+    assert step.status == "SUCCEEDED", step
+    assert entry.result == "SUCCEEDED", entry
+    await core.read_namespace(name=namespace)
+    assert (await _styrmin_deployment_status(api, namespace)).get("phase"), namespace
+    await driver.wait_for_deployment_running(deployment_id=deployment_id)
 
 
 @pytest.mark.ci
