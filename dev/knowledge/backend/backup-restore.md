@@ -121,7 +121,7 @@ Both backups and restores follow the same lifecycle: `PENDING` -> `IN_PROGRESS` 
 class Backup(StyrminModel, table=True):
     name: str                     # Unique backup name
     status: BackupStatus          # PENDING, IN_PROGRESS, COMPLETED, FAILED
-    instance_id: UUID             # FK to ApplicationInstance
+    instance_id: UUID             # FK to ApplicationInstance, indexed
     schedule_id: UUID | None      # FK to BackupSchedule (for scheduled backups)
     environment_backup_id: UUID | None  # FK to EnvironmentBackup (constituent membership)
     started_at: datetime | None
@@ -167,7 +167,7 @@ is the only supported writer and merges this way, so pre-existing keys survive.
 class Restore(StyrminModel, table=True):
     name: str                     # Unique restore name
     status: RestoreStatus
-    backup_id: UUID               # FK to Backup
+    backup_id: UUID               # FK to Backup, indexed
     target_namespace: str         # K8s namespace to restore into
     target_instance_id: UUID | None  # Optional target instance
     environment_restore_id: UUID | None  # FK to EnvironmentRestore (constituent membership)
@@ -198,7 +198,7 @@ class BackupSchedule(StyrminModel, table=True):
 | `resolve_backup_target(instance_id, uow)` | Walk instance → deployment (namespace) and instance → driver version → backup-enabled component configs, returning a `BackupTarget(deployment_id, target_namespace, component_configs)`. Best-effort: any failure degrades to `BackupTarget(None, "", None)` — a hookless backup — and logs a warning. Shared by the `createBackup` mutation and the environment fan-out so both build identical constituents (FR-014) |
 | `create_backup(instance_id, uow, ...)` | Create on-demand backup with component configs. `environment_backup_id` links it as an environment-backup constituent. The row id is generated up front so the unique auto-generated name is final before the `INSERT` |
 | `get_backup(backup_id, uow)` | Get backup by ID |
-| `get_backups(uow, *, deployment_id=None, instance_id=None, status=None)` | List backups, newest first (`created_on` descending, then `id` descending, so `restore --last` picks the same backup on a tie). Exactly one of `deployment_id` or `instance_id` is required; both or neither raise `AmbiguousIdentifierError` (`VALIDATION_ERROR`) before the unit of work opens. `deployment_id` returns the deployment's backup history: the backups of every instance the deployment has had, found by joining `Backup.instance_id` to `ApplicationInstance.deployment_id` (`BackupRepository.get_by_deployment_id`, which also joins `Deployment` and lists nothing for an internal deployment, as `deployment(deploymentId:)` hides it; an unknown id lists nothing), so backups stay listed after an upgrade, a config edit, a refresh (`refresh_deployment`, which no code path calls today) or an environment config change gives the deployment a new active instance, and after the deployment is deleted. `instance_id` returns that one instance's backups (`get_by_instance_id`). See [issue #304](https://github.com/opsmill/styrmin/issues/304) and [ADR-062](../../adr/0062-backup-history-derived-through-instances.md). `applicationinstance.deployment_id`, which the history query filters on, has no index; adding one needs an Alembic revision and was deferred. <!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 --> |
+| `get_backups(uow, *, deployment_id=None, instance_id=None, status=None)` | List backups, newest first (`created_on` descending, then `id` descending, so `restore --last` picks the same backup on a tie). Exactly one of `deployment_id` or `instance_id` is required; both or neither raise `AmbiguousIdentifierError` (`VALIDATION_ERROR`) before the unit of work opens. `deployment_id` returns the deployment's backup history: the backups of every instance the deployment has had, found by joining `Backup.instance_id` to `ApplicationInstance.deployment_id` (`BackupRepository.get_by_deployment_id`, which also joins `Deployment` and lists nothing for an internal deployment, as `deployment(deploymentId:)` hides it; an unknown id lists nothing), so backups stay listed after an upgrade, a config edit, a refresh (`refresh_deployment`, which no code path calls today) or an environment config change gives the deployment a new active instance, and after the deployment is deleted. `instance_id` returns that one instance's backups (`get_by_instance_id`). See [issue #304](https://github.com/opsmill/styrmin/issues/304) and [ADR-062](../../adr/0062-backup-history-derived-through-instances.md). The history query reads through indexes: the index of `uq_applicationinstance_deployment_sequence` leads with `applicationinstance.deployment_id`, which the query filters on, and `ix_backup_instance_id` serves the join to `backup` ([issue #427](https://github.com/opsmill/styrmin/issues/427)). <!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 --> |
 | `delete_backup(backup_id, uow)` | Delete backup (cascades to restores) |
 | `update_backup_status(backup_id, status, uow, ...)` | Update overall backup status; `metadata_updates` merges keys into `Backup.metadata_` by reassignment |
 | `update_backup_component_status(backup_id, component_name, ...)` | Update component status, derives overall status |
