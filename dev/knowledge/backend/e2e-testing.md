@@ -553,3 +553,12 @@ text = await page.evaluate("() => navigator.clipboard.readText()")
 Permissions are scoped to the context (not the page), so the grant survives across navigations within the same test. Page objects that depend on clipboard reads should expose a `grant_clipboard_permissions()` method and call it once at the start of the test rather than per-action — see `tests/e2e/pages/pods_tab.py` for the canonical example.
 
 The Copy button itself does not need the grant — `writeText` is allowed by default. The grant is only required to read the clipboard back for an assertion.
+
+## Filling and submitting dialogs
+
+Base UI moves focus to a dialog's first focusable element one animation frame after the dialog opens. Playwright's `fill()` focuses its target and then types in a second step, so a fill that runs across that frame types into the newly focused element and leaves its own field empty. The form then fails validation and the dialog never closes (#365). A `fill()` that follows any `click()` inside the dialog is safe, because `click()` waits for the element to be stable over two animation frames.
+
+Page objects use the two helpers in `tests/e2e/pages/_dom.py`:
+
+- `wait_for_dialog_open(dialog)` waits until the dialog is visible and holds focus. Call it after opening a dialog and before its first `fill()`.
+- `submit_dialog(dialog, button="Create")` clicks the submit button and waits for the dialog to close. When the dialog stays open, it raises `ScenarioTimeout` with the dialog's text (submit and field errors included), the inputs that fail native validation, and the empty inputs.

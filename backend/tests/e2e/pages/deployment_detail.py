@@ -24,7 +24,11 @@ from tests.e2e.drivers.refs import (
 
 # Shared with ``pages/environments.py`` — both read their state off ``data-*``
 # test hooks and must fail identically when one is missing.
-from tests.e2e.pages._dom import required_attr as _required_attr
+from tests.e2e.pages._dom import (
+    required_attr as _required_attr,
+    submit_dialog,
+    wait_for_dialog_open,
+)
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
@@ -160,7 +164,9 @@ class DeploymentDetailPage:
     async def open_upgrade_dialog(self) -> None:
         """Open the Upgrade Deployment dialog from the detail header."""
         await self._page.get_by_role("button", name="Upgrade", exact=True).click()
-        await self._page.get_by_role("dialog", name="Upgrade Deployment").wait_for()
+        await wait_for_dialog_open(
+            self._page.get_by_role("dialog", name="Upgrade Deployment")
+        )
 
     async def confirm_upgrade(
         self, *, version: str, driver_version_id: str | None = None
@@ -177,9 +183,7 @@ class DeploymentDetailPage:
             # SelectItem mirrors its value to data-value; the popup renders in
             # a portal outside the dialog element, so locate page-wide.
             await self._page.locator(f'[data-value="{driver_version_id}"]').click()
-        await dialog.get_by_role("button", name="Upgrade", exact=True).click()
-        # Dialog closes on success; treat its disappearance as the signal.
-        await dialog.wait_for(state="hidden")
+        await submit_dialog(dialog, button="Upgrade")
 
     async def read_pinned_image_warning(self, target_version: str) -> list[str]:
         """Open the Upgrade dialog, type ``target_version``, and return the
@@ -212,7 +216,9 @@ class DeploymentDetailPage:
 
     async def open_scheduling_dialog(self) -> None:
         await self._page.get_by_role("button", name="Scheduling", exact=True).click()
-        await self._page.get_by_role("dialog", name="Edit Scheduling").wait_for()
+        await wait_for_dialog_open(
+            self._page.get_by_role("dialog", name="Edit Scheduling")
+        )
 
     async def save_scheduling_config(self) -> None:
         dialog = self._page.get_by_role("dialog", name="Edit Scheduling")
@@ -942,7 +948,7 @@ class DeploymentDetailPage:
     async def open_delete_dialog(self) -> None:
         """Click the header Delete button and wait for the type-to-confirm dialog."""
         await self._delete_button().click()
-        await self._delete_dialog().wait_for()
+        await wait_for_dialog_open(self._delete_dialog())
 
     async def delete_confirm_button_is_disabled(self) -> bool:
         """Return True if the destructive confirm button is currently disabled."""

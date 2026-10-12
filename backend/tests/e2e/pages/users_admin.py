@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 from playwright.async_api import expect
 
+from tests.e2e.pages._dom import submit_dialog, wait_for_dialog_open
+
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
 
@@ -41,8 +43,7 @@ class UsersAdminPage:
     async def open_create_dialog(self) -> None:
         """Click the "Create user" button and wait for the dialog to mount."""
         await self._page.locator("[data-testid=users-create-button]").click()
-        dialog = self._page.get_by_role("dialog")
-        await dialog.wait_for(state="visible")
+        await wait_for_dialog_open(self._page.get_by_role("dialog"))
 
     async def fill_create_form(
         self,
@@ -79,13 +80,11 @@ class UsersAdminPage:
 
     async def submit(self) -> None:
         """Submit the create-user dialog and wait for it to close."""
-        dialog = self._page.get_by_role("dialog")
-        await dialog.get_by_role("button", name="Create", exact=True).click()
-        # The dialog only closes on success; on error the alert renders
-        # inline. ``wait_for(state="hidden")`` therefore doubles as the
-        # success assertion — if the form failed, the test sees a
-        # timeout pointing straight at the dialog.
-        await dialog.wait_for(state="hidden", timeout=10_000)
+        # The dialog only closes on success, so the close doubles as the
+        # success assertion.
+        await submit_dialog(
+            self._page.get_by_role("dialog"), button="Create", timeout=10_000
+        )
 
     def find_row(self, username: str) -> Locator:
         """Return the table row locator for ``username``.
@@ -134,10 +133,9 @@ class UsersAdminPage:
         """Open the reset-password dialog, set ``new_password``, submit."""
         await self._page.locator("[data-testid=user-reset-password-trigger]").click()
         dialog = self._page.get_by_role("dialog", name="Reset password")
-        await dialog.wait_for(state="visible")
+        await wait_for_dialog_open(dialog)
         await self._page.locator("#reset-password-new").fill(new_password)
-        await dialog.get_by_role("button", name="Reset", exact=True).click()
-        await dialog.wait_for(state="hidden", timeout=10_000)
+        await submit_dialog(dialog, button="Reset", timeout=10_000)
 
     async def delete_user(self) -> None:
         """Click the Delete button, confirm via the in-app ConfirmDialog,

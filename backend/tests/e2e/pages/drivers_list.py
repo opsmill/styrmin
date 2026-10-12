@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.refs import DriverVersionRef
+from tests.e2e.pages._dom import wait_for_dialog_open
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
@@ -42,6 +43,9 @@ class DriversListPage:
         # Open the drawer (header action). Only one "Load driver" trigger exists
         # until the drawer mounts its own footer submit button.
         await self._page.get_by_role("button", name="Load driver").first.click()
+        await wait_for_dialog_open(
+            self._page.get_by_role("dialog", name="Load a driver")
+        )
 
         # Git repository is the default tab.
         await self._page.locator("#repositoryUrl").fill(git_url)
