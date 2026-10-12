@@ -20,7 +20,6 @@ import kr8s
 import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Ingress as AsyncIngress
-from kr8s.asyncio.objects import Namespace as AsyncNamespace
 from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
 from kr8s.asyncio.objects import new_class
@@ -29,6 +28,12 @@ from styrmin_sdk.models import UpdateDeploymentInput
 
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.helpers.ingress import (
+    ingress_controller_ids,
+    wait_for_deployment_status,
+    wait_for_namespace_gone,
+    wait_for_traefik_pod,
+)
 
 pytestmark = [
     pytest.mark.shard_compute,
@@ -767,82 +772,6 @@ async def test_ip_whitelist_enforcement_allows_and_rejects(
         )
 
 
-_INGRESS_CONTROLLER_NAME_PREFIX = "styrmin-ingress-controller"
-
-
-async def _wait_for_deployment_status(
-    client: StyrminClient, deployment_id: str, expected: str, timeout: float = 300.0
-) -> None:
-    deadline = time.time() + timeout
-    last = None
-    while time.time() < deadline:
-        last = (await client.deployments.get(deployment_id)).status
-        if last == expected:
-            return
-        await asyncio.sleep(2)
-    raise AssertionError(
-        f"Deployment {deployment_id} never reached {expected!r} within "
-        f"{timeout}s. Last observed: {last!r}."
-    )
-
-
-async def _ingress_controller_ids(
-    client: StyrminClient, environment_id: str, *, include_deleted: bool = False
-) -> dict[str, str]:
-    """Map each ingress controller deployment's id to its status. Both the
-    ``deployment`` query and the default environment list hide internal
-    deployments, so the list has to ask for them."""
-    deployments = await client.deployments.list(
-        environment_id=environment_id,
-        include_deleted=include_deleted,
-        include_internal=True,
-    )
-    return {
-        str(deployment.id): deployment.status
-        for deployment in deployments
-        if deployment.name.startswith(_INGRESS_CONTROLLER_NAME_PREFIX)
-    }
-
-
-async def _wait_for_traefik_pod(
-    kr8s_api: kr8s.asyncio.Api, namespace: str, timeout: float = 300.0
-) -> None:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        async for pod in AsyncPod.list(
-            namespace=namespace,
-            label_selector={"app.kubernetes.io/name": "traefik"},
-            api=kr8s_api,
-        ):
-            if isinstance(pod, AsyncPod) and pod.status.get("phase") == "Running":
-                return
-        await asyncio.sleep(5)
-    raise AssertionError(f"No running Traefik pod in {namespace!r} after {timeout}s")
-
-
-async def _namespace_exists(kr8s_api: kr8s.asyncio.Api, namespace: str) -> bool:
-    try:
-        await AsyncNamespace.get(namespace, api=kr8s_api)
-    except kr8s.NotFoundError:
-        return False
-    return True
-
-
-async def _wait_for_namespace_gone(
-    kr8s_api: kr8s.asyncio.Api, namespace: str, timeout: float = 300.0
-) -> None:
-    # The synthetic Deleted report fires once the CR is gone, which can be
-    # before the namespace finishes terminating.
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if not await _namespace_exists(kr8s_api, namespace):
-            return
-        await asyncio.sleep(5)
-    raise AssertionError(
-        f"Namespace {namespace!r} (Traefik release) still present after {timeout}s"
-    )
-
-
 @pytest.mark.e2e
 @pytest.mark.ci
 @pytest.mark.api_only(
@@ -873,20 +802,20 @@ async def test_deleting_last_app_tears_down_dedicated_ingress(
             driver="simple-app", version="0.1.0", environment_id=environment_id
         )
         app_id = str(task.deployment_id)
-        await _wait_for_deployment_status(client, app_id, "running")
+        await wait_for_deployment_status(client, app_id, "running")
 
-        controllers = await _ingress_controller_ids(client, environment_id)
+        controllers = await ingress_controller_ids(client, environment_id)
         assert len(controllers) == 1, controllers
         (ingress_id,) = controllers
         ingress_namespace = f"styrmin-{ingress_id}"
-        await _wait_for_traefik_pod(kr8s_api, ingress_namespace)
+        await wait_for_traefik_pod(kr8s_api, ingress_namespace)
 
         await client.deployments.delete(app_id)
-        await _wait_for_deployment_status(client, app_id, "deleted")
+        await wait_for_deployment_status(client, app_id, "deleted")
 
         deadline = time.time() + 300.0
         while time.time() < deadline:
-            history = await _ingress_controller_ids(
+            history = await ingress_controller_ids(
                 client, environment_id, include_deleted=True
             )
             if history.get(ingress_id) == "deleted":
@@ -897,18 +826,18 @@ async def test_deleting_last_app_tears_down_dedicated_ingress(
                 f"Ingress controller {ingress_id} never reached 'deleted': {history}"
             )
         # The default list hides tombstones, so absence proves deleted_at is set.
-        assert await _ingress_controller_ids(client, environment_id) == {}
-        await _wait_for_namespace_gone(kr8s_api, ingress_namespace)
+        assert await ingress_controller_ids(client, environment_id) == {}
+        await wait_for_namespace_gone(kr8s_api, ingress_namespace)
 
         task = await client.deployments.create(
             driver="simple-app", version="0.1.0", environment_id=environment_id
         )
-        await _wait_for_deployment_status(client, str(task.deployment_id), "running")
+        await wait_for_deployment_status(client, str(task.deployment_id), "running")
 
-        controllers = await _ingress_controller_ids(client, environment_id)
+        controllers = await ingress_controller_ids(client, environment_id)
         assert len(controllers) == 1, controllers
         (new_ingress_id,) = controllers
         assert new_ingress_id != ingress_id
-        await _wait_for_traefik_pod(kr8s_api, f"styrmin-{new_ingress_id}")
+        await wait_for_traefik_pod(kr8s_api, f"styrmin-{new_ingress_id}")
     finally:
         await client.environments.delete(environment_id=environment_id)
