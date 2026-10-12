@@ -248,7 +248,7 @@ jobs:
       fail-fast: false
       matrix:
         entrypoint: [api, ui]
-        shard: [general, env, compute, backup, env_backup, infrahub, configuration, apply]
+        shard: [general, env, compute, backup, env_backup, infrahub, configuration, apply, task_steps]
         exclude:
           # A cell is excluded only when *every* test it would collect is
           # marked for the other entrypoint. Selecting zero tests makes pytest

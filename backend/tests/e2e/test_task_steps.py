@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from tests.e2e.drivers import ScenarioDriver, StepRef, TimelineEntry
 
 pytestmark = [
-    pytest.mark.shard_general,
+    pytest.mark.shard_task_steps,
 ]
 
 _LOG = logging.getLogger(__name__)
@@ -70,15 +70,19 @@ MISSING_IMAGE = "registry.invalid/styrmin-e2e/simple-app:missing"
 
 HOOK_FAILURE_TIMEOUT = 300.0
 PREREQUISITE_ATTEMPTS_TIMEOUT = 240.0
-# The operator's readiness timeout (270 s, so it fails before FluxCD's 5-minute
-# timeout and rollback), its 5-second check, the agent report and the page refresh,
-# with margin.
-HELMRELEASE_FAILURE_BUDGET = 420.0
+# The operator's readiness timeout (210 s in the E2E values, so it fails before
+# FluxCD's 4-minute timeout and rollback), its 5-second check, the agent report and
+# the page refresh, with margin.
+HELMRELEASE_FAILURE_BUDGET = 360.0
 READ_ONLY_MATCH_TIMEOUT = 60.0
-# FluxCD rolls the upgrade back at its 5-minute timeout, about 30 s after the
-# operator's readiness timeout, and then reconciles the rolled-back release again.
+# FluxCD rolls the upgrade back at its timeout, about 30 s after the operator's
+# readiness timeout, and then reconciles the rolled-back release again.
 ROLLBACK_TIMEOUT = 240.0
-AFTER_ROLLBACK_WATCH = 90.0
+# About 10 s after the rollback FluxCD reports the rolled-back release Ready, and the
+# operator answers on its next 5-second tick with Ready=False RolledBack.
+ROLLED_BACK_TIMEOUT = 120.0
+# Three more operator ticks in which the failure must stay.
+AFTER_ROLLED_BACK_WATCH = 15.0
 # Below uvicorn's 5-second keep-alive timeout, so a read never reuses a connection
 # that the server closes at that moment.
 POLL_INTERVAL = 3.0
@@ -294,21 +298,49 @@ async def _wait_for_rollback(api: Any, namespace: str) -> dict[str, Any]:
         await asyncio.sleep(3.0)
 
 
+def _ready_reason(status: dict[str, Any]) -> str | None:
+    return next(
+        (
+            condition.get("reason")
+            for condition in status.get("conditions") or ()
+            if condition.get("type") == "Ready"
+        ),
+        None,
+    )
+
+
 async def _assert_failure_stays(
     read_timeline: Callable[[], Awaitable[list[TimelineEntry]]],
     task_id: str,
-    *,
-    duration: float,
-) -> None:
-    """Read the task for ``duration`` seconds: its result and HelmRelease step stay FAILED."""
-    deadline = time.monotonic() + duration
+    api: Any,
+    namespace: str,
+) -> dict[str, Any]:
+    """Read the task until the operator answers FluxCD's Ready with RolledBack, then for a few ticks.
+
+    Its result and HelmRelease step stay FAILED on every read. Returns the last
+    StyrminDeployment status.
+    """
+    deadline = time.monotonic() + ROLLED_BACK_TIMEOUT
+    rolled_back_at: float | None = None
     while True:
         entry = next(e for e in await read_timeline() if e.task_id == task_id)
         step = next(s for s in entry.steps if s.key == HELMRELEASE)
         assert step.status == "FAILED", step
         assert entry.result == "FAILED", entry
-        if time.monotonic() >= deadline:
-            return
+        status = await _styrmin_deployment_status(api, namespace)
+        now = time.monotonic()
+        if rolled_back_at is None and _ready_reason(status) == "RolledBack":
+            rolled_back_at = now
+        if (
+            rolled_back_at is not None
+            and now - rolled_back_at >= AFTER_ROLLED_BACK_WATCH
+        ):
+            return status
+        if rolled_back_at is None and now >= deadline:
+            raise AssertionError(
+                f"The operator did not answer FluxCD's Ready with RolledBack within"
+                f" {ROLLED_BACK_TIMEOUT}s: {status}"
+            )
         await asyncio.sleep(POLL_INTERVAL)
 
 
@@ -575,10 +607,9 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
     namespace = failing_actions_deployment["namespace"]
     api = failing_actions_deployment["api"]
     await _wait_for_rollback(api, namespace)
-    await _assert_failure_stays(
-        admin_timeline, entry.task_id, duration=AFTER_ROLLBACK_WATCH
+    cr_status = await _assert_failure_stays(
+        admin_timeline, entry.task_id, api, namespace
     )
-    cr_status = await _styrmin_deployment_status(api, namespace)
     assert cr_status.get("phase") == "Failed", cr_status
     assert cr_status.get("displayState") == "Error", cr_status
     assert "rolled the release back" in (cr_status.get("message") or ""), cr_status

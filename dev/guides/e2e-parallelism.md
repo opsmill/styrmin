@@ -2,11 +2,11 @@
 
 ## Overview
 
-E2E tests run in an 8-shard × 2-entrypoint CI matrix. Each cell is a
+E2E tests run in a 9-shard × 2-entrypoint CI matrix. Each cell is a
 GitHub Actions job that boots its own vcluster, installs styrmin via
 Helm, and runs only the tests carrying its shard marker.
 
-The eight shards:
+The nine shards:
 
 | Shard | Marker | Purpose | Sample tests |
 |---|---|---|---|
@@ -18,6 +18,7 @@ The eight shards:
 | `infrahub` | `shard_infrahub` | Infrahub-stack backup/restore (boots full Infrahub server + DB; isolated from `shard_backup` so simple-app backup tests aren't blocked by Infrahub boot) | `test_infrahub_backup_restore` |
 | `configuration` | `shard_configuration` | `backend/tests/e2e/configuration/` — unified config-drawer UI flows | `test_drawer_env_vars_edit`, `test_drawer_scheduling_edit` |
 | `apply` | `shard_apply` | `test_deployments_apply.py` — manifest `apply` / `apply_files` flows (all `api_only`, each test deploys fresh simple-apps; split out of `general`, where it was the bulk of the run) | `test_apply_creates_updates_then_noops`, `test_apply_files_batch_continues_past_failure` |
+| `task_steps` | `shard_task_steps` | `test_task_steps.py` — failed-step scenarios on one `failing-actions` deployment; the HelmRelease scenario waits out the operator's readiness timeout and FluxCD's rollback (split out of `general`, where it was ~40% of the run) | `test_prerequisite_failure_shows_attempts`, `test_helmrelease_failure_shows_fluxcd_reason` |
 
 The two entrypoints (`api`, `ui`) continue as before — each shard runs
 twice unless every test in it carries `@pytest.mark.api_only` or
@@ -39,7 +40,7 @@ the marker rules.
                                              # shard_backup, shard_env_backup,
                                              # shard_infrahub,
                                              # shard_configuration,
-                                             # shard_apply
+                                             # shard_apply, shard_task_steps
    ]
    ```
 
@@ -76,7 +77,7 @@ Actions UI as the cell that takes longer than its siblings):
    the test's `@pytest.mark.shard_*` marker), or split the shard in half.
 3. Re-run; confirm the new slowest cell is faster than the old one.
 
-Before reaching for any of that, check the three things that dominate a
+Before reaching for any of that, check the four things that dominate a
 shard's wall-clock — reshuffling tests between shards only moves time
 around, it does not remove it:
 
@@ -87,6 +88,12 @@ around, it does not remove it:
   ~60s after Kubernetes has already finished, because the kopf timer is
   the only path that advances a deployment to `Running` or `Deleted`.
   This one value is worth ~50% of the shard.
+- **Does a test wait for a timeout or a retry?** The same `agent.extraEnv`
+  lowers the operator's retry delay after a temporary error
+  (`STYRMIN_OPERATOR_RETRY_DELAY`, 30s → 5s), its readiness timeout
+  (270s → 210s) and FluxCD's HelmRelease timeout (300s → 240s). A test
+  that fails a rollout on purpose waits for these, whatever the host;
+  give it its own shard rather than adding it to a busy one.
 - **Is `PREFECT_WORKER_QUERY_SECONDS` reaching the agent pod?** Same
   file, same `agent.extraEnv`, set to `1`. At Prefect's 10s default
   every agent flow run (a create chains three) starts ~9s late; the
@@ -101,5 +108,5 @@ around, it does not remove it:
 
 See [`dev/knowledge/backend/e2e-testing.md`](../knowledge/backend/e2e-testing.md)
 (§ "Where the wall-clock actually goes") for the measurements behind
-all three, including two environment-sharing optimisations that were
+all four, including two environment-sharing optimisations that were
 measured and rejected.
