@@ -61,10 +61,12 @@ config is what driver templates (`instance.config.*`) and the ingress post-rende
 
 The redeploy is `redeploy_for_environment_update`, the same primitive as the environment
 fan-out: a new instance at the deployment's current application version and bound driver
-version, and an `update_instance` task. Tombstoned deployments are skipped. A `RESTORING`
-deployment is skipped and counted. A redeploy that cannot be started is caught, logged and
-counted, and the other redeploys still start. A resubmission of the same config therefore
-redeploys only the deployments that are not at their resolved config, whatever the cause.
+version, and an `update_instance` task. Tombstoned deployments are skipped. A `DELETING`
+deployment is left to its teardown: it is counted in `evaluated`, like an internal deployment, and
+in no skipped count. A `RESTORING` deployment is skipped and counted. A redeploy that cannot be
+started is caught, logged and counted, and the other redeploys still start. A resubmission of the
+same config therefore redeploys only the deployments that are not at their resolved config,
+whatever the cause.
 
 The environment fan-out in `services/environments.py` is not changed and keeps its comparison of
 the stored environment config.
@@ -99,8 +101,10 @@ the work, only when a deployment's state changes:
 - An internal deployment that moves to `RUNNING` runs `continue_environment_fan_out` for its
   environment: the same per-environment evaluation, without controller creation, because no
   administrator acts. The applications that waited are redeployed.
-- An internal deployment that moves to `FAILED`, and an application that moves to `RUNNING` or
-  `FAILED`, run the removal check of decision 3.
+- An internal deployment that moves to `FAILED`, and an application that moves to `RUNNING`,
+  `FAILED` or `DELETED`, run the removal check of decision 3. The check after `DELETED` is the
+  #252 removal. Before this decision it ran outside a savepoint, so its failure rolled back the
+  whole status report.
 
 Both hooks run in a savepoint (`uow.session.begin_nested()`), like `_record_operator_steps`. A
 failure is logged (`cluster_config_fanout_hook_error`) and the status report still commits.
@@ -146,8 +150,10 @@ The update replaces the whole config. A key left out is removed, except `ingress
 shared `_apply_cluster_defaults`. The config is validated with `validate_cluster_config`
 (`InvalidContextError`, `VALIDATION_ERROR`), and the capabilities are recomputed in the same
 transaction (ADR-026). The update is refused with `EnvironmentOperationInProgressError` while an
-environment clone is building any environment of the cluster; environment backups and restores
-do not block it. No column changes, so no migration ships.
+environment clone occupies any environment of the cluster (`find_clone_occupying_environment`):
+while the clone's capture of a source environment of the cluster has not ended, and while the
+clone that creates an environment of the cluster has not ended. Environment backups and restores
+do not block the update. No column changes, so no migration ships.
 
 `createCluster` keeps `config: JSON`. Changing it was out of scope. The two cluster mutations
 therefore take the config in different shapes: GraphQL validation refuses an unknown field of
@@ -166,6 +172,9 @@ names its path (`dedicated_ingress.servce`).
 The command also accepts the stored enum values that `clusters get` prints (`http`,
 `NodeExternalIP`, `NoSchedule`) and converts them to the GraphQL enum names with
 `to_graphql_enum_names`, so a config copied from `clusters get` can be edited and submitted.
+`clusters get` prints the config in a Rich table cell, which cuts long keys and values with `…`
+when the table is narrower than the JSON (80 columns when the output is piped). The copied JSON is
+therefore valid only with a wide `COLUMNS`, such as `COLUMNS=1000`.
 
 The guard applies to `clusters update` only. A direct GraphQL caller is already protected by
 GraphQL validation. Other commands with the same exposure (`deployments update`,
@@ -176,22 +185,42 @@ GraphQL validation. Other commands with the same exposure (`deployments update`,
 1. In one transaction: load the cluster, run the clone guard on each environment, apply the
    defaults, validate, set `config` and `capabilities`, commit. The row is committed before any
    redeploy starts, as in ADR-012 decision 4.
-2. In the same unit of work: evaluate each environment and start its redeploys and controller
-   actions, then commit once.
-3. Log one line: `cluster_config_fanout cluster_id=… environments=… evaluated=… dispatched=…
-   skipped_noop=… skipped_restoring=… skipped_waiting_for_ingress=… dispatch_failed=…
-   ingress_controllers_created=… ingress_controllers_redeployed=… ingress_controllers_removed=…`.
+2. In the same unit of work: evaluate each environment in its own savepoint, start each redeploy,
+   each controller action and the removal check in a savepoint nested in it, then commit once.
+3. Log one line: `cluster_config_fanout cluster_id=… environments=… environments_failed=…
+   evaluated=… dispatched=… skipped_noop=… skipped_restoring=… skipped_waiting_for_ingress=…
+   dispatch_failed=… ingress_controllers_created=… ingress_controllers_redeployed=…
+   ingress_controllers_removed=…`.
 
 Each status reporter continuation logs the same counts for one environment as
 `cluster_config_fanout_continued`.
+
+A failing redeploy start, controller action or removal check rolls back only its own savepoint
+and is logged and counted, as decisions 1 to 3 describe. When the evaluation of an environment
+fails outside these steps (for example, the environment's stored config no longer validates), the
+environment's savepoint is rolled back, the failure is logged as
+`cluster_config_fanout_environment_error`, and the environment counts in `environments` and
+`environments_failed` only: its other counts are left out of the log line. The other environments
+are still evaluated, and `updateCluster` returns the updated cluster.
+
+The redeploy path opens nested `async with uow` blocks of its own (context generation and
+`resolve_deployment_reference`). `SqlModelUnitOfWork.__aexit__` therefore rolls back only the
+innermost open savepoint when such a block exits with an exception while a savepoint is open, and
+the whole transaction otherwise, as before. Without this rule, a failure in a nested block rolled
+back the whole transaction, including the savepoint of the caller and the redeploys already
+written, and the caller kept using a session whose transaction was gone. An explicit
+`uow.rollback()` still rolls back the whole transaction.
 
 ## Consequences
 
 - Administrators change any cluster value without deleting a deployment, an environment or the
   cluster, through `styrminctl clusters update`, the SDK's `clusters.update()`, GraphQL or the
   Edit button on the cluster detail page.
-- A resubmission of the stored config starts no redeploy, and it recovers the redeploys that could
-  not be started earlier.
+- A resubmission of the stored config redeploys only the deployments and dedicated ingress
+  controllers that are not at their resolved config, whatever the cause: for example a deployment
+  whose redeploy could not be started earlier, or a `RUNNING` controller whose `dedicated_ingress`
+  values an environment update changed. When every deployment is at its resolved config and every
+  controller runs with its environment's values, it starts no redeploy.
 - When a Styrmin release changes how the resolved config is computed (for example a new default),
   the next cluster update redeploys every deployment whose stored resolved config differs in that
   field, even when the administrator changed nothing that the deployment reads. Each of these
@@ -224,6 +253,11 @@ Each status reporter continuation logs the same counts for one environment as
   recovery "resubmit after the removal has finished" is not available. A change to the
   StyrminDeployment custom resource, such as a new annotation, made kopf run the handler again and
   remove the finalizer. This decision does not change the operator.
+- A nested `async with uow` block that fails inside any savepoint now undoes only that savepoint's
+  writes. The only savepoints are the status reporter's two and the cluster config fan-out's, all
+  opened to isolate a failure, so no other caller changes behaviour. `update_environment` opens no
+  savepoint, so a nested block that fails during one of its redeploys still rolls back the whole
+  open transaction, including the redeploys written before it in the same fan-out.
 - The environment and cluster fan-outs now use different comparisons. The cluster fan-out could
   replace the environment fan-out; that is left for a later change.
 - New fan-outs whose change reaches deployments through more than one config level should compare

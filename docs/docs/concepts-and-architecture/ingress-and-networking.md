@@ -28,32 +28,48 @@ The reason for the split: the Styrmin server is a single thing with a
 fixed URL. The applications are many, change often, and need to be
 isolated from each other.
 
-### Why one ingress controller per environment?
+### Why an environment can have its own ingress controller
 
 An **ingress controller** is the program that accepts incoming HTTP
 traffic and routes it to the right service inside the cluster. Styrmin
-uses [Traefik](https://traefik.io/) for this.
+uses [Traefik](https://traefik.io/) as the dedicated ingress controller
+of an environment.
 
-Styrmin gives every environment its own Traefik instance because:
+An environment gets its own Traefik instance only when
+`dedicated_ingress` is set for it (see
+[Dedicated ingress controller or shared ingress class](#dedicated-ingress-controller-or-shared-ingress-class)).
+A dedicated ingress controller gives the environment:
 
-- **Isolation.** Environments often have different IP whitelists,
+- **Isolation.** Environments often have different IP allow lists,
   different TLS certificates, or different load balancers in front of
-  them. Per-environment Traefik makes that trivial — you configure each
-  one independently.
+  them. With a dedicated Traefik instance, you configure each
+  environment's ingress on its own.
 - **Self-contained cloned environments.** When you clone an environment
-  (see [why this matters](../introduction/why-styrmin.md)), the
-  clone gets its own Traefik too. Applications in the clone reach each
-  other through the clone's network, not back to production.
-- **Operational blast radius.** A misconfiguration in one environment's
-  ingress can't take down another environment.
+  (see [why this matters](../introduction/why-styrmin.md)) and
+  `dedicated_ingress` is set for the new environment, the new
+  environment gets its own Traefik instance too. Applications in the
+  clone reach each other through the clone's network, not back to
+  production.
+- **Separate failures.** A misconfiguration in one environment's ingress
+  does not stop the ingress of another environment.
 
-The per-environment ingress controller is itself just a Styrmin-managed
-deployment — Styrmin uses its own driver model to install it. You don't
-have to install or manage it. Styrmin installs it when you deploy the
-first application into the environment, and removes it after you delete
-the last application in the environment. While that removal runs,
-Styrmin rejects new deployments into the environment; deploy again once
-the removal completes, and Styrmin installs a new ingress controller.
+The dedicated ingress controller is itself a deployment that Styrmin
+manages: Styrmin installs it with its own driver model, and you do not
+install or manage it. In an environment that has `dedicated_ingress`
+set and no controller yet, Styrmin installs it when you deploy, update
+or upgrade an application in the environment, or when you update the
+cluster config and the environment has applications. Styrmin removes it
+when no application uses it any more:
+
+- after you delete the last application in the environment
+- after `dedicated_ingress` is turned off for the environment and every
+  application has been redeployed to the cluster's shared ingress class
+  (see the next sections)
+
+While the removal runs and `dedicated_ingress` is still set for the
+environment, Styrmin rejects deploying, updating and upgrading
+applications in the environment. Try again once the removal completes,
+and Styrmin installs a new ingress controller.
 
 ### Dedicated ingress controller or shared ingress class
 
@@ -73,11 +89,9 @@ An environment that does not set `dedicated_ingress` takes the
 cluster's value, so an environment cannot turn off a dedicated ingress
 that the cluster sets.
 
-Besides the removal after the last application is deleted, Styrmin
-removes an environment's ingress controller when `dedicated_ingress` is
-turned off and every application of the environment has been redeployed
-to the shared ingress class. The next two sections describe when that
-happens.
+The next two sections describe how Styrmin changes the ingress of an
+environment when `dedicated_ingress` changes on the cluster or on the
+environment.
 
 ### Changing the dedicated ingress on the cluster
 
@@ -149,7 +163,7 @@ An environment update does not create or redeploy the controller:
 - When it turns the environment's own `dedicated_ingress` on, Styrmin
   redeploys the applications at once, and creates the controller the
   next time an application in the environment is deployed, updated or
-  upgraded.
+  upgraded, or the next time you update the cluster config.
 - When it changes the values of the environment's own
   `dedicated_ingress`, the controller keeps its previous values. A
   cluster update, including one that submits the stored cluster config
@@ -200,9 +214,9 @@ Internal services don't get an external hostname; external ones do.
   [DigitalOcean guide](../installation/digitalocean.md) for what this
   looks like in practice on a real cloud.
 - **Once per environment:** any environment-specific ingress settings
-  (load balancer IDs, IP whitelists, etc.). These live on the
-  Environment record and get passed through to the per-environment
-  Traefik.
+  (load balancer IDs, IP allow lists, etc.). These live on the
+  Environment record and get passed through to the environment's
+  dedicated Traefik instance.
 - **Per deployment:** nothing. The hostname is generated automatically.
 
 ### Next

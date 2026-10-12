@@ -80,8 +80,9 @@ async def update_cluster(
 
     Raises:
         ClusterNotFoundError: If the cluster does not exist.
-        EnvironmentOperationInProgressError: If a clone is building any environment
-            of the cluster (FR-006, research D6).
+        EnvironmentOperationInProgressError: If a clone is still capturing a source
+            environment of the cluster, or is still building an environment of the
+            cluster (FR-006, research D6).
         InvalidContextError: If the config is invalid (FR-008).
     """
     async with uow:

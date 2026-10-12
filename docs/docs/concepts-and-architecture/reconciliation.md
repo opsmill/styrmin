@@ -109,7 +109,8 @@ redeploys are called a config fan-out, and there are two:
 
 Both fan-outs redeploy each deployment at its current application
 version and driver version, through the steps above. Both skip deleted
-deployments and deployments with a restore in progress. Neither
+deployments and deployments with a restore in progress, and the cluster
+config fan-out also skips deployments that are being deleted. Neither
 redeploys an internal deployment, such as an ingress controller, as an
 application; the cluster config fan-out handles ingress controllers by
 their own rules, which the ingress page describes. A redeploy that cannot be

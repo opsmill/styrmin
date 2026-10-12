@@ -274,19 +274,35 @@ application version and driver version:
   environment's effective `dedicated_ingress` changes, the fan-out creates or
   redeploys the environment's dedicated ingress controller and holds back the
   applications that would move onto it until the controller is `RUNNING` with
-  the new values.
+  the new values. It skips `DELETING` deployments. Each environment, and each
+  redeploy, controller action and removal check within it, runs in its own
+  savepoint, so a failure rolls back only that unit. A failing environment is
+  logged as `cluster_config_fanout_environment_error` and counted in
+  `environments_failed`, and `update_cluster` still succeeds.
 
 The cluster config fan-out continues in the status reporter
 (`report_deployment_statuses` in `services/deployment_status.py`), on a state
 change only and inside a savepoint. An internal deployment that reaches
 `RUNNING` runs `continue_environment_fan_out` for its environment, which
 redeploys the applications that waited. An internal deployment that reaches
-`FAILED`, and an application that reaches `RUNNING` or `FAILED`, run
-`tear_down_unused_ingress_controller`, which removes the controller once the
-environment's effective `dedicated_ingress` is off and every application has
-been redeployed without it. Both fan-outs compare per deployment, so a
-resubmission of the same config is a no-op except for the deployments that an
-earlier fan-out could not redeploy.
+`FAILED`, and an application that reaches `RUNNING`, `FAILED` or `DELETED`,
+run `tear_down_unused_ingress_controller`, which removes the controller once
+no application is left in the environment, or once the environment's
+effective `dedicated_ingress` is off and every application has been
+redeployed without it. A failure in the savepoint is logged as
+`cluster_config_fanout_hook_error`, and the status report still commits.
+
+These savepoints isolate a failure because `SqlModelUnitOfWork.__aexit__`
+rolls back only the innermost open savepoint when a nested `async with uow`
+block fails inside one (see [`backend/services.md`](backend/services.md#unit-of-work-pattern)).
+
+Both fan-outs compare per deployment, so a resubmission of the same config
+redeploys only the deployments that are not at the config the fan-out
+compares, whatever the cause, such as a redeploy that an earlier fan-out
+could not start. The cluster config fan-out also redeploys a dedicated
+ingress controller whose `dedicated_ingress` values differ from its
+environment's, for example after an environment update changed them; it
+leaves a `RUNNING` controller whose values match as it is.
 
 For the full field list see [`backend/data-models.md`](backend/data-models.md).
 
