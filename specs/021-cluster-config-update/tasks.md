@@ -31,7 +31,7 @@ description: "Task list for the cluster config update (021-cluster-config-update
 
 **Purpose**: Tooling ready for codegen and tests.
 
-- [ ] T001 Install dependencies with `uv sync` and `cd frontend && pnpm install --ignore-workspace`, then run `uv run invoke generate` once to confirm codegen works before any schema change (no file changes expected)
+- [X] T001 Install dependencies with `uv sync` and `cd frontend && pnpm install --ignore-workspace`, then run `uv run invoke generate` once to confirm codegen works before any schema change (no file changes expected)
 
 ---
 
