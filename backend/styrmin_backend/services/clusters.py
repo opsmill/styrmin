@@ -8,7 +8,11 @@ from uuid import UUID
 from styrmin_backend.context.exceptions import InvalidClusterContextError
 from styrmin_backend.context.validators import validate_cluster_config
 from styrmin_backend.db.models import Cluster
+from styrmin_backend.services.backup.environment import (
+    guard_no_clone_occupying_environment,
+)
 from styrmin_backend.services.capabilities import compute_cluster_capabilities
+from styrmin_backend.services.cluster_config_fanout import fan_out_cluster_config
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
     ClusterAlreadyExistsError,
@@ -62,6 +66,49 @@ async def create_cluster(
         returned_cluster = await uow.clusters.get_by_name(name)
         assert returned_cluster is not None, "Cluster should be created successfully"
         return returned_cluster
+
+
+async def update_cluster(
+    uow: UnitOfWork, cluster_id: UUID, config: dict, acting_user_id: UUID
+) -> Cluster:
+    """Replace a cluster's config, then redeploy the deployments whose resolved config changed.
+
+    The whole config is replaced: a key left out is cleared, except ``ingress_class``
+    and ``runtime_class``, which get the ``create_cluster`` defaults (FR-005). The
+    cluster row and its recomputed capabilities are committed before the fan-out
+    starts any redeploy (FR-001, FR-007, research D7).
+
+    Raises:
+        ClusterNotFoundError: If the cluster does not exist.
+        EnvironmentOperationInProgressError: If a clone is building any environment
+            of the cluster (FR-006, research D6).
+        InvalidContextError: If the config is invalid (FR-008).
+    """
+    async with uow:
+        cluster = await uow.clusters.get(cluster_id)
+        if cluster is None:
+            raise ClusterNotFoundError(f"Cluster with id {cluster_id} not found.")
+
+        # Backups and restores in progress do not block a config update; a clone does.
+        for environment in await uow.environments.get_all():
+            if environment.cluster_id == cluster.id:
+                await guard_no_clone_occupying_environment(environment.id, uow)
+
+        new_config = _apply_cluster_defaults(config)
+        try:
+            validate_cluster_config(new_config)
+        except InvalidClusterContextError as e:
+            raise InvalidContextError(str(e)) from e
+
+        cluster.config = new_config
+        cluster.capabilities = compute_cluster_capabilities(cluster)
+        await uow.commit()
+
+        await fan_out_cluster_config(cluster, uow, acting_user_id)
+
+        refreshed = await uow.clusters.get(cluster_id)
+        assert refreshed is not None, "Cluster should still exist after update"
+        return refreshed
 
 
 async def resolve_cluster(
