@@ -16,28 +16,35 @@ uv run pytest backend/tests/unit/services/test_cluster_update.py \
   backend/tests/unit/context/test_resolve_instance_config.py -v
 uv run pytest backend/tests/functional/graphql/test_cluster_update_propagation.py -v
 uv run pytest cli/tests/test_clusters.py -v
-cd frontend && pnpm test -- EditClusterDialog
+cd frontend && pnpm test EditClusterDialog
 ```
 
 Expected: all pass. The fan-out suite covers the override rule, the resubmission after a forced dispatch failure, the skip rules and the log line; the ordering suite covers each row of the controller table in [research.md](research.md) D4 and the removal rule in D5.
 
 ## 2. Manual check with `styrminctl` (dev stack)
 
+`uv run invoke start --build-image` brings up the dev stack: a vCluster, the Helm chart with an image built from this tree, and the bootstrap of a cluster `local` (FQDN suffix `local.styrmin.io`) and an environment `local`. Without `--build-image` it reuses an existing `registry.opsmill.io/opsmill/styrmin:latest` image, which does not contain this feature. The bootstrap deploys no application, so deploy one first.
+
 ```bash
-uv run invoke dev            # dev stack with one cluster, environment and app
-styrminctl clusters get default
-# copy the printed config into /tmp/cluster.json (the file used with clusters create), then change fqdn_suffix
-styrminctl clusters update default --config @/tmp/cluster.json
-styrminctl deployments list   # the apps that take fqdn_suffix are DEPLOYING
-styrminctl clusters update default --config @/tmp/cluster.json   # second run
+uv run invoke start --build-image
+export STYRMIN_ADDRESS=http://styrmin.local.styrmin.io:8080 STYRMIN_USERNAME=admin STYRMIN_PASSWORD=styrmin
+styrminctl deployments create semaphore 2.16.47 local --cluster local --name semaphore-qs
+styrminctl deployments get <deployment-id>   # wait for Status: running
+COLUMNS=1000 styrminctl clusters get local
+# copy the printed config JSON into /tmp/cluster.json, then change fqdn_suffix
+styrminctl clusters update local --config @/tmp/cluster.json
+styrminctl tasks list                        # one update_instance task for semaphore-qs
+styrminctl deployments get <deployment-id>   # Status: deploying, then running
+styrminctl clusters update local --config @/tmp/cluster.json   # second run, after the first task succeeded
+kubectl logs deploy/styrmin-server -n styrmin | grep cluster_config_fanout
 ```
 
 Expected:
 
-- The first update prints the new config. Each application that takes the cluster's FQDN suffix gets one `UPDATE_INSTANCE` task.
+- The first update prints the new config and the line `Follow their tasks with: styrminctl tasks list`. Each deployment that takes the cluster's FQDN suffix gets one `update_instance` task, and its ingress hosts move to the new suffix.
 - The second run starts no task (SC-003).
-- The server log has one `cluster_config_fanout` line per update with the counts.
-- A file with `"fqdn_sufix"` is refused by the CLI before any request, naming the key.
+- The server log has one `cluster_config_fanout` line per update with the counts: `dispatched=1` for the first update, `dispatched=0 skipped_noop=1` for the second.
+- A file with `"fqdn_sufix"` is refused by the CLI before any request with `Error: Unknown config key(s): fqdn_sufix`.
 
 ## 3. E2E (local pass evidence required)
 
