@@ -816,8 +816,8 @@ class TestEnsureIngressController:
         fake_deployment_repo,
         env_with_ingress,
     ):
-        """#252: a controller torn down after the last app was deleted is not
-        reused, and no second one is started next to it."""
+        """#252, #423: a controller that is being removed is not reused, and no
+        second one is started next to it."""
         existing = Deployment.create(
             name="styrmin-ingress-controller",
             application_version="1.0.0",
@@ -834,10 +834,15 @@ class TestEnsureIngressController:
             environments=fake_env_repo,
             deployments=fake_deployment_repo,
         )
-        with pytest.raises(IngressControllerNotHealthyError, match="being removed"):
+        with pytest.raises(IngressControllerNotHealthyError) as raised:
             await _ensure_ingress_controller(
                 env_with_ingress.id, uow, created_by_user_id=uuid4()
             )
+        # No reason is given: the last deletion and turning dedicated_ingress off both remove it.
+        assert str(raised.value) == (
+            "The dedicated ingress controller is being removed. "
+            "Retry once the removal completes."
+        )
         assert len(fake_deployment_repo._deployments) == 1
 
     async def test_provisions_again_after_controller_was_tombstoned(
