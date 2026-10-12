@@ -23,7 +23,7 @@ from styrmin_backend.domain.models import (
     TaskStatus,
     TaskType,
 )
-from styrmin_backend.services import deployment_status
+from styrmin_backend.services import cluster_config_fanout, deployment_status
 from styrmin_backend.services.cluster_config_fanout import (
     FanOutCounts,
     continue_environment_fan_out,
@@ -145,6 +145,38 @@ class TestControllerActions:
         )
         assert tasks_of(graph, app) == []
         assert counts.ingress_controllers_redeployed == 1
+        assert counts.skipped_waiting_for_ingress == 1
+        assert counts.dispatched == 0
+
+    async def test_failed_controller_redeploy_keeps_the_applications_waiting(
+        self, graph, mocker
+    ):
+        """Review F6: a RUNNING controller still rendered with the old values is not ready."""
+        graph.cluster.config = dict(INGRESS_ON)
+        app = await deploy(graph, graph.env_a, "app-a")
+        controller = await deploy_controller(graph, graph.env_a)
+        redeploy = cluster_config_fanout.redeploy_for_environment_update
+
+        async def _fail_for_the_controller(
+            deployment: Deployment, uow: object
+        ) -> object:
+            if deployment.internal:
+                raise RuntimeError("simulated dispatch failure")
+            return await redeploy(deployment, uow)
+
+        mocker.patch.object(
+            cluster_config_fanout,
+            "redeploy_for_environment_update",
+            side_effect=_fail_for_the_controller,
+        )
+
+        counts = await _fan_out(graph, INGRESS_ON_CHANGED)
+
+        assert graph.uow.tasks.models == []
+        assert tasks_of(graph, app) == []
+        assert controller.status == DeploymentState.RUNNING
+        assert counts.ingress_controllers_redeployed == 0
+        assert counts.dispatch_failed == 1
         assert counts.skipped_waiting_for_ingress == 1
         assert counts.dispatched == 0
 

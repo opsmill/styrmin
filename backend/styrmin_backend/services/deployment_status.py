@@ -46,12 +46,13 @@ async def _run_cluster_config_fanout_hook(
 ) -> None:
     """Continue the config fan-out or check the controller removal after a state change (research D4, D7).
 
-    Runs in a savepoint, so its failure keeps the rest of the report.
+    An application reaching ``DELETED`` also runs the removal check (#252). Runs
+    in a savepoint, so its failure keeps the rest of the report.
     """
     continues = deployment.internal and target_state == DeploymentState.RUNNING
-    checks_removal = not continues and target_state in (
-        DeploymentState.RUNNING,
-        DeploymentState.FAILED,
+    checks_removal = not continues and (
+        target_state in (DeploymentState.RUNNING, DeploymentState.FAILED)
+        or (target_state == DeploymentState.DELETED and not deployment.internal)
     )
     if not (continues or checks_removal):
         return
@@ -122,8 +123,9 @@ async def report_deployment_statuses(
 
     On a state change, a dedicated ingress controller that reaches ``RUNNING``
     continues its environment's config fan-out, and a controller that reaches
-    ``FAILED`` or an application that reaches ``RUNNING`` or ``FAILED`` runs the
-    controller removal check, each in its own savepoint (021 research D4, D7).
+    ``FAILED`` or an application that reaches ``RUNNING``, ``FAILED`` or
+    ``DELETED`` runs the controller removal check, each in its own savepoint
+    (021 research D4, D7).
 
     Args:
         reports: List of dicts with keys: deployment_id (UUID), phase (str),
@@ -248,10 +250,6 @@ async def report_deployment_statuses(
                 await uow.deployments.save(deployment)
                 deployments_updated += 1
 
-                if target_state == DeploymentState.DELETED and not deployment.internal:
-                    await tear_down_unused_ingress_controller(
-                        environment_id=deployment.environment_id, uow=uow
-                    )
                 await _run_cluster_config_fanout_hook(deployment, target_state, uow)
 
         await uow.commit()

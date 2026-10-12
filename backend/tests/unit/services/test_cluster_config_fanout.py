@@ -25,8 +25,10 @@ from styrmin_backend.services import cluster_config_fanout
 from styrmin_backend.services.cluster_config_fanout import (
     FanOutCounts,
     _deployment_at_resolved_config,
+    continue_environment_fan_out,
     fan_out_cluster_config,
 )
+from styrmin_backend.services.clusters import update_cluster
 from styrmin_backend.services.deployment import redeploy_for_environment_update
 from tests.unit.services.cluster_fanout_support import (
     CLUSTER_CONFIG,
@@ -235,6 +237,64 @@ async def test_tombstoned_internal_and_restoring_deployments_are_skipped_and_cou
     assert counts.dispatch_failed == 0
 
 
+async def test_application_being_deleted_is_seen_but_not_redeployed(graph):
+    """Review F3: a redeploy would race the teardown of a ``DELETING`` application."""
+    live = await deploy(graph, graph.env_a, "live")
+    deleting = await deploy(
+        graph, graph.env_a, "deleting", status=DeploymentState.DELETING
+    )
+
+    counts = await _fan_out(
+        graph, {"ingress_class": "nginx", "runtime_class": "default"}
+    )
+
+    assert task_deployment_ids(update_tasks(graph)) == [live.id]
+    assert deleting.status == DeploymentState.DELETING
+    assert counts.evaluated == 2
+    assert counts.dispatched == 1
+    assert counts.skipped_noop == 0
+    assert counts.dispatch_failed == 0
+
+
+async def test_environment_whose_stored_config_no_longer_validates_does_not_stop_the_others(
+    graph, mocker
+):
+    """Review F4: the update succeeds, the other environment is redeployed and the failure is counted."""
+    await deploy(graph, graph.env_a, "app-a")
+    app_b = await deploy(graph, graph.env_b, "app-b")
+    graph.env_a.config = {"removed_field": True}
+    log_info = mocker.patch.object(cluster_config_fanout.logger, "info")
+    log_exception = mocker.patch.object(cluster_config_fanout.logger, "exception")
+    new_config = {**CLUSTER_CONFIG, "fqdn_suffix": "new.example.com"}
+
+    updated = await update_cluster(graph.uow, graph.cluster.id, new_config, USER_ID)
+
+    assert updated.config == new_config
+    assert task_deployment_ids(update_tasks(graph)) == [app_b.id]
+    [line] = _fanout_log_lines(log_info)
+    fields = dict(part.split("=", 1) for part in line.split()[1:])
+    assert fields["environments"] == "2"
+    assert fields["environments_failed"] == "1"
+    assert fields["evaluated"] == "1"
+    assert fields["dispatched"] == "1"
+    [failure] = [call.args for call in log_exception.call_args_list]
+    assert failure[0].startswith("cluster_config_fanout_environment_error ")
+    assert failure[1] == graph.env_a.id
+
+
+async def test_continuation_counts_an_environment_that_fails(graph):
+    """Review F4: the status reporter continuation logs the failure instead of raising."""
+    await deploy(graph, graph.env_a, "app-a")
+    graph.env_a.config = {"removed_field": True}
+
+    counts = await continue_environment_fan_out(
+        graph.env_a.id, graph.uow, trigger_deployment_id=uuid4()
+    )
+
+    assert counts == FanOutCounts(environments=1, environments_failed=1)
+    assert update_tasks(graph) == []
+
+
 async def test_standard_storage_change_redeploys_the_deployments_that_take_it(graph):
     """FR-003: a storage class change is accepted and reaches the deployments that take it."""
     graph.cluster.config = {
@@ -304,6 +364,7 @@ async def test_fan_out_logs_one_line_with_every_count(graph, mocker):
         "skipped_restoring": "1",
         "skipped_waiting_for_ingress": "0",
         "dispatch_failed": "0",
+        "environments_failed": "0",
         "ingress_controllers_created": "0",
         "ingress_controllers_redeployed": "0",
         "ingress_controllers_removed": "0",

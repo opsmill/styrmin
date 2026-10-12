@@ -134,3 +134,21 @@ backend/tests/e2e/test_pod_scheduling.py::test_pod_anti_affinity_cross_deploymen
 
 The four skipped tests are marked `api_only`. The cluster edit test ran first in the shard, and the
 `test_ingress_controller.py` UI tests after it passed on the restored session config.
+
+## Re-run after the review fixes: `test_cluster_update_redeploys_and_moves_dedicated_ingress[api-chromium]`
+
+This run checks that the review fixes (failure isolation in savepoints, a `DELETING` application
+not redeployed, the removal check after a deletion run in a savepoint) did not change the
+behaviour of the cluster config update. The server image was rebuilt from the fixed code with
+`export STYRMIN_IMAGE_VER=fac-cu-rf-1791822948 && docker compose build server`, and the same
+`STYRMIN_IMAGE_VER` was exported for the pytest session.
+
+| Item | Value |
+|---|---|
+| pytest node ID | `backend/tests/e2e/test_cluster_update.py::test_cluster_update_redeploys_and_moves_dedicated_ingress[api-chromium]` |
+| Exact command | `sleep infinity \| uv run pytest "backend/tests/e2e/test_cluster_update.py::test_cluster_update_redeploys_and_moves_dedicated_ingress" -k api-chromium -v -s --pdb 2>&1 \| tee <scratch>/review-fix-e2e.log` |
+| ISO 8601 timestamp (UTC) | `2026-10-12T16:39:52+00:00` (run started 16:36:03, PASS observed 16:39:40) |
+| vCluster id | `pytest-379a806d-2e79-442d-be58-52fe9a7dd403` (deleted by the fixture teardown after the PASS) |
+| Kubeconfig path (during run) | `/tmp/pytest-of-root/pytest-1367/vcluster0/kubeconfig` |
+| Verbatim `PASSED` line | `PASSED16:39:40 info Removing vCluster container vcluster.cp.pytest-379a806d-2e79-442d-be58-52fe9a7dd403...` (pytest's `PASSED` and the teardown log share the line because of `-s`; ANSI colour codes stripped) |
+| Verbatim summary line | `============ 1 passed, 1 deselected, 1 warning in 219.61s (0:03:39) ============` |
