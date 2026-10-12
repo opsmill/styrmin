@@ -152,8 +152,8 @@ description: "Task list for the cluster config update (021-cluster-config-update
 - [X] T050 [P] Update `docs/docs/concepts-and-architecture/ingress-and-networking.md`: what happens when `dedicated_ingress` changes at the cluster (controller ready before applications move; removed after they move; failed or removed controller cases) and the new removal after an environment update turns its own `dedicated_ingress` off
 - [X] T051 [P] Update `docs/docs/concepts-and-architecture/reconciliation.md` to name the cluster config fan-out next to the environment one
 - [X] T052 [P] Add towncrier fragments: `uv run towncrier create -c "..." 423.added.md` (update a cluster's config with `styrminctl clusters update`, the SDK, GraphQL and the cluster detail page) and `uv run towncrier create -c "..." +env-update-removes-ingress-controller.changed.md` (environment update now removes the dedicated ingress controller after its applications move off it); check wording against `dev/guidelines/changelog.md`
-- [ ] T053 Run the full local gate: `uv run invoke format lint`, `uv run invoke validate-graphql`, `uv run invoke test`, `cd frontend && pnpm --ignore-workspace lint && pnpm --ignore-workspace test`; confirm `uv run invoke generate` leaves no diff
-- [ ] T054 Walk through `specs/021-cluster-config-update/quickstart.md` sections 1, 2 and 4 against the dev stack (`uv run invoke dev`) and fix any step that does not match
+- [X] T053 Run the full local gate: `uv run invoke format lint`, `uv run invoke validate-graphql`, `uv run invoke test`, `cd frontend && pnpm --ignore-workspace lint && pnpm --ignore-workspace test`; confirm `uv run invoke generate` leaves no diff
+- [X] T054 Walk through `specs/021-cluster-config-update/quickstart.md` sections 1, 2 and 4 against the dev stack (`uv run invoke dev`) and fix any step that does not match
 
 ---
 

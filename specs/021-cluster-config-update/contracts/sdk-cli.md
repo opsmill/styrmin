@@ -35,7 +35,7 @@ Behaviour:
 1. Parse `--config` with `parse_json_argument`.
 2. Refuse unknown keys at any depth with `validate_input_strict(UpdateClusterInput, data)`; the error names each unknown key path and the command exits non-zero without calling the server (research D3).
 3. Call `sdk.clusters.update(...)`.
-4. On success, print `Cluster '<name>' updated (id: <id>)`, the stored config as JSON, and a line saying that the deployments that take a changed value are being redeployed, with a pointer to `styrminctl deployments list` (critique P3).
+4. On success, print `Cluster '<name>' updated (id: <id>)`, the stored config as JSON, and a line saying that the deployments that take a changed value are being redeployed, with a pointer to `styrminctl tasks list` (critique P3).
 
 Errors go through `styrmin_error_handler` (existing): the validation error, the not-found error, the clone-in-progress error and the permission error print their messages and exit non-zero.
 
