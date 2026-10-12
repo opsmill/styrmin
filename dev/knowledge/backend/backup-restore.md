@@ -363,13 +363,28 @@ A restore is a multi-stage operation: velero recreates the namespace and its res
 ### Stages
 
 1. **Restore start (`services/backup/service.py:create_restore`).** The deployment's status is flipped to `DeploymentState.RESTORING` in the same transaction that creates the `Restore` record. Internal deployments are rejected, and so are tombstoned ones (`deleted_at` set): Velero would recreate the deleted deployment's resources and the flip would move it out of `DELETED` while `deleted_at` stays set. The tombstone keeps `active_application_instance_id`, so the CLI can resolve a target instance for it; the service guard is what refuses it. A second restore is rejected with `RestoreAlreadyInProgressError` when a **non-terminal `Restore` row** (`PENDING` or `IN_PROGRESS`) already targets that deployment, or when one already replays the same backup. `find_in_flight_restore` counts a row as targeting the deployment when it targets the requested or the deployment's own `styrmin-<id>` namespace, or when it restores one of the deployment's own backups into any namespace other than another deployment's `styrmin-<id>` (`createRestore` accepts any `target_namespace`; an environment clone restoring the backup into its counterpart is not a conflict) — the refusal always names the offending restore in `existing_restore_id`. The guard deliberately does **not** read `deployment.status`: an environment clone parks each counterpart in `RESTORING` so nothing reconciles it before its data lands (`specs/010-environment-clone/research.md` D5), and that state is the *precondition* of the first cross-target restore rather than a conflict with it. A deployment left `RESTORING` by a dead restore is therefore restorable again instead of permanently wedged. If the caller then cannot dispatch `execute_restore_workflow`, nothing would ever move the `PENDING` row, so `createRestore` and the environment-restore fan-out call `settle_undispatched_restore`, which marks the restore `FAILED` with the dispatch error and the deployment `FAILED` in one transaction; the clone flow does the same through `_settle_undispatched_restore`.
-2. **Velero work (USER flow).** Namespace is deleted, then velero restores everything from the backup. The CRD is recreated with empty status.
+2. **Velero work (USER flow).** Namespace is deleted, then velero restores everything from the backup except the [resources left out of every backup and restore](#resources-left-out-of-every-backup-and-restore). The CRD is recreated with empty status.
 3. **Operator quiesce.** While `phase == Restoring`, the operator's `kopf_styrmin_deployment_timer` early-returns — it does not advance phases and does not trip the 300 s readiness-timeout-to-Error branch.
 4. **Post-velero recovery (`operator/restore_recovery.py`).** Called from the USER flow after velero polling reports `Completed`:
    - `mark_restoring` — patches the restored CRD to `phase=Restoring` / `displayState=Restoring` so the operator timer recognises the in-flight state.
    - `reapply_and_finalize` — strips kopf state-tracking annotations, re-applies prerequisites (`execute_phase_prerequisites`) and utility resources (`execute_phase_services`), then patches the CRD to `phase=Ready` / `displayState=Running`.
    - `mark_failed` — used on any failure with a message that distinguishes velero failure from post-restore reapply failure.
 5. **Final DB transition (INTERNAL flow).** `deployment.status` is moved from `RESTORING` to `RUNNING` (or `FAILED`) inline so the UI reflects the transition immediately rather than waiting on the next agent status poll.
+
+### Resources left out of every backup and restore
+
+Every Backup CR and every Restore CR sets `excludedResources` to
+`resources/builders/backup.py::ALWAYS_EXCLUDED_RESOURCES`, today
+`ciliumendpoints.cilium.io`. Cilium writes one `CiliumEndpoint` per pod when the pod
+starts, so a backup has no use for it. A restored copy still holds the source pod's
+addresses. When it exists before Cilium sets up the restored pod, the Cilium agent has
+to take it over, and the takeover can fail for good (`endpoint sync cannot take
+ownership of CEP: no pod HostIP`): the agent then never writes the pod's new addresses,
+and pods on other nodes cannot reach it until the pod is deleted. Leaving the type out
+of the Restore CR also covers backups taken before backups left it out. Velero matches
+nothing for a type the cluster does not serve, so clusters without Cilium are not
+affected. A cross-target restore adds the HelmRelease to this list (see
+[Cross-target restore](#cross-target-restore)).
 
 <!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 -->
 
@@ -948,8 +963,8 @@ explicit `metadata.namespace` (all Bitnami subcharts, e.g. simple-app's postgres
 upgrade straight from the restored record renders the release under the source namespace;
 Flux then logs `release target configuration changed (release namespace): running
 uninstall` and the uninstall deletes those pinned objects **from the source namespace**.
-Two changes prevent it: a cross-target Restore CR sets
-`excludedResources: [helmreleases.helm.toolkit.fluxcd.io]`
+Two changes prevent it: a cross-target Restore CR adds
+`helmreleases.helm.toolkit.fluxcd.io` to its `excludedResources`
 (`resources/builders/backup.py::CROSS_TARGET_EXCLUDED_RESOURCES`), so Flux has nothing to
 upgrade until recovery re-renders the HelmRelease; and
 `restore_recovery.py::retarget_helm_release` rewrites the source namespace to the

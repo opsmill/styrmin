@@ -16,6 +16,13 @@ VELERO_RESTORE_PVC_PATCH_CONFIGMAP = "velero-restore-pvc-patch"
 # Recovery re-renders it after retargeting that storage.
 CROSS_TARGET_EXCLUDED_RESOURCES = ["helmreleases.helm.toolkit.fluxcd.io"]
 
+# Left out of every backup and restore: Cilium writes a CiliumEndpoint for each pod
+# when the pod starts. A restored copy still holds the source pod's addresses, and the
+# Cilium agent can fail for good to take it over, leaving the restored pod unreachable
+# from other nodes. Velero matches nothing for a type the cluster does not serve, so
+# this has no effect on clusters without Cilium.
+ALWAYS_EXCLUDED_RESOURCES = ["ciliumendpoints.cilium.io"]
+
 
 def build_velero_backup(
     name: str,
@@ -44,6 +51,7 @@ def build_velero_backup(
         hooks=hooks or [],
         ttl=ttl,
         storage_location=storage_location,
+        excluded_resources=list(ALWAYS_EXCLUDED_RESOURCES),
     )
 
 
@@ -69,14 +77,16 @@ def build_velero_restore(
     ``styrmin.io/source-instance`` so provenance is not lost (research D2.6).
     Omitting it keeps the in-place labelling untouched.
 
-    A cross-target restore also leaves out the HelmRelease
-    (``CROSS_TARGET_EXCLUDED_RESOURCES``); recovery re-renders it.
+    Every restore leaves out ``ALWAYS_EXCLUDED_RESOURCES``, which also covers
+    backups taken before backups left them out. A cross-target restore also
+    leaves out the HelmRelease (``CROSS_TARGET_EXCLUDED_RESOURCES``); recovery
+    re-renders it.
     """
     namespace_mapping = None
-    excluded_resources: list[str] = []
+    excluded_resources = list(ALWAYS_EXCLUDED_RESOURCES)
     if source_namespace != target_namespace:
         namespace_mapping = {source_namespace: target_namespace}
-        excluded_resources = list(CROSS_TARGET_EXCLUDED_RESOURCES)
+        excluded_resources += CROSS_TARGET_EXCLUDED_RESOURCES
 
     labels = {
         "styrmin.io/instance": target_instance_id or instance_id,

@@ -207,6 +207,13 @@ retry loading the dump every 2 seconds, for up to 2 minutes, until the
 database accepts it. The Velero log of a successful restore can show
 failed attempts before the one that loaded the dump.
 
+Backups and restores leave out the `CiliumEndpoint` objects that Cilium
+writes for each pod. Cilium writes new ones when the restored pods start.
+A restored copy would still hold the addresses of the pods that were
+backed up, and Cilium could then leave a restored pod unreachable from
+pods on other nodes. On a cluster that does not run Cilium, this has no
+effect.
+
 ### Following a backup or a restore
 
 On the deployment page, each backup and each restore row lists its steps

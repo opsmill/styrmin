@@ -272,6 +272,18 @@ class TestVeleroBackup:
         # passes through whatever retention the caller resolved.
         assert result["spec"]["ttl"] == "2160h"
         assert "labelSelector" not in result["spec"]
+        assert "excludedResources" not in result["spec"]
+
+    def test_render_with_excluded_resources(self) -> None:
+        backup = VeleroBackup(
+            name="my-backup",
+            namespace="velero",
+            included_namespaces=["app-ns"],
+            ttl="2160h",
+            excluded_resources=["ciliumendpoints.cilium.io"],
+        )
+        result = backup.render()
+        assert result["spec"]["excludedResources"] == ["ciliumendpoints.cilium.io"]
 
     def test_render_with_hooks(self) -> None:
         hook = VeleroBackupHook(

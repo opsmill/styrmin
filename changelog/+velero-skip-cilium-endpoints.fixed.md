@@ -1,0 +1,1 @@
+Fixed restores on clusters that run Cilium sometimes leaving a restored pod unreachable from pods on other nodes, until someone deleted the pod: backups and restores no longer include the per-pod network records (`CiliumEndpoint`) that Cilium recreates when a pod starts.
