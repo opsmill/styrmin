@@ -1258,8 +1258,7 @@ async def _ensure_ingress_controller(
             # A second controller would collide with the old one's pinned node
             # port or load balancer IP, so wait for the teardown to finish.
             raise IngressControllerNotHealthyError(
-                "The dedicated ingress controller is being removed because the "
-                "last application in this environment was deleted. "
+                "The dedicated ingress controller is being removed. "
                 "Retry once the removal completes."
             )
         # PENDING — still deploying, let it proceed
