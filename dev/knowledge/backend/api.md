@@ -121,6 +121,7 @@ Defined on `type Mutation`:
 |----------|-----------|--------|
 | `createCluster` | `name="default", config?` | `Cluster` |
 | `deleteCluster` | `clusterId?, clusterName?` | `String` |
+| `updateCluster` | `input: UpdateClusterInput!, clusterId?, clusterName?` | `Cluster` (`ADMIN`; typed full-replacement input; triggers the cluster config fan-out — see [ADR-065](../../adr/0065-cluster-config-fanout.md)) |
 | `createEnvironment` | `name, clusterId?, clusterName?, config?` | `Environment` |
 | `updateEnvironment` | `environmentId, input: UpdateEnvironmentInput!` | `Environment` (typed full-replacement input; triggers per-deployment redeploy fanout — see [ADR-012](../adr/0012-environment-config-fanout.md)) |
 | `deleteEnvironment` | `environmentId?, environmentName?, clusterId?, clusterName?` | `String` |

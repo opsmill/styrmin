@@ -251,6 +251,43 @@ is therefore the single thing that ties the entire declarative loop
 together: edit a config field anywhere in the hierarchy, and reconciliation
 will notice, plan a remediation, and converge.
 
+Reconciliation runs per deployment, so a change above the deployment
+reaches it only when something starts a reconciliation of that deployment.
+An edit of a deployment reconciles that deployment. An edit of an
+environment or a cluster config reaches the deployments through a **config
+fan-out**, which redeploys each affected deployment at its current
+application version and driver version:
+
+- **Environment config fan-out** (`services/environments.py`,
+  [ADR-012](../adr/0012-environment-config-fanout.md)). `update_environment`
+  commits the environment row, then redeploys each live, non-internal
+  deployment of the environment whose active instance stores a different
+  environment config (`context.environment.config`).
+- **Cluster config fan-out** (`services/cluster_config_fanout.py`,
+  [ADR-065](../adr/0065-cluster-config-fanout.md)). `update_cluster` commits
+  the cluster config and its recomputed capabilities, then
+  `fan_out_cluster_config` evaluates every live, non-internal deployment of
+  every environment of the cluster. It compares the resolved config computed
+  now (`resolve_instance_config`: cluster, then environment, then deployment)
+  with `context.instance.config` of the active instance, so a deployment in an
+  environment that overrides the changed value is not redeployed. When an
+  environment's effective `dedicated_ingress` changes, the fan-out creates or
+  redeploys the environment's dedicated ingress controller and holds back the
+  applications that would move onto it until the controller is `RUNNING` with
+  the new values.
+
+The cluster config fan-out continues in the status reporter
+(`report_deployment_statuses` in `services/deployment_status.py`), on a state
+change only and inside a savepoint. An internal deployment that reaches
+`RUNNING` runs `continue_environment_fan_out` for its environment, which
+redeploys the applications that waited. An internal deployment that reaches
+`FAILED`, and an application that reaches `RUNNING` or `FAILED`, run
+`tear_down_unused_ingress_controller`, which removes the controller once the
+environment's effective `dedicated_ingress` is off and every application has
+been redeployed without it. Both fan-outs compare per deployment, so a
+resubmission of the same config is a no-op except for the deployments that an
+earlier fan-out could not redeploy.
+
 For the full field list see [`backend/data-models.md`](backend/data-models.md).
 
 ---

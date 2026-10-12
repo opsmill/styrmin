@@ -81,8 +81,11 @@ as a semver specifier.
 #### Cluster
 
 A **Cluster** is a Kubernetes cluster registered with Styrmin.
-Cluster-level settings (storage classes, ingress, ...) are configured
-once and inherited by every application deployed on it. Styrmin
+Cluster-level settings (storage classes, ingress, ...) are inherited by
+every application deployed on it. You set them when you create the
+cluster and can change them later with
+[`styrminctl clusters update`](../reference/styrminctl.md#clusters-update--change-a-clusters-config),
+which redeploys the applications that take a changed value. Styrmin
 currently supports one cluster at a time; multi-cluster is on the
 roadmap.
 

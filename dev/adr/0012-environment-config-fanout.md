@@ -1,9 +1,18 @@
 # ADR-012: Environment-Config Update — Typed Input, Per-Deployment Fanout, Clean Replace
 
-**Status**: Accepted
+**Status**: Accepted — narrowed by [ADR-065](0065-cluster-config-fanout.md)
 **Date**: 2026-05-08
 **Source**: specs/009-environment-update/ (spec, plan, research §7-§8, contracts/graphql.md)
 **Supersedes**: the JSON-blob `updateEnvironment(environmentId, config: JSON)` write surface introduced in 008-deployment-env-vars.
+
+> **Narrowed by [ADR-065](0065-cluster-config-fanout.md)** (2026-10-12,
+> 021-cluster-config-update). The cluster config fan-out compares each deployment's resolved
+> config, not the stored config of one level, because a cluster value reaches several environments and an
+> environment can override it. The "convention to replicate" below holds only for a change made
+> at one config level. Since ADR-065, an environment update that turns the environment's own
+> `dedicated_ingress` off also leads to the removal of the environment's dedicated ingress
+> controller once the applications have moved off it. The environment fan-out described below is
+> unchanged.
 
 ## Context
 

@@ -1,0 +1,262 @@
+# ADR-065: Cluster Config Fan-Out — Resolved-Config Comparison and Dedicated Ingress Ordering
+
+**Status**: Accepted
+**Date**: 2026-10-12
+**Source**: [issue #423](https://github.com/opsmill/styrmin/issues/423) and
+specs/021-cluster-config-update/ (spec, plan, research D1 to D12).
+**Related**: [ADR-012](0012-environment-config-fanout.md) (environment config fan-out; this ADR
+narrows its "convention to replicate"), [ADR-026](0026-capabilities-recalculation-in-service-layer.md)
+(capabilities recomputed in the service layer), [ADR-008](0008-deployment-soft-delete-tombstoning.md)
+(the status reporter tombstones deployments),
+[ADR-064](0064-styrmindeployment-write-order-by-instance-sequence.md) (the instance with the
+highest sequence wins on the StyrminDeployment).
+
+## Context
+
+Before #423, an administrator set a cluster's config only when they created the cluster. To
+change one value, such as the shared ingress class or a storage class, they deleted every
+deployment and every environment of the cluster, deleted the cluster and created it again.
+
+Each environment and each deployment takes the cluster's value for every key it does not set
+itself. The resolved config of a deployment is the merge of the cluster config, then the
+environment config, then the deployment config, where the deepest value wins (`env_vars` is
+merged per key, and `scheduling` is merged from the environment and the deployment only). Each
+instance stores the resolved config it was rendered with in `context.instance.config`.
+
+ADR-012 introduced the environment config fan-out. After `updateEnvironment`, Styrmin redeploys
+each live, non-internal deployment of the environment whose active instance stores an
+environment config (`context.environment.config`) that differs from the new environment config.
+ADR-012 recommends this comparison of the changed level's config for future fan-outs.
+
+A cluster update differs from an environment update in two ways:
+
+- One cluster value reaches the deployments of several environments, and an environment can set
+  the same key itself, which hides the cluster's value from its deployments.
+- `dedicated_ingress` decides whether the applications of an environment are served by the
+  environment's dedicated ingress controller, an internal deployment, or by the cluster's shared
+  ingress class. An application that is redeployed onto a controller that does not answer yet is
+  not reachable.
+
+## Decision
+
+### 1. Compare the resolved config, not the stored cluster config
+
+`update_cluster` (`services/clusters.py`) saves the config, then `fan_out_cluster_config`
+(`services/cluster_config_fanout.py`) evaluates every live, non-internal deployment of every
+environment of the cluster. A deployment is redeployed when the resolved config computed now,
+from the new cluster config, the current environment config and the deployment config, differs
+from `active_instance.context.instance.config`. Both sides are normalised with
+`ResolvedConfig.model_validate(...).model_dump(exclude_none=True, mode="json")`. A deployment
+without an active instance, or whose stored resolved config fails validation, is redeployed.
+
+`resolve_instance_config(cluster, environment, deployment)` in `context/resolvers.py` is the
+public entry point to the resolution that `generate_context_from_deployment` uses, so the
+comparison needs no driver, chart or deployed-service lookup per deployment.
+
+ADR-012's comparison does not apply, because the cluster config that each instance stores
+(`context.cluster.config`) differs on every deployment after any cluster change. It would redeploy the deployments of an
+environment that sets the changed value itself, and it would redeploy every deployment after a
+change to a value that no resolution reads (today the cluster's `scheduling` value). The resolved
+config is what driver templates (`instance.config.*`) and the ingress post-render patch read.
+
+The redeploy is `redeploy_for_environment_update`, the same primitive as the environment
+fan-out: a new instance at the deployment's current application version and bound driver
+version, and an `update_instance` task. Tombstoned deployments are skipped. A `RESTORING`
+deployment is skipped and counted. A redeploy that cannot be started is caught, logged and
+counted, and the other redeploys still start. A resubmission of the same config therefore
+redeploys only the deployments that are not at their resolved config, whatever the cause.
+
+The environment fan-out in `services/environments.py` is not changed and keeps its comparison of
+the stored environment config.
+
+### 2. Order the dedicated ingress changes through the status reporter
+
+The effective `dedicated_ingress` of an environment is the environment's own value, or else the
+cluster's. Any object, including `{}`, turns the controller on.
+
+In the update call, for each environment, Styrmin acts on the environment's live controller
+(`find_internal_by_environment`):
+
+| New effective value | Controller | Action |
+|---|---|---|
+| Set, and the environment has applications | None | Create it, attributed to the administrator who submitted the config. |
+| Set | Exists, not `DELETING`, rendered with other `dedicated_ingress` values | Redeploy it with the new values. |
+| Set | `FAILED`, same values, and at least one application waits to move onto it | Redeploy it again. |
+| Set | `DELETING` | None. No second controller while the first one is being removed. |
+| Not set | Exists | None in this step. Removal follows decision 3. |
+
+Each application whose resolved config differs is then handled by its own change:
+
+- Its resolved `dedicated_ingress` changes to a set value: it is redeployed only when the
+  controller is `RUNNING` and was rendered with that value. Otherwise it waits on its current
+  config and is counted as `skipped_waiting_for_ingress`.
+- Any other change, including the removal of its `dedicated_ingress`: it is redeployed at once,
+  whatever the controller state.
+
+The status reporter (`report_deployment_statuses` in `services/deployment_status.py`) continues
+the work, only when a deployment's state changes:
+
+- An internal deployment that moves to `RUNNING` runs `continue_environment_fan_out` for its
+  environment: the same per-environment evaluation, without controller creation, because no
+  administrator acts. The applications that waited are redeployed.
+- An internal deployment that moves to `FAILED`, and an application that moves to `RUNNING` or
+  `FAILED`, run the removal check of decision 3.
+
+Both hooks run in a savepoint (`uow.session.begin_nested()`), like `_record_operator_steps`. A
+failure is logged (`cluster_config_fanout_hook_error`) and the status report still commits.
+
+No list of waiting applications is stored. The comparison of decision 1 recomputes it from the
+database each time, which also makes the continuation idempotent.
+
+### 3. Remove the controller once no application depends on it
+
+`tear_down_unused_ingress_controller` (`services/deployment.py`) requests the deletion of the
+environment's controller when no live application is left in the environment (the #252 rule,
+unchanged), or when all of the following hold:
+
+- The environment's effective `dedicated_ingress` is not set.
+- Every live application's active instance was rendered without `dedicated_ingress`.
+- No live application is `PENDING` or `DEPLOYING`.
+- The controller is not `PENDING` or `DEPLOYING`. The flow that creates or redeploys a controller
+  does not check for `DELETING`, so a deletion requested before that flow writes the
+  StyrminDeployment would leave a controller running without a live row. The check runs again
+  when the controller reaches `RUNNING` or `FAILED`.
+
+The deletion path is the one #252 built: the row moves to `DELETING`, a born-complete
+`delete_deployment` task with its steps is recorded, and the operator tears the controller down.
+
+The check runs at the end of each environment's fan-out and from the status reporter. Because it
+reads only stored state, it also acts after an environment update. When `updateEnvironment`
+turns the environment's own `dedicated_ingress` off and the cluster sets none, the controller is
+now removed once the applications have been redeployed without it. Before this decision, it
+stayed until the last application of the environment was deleted. The environment update still
+neither creates nor redeploys the controller.
+
+### 4. A typed `UpdateClusterInput`, while `createCluster` keeps its JSON argument
+
+`updateCluster(input: UpdateClusterInput!, clusterId: UUID, clusterName: String): Cluster`
+requires the `ADMIN` role. `UpdateClusterInput` mirrors `ClusterConfig` field by field and reuses
+the existing inputs `DedicatedIngressInput`, `SchedulingInput`, `StandardStorageInput` and
+`FastStorageInput` and the enums `ExternalUrlScheme` and `ExternalDnsEndpointsType`, following
+ADR-012's convention of one Strawberry input per Pydantic class.
+`update_cluster_input_to_dict` drops the top-level fields that are `null`.
+
+The update replaces the whole config. A key left out is removed, except `ingress_class` and
+`runtime_class`, which get the `createCluster` defaults (`traefik` and `default`) through the
+shared `_apply_cluster_defaults`. The config is validated with `validate_cluster_config`
+(`InvalidContextError`, `VALIDATION_ERROR`), and the capabilities are recomputed in the same
+transaction (ADR-026). The update is refused with `EnvironmentOperationInProgressError` while an
+environment clone is building any environment of the cluster; environment backups and restores
+do not block it. No column changes, so no migration ships.
+
+`createCluster` keeps `config: JSON`. Changing it was out of scope. The two cluster mutations
+therefore take the config in different shapes: GraphQL validation refuses an unknown field of
+`UpdateClusterInput`, and `ClusterConfig`'s `extra="forbid"` refuses an unknown key of the
+`createCluster` JSON.
+
+### 5. The CLI refuses unknown keys in the config file
+
+The SDK input models that ariadne-codegen generates ignore unknown keys. Under full replacement,
+a misspelled key (`fqdn_sufix`) would be dropped, the real key would be removed, and every
+deployment that takes it would be redeployed without it. `styrminctl clusters update` therefore
+runs `validate_input_strict(UpdateClusterInput, data)` (`cli/src/styrminctl/output.py`) before
+any request. It refuses every key, at any depth, that is neither a field name nor an alias, and
+names its path (`dedicated_ingress.servce`).
+
+The command also accepts the stored enum values that `clusters get` prints (`http`,
+`NodeExternalIP`, `NoSchedule`) and converts them to the GraphQL enum names with
+`to_graphql_enum_names`, so a config copied from `clusters get` can be edited and submitted.
+
+The guard applies to `clusters update` only. A direct GraphQL caller is already protected by
+GraphQL validation. Other commands with the same exposure (`deployments update`,
+`env-clones create --config-override`) are not changed.
+
+### 6. Transaction boundaries
+
+1. In one transaction: load the cluster, run the clone guard on each environment, apply the
+   defaults, validate, set `config` and `capabilities`, commit. The row is committed before any
+   redeploy starts, as in ADR-012 decision 4.
+2. In the same unit of work: evaluate each environment and start its redeploys and controller
+   actions, then commit once.
+3. Log one line: `cluster_config_fanout cluster_id=… environments=… evaluated=… dispatched=…
+   skipped_noop=… skipped_restoring=… skipped_waiting_for_ingress=… dispatch_failed=…
+   ingress_controllers_created=… ingress_controllers_redeployed=… ingress_controllers_removed=…`.
+
+Each status reporter continuation logs the same counts for one environment as
+`cluster_config_fanout_continued`.
+
+## Consequences
+
+- Administrators change any cluster value without deleting a deployment, an environment or the
+  cluster, through `styrminctl clusters update`, the SDK's `clusters.update()`, GraphQL or the
+  Edit button on the cluster detail page.
+- A resubmission of the stored config starts no redeploy, and it recovers the redeploys that could
+  not be started earlier.
+- When a Styrmin release changes how the resolved config is computed (for example a new default),
+  the next cluster update redeploys every deployment whose stored resolved config differs in that
+  field, even when the administrator changed nothing that the deployment reads. Each of these
+  redeploys adds a new instance and an `update_instance` task to the deployment.
+- Any transition of a controller to `RUNNING`, including after its first deploy or after a repair,
+  runs its environment's fan-out. With converged deployments it starts no redeploy. Deployments
+  that are not at their resolved config are redeployed.
+- If the controller moves to `RUNNING` while an update call evaluates the same environment, both
+  can start a redeploy of one application. Both instances carry the same resolved config, and the
+  one with the highest instance sequence wins on the StyrminDeployment (ADR-064). The cost is one
+  extra task.
+- If a status reporter continuation fails, the waiting applications move only at the controller's
+  next transition to `RUNNING` or at a resubmission of the cluster config.
+- `apply_state` dispatches the Prefect flow before the transaction commits. If the fan-out's
+  commit, or the status report's savepoint or commit, fails after a dispatch, the flow refers to a
+  task row that does not exist. `update_environment` and `deploy_application` have the same window;
+  this decision does not widen it.
+- Two updates do not merge: the update saved last wins, and a file saved before another update
+  reverts it. There is no concurrency check.
+- Kubernetes refuses any change to the volume claim templates of an existing StatefulSet, and
+  driver templates can write the storage class there. A storage class change then fails that
+  deployment's redeploy. The new instance is already active, so a resubmission does not retry it.
+  The administrator recovers by submitting the previous storage class again or by recreating the
+  deployment. There is no workaround in Styrmin, and existing volumes are not moved.
+- A pre-existing operator race in the #252 deletion path can leave a deleted controller in
+  `DELETING`: when kopf's delete handler and the StyrminDeployment timer run at the same moment,
+  kopf keeps its finalizer and the namespace stays `Terminating` (seen once in the E2E run of
+  2026-10-12, recorded in specs/021-cluster-config-update/e2e-evidence.md). While the controller
+  stays `DELETING`, the applications that would move onto a controller keep waiting, and the
+  recovery "resubmit after the removal has finished" is not available. A change to the
+  StyrminDeployment custom resource, such as a new annotation, made kopf run the handler again and
+  remove the finalizer. This decision does not change the operator.
+- The environment and cluster fan-outs now use different comparisons. The cluster fan-out could
+  replace the environment fan-out; that is left for a later change.
+- New fan-outs whose change reaches deployments through more than one config level should compare
+  the resolved config, as decision 1 does, not the stored config of one level.
+
+## Alternatives Considered
+
+- Compare the cluster config that each instance stores (`context.cluster.config`), as ADR-012
+  does for the environment config: rejected, see decision 1.
+- Render the full Helm values and compare them: rejected. It needs the driver version, the chart
+  and the deployed services of every deployment, and it misses the post-render patches (ingress
+  annotations, env vars, scheduling).
+- Compare only the cluster keys that changed: rejected. It does not recover deployments that
+  missed an earlier update, and it needs the previous config, which is not reliable after a
+  partial failure.
+- Start every redeploy at once, the controller first: rejected. The applications would move to a
+  controller that does not answer yet.
+- A Prefect flow that waits for the controller, then redeploys the applications: rejected. It adds
+  a long-running flow and a new flow type per environment (which ADR-012 rejected for the
+  environment fan-out), and it holds a worker slot while it polls.
+- A stored table of pending redeploys: rejected. The comparison already derives the pending set
+  from the database, and a table would hold state that can drift from it.
+- The operator waits in the application's prerequisites until the environment's controller is
+  ready: rejected. The operator would need to know which controller serves which environment, and
+  the wait would not show in Styrmin's tasks.
+- Remove the controller in the update call, after starting the application redeploys: rejected.
+  The redeploys run asynchronously, so the controller would be removed before the applications
+  have moved.
+- `config: JSON` on `updateCluster`, like `createCluster`: rejected. It reverses ADR-012's typed
+  input convention for a new mutation, and the one benefit it has over the typed input (unknown
+  keys refused by every surface) is restored in the CLI by decision 5.
+- A typed input with a JSON escape hatch: rejected. Two write paths to validate and test, which
+  ADR-012 decision 3 already rejected.
+- An ariadne-codegen plugin that sets `extra="forbid"` on every generated SDK input: rejected for
+  this change, because it changes every SDK input type for every SDK user. It remains a candidate
+  for a separate change.

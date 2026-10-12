@@ -19,9 +19,10 @@ There are two different "front doors" in a Styrmin cluster:
    set up the cluster (see the
    [DigitalOcean guide](../installation/digitalocean.md) for a worked
    example) and it never changes per deployment.
-2. **A front door per environment.** Every Styrmin environment gets its
+2. **A front door per environment.** A Styrmin environment can get its
    own ingress controller, which handles traffic to the applications
-   deployed in that environment.
+   deployed in that environment (see
+   [Dedicated ingress controller or shared ingress class](#dedicated-ingress-controller-or-shared-ingress-class)).
 
 The reason for the split: the Styrmin server is a single thing with a
 fixed URL. The applications are many, change often, and need to be
@@ -53,6 +54,106 @@ first application into the environment, and removes it after you delete
 the last application in the environment. While that removal runs,
 Styrmin rejects new deployments into the environment; deploy again once
 the removal completes, and Styrmin installs a new ingress controller.
+
+### Dedicated ingress controller or shared ingress class
+
+The `dedicated_ingress` setting decides whether an environment gets its
+own ingress controller:
+
+- When the environment sets `dedicated_ingress`, or the environment does
+  not set it and the cluster does, the environment gets a dedicated
+  ingress controller and its applications are served through it. Any
+  `dedicated_ingress` object turns it on, including an empty one (`{}`).
+- When neither the environment nor the cluster sets `dedicated_ingress`,
+  the applications' Ingress resources use the cluster's `ingress_class`
+  (`traefik` by default), and the shared ingress controller of the
+  Kubernetes cluster for that class serves them.
+
+An environment that does not set `dedicated_ingress` takes the
+cluster's value, so an environment cannot turn off a dedicated ingress
+that the cluster sets.
+
+Besides the removal after the last application is deleted, Styrmin
+removes an environment's ingress controller when `dedicated_ingress` is
+turned off and every application of the environment has been redeployed
+to the shared ingress class. The next two sections describe when that
+happens.
+
+### Changing the dedicated ingress on the cluster
+
+When you update the cluster config (with `styrminctl clusters update`,
+the SDK, the `updateCluster` GraphQL mutation or the cluster detail
+page) and the update turns `dedicated_ingress` on, changes its values,
+or turns it off, Styrmin changes the ingress of each environment that
+takes the cluster's value. It orders the changes so that the
+applications stay reachable. Environments that set their own
+`dedicated_ingress` keep their own value. See
+[`clusters update`](../reference/styrminctl.md#clusters-update--change-a-clusters-config)
+for the rest of the update.
+
+When the update turns `dedicated_ingress` on or changes its values:
+
+1. Styrmin creates the environment's ingress controller, or redeploys it
+   with the new values. In an environment without applications, Styrmin
+   creates no controller; it creates one when you deploy the first
+   application, as before.
+2. The applications stay on their current ingress while the controller
+   is not `RUNNING` with the new values.
+3. When the controller reaches `RUNNING`, Styrmin redeploys the
+   applications onto it.
+
+When the update turns `dedicated_ingress` off:
+
+1. Styrmin redeploys the applications to the cluster's `ingress_class`
+   at once.
+2. Styrmin removes the controller once every application has been
+   redeployed without the dedicated ingress, and neither the
+   applications nor the controller are `PENDING` or `DEPLOYING`. A
+   controller that is still being created when you turn the setting off
+   is removed once its creation has finished, so no controller is left
+   running without a record in Styrmin.
+
+When the controller has failed or is being removed:
+
+- The controller is `FAILED` and the update does not change the
+  environment's `dedicated_ingress`: Styrmin redeploys the applications
+  for the other changed values and leaves the controller as it is.
+- A new or redeployed controller ends `FAILED`: the applications that
+  wait to move onto it stay on their current config, because Styrmin
+  never moves an application onto a controller that is not `RUNNING`.
+  Submit the config again: Styrmin redeploys the controller again, and
+  moves the applications once it is `RUNNING`.
+- The controller is being removed (`DELETING`): Styrmin does not create
+  a second controller, and the applications that would move onto one
+  stay on their current config. Submit the config again once the
+  removal has finished; Styrmin then creates a new controller and moves
+  them.
+- The update turns `dedicated_ingress` off while the controller is
+  `FAILED`: Styrmin redeploys the applications to the shared ingress
+  class, then removes the controller.
+
+When an environment's controller reaches `RUNNING` for any reason, for
+example after the first deploy creates it, Styrmin also redeploys the
+applications of that environment that are not yet at the config they
+resolve to.
+
+### Changing the dedicated ingress of an environment
+
+When you update an environment and turn its own `dedicated_ingress`
+off, and the cluster does not set `dedicated_ingress`, Styrmin redeploys
+the applications to the shared ingress class and removes the
+environment's controller once they have moved.
+
+An environment update does not create or redeploy the controller:
+
+- When it turns the environment's own `dedicated_ingress` on, Styrmin
+  redeploys the applications at once, and creates the controller the
+  next time an application in the environment is deployed, updated or
+  upgraded.
+- When it changes the values of the environment's own
+  `dedicated_ingress`, the controller keeps its previous values. A
+  cluster update, including one that submits the stored cluster config
+  again, redeploys the controller with the environment's values.
 
 ### How an application URL gets assigned
 
