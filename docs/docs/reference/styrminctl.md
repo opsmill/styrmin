@@ -105,8 +105,11 @@ Error: Unknown config key(s): fqdn_sufix, dedicated_ingress.servce
 To start from the stored config, run `styrminctl clusters get <name>`.
 It prints the config as JSON in the `config` column, and `clusters
 update` accepts that JSON as it is, including values such as
-`"external_url_scheme": "http"`. In a narrow terminal the table wraps
-the JSON over several lines; set `COLUMNS` to a large value to print it
+`"external_url_scheme": "http"`. When the JSON is wider than the
+column, the table splits it over several lines and cuts long keys and
+values with `…`, and a copy of the cut JSON is not valid. The output
+is 80 characters wide when you pipe it to a file or another command.
+Set `COLUMNS` to a large value so that the table prints the whole JSON
 on one line:
 
 ```bash
@@ -120,8 +123,10 @@ the stored config with `clusters get` immediately before you edit it.
 The update is refused, and nothing is saved, in these cases:
 
 - The config does not pass validation (`VALIDATION_ERROR`).
-- An environment clone is building an environment of the cluster.
-  Environment backups and restores in progress do not block the update.
+- An environment clone is in progress in the cluster: it is still
+  capturing the backup of an environment of the cluster, or it is still
+  building its new environment in the cluster. Environment backups and
+  restores in progress do not block the update.
 - You do not have the administrator role.
 
 #### Which deployments are redeployed
@@ -135,12 +140,17 @@ driver version. As a result:
 
 - A deployment in an environment that sets the changed value itself is
   not redeployed.
-- Submitting the stored config again redeploys nothing, except the
-  deployments whose redeploy could not be started during an earlier
-  update.
-- Deleted deployments are not redeployed. A deployment with a restore in
-  progress is skipped; submit the config again after the restore has
-  ended.
+- Submitting the stored config again redeploys only the deployments
+  that are not at the config they resolve to, whatever the cause. For
+  example, it redeploys a deployment whose redeploy could not be started
+  during an earlier update. It also redeploys a dedicated ingress
+  controller whose `dedicated_ingress` values differ from the values
+  that its environment resolves to, for example after an environment
+  update changed the environment's own `dedicated_ingress` values. It
+  does not redeploy a `RUNNING` controller whose values match.
+- Deleted deployments and deployments that are being deleted are not
+  redeployed. A deployment with a restore in progress is skipped; submit
+  the config again after the restore has ended.
 - The cluster's `scheduling` value is saved, but no deployment's config
   reads it, so a change to it redeploys nothing.
 - When `dedicated_ingress` changes, the applications of an environment
@@ -156,11 +166,20 @@ of its deployment. The server log has one `cluster_config_fanout` line
 per update, with the number of deployments evaluated, redeployed,
 skipped and failed.
 
+When the evaluation of one environment fails, for example because the
+environment's stored config no longer passes validation, Styrmin
+cancels the changes that it recorded for that environment and logs a
+`cluster_config_fanout_environment_error` line. The
+`environments_failed` count of the `cluster_config_fanout` line counts
+these environments. The update still succeeds, and Styrmin evaluates
+the other environments.
+
 #### Reverting an update
 
 To revert an update, submit the previous file again. Styrmin redeploys
 the deployments whose config changes back. Keep a copy of the file
-before you edit it, or save the output of `clusters get` first.
+before you edit it, or save the output of `COLUMNS=1000 styrminctl
+clusters get <name>` first.
 
 #### Storage class change on a StatefulSet
 

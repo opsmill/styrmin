@@ -25,7 +25,11 @@ clusters_app = App(name="clusters", help="Manage clusters.")
 
 
 def _config_cell(config: object) -> str:
-    """The config as JSON, so it can be copied into a file for ``clusters update``."""
+    """The config as JSON for ``clusters update``.
+
+    Rich cuts long keys and values with "…" when the table is narrower than the JSON
+    (80 columns when piped), so the copied JSON is valid only with a wide ``COLUMNS``.
+    """
     return escape(json.dumps(config, sort_keys=True)) if config is not None else ""
 
 
