@@ -6,8 +6,11 @@ cluster's config through the SDK in four phases, on two new environments with
 one ``simple-app`` each: A takes every cluster value, B sets ``ingress_class:
 traefik``.
 
-The test changes the cluster config that every test of ``shard_compute``
-shares. The module sorts first in the shard, and the test restores the
+``test_edit_cluster_config_from_detail_page`` covers User Story 3 scenario 1:
+it changes only the FQDN suffix in the Edit dialog of the cluster detail page.
+
+Both tests change the cluster config that every test of ``shard_compute``
+shares. The module sorts first in the shard, and each test restores the
 original config and waits for the cluster to settle before it ends.
 """
 
@@ -17,7 +20,7 @@ import asyncio
 import time
 import uuid
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import kr8s
 import kr8s.asyncio
@@ -28,6 +31,12 @@ from styrmin_sdk import StyrminClient, UpdateClusterInput
 from styrmin_sdk.graphql._generated.enums import (
     ExternalDnsEndpointsType,
     ExternalUrlScheme,
+    TolerationEffect,
+    TolerationOperator,
+)
+from styrmin_sdk.graphql._generated.input_types import (
+    SchedulingInput,
+    TolerationInput,
 )
 
 from tests.e2e.conftest import _portforward, _wait_for_http
@@ -39,6 +48,10 @@ from tests.e2e.helpers.ingress import (
     wait_for_deployment_status,
     wait_for_namespace_gone,
 )
+from tests.e2e.pages.cluster_detail import ClusterDetailPage
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page
 
 pytestmark = [
     pytest.mark.shard_compute,
@@ -356,3 +369,70 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
         await wait_for_cluster_settled(client, cluster_id)
         for environment_id in environment_ids:
             await client.environments.delete(environment_id=environment_id)
+
+
+# A cluster value the edit dialog does not show. No resolved config reads the
+# cluster's scheduling, and a toleration only allows pods onto nodes.
+_HIDDEN_SCHEDULING = SchedulingInput(
+    tolerations=[
+        TolerationInput(
+            key="styrmin.io/cluster-edit-e2e",
+            operator=TolerationOperator.EXISTS,
+            effect=TolerationEffect.NO_SCHEDULE,
+        )
+    ]
+)
+
+
+@pytest.mark.e2e
+@pytest.mark.ci
+@pytest.mark.ui_only(
+    reason="Drives the Edit dialog of the cluster detail page, which has no SDK "
+    "equivalent; the SDK path is covered by "
+    "test_cluster_update_redeploys_and_moves_dedicated_ingress."
+)
+async def test_edit_cluster_config_from_detail_page(
+    styrmin_resources: dict,
+    session_ui_page: Page,
+) -> None:
+    """Change only the FQDN suffix in the Edit dialog, signed in as the seeded admin.
+
+    The stored config gets the new suffix and keeps every other value: the
+    ones the dialog shows (``dedicated_ingress``, the storage classes,
+    ``external_dns_endpoints_type``) and a ``scheduling`` value it does not
+    show, which the test adds through the SDK first.
+    """
+    client: StyrminClient = styrmin_resources["client"]
+    cluster_id = str(styrmin_resources["cluster_id"])
+
+    original = (await client.clusters.get(cluster_id=cluster_id)).config
+    for key in ("dedicated_ingress", "standard_storage", "external_dns_endpoints_type"):
+        assert original.get(key) is not None, (
+            f"session cluster has no {key}: {original}"
+        )
+    original_input = _cluster_input(original)
+    new_suffix = f"edit-{uuid.uuid4().hex[:6]}.styrmin.com"
+
+    try:
+        await client.clusters.update(
+            original_input.model_copy(update={"scheduling": _HIDDEN_SCHEDULING}),
+            cluster_id=cluster_id,
+        )
+        before = (await client.clusters.get(cluster_id=cluster_id)).config
+        assert before.get("scheduling"), before
+
+        page = ClusterDetailPage(session_ui_page)
+        await page.goto(cluster_id=cluster_id)
+        await page.open_edit_dialog()
+        await page.set_fqdn_suffix(new_suffix)
+        await page.save()
+
+        stored = (await client.clusters.get(cluster_id=cluster_id)).config
+        assert stored == {**before, "fqdn_suffix": new_suffix}, (
+            f"Saving the dialog changed more than the FQDN suffix.\n"
+            f"before: {before}\nstored: {stored}"
+        )
+        await page.wait_for_section_text("Networking", new_suffix)
+    finally:
+        await client.clusters.update(original_input, cluster_id=cluster_id)
+        await wait_for_cluster_settled(client, cluster_id)
