@@ -131,10 +131,10 @@ description: "Task list for the cluster config update (021-cluster-config-update
 - [X] T038 [US3] Create `frontend/src/pages/clusters/EditClusterDialog.tsx`: prefill from `cluster.config` via `configToFormValues`, on submit merge the form values over the stored config (so unseen keys and unseen `dedicated_ingress.service` fields are carried through), map to `UpdateClusterInput` (camelCase keys, enum values), call `useUpdateClusterMutation`, invalidate the cluster query, close on success, show the error otherwise
 - [X] T039 [US3] Add an Edit button that opens `EditClusterDialog` to `frontend/src/pages/clusters/ClusterDetailPage.tsx`, shown only when `useAuth().effectiveRole === "ADMIN"`
 - [X] T040 [US3] Run `cd frontend && pnpm --ignore-workspace test` and `pnpm --ignore-workspace lint` to green
-- [ ] T041 [P] [US3] Add `open_edit_dialog()`, `set_fqdn_suffix(value)` and `save()` to `backend/tests/e2e/pages/cluster_detail.py`
-- [ ] T042 [US3] Add `test_edit_cluster_config_from_detail_page` to `backend/tests/e2e/test_cluster_update.py`, marked `e2e`, `ci`, `ui_only(reason=...)`: sign in as admin, change only the FQDN suffix in the dialog, read the stored config through the SDK (new suffix; `dedicated_ingress`, `standard_storage`, `fast_storage`, `external_dns_endpoints_type` unchanged); `finally` resubmit the original session config through the SDK and wait for the cluster to settle (T030)
-- [ ] T043 [US3] Run `sleep infinity | uv run pytest "backend/tests/e2e/test_cluster_update.py::test_edit_cluster_config_from_detail_page" -k ui-chromium -v -s --pdb 2>&1 | tee /tmp/cluster-update-ui.log` until it passes (in its own session, separate from the API variant)
-- [ ] T044 [US3] Append the local pass evidence for T043 to `specs/021-cluster-config-update/e2e-evidence.md`
+- [X] T041 [P] [US3] Add `open_edit_dialog()`, `set_fqdn_suffix(value)` and `save()` to `backend/tests/e2e/pages/cluster_detail.py`
+- [X] T042 [US3] Add `test_edit_cluster_config_from_detail_page` to `backend/tests/e2e/test_cluster_update.py`, marked `e2e`, `ci`, `ui_only(reason=...)`: sign in as admin, change only the FQDN suffix in the dialog, read the stored config through the SDK (new suffix; `dedicated_ingress`, `standard_storage`, `fast_storage`, `external_dns_endpoints_type` unchanged); `finally` resubmit the original session config through the SDK and wait for the cluster to settle (T030)
+- [X] T043 [US3] Run `sleep infinity | uv run pytest "backend/tests/e2e/test_cluster_update.py::test_edit_cluster_config_from_detail_page" -k ui-chromium -v -s --pdb 2>&1 | tee /tmp/cluster-update-ui.log` until it passes (in its own session, separate from the API variant)
+- [X] T044 [US3] Append the local pass evidence for T043 to `specs/021-cluster-config-update/e2e-evidence.md`
 
 **Checkpoint**: All three stories work and both E2E tests have local pass evidence.
 
