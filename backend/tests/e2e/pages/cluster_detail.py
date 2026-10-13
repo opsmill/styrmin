@@ -2,7 +2,8 @@
 
 Each configuration area renders as a ``<section>`` labelled by its heading
 (``ClusterConfiguration.tsx``), so sections resolve by ARIA ``region`` name.
-The admin-only Edit button opens ``EditClusterDialog.tsx``.
+The admin-only Edit button opens ``EditClusterDialog.tsx``, which reviews the
+change with a dry run, then saves and shows what the save started.
 """
 
 from __future__ import annotations
@@ -50,22 +51,44 @@ class ClusterDetailPage:
         await expect(self._edit_dialog()).to_be_visible()
 
     async def set_fqdn_suffix(self, value: str) -> None:
-        await self._edit_dialog().get_by_label("FQDN Suffix", exact=True).fill(value)
+        await self._edit_dialog().get_by_label("FQDN suffix", exact=True).fill(value)
 
-    async def save(self) -> None:
-        """Save the dialog; it closes once the server accepted the update."""
+    async def _alert_text(self) -> str:
+        alert = self._edit_dialog().get_by_role("alert").last
+        return (
+            await alert.inner_text()
+            if await alert.count() > 0
+            else "(no alert rendered)"
+        )
+
+    async def review(self) -> str:
+        """Run the dry run and return the text of the review step."""
         dialog = self._edit_dialog()
-        await dialog.get_by_role("button", name="Save", exact=True).click()
+        await dialog.get_by_role("button", name="Review changes", exact=True).click()
+        review = dialog.get_by_test_id("cluster-update-review")
         try:
-            await dialog.wait_for(state="hidden", timeout=30_000)
+            await review.wait_for(state="visible", timeout=30_000)
         except PlaywrightTimeoutError as exc:
-            # A refused update keeps the dialog open with an inline alert.
-            alert = dialog.get_by_role("alert")
-            message = (
-                await alert.inner_text()
-                if await alert.count() > 0
-                else "(no alert rendered)"
-            )
             raise ScenarioActionError(
-                f"cluster config save did not close the dialog: {message}"
+                f"cluster config review did not open: {await self._alert_text()}"
             ) from exc
+        return await review.inner_text()
+
+    async def save(self) -> str:
+        """Review unless already reviewed, save, and close the dialog; return the text of the result step."""
+        dialog = self._edit_dialog()
+        if not await dialog.get_by_test_id("cluster-update-review").is_visible():
+            await self.review()
+        await dialog.get_by_role("button", name="Save and redeploy", exact=True).click()
+        result = dialog.get_by_test_id("cluster-update-result")
+        try:
+            await result.wait_for(state="visible", timeout=30_000)
+        except PlaywrightTimeoutError as exc:
+            # A refused update keeps the review open with an alert next to the buttons.
+            raise ScenarioActionError(
+                f"cluster config save did not finish: {await self._alert_text()}"
+            ) from exc
+        text = await result.inner_text()
+        await dialog.get_by_role("button", name="Done", exact=True).click()
+        await dialog.wait_for(state="hidden")
+        return text

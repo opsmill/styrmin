@@ -61,6 +61,7 @@ from .enums import (
     EnvironmentRestoreStatus,
     ExternalDnsEndpointsType,
     ExternalUrlScheme,
+    IngressControllerAction,
     LabelSelectorOperator,
     PodPhase,
     RestoreStatus,
@@ -376,7 +377,17 @@ from .update_backup_storage_location import (
     UpdateBackupStorageLocation,
     UpdateBackupStorageLocationUpdateBackupStorageLocation,
 )
-from .update_cluster import UpdateCluster, UpdateClusterUpdateCluster
+from .update_cluster import (
+    UpdateCluster,
+    UpdateClusterUpdateCluster,
+    UpdateClusterUpdateClusterCluster,
+    UpdateClusterUpdateClusterFailedEnvironments,
+    UpdateClusterUpdateClusterFailedToStart,
+    UpdateClusterUpdateClusterIngressControllers,
+    UpdateClusterUpdateClusterRedeployed,
+    UpdateClusterUpdateClusterSkippedRestoring,
+    UpdateClusterUpdateClusterWaitingForIngress,
+)
 from .update_deployment import UpdateDeployment, UpdateDeploymentUpdateDeployment
 from .update_deployment_version import (
     UpdateDeploymentVersion,
@@ -591,6 +602,7 @@ __all__ = [
     "GraphQLClientGraphQLMultiError",
     "GraphQLClientHttpError",
     "GraphQLClientInvalidResponseError",
+    "IngressControllerAction",
     "IngressServiceConfigInput",
     "LabelSelectorInput",
     "LabelSelectorOperator",
@@ -696,6 +708,13 @@ __all__ = [
     "UpdateCluster",
     "UpdateClusterInput",
     "UpdateClusterUpdateCluster",
+    "UpdateClusterUpdateClusterCluster",
+    "UpdateClusterUpdateClusterFailedEnvironments",
+    "UpdateClusterUpdateClusterFailedToStart",
+    "UpdateClusterUpdateClusterIngressControllers",
+    "UpdateClusterUpdateClusterRedeployed",
+    "UpdateClusterUpdateClusterSkippedRestoring",
+    "UpdateClusterUpdateClusterWaitingForIngress",
     "UpdateDeployment",
     "UpdateDeploymentInput",
     "UpdateDeploymentUpdateDeployment",

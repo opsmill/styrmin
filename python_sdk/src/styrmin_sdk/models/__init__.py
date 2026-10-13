@@ -5,6 +5,7 @@ from styrmin_sdk.graphql._generated.enums import (
     EnvironmentCloneDeploymentOutcome,
     EnvironmentCloneStatus,
     EnvironmentRestoreStatus,
+    IngressControllerAction,
     StepKind,
     StepStatus,
     TaskResult,
@@ -66,7 +67,6 @@ from styrmin_sdk.graphql._generated.input_types import (
     ResourceSpecInput,
     SchedulingInput,
     StandardStorageInput,
-    UpdateClusterInput,
     UpdateDeploymentInput,
     UpdateEnvironmentInput,
 )
@@ -82,6 +82,7 @@ from styrmin_sdk.graphql._generated.load_remote_application_driver_version impor
 from styrmin_sdk.graphql._generated.load_remote_application_driver_version import (
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart as HelmChart,
 )
+from styrmin_sdk.graphql._generated.update_cluster import UpdateClusterUpdateCluster as ClusterUpdateResult
 from styrmin_sdk.models.context import Context
 from styrmin_sdk.models.deployment_manifest import (
     ApplyEvent,
@@ -109,6 +110,7 @@ __all__ = [
     "BackupStorageLocation",
     "Cluster",
     "ClusterRef",
+    "ClusterUpdateResult",
     "Component",
     "ComponentConfig",
     "ComponentConfigInput",
@@ -130,6 +132,7 @@ __all__ = [
     "EnvironmentRestoreStatus",
     "FailedStep",
     "HelmChart",
+    "IngressControllerAction",
     "ParameterValueInput",
     "ResolvedManifest",
     "ResourceRequirementsInput",
@@ -144,7 +147,6 @@ __all__ = [
     "Task",
     "TaskResult",
     "TaskStep",
-    "UpdateClusterInput",
     "UpdateDeploymentInput",
     "UpdateEnvironmentInput",
     "has_app_version_token",

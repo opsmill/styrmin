@@ -8,15 +8,36 @@ from uuid import UUID
 from pydantic import Field
 
 from .base_model import BaseModel
+from .enums import IngressControllerAction
 
 
 class UpdateCluster(BaseModel):
-    update_cluster: Optional["UpdateClusterUpdateCluster"] = Field(
-        alias="updateCluster"
-    )
+    update_cluster: "UpdateClusterUpdateCluster" = Field(alias="updateCluster")
 
 
 class UpdateClusterUpdateCluster(BaseModel):
+    cluster: "UpdateClusterUpdateClusterCluster"
+    dry_run: bool = Field(alias="dryRun")
+    redeployed: list["UpdateClusterUpdateClusterRedeployed"]
+    waiting_for_ingress: list["UpdateClusterUpdateClusterWaitingForIngress"] = Field(
+        alias="waitingForIngress"
+    )
+    skipped_restoring: list["UpdateClusterUpdateClusterSkippedRestoring"] = Field(
+        alias="skippedRestoring"
+    )
+    failed_to_start: list["UpdateClusterUpdateClusterFailedToStart"] = Field(
+        alias="failedToStart"
+    )
+    unchanged_count: int = Field(alias="unchangedCount")
+    ingress_controllers: list["UpdateClusterUpdateClusterIngressControllers"] = Field(
+        alias="ingressControllers"
+    )
+    failed_environments: list["UpdateClusterUpdateClusterFailedEnvironments"] = Field(
+        alias="failedEnvironments"
+    )
+
+
+class UpdateClusterUpdateClusterCluster(BaseModel):
     id: UUID
     name: str
     config: Any
@@ -25,4 +46,49 @@ class UpdateClusterUpdateCluster(BaseModel):
     updated_on: Optional[datetime] = Field(alias="updatedOn")
 
 
+class UpdateClusterUpdateClusterRedeployed(BaseModel):
+    deployment_id: UUID = Field(alias="deploymentId")
+    deployment_name: str = Field(alias="deploymentName")
+    environment_id: UUID = Field(alias="environmentId")
+    environment_name: str = Field(alias="environmentName")
+    task_id: Optional[UUID] = Field(alias="taskId")
+
+
+class UpdateClusterUpdateClusterWaitingForIngress(BaseModel):
+    deployment_id: UUID = Field(alias="deploymentId")
+    deployment_name: str = Field(alias="deploymentName")
+    environment_id: UUID = Field(alias="environmentId")
+    environment_name: str = Field(alias="environmentName")
+    task_id: Optional[UUID] = Field(alias="taskId")
+
+
+class UpdateClusterUpdateClusterSkippedRestoring(BaseModel):
+    deployment_id: UUID = Field(alias="deploymentId")
+    deployment_name: str = Field(alias="deploymentName")
+    environment_id: UUID = Field(alias="environmentId")
+    environment_name: str = Field(alias="environmentName")
+    task_id: Optional[UUID] = Field(alias="taskId")
+
+
+class UpdateClusterUpdateClusterFailedToStart(BaseModel):
+    deployment_id: UUID = Field(alias="deploymentId")
+    deployment_name: str = Field(alias="deploymentName")
+    environment_id: UUID = Field(alias="environmentId")
+    environment_name: str = Field(alias="environmentName")
+    task_id: Optional[UUID] = Field(alias="taskId")
+
+
+class UpdateClusterUpdateClusterIngressControllers(BaseModel):
+    environment_id: UUID = Field(alias="environmentId")
+    environment_name: str = Field(alias="environmentName")
+    action: IngressControllerAction
+    failed: bool
+
+
+class UpdateClusterUpdateClusterFailedEnvironments(BaseModel):
+    environment_id: UUID = Field(alias="environmentId")
+    environment_name: str = Field(alias="environmentName")
+
+
 UpdateCluster.model_rebuild()
+UpdateClusterUpdateCluster.model_rebuild()

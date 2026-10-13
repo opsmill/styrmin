@@ -1,8 +1,48 @@
-mutation UpdateCluster($input: UpdateClusterInput!, $clusterId: UUID, $clusterName: String) {
-    updateCluster(input: $input, clusterId: $clusterId, clusterName: $clusterName) {
-        id
-        name
-        config
-        capabilities
+mutation UpdateCluster($input: UpdateClusterInput!, $clusterId: UUID, $clusterName: String, $dryRun: Boolean! = false) {
+    updateCluster(input: $input, clusterId: $clusterId, clusterName: $clusterName, dryRun: $dryRun) {
+        cluster {
+            id
+            name
+            config
+            capabilities
+        }
+        dryRun
+        redeployed {
+            deploymentId
+            deploymentName
+            environmentId
+            environmentName
+            taskId
+        }
+        waitingForIngress {
+            deploymentId
+            deploymentName
+            environmentId
+            environmentName
+            taskId
+        }
+        skippedRestoring {
+            deploymentId
+            deploymentName
+            environmentId
+            environmentName
+            taskId
+        }
+        failedToStart {
+            deploymentId
+            deploymentName
+            environmentId
+            environmentName
+            taskId
+        }
+        unchangedCount
+        ingressControllers {
+            environmentName
+            action
+            failed
+        }
+        failedEnvironments {
+            environmentName
+        }
     }
 }

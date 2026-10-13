@@ -852,6 +852,15 @@ type HelmChart {
   repository: String!
 }
 
+"""
+What a cluster update does to an environment's dedicated ingress controller. REMOVE is requested once no application of the environment uses the controller.
+"""
+enum IngressControllerAction {
+  CREATE
+  REDEPLOY
+  REMOVE
+}
+
 """Configuration for the dedicated ingress Kubernetes Service."""
 input IngressServiceConfigInput {
   type: String = null
@@ -924,9 +933,9 @@ type Mutation {
   deleteCluster(clusterId: UUID = null, clusterName: String = null): String @requiresRole
 
   """
-  Replace a cluster's config and redeploy every deployment whose resolved config changes. Requires the ADMIN role. Identify the cluster by id or name.
+  Replace a cluster's config and redeploy every deployment whose resolved config changes. Requires the ADMIN role. Identify the cluster by id or name. With dryRun, nothing is saved and the result lists what saving would do.
   """
-  updateCluster(input: UpdateClusterInput!, clusterId: UUID = null, clusterName: String = null): Cluster @requiresRole
+  updateCluster(input: UpdateClusterInput!, clusterId: UUID = null, clusterName: String = null, dryRun: Boolean! = false): UpdateClusterResult! @requiresRole
   createEnvironment(name: String!, clusterId: UUID = null, clusterName: String = null, config: JSON = null): Environment @requiresRole
   updateEnvironment(environmentId: UUID!, input: UpdateEnvironmentInput!): Environment @requiresRole
   deleteEnvironment(environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null): String @requiresRole
@@ -1396,6 +1405,43 @@ input TopologySpreadConstraintInput {
 scalar UUID
 
 """
+A deployment that a cluster update redeploys, leaves waiting, skips or could not start.
+"""
+type UpdateClusterDeployment {
+  deploymentId: UUID!
+  deploymentName: String!
+  environmentId: UUID!
+  environmentName: String!
+
+  """
+  The update_instance task of the redeploy. Null in a dry run and when the redeploy did not start.
+  """
+  taskId: UUID
+}
+
+"""
+An environment whose evaluation failed; none of its deployments was redeployed.
+"""
+type UpdateClusterEnvironment {
+  environmentId: UUID!
+  environmentName: String!
+}
+
+"""
+An action of a cluster update on an environment's dedicated ingress controller.
+"""
+type UpdateClusterIngressController {
+  environmentId: UUID!
+  environmentName: String!
+  action: IngressControllerAction!
+
+  """
+  The controller could not be created or redeployed. Its applications wait.
+  """
+  failed: Boolean!
+}
+
+"""
 Full-replacement input for cluster configuration updates. Submit the complete desired configuration; any field omitted (null) is removed from the stored config, except ingressClass and runtimeClass, which default to "traefik" and "default" as on createCluster.
 """
 input UpdateClusterInput {
@@ -1412,6 +1458,37 @@ input UpdateClusterInput {
   scheduling: SchedulingInput = null
   dbSize: String = null
   backupTtl: String = null
+}
+
+"""
+The cluster after an update, and the deployments the update redeploys. In a dry run, the cluster is unchanged and the lists say what saving would do.
+"""
+type UpdateClusterResult {
+  cluster: Cluster!
+  dryRun: Boolean!
+
+  """Deployments whose redeploy started, or would start in a dry run."""
+  redeployed: [UpdateClusterDeployment!]!
+
+  """
+  Deployments that move onto a dedicated ingress controller. They are redeployed when the controller is running with the new values.
+  """
+  waitingForIngress: [UpdateClusterDeployment!]!
+
+  """
+  Deployments not redeployed because a restore is running. Save again after the restore.
+  """
+  skippedRestoring: [UpdateClusterDeployment!]!
+
+  """Deployments whose redeploy could not start. Save again to retry them."""
+  failedToStart: [UpdateClusterDeployment!]!
+
+  """Deployments already at their resolved configuration."""
+  unchangedCount: Int!
+  ingressControllers: [UpdateClusterIngressController!]!
+
+  """Environments whose evaluation failed. Save again to retry them."""
+  failedEnvironments: [UpdateClusterEnvironment!]!
 }
 
 """

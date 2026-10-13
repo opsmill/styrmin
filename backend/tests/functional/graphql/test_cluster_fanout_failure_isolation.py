@@ -190,9 +190,15 @@ async def test_update_cluster_returns_normally_when_one_redeploy_fails(
         {"clusterId": str(cluster_id), "input": {"fqdnSuffix": "apps.example.com"}},
     )
 
-    assert data["updateCluster"]["config"]["fqdn_suffix"] == "apps.example.com"
+    result = data["updateCluster"]
+    assert result["cluster"]["config"]["fqdn_suffix"] == "apps.example.com"
     session.expire_all()
     [bad_id] = failed
+    assert {UUID(entry["deploymentId"]) for entry in result["redeployed"]} == (
+        deployment_ids - {bad_id}
+    )
+    assert all(entry["taskId"] for entry in result["redeployed"])
+    assert [entry["deploymentId"] for entry in result["failedToStart"]] == [str(bad_id)]
     for redeployed in deployment_ids - {bad_id}:
         assert await _task_types(session, redeployed) == [TaskType.UPDATE_INSTANCE]
         assert await _status(session, redeployed) == DeploymentState.DEPLOYING
@@ -264,3 +270,38 @@ async def test_status_report_commits_when_the_removal_check_fails_after_a_deleti
     patch_crd.assert_not_awaited()
     [failure] = _logged(log_exception)
     assert failure.startswith("cluster_config_fanout_hook_error ")
+
+
+async def test_update_cluster_continues_after_an_environment_transaction_rolls_back(
+    client: AsyncClient, session: AsyncSession, mocker
+) -> None:
+    """Review: each environment commits on its own, and a rolled-back environment does not stop the next."""
+    cluster = await seed_cluster(session)
+    broken = await seed_environment(session, cluster=cluster, name="broken")
+    healthy = await seed_environment(session, cluster=cluster, name="healthy")
+    adv = await seed_application_driver_version(session)
+    stuck = await seed_deployment(session, environment=broken, adv=adv)
+    redeployed = await seed_deployment(session, environment=healthy, adv=adv)
+    broken.config = {"removed_field": True}
+    session.add(broken)
+    await session.commit()
+    cluster_id, stuck_id, redeployed_id = cluster.id, stuck.id, redeployed.id
+    log_exception = mocker.patch.object(cluster_config_fanout.logger, "exception")
+
+    data = await gql(
+        client,
+        "update_cluster",
+        {"clusterId": str(cluster_id), "input": {"fqdnSuffix": "apps.example.com"}},
+    )
+
+    result = data["updateCluster"]
+    assert result["cluster"]["config"]["fqdn_suffix"] == "apps.example.com"
+    assert result["failedEnvironments"] == [{"environmentName": "broken"}]
+    assert [entry["deploymentId"] for entry in result["redeployed"]] == [
+        str(redeployed_id)
+    ]
+    session.expire_all()
+    assert await _task_types(session, redeployed_id) == [TaskType.UPDATE_INSTANCE]
+    assert await _task_types(session, stuck_id) == []
+    [failure] = _logged(log_exception)
+    assert failure.startswith("cluster_config_fanout_environment_error ")

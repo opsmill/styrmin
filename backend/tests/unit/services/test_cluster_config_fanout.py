@@ -23,7 +23,7 @@ from styrmin_backend.context.models.config import (
 from styrmin_backend.domain.models import Deployment, DeploymentState, Task
 from styrmin_backend.services import cluster_config_fanout
 from styrmin_backend.services.cluster_config_fanout import (
-    FanOutCounts,
+    FanOutResult,
     _deployment_at_resolved_config,
     continue_environment_fan_out,
     fan_out_cluster_config,
@@ -52,7 +52,7 @@ def graph() -> SimpleNamespace:
     return build_graph()
 
 
-async def _fan_out(graph: SimpleNamespace, config: dict) -> FanOutCounts:
+async def _fan_out(graph: SimpleNamespace, config: dict) -> FanOutResult:
     graph.cluster.config = config
     return await fan_out_cluster_config(graph.cluster, graph.uow, USER_ID)
 
@@ -269,8 +269,12 @@ async def test_environment_whose_stored_config_no_longer_validates_does_not_stop
 
     updated = await update_cluster(graph.uow, graph.cluster.id, new_config, USER_ID)
 
-    assert updated.config == new_config
+    assert updated.cluster.config == new_config
     assert task_deployment_ids(update_tasks(graph)) == [app_b.id]
+    assert [env.environment_name for env in updated.fan_out.failed_environments] == [
+        "env-a"
+    ]
+    assert [entry.deployment_id for entry in updated.fan_out.redeployed] == [app_b.id]
     [line] = _fanout_log_lines(log_info)
     fields = dict(part.split("=", 1) for part in line.split()[1:])
     assert fields["environments"] == "2"
@@ -291,7 +295,12 @@ async def test_continuation_counts_an_environment_that_fails(graph):
         graph.env_a.id, graph.uow, trigger_deployment_id=uuid4()
     )
 
-    assert counts == FanOutCounts(environments=1, environments_failed=1)
+    assert (
+        counts.counts() == FanOutResult(environments=1, environments_failed=1).counts()
+    )
+    assert [env.environment_id for env in counts.failed_environments] == [
+        graph.env_a.id
+    ]
     assert update_tasks(graph) == []
 
 
@@ -363,18 +372,28 @@ async def test_fan_out_logs_one_line_with_every_count(graph, mocker):
         "skipped_noop": "1",
         "skipped_restoring": "1",
         "skipped_waiting_for_ingress": "0",
+        "evaluation_failed": "0",
         "dispatch_failed": "0",
         "environments_failed": "0",
         "ingress_controllers_created": "0",
         "ingress_controllers_redeployed": "0",
         "ingress_controllers_removed": "0",
+        "ingress_controller_failed": "0",
+        "ingress_controller_removal_failed": "0",
     }
     fields = dict(part.split("=", 1) for part in line.split()[1:])
     assert fields == expected
-    assert counts == FanOutCounts(
-        environments=2,
-        evaluated=4,
-        dispatched=1,
-        skipped_noop=1,
-        skipped_restoring=1,
+    assert (
+        counts.counts()
+        == FanOutResult(
+            environments=2,
+            evaluated=4,
+            dispatched=1,
+            skipped_noop=1,
+            skipped_restoring=1,
+        ).counts()
     )
+    assert sorted(entry.deployment_name for entry in counts.redeployed) == ["live"]
+    assert [entry.deployment_name for entry in counts.skipped_for_restore] == [
+        "restoring"
+    ]

@@ -57,6 +57,12 @@ class ExternalUrlScheme(str, Enum):
     HTTPS = "HTTPS"
 
 
+class IngressControllerAction(str, Enum):
+    CREATE = "CREATE"
+    REDEPLOY = "REDEPLOY"
+    REMOVE = "REMOVE"
+
+
 class LabelSelectorOperator(str, Enum):
     IN = "IN"
     NOT_IN = "NOT_IN"

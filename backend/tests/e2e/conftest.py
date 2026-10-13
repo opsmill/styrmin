@@ -1566,12 +1566,24 @@ def _driver_param_id(item: pytest.Item) -> str | None:
     return callspec.params.get("driver_mode")
 
 
+def run_cluster_config_changes_first(items: list[pytest.Item]) -> None:
+    """Move the ``changes_cluster_config`` tests to the front, keeping the order within each group.
+
+    Changing the session cluster's config redeploys every deployment of the
+    cluster, so these tests run before other tests create shared deployments.
+    """
+    items.sort(
+        key=lambda item: item.get_closest_marker("changes_cluster_config") is None
+    )
+
+
 def pytest_collection_modifyitems(
     config: pytest.Config,
     items: list[pytest.Item],
 ) -> None:
-    """Enforce api_only/ui_only contract and shard-marker guardrail."""
+    """Enforce api_only/ui_only contract and shard-marker guardrail, then order the items."""
     enforce_shard_markers(config, items)
+    run_cluster_config_changes_first(items)
 
     for item in items:
         driver_id = _driver_param_id(item)

@@ -23,6 +23,7 @@ from styrmin_backend.db.models import (
 )
 from styrmin_backend.domain.models import Deployment, Task, TaskType
 from styrmin_backend.services.backup.clone import find_clone_occupying_environment
+from styrmin_backend.services import clusters
 from styrmin_backend.services.clusters import update_cluster
 from styrmin_backend.services.exceptions import (
     ClusterNotFoundError,
@@ -201,7 +202,7 @@ async def test_update_cluster_clears_omitted_values_and_applies_defaults(
 
     updated = await update_cluster(uow, cluster.id, {"db_size": "20Gi"}, USER_ID)
 
-    assert updated.config == {
+    assert updated.cluster.config == {
         "ingress_class": "traefik",
         "runtime_class": "default",
         "db_size": "20Gi",
@@ -220,7 +221,10 @@ async def test_update_cluster_keeps_submitted_ingress_and_runtime_class(
         uow, cluster.id, {"ingress_class": "nginx", "runtime_class": "gvisor"}, USER_ID
     )
 
-    assert updated.config == {"ingress_class": "nginx", "runtime_class": "gvisor"}
+    assert updated.cluster.config == {
+        "ingress_class": "nginx",
+        "runtime_class": "gvisor",
+    }
 
 
 async def test_update_cluster_adding_fqdn_suffix_adds_the_ingress_capability(
@@ -234,7 +238,7 @@ async def test_update_cluster_adding_fqdn_suffix_adds_the_ingress_capability(
         uow, cluster.id, {"fqdn_suffix": "apps.example.com"}, USER_ID
     )
 
-    assert updated.capabilities == {
+    assert updated.cluster.capabilities == {
         "ingress": {
             "external": {
                 "ingress_class": "traefik",
@@ -293,6 +297,10 @@ async def test_update_cluster_refused_while_a_clone_occupies_any_environment(
         await update_cluster(uow, cluster.id, {"ingress_class": "nginx"}, USER_ID)
 
     assert excinfo.value.operation_kind == "environment_clone"
+    assert str(excinfo.value) == (
+        "Nothing was saved: environment 'production' is part of an environment clone "
+        "that is still running. Save again when the clone has finished."
+    )
     stored = await uow.clusters.get(cluster.id)
     assert stored is not None
     assert stored.config == original
@@ -314,8 +322,8 @@ async def test_update_cluster_accepted_while_an_environment_backup_is_in_progres
 
     updated = await update_cluster(uow, cluster.id, {"ingress_class": "nginx"}, USER_ID)
 
-    assert updated.config is not None
-    assert updated.config["ingress_class"] == "nginx"
+    assert updated.cluster.config is not None
+    assert updated.cluster.config["ingress_class"] == "nginx"
 
 
 async def test_update_cluster_accepted_while_an_environment_restore_is_in_progress(
@@ -334,8 +342,8 @@ async def test_update_cluster_accepted_while_an_environment_restore_is_in_progre
 
     updated = await update_cluster(uow, cluster.id, {"ingress_class": "nginx"}, USER_ID)
 
-    assert updated.config is not None
-    assert updated.config["ingress_class"] == "nginx"
+    assert updated.cluster.config is not None
+    assert updated.cluster.config["ingress_class"] == "nginx"
 
 
 async def test_update_cluster_runs_the_fan_out_after_saving(
@@ -357,3 +365,92 @@ async def test_update_cluster_unknown_cluster_raises_not_found(
         await update_cluster(uow, uuid4(), {"ingress_class": "nginx"}, USER_ID)
 
     assert uow.commit_count == 0
+
+
+async def test_update_cluster_commits_each_environment_on_its_own(
+    uow: FakeUnitOfWork, mocker
+):
+    """Review: a flow never waits for a commit that covers the whole installation."""
+    cluster = await _seed_cluster(uow)
+    staging = await _seed_environment(uow, cluster, "staging")
+    production = await _seed_environment(uow, cluster, "production")
+    await _seed_deployment(uow, staging, "web")
+    await _seed_deployment(uow, production, "api")
+    commits_when_redeployed: list[int] = []
+
+    async def _record(deployment: Deployment, uow: FakeUnitOfWork) -> Task:
+        commits_when_redeployed.append(uow.commit_count)
+        return Task.create(type=TaskType.UPDATE_INSTANCE, deployment_id=deployment.id)
+
+    mocker.patch(REDEPLOY, side_effect=_record)
+
+    result = await update_cluster(uow, cluster.id, {"ingress_class": "nginx"}, USER_ID)
+
+    # The cluster row, then one commit per environment.
+    assert commits_when_redeployed == [1, 2]
+    assert uow.commit_count == 3
+    assert sorted(entry.deployment_name for entry in result.fan_out.redeployed) == [
+        "api",
+        "web",
+    ]
+    assert all(entry.task_id is not None for entry in result.fan_out.redeployed)
+
+
+async def test_update_cluster_dry_run_lists_the_redeploys_and_saves_nothing(
+    uow: FakeUnitOfWork, redeploy_recorder: list[Deployment]
+):
+    original = {"ingress_class": "traefik", "runtime_class": "default"}
+    cluster = await _seed_cluster(uow, deepcopy(original))
+    environment = await _seed_environment(uow, cluster, "staging")
+    deployment = await _seed_deployment(uow, environment, "web")
+
+    result = await update_cluster(
+        uow, cluster.id, {"ingress_class": "nginx"}, USER_ID, dry_run=True
+    )
+
+    assert result.dry_run
+    assert result.cluster.config == original
+    assert [
+        (entry.deployment_id, entry.environment_name, entry.task_id)
+        for entry in result.fan_out.redeployed
+    ] == [(deployment.id, "staging", None)]
+    assert uow.commit_count == 0
+    assert redeploy_recorder == []
+
+
+async def test_update_cluster_dry_run_refuses_an_invalid_config(
+    uow: FakeUnitOfWork, redeploy_recorder: list[Deployment]
+):
+    cluster = await _seed_cluster(uow)
+
+    with pytest.raises(InvalidContextError):
+        await update_cluster(uow, cluster.id, {"db_size": 10}, USER_ID, dry_run=True)
+
+
+async def test_update_cluster_logs_the_user_and_the_changed_values(
+    uow: FakeUnitOfWork, redeploy_recorder: list[Deployment], mocker
+):
+    """Review: an application owner can learn who changed what."""
+    cluster = await _seed_cluster(
+        uow, {"ingress_class": "traefik", "runtime_class": "default", "db_size": "5Gi"}
+    )
+    log_info = mocker.patch.object(clusters.logger, "info")
+
+    await update_cluster(
+        uow,
+        cluster.id,
+        {"ingress_class": "nginx", "fqdn_suffix": "apps.example.com"},
+        USER_ID,
+    )
+
+    [line] = [
+        call.args[0].format(*call.args[1:])
+        for call in log_info.call_args_list
+        if call.args and call.args[0].startswith("cluster_config_updated ")
+    ]
+    assert f"user_id={USER_ID}" in line
+    assert (
+        'changes={"db_size": {"from": "5Gi", "to": null}, '
+        '"fqdn_suffix": {"from": null, "to": "apps.example.com"}, '
+        '"ingress_class": {"from": "traefik", "to": "nginx"}}'
+    ) in line

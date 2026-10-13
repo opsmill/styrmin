@@ -25,7 +25,11 @@ from styrmin_backend.domain.utils import (
     generate_deployment_name,
     validate_deployment_name,
 )
-from styrmin_backend.context.models.config import DedicatedIngressConfig
+from styrmin_backend.context.models.config import (
+    ClusterConfig,
+    DedicatedIngressConfig,
+    EnvironmentConfig,
+)
 from styrmin_backend.db.models import ApplicationDriver, ApplicationDriverVersion
 from styrmin_backend.operator.config import CRD_GROUP, CRD_PLURAL, CRD_VERSION
 from styrmin_backend.services.container_overrides.exceptions import (
@@ -1193,35 +1197,34 @@ async def redeploy_for_environment_update(
     return task
 
 
+def effective_dedicated_ingress(
+    environment_config: EnvironmentConfig, cluster_config: ClusterConfig
+) -> DedicatedIngressConfig | None:
+    """The environment's own ``dedicated_ingress``, else the cluster's.
+
+    Any object, including ``{}``, enables the controller; only an absent or null
+    key disables it.
+    """
+    if environment_config.dedicated_ingress is not None:
+        return environment_config.dedicated_ingress
+    return cluster_config.dedicated_ingress
+
+
 async def _resolve_dedicated_ingress(
     environment_id: UUID,
     uow: UnitOfWork,
 ) -> DedicatedIngressConfig | None:
-    """Resolve the effective dedicated_ingress config for an environment.
-
-    Checks environment config first, falls back to cluster config. Any
-    object, including ``{}``, enables the controller; only an absent or null
-    key disables it.
-    """
+    """Load the environment and its cluster, and return their :func:`effective_dedicated_ingress`."""
     environment = await uow.environments.get(environment_id)
     if environment is None:
         return None
-
-    env_config = environment.config or {}
-    if env_config.get("dedicated_ingress") is not None:
-        return DedicatedIngressConfig.model_validate(env_config["dedicated_ingress"])
-
     cluster = await uow.clusters.get(environment.cluster_id)
-    if cluster is None:
-        return None
-
-    cluster_config = cluster.config or {}
-    if cluster_config.get("dedicated_ingress") is not None:
-        return DedicatedIngressConfig.model_validate(
-            cluster_config["dedicated_ingress"]
-        )
-
-    return None
+    return effective_dedicated_ingress(
+        EnvironmentConfig.model_validate(environment.config or {}),
+        ClusterConfig.model_validate(
+            cluster.config or {} if cluster is not None else {}
+        ),
+    )
 
 
 async def _ensure_ingress_controller(
@@ -1264,10 +1267,10 @@ async def _ensure_ingress_controller(
         # PENDING — still deploying, let it proceed
         return
 
-    await _create_ingress_controller(environment_id, uow, created_by_user_id)
+    await create_ingress_controller(environment_id, uow, created_by_user_id)
 
 
-async def _create_ingress_controller(
+async def create_ingress_controller(
     environment_id: UUID,
     uow: UnitOfWork,
     created_by_user_id: UUID,
@@ -1800,9 +1803,15 @@ async def request_cluster_teardown(deployment_id: UUID) -> bool:
 
 
 _ROLLOUT_STATES = (DeploymentState.PENDING, DeploymentState.DEPLOYING)
+# A FAILED rollout leaves the previous release, and a restore the backed-up one, which can still use the controller.
+_REMOVAL_BLOCKING_STATES = (
+    *_ROLLOUT_STATES,
+    DeploymentState.FAILED,
+    DeploymentState.RESTORING,
+)
 
 
-def _rendered_dedicated_ingress(
+def rendered_dedicated_ingress(
     deployment: Deployment,
 ) -> DedicatedIngressConfig | None:
     """The ``dedicated_ingress`` value the deployment's active instance was rendered with."""
@@ -1816,10 +1825,12 @@ async def _applications_moved_off_controller(
     environment_id: UUID, applications: list[Deployment], uow: UnitOfWork
 ) -> bool:
     """Return True when no application uses or waits for the environment's controller (research D5)."""
-    if any(application.status in _ROLLOUT_STATES for application in applications):
+    if any(
+        application.status in _REMOVAL_BLOCKING_STATES for application in applications
+    ):
         return False
     if any(
-        _rendered_dedicated_ingress(application) is not None
+        rendered_dedicated_ingress(application) is not None
         for application in applications
     ):
         return False
@@ -1835,9 +1846,10 @@ async def tear_down_unused_ingress_controller(
 
     That is the case when no user-facing deployment is left (#252), or when
     the environment no longer takes a dedicated ingress, every application's
-    active instance was rendered without one, and neither the applications nor
-    the controller are still rolling out (021 research D5). A controller that
-    is still rolling out is checked again once it reaches RUNNING or FAILED.
+    active instance was rendered without one, no application is rolling out,
+    FAILED or RESTORING, and the controller is not rolling out (021 research
+    D5). The status reporter runs the check again when an application reaches
+    RUNNING, FAILED or DELETED, and when the controller reaches FAILED.
 
     Runs inside the caller's unit of work and does not commit. The row goes to
     ``DELETING`` at once so new deployments stop reusing it; the status
@@ -1846,6 +1858,8 @@ async def tear_down_unused_ingress_controller(
     Returns:
         The number of controllers whose deletion was requested.
     """
+    if await uow.deployments.find_internal_by_environment(environment_id) is None:
+        return 0
     deployments = await uow.deployments.find_all_by_environment(environment_id)
     controllers = [
         deployment

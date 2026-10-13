@@ -149,8 +149,8 @@ async def test_update_cluster_persists_every_input_field(
         {"clusterId": str(cluster.id), "input": FULL_INPUT},
     )
 
-    assert data["updateCluster"]["id"] == str(cluster.id)
-    assert data["updateCluster"]["config"] == FULL_CONFIG
+    assert data["updateCluster"]["cluster"]["id"] == str(cluster.id)
+    assert data["updateCluster"]["cluster"]["config"] == FULL_CONFIG
     stored = await _stored_cluster(session, cluster.id)
     assert stored.config == FULL_CONFIG
     ClusterConfig.model_validate(stored.config)
@@ -182,7 +182,7 @@ async def test_update_cluster_clears_omitted_fields_and_applies_defaults(
         "ingress_class": "traefik",
         "runtime_class": "default",
     }
-    assert data["updateCluster"]["config"] == expected
+    assert data["updateCluster"]["cluster"]["config"] == expected
     stored = await _stored_cluster(session, cluster.id)
     assert stored.config == expected
 
@@ -216,7 +216,7 @@ async def test_update_cluster_recomputes_capabilities(
             "fast": {"storage_class": "local-nvme"},
         },
     }
-    assert data["updateCluster"]["capabilities"] == expected
+    assert data["updateCluster"]["cluster"]["capabilities"] == expected
     assert (await _stored_cluster(session, cluster.id)).capabilities == expected
     read_back = await gql(
         client, "get_cluster_capabilities", {"clusterId": str(cluster.id)}
@@ -227,7 +227,7 @@ async def test_update_cluster_recomputes_capabilities(
     data = await gql(
         client, "update_cluster", {"clusterId": str(cluster.id), "input": {}}
     )
-    assert data["updateCluster"]["capabilities"] == {}
+    assert data["updateCluster"]["cluster"]["capabilities"] == {}
     assert not (await _stored_cluster(session, cluster.id)).capabilities
 
 
@@ -243,10 +243,54 @@ async def test_update_cluster_by_name(
         {"clusterName": "by-name", "input": {"fqdnSuffix": "apps.example.com"}},
     )
 
-    assert data["updateCluster"]["id"] == str(cluster.id)
+    assert data["updateCluster"]["cluster"]["id"] == str(cluster.id)
     stored = await _stored_cluster(session, cluster.id)
     assert stored.config is not None
     assert stored.config["fqdn_suffix"] == "apps.example.com"
+
+
+@pytest.mark.asyncio
+async def test_update_cluster_dry_run_lists_the_redeploys_and_saves_nothing(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    cluster = await seed_cluster(session)
+    original = dict(cluster.config or {})
+    environment = await seed_environment(session, cluster=cluster, name="staging")
+    deployment = await seed_deployment(session, environment=environment, name="web")
+    cluster_id = cluster.id
+    environment_id = environment.id
+    deployment_id = deployment.id
+
+    data = await gql(
+        client,
+        "update_cluster",
+        {
+            "clusterId": str(cluster_id),
+            "input": {"fqdnSuffix": "apps.example.com"},
+            "dryRun": True,
+        },
+    )
+
+    result = data["updateCluster"]
+    assert result["dryRun"] is True
+    assert result["cluster"]["config"] == original
+    assert result["redeployed"] == [
+        {
+            "deploymentId": str(deployment_id),
+            "deploymentName": "web",
+            "environmentId": str(environment_id),
+            "environmentName": "staging",
+            "taskId": None,
+        }
+    ]
+    assert result["failedToStart"] == []
+    assert result["unchangedCount"] == 0
+    stored = await _stored_cluster(session, cluster_id)
+    assert stored.config == original
+    tasks = (
+        await session.exec(select(Task).where(Task.deployment_id == deployment_id))
+    ).all()
+    assert tasks == []
 
 
 @pytest.mark.asyncio
