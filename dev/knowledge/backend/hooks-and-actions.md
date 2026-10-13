@@ -229,8 +229,8 @@ Located in `actions/primitives.py`. These are Prefect `@task` functions that dri
 |-----------|-----------|-------------|
 | `stop_components` | `(components: list[str], context: GlobalContext)` | Calls internal GraphQL to disable components |
 | `start_components` | `(components: list[str], context: GlobalContext)` | Calls internal GraphQL to enable components |
-| `execute_commands` | `(commands: list[str], image: str, context: GlobalContext, env_from_component: str \| None = None, labels_from_component: str \| None = None)` | Runs commands as a Kubernetes Job. `image` is required; the optional `*_from_component` arguments copy env vars and labels from a named component pod. `env_from_component` reads `containers[0]`, which is the component container whenever env vars or an image override apply. |
-| `get_component_images` | `(component: str, context: GlobalContext) -> list[str]` | Images of every container in the component's `Deployment`/`StatefulSet` pod template (init containers excluded). When the component declares a component container present in the template, its image is element 0 (it carries any image override; spec 018); the others keep pod-template order. |
+| `execute_commands` | `(commands: list[str], image: str, context: GlobalContext, env_from_component: str \| None = None, labels_from_component: str \| None = None)` | Runs commands as a Kubernetes Job. `image` is required; the optional `*_from_component` arguments copy env vars and labels from a named component pod. `env_from_component` reads the component container (else `containers[0]`), then sets the env vars that apply in the action's context on top (#431). |
+| `get_component_images` | `(component: str, context: GlobalContext) -> list[str]` | Images of every container in the component's `Deployment`/`StatefulSet` pod template (init containers excluded). When the component declares a component container present in the template, its image is element 0 (spec 018); the others keep pod-template order. When an image override applies in the action's context, element 0 is that override with `{{ app.version }}` substituted (#431). |
 | `get_component_labels` | `(component: str, context: GlobalContext) -> dict[str, str]` | Pod template labels of the component's workload |
 | `upgrade_deployment_version` | `(target_version: str, context: GlobalContext)` | Calls `updateDeploymentVersion` without a driver version and waits for the nested task, which completes when the CR is written, not when the rollout is done. On each call the server binds the latest driver version that supports `target_version`. When the deployment already has `target_version` and is already bound to that driver version, the server finds no change, starts no task and returns `null`, and the primitive returns without waiting. The bundled drivers' `upgrade` actions call it with the hook's `target_version`, which the upgrade already set, so there it starts a task only when the deployment is bound to a driver version other than that latest one, for example one the upgrade chose with `driverVersionId` |
 
@@ -300,14 +300,34 @@ The in-repo `upgrade` actions (`driver/examples/simple-app`, `infrahub`, `infrah
 build their migration Job's image from `get_component_images(...)[0]` and the target version:
 they drop any `@digest`, then strip the tag only when the part after the last `:` contains no
 `/`, so a registry port (`registry:5000/app`) survives. `upgrade_deployment_version` returns before
-the rollout, so the image read is usually the pre-upgrade pod template; rebuilding the tag is what
+the rollout, so the pod template read is usually the pre-upgrade one; rebuilding the tag is what
 moves the Job to the target version. With a `{{ app.version }}` image override the Job runs the
-override's repository at the target version once the override has rendered: an `apply` that sets the
-override and changes the version together can race the action, whose first Job may then use the
-previous repository (ADR-058, Consequences), so set the override in an earlier apply when the current driver version accepts it (otherwise see #431); with a pinned override the Job does the same while the
+override's repository at the target version; with a pinned override it does the same while the
 component stays pinned (the upgrade dialog and `styrminctl apply` warn about it). Taking
 `images[0]` replaced a substring match on the image name, which missed overrides. See
 [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md) §6.
+
+### Overrides set with the version change
+
+Every action receives the context of the instance it runs for: the upgrade remediation passes
+the new instance (`diff.instance`) to the pre, core and post hooks. Since ADR-065, one
+`updateDeploymentVersion` call can write an image override or env vars with the version, and
+the upgrade action then starts while the workload still runs the previous instance. The
+primitives therefore take the component-container overrides from the context, through the
+helpers in `services/component_container/overrides.py` that the patch builder also uses
+(#431):
+
+- `get_component_images` returns the applicable image override as element 0, with
+  `{{ app.version }}` set to `context.app.version`. The other images still come from the pod
+  template.
+- `execute_commands(env_from_component=...)` reads env and envFrom from the component
+  container (else `containers[0]`), then sets the applicable env vars on top: a same-name entry
+  is replaced by a literal `value`, and a new name is appended.
+
+An override applies when the component declares a component container and the override is not
+orphaned, as for the post-render patches. An env var removed in the same call is still in the
+workload's env and reaches the Job, because the action cannot tell an injected env var from a
+chart one. A component whose workload does not exist yet still fails the lookup.
 
 ## Work Pools
 
@@ -422,7 +442,8 @@ If no upgrade core hook is defined for the application version, `_handle_upgrade
 | [workflows/manager.py](backend/styrmin_backend/workflows/manager.py) | `register_user_action`, `get_user_action_deployment_id` |
 | [workflows/catalogue.py](backend/styrmin_backend/workflows/catalogue.py) | Workflow registry (UPGRADE_INSTANCE definition) |
 | [actions/primitives.py](backend/styrmin_backend/actions/primitives.py) | `stop_components`, `start_components`, `execute_commands`, `get_component_images`, `get_component_labels`, `upgrade_deployment_version` |
-| [agent/service/kubernetes/primitives.py](backend/styrmin_backend/agent/service/kubernetes/primitives.py) | Kubernetes side of `get_component_images` (component container image first); `run_job` and `run_kubernetes_job` raise `JobFailedError` with the end of the output |
+| [agent/service/kubernetes/primitives.py](backend/styrmin_backend/agent/service/kubernetes/primitives.py) | Kubernetes side of `get_component_images` (component container image first) and `get_component_env` (component container env); `run_job` and `run_kubernetes_job` raise `JobFailedError` with the end of the output |
+| [services/component_container/overrides.py](backend/styrmin_backend/services/component_container/overrides.py) | `applicable_env`, `applicable_image`: the overrides that apply in a context, shared by the patch builder and the action primitives |
 | [agent/service/kubernetes/job_logs.py](backend/styrmin_backend/agent/service/kubernetes/job_logs.py) | `read_job_output_tail`: the end of a failed Job's output |
 | [agent/steps/reporter.py](backend/styrmin_backend/agent/steps/reporter.py) | `StepReporter`: hook-step output and steps recorded through `recordStep` |
 | [agent/tasks/utils.py](backend/styrmin_backend/agent/tasks/utils.py) | `run_driver_action_or_fail` (`STYRMIN_TOKEN`, `STYRMIN_TASK_ID`, `STYRMIN_STEP_ID`) |

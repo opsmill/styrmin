@@ -162,6 +162,16 @@ declares one) and the rest in pod order. When a user sets an
 image is the override, so an action that takes `images[0]` runs the
 user's build. Searching the list for an image name would miss it.
 
+An action runs for the new configuration of the deployment, which can
+reach the component's workload after the action starts: for example when
+one apply sets an image override and changes the version. The first
+image is then the override from the new configuration, with
+`{{ app.version }}` set to the target version.
+`execute_commands(env_from_component=...)` likewise copies the env of the
+component container and sets the user's env vars from the new
+configuration on top. An env var removed in that configuration is still
+copied from the workload.
+
 ### Why Prefect?
 
 Actions are workflows: long-running, sometimes flaky, with steps that

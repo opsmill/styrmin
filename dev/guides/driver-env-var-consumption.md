@@ -161,8 +161,9 @@ vars. These do not:
 
 If your application needs a user value in a Job, read it from the context and template it
 explicitly. Action Jobs started with `execute_commands(env_from_component=...)` copy the
-env of the component pod template's first container, which is the component container
-whenever env vars or an image override are set.
+env of the component container (else the pod template's first container) and set the env
+vars of the action's context on top, so env vars set in the apply that changes the version
+reach the upgrade Job. An env var removed in that apply is still copied from the workload.
 
 ## Failure modes to check
 

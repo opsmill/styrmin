@@ -17,12 +17,14 @@ from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     Target,
     TargetPatch,
 )
-from styrmin_backend.context.models.components import ComponentContext
 from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.services.component_container.exceptions import (
     ComponentContainerPatchRenderingError,
 )
-from styrmin_backend.services.image_overrides.reference import validate_reference
+from styrmin_backend.services.component_container.overrides import (
+    applicable_env,
+    applicable_image,
+)
 
 #: Workload kinds whose pod template receives component-container patches.
 COMPONENT_CONTAINER_PATCH_KINDS: tuple[str, ...] = ("Deployment", "StatefulSet")
@@ -44,20 +46,6 @@ def _validate_renders(patches: list[TargetPatch]) -> list[TargetPatch]:
     return patches
 
 
-def _applicable_env(component: ComponentContext) -> dict[str, str]:
-    env_vars = component.env_vars
-    if env_vars is None or env_vars.is_orphaned:
-        return {}
-    return dict(env_vars.config)
-
-
-def _resolved_image(name: str, component: ComponentContext, version: str) -> str | None:
-    override = component.image_override
-    if override is None or override.is_orphaned:
-        return None
-    return validate_reference(override.reference, version=version, component_name=name)
-
-
 def build_component_container_patches(context: GlobalContext) -> list[TargetPatch]:
     """Build component-container post-render patches for every applicable component.
 
@@ -75,8 +63,8 @@ def build_component_container_patches(context: GlobalContext) -> list[TargetPatc
         container = component.config.container
         if container is None:
             continue
-        env = _applicable_env(component)
-        image = _resolved_image(name, component, context.app.version)
+        env = applicable_env(component)
+        image = applicable_image(name, component, context.app.version)
         if not env and image is None:
             continue
 
