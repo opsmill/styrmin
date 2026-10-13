@@ -233,8 +233,9 @@ To revert an update, submit the previous file again. Styrmin redeploys
 the deployments whose config changes back. Keep a copy of the file
 before you edit it, or save the output of
 `styrminctl clusters get <name> --json` first. Styrmin does not keep a
-history of cluster configs; the `cluster_config_updated` server log line
-holds the previous values.
+history of cluster configs
+([#447](https://github.com/opsmill/styrmin/issues/447)); the
+`cluster_config_updated` server log line holds the previous values.
 
 #### Storage class change on a StatefulSet
 

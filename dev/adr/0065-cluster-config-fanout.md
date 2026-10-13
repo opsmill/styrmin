@@ -211,7 +211,8 @@ GraphQL validation. Other commands with the same exposure (`deployments update`,
    defaults, validate, set `config` and `capabilities`, commit. The row is committed before any
    redeploy starts, as in ADR-012 decision 4. Log `cluster_config_updated cluster_id=… user_id=…
    changes=…`, with the previous and new value of each top-level key that changed. Styrmin keeps no
-   history of cluster configs; this line is the record of who changed what.
+   history of cluster configs; this line is the record of who changed what
+   ([#447](https://github.com/opsmill/styrmin/issues/447)).
 2. For each environment, in its own transaction: plan it, start the controller action, each
    redeploy and the removal check, each in a savepoint, then commit. An installation has one
    cluster, so one transaction for the whole fan-out would hold row locks across one Prefect call
@@ -293,7 +294,8 @@ written, and the caller kept using a session whose transaction was gone. An expl
   stays `DELETING`, the applications that would move onto a controller keep waiting, and the
   recovery "resubmit after the removal has finished" is not available. A change to the
   StyrminDeployment custom resource, such as a new annotation, made kopf run the handler again and
-  remove the finalizer. This decision does not change the operator.
+  remove the finalizer. This decision does not change the operator; the race is tracked in
+  [#446](https://github.com/opsmill/styrmin/issues/446).
 - A nested `async with uow` block that fails inside any savepoint now undoes only that savepoint's
   writes. The only savepoints are the status reporter's two and the cluster config fan-out's, all
   opened to isolate a failure, so no other caller changes behaviour. `uow.commit()` inside a

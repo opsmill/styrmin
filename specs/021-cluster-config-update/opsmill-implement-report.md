@@ -342,19 +342,22 @@ section records what changed for each one. Items 18 and 19 were not in the revie
 | 20 | Dialog suggestions. | Shared labels, defaults in the dropdowns, corrected description copy, a review step that says when there is nothing to save or why saving again is useful, a warning when another administrator changed the config, a discard confirmation, and the accessibility fixes (`aria-invalid`, `aria-describedby`, focus on the first error, distinct labels, a fieldset for IP families). |
 | 21 | Code suggestions. | The removal check returns before reading the deployments when the environment has no controller; the second `find_internal_by_environment` query is gone; `effective_dedicated_ingress` is the one rule; `create_ingress_controller` and `rendered_dedicated_ingress` are public; `dispatch_failed` is split into `evaluation_failed`, `dispatch_failed`, `ingress_controller_failed` and `ingress_controller_removal_failed`; the `changes_cluster_config` marker and the `run_cluster_config_changes_first` conftest hook replace the alphabetical file order, and the E2E cleanup is nested. |
 
-### Not done in the code
+### Actions outside the repository
 
-These need an action outside the repository:
+Done on 2026-10-13:
 
-- File an issue for the operator race (item 4) and link it from the PR.
-- Tell the owners of the CI E2E runs that `shard_compute` can fail at random on that race.
-- File a follow-up issue for a history of cluster configs (item 11).
-- Comment on #424 to reduce its scope, and note on ENG-140 that the epic stays open (item 16).
+- The operator race is [#446](https://github.com/opsmill/styrmin/issues/446) (item 4); link it from the PR.
+- The history of cluster configs is [#447](https://github.com/opsmill/styrmin/issues/447) (item 11).
+- A [#424 comment](https://github.com/opsmill/styrmin/issues/424#issuecomment-6139920796) reduces its scope, and an [ENG-140](https://opsmill.atlassian.net/browse/ENG-140) comment says that the epic stays open (item 16).
+
+Not done:
+
+- Tell the owners of the CI E2E runs that `shard_compute` can fail at random on #446.
 - Tell support and presales about the storage class limitation, which affects the Infrahub drivers (item 3), and about the redeploy whenever a controller reaches `RUNNING` (item 17).
 
 ### Pull request description
 
-- Closes #423, closes #301, partially addresses #424.
+- Closes #423, closes #301, partially addresses #424. Follow-ups: #446, #447.
 - Behaviour changes:
   - Applications are redeployed whenever their environment's dedicated ingress controller reaches `RUNNING` and they are not at their resolved config.
   - An environment update that turns the environment's own `dedicated_ingress` off now removes the controller once the applications have moved off it.

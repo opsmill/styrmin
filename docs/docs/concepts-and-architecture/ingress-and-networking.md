@@ -161,7 +161,7 @@ resolve to.
 ### A controller that stays `DELETING`
 
 A known race in the operator can stop the removal of a dedicated
-ingress controller. Changes to `dedicated_ingress` remove controllers
+ingress controller ([#446](https://github.com/opsmill/styrmin/issues/446)). Changes to `dedicated_ingress` remove controllers
 more often, so you are more likely to see it after a cluster update.
 
 You see these symptoms:
