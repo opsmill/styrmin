@@ -75,7 +75,7 @@ async def test_delete_deployment_ui(
     list_page = EnvironmentDetailPage(session_ui_page)
 
     # 2. Open the deployment detail page and verify the Delete button is
-    # present and enabled (US3 — Delete sits beside Upgrade/Redeploy).
+    # present and enabled (US3 — Delete sits beside Upgrade).
     await detail_page.goto(
         environment_id=scenario_environment_id, deployment_id=deployment_id
     )
