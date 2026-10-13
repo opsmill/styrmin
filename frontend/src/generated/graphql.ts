@@ -513,7 +513,7 @@ export type Environment = {
   __typename?: 'Environment';
   backupStorageLocation?: Maybe<BackupStorageLocation>;
   capabilities: Scalars['JSON']['output'];
-  /** The clone that created this environment, or null when it was not clone-born. The provenance back-reference: `environmentClones` is scoped by *source* environment, so this is how a cloned environment points back at where it came from — and it keeps working after the source environment is deleted, since a terminal clone survives with `sourceEnvironmentName` intact. */
+  /** The clone that created this environment, or null when it was not clone-born. The provenance back-reference: `environmentClones` is scoped by *source* environment, so this is how a cloned environment points back at where it came from — and it keeps working after the source environment is deleted, since a clone that created an environment survives its source with `sourceEnvironmentName` intact. */
   clonedFrom?: Maybe<EnvironmentClone>;
   cluster: Cluster;
   config: Scalars['JSON']['output'];
@@ -589,7 +589,7 @@ export type EnvironmentClone = {
   name: Scalars['String']['output'];
   /** The explicit deployment selection as requested. Null means every eligible deployment was included (FR-003). */
   requestedDeploymentIds?: Maybe<Array<Scalars['UUID']['output']>>;
-  /** The environment that was cloned. Null once the source has been deleted — a terminal clone survives its source as the created environment's provenance (``sourceEnvironmentName`` keeps it readable). */
+  /** The environment that was cloned. Null once the source has been deleted — a clone that created an environment survives its source as that environment's provenance (``sourceEnvironmentName`` keeps it readable). */
   sourceEnvironment?: Maybe<Environment>;
   sourceEnvironmentName: Scalars['String']['output'];
   /** Derived on every read from the capture's own derived status, the existence of the created environment, the constituent cross-target restores and the recorded clone errors — never stored, so it cannot contradict any of them. Terminal values are COMPLETED, PARTIAL and FAILED. */

@@ -128,6 +128,11 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     parameters: list | None = Field(sa_column=Column(JSON))
     services: list | None = Field(sa_column=Column(JSON))
 
+    # Driver information from spec.info (spec 020). Not part of the identity.
+    icon: str | None = None                      # Logo URL (absolute https)
+    description: str | None = None               # Application description
+    links: list | None = Field(sa_column=Column(JSON))  # [{"link", "url"}] in file order
+
     application_driver_id: UUID
     helm_chart_id: UUID
 
@@ -139,6 +144,15 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     actions: list[Action]                        # Relationship
     deployments: list["Deployment"]              # Relationship
 ```
+
+`icon`, `description` and `links` hold the `spec.info` values of the driver version's specification file, so two versions of a driver can show different values. They were added by the Alembic revision `c62923f4dc7e`.
+
+- `icon` stores the URL as `HttpUrl` normalizes it, for example with a trailing `/` after a bare host and a lower-case host.
+- An empty `description` and an empty `links` list are stored as `NULL`.
+- An invalid icon or link is not stored; the load leaves it out and returns a warning (see [services.md](services.md#driver-information-in-specinfo)).
+- The three columns are not part of `uq_application_driver_version_identity`. A load whose identity matches a stored row writes them when they differ from the file ([ADR-053](../../adr/0053-driver-version-provenance-fingerprint.md)).
+
+<!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
 
 #### Action
 
@@ -647,6 +661,15 @@ BaseConfigSection                      # shared field set + ConfigDict(extra="fo
 
 The merge (`_resolve_instance_config` in `context/resolvers.py`) uses generic `**model_dump(exclude_none=True)` dict-spread with deepest-wins precedence: Cluster value → Environment value (if set) → Deployment value (if set). Any new field added to `BaseConfigSection` propagates through this merge automatically — see [ADR-029](../adr/0029-config-additions-via-baseconfigsection-no-migration.md) for the no-migration / no-GraphQL-change pattern that backs additive config work, and [`dev/guidelines/backend/python.md` → Rendering Kubernetes manifests](../../guidelines/backend/python.md#no-runtime-defaults-for-optional-emitted-annotations) for the "emit only when set" discipline that preserves byte-identical output for existing deployments.
 
+Two fields do not follow the dict spread:
+
+- `env_vars` is merged per key across the environment and the deployment, deepest value winning, so an environment key that the deployment does not set is kept.
+- `scheduling` is computed from the environment and the deployment only. The cluster's `scheduling` value is always dropped ([ADR-033](../../adr/0033-scheduling-merge-semantics.md)).
+
+`resolve_instance_config(cluster, environment, deployment)` is the public wrapper of `_resolve_instance_config`, the same function whose output context generation stores in `InstanceContext.config`. The cluster config fan-out compares the value it returns now with the value stored on the active instance ([ADR-066](../../adr/0066-cluster-config-fanout.md)). Any change to the merge therefore makes the next cluster update redeploy every deployment whose stored value differs. Two tests check that the comparison and the stored value agree: `test_matches_the_private_resolver` in `tests/unit/context/test_resolve_instance_config.py`, and `test_instance_generated_from_the_deployment_is_at_config_when_nothing_changed` in `tests/unit/services/test_cluster_config_fanout.py`.
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
 ```python
 class ClusterConfig(BaseConfigSection):
     # Cluster-level: standard_storage, plus the BaseConfigSection fields above
@@ -668,13 +691,13 @@ class ResolvedConfig(DeploymentConfig):
 - An absent or `null` key turns it off. No controller is deployed, and the agent sets `spec.ingressClassName` and the `kubernetes.io/ingress.class` annotation on the application Ingress to the resolved `ingress_class`.
 - Any object, including `{}`, turns it on with the default values: `implementation: traefik`, `type: ingress`, `service.type: LoadBalancer`. The agent sets the `kubernetes.io/ingress.class` annotation to the implementation name and removes `ingress_class` from the values-template context.
 
-The controller check (`_resolve_dedicated_ingress` in `services/deployment.py`), the agent and the capability derivation all apply this rule. `createCluster` stores no default value. Earlier versions stored `{}`, which the controller check read as off and the agent read as on ([#409](https://github.com/opsmill/styrmin/issues/409)). The Alembic revision `f3a4b5c6d7e8` removes that `{}` from clusters. It keeps `{}` on environments, because an operator set it there.
+The controller check, the agent and the capability derivation all apply this rule. On the server, the rule lives in `effective_dedicated_ingress` (`services/deployment.py`), which `_resolve_dedicated_ingress`, the cluster config fan-out and the controller removal check (`tear_down_unused_ingress_controller`) all call. <!-- Extracted from specs/021-cluster-config-update on 2026-10-13 --> `createCluster` stores no default value. Earlier versions stored `{}`, which the controller check read as off and the agent read as on ([#409](https://github.com/opsmill/styrmin/issues/409)). The Alembic revision `f3a4b5c6d7e8` removes that `{}` from clusters. It keeps `{}` on environments, because an operator set it there.
 
 #### IngressServiceConfig
 
 <!-- Extracted from specs/001-ingress-ipfamily-nodeport on 2026-05-17 -->
 
-Nested under `EnvironmentConfig.dedicated_ingress.service` (and the equivalent path in cluster/deployment config when an operator overrides dedicated ingress at those layers). Travels through the same JSON-blob path as the rest of `dedicated_ingress` — no DB / GraphQL surface of its own.
+Nested under `EnvironmentConfig.dedicated_ingress.service` (and the equivalent path in cluster/deployment config when an operator overrides dedicated ingress at those layers). It is stored in the same JSON config column as the rest of `dedicated_ingress`, with no database column of its own. On the GraphQL side, `IngressServiceConfigInput` is nested in `DedicatedIngressInput`, which `UpdateClusterInput`, `UpdateEnvironmentInput` and `UpdateDeploymentInput` all use. <!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
 
 | Field | Type | Notes |
 |-------|------|-------|

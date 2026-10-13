@@ -7,6 +7,7 @@ The services layer contains the business logic of the application. It sits betwe
 ```text
 styrmin_backend/services/
 ├── clusters.py                    # Cluster management
+├── cluster_config_fanout.py       # Cluster config fan-out (ADR-066)
 ├── environments.py                # Environment management
 ├── deployment.py                  # Deployment orchestration
 ├── deployment_status.py           # Server-side handler for reportDeploymentStatuses
@@ -44,6 +45,9 @@ styrmin_backend/services/
 │
 ├── backup/                        # Backup/restore (see backup-restore.md)
 │   ├── service.py                 # Backup/restore service functions and STRATEGY_MAP
+│   ├── environment.py             # Environment backup and environment restore (ADR-055)
+│   ├── clone.py                   # Environment clone records and their derived status (ADR-056)
+│   ├── ttl.py                     # Backup retention TTL resolution
 │   ├── scheduler.py               # Backup schedule management
 │   └── strategies/                # disk / postgres / mariadb / mongodb / neo4j / action
 │
@@ -79,6 +83,8 @@ styrmin_backend/services/
     └── utilities.py               # Utility management
 ```
 
+<!-- Extracted from specs/001-env-backup-restore on 2026-10-13 (backup/environment.py, backup/clone.py, backup/ttl.py) and specs/021-cluster-config-update on 2026-10-13 (cluster_config_fanout.py) -->
+
 ## Unit of Work Pattern
 
 The `UnitOfWork` pattern coordinates database operations across multiple repositories within a single async transaction. The abstract base lives in `services/unit_of_work.py`; the SQLModel implementation is `SqlModelUnitOfWork`, which is what the API layer wires up via dependency injection.
@@ -105,6 +111,9 @@ class UnitOfWork(ABC):
     deployed_services: DeployedServiceRepository
     backups: BackupRepository
     restores: RestoreRepository
+    environment_backups: EnvironmentBackupRepository
+    environment_restores: EnvironmentRestoreRepository
+    environment_clones: EnvironmentCloneRepository
     backup_schedules: BackupScheduleRepository
     pod_statuses: PodStatusRepository
     deployment_statuses: DeploymentStatusRepository
@@ -118,6 +127,8 @@ class UnitOfWork(ABC):
     @abstractmethod
     async def rollback(self) -> None: ...
 ```
+
+<!-- Extracted from specs/001-env-backup-restore on 2026-10-13 (environment_backups, environment_restores) and specs/010-environment-clone on 2026-10-13 (environment_clones) -->
 
 `__aexit__` calls `rollback()` automatically when the `async with` block exits with an exception; otherwise services must call `await uow.commit()` explicitly.
 
@@ -173,8 +184,27 @@ Manages environments within clusters.
 | `create_environment(name, cluster_id, uow, config=None)` | Create environment in cluster (name unique per cluster). Computes and persists capabilities. |
 | `get_environment(environment_id, uow)` | Retrieve environment by ID |
 | `get_environments(uow)` | List all environments |
-| `update_environment(environment_id, uow, config)` | Validate + persist env-config row, then fan out a redeploy Task to every non-tombstoned, non-internal deployment in the environment whose active instance is not already at the new config. See "Environment-config fanout" below + [ADR-012](../adr/0012-environment-config-fanout.md). |
-| `delete_environment(environment_id, uow)` | Delete an environment |
+| `update_environment(environment_id, uow, config)` | Validate + persist env-config row, then fan out a redeploy Task to every non-tombstoned, non-internal deployment in the environment whose active instance is not already at the new config. See "Environment-config fanout" below + [ADR-012](../../adr/0012-environment-config-fanout.md). Raises `EnvironmentOperationInProgressError` while an environment clone occupies the environment (`guard_no_clone_occupying_environment`). Only the clone part of the environment-level guard applies: an environment backup or restore in progress does not block the update. The check runs before the `config is None` no-op path, so a no-op update is also refused while a clone occupies the environment. |
+| `delete_environment(environment_id, uow)` | Delete an environment and everything that depends on it, in four steps (see "Deleting an environment" below). |
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
+
+#### Deleting an environment
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
+
+`delete_environment` runs four steps, in this order:
+
+1. It settles the environment clone records in which the environment appears, in one transaction:
+   - as the created environment, with `detach_clones_from_created_environment`;
+   - as the source environment, with `resolve_clones_of_deleted_source_environment`.
+
+   The rules for which clone records are kept and which entries they get are in [backup-restore.md](backup-restore.md#environment-clone). Settling the clones first means that every clone still linked to a snapshot of the environment has finished, so the capture guard in step 2 cannot refuse.
+2. It deletes the environment backups of the environment, with the same cascade as `delete_environment_backup` (`delete_environment_backups_for_environment`).
+3. It asks the cluster to tear down every remaining deployment of the environment with `request_cluster_teardown`, then deletes the deployment rows with `uow.deployments.delete_all_for_environment`. The teardown request is best effort: the rows are deleted even when the cluster did not answer, and the failures are logged as `environment_delete_teardown_incomplete`.
+4. It deletes the environment row. When a concurrent delete already removed it, the call returns without an error.
+
+The `environment_deleted` log line records the number of environment backups and deployments deleted, the teardown requests that succeeded and failed, and the clone records discarded, kept, deleted and failed.
 
 #### Environment-config fanout
 
@@ -182,9 +212,17 @@ Manages environments within clusters.
 
 `update_environment` is the load-bearing write path for environment configuration. The mutation is thin: validate the input through the Pydantic pipeline, commit the env-config row **before** any Task dispatch (FR-009a), then iterate every non-tombstoned, non-internal deployment in the environment, calling `redeploy_for_environment_update(deployment, uow)` for each one whose active instance is not already at the new config.
 
-Per-deployment no-op detection is in `_deployment_already_at_config(deployment, new_config) -> bool` — it compares the canonical Pydantic round-trip of the deployment's active-instance environment-config slice against the canonical round-trip of the new config. This shape handles two cases with one code path: a true environment-wide no-op (every deployment skips, zero Tasks dispatched, zero spurious timeline entries) and partial-fanout recovery (a re-submission of the same input dispatches Tasks only for laggards that didn't reach the new config on a prior attempt). See [ADR-012](../adr/0012-environment-config-fanout.md) §1 for the design rationale.
+Per-deployment no-op detection is in `_deployment_already_at_config(deployment, new_config) -> bool` — it compares the canonical Pydantic round-trip of the deployment's active-instance environment-config slice against the canonical round-trip of the new config. This shape handles two cases with one code path: a true environment-wide no-op (every deployment skips, zero Tasks dispatched, zero spurious timeline entries) and partial-fanout recovery (a re-submission of the same input dispatches Tasks only for laggards that didn't reach the new config on a prior attempt). See [ADR-012](../../adr/0012-environment-config-fanout.md) §1 for the design rationale.
 
-The fanout helper `redeploy_for_environment_update(deployment, uow) -> Task` lives in `services/deployment.py`. It mirrors the post-version-decision portion of `update_deployment_version` — does NOT change the deployment's `application_version`, `parameters`, or `service_name_overrides`; only regenerates the active instance against the deployment's currently-bound driver and dispatches the resulting Task.
+The fanout helper `redeploy_for_environment_update(deployment, uow) -> Task | None` lives in `services/deployment.py`. It mirrors the post-version-decision portion of `update_deployment_version` — does NOT change the deployment's `application_version`, `parameters`, or `service_name_overrides`; only regenerates the active instance against the deployment's currently-bound driver and dispatches the resulting Task.
+
+For a `RESTORING` deployment it returns `None` and changes nothing, because a restore is about to delete and recreate that namespace and a concurrent `apply_state` would write to the same objects. `update_environment` counts that case as `skipped_restoring` in the `env_config_fanout_dispatched` log line. The cluster config fan-out also uses this helper, for applications and for the `REDEPLOY` action on a dedicated ingress controller.
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 and specs/021-cluster-config-update on 2026-10-13 -->
+
+`update_environment` never creates, redeploys or removes the dedicated ingress controller. When an update turns the environment's own `dedicated_ingress` off, the status reporter's removal check (`tear_down_unused_ingress_controller`) removes the controller once the applications have been redeployed without it. Unlike the cluster config fan-out, the environment fan-out skips only tombstoned and internal deployments, so it also redeploys a deployment that is `DELETING`.
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
 
 Per-deployment dispatch failures are caught, logged, and counted (`dispatch_failed`); they do NOT propagate or roll back the env-config row, and peer deployments still receive Tasks (FR-008). One structured log line per fanout dispatch (`env_config_fanout_dispatched ...`) records the counts (FR-023). The metric `env_config_fanout_deployments_total{environment, outcome}` (FR-023a) is emitted via `_emit_fanout_metric`; the metric backend is not yet wired in v1, so the helper currently logs the would-be metric at `info` level — see the TODO at `services/environments.py::_emit_fanout_metric`.
 
@@ -197,7 +235,15 @@ Derives hierarchical capabilities from cluster/environment configuration. Capabi
 | `compute_cluster_capabilities(cluster)` | Compute capabilities from cluster config (storage, ingress) |
 | `compute_environment_capabilities(environment)` | Compute capabilities from environment config and BSL (backup, ingress) |
 
-Called automatically by cluster/environment creation and BSL assign/unassign operations.
+Called automatically by cluster/environment creation and BSL assign/unassign operations, and also by:
+
+- `update_cluster` (`clusters.py`), before it commits the new cluster config;
+- `update_environment` (`environments.py`), before it commits the new environment config;
+- `restore_environment_backup` (`backup/environment.py`), when it writes the captured config back.
+
+An environment clone creates its environment through `create_environment`, so the new environment's capabilities are computed from its own config, not copied from the source ([ADR-027](../../adr/0027-environment-capabilities-computed-independently.md)).
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
 
 ### Deployment Service (`deployment.py`)
 
@@ -205,12 +251,17 @@ Orchestrates application deployments.
 
 | Function | Description |
 |----------|-------------|
-| `deploy_application(name, version, environment_id, config, uow)` | Deploy an application |
+| `deploy_application(driver_name, version, environment_id, uow, created_by_user_id, deployment_config=None, deployment_parameters=None, deployment_name=None, service_name_overrides=None, driver_version_id=None, skip_initial_reconcile=False, release_reference=None) -> Task \| None` | Deploy an application. `driver_version_id` pins a driver version instead of the latest one. With `skip_initial_reconcile`, the deployment starts in `RESTORING`, its services and active instance are still created, `apply_state` is not called, the call logs `deploy_application_reconcile_skipped` and returns `None`. `release_reference` fixes the Helm release name instead of `styrmin-<deployment id>`. Only the environment clone flow passes the last two, for its counterpart deployments ([ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md)). <!-- Extracted from specs/010-environment-clone on 2026-10-13 --> |
 | `get_deployment(deployment_id, uow)` | Get deployment by ID |
 | `update_deployment(deployment_id, config, uow)` | Update deployment configuration. Returns `Task \| None` — a no-op update (resolved desired state equals the current instance) returns `None` with no new instance and no reconcile dispatched. |
 | `update_deployment_version(deployment_id, version, uow)` | Change application version. Returns `Task \| None` — requesting the current version is a no-op (`None`, no instance, no reconcile). |
-| `redeploy_for_environment_update(deployment, uow)` | Per-deployment redeploy helper used by the env-config fanout (009). Regenerates the active instance against the deployment's currently-bound driver and dispatches a Task; does NOT change `application_version`, `parameters`, or `service_name_overrides`. |
+| `redeploy_for_environment_update(deployment, uow) -> Task \| None` | Per-deployment redeploy helper used by the env-config fanout (009) and the cluster config fan-out (021). Regenerates the active instance against the deployment's currently-bound driver and dispatches a Task; does NOT change `application_version`, `parameters`, or `service_name_overrides`. Returns `None` and changes nothing for a `RESTORING` deployment. |
 | `delete_deployment(deployment_id, uow)` | Request platform-driven teardown — see lifecycle below |
+| `request_cluster_teardown(deployment_id) -> bool` | Set `spec.deletionRequested` on the deployment's `StyrminDeployment` CR, the same signal `delete_deployment` sends. It writes nothing to the database and checks no state, so it also works on the `RESTORING` counterpart deployments of a clone. It returns `False` instead of raising when the CR cannot be patched. Only `delete_environment` calls it. <!-- Extracted from specs/010-environment-clone on 2026-10-13 --> |
+| `create_ingress_controller(environment_id, uow, created_by_user_id) -> Deployment` | Create the environment's internal ingress controller deployment from the latest version of the internal driver and dispatch it. Callers check first that no live controller exists. `_ensure_ingress_controller` calls it on the first deploy, and the cluster config fan-out calls it for a `CREATE` action. <!-- Extracted from specs/021-cluster-config-update on 2026-10-13 --> |
+| `effective_dedicated_ingress(environment_config, cluster_config)` | The environment's own `dedicated_ingress`, else the cluster's. Any object, including `{}`, turns the controller on; only an absent or null value turns it off. |
+| `rendered_dedicated_ingress(deployment)` | The `dedicated_ingress` value that the deployment's active instance was rendered with, or `None` without an active instance. |
+| `tear_down_unused_ingress_controller(environment_id, uow) -> int` | Request the deletion of the environment's controller once no application depends on it (lifecycle step 5 below). Runs in the caller's transaction, does not commit, and returns the number of controllers whose deletion it requested. |
 
 **Deployment Flow:**
 
@@ -257,14 +308,24 @@ Read-side accessors for application drivers stored in the database.
 
 Driver loading and application instantiation. The "loaders" pull a driver spec from a source (Git, local directory, or in-memory object), validate it, register its actions with Prefect, and persist the resulting `ApplicationDriver` / `ApplicationDriverVersion` rows.
 
-Loading is **identity-aware** (spec 013): each load computes a provenance fingerprint — `content_hash` (SHA-256 over the canonical three-file input) for local source, `source_commit_sha` (resolved at HEAD) for git source — and looks up via `get_by_identity`. Same identity tuple → idempotent no-op (returns the existing row). New fingerprint at the same `(driver, source, version)` → a new row is created alongside the existing ones; no row is ever deleted by the load path. The Prefect action registration is keyed on the fingerprint short prefix so historical deployments keep resolving actions to the bytes they were deployed from.
+Loading is **identity-aware** (spec 013): each load computes a provenance fingerprint — `content_hash` (SHA-256 over the canonical three-file input) for local source, `source_commit_sha` (resolved at HEAD) for git source — and looks up via `get_by_identity`. Same identity tuple → the existing row is returned, and nothing else is created or registered. New fingerprint at the same `(driver, source, version)` → a new row is created alongside the existing ones; no row is ever deleted by the load path. The Prefect action registration is keyed on the fingerprint short prefix so historical deployments keep resolving actions to the bytes they were deployed from.
+
+When the identity matches, the load first compares the `icon`, `description` and `links` of the file with the stored columns. When any of them differs, it writes all three, commits, and returns the row read again. The identity tuple pins the file content, so this only fills in driver versions stored before spec 020 added the columns. No other column changes, no row is created, and the Prefect actions are not registered again ([ADR-053](../../adr/0053-driver-version-provenance-fingerprint.md)). When two loads of the same driver race and the insert of one fails on the unique identity index, that load returns the row of the other load unchanged.
 
 | Function | Description |
 |----------|-------------|
 | `load_application_driver_from_object(driver_spec, uow, ...)` | Load a driver from an in-memory `DriverSpec` |
-| `load_application_driver_from_git_repository(repository_url, branch, uow, ...)` | Clone a driver from Git and load it |
-| `load_application_driver_from_local_directory(path, uow, ...)` | Load a driver from a local filesystem path |
+| `load_application_driver_from_git_repository(repository_url, branch, uow) -> LoadedDriverVersion` | Clone a driver from Git and load it |
+| `load_application_driver_from_local_directory(path, uow) -> LoadedDriverVersion` | Load a driver from a local filesystem path |
 | `instantiate_application(...)` | Instantiate an application from a loaded driver |
+
+The Git and local loaders return `LoadedDriverVersion(version, warnings)`: the stored driver version and the warnings of its `spec.info` block (see "Driver information in `spec.info`" below). `_store_loaded_driver` logs each warning before it stores the driver version. `_driver_info_columns` maps `spec.info` to the three columns:
+
+- `icon`: `str(info.icon)`, the URL as `HttpUrl` normalizes it;
+- `description`: the text, or `None` when it is empty;
+- `links`: a list of `{"link", "url"}` dictionaries in file order, or `None` when there is none.
+
+<!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
 
 ### Tasks Service (`tasks.py`)
 
@@ -364,6 +425,15 @@ Load driver definitions from the filesystem after cloning.
 
 Parse driver manifest files (YAML/JSON) into domain models.
 
+When the driver specification file does not validate, `format_validation_error` writes one line per invalid field, in the form `- <path>: <message> (found <value>)`:
+
+- The path uses `[n]` for list indexes, for example `spec.info.links[0]`.
+- The value is shown only when it is a string, an integer or a float, and never for a missing field.
+
+The loader wraps these lines in `DriverLoadingError("Error while deserializing the driver resource: The driver specification is invalid:\n…")` (`loaders.py`).
+
+<!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
+
 ### Validators (`validators.py`)
 
 Validate driver structure and content against schema requirements.
@@ -376,6 +446,22 @@ Domain models representing driver resources:
 - `Action` - Custom actions with hooks (pre/core/post)
 - `Code` - Code resource references
 - `Component` - Component definitions
+
+#### Driver information in `spec.info`
+
+<!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
+
+`Specification.info: Info` is required in the driver specification file, and every key in it is optional (`models/resources/driver.py`). `Info` accepts `icon`, `description`, `links`, `authors` and `license`. Styrmin stores the first three on the driver version and does not store `authors` or `license`.
+
+An invalid `icon` or `links` value does not fail the load. The wrap validator `Info._drop_invalid_icon_and_links` removes it before validation and records one warning for each value it removes. The `warnings` property returns these warnings. The rules are:
+
+- `icon` must be an absolute `https` URL.
+- Each `links[].url` must be an absolute `http` or `https` URL.
+- Neither may contain a username or password. The warning for such a URL does not repeat the value.
+- A `links` entry must be a mapping with exactly the keys `link` and `url`, and `link` must be text. Each invalid entry is removed on its own.
+- A `links` value that is not a list is removed as a whole.
+
+Each warning names the field and ends with what was left out, for example `spec.info.links[1].url must be an absolute http or https URL, such as https://example.com/docs (found '…'). The link was not stored.` Any other invalid field of the file still fails the load. The decision is recorded in [ADR-068](../../adr/0068-invalid-driver-info-dropped-with-load-warning.md).
 
 <!-- Extracted from specs/015-infrahub-mcp-driver on 2026-08-04 -->
 
@@ -580,6 +666,14 @@ ServiceError (base)
 ├── RestoreAlreadyInProgressError
 ├── BackupScheduleNotFoundError
 ├── BackupScheduleAlreadyExistsError
+├── EnvironmentBackupNotFoundError          # NOT_FOUND
+├── EnvironmentRestoreNotFoundError         # NOT_FOUND
+├── EnvironmentOperationInProgressError     # ALREADY_IN_PROGRESS; operation_kind environment_backup / environment_restore / environment_clone
+├── EnvironmentBackupNotRestorableError     # OPERATION_DENIED
+├── EnvironmentCloneNotFoundError           # NOT_FOUND
+├── EnvironmentBackupInUseByCloneError      # IN_USE
+├── UnknownEnvironmentConfigFieldError      # VALIDATION_ERROR
+├── InvalidCloneDeploymentSelectionError    # NOT_FOUND
 ├── AmbiguousIdentifierError
 ├── BackupStorageLocationNotFoundError
 ├── BackupStorageLocationAlreadyExistsError
@@ -595,6 +689,8 @@ ServiceError (base)
 ├── ComponentContainerNotDeclaredError      # services/env_vars/exceptions.py
 └── RetiredTemplateFilterError              # services/exceptions.py
 ```
+
+<!-- Extracted from specs/001-env-backup-restore on 2026-10-13 (the first four Environment* errors) and specs/010-environment-clone on 2026-10-13 (the clone errors) -->
 
 <!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
 

@@ -4,7 +4,18 @@
 
 ### Overview
 
-The frontend uses **TanStack Form** (`@tanstack/react-form`) for all six form components (Add Driver, Create/Detail BSL, Create Cluster, Create Environment, Deploy Form). Each form follows the same pattern: a Zod schema declares shape and constraints, `<form.Field>` binds inputs to form state, and submission calls a TanStack Query mutation.
+The frontend uses **TanStack Form** (`@tanstack/react-form`) for every form component:
+
+- the Load driver drawer;
+- the Create and Detail backup storage location forms;
+- the Create cluster and Edit cluster dialogs;
+- the Create environment and Clone environment dialogs;
+- the Deploy form;
+- the deployment configuration edit drawer.
+
+Most of them follow the same pattern: a Zod schema declares shape and constraints, `<form.Field>` binds inputs to form state, and submission calls a TanStack Query mutation.
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
 
 TanStack Form 1.28+ accepts Zod schemas directly via Standard Schema. There is **no `@tanstack/zod-form-adapter`** dependency — it isn't needed at this version.
 
@@ -79,17 +90,45 @@ return (
 
 Zod `.refine()` works as form-level validation when the full schema is passed via `validators.onSubmit`. Per-field validators continue to use simpler Zod types for instant feedback.
 
+The cluster forms keep their cross-field rules in one `superRefine` function, so the create and
+edit dialogs share them (`components/cluster/ClusterConfigFields.helpers.ts`):
+
 ```ts
+export function refineClusterConfig(
+  data: ClusterConfigFormValues,
+  ctx: z.RefinementCtx,
+): void {
+  if (data.standard_storage_enabled && !data.standard_storage_class) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Storage class is required when standard storage is enabled",
+      path: ["standard_storage_class"],
+    });
+  }
+  // … the same for fast storage, the external URL port and the NodePort
+}
+
+export const clusterConfigSchema =
+  z.object(clusterConfigShape).superRefine(refineClusterConfig);
+
+// The Create cluster dialog adds its `name` field to the same shape and rules.
 const createClusterSchema = z
-  .object({
-    storageEnabled: z.boolean(),
-    storageClass: z.string().optional(),
-  })
-  .refine((d) => !d.storageEnabled || !!d.storageClass, {
-    message: "Storage class required when storage is enabled",
-    path: ["storageClass"],
-  });
+  .object({ name: z.string().min(1, "Cluster name is required"), ...clusterConfigShape })
+  .superRefine(refineClusterConfig);
 ```
+
+The two cluster dialogs pass a function to `validators.onSubmit` instead of the schema itself.
+`schemaFieldErrors(schema, value)` runs `safeParse` and returns the issues in the
+`{ fields: { "<path>": "<message>" } }` shape that a TanStack Form validator returns, or
+`undefined` when the values are valid:
+
+```ts
+validators: {
+  onSubmit: ({ value }) => schemaFieldErrors(createClusterSchema, value),
+},
+```
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
 
 ### Dynamic Fields Outside the Schema
 
@@ -104,6 +143,49 @@ Forms inside dialogs call `form.reset()` from the dialog's `onOpenChange` to res
 ```tsx
 <Dialog onOpenChange={(open) => { if (!open) form.reset(); }}>
 ```
+
+### Cluster config form (create and edit)
+
+`ClusterConfigFields` (`components/cluster/ClusterConfigFields.tsx`) renders the cluster config
+fields of both the Create cluster dialog (`pages/settings/CreateClusterDialog.tsx`) and the Edit
+cluster dialog (`pages/clusters/EditClusterDialog.tsx`). The form edits the config in its stored
+format: snake_case keys and stored enum values such as `http` and `NodeExternalIP`.
+`configToFormValues` and `formValuesToConfig` convert between the stored config and the form
+values.
+
+The cluster detail page shows the Edit button only to administrators, through
+`<IfRole minimum="ADMIN">`. The Edit dialog keeps a copy of the config it opened with and has
+three steps:
+
+1. Edit: the form. Submitting it builds the full config and calls `updateCluster` with
+   `dryRun: true`.
+2. Review (`ClusterUpdateReview` in `pages/clusters/ClusterUpdateSummary.tsx`): the values that
+   change and the deployments that saving would redeploy. It warns when:
+   - the FQDN suffix changes, because the URLs of the applications that take it change;
+   - a storage class changes, because Kubernetes refuses to change the storage class of an
+     existing volume claim, so deployments whose StatefulSets use it become `FAILED`;
+   - dedicated ingress controllers are created or removed.
+3. Result (`ClusterUpdateResult`): after `updateCluster` with `dryRun: false`. The dialog then
+   invalidates the `GetCluster` query of that cluster.
+
+`mergeFormValuesIntoConfig(stored, values)` builds the config to save from the form values and
+the stored config, because `updateCluster` replaces the whole config:
+
+- Top-level keys that the form does not show, such as `scheduling`, `db_size`, `node_selector`
+  and `backup_ttl`, keep their stored value.
+- `dedicated_ingress.service` fields that the form does not show, such as `annotations` and
+  `load_balancer_ip`, keep their stored value.
+- A value cleared in the form is removed.
+- When the IP families are the same set as the stored ones, the stored order is kept, so saving
+  does not change the controller.
+
+`clusterConfigToInput` (`lib/cluster-input.ts`) converts the stored config to
+`UpdateClusterInput`: camelCase keys and GraphQL enum names. It maps each field by hand. Every
+field of the generated `UpdateClusterInput` type is optional, so the compiler does not report a
+field that the function leaves out. Such a field would be removed by every save from the Edit
+dialog.
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
 
 ### Form Tests
 

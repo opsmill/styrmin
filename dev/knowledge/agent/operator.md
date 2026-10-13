@@ -49,6 +49,14 @@ The context is embedded directly in the CRD (see ADR-004), making the operator a
 
 The CRD is `scope: Namespaced` and lives **inside the deployment's own namespace** (`styrmin-{deployment_id}`). Deleting that namespace deletes the CR with it. Any state transition you want observed must complete BEFORE the namespace is gone, OR you must rely on a separate "DB DELETING + CR absent → infer terminal" path (this is what the agent's status reporter does for the platform-driven delete flow — see [`overview.md`](overview.md) → Status Reporter and `services/deployment_status.py`). New work that needs a phase change to land after namespace deletion will silently fail without this callout — design accordingly.
 
+### Name of the CR and the release reference
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
+
+`build_styrmin_deployment_body` (`operator/crd/builder.py`) names the CR after its namespace, not after `spec.releaseReference`. There is one StyrminDeployment per deployment namespace, and the status reporter, `delete_deployment` and the janitor all find it by that name.
+
+For an ordinary deployment the two strings are equal: `styrmin-<deployment id>`. They differ only for the counterpart deployment of an environment clone. The counterpart keeps its own namespace and CR name, but its `releaseReference` is the Helm release name of the source deployment. The restored Helm release, its storage record and the `meta.helm.sh/release-*` annotations on the restored chart objects all carry that name. A release named after the counterpart would make FluxCD install over objects that another release owns, and Helm's ownership check would fail. See [ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md) §3.
+
 ### Status
 
 | Field | Description |
@@ -91,7 +99,21 @@ Two paths exist:
 
 **Platform-driven (preferred)**: the backend's `deleteDeployment` mutation patches `spec.deletionRequested = true`. A `@kopf.on.update(field="spec.deletionRequested", new=True)` handler observes the flip and runs `_teardown_owned_resources` in reverse order (Services/Middlewares → HelmRelease → NetworkPolicies/Secrets), then issues a namespace delete. The periodic timer advances `phase` to `Deleted` once the namespace returns 404. Because the StyrminDeployment CR lives inside the deployment's own namespace, the CR is garbage-collected with the namespace; the agent's status reporter detects "DB DELETING + CR absent" and synthesises a final `displayState: Deleted` report so the DB is tombstoned race-free.
 
+A known race can leave the namespace in `Terminating` ([#446](https://github.com/opsmill/styrmin/issues/446), not fixed). The only record of it is one E2E run in `specs/archive/021-cluster-config-update/e2e-evidence.md`. In that run:
+
+- the namespace deletion deleted the CR, and the `@kopf.on.delete` handler ran at the same moment as the CR's timer tick;
+- kopf 1.44.5 keeps the `styrmin.io/kopf-finalizer` finalizer while a timer is still exiting, and then waits for the event of its own patch to process the object again;
+- the delete handler's patch set the `Deleting` phase that the `deletionRequested` handler had already set, so the patch changed nothing and produced no event.
+
+The finalizer stayed, the namespace stayed `Terminating`, and the status reporter kept reporting `Deleting`. Adding an annotation to the CR by hand made kopf run the handler again and remove the finalizer.
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
 **Manual safety-net**: `kubectl delete styrmindeployment ...` triggers the existing `@kopf.on.delete` handler, which runs the same `_teardown_owned_resources` helper. This path does **not** produce a DB tombstone — it's a recovery mechanism for when the platform-driven path is unavailable.
+
+The handler skips the teardown for a CR annotated `styrmin.io/skip-teardown: "true"` (`ANNOTATION_SKIP_TEARDOWN` in `operator/config.py`). A cross-target restore sets this annotation on its restored copy of the source's CR before it deletes that copy, because the counterpart CR now owns the resources the copy names. See [ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md) §3.
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 
 After the platform-driven path completes, the StyrminDeployment CR remains in `phase: Deleted` for `DELETED_CR_TTL_HOURS` (default 6h, env-configurable) so operators can inspect cluster-side state. A `@kopf.timer` janitor in `operator/janitor.py` reaps CRs whose `Deleted` condition's `lastTransitionTime` is past the TTL. CRs stuck in `Deleting` are NEVER auto-reaped.
 

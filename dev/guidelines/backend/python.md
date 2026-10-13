@@ -94,20 +94,155 @@ target driver version and re-checks image overrides before `_ensure_ingress_cont
 ### Calculate a status that several writers change; do not store it
 
 <!-- Extracted from specs/019-task-steps on 2026-10-08 -->
+<!-- Extracted from specs/001-env-backup-restore on 2026-10-13 -->
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
 
 When a status or result depends on rows that different processes write at different times,
 calculate it on every read from those rows instead of storing it. A stored value forces every
-writer to recalculate it, and a writer that forgets leaves it wrong. Two features follow this rule:
+writer to recalculate it, and a writer that forgets leaves it wrong. These features follow this
+rule:
 
 - The status of an environment backup or restore comes from its constituent backups or restores
   ([ADR-055](../../adr/0055-environment-backup-parent-records.md)).
+- The status of an environment clone comes from its capture, its created environment, its
+  cross-target restores and its recorded clone errors
+  ([ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md)).
 - The task result comes from the steps and `Task.status` of the task and of the tasks its hook
   steps started. Flows, driver actions and status reports write these
   ([ADR-060](../../adr/0060-steps-and-derived-task-result.md)).
+- The applications that wait for a dedicated ingress controller are recalculated from the
+  database each time the cluster config fan-out runs or the status reporter continues it. No list
+  of them is stored, which also makes the continuation safe to run twice
+  ([ADR-066](../../adr/0066-cluster-config-fanout.md) decision 2).
 
 Write the calculation as a pure function over rows that are already loaded
 (`services/steps/results.py::compute_task_result`), so a list read can load the rows in bulk and
 apply it in memory (see [Load list fields in a fixed number of queries](#load-list-fields-in-a-fixed-number-of-queries)).
+
+Commit a parent row in the same transaction as every child row its status is calculated from.
+Until its children are committed, a parent calculates a wrong status: an environment backup with
+no constituent backups reads `COMPLETED`. Guards that look for unfinished child rows do not see it
+either, so a second environment backup of the same environment is not refused.
+`register_environment_backup` writes the parent, the constituents and their errors into the
+caller's transaction, and `create_environment_backup` commits once, before it dispatches any flow
+(`services/backup/environment.py`).
+
+When rows that the calculation reads can be deleted, for example by retention cleanup or by a
+cascade, record each deletion on the record whose status depends on them:
+
+- Write an explicit event on the record in the same transaction as the deletion. An environment
+  clone gets a `clone_errors` entry whose step names the deletion, such as
+  `environment_backup_deleted` or `created_environment_deleted`.
+- Never infer an outcome from a null foreign key. A null `created_environment_id` cannot tell
+  "the environment was deleted" from "the environment was not created yet".
+- Mark the event as fatal only when the record had not finished. Cleanup then never changes the
+  outcome of a finished record.
+- When an input is missing and no event explains it, keep the recorded outcome instead of
+  calculating a new one.
+- Decide whether each record had finished before the cascade deletes the rows the calculation
+  reads, and pass that answer to the code that writes the event. Calculated after the cascade, a
+  clone that was still restoring would read as finished.
+
+Reference: the module docstring of `services/backup/clone.py`, and
+`delete_environment_backup` in `services/backup/environment.py`, which takes the
+`{clone_id: was_terminal}` result of `guard_no_clone_capturing_environment_backup` before the
+cascade and passes it to `detach_clones_from_environment_backup`.
+
+### Join the caller's transaction when you reuse a service that commits
+
+<!-- Extracted from specs/001-env-backup-restore on 2026-10-13 -->
+
+A service that creates many rows by calling a service that ends with `uow.commit()`, such as
+`create_backup`, must not let each call commit on its own. The parent row and every child row
+would no longer commit together (see the previous section), and the reused service's rollback on
+an error would also discard the rows written before it.
+
+Pass the reused service a `_SharedTransaction(uow)` view, which forwards every repository to the
+caller's unit of work and turns `commit()` and `rollback()` into no-ops:
+
+- Construct the view inside the caller's `async with uow` block, because the real unit of work
+  binds its repositories in `__aenter__`.
+- Collect the flow runs to start while the transaction is open, commit once, then start them.
+- Use the view only with services that raise before their first write. Its `rollback()` does
+  nothing, so rows the reused service already flushed stay in the transaction.
+  `create_backup` raises `BackupAlreadyInProgressError` before it creates its row.
+
+Reference: `_SharedTransaction` and `register_environment_backup` in
+`services/backup/environment.py`.
+
+### Set the row id before the INSERT when a unique name is built from it
+
+<!-- Extracted from specs/001-env-backup-restore on 2026-10-13 -->
+
+When a default name contains the row id, such as `styrmin-<backup id>`, generate the id with
+`uuid4()` and pass it to the model, so the name is final when the row is inserted. Do not insert a
+placeholder name and rename the row afterwards: the name column is unique, so two rows created in
+one transaction, or two concurrent requests, collide on the placeholder.
+
+```python
+backup_id = uuid4()
+backup = Backup(
+    id=backup_id,
+    name=name or f"styrmin-{backup_id}",
+    ...
+)
+```
+
+`create_backup` and `create_restore` in `services/backup/service.py`, and
+`register_environment_backup` in `services/backup/environment.py`, follow this rule.
+
+### Check for an operation in progress against its unfinished rows
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
+
+To refuse an operation because another one is running, look for an operation row that has not
+finished, `PENDING` rows included. Do not use a state field of the target entity such as
+`Deployment.status`. A state can outlive the operation that set it: a deployment left in
+`RESTORING` by a restore whose flow died would otherwise refuse every later restore, and a clone's
+counterpart deployment starts in `RESTORING` before its first restore
+([ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md) decision 4).
+
+Counting `PENDING` rows comes with a duty. A caller that commits a `PENDING` row and then fails to
+start its flow run must settle that row itself, because no process picks up a `PENDING` row that
+has no flow run, and it would refuse every later operation on the same target. Mark the row
+`FAILED` with the reason, and move the target out of the state the operation set, the same way the
+flow does when it fails. Reference: `settle_undispatched_restore` in `services/backup/service.py`,
+called by the `createRestore` mutation and by the environment restore. The clone flow uses its own
+copy, `_settle_undispatched_restore` in `workflows/templates/clone.py`.
+
+### Expire an in-flight guard when the flow it protects stops waiting
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
+
+A guard that refuses an action because a flow is still waiting on a row must stop refusing when
+that flow stops waiting. Otherwise a row that never finishes, such as a constituent backup whose
+flow run was never started and stays `PENDING`, blocks the action forever and leaves no way out.
+
+- Bound the guard in time as well as in state, and let both the guard and the flow read one
+  constant, so the two limits cannot drift apart. `CAPTURE_POLL_TIMEOUT_SECONDS` in
+  `workflows/templates/clone.py` is defined as `CAPTURE_IN_FLIGHT_GUARD_SECONDS` from
+  `services/backup/clone.py`.
+- Log a line when the guard stops refusing because of the time limit
+  (`clone_capture_guard_expired`).
+- Make sure every guard of this kind leaves a way out that the operator can always reach, such as
+  deleting the record ([ADR-055](../../adr/0055-environment-backup-parent-records.md) decision 6,
+  [ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md) decision 5).
+
+### Never let work added to a status report fail the report
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
+`report_deployment_statuses` in `services/deployment_status.py` writes the observed state of
+every deployment in one transaction. Work added to it must not be able to roll that back:
+
+- Run the work inside a savepoint (`async with uow.session.begin_nested():`), catch every
+  exception, and log it with the deployment id.
+- Run it only when the report changes something the work depends on. The cluster config fan-out
+  hook runs only when a deployment's state changes.
+
+Reference: `_record_operator_steps` and `_run_cluster_config_fanout_hook` in
+`services/deployment_status.py`.
 
 ## Repository Pattern
 
@@ -277,6 +412,24 @@ correctly rejects `True`/`False`. Coercing wrong-typed values via `str(value)`
 is **forbidden**: an operator who passes `1` may have meant `"1"` or may
 have intended an integer; a typed error tells them which.
 
+### Validate URLs that a browser loads or opens
+
+<!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
+
+When a value from a user or a driver file becomes a URL that the browser loads or opens, such as
+the driver logo or a driver link, validate it before you store it:
+
+- Parse it with Pydantic's `HttpUrl`, then check the scheme against an explicit list. An image
+  must be `https`, because browsers block an `http` image on a page served over `https` as mixed
+  content. A link may be `http` or `https`. The parse and the scheme check keep `javascript:` and
+  `data:` values away from the browser.
+- Reject a URL that contains a username or a password.
+- Never repeat such a value in an error or a warning message: the message names the field and
+  says that it must not contain a username or a password.
+
+Reference: `_url_problem` in `services/driver/models/resources/driver.py`. It is private to that
+module; move it to a shared module when a second caller needs it.
+
 ### Schema-walking propagation tests
 
 Every Strawberry input that mirrors a Pydantic config model MUST have a
@@ -292,35 +445,47 @@ are fail-on-regression. Both stay; neither subsumes the other.
 
 ### Per-target failure isolation in fanout writes
 
-When a write operation fans out across multiple targets (e.g.
-`update_environment` redeploys every deployment in the environment),
-wrap each per-target invocation in a `try/except Exception`, record the
-failure on the per-target `Task`, log it structured, and continue to the
-next target. The mutation succeeds once every iteration has either
-dispatched a Task or recorded a failure; per-target failures do **not**
-surface in the mutation envelope:
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
+When a write fans out to many targets, for example a config update that redeploys every
+deployment it changes, one target that fails must not stop the others or undo their writes:
+
+- Wrap each per-target write in a savepoint inside the `try`, catch every exception, count and log
+  the failure with the target's id, and continue with the next target. The redeploy path opens
+  nested `async with uow` blocks of its own. When one of them fails while a savepoint is open,
+  `SqlModelUnitOfWork.__aexit__` rolls back only that savepoint; without a savepoint it rolls back
+  the whole transaction, including the targets already written.
+- Never call `uow.commit()` inside a savepoint. In SQLAlchemy 2.0 it commits the outer
+  transaction, so `SqlModelUnitOfWork.commit()` raises there.
+- Commit after a limited set of targets, not once for the whole fan-out. `apply_state` starts the
+  flow run before the caller commits, and the flow waits only `TASK_ROW_WAIT_SECONDS` (10 seconds,
+  `services/steps/internal_flows.py`) for its task row. The cluster config fan-out commits once per
+  environment.
+- Copy the values you need after a failure before you roll back. A rollback expires the ORM rows
+  that were loaded in the transaction (`_EnvironmentRef` in `services/cluster_config_fanout.py`).
+- Return the failures to the caller when the mutation has a result type for them, as
+  `updateCluster` does with `failedToStart` and `failedEnvironments`. A redeploy that could not
+  start creates no task, so it does not appear in the deployment timeline.
 
 ```python
-for deployment in deployments:
-    try:
+try:
+    async with uow.session.begin_nested():
         task = await redeploy_for_environment_update(deployment, uow)
-    except Exception as exc:  # noqa: BLE001 — surface as a per-target Task
-        logger.warning(
-            "fanout_redeploy_failed",
-            deployment_id=str(deployment.id),
-            error=str(exc),
-        )
-        await record_failed_task(deployment, exc, uow)
-        continue
-    tasks.append(task)
+except Exception:  # noqa: BLE001 — one deployment must not stop the others
+    result.dispatch_failed += 1
+    logger.exception("cluster_config_fanout_dispatch_error deployment_id={}", deployment.id)
+    return
 ```
 
-This pattern is what makes a fanout write resilient to per-deployment
-chart-render failures, missing drivers, or transient cluster errors —
-one bad deployment does not block the rest. The failure surface is
-queryable via `Deployment.timeline` after the fact; see [ADR-012 §commit
-ordering](../../adr/0012-environment-config-fanout.md) for the
-durability contract.
+When a change reaches deployments through more than one config level, decide which deployments
+to redeploy by comparing each deployment's resolved config with the one its active instance was
+rendered with, not by comparing one level's stored config
+([ADR-066](../../adr/0066-cluster-config-fanout.md) decision 1).
+
+Reference: `services/cluster_config_fanout.py` and
+[ADR-066](../../adr/0066-cluster-config-fanout.md) decision 6. `update_environment` in
+`services/environments.py` predates the savepoint rule: its loop catches the error of each
+redeploy without a savepoint.
 
 <!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
 
@@ -435,6 +600,22 @@ async with UnitOfWork() as uow:            # fresh session, not the writer's
     assert reloaded.metadata_["ttl"] == "2160h"
 ```
 
+### Merge by key when you update entries of a JSON list that another writer created
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
+
+When code updates entries of a JSON list column that another writer created, write its entries
+back into the stored list, matched by a key. Do not replace the list with the entries the code
+could read. An entry it could not read, or that a newer writer added, would otherwise disappear,
+and a status calculated from the list would lose it.
+
+- Match by the entry's identifier, such as `deployment_id`.
+- Keep every stored entry that the code did not update exactly as it was.
+- Append the code's entries that have no stored counterpart.
+
+Reference: `_read_results` and `_merge_results` in `workflows/templates/clone.py`, which update
+`EnvironmentClone.deployment_results`.
+
 ## Domain Models (Pydantic)
 
 - Use `BaseModel` for domain objects
@@ -513,6 +694,27 @@ top-level spec key it writes; everything else merges.
 See [ADR-057](../../adr/0057-post-render-component-overrides.md) §6 and
 [`dev/knowledge/agent/operator.md`](../../knowledge/agent/operator.md#apply-semantics).
 
+### Read the Helm release name from the active instance; never compute it from the deployment id
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
+
+A deployment's Helm release name is chosen once and never changes, because renaming it would make
+Flux install a second release over objects that Helm already owns. Code that needs the release name
+reads the `release_reference` that the active instance's context carries. Code that creates a
+context gets it from `_resolve_release_reference` in `services/context.py`, which returns, in
+order:
+
+1. an explicit release name, which the environment clone passes so that a counterpart deployment
+   keeps the source deployment's release;
+2. the release name the active instance already carries;
+3. `styrmin-<deployment id>`, for the first instance of an ordinary deployment.
+
+Do not build `styrmin-<deployment id>` and use it as the release name. That string is the
+deployment's namespace and the name of its StyrminDeployment CR. It equals the release name for
+most deployments but not for a counterpart deployment
+([ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md) decision 3,
+`operator/crd/builder.py`).
+
 ## GraphQL (Strawberry)
 
 - Types use `@strawberry.type` decorator
@@ -561,6 +763,60 @@ def application_driver(self) -> ApplicationDriver:
 ```
 
 **Circular imports**: Use `strawberry.lazy()` with `Annotated` only when circular imports actually occur. Prefer standard imports when possible.
+
+### Declare a mirror enum class for each GraphQL enum
+
+<!-- Extracted from specs/001-env-backup-restore on 2026-10-13 -->
+
+`strawberry.enum` binds one GraphQL name to one Python class. To expose a service-layer enum,
+declare a `str, Enum` class in the API layer with `@strawberry.enum(name=...)` and the same
+members, rather than registering the service-layer enum itself. Registering it claims its only
+GraphQL name and makes an API concern of a service-layer type. `EnvironmentBackupStatus`
+(`api/definitions/backup/environment_backup.py`) registers the service-layer
+`EnvironmentOperationStatus` directly, which is why `EnvironmentRestoreStatus`, a second GraphQL
+name for the same enum, had to be a mirror class.
+
+Add a unit test that the mirror's members match the service-layer enum one for one, so the two
+cannot drift apart. References: `EnvironmentRestoreStatus` in
+`api/definitions/backup/environment_restore.py`, with
+`test_environment_restore_status_mirrors_the_service_enum` in
+`tests/unit/services/backup/test_environment_backup.py`; `EnvironmentCloneStatus` in
+`api/definitions/backup/environment_clone.py`.
+
+### Take a typed input that mirrors the config model in a mutation that writes a config
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
+A mutation that writes a cluster, environment or deployment config takes a typed Strawberry input,
+not a `config: JSON` argument:
+
+- Declare one Strawberry input per Pydantic class and one enum mirror per Pydantic enum.
+- Reuse the shared leaf inputs in `api/definitions/config/inputs.py`.
+- Put the top-level input and its `*_input_to_dict` converter next to the entity, for example
+  `UpdateClusterInput` and `update_cluster_input_to_dict` in `api/definitions/cluster/inputs.py`.
+- When the input replaces the whole config, say so in its description.
+- Cover it with a schema-walking propagation test (see
+  [Schema-walking propagation tests](#schema-walking-propagation-tests)).
+
+`createCluster` and `createEnvironment` still take `config: JSON`. Do not add another. Sources:
+[ADR-012](../../adr/0012-environment-config-fanout.md) ("Convention to replicate"),
+[ADR-018](../../adr/0018-typed-update-deployment-input.md) and
+[ADR-066](../../adr/0066-cluster-config-fanout.md) decision 4.
+
+### Show one unreadable JSON entry as degraded instead of failing the query
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
+
+When a GraphQL type projects entries of a JSON column, and its wire type is stricter than the
+column (for example a closed enum where the column holds free text), project each entry on its own.
+For an entry that does not validate, log a warning and return a degraded entry instead of raising:
+keep the fields that could be read and say in a text field which entry could not be read and why.
+A single bad entry would otherwise fail the whole query with `INTERNAL_ERROR`, and the record could
+no longer be read on any surface. Give the degraded entry the outcome that the status calculation
+gives it, so the two agree.
+
+Reference: `EnvironmentCloneDeploymentResult.from_stored` in
+`api/definitions/backup/environment_clone.py`.
 
 ### Load list fields in a fixed number of queries
 
@@ -665,6 +921,34 @@ if scheduled is not None and datetime.now(UTC) - scheduled > LATE_RUN_LIMIT:
 `workflows/templates/telemetry.py` does this, so a report missed while the task worker was down
 is not sent later.
 
+### In a polling loop, reuse one unit of work and roll it back before each sleep
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
+
+When a flow polls the database until a row reaches a state, open one unit of work for the whole
+loop and call `await uow.rollback()` before each sleep:
+
+- Opening a new unit of work on each turn opens one session per turn, up to hundreds for one long
+  wait, and holds connections from the pool.
+- Without the rollback, the session's identity map keeps returning its first read of the row, so
+  the loop never sees the row change. The rollback also returns the connection to the pool while
+  the loop sleeps.
+- Do not roll back after the last read: the rollback expires the loaded rows, and the caller must
+  not receive expired rows.
+
+```python
+async with get_unit_of_work() as uow:
+    while True:
+        clone = await _load_clone(clone_id, uow)
+        ...
+        if capture_status in TERMINAL_ENVIRONMENT_OPERATION_STATUSES:
+            return capture_status, clone
+        await uow.rollback()
+        await asyncio.sleep(poll_delay)
+```
+
+Reference: `_await_capture_terminal` in `workflows/templates/clone.py`.
+
 ## Outbound HTTP requests
 
 <!-- Extracted from specs/020-backend-telemetry on 2026-10-10 -->
@@ -713,3 +997,12 @@ def my_task(context: Context) -> None:  # noqa: ARG001
   `frontend/src/lib/image-reference.vectors.json`, read by
   `backend/tests/unit/services/image_overrides/test_reference.py` and
   `frontend/src/lib/image-reference.test.ts`.
+
+<!-- Extracted from specs/001-env-backup-restore on 2026-10-13 -->
+
+- **Put a test that needs no cluster under `backend/tests/unit/`, even when it imports modules
+  from `tests.e2e`.** Collecting any module under `tests/e2e/` starts a vCluster, because
+  `tests/e2e/conftest.py` has an `autouse` fixture that depends on the session `vcluster` fixture.
+  The unit job ignores `tests/e2e/`, and the CI E2E jobs select tests by the `ci` and shard
+  markers, so a test placed there without those markers runs in no CI job. Example:
+  `backend/tests/unit/test_e2e_driver_conformance.py`.

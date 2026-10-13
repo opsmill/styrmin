@@ -322,7 +322,7 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     # command, args). Nullable JSON column added by revision ``a8b9c0d1e2f3``;
     # rows pre-dating it carry NULL and deserialize to ``None``.
     container_overrides: list | None = Field(default=None, sa_column=Column(JSON))
-    # 020: logo URL from ``spec.info.icon`` (validated http/https URL).
+    # 020: logo URL from ``spec.info.icon`` (validated absolute https URL).
     icon: str | None = None
     # 020: free text from ``spec.info.description``; an empty string is stored as NULL.
     description: str | None = None

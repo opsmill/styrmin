@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-06
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: User description: "Environment-level backup and restore operations (GitHub issue #7). Add the ability to back up and restore an entire environment as a single coordinated operation, via a new EnvironmentBackup construct grouping per-instance Backup records, plus a symmetric EnvironmentRestore record." (Full grilled idea brief supplied; see issue [#7](https://github.com/opsmill/styrmin/issues/7).)
 

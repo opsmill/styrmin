@@ -1,6 +1,6 @@
 # ADR-029: Config additions ride through `BaseConfigSection` and existing JSON columns
 
-**Status**: Accepted
+**Status**: Accepted — narrowed by [ADR-066](0066-cluster-config-fanout.md) (every config level now has a typed update input)
 **Date**: 2026-05-17
 **Source**: specs/archive/001-external-dns-endpoints-type/research.md (D1, D3)
 
@@ -46,6 +46,27 @@ This pattern explicitly **avoids triggering the Constitution's Governance Gates*
 - The field needs a strongly-typed GraphQL output type so the frontend can drive UI off introspection — JSON scalar hides the structure.
 
 In those cases, take the governance hit and do the migration / schema work. The point of this ADR is that for *most* operator-tunable knobs, you don't have to.
+
+Amended 2026-10-13 (recorded at extraction of specs/archive/021-cluster-config-update): since
+[ADR-066](0066-cluster-config-fanout.md) added `UpdateClusterInput`, each config level has a
+typed update input, and each input has a test that fails when it does not cover every field of
+its Pydantic model:
+
+- `UpdateEnvironmentInput`: `test_update_environment_input_covers_every_environment_config_field`
+  in `backend/tests/functional/graphql/test_environment_update_propagation.py`.
+- `UpdateDeploymentInput`: `test_update_deployment_input_field_coverage` in
+  `backend/tests/functional/graphql/test_update_deployment_input_introspection.py`.
+- `UpdateClusterInput`: `test_update_cluster_input_covers_every_cluster_config_field` in
+  `backend/tests/functional/graphql/test_cluster_update_propagation.py`.
+
+A field added to `BaseConfigSection` therefore always needs GraphQL schema work: the field
+on each of the three inputs, a regenerated `schema.graphql` and regenerated SDK types. The
+frontend's `clusterConfigToInput` (`frontend/src/lib/cluster-input.ts`) maps each cluster
+field by hand, so it needs the field too; a field missing there is removed from the cluster
+config on every save from the edit dialog. Decision step 3 ("no changes to `schema.graphql`
+and the SDK Pydantic types") no longer holds. No database migration is needed, as before.
+`createCluster` and `createEnvironment` still take `config: JSON`; `deploy` takes the typed
+`DeploymentConfigInput`.
 
 ## Consequences
 

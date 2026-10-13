@@ -53,3 +53,17 @@ Base UI exposes state via boolean presence attributes. Tailwind selectors must u
 
 - Use the shared `useCopyToClipboard` hook from `@/hooks/use-copy-to-clipboard` for any Copy button. Do not call `navigator.clipboard.writeText` directly — the hook owns the post-copy `copied` flag (2 s window), the failure swallowing, and the unmount cleanup. Two divergent implementations of that state machine are guaranteed to drift.
 - Surface the `copied` state in the UI (typically by swapping the Copy icon for a check + "Copied" label) so the operator gets feedback even when the clipboard write succeeded silently.
+
+<!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
+
+### Links That Open a New Tab
+
+- Give every link with `target="_blank"` the attribute `rel="noopener noreferrer"`, so the opened page receives no reference to the Styrmin tab and no referrer. The existing new-tab links follow this rule: `pages/drivers/DriverDetailPage.tsx`, `pages/deployments/DeploymentDetailPage.tsx`, `components/deployment/configuration/DeploymentContextDialog.tsx` and `components/deployment/configuration/sections/read/ServiceOverridesSummary.tsx`.
+
+### Driver Logos
+
+- Show every driver logo through the shared `DriverLogo` component (`pages/drivers/DriverLogo.tsx`). Do not render `spec.info.icon` another way.
+- Load a logo only through `<img>`, never as a CSS `background-image`, an `<object>` or a frame:
+  - Only `<img>` reports a load error, which `DriverLogo` needs to show the generic package icon when the image cannot be loaded.
+  - Browsers do not run scripts in an SVG loaded through `<img>`.
+- Keep the attributes that `DriverLogo` sets: `alt=""`, because the driver name is always shown next to the logo, and `referrerPolicy="no-referrer"`, so the logo host does not receive the address of the Styrmin page. See [ADR-067](../../adr/0067-driver-logos-loaded-by-the-viewer-browser.md).

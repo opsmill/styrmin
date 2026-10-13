@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-10-12
 **Source**: [issue #423](https://github.com/opsmill/styrmin/issues/423) and
-specs/021-cluster-config-update/ (spec, plan, research D1 to D12).
+specs/archive/021-cluster-config-update/ (spec, plan, research D1 to D12).
 **Related**: [ADR-012](0012-environment-config-fanout.md) (environment config fan-out; this ADR
 narrows its "convention to replicate"), [ADR-026](0026-capabilities-recalculation-in-service-layer.md)
 (capabilities recomputed in the service layer), [ADR-008](0008-deployment-soft-delete-tombstoning.md)
@@ -93,13 +93,23 @@ In the update call, for each environment, Styrmin acts on the environment's live
 | Set | `DELETING` | None. No second controller while the first one is being removed. |
 | Not set | Exists | None in this step. Removal follows decision 3. |
 
-Each application whose resolved config differs is then handled by its own change:
+Each application whose resolved config differs is then handled as follows (`_plan_environment`):
 
-- Its resolved `dedicated_ingress` changes to a set value: it is redeployed only when the
-  controller is `RUNNING` and was rendered with that value. Otherwise it waits on its current
-  config and is counted as `skipped_waiting_for_ingress`.
-- Any other change, including the removal of its `dedicated_ingress`: it is redeployed at once,
+- The environment's effective `dedicated_ingress` is set, and differs from the
+  `dedicated_ingress` value the application's active instance was rendered with: the application
+  is redeployed only when the controller is `RUNNING`, was rendered with the effective value, and
+  this run starts no action on it. Otherwise it waits on its current config and is counted as
+  `skipped_waiting_for_ingress`.
+- In every other case, including an effective value that is not set: it is redeployed at once,
   whatever the controller state.
+
+> Amended 2026-10-13: the first version of this list said that an application waits when "its
+> resolved `dedicated_ingress` changes to a set value". The code compares the environment's
+> effective value with the value the application was rendered with, as written above. A known
+> limitation follows from this: the check does not use the application's own resolved value, so
+> a deployment that sets its own `dedicated_ingress`, different from the environment's effective
+> value, can wait for the controller for no reason. The implement report lists this as a deferred
+> finding (specs/archive/021-cluster-config-update/opsmill-implement-report.md, §5 "Deferred").
 
 Each environment is planned first (`_plan_environment`): the applications to redeploy, the ones
 that wait and the controller action. The plan is then carried out. A dry run (decision 4) returns
@@ -290,7 +300,7 @@ written, and the caller kept using a session whose transaction was gone. An expl
 - A pre-existing operator race in the #252 deletion path can leave a deleted controller in
   `DELETING`: when kopf's delete handler and the StyrminDeployment timer run at the same moment,
   kopf keeps its finalizer and the namespace stays `Terminating` (seen once in the E2E run of
-  2026-10-12, recorded in specs/021-cluster-config-update/e2e-evidence.md). While the controller
+  2026-10-12, recorded in specs/archive/021-cluster-config-update/e2e-evidence.md). While the controller
   stays `DELETING`, the applications that would move onto a controller keep waiting, and the
   recovery "resubmit after the removal has finished" is not available. A change to the
   StyrminDeployment custom resource, such as a new annotation, made kopf run the handler again and
@@ -332,7 +342,8 @@ written, and the caller kept using a session whose transaction was gone. An expl
   have moved.
 - `config: JSON` on `updateCluster`, like `createCluster`: rejected. It reverses ADR-012's typed
   input convention for a new mutation, and the one benefit it has over the typed input (unknown
-  keys refused by every surface) is restored in the CLI by decision 5.
+  keys refused by every surface) is restored in the SDK, and so in the CLI, by decision 5
+  (wording corrected 2026-10-13).
 - A typed input with a JSON escape hatch: rejected. Two write paths to validate and test, which
   ADR-012 decision 3 already rejected.
 - Commit the whole fan-out once, at the end: rejected. See decision 6.

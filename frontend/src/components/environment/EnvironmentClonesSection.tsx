@@ -13,8 +13,9 @@
  *   already read `IN_PROGRESS` — an upfront skip counts as recorded progress —
  *   so nothing assumes a PENDING-first progression.
  * - **Discarding the created environment through ordinary environment deletion
- *   is the supported discard path** (SC-005), and it drives the clone to
- *   `FAILED` with a `created_environment_deleted` event. That is a deliberate
+ *   is the supported discard path** (SC-005). It records a
+ *   `created_environment_deleted` event, which drives a clone that has not
+ *   finished to `FAILED`; a finished clone keeps its outcome. That is a deliberate
  *   operator action, not a malfunction, so the row labels it *Discarded*
  *   instead of presenting a bare failure.
  */

@@ -138,6 +138,17 @@ The phase history runs in a savepoint (`session.begin_nested()`) of the report's
 
 `reportDeploymentStatuses` is on the unauthenticated allow-list (issue [#396](https://github.com/opsmill/styrmin/issues/396)), so a caller who can reach the API can also move operator-phase steps through it.
 
+### Cluster config fan-out after a state change
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
+When a report changes `Deployment.status`, `report_deployment_statuses` calls `_run_cluster_config_fanout_hook` in a second savepoint of the report's transaction. A report that does not change the status runs nothing. The hook does one of two things:
+
+- When an internal deployment, such as the dedicated ingress controller, reaches `RUNNING`, it calls `continue_environment_fan_out`, which redeploys the applications that were waiting for that controller.
+- When an application reaches `RUNNING`, `FAILED` or `DELETED`, or the controller reaches `FAILED`, it calls `tear_down_unused_ingress_controller`, which requests the deletion of the environment's controller once no application depends on it.
+
+When the hook raises, its own writes roll back, the error is logged as `cluster_config_fanout_hook_error`, and the rest of the report still commits. See [ADR-066](../../adr/0066-cluster-config-fanout.md) §2 and §3, and the cluster config fan-out in [`../backend/services.md`](../backend/services.md).
+
 ### Cadence and lifecycle
 
 - **Cadence**: configurable via `STYRMIN_AGENT_STATUS_POLL_INTERVAL` (seconds, default `5`).

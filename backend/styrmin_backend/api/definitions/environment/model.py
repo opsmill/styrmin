@@ -109,8 +109,9 @@ class Environment:
             "clone-born. The provenance back-reference: `environmentClones` is "
             "scoped by *source* environment, so this is how a cloned "
             "environment points back at where it came from — and it keeps "
-            "working after the source environment is deleted, since a terminal "
-            "clone survives with `sourceEnvironmentName` intact."
+            "working after the source environment is deleted, since a clone that "
+            "created an environment survives its source with "
+            "`sourceEnvironmentName` intact."
         )
     )
     async def cloned_from(
