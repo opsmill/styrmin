@@ -25,6 +25,7 @@ from typing import Any
 
 import pytest
 
+from styrmin_backend.operator.config import ANNOTATION_SKIP_TEARDOWN
 from styrmin_backend.operator.crd.schema import (
     ConditionType,
     DeploymentPhase,
@@ -32,6 +33,7 @@ from styrmin_backend.operator.crd.schema import (
 )
 from styrmin_backend.operator.handlers import styrmin_deployment as handlers_module
 from styrmin_backend.operator.handlers.styrmin_deployment import (
+    kopf_on_styrmin_deployment_delete,
     kopf_on_styrmin_deployment_deletion_requested,
     kopf_on_styrmin_deployment_update,
     kopf_styrmin_deployment_timer,
@@ -183,6 +185,56 @@ async def test_deletion_requested_handler_short_circuits_when_already_deleted(
 
     teardown_mock.assert_not_called()
     delete_ns_mock.assert_not_called()
+    assert patch.status == {}
+
+
+@pytest.mark.anyio
+async def test_delete_handler_runs_teardown(mocker) -> None:
+    """A manual ``kubectl delete`` tears down the resources the CR names."""
+    teardown_mock = mocker.patch.object(
+        handlers_module, "_teardown_owned_resources", autospec=True
+    )
+    patch = _Patch()
+
+    await kopf_on_styrmin_deployment_delete(
+        spec={"releaseReference": "rel-1"},
+        status={"phase": DeploymentPhase.READY.value},
+        name="dep-1",
+        namespace="styrmin-abc",
+        annotations={},
+        patch=patch,
+        logger=_Logger(),
+    )
+
+    teardown_mock.assert_called_once()
+    assert patch.status["phase"] == DeploymentPhase.DELETING.value
+
+
+@pytest.mark.anyio
+async def test_delete_handler_skips_teardown_when_annotated(mocker) -> None:
+    """A cross-target restore discards its restored copy of the source's CR.
+
+    That copy names the counterpart's own HelmRelease and resources, so tearing
+    them down would uninstall the counterpart's release and remove the
+    resources the restore is re-applying. kopf can still run this handler for
+    it, because kopf puts back the finalizer the restore clears.
+    """
+    teardown_mock = mocker.patch.object(
+        handlers_module, "_teardown_owned_resources", autospec=True
+    )
+    patch = _Patch()
+
+    await kopf_on_styrmin_deployment_delete(
+        spec={"releaseReference": "rel-1"},
+        status={"phase": DeploymentPhase.RESTORING.value},
+        name="dep-1",
+        namespace="styrmin-abc",
+        annotations={ANNOTATION_SKIP_TEARDOWN: "true"},
+        patch=patch,
+        logger=_Logger(),
+    )
+
+    teardown_mock.assert_not_called()
     assert patch.status == {}
 
 
