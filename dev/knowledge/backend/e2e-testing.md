@@ -51,6 +51,21 @@ Defined in the root `pyproject.toml` under `[tool.pytest.ini_options]`:
 | `ci` | E2E tests included in the CI pipeline |
 | `api_only(reason)` | Scenario runs only through the API entrypoint; the `[ui]` variant is skipped with the given reason |
 | `ui_only(reason)` | Scenario runs only through the UI entrypoint; the `[api]` variant is skipped with the given reason |
+| `changes_cluster_config` | The test changes the session cluster's config, which redeploys every deployment of the cluster; the E2E conftest runs these tests first in the session |
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
+The hook `run_cluster_config_changes_first` in `backend/tests/e2e/conftest.py`, called from
+`pytest_collection_modifyitems`, moves the `changes_cluster_config` tests to the front of the
+session and keeps the order within each group. They then run before other tests create shared
+deployments. Each such test restores the original config and calls `wait_for_cluster_settled`
+(`backend/tests/e2e/helpers/ingress.py`), which waits until no deployment of the cluster, internal
+ones included, is pending or deploying. The shard rules for these tests are in
+[`e2e-parallelism.md`](../../guides/e2e-parallelism.md#tests-that-change-the-cluster-config).
+
+The E2E vCluster runs no shared ingress controller: no Traefik or NGINX runs besides the dedicated
+ingress controllers. `test_cluster_update.py` therefore checks that an application uses the
+shared ingress class through the Ingress resource's `spec.ingressClassName`, not over HTTP.
 
 The dual-entrypoint design is the reason every E2E scenario runs **twice by default** in CI — once as `[api-chromium]` (driver = SDK) and once as `[ui-chromium]` (driver = Playwright). Use `api_only` / `ui_only` to opt out of one variant when the same code path would be exercised redundantly. See `backend/tests/AGENTS.md` for the full rationale.
 
@@ -62,7 +77,10 @@ A test that calls **any** dual-entrypoint method on `scenario_driver`
 (`create_deployment` / `update_deployment` / `update_environment_via_form` /
 `set_environment_backup_ttl` / `set_component_env_vars` / `set_component_image` /
 `upgrade_deployment` / `pinned_image_components` / `create_backup` /
-`list_backups` / `start_components` / `stop_components` / `run_job` / `delete_*`) MUST run
+`list_backups` / `start_components` / `stop_components` / `run_job` /
+`create_environment_backup` / `get_environment_backup` / `wait_for_environment_backup` /
+`restore_environment_backup` / `wait_for_environment_restore` / `clone_environment` /
+`get_environment_clone` / `wait_for_environment_clone` / `delete_*`) MUST run
 under both variants — these methods
 exercise both the UI form and the API code path, and the parametrisation
 **is** the parity check. Marking such a test `api_only` short-circuits half
@@ -79,6 +97,27 @@ When adding a new dual-entrypoint method, add it to **both** drivers
 shape of the protocol and the lever the parametrisation uses. Adding the
 method to only `ui_driver.py` (or wrapping the test in `api_only` because
 the API side is missing) re-introduces the same drift class.
+
+<!-- Extracted from specs/001-env-backup-restore and specs/010-environment-clone on 2026-10-13 -->
+
+The environment backup methods drive the environment detail page's Backups
+tab, and the clone methods its Clones tab. Both groups are scoped by an
+environment: `create_environment_backup` and `clone_environment` take the
+environment id and the UI driver keeps it for the read methods that follow,
+which raise `ScenarioActionError` when the driver has no environment yet. The
+API driver ignores it, so scenarios need no `driver_mode` branch.
+
+`backend/tests/unit/test_e2e_driver_conformance.py` checks that
+`ApiScenarioDriver` and `UiScenarioDriver` implement every method of
+`ScenarioDriver`, and that no implementation is a `raise NotImplementedError`
+stub. It lives under `tests/unit/`, not `tests/e2e/`, because it needs no
+cluster:
+
+- Every test under `tests/e2e/` boots a vCluster, because the autouse fixture
+  `_dump_k8s_logs_on_failure` depends on the session-scoped `vcluster` fixture.
+- The unit job runs `pytest tests --ignore=tests/e2e` (`tasks/__init__.py`),
+  and the CI E2E jobs select tests with `-m "ci and shard_<name>"`. While the
+  test lived under `tests/e2e/drivers/` without those markers, no CI job ran it.
 
 #### Peer-deployment service-name overrides
 
@@ -349,7 +388,7 @@ A bare git daemon that hosts the application driver source code.
 At setup time, the fixture:
 
 1. Copies each driver source to a temp directory: the examples under `driver/examples/` and the test drivers under `tests/e2e/fixtures/drivers/`
-2. Patches `driver.styrmin.yml` to point the Helm chart location at the chart server's cluster-internal URL (drivers that use the chart server's charts)
+2. Patches `driver.styrmin.yml` to point the Helm chart location at the chart server's cluster-internal URL (drivers that use the chart server's charts). For `simple-app`, it also sets `spec.info.icon` to `https://styrmin-e2e.invalid/simple-app-logo.svg` and adds one "Documentation" link to `https://styrmin-e2e.invalid/docs` (`SIMPLE_APP_LOGO_URL` and `SIMPLE_APP_DOCS_URL` in `conftest.py`); see [Serving external URLs to the UI browser](#serving-external-urls-to-the-ui-browser) <!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
 3. Initializes a git repository using [dulwich](https://www.dulwich.io/) (pure Python git)
 4. Port-forwards the git-daemon service and pushes the repo
 
@@ -562,3 +601,23 @@ Page objects use the two helpers in `tests/e2e/pages/_dom.py`:
 
 - `wait_for_dialog_open(dialog)` waits until the dialog is visible and holds focus. Call it after opening a dialog and before its first `fill()`.
 - `submit_dialog(dialog, button="Create")` clicks the submit button and waits for the dialog to close. When the dialog stays open, it raises `ScenarioTimeout` with the dialog's text (submit and field errors included), the inputs that fail native validation, and the empty inputs.
+
+<!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
+
+## Serving external URLs to the UI browser
+
+A test that checks content which the browser loads from an external URL serves that content
+itself with Playwright's `page.route()`, so it does not depend on network access in CI.
+`test_driver_logo_description_and_links_render` (`backend/tests/e2e/test_ui_smoke.py`) does this
+for the driver logo:
+
+- The `git_server` fixture sets the `simple-app` logo to a URL on the reserved `.invalid` domain
+  (RFC 2606), where no real host answers. Without the route the logo cannot load, so the test
+  fails clearly instead of passing by accident.
+- The route answers with a small SVG that has an explicit `width` and `height`, so the decoded
+  image has a `naturalWidth` above zero. The test waits for `data-logo-state="image"` and for
+  `img.complete && img.naturalWidth > 0`.
+- The test calls `page.unroute()` in a `finally` block, because `session_ui_page` is shared by the
+  whole session and a route left on it would change later tests.
+- List logos load lazily (`loading="lazy"`), so the test scrolls the driver group into view before
+  it checks the logo.

@@ -9,6 +9,14 @@ logic: commands resolve arguments, call a `styrmin-sdk` resource method, and
 render the result. Everything platform-semantic — validation, no-op detection,
 name resolution — lives server-side.
 
+One exception: `clusters update` checks the config for unknown keys before it
+connects, through the SDK (see [Cluster config update](#cluster-config-update)).
+The SDK's generated input models ignore unknown keys, so without this check a
+misspelled key would be dropped before the request, and the stored value it
+meant to keep would be removed, because the update replaces the whole config.
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
 Three things do belong to the CLI, and they are what this page documents: how
 credentials are resolved and persisted, how errors reach the user, and the
 telemetry wrapper that observes each invocation's outcome.
@@ -280,3 +288,61 @@ server without steps. It reads the failed step in the same poll that saw the fai
 later status report can change that step. The CLI prints the reason on the `failed` line. The wait
 lasts 600 seconds by default (`WAIT_TIMEOUT_SECONDS`, `--max-wait`, SDK `max_wait`); a wait that
 runs out reports `wait timeout` instead of the failed step.
+
+## Driver load warnings
+
+<!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
+
+`drivers load-version` and `drivers load-local-version` print the loaded driver version with
+`_print_version_details` (`commands/drivers.py`). After the success line, it prints each entry of
+the version's `load_warnings` as a `Warning:` line (`print_warning`). The load mutations fill
+`loadWarnings` when the driver file sets an invalid `spec.info.icon` or `spec.info.links` value,
+which the load drops instead of failing. Styrmin does not store the warnings, so loading the same
+file again prints them again. See
+[ADR-068](../../adr/0068-invalid-driver-info-dropped-with-load-warning.md).
+
+## Cluster config update
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
+`styrminctl clusters update` replaces the whole config of a cluster and redeploys the deployments
+that take a changed value. The server side is described in
+[ADR-066](../../adr/0066-cluster-config-fanout.md).
+
+**Reading the config.** `--config` takes the whole config as inline JSON or `@filepath`, parsed
+with `parse_json_argument`. A value that is not a JSON object is refused. A key left out is removed
+from the stored config.
+
+**Checking the keys before connecting.** The command calls the SDK's `cluster_update_input`
+(`python_sdk/src/styrmin_sdk/resources/clusters.py`) before it opens a client. That function:
+
+- refuses every key that is not a field name or alias of `UpdateClusterInput`, at any depth, and
+  names its path (`Unknown config key(s): dedicated_ingress.servce`), through
+  `validate_input_strict` in `_input_checks.py`;
+- accepts snake_case or camelCase keys;
+- converts stored enum values, such as `http` and `NoSchedule`, to the GraphQL enum names, such as
+  `HTTP` and `NO_SCHEDULE`, through `to_graphql_enum_names`. A config printed by
+  `clusters get --json` can therefore be edited and passed back.
+
+`ClusterResource.update` runs the same check again, so SDK callers get it too.
+
+**Waiting for the answer.** The server starts one redeploy for each changed deployment before it
+answers, so `ClusterResource.update` waits up to 600 seconds (`UPDATE_CLUSTER_TIMEOUT_SECONDS`,
+passed as `request_timeout`) instead of the SDK's default timeout. When the request fails with a
+`StyrminTransportError`, the command adds to the message that the server may still be saving the
+config and starting the redeploys, and that the operator should check the config with
+`styrminctl clusters get` before running the command again.
+
+**Output.** `--dry-run` saves nothing and lists what saving would do. The command lists:
+
+- the deployments that are redeployed, with their task ids (not in a dry run);
+- the deployments that wait for their environment's dedicated ingress controller;
+- the deployments that are not redeployed because a restore runs;
+- one row per dedicated ingress controller action (`create`, `redeploy`, `remove`);
+- the deployments that could not be redeployed and the environments that could not be evaluated,
+  followed by "Run this command again to retry them. The config is saved." outside a dry run;
+- the number of deployments that already run with this config.
+
+**Reading the config back.** `clusters get --json` prints only the config, as indented JSON with
+sorted keys, to edit and pass to `clusters update --config @FILE`. `clusters get` and
+`clusters list` show the config as JSON in a table cell.

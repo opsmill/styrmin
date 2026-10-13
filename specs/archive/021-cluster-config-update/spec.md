@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-12
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: PRD "Update a cluster's config in place" — [opsmill/styrmin#423 (comment)](https://github.com/opsmill/styrmin/issues/423#issuecomment-6123640046). Seed issue: [#423](https://github.com/opsmill/styrmin/issues/423). Related: [#301](https://github.com/opsmill/styrmin/issues/301) (cluster detail edit form), [#366](https://github.com/opsmill/styrmin/issues/366) (a cluster can be deleted only once it has no environments), [ENG-140](https://opsmill.atlassian.net/browse/ENG-140) (a declared change to a cluster is applied without recreating the cluster).
 

@@ -598,6 +598,10 @@ are still running. That is deliberate: it's the escape hatch for a
 snapshot pinned in progress by a constituent that never ran, and it's
 what releases the environment for new operations.
 
+There is one exception. While an environment clone is still capturing
+into the snapshot, deleting it is refused with `IN_USE`, for at most two
+hours. See [Discarding a clone](#discarding-a-clone).
+
 Deleting an environment takes its environment backups with it. In this
 release a snapshot does not outlive its environment.
 
@@ -750,9 +754,11 @@ neighbours are cloned, and the clone reports the mix.
 
 **Delete the environment the clone created.** That is the supported
 discard path, it works in any state including `PARTIAL` and `FAILED`, and
-it takes the counterpart deployments with it. The clone record then reads
-`FAILED` with a `created_environment_deleted` event — a *discarded* state,
-not an unexpected error, and the UI labels it that way.
+it takes the counterpart deployments with it. The clone record keeps a
+`created_environment_deleted` event, and the UI labels the clone
+*Discarded*. A clone that was still running then reads `FAILED`. A clone
+that had already finished keeps its outcome (`COMPLETED`, `PARTIAL` or
+`FAILED`); the event only records that its environment is gone.
 
 Because a clone's name is deliberately not unique, and deleting the
 environment frees the environment name, you can immediately re-clone the
@@ -784,9 +790,9 @@ yet:
 
 Environment deletion tears down and removes the deployments inside the
 environment, rather than refusing. This is what makes the discard path
-above work — a cloned environment always owns at least its counterparts
-and its own ingress controller — and it applies to every environment, not
-just clones.
+above work — a cloned environment owns at least its counterparts, and its
+own ingress controller when it uses a dedicated one — and it applies to
+every environment, not just clones.
 
 :::
 

@@ -151,6 +151,29 @@ expect(Object.keys(out).filter((k) => k.includes("_"))).toEqual([]);
 
 The canonical reference is `frontend/src/lib/deployment-input.test.ts`.
 
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
+### Keep the values an edit form does not show when it submits a full-replacement input
+
+An edit form that submits a full-replacement input removes every value it leaves out. So build
+the submitted config from the stored config the form opened with, and lay the form values over
+it:
+
+- Keep every key the form does not show, and every field of a nested object that the form does
+  not show, with its stored value.
+- Keep a stored value that is not in one of the form's option lists, and show it as an extra
+  option, so that saving an unrelated change does not clear it.
+- Remove a value only when the user clears it in the form.
+- Do not block saving to protect values the form cannot show. The first environment edit form
+  dropped nested fields and had to block saving
+  ([ADR-012](../../adr/0012-environment-config-fanout.md)).
+
+Reference: `mergeFormValuesIntoConfig` in
+`frontend/src/components/cluster/ClusterConfigFields.helpers.ts`, used by the cluster edit
+dialog. The converted input then goes through `clusterConfigToInput`
+(`frontend/src/lib/cluster-input.ts`), which maps each field by hand: add each new `ClusterConfig`
+field there too, or every save from the dialog removes it.
+
 ### Dialog Forms
 
 - For forms inside dialogs, call `form.reset()` from the dialog's `onOpenChange` when transitioning to closed. This restores defaults and clears errors and matches the long-standing UX expectation that closing a dialog discards in-flight edits.

@@ -1,6 +1,6 @@
 # ADR-053: Driver-version identity via provenance fingerprint; loads are non-destructive
 
-**Status**: Accepted
+**Status**: Accepted — amended by [ADR-067](0067-driver-logos-loaded-by-the-viewer-browser.md) (a reload fills in the driver info columns)
 **Date**: 2026-08-04
 **Source**: specs/archive/013-driver-fingerprint/research.md (D-001 – D-007), data-model.md
 **Related**: [ADR-001](0001-alembic-database-migrations.md) (which D-008 violated — see
@@ -82,8 +82,22 @@ Upsert looks up via a single `get_by_identity()` parameterised by `source_type`:
  content_hash | source_commit_sha)
 ```
 
-- Same tuple → return the existing row. The load is an idempotent no-op.
+- Same tuple → return the existing row. The load is an idempotent no-op, with one
+  exception for the driver info columns (see the amendment below).
 - Same coordinates, different fingerprint → **a new row alongside the old one**.
+
+Amended 2026-10-13 (specs/archive/020-driver-info-display, research R5): when the
+identity matches, the load compares the `icon`, `description` and `links` it parsed from
+`spec.info` with the values stored on the row. When any of them differs, it writes all
+three, commits, and returns the row read again (`load_application_driver_from_object` in
+`services/applications.py`). No other column changes, no new row is created, and Prefect
+actions are not registered again. The identity tuple pins the file content, so for a row
+stored after spec 020 the values are already equal and nothing is written. The write only
+fills in rows stored before the three columns existed
+([ADR-067](0067-driver-logos-loaded-by-the-viewer-browser.md)), which would otherwise show
+the generic icon until the driver changed. Two alternatives were rejected: a data
+migration that reads the driver sources again, because a migration cannot reach Git tokens
+or the server's local driver paths; and leaving the old rows empty.
 - **No load operation deletes any `ApplicationDriverVersion` row.** This is the
   change that makes the feature non-destructive: existing deployments keep
   pointing at the bytes they were deployed from.
@@ -141,6 +155,9 @@ cascade from §5 is what will make it clean when it arrives.
   [`dev/guides/driver-iteration.md`](../guides/driver-iteration.md).
 - **History is immutable.** No load rewrites a row a deployment or instance
   points at, so the timeline and the "which bytes ran?" question stay answerable.
+  The one exception (amended 2026-10-13) is the three display-only columns `icon`,
+  `description` and `links`, which a load fills in on a row stored before they
+  existed. They play no part in rendering or reconciling a deployment.
 - **Rows accumulate.** Every distinct set of driver bytes is a permanent row
   until a prune command exists. Accepted.
 - **A misspelled or unbumped `version` no longer hides a change, but it does

@@ -1,7 +1,7 @@
 """GraphQL to database propagation tests for ``updateCluster`` (021-cluster-config-update).
 
 Each test drives the mutation over HTTP, then reads the ``cluster`` row back
-through the database session. See ``specs/021-cluster-config-update/contracts/graphql.md``.
+through the database session. See ``specs/archive/021-cluster-config-update/contracts/graphql.md``.
 """
 
 from __future__ import annotations

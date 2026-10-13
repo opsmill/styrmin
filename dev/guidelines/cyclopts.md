@@ -220,6 +220,26 @@ already carries. `styrminctl`'s telemetry buckets failures by exception **type**
 using the SDK hierarchy plus `styrminctl.errors` as-is; adding classes for
 categorisation would be a governance gate for no benefit.
 
+<!-- Extracted from specs/001-env-backup-restore on 2026-10-13 -->
+
+### Exit 1 when an operation ends `PARTIAL`, not only when it ends `FAILED`
+
+When a command reports an operation whose status can be `PARTIAL`, such as an environment backup,
+an environment restore or an environment clone, exit with code 1 for `PARTIAL` as well as for
+`FAILED`. A `PARTIAL` operation did not do what the script asked for every deployment, and the exit
+code is the only result a script can read. Print a one-line warning for `PARTIAL` and an error for
+`FAILED`, then the per-deployment details.
+
+Apply it in two places:
+
+- after `--wait` polls the operation to a final status;
+- without `--wait`, when the first response already holds a final status, for example an
+  environment backup whose constituents all failed when they were created.
+
+Reference: `_FAILED_STATUSES` and `_report_terminal_status` in
+`cli/src/styrminctl/commands/environment_backups.py`, and the same pattern in
+`cli/src/styrminctl/commands/environment_clones.py`.
+
 <!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 -->
 
 ## Confirm before acting on a target the operator did not name

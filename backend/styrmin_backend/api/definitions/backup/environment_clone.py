@@ -229,9 +229,9 @@ class EnvironmentClone:
     @strawberry.field(
         description=(
             "The environment that was cloned. Null once the source has been "
-            "deleted — a terminal clone survives its source as the created "
-            "environment's provenance (``sourceEnvironmentName`` keeps it "
-            "readable)."
+            "deleted — a clone that created an environment survives its source "
+            "as that environment's provenance (``sourceEnvironmentName`` keeps "
+            "it readable)."
         )
     )
     async def source_environment(self, info: strawberry.Info) -> EnvironmentType | None:

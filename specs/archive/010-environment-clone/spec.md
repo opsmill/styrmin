@@ -4,7 +4,7 @@
 
 **Created**: 2026-08-19
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: User description: "Environment Clone — clone a live environment into a new environment on the same cluster, built from a fresh environment backup, with selective deployment inclusion. Idea brief from [issue #6](https://github.com/opsmill/styrmin/issues/6#issuecomment-5208479529)."
 

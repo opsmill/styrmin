@@ -124,9 +124,12 @@ The `apply_state` service function (`services/reconciliation/__init__.py`) takes
 |---|---|
 | `deploy_application` (`deploy`) | `create_instance` |
 | `update_deployment`, `redeploy_for_environment_update` | `update_instance` |
-| `_ensure_ingress_controller` | `create_instance` when the ingress controller has no instance yet, else `update_instance` |
+| `create_ingress_controller`, called by `_ensure_ingress_controller` on the first deploy and by the cluster config fan-out for a `CREATE` action | `create_instance`. The code chooses `update_instance` when the deployment already has an instance, but the controller deployment it creates never has one. |
+| Cluster config fan-out, `REDEPLOY` action on a dedicated ingress controller (through `redeploy_for_environment_update`) | `update_instance` |
 | `update_deployment_version` (`updateDeploymentVersion`) | `upgrade_instance` |
 | `stop_components`, `start_components` (`services/primitives.py`) | `stop_components`, `start_components` |
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
 
 The type names the operation the user asked for, not the flow that runs: a version change is an `upgrade_instance` task even when the driver has no upgrade hook and the remediation runs `update_instance_crd`. The step list shows which flow ran. Tasks created before this change keep the type `noop`; `noop` remains the default of the argument.
 

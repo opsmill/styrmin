@@ -293,9 +293,15 @@ global:
 
 infrahubServer:
   persistence:
-    storageClassName: {{ cluster.config.standard_storage.storage_class }}
+    storageClassName: {{ instance.config.standard_storage.storage_class }}
   replicas: "1"
 ```
+
+### Credentials in a driver that can be cloned
+
+An environment clone restores the data of each deployment into a new deployment in the new environment, and renders the Helm values again for that new deployment. The clone copies the deployment's config and parameters unchanged, so a credential set there still matches the restored data.
+
+A chart that generates a credential when it is installed, for example a random password from `randAlphaNum` without `lookup`, creates a new credential over restored data that expects the old one. The restored component then cannot connect to its data. A driver meant to be cloned must therefore take its credentials from the deployment's config or parameters, not generate them at install time. See [Backups and restores](../docs/docs/concepts-and-architecture/backups-and-restores.md) and [ADR-056](../dev/adr/0056-environment-clone-record-and-cross-target-restore.md).
 
 ## Actions
 

@@ -308,6 +308,21 @@ ingress controller whose `dedicated_ingress` values differ from its
 environment's, for example after an environment update changed them; it
 leaves a `RUNNING` controller whose values match as it is.
 
+A resubmission does not retry a redeploy whose rollout started and then
+failed. `redeploy_for_environment_update` makes the new instance active
+before `apply_state` runs, so the failed deployment then compares as being at
+its config, and neither fan-out looks at the `FAILED` state. A storage class
+change is the known case: Kubernetes refuses any change to the
+`volumeClaimTemplates` of an existing StatefulSet, and a driver whose chart
+puts the storage class there (the Infrahub example driver passes
+`instance.config.standard_storage.storage_class` and
+`instance.config.fast_storage.storage_class` to its chart) fails to redeploy.
+To recover, the administrator sets the previous storage class again or
+recreates the deployment. Styrmin has no workaround and does not move
+volumes.
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
 For the full field list see [`backend/data-models.md`](backend/data-models.md).
 
 ---

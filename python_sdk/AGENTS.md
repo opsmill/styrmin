@@ -19,8 +19,9 @@ sessions receive `FORBIDDEN`.
 | Path | Role |
 |------|------|
 | `src/styrmin_sdk/client.py` | `StyrminClient` — public entry point. Constructs the transport and instantiates one resource per area, exposed as attributes (`client.clusters`, `client.deployments`, …). |
-| `src/styrmin_sdk/_transport.py` | Internal HTTP + GraphQL transport over `httpx.AsyncClient`. Owns the connection lifetime; wraps HTTP errors into `StyrminTransportError`. |
+| `src/styrmin_sdk/_transport.py` | Internal HTTP + GraphQL transport over `httpx.AsyncClient`. Owns the connection lifetime; wraps HTTP errors into `StyrminTransportError`. The client timeout defaults to 30 seconds; `execute(..., request_timeout=)` overrides it for one call. |
 | `src/styrmin_sdk/_queries.py` | `load_query(name)` helper — reads `graphql/<name>.graphql` from disk and returns the query string. |
+| `src/styrmin_sdk/_input_checks.py` | Checks for config dicts sent through a generated input model: `validate_input_strict` and `to_graphql_enum_names`. See [Updating a cluster config](#updating-a-cluster-config). |
 | `src/styrmin_sdk/exceptions.py` | `StyrminError` hierarchy: `StyrminTransportError` (HTTP failures), `StyrminGraphQLError` (raw GraphQL `errors`), and `StyrminAPIError` with three concrete subclasses (`ResourceNotFoundError`, `ResourceAlreadyExistsError`, `OperationFailedError`) raised by `_check_graphql_errors` based on `extensions.code`. |
 | `src/styrmin_sdk/resources/` | One `*Resource` class per area; each method maps to one GraphQL operation. |
 | `src/styrmin_sdk/resources/_base.py` | `BaseResource` — holds the transport reference and provides `_check_graphql_errors()` and `_parse()` helpers. |
@@ -144,6 +145,32 @@ async with StyrminClient(server_address="...") as client:
 See [`specs/archive/009-deployments-apply/contracts/sdk-apply.md`](../specs/archive/009-deployments-apply/contracts/sdk-apply.md)
 for the full contract, and [ADR-048](../dev/adr/0048-declarative-apply-client-side-orchestration.md)
 for why the upsert lives in the SDK.
+
+## Updating a cluster config
+
+`ClusterResource.update(config, cluster_id=None, cluster_name=None, *, dry_run=False)`
+replaces a cluster's whole config through the `updateCluster` mutation. It takes a
+plain mapping, not the generated `UpdateClusterInput`, and returns the
+`updateCluster` result, which `styrmin_sdk.models` exports as `ClusterUpdateResult`.
+`UpdateClusterInput` is not exported.
+
+The generated input models ignore keys they do not know. Under full replacement, a
+misspelled key would be dropped, and the stored value it was meant to keep would be
+removed. So before any request, `update` passes the config through
+`cluster_update_input` (`resources/clusters.py`), which:
+
+- refuses, with a `ValueError` that names each path, any key at any depth that is
+  neither a field name nor an alias of `UpdateClusterInput`
+  (`_input_checks.validate_input_strict`);
+- accepts snake_case or camelCase keys;
+- converts stored enum values, such as `http` or `NoSchedule` as `get()` returns them,
+  to their GraphQL names (`_input_checks.to_graphql_enum_names`).
+
+`styrminctl clusters update` calls `cluster_update_input` before it connects to the
+server. The server answers `updateCluster` only after it has started one redeploy per
+changed deployment, so `update` waits up to 600 seconds
+(`UPDATE_CLUSTER_TIMEOUT_SECONDS`) instead of the 30-second default. See
+[ADR-066](../dev/adr/0066-cluster-config-fanout.md) §4 and §5.
 
 ## Always Do / Ask First / Never Do
 

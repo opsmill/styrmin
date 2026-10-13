@@ -68,6 +68,12 @@ The full list, in the order they appear on `type Query` in `schema.graphql`:
 | `backups` | exactly one of `deploymentId?` or `instanceId?`, plus `status?` | `[Backup!]!` (`deploymentId` lists the deployment's backup history; both or neither give `VALIDATION_ERROR`; see [ADR-062](../../adr/0062-backup-history-derived-through-instances.md)) <!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 --> |
 | `restore` | `restoreId` | `Restore` |
 | `restores` | `backupId, status?` | `[Restore!]!` |
+| `environmentBackup` | `environmentBackupId` | `EnvironmentBackup` (`NOT_FOUND` for an unknown id) <!-- Extracted from specs/001-env-backup-restore on 2026-10-13 --> |
+| `environmentBackups` | `environmentId` | `[EnvironmentBackup!]!` (newest first) |
+| `environmentRestore` | `environmentRestoreId` | `EnvironmentRestore` (`NOT_FOUND` for an unknown id) |
+| `environmentRestores` | `environmentBackupId` | `[EnvironmentRestore!]!` (newest first) |
+| `environmentClone` | `environmentCloneId` | `EnvironmentClone!` (`NOT_FOUND` for an unknown id) <!-- Extracted from specs/010-environment-clone on 2026-10-13 --> |
+| `environmentClones` | `environmentId` | `[EnvironmentClone!]!` (the clones made from that source environment, newest first) |
 | `backupSchedule` | `scheduleId` | `BackupSchedule` |
 | `backupSchedules` | `deploymentId` | `[BackupSchedule!]!` |
 | `applicationDrivers` | — | `[ApplicationDriver!]!` |
@@ -77,6 +83,10 @@ The full list, in the order they appear on `type Query` in `schema.graphql`:
 | `deploymentTimeline` | `deploymentId` | `[DeploymentTimelineEntry!]!` |
 | `podStatuses` | `deploymentId?, environmentId?, clusterId?` | `[PodStatus!]!` |
 | `ok` | — | `Boolean!` (health probe) |
+
+The environment backup, environment restore and environment clone queries require no role: any signed-in user can read them, as for `environmentBackup`, which already returns the captured environment config ([ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md) §6).
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 
 <!-- Extracted from specs/009-deployments-apply on 2026-08-04 -->
 
@@ -130,12 +140,16 @@ Defined on `type Mutation`:
 | `deleteBackupStorageLocation` | `backupStorageLocationId` | `String` |
 | `assignBackupStorageLocation` | `environmentId, backupStorageLocationId` | `Environment` |
 | `unassignBackupStorageLocation` | `environmentId` | `Environment` |
-| `loadLocalApplicationDriverVersion` | `path` | `ApplicationDriverVersion` (identity-aware per spec 013: same content → idempotent, new content → new row alongside existing) |
-| `loadRemoteApplicationDriverVersion` | `repositoryUrl, branch` | `ApplicationDriverVersion` (identity-aware: keyed on resolved git commit SHA) |
+| `loadLocalApplicationDriverVersion` | `path` | `ApplicationDriverVersion` (`ADMIN`; identity-aware per spec 013: new content → new row alongside existing; same content → the existing row, after writing `icon`, `description` and `links` when they differ from the file (spec 020); `loadWarnings` lists the `spec.info` values the load left out) <!-- Extracted from specs/020-driver-info-display on 2026-10-13 --> |
+| `loadRemoteApplicationDriverVersion` | `repositoryUrl, branch` | `ApplicationDriverVersion` (`ADMIN`; identity-aware: keyed on resolved git commit SHA; same reload and `loadWarnings` behaviour as the local load) |
 | `deploy` | `driver, environmentId?, environmentName?, clusterId?, clusterName?, version?, name?, config?, parameters?, serviceNameOverrides?` | `Task` |
 | `updateDeployment` | `deploymentId, input: UpdateDeploymentInput!` | `Task` — **`null` on a no-op** (see below) |
 | `deleteDeployment` | `deploymentId` | `Task!` (born-complete `DELETE_DEPLOYMENT` audit record; patches `spec.deletionRequested` on the CR — operator drives teardown asynchronously) |
 | `createBackup` | `instanceId, name?` | `Backup` |
+| `createEnvironmentBackup` | `environmentId, name?` | `EnvironmentBackup!` (`READ_WRITE`; returns once the constituent backups are created and dispatched; `ALREADY_IN_PROGRESS` while another environment-level operation holds the environment) <!-- Extracted from specs/001-env-backup-restore on 2026-10-13 --> |
+| `restoreEnvironmentBackup` | `environmentBackupId` | `EnvironmentRestore!` (`ADMIN`, because the restore reverts the environment config as `updateEnvironment` does; `OPERATION_DENIED` unless the derived status is `COMPLETED` or `PARTIAL`) |
+| `cloneEnvironment` | `name, environmentId?, environmentName?, clusterId?, clusterName?, deploymentIds?, configOverride?: UpdateEnvironmentInput, clearConfigFields?` | `EnvironmentClone!` (`ADMIN`; returns the clone record at once, and the clone flow builds the new environment; see [backup-restore.md](backup-restore.md#environment-clone)) <!-- Extracted from specs/010-environment-clone on 2026-10-13 --> |
+| `deleteEnvironmentBackup` | `environmentBackupId` | `Boolean!` (`READ_WRITE`; cascades through the constituent backups and the environment restores; `IN_USE` while a clone is still capturing into the snapshot) <!-- Extracted from specs/001-env-backup-restore on 2026-10-13 --> |
 | `deleteBackup` | `backupId` | `String` |
 | `createRestore` | `backupId, targetNamespace, targetInstanceId?` | `Restore` |
 | `createBackupSchedule` | `deploymentId, name, cronExpression, retentionCount=10, enabled=true` | `BackupSchedule` |
@@ -348,8 +362,13 @@ type Environment {
   cluster: Cluster!
   deployments: [Deployment!]!
   backupStorageLocation: BackupStorageLocation
+  clonedFrom: EnvironmentClone   # The clone that created this environment; null otherwise
 }
 ```
+
+`clonedFrom` points from a cloned environment back to the clone that created it, because `environmentClones` lists clones by source environment. It still resolves after the source environment is deleted when the clone record is kept; see [backup-restore.md](backup-restore.md#environment-clone) for which clone records are kept.
+
+<!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 
 ### Deployment
 
@@ -454,6 +473,40 @@ Observability:
 - One structured log line per fanout dispatch (`env_config_fanout_dispatched ...`) records `evaluated`, `dispatched`, `skipped_noop`, `dispatch_failed` counts (FR-023).
 - Per-deployment outcomes are emitted via `_emit_fanout_metric` against the metric `env_config_fanout_deployments_total{environment, outcome}` (FR-023a). The metric backend is **not yet wired**: the helper at `services/environments.py::_emit_fanout_metric` currently logs the would-be metric at `info` level with a clear marker. Replacing the log call with a real counter increment is a one-line edit once a metrics client is registered. Until then, dashboards consume the structured log lines.
 
+#### Cluster-config update + typed input
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
+```graphql
+updateCluster(input: UpdateClusterInput!, clusterId: UUID = null, clusterName: String = null, dryRun: Boolean! = false): UpdateClusterResult!
+```
+
+`updateCluster` requires the `ADMIN` role. It identifies the cluster by `clusterId` or `clusterName` ([ADR-031](../../adr/0031-dual-identifier-resolution-service-layer.md)), saves the new config, and starts the cluster config fan-out. The decisions are in [ADR-066](../../adr/0066-cluster-config-fanout.md); the fan-out itself is described in [services.md](services.md#cluster-config-fan-out).
+
+`UpdateClusterInput` has 13 fields that mirror `ClusterConfig` field by field: `ingressClass`, `runtimeClass`, `nodeSelector`, `fqdnSuffix`, `externalUrlScheme`, `externalUrlPort`, `externalDnsEndpointsType`, `dedicatedIngress`, `standardStorage`, `fastStorage`, `scheduling`, `dbSize` and `backupTtl`. A parity test (`backend/tests/functional/graphql/test_cluster_update_propagation.py`) fails when a `ClusterConfig` field has no input field. The input replaces the whole config: a top-level field that is `null` or omitted is removed from the stored config, except `ingressClass` and `runtimeClass`, which get the `createCluster` defaults (`traefik` and `default`). `createCluster` still takes `config: JSON`.
+
+`UpdateClusterResult` reports what the update did, or would do in a dry run:
+
+- `cluster`: the cluster after the update.
+- `redeployed`: the deployments whose redeploy started, each with the `taskId` of its `update_instance` task.
+- `waitingForIngress`: the applications that move onto a dedicated ingress controller. They are redeployed later, once the controller is `RUNNING` with the new values.
+- `skippedRestoring`: the deployments not redeployed because a restore is running.
+- `failedToStart`: the deployments whose redeploy could not start, and the applications whose config comparison raised an error.
+- `unchangedCount`: the number of deployments already at their resolved config.
+- `ingressControllers`: one `{action, failed}` entry per environment whose dedicated ingress controller the update acts on. `IngressControllerAction` is `CREATE`, `REDEPLOY` or `REMOVE`.
+  - `REMOVE` is listed for every environment whose effective `dedicated_ingress` is off and that has a live controller, even when the removal happens later, from the status reporter.
+  - `failed` can be true only for `CREATE` and `REDEPLOY`. A failed removal check is counted in the `cluster_config_fanout` log line and does not appear in the result.
+- `failedEnvironments`: the environments whose evaluation failed; none of their deployments was redeployed.
+
+With `dryRun: true`, the mutation runs the clone guard and the config validation, plans the fan-out as an administrator's update would (controller creation allowed), and saves nothing. It returns the stored cluster, and every `taskId` is `null`.
+
+Errors:
+
+- `VALIDATION_ERROR` (`AmbiguousIdentifierError`) when the call gives both `clusterId` and `clusterName`, or neither.
+- `NOT_FOUND` (`ClusterNotFoundError`) for an unknown cluster.
+- `VALIDATION_ERROR` (`InvalidContextError`) for an invalid config.
+- `ALREADY_IN_PROGRESS` (`EnvironmentOperationInProgressError`) while an environment clone is still capturing a source environment of the cluster or still building an environment of the cluster. The message names the environment and says that nothing was saved. Environment backups and restores in progress do not block the update.
+
 #### Deployment-config update + typed input
 
 <!-- Extracted from specs/011-typed-deployment-input on 2026-05-16 -->
@@ -478,9 +531,40 @@ Submitting an empty input (`input: {}`) surfaces a `VALIDATION_ERROR` from the e
 
 Shared leaf inputs (`EnvVarInput`, `SchedulingInput`, `DedicatedIngressInput`, `AffinityBlockInput`, `ResourceRequirementsInput`, the enum mirrors, …) live in `api/definitions/config/inputs.py` and are reused unchanged by `UpdateEnvironmentInput` and `UpdateDeploymentInput`. Top-level inputs and their conversion helpers (`update_environment_input_to_dict`, `update_deployment_input_to_dict`) stay co-located with their entities under `api/definitions/{environment,deployment}/inputs.py`.
 
+`UpdateClusterInput` and `update_cluster_input_to_dict` follow the same layout in `api/definitions/cluster/inputs.py`. The cluster input added two shared leaf inputs to `api/definitions/config/inputs.py`: `StandardStorageInput` and `FastStorageInput`.
+
+<!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
+
 The frontend `deploymentConfigToInput()` helper in `frontend/src/lib/deployment-input.ts` converts the read-API config dict (with dict-shaped `envVars` and `components`) into the new list-shaped input shape; the `SchedulingConfigDialog` and any future caller submitting `UpdateDeploymentInput` go through this helper (mirrors the submit-boundary-transform discipline in [ADR-015](../adr/0015-frontend-value-transform-boundary.md)).
 
 There is no `tasks` field on `Deployment` — query `tasks` at the root and filter by `deploymentId` if you need a deployment's task history.
+
+### ApplicationDriverVersion: logo, description, links and load warnings
+
+<!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
+
+Four fields carry the `spec.info` values of the driver specification file:
+
+```graphql
+type ApplicationDriverVersion {
+  icon: String                   # spec.info.icon; null when STYRMIN_DRIVER_SHOW_LOGOS is false
+  description: String            # spec.info.description
+  links: [DriverLink!]!          # spec.info.links, in file order; [] when none are stored
+  loadWarnings: [String!]!       # filled only in the result of the two load mutations
+}
+
+type DriverLink {
+  label: String!                 # from the `link` key of the entry
+  url: String!                   # absolute http or https URL
+}
+```
+
+- `icon` is read from the stored column on each request. When the server setting `driver.show_logos` is false, the resolver returns `null` and the stored URL is kept, so turning the setting back on shows the logos again without reloading the drivers (`api/definitions/application_driver/model.py`, `from_instance`).
+- `links` maps the stored `{"link", "url"}` entries to `DriverLink`. The field is named `label` rather than `link`, because `DriverLink.link` would read as "the link's link" (research R6).
+- `loadWarnings` is set by `loadLocalApplicationDriverVersion` and `loadRemoteApplicationDriverVersion` from the warnings the load returns. Warnings are not stored, so every other read returns an empty list, and loading the same file again returns them again. See [ADR-068](../../adr/0068-invalid-driver-info-dropped-with-load-warning.md).
+- Of the SDK operations, only `load_version.graphql` and `load_local_version.graphql` select `loadWarnings`. No SDK operation selects `icon`, `description` or `links`.
+
+The browser of each viewer loads the logo from `icon`; Styrmin never fetches it. See [ADR-067](../../adr/0067-driver-logos-loaded-by-the-viewer-browser.md).
 
 ### Task
 
@@ -715,6 +799,9 @@ GraphQL enums in the schema:
 - `PodPhase` — `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `UNKNOWN` (uppercase wire format; the agent's `agent/status/models.py::PodPhase` mirrors these values).
 - `BackupStatus` — `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`.
 - `RestoreStatus` — `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`.
+- `EnvironmentBackupStatus` and `EnvironmentRestoreStatus` — `PENDING`, `IN_PROGRESS`, `COMPLETED`, `PARTIAL`, `FAILED`. Both are derived on every read and never stored; both map the same service-layer `EnvironmentOperationStatus` ([ADR-055](../../adr/0055-environment-backup-parent-records.md)). <!-- Extracted from specs/001-env-backup-restore on 2026-10-13 -->
+- `EnvironmentCloneStatus` — the same five values, derived on every read from different inputs ([ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md)).
+- `EnvironmentCloneDeploymentOutcome` — `PENDING`, `CLONED`, `SKIPPED`, `FAILED`. The outcome is a closed enum on the wire, while the `reason` next to it is open text that clients show and do not compare. <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 - `StepStatus` — `PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `SUPERSEDED`.
 - `StepKind` — `PLAN`, `HOOK`, `RESOURCE_WRITE`, `OPERATOR_PHASE`, `COMMAND`, `RESTORE`, `BACKUP_COMPONENT`.
 - `StepEvent` — `STARTED`, `SUCCEEDED`, `FAILED`, `OUTPUT` (input only, on `RecordStepInput`).

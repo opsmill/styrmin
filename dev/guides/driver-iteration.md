@@ -17,8 +17,11 @@ See [`CONTEXT.md`](../../CONTEXT.md) for the canonical glossary entry
 - Edit `driver.styrmin.yml`, the values template, or `actions.py`,
   re-run `styrminctl drivers load-local-version <path>`, and Styrmin
   records a new `ApplicationDriverVersion` row.
-- Re-run the same command on **unchanged** files and nothing happens —
-  the load is idempotent.
+- Re-run the same command on **unchanged** files and Styrmin returns the
+  existing row instead of creating a new one. The one write it can make:
+  a row stored before Styrmin kept the driver's logo, description and
+  links (`spec.info`, spec `020-driver-info-display`) gets those three values from the file.
+  See [How identity works](#how-identity-works).
 - Every label that mentions a driver version now reads
   `<version>@<short-fingerprint>` (the first 7 hex chars of either the
   content hash or the resolved git commit SHA).
@@ -40,9 +43,18 @@ and the discriminator is `source_type`:
 | `"local"` | `content_hash` | SHA-256 of the canonical concatenation of the three hashed files (see below). |
 | `"git"` | `source_commit_sha` | The HEAD commit SHA of the cloned working tree, resolved by `dulwich`. |
 
-A reload that matches every column of the identity tuple is a no-op
-(the existing row is returned). A reload that differs in any column —
-including the fingerprint — creates a new row.
+A reload that matches every column of the identity tuple returns the
+existing row. A reload that differs in any column — including the
+fingerprint — creates a new row.
+
+Before it returns the existing row, the load compares the `icon`,
+`description` and `links` it parsed from `spec.info` with the stored
+values. When any of them differs, it writes all three and commits; no
+other column changes and no actions are registered again. Because the
+identity tuple pins the file content, this changes only rows stored
+before these columns existed (spec `020-driver-info-display`, research R5). See
+`load_application_driver_from_object` in
+`backend/styrmin_backend/services/applications.py`.
 
 The tuple is also enforced as a `UNIQUE` composite index in Postgres,
 using `IS NOT DISTINCT FROM` nullability semantics so that the two
@@ -86,7 +98,9 @@ For `source_type = "git"`, Styrmin clones the requested
 commit SHA. That SHA is the fingerprint — the bytes of the working tree
 are not re-hashed. Two implications:
 
-- Re-running `drivers load-version` on the same commit is a no-op.
+- Re-running `drivers load-version` on the same commit returns the
+  existing row (see [How identity works](#how-identity-works) for the
+  one write it can make).
 - A new commit pushed to the same branch produces a new row on the next
   load, even if the diff is whitespace-only.
 

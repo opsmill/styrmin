@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-19
-**Source**: specs/010-environment-clone/ (research.md D2-D10, data-model.md, spec.md)
+**Source**: specs/archive/010-environment-clone/ (research.md D1-D10, data-model.md, spec.md, contracts/graphql.md), plus commits `59b664bb` and `9023235b` for decision 3's recovery order
 **Related**: [ADR-055](0055-environment-backup-parent-records.md) (the parent-record and
 derived-status pattern this reuses, and the deletion-escape-hatch decision this narrows),
 [ADR-012](0012-environment-config-fanout.md) (per-item isolation, commit-before-dispatch,
@@ -109,6 +109,30 @@ Reconciling first would only create resources the restore flow immediately delet
 `RESTORING` is what makes the existing restoring-deployment guards protect a counterpart
 until its data lands.
 
+Amended 2026-10-13 (recorded at extraction from research D1 and D5):
+
+- **The cross-target restore depends on how Velero restores volume data.**
+  `build_velero_restore` sets `restore_pvs=False` and uses a resource modifier that
+  removes `spec.volumeName` from restored PVCs. Volumes are therefore restored by
+  file-system (kopia) pod-volume restore: the PVCs in the mapped namespace are
+  provisioned again and filled by the restore's init containers, which works with
+  `namespaceMapping`. If the platform moves to CSI snapshot restores, this setting must
+  be revisited, because with `restore_pvs=False` such a restore would restore no data.
+- **`namespaceMapping` keeps object names.** Only the namespace changes. Names do not
+  collide, because each deployment has its own namespace, and keeping them is what makes
+  the chart's PVC and Secret names match in the counterpart.
+- **The snapshot contract gained two fields** (`DeploymentSnapshot` in
+  `services/backup/environment.py`). Both are nullable JSON additions, so no migration
+  was needed:
+  - `service_name_overrides` holds the resolved service names that differ from the
+    driver default. FR-005 forbids reading the live source again, and FR-007 needs the
+    sibling services' names, so without this field the two requirements cannot both
+    hold. A snapshot taken before the field existed reads as "driver-default names".
+  - `release_reference` holds the Helm release name at capture time (decision 3). It
+    was added during implementation, not in research. A snapshot without it reads as
+    `styrmin-<deployment id>`. A clone of a clone needs it, because its source already
+    carries a release name adopted from an earlier source.
+
 ### 3. The counterpart adopts the source's Helm release identity
 
 This is the least obvious decision and the one with a visible operator consequence.
@@ -136,12 +160,34 @@ To keep that pin from being silently undone, release-reference resolution became
 explicit override → the value the active instance already carries → the computed default.
 A later configuration fan-out can no longer rename a live release.
 
-Cross-target recovery replaces the restored source-named CR with the counterpart's own CR
-body, carries kopf's state annotations over, retargets the restored release storage,
-re-runs prerequisites → HelmRelease →
-services against the counterpart's spec, and **clears and verifies finalizers before
-deleting the restored CR** — deleting it with kopf's finalizer intact would fire the
-delete handler and tear down the very HelmRelease keeping the just-restored data alive.
+Cross-target recovery (`reapply_with_counterpart_identity`) runs in this order:
+
+1. It retargets the restored Helm release storage at the counterpart's namespace. This
+   comes first because applying the counterpart CR makes kopf's `on.update` handler
+   create the HelmRelease about 0.1 s later, and Flux starts the Helm upgrade about a
+   second after that. An upgrade from storage that still names the source namespace
+   deletes, in the source namespace, the objects the chart pins there. No HelmRelease
+   exists before this step, because the cross-target Restore CR excludes it.
+2. It applies the counterpart's own CR body and carries kopf's state annotations over
+   from the restored CR.
+3. It patches the restored source-named CR once, setting the annotation
+   `styrmin.io/skip-teardown: "true"` and `finalizers: []`, and then deletes it. The
+   operator's `on.delete` handler returns without teardown for a CR that carries the
+   annotation. Without it, the handler would delete the HelmRelease named by
+   `spec.releaseReference` and the Services, NetworkPolicies and Secrets labelled with
+   it, which are the counterpart's own, and Flux would uninstall the release with the
+   restored volumes.
+4. It re-runs prerequisites, then the HelmRelease, then services against the
+   counterpart's spec.
+
+> Amended 2026-10-13. The first version of this paragraph had a different order: apply
+> the counterpart CR, retarget the release storage later, and clear the finalizers and
+> read the CR back to check they were gone before the delete. Two fixes changed it.
+> Commit `9023235b` moved the retarget first, because in CI the retarget won the race
+> with the Flux upgrade by less than a second, and a local run with a 3 s delay lost the
+> source's objects. Commit `59b664bb` replaced the finalizer check with the
+> `skip-teardown` annotation: kopf adds its finalizer back on the next watch event, so the
+> check could not close the race and either failed the restore or let the teardown run.
 
 **Consequence we accept and document:** `helm list -n styrmin-<counterpart>` shows a
 release named after the *source* deployment. That is correct, not drift. (It assumes
@@ -226,6 +272,12 @@ the same values remain readable one query away. If environment-level read gating
 introduced, it must cover both surfaces in one change; neither is a precedent for leaving
 the other open.
 
+Amended 2026-10-13 (recorded at extraction from contracts/graphql.md): each deployment's
+outcome is a closed enum on the wire (`EnvironmentCloneDeploymentOutcome`: `PENDING`,
+`CLONED`, `SKIPPED`, `FAILED`), because the service writes only these four values. The
+stored outcome stays a string in the JSON column, and `reason` stays a free string on the
+wire, as ADR-055 decision 4 set for skip reasons.
+
 ### 7. Config override: top-level-field replacement, plus explicit field clearing
 
 The cloned environment's configuration is the captured configuration with the override
@@ -269,10 +321,18 @@ User-facing documentation states it that way rather than repeating the "100%" ph
 ### 9. Discard is ordinary environment deletion — which now cascades deployments
 
 The supported way to throw a clone away, in any state, is to delete the created
-environment. It records `created_environment_deleted` and the clone derives `FAILED` —
-a legitimate *discarded* state, not an unexpected error, and the surfaces render it as
-such. Because the clone name is not unique and the environment name is freed, re-cloning
-under the same name immediately afterwards works.
+environment. It records a `created_environment_deleted` entry on the clone. When the
+clone has not finished, the entry is fatal and the clone derives `FAILED` — a
+legitimate *discarded* state, not an unexpected error, and the surfaces render it as
+such. When the clone had already finished, the entry is not fatal and the clone keeps its
+outcome; the entry only records that the environment is gone. This is the same rule
+decision 5 applies to a deleted capture. Because the clone name is not unique and the
+environment name is freed, re-cloning under the same name immediately afterwards works.
+
+> Amended 2026-10-13: this paragraph first said that the clone always derives `FAILED`.
+> The code has applied the finished-or-not rule since the discard work
+> (`detach_clones_from_created_environment` in `services/backup/clone.py`, tested by
+> `test_discarding_the_environment_of_a_finished_clone_keeps_its_outcome`).
 
 Making that path real exposed a pre-existing gap: `delete_environment` never cascaded its
 deployments, so the ORM nulled a non-nullable FK. Every prior caller swallowed the failure
@@ -313,6 +373,18 @@ resolvable.
   the platform's first orchestration that has to *wait* (for the capture to reach a
   restorable terminal status) instead of being fire-and-forget.
 
+  Amended 2026-10-13 (recorded at extraction from research D4): ADR-055 shipped no
+  environment-backup flow because nothing in its fan-out had to wait. A clone must
+  sequence on an asynchronous result, because FR-002 forbids creating anything unless
+  the capture succeeds, and Prefect is the only asynchronous executor Constitution §III
+  allows. The flow is INTERNAL and writes statuses directly, like
+  `execute_restore_workflow`. When the capture is still not finished after
+  `CAPTURE_POLL_TIMEOUT_SECONDS` (7200 s), the flow run fails with a `RuntimeError` and
+  the clone stays non-terminal. Failing the flow run rather than the clone is
+  deliberate, because the capture may still finish. The operator then uses the escape
+  hatch of decision 5, deleting the backing environment backup, which the `IN_USE` guard
+  allows from that moment because both read the same constant.
+
 ## Alternatives Considered
 
 - **Reuse `EnvironmentRestore` with a nullable "target environment"**: rejected. It
@@ -343,6 +415,24 @@ resolvable.
 - **Fully reconcile the counterpart, then restore data over it**: rejected — it collides
   with the restore flow's namespace delete-and-wait and would lay source volume objects
   over live pods.
+- **Copy deployment rows directly instead of calling `deploy_application`** (research
+  D5): rejected — it skips validation, service creation and instance generation.
+- **A Velero plugin (RestoreItemAction) that rewrites the identity during the restore**
+  (research D1): rejected. The identity rewrite (CR spec, FQDNs, release reference) is
+  Styrmin logic that already lives in the recovery step. A plugin would split one concern
+  across two codebases and add a new artifact to deploy.
+- **An upstream Velero contribution to rename resources** (research D1): not needed.
+  Names do not collide, because each deployment lives in its own namespace.
+- **Data-only copy jobs outside Velero (`pg_dump`, `rsync`)** (research D1): rejected. They
+  would bypass the shipped backup strategies and repeat the hook handling for each
+  strategy.
+- **A synchronous `cloneEnvironment` mutation** (research D4): rejected — it would hold a
+  GraphQL request open for the whole capture, which can take minutes.
+- **Background work in the server outside Prefect** (research D4): rejected — it breaks
+  Constitution §III.
+- **One Prefect flow that also wraps the constituent restores** (research D4): rejected.
+  The restores already report their own status, and wrapping them adds a second status
+  channel.
 - **Deep recursive merge for the config override**: rejected — no platform precedent
   (ADR-012 settled this) and ambiguous for list-valued fields. **Whole-config
   replacement** was rejected from the other side: an operator overriding one environment

@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-08
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: GitHub issue [#272](https://github.com/opsmill/styrmin/issues/272) — "render driver logo/image from driver definition (icon field)", with these decisions made by the user before specification:
 

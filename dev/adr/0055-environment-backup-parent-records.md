@@ -1,8 +1,8 @@
 # ADR-055: Environment backup/restore as parent records with derived status
 
-**Status**: Accepted
+**Status**: Accepted — narrowed by [ADR-056](0056-environment-clone-record-and-cross-target-restore.md)
 **Date**: 2026-08-06
-**Source**: specs/001-env-backup-restore/ (research.md D1-D11, data-model.md, spec.md)
+**Source**: specs/archive/001-env-backup-restore/ (research.md D1-D11, data-model.md, spec.md)
 **Related**: [ADR-012](0012-environment-config-fanout.md) (the fan-out convention this
 replicates, and two of its rejections this deviates from — the umbrella record and
 the per-environment serialisation primitive),
@@ -11,6 +11,20 @@ the per-environment serialisation primitive),
 records), [ADR-027](0027-environment-capabilities-computed-independently.md)
 (capabilities recomputed, never captured), [ADR-001](0001-alembic-database-migrations.md)
 (the revision this ships).
+
+> **Narrowed by [ADR-056](0056-environment-clone-record-and-cross-target-restore.md)**
+> (2026-10-13, recorded at extraction of 001-env-backup-restore). The environment clone
+> changed two decisions below:
+>
+> - Decision 6 no longer holds without exception. `delete_environment_backup` refuses
+>   with `IN_USE` (`EnvironmentBackupInUseByCloneError`) while a clone that has not
+>   finished is still capturing into the snapshot. The refusal ends after
+>   `CAPTURE_IN_FLIGHT_GUARD_SECONDS`, so deletion stays the escape hatch (ADR-056
+>   decision 5).
+> - Decision 5 has a third case. An environment clone that has not finished also blocks
+>   environment-level operations on the environments it occupies, and the error carries
+>   `operation_kind="environment_clone"`. `update_environment` applies only this clone
+>   check; an environment backup or restore in progress still does not block it.
 
 ## Context
 
@@ -412,6 +426,16 @@ environment's config through the back door. No new roles or permission concepts
   environment config. **Waiting for the fan-out, then restoring** was rejected
   because fan-out completion is not synchronously observable without new
   polling machinery.
+
+  Amended 2026-10-13: the premise "`redeploy_for_environment_update` does not
+  check `RESTORING`" is no longer true. Since commit `9ee19959` (010-environment-clone)
+  the function returns `None` and changes nothing for a deployment in `RESTORING`.
+  The step-4 exclusion in decision 4 is still needed, because the fan-out loop works
+  on deployment entities loaded before `create_restore` set those deployments to
+  `RESTORING`, and the repository returns a new entity object on each read. The
+  `RESTORING` check is now what protects a deployment that classification skipped as
+  `deployment busy`: that deployment is not in the exclusion set, so it reaches the
+  fan-out, which leaves it unchanged.
 - **Delegating the config revert to `update_environment`**: rejected. Its
   `config is None` no-op guard would make a captured `None` config
   unrestorable, and silently so.

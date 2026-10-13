@@ -116,3 +116,32 @@ When to use this vs. the Base UI `Collapsible` wrapper:
 
 - **Use `Collapsible`** when you want the animated expand/collapse, the ARIA wiring handled for you, and child content that stays mounted while hidden.
 - **Use the hand-rolled pattern** when you want children to actually unmount on collapse (so expensive child render paths don't run until needed) or when you need a `data-open` attribute on the wrapper for downstream selectors / E2E test assertions.
+
+<!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
+
+### Clamped text with "Show more" (`ClampedText`)
+
+`frontend/src/components/ClampedText.tsx` cuts a text to one or three lines (`lines={1}` or
+`lines={3}`, through Tailwind's `line-clamp-1` and `line-clamp-3`). The driver pages use it for
+driver descriptions; see [driver-pages.md](driver-pages.md).
+
+- After each render, it compares the text's `scrollHeight` with its `clientHeight` to find out
+  whether the text is longer than the clamp. A `ResizeObserver` measures again when the text's
+  size changes; without `ResizeObserver`, it measures once.
+- Only when the text is longer does it show a "Show more" button, which switches to "Show less".
+  The button lets keyboard and touch users read the whole text too.
+- The button carries `aria-controls` (the text's id, from `useId`) and `aria-expanded`.
+- `className` styles the text itself, and `data-testid` is set on the text element.
+
+### Warning notifications (`toast.tsx`)
+
+The toast host in `frontend/src/components/ui/toast.tsx` (raised with `useToast()` from
+`frontend/src/hooks/use-toast.ts`) supports two marked types:
+
+- `type: "success"` shows a green check.
+- `type: "warning"` shows an amber triangle.
+
+The description keeps its line breaks (`whitespace-pre-line`), so a caller can list one item per
+line. Toasts close after 4 seconds (the provider `timeout`) unless the caller passes its own
+`timeout`; `timeout: 0` keeps the toast until the user closes it. The load driver drawer uses a
+warning toast with `timeout: 0` for load warnings.

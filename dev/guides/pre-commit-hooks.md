@@ -102,6 +102,7 @@ Not acceptable: skipping hooks because "the lint failure is annoying". Fix it. C
   ```
 
 - **"works locally, fails in CI"** — usually a generated-file drift. Run `uv run invoke generate` and `uv run styrmin export graphql-schema schema.graphql`, commit the result, push.
+- **Regenerated SDK or frontend types disappear after `uv run invoke lint`** — stage them with `git add` before you run `lint`. `lint` runs `generate-validate` (`tasks/__init__.py`), which regenerates the types and compares the generated folders (`python_sdk/src/styrmin_sdk/graphql/_generated/` and `frontend/src/generated/`) with the git index. When they differ, it runs `git checkout --` on the folder, which discards regenerated files that are not staged, and then fails. Staged files are what the check compares against, so it passes and keeps them.
 - **Hook output is unclear** — run the hook in isolation with `prek run <hook-id> --all-files --verbose` to see the exact command and its full output.
 
 ## Reference
