@@ -965,10 +965,14 @@ Flux then logs `release target configuration changed (release namespace): runnin
 uninstall` and the uninstall deletes those pinned objects **from the source namespace**.
 Two changes prevent it: a cross-target Restore CR adds
 `helmreleases.helm.toolkit.fluxcd.io` to its `excludedResources`
-(`resources/builders/backup.py::CROSS_TARGET_EXCLUDED_RESOURCES`), so Flux has nothing to
-upgrade until recovery re-renders the HelmRelease; and
+(`resources/builders/backup.py::CROSS_TARGET_EXCLUDED_RESOURCES`), so no HelmRelease exists
+until recovery applies the counterpart's CR; and
 `restore_recovery.py::retarget_helm_release` rewrites the source namespace to the
-counterpart's in every restored `helm.sh/release.v1` Secret before it does. The pin is kept honest by
+counterpart's in every restored `helm.sh/release.v1` Secret **before** recovery applies that
+CR. The order matters: kopf's `on.update` for the applied counterpart CR creates the
+HelmRelease within a fraction of a second, and Flux starts the upgrade about a second later.
+When the retarget ran after the CR apply, a slow retarget lost to that upgrade, which deleted
+the source's PostgreSQL StatefulSet and Services. The pin is kept honest by
 `services/context.py::_resolve_release_reference`, whose order is: explicit override → the
 value the active instance already carries → `styrmin-<deployment id>`. A later config
 fan-out therefore cannot silently rename a live release.
@@ -977,11 +981,11 @@ Operator-visible consequence: **`helm list -n styrmin-<counterpart>` shows a rel
 after the *source* deployment.** Correct, not drift (assuming Helm's default secret
 storage driver).
 
-`reapply_with_counterpart_identity` then, in order: applies the counterpart's CR body
-carrying kopf's state annotations over from the restored CR (a CR without
-`last-handled-configuration` would make kopf fire `on.create` and race the finalize);
-deletes the restored source-named CR **after annotating it `styrmin.io/skip-teardown: "true"`
-and clearing its finalizers in one patch**; retargets the restored release storage; and re-runs
+`reapply_with_counterpart_identity` then, in order: retargets the restored release storage;
+applies the counterpart's CR body carrying kopf's state annotations over from the restored CR
+(a CR without `last-handled-configuration` would make kopf fire `on.create` and race the
+finalize); deletes the restored source-named CR **after annotating it
+`styrmin.io/skip-teardown: "true"` and clearing its finalizers in one patch**; and re-runs
 prerequisites → HelmRelease → services against the counterpart's spec before marking it
 Ready. Data survives; only identity objects are re-rendered.
 
