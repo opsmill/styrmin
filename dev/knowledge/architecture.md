@@ -274,11 +274,14 @@ application version and driver version:
   environment's effective `dedicated_ingress` changes, the fan-out creates or
   redeploys the environment's dedicated ingress controller and holds back the
   applications that would move onto it until the controller is `RUNNING` with
-  the new values. It skips `DELETING` deployments. Each environment, and each
-  redeploy, controller action and removal check within it, runs in its own
+  the new values. It skips `DELETING` deployments. Each environment runs in
+  its own transaction and is committed before the next one, and each
+  redeploy, controller action and removal check within it runs in a
   savepoint, so a failure rolls back only that unit. A failing environment is
   logged as `cluster_config_fanout_environment_error` and counted in
-  `environments_failed`, and `update_cluster` still succeeds.
+  `environments_failed`, and `update_cluster` still succeeds. The mutation
+  returns the deployments redeployed, waiting, skipped and failed to start;
+  with `dryRun` it returns the plan and writes nothing.
 
 The cluster config fan-out continues in the status reporter
 (`report_deployment_statuses` in `services/deployment_status.py`), on a state
@@ -288,13 +291,14 @@ redeploys the applications that waited. An internal deployment that reaches
 `FAILED`, and an application that reaches `RUNNING`, `FAILED` or `DELETED`,
 run `tear_down_unused_ingress_controller`, which removes the controller once
 no application is left in the environment, or once the environment's
-effective `dedicated_ingress` is off and every application has been
-redeployed without it. A failure in the savepoint is logged as
+effective `dedicated_ingress` is off, every application has been redeployed
+without it and no application is rolling out, `FAILED` or `RESTORING`. A failure in the savepoint is logged as
 `cluster_config_fanout_hook_error`, and the status report still commits.
 
 These savepoints isolate a failure because `SqlModelUnitOfWork.__aexit__`
 rolls back only the innermost open savepoint when a nested `async with uow`
-block fails inside one (see [`backend/services.md`](backend/services.md#unit-of-work-pattern)).
+block fails inside one, and `SqlModelUnitOfWork.commit()` raises inside a
+savepoint (see [`backend/services.md`](backend/services.md#unit-of-work-pattern)).
 
 Both fan-outs compare per deployment, so a resubmission of the same config
 redeploys only the deployments that are not at the config the fan-out

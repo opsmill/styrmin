@@ -236,6 +236,13 @@ The template receives a context object with the following structure:
 | `services['<name>'].primary_fqdn` | `str` | Primary FQDN for a named service |
 | `services['<name>'].human_readable_fqdn` | `str` | Human-readable FQDN for display |
 
+Prefer `instance.config.*` over `cluster.config.*` and `environment.config.*`. When an
+administrator changes the cluster config, Styrmin redeploys only the deployments whose resolved
+config (`instance.config`) changes. A deployment that is not redeployed keeps the
+`cluster.config` of its last render, so a template that reads `cluster.config.*` sees the
+previous cluster value until the deployment is redeployed for another reason (see
+[ADR-065](../dev/adr/0065-cluster-config-fanout.md)).
+
 ### Naming Convention (`fullnameOverride`)
 
 Every `values.j2.yml` **must** set `fullnameOverride` for the main chart and all subcharts, using the pattern:

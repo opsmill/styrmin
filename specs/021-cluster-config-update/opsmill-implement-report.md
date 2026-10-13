@@ -313,3 +313,59 @@ No E2E test was deferred. Every E2E test was run locally.
    ```
 
 6. Run `speckit-opsmill-extract` to move lasting knowledge from this spec into `dev/`.
+
+## 8. Review of 2026-10-12 (product, UX and engineering)
+
+The second review rated four findings critical, eleven important and three as suggestions. This
+section records what changed for each one. Items 18 and 19 were not in the review.
+
+### Changes
+
+| # | Finding | Change |
+|---|---|---|
+| 1 | One transaction for the whole fan-out: flows waited for a late commit, row locks were held across one Prefect call per deployment, and the SDK's 30-second timeout could report a failure while the server continued. | `fan_out_cluster_config` commits each environment in its own transaction. Environment values are read once (`_EnvironmentRef`), because a rolled-back environment transaction expires the ORM rows; a real-session test reproduces the `MissingGreenlet` error without this. `clusters.update()` waits up to 600 seconds, and the CLI says on a timeout that the server can still be saving. ADR-065 decision 6 and its consequence about the dispatch window are corrected. |
+| 2 | The update returned only the cluster, so no surface reported what was redeployed or failed. | `updateCluster` returns `UpdateClusterResult`: the deployments redeployed (with their task), waiting for a dedicated ingress controller, skipped for a restore and failed to start, the unchanged count, the controller actions and the failed environments. The CLI prints them, with `styrminctl tasks get TASK_ID` instead of `tasks list`, and says to run the command again when something failed. The dialog shows them in a result step. |
+| 3 | Save applied the change with no review step. | `updateCluster(dryRun: true)` plans without saving. The dialog's "Review changes" step lists the changed values, the deployments to redeploy and the controller actions, with warnings for an FQDN suffix change, a storage class change, and dedicated ingress turned on or off. The CLI has `--dry-run`. |
+| 4 | The operator race that leaves a controller `DELETING` will be hit more often. | The symptom and the recovery (an annotation on the `StyrminDeployment`) are documented in `ingress-and-networking.md`. The issue, the PR link and the note to the CI owners are pending (see "Not done in the code"). |
+| 5 | The removal check treated a `FAILED` application as moved off the controller. | `FAILED` and `RESTORING` applications now keep the controller (`_REMOVAL_BLOCKING_STATES`), with unit tests and a status-reporter test. |
+| 6 | `session.commit()` inside a savepoint commits the outer transaction. | `SqlModelUnitOfWork.commit()` raises when a savepoint is open, with a real-session test. |
+| 7 | The dialog lost values it does not show. | `deployment_ref` keys are converted to camelCase (also fixes the deployment edit path), and stored values outside the option lists are kept and shown as extra options. Round-trip tests cover them. |
+| 8 | Driver templates can read a stale `cluster.config`. | Limitation stated in ADR-065, `driver/DRIVERS.md` and `docs/docs/drivers/context.md`; `run_job` reads `instance.config.runtime_class`. |
+| 9 | The table output of `clusters get` cuts the config. | `styrminctl clusters get --json` prints only the config. The `COLUMNS=1000` workaround is removed from the docs. |
+| 10 | The SDK did not protect callers the way the CLI did. | `clusters.update()` takes a dict like `create()`, refuses unknown keys at any depth and accepts the stored enum values. The check moved from the CLI to the SDK (`styrmin_sdk/_input_checks.py`), and `UpdateClusterInput` is no longer exported. The read, change and send example is in `styrminctl.md`. |
+| 11 | Nobody can learn who changed the cluster config. | `update_cluster` logs `cluster_config_updated` with the acting user and the previous and new value of each changed key. A config history issue is pending. |
+| 12 | The clone error showed a UUID. | The error names the environment, says that nothing was saved, and says to save again when the clone has finished. |
+| 13 | Errors could be missed, and the dialog could close during a save. | The error sits in a sticky footer next to the buttons; Escape, outside click, the close button and Cancel do nothing while a request runs; closing with edits asks for confirmation. |
+| 14 | Empty Ingress class and Runtime class silently became `traefik` and `default`. | Hints under both fields, and the defaults in the view. |
+| 15 | Changelog. | `423.added.md` is shorter; `423.changed.1.md` records the `clusters get` and `clusters list` output change; `423.fixed.md` records the deployment edit fixes; `docs/docs/changelog.md` has an entry with a Migration section. |
+| 16, 17 | PR description and follow-ups. | See "Pull request description" below. |
+| 20 | Dialog suggestions. | Shared labels, defaults in the dropdowns, corrected description copy, a review step that says when there is nothing to save or why saving again is useful, a warning when another administrator changed the config, a discard confirmation, and the accessibility fixes (`aria-invalid`, `aria-describedby`, focus on the first error, distinct labels, a fieldset for IP families). |
+| 21 | Code suggestions. | The removal check returns before reading the deployments when the environment has no controller; the second `find_internal_by_environment` query is gone; `effective_dedicated_ingress` is the one rule; `create_ingress_controller` and `rendered_dedicated_ingress` are public; `dispatch_failed` is split into `evaluation_failed`, `dispatch_failed`, `ingress_controller_failed` and `ingress_controller_removal_failed`; the `changes_cluster_config` marker and the `run_cluster_config_changes_first` conftest hook replace the alphabetical file order, and the E2E cleanup is nested. |
+
+### Not done in the code
+
+These need an action outside the repository:
+
+- File an issue for the operator race (item 4) and link it from the PR.
+- Tell the owners of the CI E2E runs that `shard_compute` can fail at random on that race.
+- File a follow-up issue for a history of cluster configs (item 11).
+- Comment on #424 to reduce its scope, and note on ENG-140 that the epic stays open (item 16).
+- Tell support and presales about the storage class limitation, which affects the Infrahub drivers (item 3), and about the redeploy whenever a controller reaches `RUNNING` (item 17).
+
+### Pull request description
+
+- Closes #423, closes #301, partially addresses #424.
+- Behaviour changes:
+  - Applications are redeployed whenever their environment's dedicated ingress controller reaches `RUNNING` and they are not at their resolved config.
+  - An environment update that turns the environment's own `dedicated_ingress` off now removes the controller once the applications have moved off it.
+  - `styrminctl clusters get` and `clusters list` print the config as JSON.
+  - The deployment edit path now converts `ephemeral_storage` and `deployment_ref` keys (`423.fixed.md`).
+- High-risk areas: the unit of work (`commit()` inside a savepoint, rollback inside a savepoint), the per-environment transactions of the fan-out, the status reporter hooks, and the GraphQL return type of `updateCluster`, which changed from `Cluster` to `UpdateClusterResult` before any release.
+
+### Checks run after the review fixes
+
+- Backend: `uv run pytest backend/tests --ignore=backend/tests/e2e -n 8`: 4260 passed, 3 skipped.
+- SDK: 274 passed. CLI: 384 passed; the 2 failures are the telemetry tests that need an unwritable directory, which a root sandbox cannot provide.
+- Frontend, in `node:22-slim`: 89 files and 926 tests passed; lint, `tsc -b` and `prettier --check` pass.
+- `ruff check`, `ruff format`, `ty check`, `rumdl`, `yamllint`, `invoke validate-graphql`; `schema.graphql` and the generated SDK and frontend types are up to date.
+- E2E `shard_compute`: API 7 passed and 1 skipped, UI 4 passed and 4 skipped (`e2e-evidence.md`).

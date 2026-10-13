@@ -221,7 +221,7 @@ ingress:
   enabled: true
   className: "{{ instance.config.ingress_class }}"
   hosts:
-    - host: "{{ app.name }}-{{ instance.deployment_id }}.{{ cluster.config.fqdn_suffix }}"
+    - host: "{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}"
 
 storage:
   storageClassName: "{{ instance.config.standard_storage.storage_class }}"
@@ -233,7 +233,11 @@ Notice the typical patterns:
 - **`{{ instance.config.X }}`** for merged configuration — this is the
   default-correct place to read from.
 - **`{{ cluster.config.X }}`** only when you specifically need the
-  cluster-wide value (e.g. the FQDN suffix).
+  cluster's own value, not the one the environment or the deployment
+  sets. When an administrator changes the cluster config, Styrmin
+  redeploys only the deployments whose `instance.config` changes, so a
+  deployment that is not redeployed keeps the `cluster.config` of its
+  last render.
 - **No env var wiring.** User env vars reach each component's
   declared container without template code; the `component_env_vars`
   filter is removed (see
