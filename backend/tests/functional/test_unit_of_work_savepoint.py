@@ -1,4 +1,5 @@
-"""A failing ``async with uow`` block inside a savepoint rolls back only that savepoint (021 review F1).
+"""A failing ``async with uow`` block inside a savepoint rolls back only that savepoint (021 review F1),
+and ``commit()`` inside a savepoint is refused.
 
 Runs on the real SQLModel session (in-memory SQLite). Outside a savepoint the
 whole transaction still rolls back, as before.
@@ -67,5 +68,18 @@ async def test_failure_outside_a_savepoint_rolls_back_the_whole_transaction(
             await _add(session, "before")
             async with uow:
                 raise RuntimeError("simulated failure")
+
+    assert await _names(session) == set()
+
+
+async def test_commit_inside_a_savepoint_is_refused(session: AsyncSession) -> None:
+    uow = SqlModelUnitOfWork(session)
+    async with uow:
+        await _add(session, "before")
+        with pytest.raises(RuntimeError, match="inside a savepoint"):
+            async with session.begin_nested():
+                await _add(session, "in-savepoint")
+                await uow.commit()
+        await uow.rollback()
 
     assert await _names(session) == set()

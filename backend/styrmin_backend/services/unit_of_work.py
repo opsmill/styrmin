@@ -230,6 +230,9 @@ class SqlModelUnitOfWork(UnitOfWork):
         await self.session.rollback()
 
     async def commit(self) -> None:
+        # In SQLAlchemy 2.0 this commits the outer transaction, which would end the caller's failure isolation.
+        if self.session.in_nested_transaction():
+            raise RuntimeError("UnitOfWork.commit() called inside a savepoint")
         await self.session.commit()
 
 
