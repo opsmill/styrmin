@@ -63,7 +63,7 @@ deployment and environment of the cluster. The command requires the
 administrator role.
 
 ```text
-styrminctl clusters update [NAME] [--id UUID] --config JSON|@FILE
+styrminctl clusters update [NAME] [--id UUID] --config JSON|@FILE [--dry-run]
 ```
 
 - `NAME`: the name of the cluster.
@@ -71,17 +71,51 @@ styrminctl clusters update [NAME] [--id UUID] --config JSON|@FILE
   both.
 - `--config`: required. The whole cluster config, as inline JSON or as
   `@path/to/file.json`.
+- `--dry-run`: check the config and list the deployments that the
+  update would redeploy, without saving anything.
 
 ```bash
+styrminctl clusters get default --json > cluster.json
+# edit cluster.json
+styrminctl clusters update default --config @cluster.json --dry-run
 styrminctl clusters update default --config @cluster.json
 ```
 
-The same update is available as the `updateCluster` GraphQL mutation,
-as `clusters.update()` in the Python SDK, and from the **Edit** button
-on the cluster detail page, which the page shows only to administrators. The edit
-dialog keeps the values it does not show: scheduling, the node selector,
-the database size, the backup retention, and the dedicated ingress
-service annotations and load balancer IP.
+The same update is available as the `updateCluster` GraphQL mutation
+(with `dryRun: true` for the check), as `clusters.update()` in the
+Python SDK, and from the **Edit** button on the cluster detail page,
+which the page shows only to administrators. The edit dialog lists the
+changed values and the deployments that will be redeployed before it
+saves. It keeps the values it does not show: scheduling, the node
+selector, the database size, the backup retention, and the dedicated
+ingress service annotations and load balancer IP. When you turn the
+dedicated ingress off, the annotations and the load balancer IP are
+removed with it.
+
+#### From the Python SDK
+
+`clusters.update()` takes the config as a dict, like
+`clusters.create()`. Read the stored config, change one value, and send
+it back:
+
+```python
+from styrmin_sdk import StyrminClient
+
+async with StyrminClient(server_address="https://styrmin.example") as client:
+    cluster = await client.clusters.get(cluster_name="default")
+    config = {**cluster.config, "fqdn_suffix": "apps.example.com"}
+
+    preview = await client.clusters.update(config, cluster_name="default", dry_run=True)
+    print([d.deployment_name for d in preview.redeployed])
+
+    result = await client.clusters.update(config, cluster_name="default")
+    for failed in result.failed_to_start:
+        print("not started:", failed.environment_name, failed.deployment_name)
+```
+
+The SDK accepts the stored values that `get()` returns, such as
+`"external_url_scheme": "http"`, and refuses an unknown key at any depth
+with a `ValueError` before it sends anything.
 
 #### The file holds the whole config
 
@@ -102,31 +136,27 @@ value:
 Error: Unknown config key(s): fqdn_sufix, dedicated_ingress.servce
 ```
 
-To start from the stored config, run `styrminctl clusters get <name>`.
-It prints the config as JSON in the `config` column, and `clusters
-update` accepts that JSON as it is, including values such as
-`"external_url_scheme": "http"`. When the JSON is wider than the
-column, the table splits it over several lines and cuts long keys and
-values with `…`, and a copy of the cut JSON is not valid. The output
-is 80 characters wide when you pipe it to a file or another command.
-Set `COLUMNS` to a large value so that the table prints the whole JSON
-on one line:
-
-```bash
-COLUMNS=1000 styrminctl clusters get default
-```
+To start from the stored config, run
+`styrminctl clusters get <name> --json`. It prints only the config, as
+JSON, and `clusters update` accepts that JSON as it is, including
+values such as `"external_url_scheme": "http"`. Without `--json`, the
+command prints a table whose `config` column cuts long values, so do not
+copy the config from the table.
 
 Two updates are not merged: the update saved last wins. A file that you
 saved before another administrator's update reverts that update, so read
-the stored config with `clusters get` immediately before you edit it.
+the stored config with `clusters get --json` immediately before you edit
+it. The edit dialog warns you when the config changed after you opened
+it.
 
 The update is refused, and nothing is saved, in these cases:
 
 - The config does not pass validation (`VALIDATION_ERROR`).
 - An environment clone is in progress in the cluster: it is still
   capturing the backup of an environment of the cluster, or it is still
-  building its new environment in the cluster. Environment backups and
-  restores in progress do not block the update.
+  building its new environment in the cluster. The error names the
+  environment; submit the config again when the clone has finished.
+  Environment backups and restores in progress do not block the update.
 - You do not have the administrator role.
 
 #### Which deployments are redeployed
@@ -159,27 +189,52 @@ driver version. As a result:
   removed only after the applications have moved off it. See
   [Changing the dedicated ingress on the cluster](../concepts-and-architecture/ingress-and-networking.md#changing-the-dedicated-ingress-on-the-cluster).
 
-After the update, the command prints the stored config and says that
-the deployments are being redeployed. Each redeploy is an
-`update_instance` task, which `styrminctl tasks list` lists with the ID
-of its deployment. The server log has one `cluster_config_fanout` line
-per update, with the number of deployments evaluated, redeployed,
-skipped and failed.
+#### What the command prints
 
-When the evaluation of one environment fails, for example because the
-environment's stored config no longer passes validation, Styrmin
-cancels the changes that it recorded for that environment and logs a
-`cluster_config_fanout_environment_error` line. The
-`environments_failed` count of the `cluster_config_fanout` line counts
-these environments. The update still succeeds, and Styrmin evaluates
-the other environments.
+After the update, the command lists, by environment:
+
+- the deployments that are being redeployed, each with the ID of its
+  `update_instance` task. Follow one with
+  `styrminctl tasks get <task-id>`.
+- the deployments that wait for their environment's dedicated ingress
+  controller. They are redeployed when the controller runs with the new
+  values.
+- the deployments that are not redeployed because a restore is in
+  progress.
+- the dedicated ingress controllers that the update creates, redeploys
+  or removes.
+- the deployments whose redeploy could not start, and the environments
+  that could not be evaluated, for example because the environment's
+  stored config no longer passes validation.
+
+The config is saved even when some redeploys could not start, so a
+successful command does not mean that every redeploy started. When the
+command lists deployments or environments that could not start, run the
+same command again: it retries only the deployments that are not at
+their config.
+
+Styrmin starts the redeploys before it answers, environment by
+environment. The command waits up to 10 minutes. If it times out, the
+server can still be saving the config and starting the redeploys: check
+the config with `clusters get --json` before you run the command again.
+
+The server log has one `cluster_config_updated` line per update, with
+the ID of the administrator who submitted it and the previous and new
+value of each top-level key that changed. It also has one
+`cluster_config_fanout` line, with the number of deployments evaluated,
+redeployed, skipped and failed, and one
+`cluster_config_fanout_environment_error` line for each environment that
+could not be evaluated. Styrmin cancels the changes that it recorded for
+that environment and still evaluates the other environments.
 
 #### Reverting an update
 
 To revert an update, submit the previous file again. Styrmin redeploys
 the deployments whose config changes back. Keep a copy of the file
-before you edit it, or save the output of `COLUMNS=1000 styrminctl
-clusters get <name>` first.
+before you edit it, or save the output of
+`styrminctl clusters get <name> --json` first. Styrmin does not keep a
+history of cluster configs; the `cluster_config_updated` server log line
+holds the previous values.
 
 #### Storage class change on a StatefulSet
 

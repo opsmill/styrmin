@@ -121,11 +121,17 @@ When the update turns `dedicated_ingress` off:
 1. Styrmin redeploys the applications to the cluster's `ingress_class`
    at once.
 2. Styrmin removes the controller once every application has been
-   redeployed without the dedicated ingress, and neither the
-   applications nor the controller are `PENDING` or `DEPLOYING`. A
-   controller that is still being created when you turn the setting off
-   is removed once its creation has finished, so no controller is left
-   running without a record in Styrmin.
+   redeployed without the dedicated ingress, no application is
+   `PENDING`, `DEPLOYING`, `FAILED` or `RESTORING`, and the controller is
+   not `PENDING` or `DEPLOYING`. A controller that is still being
+   created when you turn the setting off is removed once its creation
+   has finished, so no controller is left running without a record in
+   Styrmin.
+
+A `FAILED` application keeps the controller because FluxCD rolls a
+failed upgrade back to the previous release, whose Ingress can still use
+the controller. Styrmin removes the controller once the application is
+`RUNNING` again or deleted.
 
 When the controller has failed or is being removed:
 
@@ -141,7 +147,8 @@ When the controller has failed or is being removed:
   a second controller, and the applications that would move onto one
   stay on their current config. Submit the config again once the
   removal has finished; Styrmin then creates a new controller and moves
-  them.
+  them. If the controller stays `DELETING`, see
+  [A controller that stays `DELETING`](#a-controller-that-stays-deleting).
 - The update turns `dedicated_ingress` off while the controller is
   `FAILED`: Styrmin redeploys the applications to the shared ingress
   class, then removes the controller.
@@ -150,6 +157,35 @@ When an environment's controller reaches `RUNNING` for any reason, for
 example after the first deploy creates it, Styrmin also redeploys the
 applications of that environment that are not yet at the config they
 resolve to.
+
+### A controller that stays `DELETING`
+
+A known race in the operator can stop the removal of a dedicated
+ingress controller. Changes to `dedicated_ingress` remove controllers
+more often, so you are more likely to see it after a cluster update.
+
+You see these symptoms:
+
+- The controller deployment stays `DELETING` in Styrmin for more than a
+  few minutes.
+- Its namespace, `styrmin-<controller-id>`, stays `Terminating`.
+- Its `StyrminDeployment` custom resource, also named
+  `styrmin-<controller-id>`, still has the `styrmin.io/kopf-finalizer`
+  finalizer although the operator logged `Deletion is processed`.
+
+The operator's delete handler and its timer ran at the same moment, and
+the operator kept the finalizer. To recover, add any annotation to the
+custom resource. The operator then runs the delete handler again and
+removes the finalizer:
+
+```bash
+kubectl annotate styrmindeployments.styrmin.io styrmin-<controller-id> \
+  -n styrmin-<controller-id> styrmin.io/retry-delete="$(date +%s)" --overwrite
+```
+
+The namespace is then deleted, Styrmin marks the controller as deleted,
+and you can submit the cluster config again to move the applications
+that waited.
 
 ### Changing the dedicated ingress of an environment
 

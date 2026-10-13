@@ -59,6 +59,12 @@ environment that sets the changed value itself, and it would redeploy every depl
 change to a value that no resolution reads (today the cluster's `scheduling` value). The resolved
 config is what driver templates (`instance.config.*`) and the ingress post-render patch read.
 
+A driver template can also read `cluster.config.*`, which `driver/DRIVERS.md` documents. A
+deployment that the fan-out skips keeps the `context.cluster.config` of its last render, so such a
+template sees the previous cluster value until the deployment is redeployed for another reason.
+This is a limitation of this decision. Styrmin's own code reads the resolved config:
+`run_job` (`services/primitives.py`) takes the runtime class from `instance.config`.
+
 The redeploy is `redeploy_for_environment_update`, the same primitive as the environment
 fan-out: a new instance at the deployment's current application version and bound driver
 version, and an `update_instance` task. Tombstoned deployments are skipped. A `DELETING`
@@ -95,6 +101,10 @@ Each application whose resolved config differs is then handled by its own change
 - Any other change, including the removal of its `dedicated_ingress`: it is redeployed at once,
   whatever the controller state.
 
+Each environment is planned first (`_plan_environment`): the applications to redeploy, the ones
+that wait and the controller action. The plan is then carried out. A dry run (decision 4) returns
+the plan of every environment and carries out none.
+
 The status reporter (`report_deployment_statuses` in `services/deployment_status.py`) continues
 the work, only when a deployment's state changes:
 
@@ -120,7 +130,10 @@ unchanged), or when all of the following hold:
 
 - The environment's effective `dedicated_ingress` is not set.
 - Every live application's active instance was rendered without `dedicated_ingress`.
-- No live application is `PENDING` or `DEPLOYING`.
+- No live application is `PENDING`, `DEPLOYING`, `FAILED` or `RESTORING`. FluxCD rolls a failed
+  upgrade back to the previous release, whose Ingress can still use the controller, and a restore
+  brings back the backed-up release. The check runs again when the application reaches `RUNNING`,
+  `FAILED` or `DELETED`.
 - The controller is not `PENDING` or `DEPLOYING`. The flow that creates or redeploys a controller
   does not check for `DELETING`, so a deletion requested before that flow writes the
   StyrminDeployment would leave a controller running without a live row. The check runs again
@@ -138,8 +151,15 @@ neither creates nor redeploys the controller.
 
 ### 4. A typed `UpdateClusterInput`, while `createCluster` keeps its JSON argument
 
-`updateCluster(input: UpdateClusterInput!, clusterId: UUID, clusterName: String): Cluster`
-requires the `ADMIN` role. `UpdateClusterInput` mirrors `ClusterConfig` field by field and reuses
+`updateCluster(input: UpdateClusterInput!, clusterId: UUID, clusterName: String, dryRun: Boolean! = false): UpdateClusterResult!`
+requires the `ADMIN` role. `UpdateClusterResult` holds the cluster and what the fan-out did: the
+deployments redeployed (with their task), waiting for a controller, skipped for a restore and
+failed to start, the number already at their resolved config, the controller actions per
+environment, and the environments whose evaluation failed. With `dryRun`, the config is validated
+and the same lists say what saving would do; nothing is saved and no task is created. The CLI
+prints the lists and the edit dialog shows them, before saving (dry run) and after.
+
+`UpdateClusterInput` mirrors `ClusterConfig` field by field and reuses
 the existing inputs `DedicatedIngressInput`, `SchedulingInput`, `StandardStorageInput` and
 `FastStorageInput` and the enums `ExternalUrlScheme` and `ExternalDnsEndpointsType`, following
 ADR-012's convention of one Strawberry input per Pydantic class.
@@ -160,23 +180,28 @@ therefore take the config in different shapes: GraphQL validation refuses an unk
 `UpdateClusterInput`, and `ClusterConfig`'s `extra="forbid"` refuses an unknown key of the
 `createCluster` JSON.
 
-### 5. The CLI refuses unknown keys in the config file
+### 5. The SDK refuses unknown keys in the config
 
 The SDK input models that ariadne-codegen generates ignore unknown keys. Under full replacement,
 a misspelled key (`fqdn_sufix`) would be dropped, the real key would be removed, and every
-deployment that takes it would be redeployed without it. `styrminctl clusters update` therefore
-runs `validate_input_strict(UpdateClusterInput, data)` (`cli/src/styrminctl/output.py`) before
-any request. It refuses every key, at any depth, that is neither a field name nor an alias, and
-names its path (`dedicated_ingress.servce`).
+deployment that takes it would be redeployed without it. The SDK's `clusters.update()` therefore
+takes the config as a dict, like `clusters.create()`, and `cluster_update_input`
+(`python_sdk/src/styrmin_sdk/resources/clusters.py`) runs `validate_input_strict` before any
+request. It refuses every key, at any depth, that is neither a field name nor an alias, and names
+its path (`dedicated_ingress.servce`). `styrminctl clusters update` calls the same check before
+it connects.
 
-The command also accepts the stored enum values that `clusters get` prints (`http`,
+The check also accepts the stored enum values that `clusters get` returns (`http`,
 `NodeExternalIP`, `NoSchedule`) and converts them to the GraphQL enum names with
-`to_graphql_enum_names`, so a config copied from `clusters get` can be edited and submitted.
-`clusters get` prints the config in a Rich table cell, which cuts long keys and values with `…`
-when the table is narrower than the JSON (80 columns when the output is piped). The copied JSON is
-therefore valid only with a wide `COLUMNS`, such as `COLUMNS=1000`.
+`to_graphql_enum_names`, so a config read from the API can be changed and sent back.
+`styrminctl clusters get --json` prints only the config, as JSON; the table output cuts long
+values and cannot be copied.
 
-The guard applies to `clusters update` only. A direct GraphQL caller is already protected by
+`clusters.update()` waits up to 600 seconds (`UPDATE_CLUSTER_TIMEOUT_SECONDS`), because the server
+starts every redeploy before it answers. On a timeout, the CLI says that the server can still be
+saving the config.
+
+The guard applies to `clusters.update()` only. A direct GraphQL caller is already protected by
 GraphQL validation. Other commands with the same exposure (`deployments update`,
 `env-clones create --config-override`) are not changed.
 
@@ -184,13 +209,21 @@ GraphQL validation. Other commands with the same exposure (`deployments update`,
 
 1. In one transaction: load the cluster, run the clone guard on each environment, apply the
    defaults, validate, set `config` and `capabilities`, commit. The row is committed before any
-   redeploy starts, as in ADR-012 decision 4.
-2. In the same unit of work: evaluate each environment in its own savepoint, start each redeploy,
-   each controller action and the removal check in a savepoint nested in it, then commit once.
+   redeploy starts, as in ADR-012 decision 4. Log `cluster_config_updated cluster_id=… user_id=…
+   changes=…`, with the previous and new value of each top-level key that changed. Styrmin keeps no
+   history of cluster configs; this line is the record of who changed what.
+2. For each environment, in its own transaction: plan it, start the controller action, each
+   redeploy and the removal check, each in a savepoint, then commit. An installation has one
+   cluster, so one transaction for the whole fan-out would hold row locks across one Prefect call
+   per deployment of the installation, and each flow, which waits 10 seconds for its task row
+   (`TASK_ROW_WAIT_SECONDS`), could start long before that commit.
 3. Log one line: `cluster_config_fanout cluster_id=… environments=… environments_failed=…
    evaluated=… dispatched=… skipped_noop=… skipped_restoring=… skipped_waiting_for_ingress=…
-   dispatch_failed=… ingress_controllers_created=… ingress_controllers_redeployed=…
-   ingress_controllers_removed=…`.
+   evaluation_failed=… dispatch_failed=… ingress_controllers_created=…
+   ingress_controllers_redeployed=… ingress_controllers_removed=… ingress_controller_failed=…
+   ingress_controller_removal_failed=…`. `evaluation_failed` counts the applications whose
+   comparison raised, `dispatch_failed` the application redeploys that could not start, and the two
+   `ingress_controller_*failed` counts the controller actions and removal checks that failed.
 
 Each status reporter continuation logs the same counts for one environment as
 `cluster_config_fanout_continued`.
@@ -198,10 +231,15 @@ Each status reporter continuation logs the same counts for one environment as
 A failing redeploy start, controller action or removal check rolls back only its own savepoint
 and is logged and counted, as decisions 1 to 3 describe. When the evaluation of an environment
 fails outside these steps (for example, the environment's stored config no longer validates), the
-environment's savepoint is rolled back, the failure is logged as
-`cluster_config_fanout_environment_error`, and the environment counts in `environments` and
-`environments_failed` only: its other counts are left out of the log line. The other environments
-are still evaluated, and `updateCluster` returns the updated cluster.
+environment's transaction is rolled back (in the status reporter, its savepoint), the failure is
+logged as `cluster_config_fanout_environment_error`, and the environment counts in `environments`
+and `environments_failed` only: its other counts are left out of the log line. The other
+environments are still evaluated, and `updateCluster` returns the updated cluster with the
+environment in `failedEnvironments`.
+
+`SqlModelUnitOfWork.commit()` raises when a savepoint is open. In SQLAlchemy 2.0,
+`session.commit()` inside a savepoint commits the outer transaction, so a helper that committed
+there would end the failure isolation without any error.
 
 The redeploy path opens nested `async with uow` blocks of its own (context generation and
 `resolve_deployment_reference`). `SqlModelUnitOfWork.__aexit__` therefore rolls back only the
@@ -234,10 +272,13 @@ written, and the caller kept using a session whose transaction was gone. An expl
   extra task.
 - If a status reporter continuation fails, the waiting applications move only at the controller's
   next transition to `RUNNING` or at a resubmission of the cluster config.
-- `apply_state` dispatches the Prefect flow before the transaction commits. If the fan-out's
+- `apply_state` dispatches the Prefect flow before the transaction commits. If an environment's
   commit, or the status report's savepoint or commit, fails after a dispatch, the flow refers to a
-  task row that does not exist. `update_environment` and `deploy_application` have the same window;
-  this decision does not widen it.
+  task row that does not exist. Each environment commits on its own, so the window is one
+  environment's redeploys, as in `update_environment`, which also commits once per environment.
+- `updateCluster` answers after every environment has been committed. In a large installation the
+  call can take longer than the SDK's default 30-second timeout, so `clusters.update()` waits up to
+  600 seconds.
 - Two updates do not merge: the update saved last wins, and a file saved before another update
   reverts it. There is no concurrency check.
 - Kubernetes refuses any change to the volume claim templates of an existing StatefulSet, and
@@ -255,7 +296,8 @@ written, and the caller kept using a session whose transaction was gone. An expl
   remove the finalizer. This decision does not change the operator.
 - A nested `async with uow` block that fails inside any savepoint now undoes only that savepoint's
   writes. The only savepoints are the status reporter's two and the cluster config fan-out's, all
-  opened to isolate a failure, so no other caller changes behaviour. `update_environment` opens no
+  opened to isolate a failure, so no other caller changes behaviour. `uow.commit()` inside a
+  savepoint raises. `update_environment` opens no
   savepoint, so a nested block that fails during one of its redeploys still rolls back the whole
   open transaction, including the redeploys written before it in the same fan-out.
 - The environment and cluster fan-outs now use different comparisons. The cluster fan-out could
@@ -291,6 +333,11 @@ written, and the caller kept using a session whose transaction was gone. An expl
   keys refused by every surface) is restored in the CLI by decision 5.
 - A typed input with a JSON escape hatch: rejected. Two write paths to validate and test, which
   ADR-012 decision 3 already rejected.
+- Commit the whole fan-out once, at the end: rejected. See decision 6.
+- Answer `updateCluster` before the fan-out and run it in the background: rejected. The caller
+  could not learn which deployments were redeployed or failed to start.
+- A separate preview query instead of `dryRun`: rejected. It would duplicate the arguments and the
+  validation of the mutation.
 - An ariadne-codegen plugin that sets `extra="forbid"` on every generated SDK input: rejected for
   this change, because it changes every SDK input type for every SDK user. It remains a candidate
   for a separate change.

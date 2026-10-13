@@ -8,6 +8,58 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### Change a cluster's config without recreating it
+
+An administrator can now change any value of a cluster's config, such
+as the FQDN suffix, the ingress class, a storage class or the dedicated
+ingress, without deleting and recreating the cluster, its environments
+and its deployments. See
+[`clusters update`](./reference/styrminctl.md#clusters-update--change-a-clusters-config).
+
+#### What's new
+
+- `styrminctl clusters update`, `clusters.update()` in the Python SDK,
+  the `updateCluster` GraphQL mutation and an **Edit** button on the
+  cluster detail page replace the whole cluster config
+  ([#423](https://github.com/opsmill/styrmin/issues/423)).
+- Styrmin redeploys each deployment whose resolved config changes, in
+  every environment of the cluster. The command, the SDK and the dialog
+  list the deployments that are redeployed, that wait for a dedicated
+  ingress controller and that could not start. Run the update again to
+  retry the ones that could not start.
+- `styrminctl clusters update --dry-run`, the `dryRun` argument and the
+  dialog's review step list the changes and the deployments to redeploy
+  before anything is saved.
+- `styrminctl clusters get --json` prints only the cluster config, to
+  edit and pass to `clusters update --config @FILE`.
+- When `dedicated_ingress` changes, the applications of an environment
+  move onto its dedicated ingress controller only once the controller is
+  `RUNNING`, and the controller is removed only after the applications
+  have moved off it.
+
+#### Migration
+
+- When an environment update turns the environment's own
+  `dedicated_ingress` off and the cluster does not set
+  `dedicated_ingress`, Styrmin now removes the environment's dedicated
+  ingress controller once its applications are redeployed to the
+  cluster's `ingress_class`. Before, the controller stayed until the
+  last application of the environment was deleted. If you rely on that
+  controller, for example for its load balancer IP, set
+  `dedicated_ingress` on the environment or the cluster again before
+  you upgrade.
+- Whenever an environment's dedicated ingress controller reaches
+  `RUNNING`, Styrmin now also redeploys the applications of that
+  environment that are not at the config they resolve to.
+- `styrminctl clusters get` and `clusters list` print the config as
+  JSON instead of Python dict text. Scripts that parse the old output
+  need to change; use `clusters get --json`.
+- A storage class change makes deployments whose StatefulSets use the
+  storage class `FAILED`, because Kubernetes refuses to change the
+  storage class of an existing volume claim. The Infrahub drivers are
+  affected. Saving again does not retry them: submit the previous
+  storage class again, or delete and redeploy the deployment.
+
 ### Env vars and image overrides reach the pods after every change
 
 The agent now installs the FluxCD controllers of Flux v2.9.6:

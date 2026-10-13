@@ -152,3 +152,22 @@ behaviour of the cluster config update. The server image was rebuilt from the fi
 | Kubeconfig path (during run) | `/tmp/pytest-of-root/pytest-1367/vcluster0/kubeconfig` |
 | Verbatim `PASSED` line | `PASSED16:39:40 info Removing vCluster container vcluster.cp.pytest-379a806d-2e79-442d-be58-52fe9a7dd403...` (pytest's `PASSED` and the teardown log share the line because of `-s`; ANSI colour codes stripped) |
 | Verbatim summary line | `============ 1 passed, 1 deselected, 1 warning in 219.61s (0:03:39) ============` |
+
+## Review fixes of 2026-10-12 (evening): whole `shard_compute`, both variants
+
+The second review changed the fan-out transactions (one per environment), the `updateCluster`
+return type and `dryRun`, the SDK `clusters.update()` signature, the edit dialog (review and
+result steps), the controller removal rule (`FAILED` and `RESTORING` applications keep it) and
+the shard ordering (`changes_cluster_config` runs first, whatever the file name). Image tag
+`review423-195518`, built with `docker compose build server` before each run.
+
+| Variant | Command | Verbatim summary line |
+|---|---|---|
+| API | `sleep infinity \| uv run pytest backend/tests/e2e -m "ci and shard_compute" -k "api-chromium" -v -s --pdb` | `===== 7 passed, 1 skipped, 177 deselected, 1 warning in 625.86s (0:10:25) ======` |
+| UI | `sleep infinity \| uv run pytest backend/tests/e2e -m "ci and shard_compute" -k "ui-chromium" -v -s --pdb` | `===== 4 passed, 4 skipped, 177 deselected, 1 warning in 276.89s (0:04:36) ======` |
+
+In both sessions the `test_cluster_update.py` tests ran first. The API test checked the result
+lists of each phase (redeployed with task IDs, `REMOVE` and `CREATE` controller actions, the
+application waiting for the new controller) and a dry run that saved nothing and started no task.
+The UI test went through the review step (FQDN suffix change and its warning), saved, and read
+the result step.

@@ -48,6 +48,17 @@ the marker rules.
    The `enforce_shard_markers` hook in conftest will reject your test
    if the shard marker is missing or names an unknown shard.
 
+### Tests that change the cluster config
+
+A cluster config change redeploys every deployment of the session
+cluster, including the shared deployments of other tests in the shard.
+Mark such a test with `@pytest.mark.changes_cluster_config`, restore
+the original config and wait for `wait_for_cluster_settled` before the
+test ends. The conftest hook `run_cluster_config_changes_first` runs the
+marked tests before every other test of the session, whatever their
+file names, so no shared deployment exists yet when they change the
+config. `test_cluster_update.py` in `shard_compute` uses it.
+
 ## Debugging — `--pdb` still works
 
 Matrix sharding does NOT change the per-test debugging recipe.
