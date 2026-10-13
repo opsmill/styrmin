@@ -52,7 +52,6 @@ from styrmin_backend.services.deployment import (
     _ensure_ingress_controller,
     deploy_application,
     redeploy_for_environment_update,
-    refresh_deployment,
     update_deployment,
     update_deployment_version,
 )
@@ -261,10 +260,6 @@ async def test_apply_state_stores_the_given_task_type(
 Caller = Callable[[FakeUnitOfWork, Deployment], Awaitable[Task | None]]
 
 
-async def _refresh(uow: FakeUnitOfWork, deployment: Deployment) -> Task | None:
-    return await refresh_deployment(deployment_id=deployment.id, uow=uow)
-
-
 async def _update(uow: FakeUnitOfWork, deployment: Deployment) -> Task | None:
     return await update_deployment(
         deployment_id=deployment.id, uow=uow, deployment_name="web-app-renamed"
@@ -297,7 +292,6 @@ async def _start(uow: FakeUnitOfWork, deployment: Deployment) -> Task | None:
 @pytest.mark.parametrize(
     ("caller", "expected"),
     [
-        pytest.param(_refresh, TaskType.UPDATE_INSTANCE, id="refresh_deployment"),
         pytest.param(_update, TaskType.UPDATE_INSTANCE, id="update_deployment"),
         pytest.param(
             _update_version, TaskType.UPGRADE_INSTANCE, id="update_deployment_version"

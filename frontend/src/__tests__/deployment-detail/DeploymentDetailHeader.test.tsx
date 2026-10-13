@@ -295,3 +295,28 @@ describe("DeploymentDetailPage header driver label", () => {
     });
   });
 });
+
+describe("DeploymentDetailPage header actions", () => {
+  beforeEach(() => {
+    useGetDeploymentQueryMock.mockReset();
+  });
+
+  it("offers Upgrade and Delete, and no Redeploy (#428)", async () => {
+    useGetDeploymentQueryMock.mockReturnValue(
+      makeQueryResult(makeDeployment()),
+    );
+
+    await renderPage();
+
+    const header = await screen.findByTestId("deployment-detail");
+    expect(
+      within(header).getByRole("button", { name: "Upgrade" }),
+    ).toBeInTheDocument();
+    expect(
+      within(header).getByTestId("delete-deployment-button"),
+    ).toBeInTheDocument();
+    expect(
+      within(header).queryByRole("button", { name: "Redeploy" }),
+    ).not.toBeInTheDocument();
+  });
+});

@@ -343,7 +343,6 @@ SDK.
 A no-op apply against a deployment in a terminal-failure state stays a
 no-op — `apply` compares desired intent against current intent, not
 health, so it will not retry a broken-but-unchanged deployment.
-Recovering such a deployment is a separate refresh path.
 
 :::
 
