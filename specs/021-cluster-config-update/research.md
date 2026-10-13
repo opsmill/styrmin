@@ -111,7 +111,7 @@ The check runs at the end of each environment's fan-out (so an environment whose
 
 **Rationale**: This removes the controller only after every application's redeploy has finished (FR-004, SC-005), and it reuses the deletion path that #252 built (born-complete delete task, `DELETING` state, operator teardown, tombstone by the status reporter). An application whose redeploy could not be started keeps an active instance with `dedicated_ingress`, so the controller stays until a resubmission moves it. An application that is `RESTORING` keeps its old instance, so the controller stays until the restore has finished and a later update moves it.
 
-**Effect on the environment update** (critique E2): both rules depend only on the stored state, so they also act after `updateEnvironment`. When an environment update turns the environment's own `dedicated_ingress` off and no cluster value applies, the environment fan-out redeploys the applications as today, and the controller is now removed once they have moved. Today it stays until the last application is deleted. When a controller of any environment becomes `RUNNING`, its environment's deployments that are not at their resolved config are redeployed. The environment update's other gaps (it neither creates nor redeploys the controller) stay out of scope. The spec, ADR-0065 and `docs/` state this change.
+**Effect on the environment update** (critique E2): both rules depend only on the stored state, so they also act after `updateEnvironment`. When an environment update turns the environment's own `dedicated_ingress` off and no cluster value applies, the environment fan-out redeploys the applications as today, and the controller is now removed once they have moved. Today it stays until the last application is deleted. When a controller of any environment becomes `RUNNING`, its environment's deployments that are not at their resolved config are redeployed. The environment update's other gaps (it neither creates nor redeploys the controller) stay out of scope. The spec, ADR-0066 and `docs/` state this change.
 
 **Alternatives considered**: remove the controller in the update call after starting the application redeploys. Rejected: the redeploys run asynchronously, so the controller would disappear before the applications have moved to the shared ingress class.
 
@@ -147,7 +147,7 @@ The environment fan-out in `services/environments.py` is not changed. The PRD no
 
 ## D9. A new ADR is needed
 
-**Decision**: Write `dev/adr/0065-cluster-config-fanout.md`.
+**Decision**: Write `dev/adr/0066-cluster-config-fanout.md`.
 
 **Rationale**: Two durable decisions differ from ADR-012 and are not obvious from the code: the resolved-config comparison (D1) and the readiness ordering of the dedicated ingress controller through the status reporter (D4, D5). ADR-012's "Convention to replicate" says new fan-outs adopt the slice comparison, so a reader of ADR-012 alone would expect the wrong rule. The ADR also records the `createCluster`/`updateCluster` input asymmetry (D2).
 

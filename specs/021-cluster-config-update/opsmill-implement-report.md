@@ -47,7 +47,7 @@ Each chunk ran in a clean-context subagent, one at a time.
    - Two attempts stopped in session fixture setup in the backup storage location dialog, which this feature does not touch. The cause is not known. The next runs passed with no change.
    - The test asserts that the whole stored config is unchanged except `fqdn_suffix`, including a cluster `scheduling` value that the dialog does not show.
 10. **Phase 6a: Documentation** (T045–T052). 8 tasks, 8 ✅. Commit `61502756`.
-    - ADR-065 was added, and ADR-012 now says ADR-065 narrows it.
+    - ADR-066 was added, and ADR-012 now says ADR-066 narrows it.
     - Pages outside the task list were corrected too: `services.md`, `api.md`, `core-concepts.md` and `backups-and-restores.md`.
 11. **Phase 6b: Local gate and quickstart** (T053, T054). 2 tasks, 2 ✅. Commit `cf8b1d3a`.
     - `uv run invoke dev` does not exist. The walk-through used an isolated `invoke start` equivalent on its own vCluster.
@@ -243,11 +243,11 @@ No E2E test was deferred. Every E2E test was run locally.
 | Medium | `services/cluster_config_fanout.py` | One environment whose stored config no longer validates stopped the fan-out for every environment of the cluster. | `f350984b` (new `environments_failed` count) |
 | Medium | `services/deployment_status.py` | The removal check after an application reaches `DELETED` ran without a savepoint, and it now does more work, so a failure would roll back the whole report batch. | `f350984b` |
 | Medium | `backend/tests/unit/services/` | No test made the controller's create or redeploy fail, and no test checked that capabilities are committed in the same commit as the config. The hook-failure test used a session that never rolls back. | `f350984b` |
-| Medium | `docs/docs/reference/styrminctl.md`, `changelog/423.added.md`, `dev/knowledge/architecture.md`, ADR-065 | The pages said different things about what a resubmission redeploys. | `a2781476` |
+| Medium | `docs/docs/reference/styrminctl.md`, `changelog/423.added.md`, `dev/knowledge/architecture.md`, ADR-066 | The pages said different things about what a resubmission redeploys. | `a2781476` |
 | Medium | `docs/docs/reference/styrminctl.md`, `cli/src/styrminctl/commands/clusters.py` | The docs said a narrow terminal only wraps the `clusters get` JSON. Rich also cuts long values with "…". | `a2781476` (documentation only) |
 | Medium | `backend/styrmin_backend/services/deployment.py` | A stale error message said the controller is removed only because the last application was deleted. | `81c85acd` |
 | Medium | `docs/docs/concepts-and-architecture/ingress-and-networking.md` | An older section contradicted the new section. | `a2781476` |
-| Low | `services/clusters.py`, `styrminctl.md`, ADR-065, `services.md`, changelog | The clone guard wording left out that a clone capturing a source environment also blocks the update. | `a2781476` |
+| Low | `services/clusters.py`, `styrminctl.md`, ADR-066, `services.md`, changelog | The clone guard wording left out that a clone capturing a source environment also blocks the update. | `a2781476` |
 | Low | `changelog/` | The fragment for #423 used the `+` prefix, which is for changes with no issue. It is renamed to `423.changed.md`. | `a2781476` |
 | Low | `CONTEXT.md` | The Config fan-out entry used "application", a term the glossary lists under _Avoid_. | `a2781476` |
 
@@ -323,14 +323,14 @@ section records what changed for each one. Items 18 and 19 were not in the revie
 
 | # | Finding | Change |
 |---|---|---|
-| 1 | One transaction for the whole fan-out: flows waited for a late commit, row locks were held across one Prefect call per deployment, and the SDK's 30-second timeout could report a failure while the server continued. | `fan_out_cluster_config` commits each environment in its own transaction. Environment values are read once (`_EnvironmentRef`), because a rolled-back environment transaction expires the ORM rows; a real-session test reproduces the `MissingGreenlet` error without this. `clusters.update()` waits up to 600 seconds, and the CLI says on a timeout that the server can still be saving. ADR-065 decision 6 and its consequence about the dispatch window are corrected. |
+| 1 | One transaction for the whole fan-out: flows waited for a late commit, row locks were held across one Prefect call per deployment, and the SDK's 30-second timeout could report a failure while the server continued. | `fan_out_cluster_config` commits each environment in its own transaction. Environment values are read once (`_EnvironmentRef`), because a rolled-back environment transaction expires the ORM rows; a real-session test reproduces the `MissingGreenlet` error without this. `clusters.update()` waits up to 600 seconds, and the CLI says on a timeout that the server can still be saving. ADR-066 decision 6 and its consequence about the dispatch window are corrected. |
 | 2 | The update returned only the cluster, so no surface reported what was redeployed or failed. | `updateCluster` returns `UpdateClusterResult`: the deployments redeployed (with their task), waiting for a dedicated ingress controller, skipped for a restore and failed to start, the unchanged count, the controller actions and the failed environments. The CLI prints them, with `styrminctl tasks get TASK_ID` instead of `tasks list`, and says to run the command again when something failed. The dialog shows them in a result step. |
 | 3 | Save applied the change with no review step. | `updateCluster(dryRun: true)` plans without saving. The dialog's "Review changes" step lists the changed values, the deployments to redeploy and the controller actions, with warnings for an FQDN suffix change, a storage class change, and dedicated ingress turned on or off. The CLI has `--dry-run`. |
 | 4 | The operator race that leaves a controller `DELETING` will be hit more often. | The symptom and the recovery (an annotation on the `StyrminDeployment`) are documented in `ingress-and-networking.md`. The issue, the PR link and the note to the CI owners are pending (see "Not done in the code"). |
 | 5 | The removal check treated a `FAILED` application as moved off the controller. | `FAILED` and `RESTORING` applications now keep the controller (`_REMOVAL_BLOCKING_STATES`), with unit tests and a status-reporter test. |
 | 6 | `session.commit()` inside a savepoint commits the outer transaction. | `SqlModelUnitOfWork.commit()` raises when a savepoint is open, with a real-session test. |
 | 7 | The dialog lost values it does not show. | `deployment_ref` keys are converted to camelCase (also fixes the deployment edit path), and stored values outside the option lists are kept and shown as extra options. Round-trip tests cover them. |
-| 8 | Driver templates can read a stale `cluster.config`. | Limitation stated in ADR-065, `driver/DRIVERS.md` and `docs/docs/drivers/context.md`; `run_job` reads `instance.config.runtime_class`. |
+| 8 | Driver templates can read a stale `cluster.config`. | Limitation stated in ADR-066, `driver/DRIVERS.md` and `docs/docs/drivers/context.md`; `run_job` reads `instance.config.runtime_class`. |
 | 9 | The table output of `clusters get` cuts the config. | `styrminctl clusters get --json` prints only the config. The `COLUMNS=1000` workaround is removed from the docs. |
 | 10 | The SDK did not protect callers the way the CLI did. | `clusters.update()` takes a dict like `create()`, refuses unknown keys at any depth and accepts the stored enum values. The check moved from the CLI to the SDK (`styrmin_sdk/_input_checks.py`), and `UpdateClusterInput` is no longer exported. The read, change and send example is in `styrminctl.md`. |
 | 11 | Nobody can learn who changed the cluster config. | `update_cluster` logs `cluster_config_updated` with the acting user and the previous and new value of each changed key. A config history issue is pending. |

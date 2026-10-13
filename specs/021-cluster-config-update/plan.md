@@ -47,11 +47,11 @@ When the effective `dedicated_ingress` of an environment changes, the fan-out al
 | IV. Type safety and typed errors | Pass | Existing `ServiceError` subclasses only: `InvalidContextError`, `ClusterNotFoundError`, `EnvironmentOperationInProgressError`, `AmbiguousIdentifierError`. No union error types. |
 | V. Test-first development | Pass | Unit suites for the update service, the fan-out and the controller ordering; a propagation test for `updateCluster`; CLI tests; one `api_only` E2E (P1) and one `ui_only` E2E (P2) with local pass evidence (D10). |
 | VI. Format and lint | Pass | `uv run invoke format lint` and `pnpm lint` before each commit. |
-| VII. Documentation accuracy | Pass | Documentation tasks listed below, including ADR-0065 (D9). |
+| VII. Documentation accuracy | Pass | Documentation tasks listed below, including ADR-0066 (D9). |
 | Governance gate: GraphQL schema change | Crossed, approved | One new mutation and three new input types. Recorded as crossed in the PRD's governance list, decided with the issue author in the requirements session (2026-10-12). |
 | Governance gates: database, dependencies, CI/CD, auth | Not crossed | No migration, no new package, no workflow change (no new shard), the existing `ADMIN` permission extension. |
 
-**Post-design re-check**: Pass. The design adds no persisted state, no new task type and no new flow. The one new cross-cutting behaviour (status reporter continuation) follows the existing `tear_down_unused_ingress_controller` precedent and is recorded in ADR-0065.
+**Post-design re-check**: Pass. The design adds no persisted state, no new task type and no new flow. The one new cross-cutting behaviour (status reporter continuation) follows the existing `tear_down_unused_ingress_controller` precedent and is recorded in ADR-0066.
 
 ## Project Structure
 
@@ -123,7 +123,7 @@ docs/docs/concepts-and-architecture/ingress-and-networking.md
 docs/docs/concepts-and-architecture/reconciliation.md
 dev/knowledge/architecture.md                  # §3.5
 dev/knowledge/backend/data-models.md           # Cluster section
-dev/adr/0065-cluster-config-fanout.md          # NEW
+dev/adr/0066-cluster-config-fanout.md          # NEW
 CONTEXT.md                                     # Config fan-out entry
 changelog/423.added.md                         # NEW
 ```
@@ -137,13 +137,13 @@ changelog/423.added.md                         # NEW
 3. **US2 (P1)**: controller actions and the per-application rule (D4); extended removal rule, including "the controller is not `PENDING` or `DEPLOYING`" (D5); status reporter hooks inside a savepoint, with the `cluster_config_fanout_continued` log line (D7); ordering unit tests, including a resubmission after a failed turn-on (applications do not move onto the failed controller) and an environment update that turns `dedicated_ingress` off (controller removed after the applications move).
 4. **E2E (P1)**: move helpers to `e2e/helpers/ingress.py`; `test_cluster_update_redeploys_and_moves_dedicated_ingress` (`api_only`), local pass evidence; full `shard_compute` run.
 5. **US3 (P2)**: frontend operation and codegen; `ClusterConfigFields` extraction; `EditClusterDialog` that carries unseen values; ADMIN gating; Vitest; `ui_only` E2E with page object, local pass evidence.
-6. **Documentation**: ADR-0065; CONTEXT.md; architecture.md §3.5; data-models.md; `docs/` pages, including the change to the environment update's controller removal (critique E2), how to revert an update by resubmitting the previous file, and that the file must hold the current config because the last update wins (critique E9, P5); changelog fragments for the new command and for the environment update change.
+6. **Documentation**: ADR-0066; CONTEXT.md; architecture.md §3.5; data-models.md; `docs/` pages, including the change to the environment update's controller removal (critique E2), how to revert an update by resubmitting the previous file, and that the file must hold the current config because the last update wins (critique E9, P5); changelog fragments for the new command and for the environment update change.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| A Styrmin upgrade changes the resolved-config computation, so the first cluster update after it redeploys many deployments (D1). | Recorded in ADR-0065 and the docs. The redeploy is a Helm upgrade with the same values where nothing changed, so pods do not restart. |
+| A Styrmin upgrade changes the resolved-config computation, so the first cluster update after it redeploys many deployments (D1). | Recorded in ADR-0066 and the docs. The redeploy is a Helm upgrade with the same values where nothing changed, so pods do not restart. |
 | A status transition is lost (server restart between the report and the commit), so waiting applications are not moved. | A resubmission of the same config moves them (per-deployment comparison). Documented as the recovery path. |
 | The E2E changes the shared session cluster and disturbs later tests in `shard_compute`. | The module sorts first in the shard, restores the original config in `finally`, and waits until no deployment of the cluster is `PENDING` or `DEPLOYING` (D10). The full shard is run once locally. |
 | A storage class change fails a StatefulSet-based deployment and a resubmission does not retry it. | Documented limit and recovery (spec edge case, D12); same behaviour as the environment update. |
