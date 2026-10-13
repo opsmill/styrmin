@@ -478,67 +478,6 @@ async def get_deployment_by_name(
         return deployment
 
 
-async def refresh_deployment(
-    deployment_id: UUID,
-    uow: UnitOfWork,
-) -> Task:
-    """Refresh a deployment by its ID.
-
-    Args:
-        deployment_id (UUID): The ID of the deployment to refresh.
-        uow (UnitOfWork): The unit of work to use.
-
-    Raises:
-        DeploymentNotFoundError: If the deployment is not found.
-
-    Returns:
-        Task: The task created for the deployment refresh.
-    """
-    async with uow:
-        # Get the deployment
-        deployment = await uow.deployments.find(id=deployment_id)
-        if deployment is None:
-            raise DeploymentNotFoundError(
-                f"Deployment with ID {deployment_id} not found"
-            )
-
-        # Ensure dedicated ingress controller is healthy if configured
-        await _ensure_ingress_controller(
-            environment_id=deployment.environment_id,
-            uow=uow,
-            created_by_user_id=deployment.created_by_user_id,
-        )
-
-        # Get the current instance
-        current_instance = deployment.active_instance
-
-        # Generate the instance from the deployment
-        new_instance = await generate_instance_from_deployment(
-            deployment=deployment,
-            uow=uow,
-        )
-
-        # Set the new instance as the active one
-        deployment.set_active_instance(instance=new_instance)
-        deployment.set_status(DeploymentState.PENDING)
-
-        # Get the task from the reconciliation workflow
-        task = await apply_state(
-            deployment=deployment,
-            current_instance=current_instance,
-            uow=uow,
-            task_type=TaskType.UPDATE_INSTANCE,
-        )
-
-        await uow.deployments.save(deployment=deployment)
-        await uow.tasks.save(task=task)
-        await uow.commit()
-
-        result = await uow.tasks.find(id=task.id)
-        assert result is not None, "Task not found"
-        return result
-
-
 async def update_deployment(
     deployment_id: UUID,
     uow: UnitOfWork,

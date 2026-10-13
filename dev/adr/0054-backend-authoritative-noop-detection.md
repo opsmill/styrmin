@@ -110,6 +110,13 @@ instance generation.
   That falls out of existing comparison semantics rather than any special-casing
   here. Exposing `refresh_deployment` as a user-facing redeploy is the intended
   recovery route and is a separate feature.
+
+  > **Note — amended ([#428](https://github.com/opsmill/styrmin/issues/428)).**
+  > `refresh_deployment` and the deployment page's Redeploy button, which had no
+  > click handler, were removed instead of exposed. A redeploy with an unchanged
+  > config sends FluxCD the same HelmRelease spec, so it cannot make FluxCD retry
+  > a HelmRelease that has used all its retries. Retrying a failed deployment
+  > without changing its config or version is not supported.
 - **`null` is now overloaded.** A null `Task` means "no work needed"; it used to
   imply only an error path. Any client treating null as failure would break — the
   frontend's `ConfigDiffDialog` is safe because it awaits the mutation and then

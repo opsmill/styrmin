@@ -51,7 +51,6 @@ Called by service functions in `services/deployment.py`:
 - `deploy_application()` - First deployment (current_instance is None)
 - `update_deployment()` - Config change (uses a two-UoW pattern — see below)
 - `update_deployment_version()` - Version change
-- `refresh_deployment()` - Re-reconcile
 
 Server-side responsibility (post-#237 boundary):
 

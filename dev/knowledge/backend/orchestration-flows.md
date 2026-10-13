@@ -123,7 +123,7 @@ The `apply_state` service function (`services/reconciliation/__init__.py`) takes
 | Caller | Task type |
 |---|---|
 | `deploy_application` (`deploy`) | `create_instance` |
-| `update_deployment`, `refresh_deployment`, `redeploy_for_environment_update` | `update_instance` |
+| `update_deployment`, `redeploy_for_environment_update` | `update_instance` |
 | `_ensure_ingress_controller` | `create_instance` when the ingress controller has no instance yet, else `update_instance` |
 | `update_deployment_version` (`updateDeploymentVersion`) | `upgrade_instance` |
 | `stop_components`, `start_components` (`services/primitives.py`) | `stop_components`, `start_components` |

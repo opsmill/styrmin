@@ -362,11 +362,6 @@ export default function DeploymentDetailPage() {
             </Button>
           </IfRole>
           <IfRole minimum="READ_WRITE">
-            <Button size="sm" disabled={isTerminal} title={terminalTitle}>
-              Redeploy
-            </Button>
-          </IfRole>
-          <IfRole minimum="READ_WRITE">
             <Button
               variant="destructive"
               size="sm"

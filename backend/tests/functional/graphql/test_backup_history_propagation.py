@@ -2,9 +2,9 @@
 
 ``backups(deploymentId:)`` lists the deployment's backup history: the backups of
 every instance the deployment has had, so a backup stays listed after an
-upgrade, a config edit, a refresh or an environment config change gives the
-deployment a new instance. ``backups(instanceId:)`` keeps listing one
-instance's backups, and the service rejects both or neither id.
+upgrade, a config edit or an environment config change gives the deployment a
+new instance. ``backups(instanceId:)`` keeps listing one instance's backups,
+and the service rejects both or neither id.
 """
 
 from __future__ import annotations
@@ -32,8 +32,6 @@ from styrmin_backend.db.models import (
     Deployment,
     DeploymentState,
 )
-from styrmin_backend.services.deployment import refresh_deployment
-from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 
 from ._queries import load_query
 from .conftest import gql
@@ -391,13 +389,6 @@ async def _edit_config(
     )
 
 
-async def _refresh(
-    client: AsyncClient, session: AsyncSession, seeded: DeployedWithBackup
-) -> None:
-    # No GraphQL field, CLI command or flow calls refresh_deployment (research R2).
-    await refresh_deployment(seeded.deployment_id, SqlModelUnitOfWork(session=session))
-
-
 async def _change_environment_config(
     client: AsyncClient, session: AsyncSession, seeded: DeployedWithBackup
 ) -> None:
@@ -417,8 +408,8 @@ Operation = Callable[[AsyncClient, AsyncSession, DeployedWithBackup], Awaitable[
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "operation",
-    [_upgrade, _edit_config, _refresh, _change_environment_config],
-    ids=["upgrade", "config-edit", "refresh", "environment-config-change"],
+    [_upgrade, _edit_config, _change_environment_config],
+    ids=["upgrade", "config-edit", "environment-config-change"],
 )
 async def test_backup_stays_in_history_after_operation_creates_new_instance(
     client: AsyncClient,
