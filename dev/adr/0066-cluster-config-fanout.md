@@ -1,4 +1,4 @@
-# ADR-065: Cluster Config Fan-Out — Resolved-Config Comparison and Dedicated Ingress Ordering
+# ADR-066: Cluster Config Fan-Out — Resolved-Config Comparison and Dedicated Ingress Ordering
 
 **Status**: Accepted
 **Date**: 2026-10-12

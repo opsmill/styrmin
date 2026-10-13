@@ -68,4 +68,4 @@ uv run pytest backend/tests/e2e -m shard_compute -k api-chromium -v
 - `docs/docs/reference/styrminctl.md` documents `clusters update`.
 - `docs/docs/concepts-and-architecture/ingress-and-networking.md` describes the order when `dedicated_ingress` changes at the cluster.
 - `docs/docs/concepts-and-architecture/reconciliation.md` names the cluster config fan-out.
-- `dev/knowledge/architecture.md` §3.5, `dev/knowledge/backend/data-models.md`, `CONTEXT.md` (**Config fan-out**), `dev/adr/0065-cluster-config-fanout.md` and a `changelog/423.added.md` fragment are present.
+- `dev/knowledge/architecture.md` §3.5, `dev/knowledge/backend/data-models.md`, `CONTEXT.md` (**Config fan-out**), `dev/adr/0066-cluster-config-fanout.md` and a `changelog/423.added.md` fragment are present.

@@ -241,7 +241,7 @@ administrator changes the cluster config, Styrmin redeploys only the deployments
 config (`instance.config`) changes. A deployment that is not redeployed keeps the
 `cluster.config` of its last render, so a template that reads `cluster.config.*` sees the
 previous cluster value until the deployment is redeployed for another reason (see
-[ADR-065](../dev/adr/0065-cluster-config-fanout.md)).
+[ADR-066](../dev/adr/0066-cluster-config-fanout.md)).
 
 ### Naming Convention (`fullnameOverride`)
 

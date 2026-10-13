@@ -121,7 +121,7 @@ Defined on `type Mutation`:
 |----------|-----------|--------|
 | `createCluster` | `name="default", config?` | `Cluster` |
 | `deleteCluster` | `clusterId?, clusterName?` | `String` |
-| `updateCluster` | `input: UpdateClusterInput!, clusterId?, clusterName?, dryRun = false` | `UpdateClusterResult!` (`ADMIN`; typed full-replacement input; triggers the cluster config fan-out and returns the cluster with the deployments redeployed, waiting for a dedicated ingress controller, skipped for a restore and failed to start; `dryRun` saves nothing and returns the plan — see [ADR-065](../../adr/0065-cluster-config-fanout.md)) |
+| `updateCluster` | `input: UpdateClusterInput!, clusterId?, clusterName?, dryRun = false` | `UpdateClusterResult!` (`ADMIN`; typed full-replacement input; triggers the cluster config fan-out and returns the cluster with the deployments redeployed, waiting for a dedicated ingress controller, skipped for a restore and failed to start; `dryRun` saves nothing and returns the plan — see [ADR-066](../../adr/0066-cluster-config-fanout.md)) |
 | `createEnvironment` | `name, clusterId?, clusterName?, config?` | `Environment` |
 | `updateEnvironment` | `environmentId, input: UpdateEnvironmentInput!` | `Environment` (typed full-replacement input; triggers per-deployment redeploy fanout — see [ADR-012](../adr/0012-environment-config-fanout.md)) |
 | `deleteEnvironment` | `environmentId?, environmentName?, clusterId?, clusterName?` | `String` |

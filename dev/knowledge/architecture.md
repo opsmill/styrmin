@@ -264,7 +264,7 @@ application version and driver version:
   deployment of the environment whose active instance stores a different
   environment config (`context.environment.config`).
 - **Cluster config fan-out** (`services/cluster_config_fanout.py`,
-  [ADR-065](../adr/0065-cluster-config-fanout.md)). `update_cluster` commits
+  [ADR-066](../adr/0066-cluster-config-fanout.md)). `update_cluster` commits
   the cluster config and its recomputed capabilities, then
   `fan_out_cluster_config` evaluates every live, non-internal deployment of
   every environment of the cluster. It compares the resolved config computed
