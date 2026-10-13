@@ -15,7 +15,7 @@ import pytest
 
 from styrmin_backend.domain.models import Deployment, DeploymentState
 from styrmin_backend.services import cluster_config_fanout, deployment_status
-from styrmin_backend.services.cluster_config_fanout import FanOutCounts
+from styrmin_backend.services.cluster_config_fanout import FanOutResult
 from styrmin_backend.services.deployment_status import report_deployment_statuses
 from tests.unit.services.cluster_fanout_support import (
     CLUSTER_CONFIG,
@@ -136,10 +136,13 @@ async def test_controller_running_continues_the_fan_out_and_moves_the_waiting_ap
         "skipped_noop": "0",
         "skipped_restoring": "0",
         "skipped_waiting_for_ingress": "0",
+        "evaluation_failed": "0",
         "dispatch_failed": "0",
         "ingress_controllers_created": "0",
         "ingress_controllers_redeployed": "0",
         "ingress_controllers_removed": "0",
+        "ingress_controller_failed": "0",
+        "ingress_controller_removal_failed": "0",
     }
 
 
@@ -159,19 +162,28 @@ async def test_controller_running_does_not_redeploy_an_application_being_deleted
     assert deleting.status == DeploymentState.DELETING
 
 
-@pytest.mark.parametrize("display_state", ["Running", "Error"])
-async def test_application_settling_off_the_controller_removes_it(
-    graph, patch_crd, display_state
-):
+async def test_application_settling_off_the_controller_removes_it(graph, patch_crd):
     """The controller goes only after the application's redeploy to the shared class finished."""
     app = await deploy(graph, graph.env_a, "app-a", status=DeploymentState.DEPLOYING)
     controller = await deploy_controller(graph, graph.env_a)
 
-    await report_deployment_statuses([_report(app, display_state)], graph.uow)
+    await report_deployment_statuses([_report(app, "Running")], graph.uow)
 
-    assert app.status != DeploymentState.DEPLOYING
+    assert app.status == DeploymentState.RUNNING
     assert controller.status == DeploymentState.DELETING
     patch_crd.assert_awaited_once()
+
+
+async def test_application_failing_off_the_controller_keeps_it(graph, patch_crd):
+    """Review: Flux rolls the failed upgrade back to a release whose Ingress can still use the controller."""
+    app = await deploy(graph, graph.env_a, "app-a", status=DeploymentState.DEPLOYING)
+    controller = await deploy_controller(graph, graph.env_a)
+
+    await report_deployment_statuses([_report(app, "Error")], graph.uow)
+
+    assert app.status == DeploymentState.FAILED
+    assert controller.status == DeploymentState.RUNNING
+    patch_crd.assert_not_awaited()
 
 
 @pytest.mark.parametrize("display_state", ["Running", "Error"])
@@ -218,7 +230,7 @@ async def test_hooks_run_only_on_their_state_change(
         deployment_status,
         "continue_environment_fan_out",
         new_callable=AsyncMock,
-        return_value=FanOutCounts(),
+        return_value=FanOutResult(),
     )
     removal = mocker.patch.object(
         deployment_status,

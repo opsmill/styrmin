@@ -4,6 +4,16 @@ All notable changes to the Styrmin Python SDK will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- **`client.clusters.update(config, cluster_id=None, cluster_name=None, *, dry_run=False)`**
+  replaces a cluster's config and returns the deployments the update redeploys, leaves
+  waiting for a dedicated ingress controller, skips for a restore or could not start.
+  `config` is a dict, like `clusters.create()`: snake_case or camelCase keys, and the
+  stored enum values that `clusters.get()` returns. An unknown key at any depth raises
+  `ValueError` before any request. With `dry_run=True`, nothing is saved. The call waits
+  up to 600 seconds.
+
 ### Breaking changes
 
 - **`client.deployments.update(...)` signature change.** The method no longer

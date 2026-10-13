@@ -10,8 +10,9 @@ traefik``.
 it changes only the FQDN suffix in the Edit dialog of the cluster detail page.
 
 Both tests change the cluster config that every test of ``shard_compute``
-shares. The module sorts first in the shard, and each test restores the
-original config and waits for the cluster to settle before it ends.
+shares. They carry ``changes_cluster_config``, which the e2e conftest runs
+before every other test of the session, and each test restores the original
+config and waits for the cluster to settle before it ends.
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import kr8s
@@ -27,17 +27,8 @@ import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Ingress as AsyncIngress
 from kr8s.asyncio.objects import Service as AsyncService
-from styrmin_sdk import StyrminClient, UpdateClusterInput
-from styrmin_sdk.graphql._generated.enums import (
-    ExternalDnsEndpointsType,
-    ExternalUrlScheme,
-    TolerationEffect,
-    TolerationOperator,
-)
-from styrmin_sdk.graphql._generated.input_types import (
-    SchedulingInput,
-    TolerationInput,
-)
+from styrmin_sdk import StyrminClient
+from styrmin_sdk.models import IngressControllerAction
 
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.helpers.ingress import (
@@ -52,33 +43,33 @@ from tests.e2e.pages.cluster_detail import ClusterDetailPage
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
+    from styrmin_sdk.models import ClusterUpdateResult
 
 pytestmark = [
     pytest.mark.shard_compute,
+    pytest.mark.changes_cluster_config,
 ]
 
 _REDEPLOY_TASK = "update_instance"
-_ENUM_FIELDS: dict[str, type[Enum]] = {
-    "external_url_scheme": ExternalUrlScheme,
-    "external_dns_endpoints_type": ExternalDnsEndpointsType,
-}
 
 
-def _cluster_input(config: dict[str, Any]) -> UpdateClusterInput:
-    """The stored cluster config as an ``UpdateClusterInput``.
+def _deployment_ids(entries: list[Any]) -> set[str]:
+    return {str(entry.deployment_id) for entry in entries}
 
-    The stored config holds enum values (``http``, ``NodeExternalIP``); the input takes GraphQL names.
-    """
-    converted = dict(config)
-    for key, enum_type in _ENUM_FIELDS.items():
-        if converted.get(key) is not None:
-            stored = str(converted[key]).replace("_", "").lower()
-            converted[key] = next(
-                member
-                for member in enum_type
-                if member.name.replace("_", "").lower() == stored
-            )
-    return UpdateClusterInput.model_validate(converted)
+
+def _assert_no_failure(result: ClusterUpdateResult) -> None:
+    failed_controllers = [c for c in result.ingress_controllers if c.failed]
+    assert not (
+        result.failed_to_start or result.failed_environments or failed_controllers
+    ), result
+
+
+async def _restore(
+    client: StyrminClient, cluster_id: str, original: dict[str, Any]
+) -> None:
+    """Restore the original cluster config and wait for the cluster to settle."""
+    await client.clusters.update(original, cluster_id=cluster_id)
+    await wait_for_cluster_settled(client, cluster_id)
 
 
 async def _task_ids(client: StyrminClient, deployment_id: str) -> set[str]:
@@ -245,9 +236,10 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
     original = (await client.clusters.get(cluster_id=cluster_id)).config
     assert original.get("dedicated_ingress") is not None, original
     assert original.get("ingress_class") == "traefik", original
-    original_input = _cluster_input(original)
-    shared_input = original_input.model_copy(update={"dedicated_ingress": None})
-    nginx_input = shared_input.model_copy(update={"ingress_class": "nginx"})
+    shared = {
+        key: value for key, value in original.items() if key != "dedicated_ingress"
+    }
+    nginx = {**shared, "ingress_class": "nginx"}
 
     suffix = uuid.uuid4().hex[:6]
     environment_ids: list[str] = []
@@ -278,9 +270,19 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
         # Phase 1: dedicated_ingress off moves both applications to the shared class.
         known_a = await _task_ids(client, app_a)
         known_b = await _task_ids(client, app_b)
-        await client.clusters.update(shared_input, cluster_id=cluster_id)
+        result = await client.clusters.update(shared, cluster_id=cluster_id)
+        assert {app_a, app_b} <= _deployment_ids(result.redeployed), result
+        assert {env_a, env_b} <= {
+            str(controller.environment_id)
+            for controller in result.ingress_controllers
+            if controller.action == IngressControllerAction.REMOVE
+        }, result
         redeploy_a = _single_redeploy(await _new_tasks(client, app_a, known_a), "A")
         redeploy_b = _single_redeploy(await _new_tasks(client, app_b, known_b), "B")
+        assert {str(entry.task_id) for entry in result.redeployed} >= {
+            redeploy_a.id,
+            redeploy_b.id,
+        }, result
 
         redeploy_a = await _wait_for_task_end(client, app_a, redeploy_a.id)
         await _wait_for_task_end(client, app_b, redeploy_b.id)
@@ -307,7 +309,17 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
         await wait_for_cluster_settled(client, cluster_id)
         known_a = await _task_ids(client, app_a)
         known_b = await _task_ids(client, app_b)
-        await client.clusters.update(nginx_input, cluster_id=cluster_id)
+        preview = await client.clusters.update(
+            nginx, cluster_id=cluster_id, dry_run=True
+        )
+        assert preview.dry_run
+        assert app_a in _deployment_ids(preview.redeployed), preview
+        assert app_b not in _deployment_ids(preview.redeployed), preview
+        assert (await client.clusters.get(cluster_id=cluster_id)).config == shared
+        assert await _new_tasks(client, app_a, known_a) == []
+
+        result = await client.clusters.update(nginx, cluster_id=cluster_id)
+        _assert_no_failure(result)
         stored = (await client.clusters.get(cluster_id=cluster_id)).config
         assert stored.get("ingress_class") == "nginx", stored
         redeploy_a = _single_redeploy(await _new_tasks(client, app_a, known_a), "A")
@@ -321,7 +333,13 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
         # Phase 3: the original config creates A's controller before A's application moves.
         await wait_for_cluster_settled(client, cluster_id)
         known_a = await _task_ids(client, app_a)
-        await client.clusters.update(original_input, cluster_id=cluster_id)
+        result = await client.clusters.update(original, cluster_id=cluster_id)
+        _assert_no_failure(result)
+        assert app_a in _deployment_ids(result.waiting_for_ingress), result
+        assert (env_a, IngressControllerAction.CREATE) in {
+            (str(controller.environment_id), controller.action)
+            for controller in result.ingress_controllers
+        }, result
         controllers = await ingress_controller_ids(client, env_a)
         assert len(controllers) == 1, controllers
         (new_controller_a,) = controllers
@@ -360,28 +378,31 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
         await wait_for_cluster_settled(client, cluster_id)
         known_a = await _task_ids(client, app_a)
         known_b = await _task_ids(client, app_b)
-        await client.clusters.update(original_input, cluster_id=cluster_id)
+        result = await client.clusters.update(original, cluster_id=cluster_id)
+        _assert_no_failure(result)
+        assert not {app_a, app_b} & _deployment_ids(result.redeployed), result
         await wait_for_cluster_settled(client, cluster_id)
         assert await _new_tasks(client, app_a, known_a) == []
         assert await _new_tasks(client, app_b, known_b) == []
     finally:
-        await client.clusters.update(original_input, cluster_id=cluster_id)
-        await wait_for_cluster_settled(client, cluster_id)
-        for environment_id in environment_ids:
-            await client.environments.delete(environment_id=environment_id)
+        try:
+            await _restore(client, cluster_id, original)
+        finally:
+            for environment_id in environment_ids:
+                await client.environments.delete(environment_id=environment_id)
 
 
 # A cluster value the edit dialog does not show. No resolved config reads the
 # cluster's scheduling, and a toleration only allows pods onto nodes.
-_HIDDEN_SCHEDULING = SchedulingInput(
-    tolerations=[
-        TolerationInput(
-            key="styrmin.io/cluster-edit-e2e",
-            operator=TolerationOperator.EXISTS,
-            effect=TolerationEffect.NO_SCHEDULE,
-        )
+_HIDDEN_SCHEDULING = {
+    "tolerations": [
+        {
+            "key": "styrmin.io/cluster-edit-e2e",
+            "operator": "Exists",
+            "effect": "NoSchedule",
+        }
     ]
-)
+}
 
 
 @pytest.mark.e2e
@@ -410,13 +431,11 @@ async def test_edit_cluster_config_from_detail_page(
         assert original.get(key) is not None, (
             f"session cluster has no {key}: {original}"
         )
-    original_input = _cluster_input(original)
     new_suffix = f"edit-{uuid.uuid4().hex[:6]}.styrmin.com"
 
     try:
         await client.clusters.update(
-            original_input.model_copy(update={"scheduling": _HIDDEN_SCHEDULING}),
-            cluster_id=cluster_id,
+            {**original, "scheduling": _HIDDEN_SCHEDULING}, cluster_id=cluster_id
         )
         before = (await client.clusters.get(cluster_id=cluster_id)).config
         assert before.get("scheduling"), before
@@ -425,7 +444,12 @@ async def test_edit_cluster_config_from_detail_page(
         await page.goto(cluster_id=cluster_id)
         await page.open_edit_dialog()
         await page.set_fqdn_suffix(new_suffix)
-        await page.save()
+        review = await page.review()
+        assert "FQDN suffix" in review and new_suffix in review, review
+        assert "Application URLs change" in review, review
+        saved = await page.save()
+        assert "The configuration was saved" in saved, saved
+        assert "Save again to retry them" not in saved, saved
 
         stored = (await client.clusters.get(cluster_id=cluster_id)).config
         assert stored == {**before, "fqdn_suffix": new_suffix}, (
@@ -434,5 +458,4 @@ async def test_edit_cluster_config_from_detail_page(
         )
         await page.wait_for_section_text("Networking", new_suffix)
     finally:
-        await client.clusters.update(original_input, cluster_id=cluster_id)
-        await wait_for_cluster_settled(client, cluster_id)
+        await _restore(client, cluster_id, original)

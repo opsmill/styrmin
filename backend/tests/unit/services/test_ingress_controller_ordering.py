@@ -25,7 +25,8 @@ from styrmin_backend.domain.models import (
 )
 from styrmin_backend.services import cluster_config_fanout, deployment_status
 from styrmin_backend.services.cluster_config_fanout import (
-    FanOutCounts,
+    ControllerAction,
+    FanOutResult,
     continue_environment_fan_out,
     fan_out_cluster_config,
 )
@@ -76,7 +77,7 @@ def graph() -> SimpleNamespace:
     return build_graph()
 
 
-async def _fan_out(graph: SimpleNamespace, config: dict) -> FanOutCounts:
+async def _fan_out(graph: SimpleNamespace, config: dict) -> FanOutResult:
     graph.cluster.config = dict(config)
     return await fan_out_cluster_config(graph.cluster, graph.uow, USER_ID)
 
@@ -176,7 +177,12 @@ class TestControllerActions:
         assert tasks_of(graph, app) == []
         assert controller.status == DeploymentState.RUNNING
         assert counts.ingress_controllers_redeployed == 0
-        assert counts.dispatch_failed == 1
+        assert counts.ingress_controller_failed == 1
+        assert counts.dispatch_failed == 0
+        assert [
+            (entry.action, entry.failed) for entry in counts.ingress_controllers
+        ] == [(ControllerAction.REDEPLOY, True)]
+        assert [entry.deployment_id for entry in counts.waiting_for_ingress] == [app.id]
         assert counts.skipped_waiting_for_ingress == 1
         assert counts.dispatched == 0
 
@@ -440,7 +446,7 @@ class TestControllerRemovalRule:
         self, graph, patch_crd, controller_state
     ):
         await deploy(graph, graph.env_a, "running-app")
-        await deploy(graph, graph.env_a, "failed-app", status=DeploymentState.FAILED)
+        await deploy(graph, graph.env_a, "other-app")
         controller = await deploy_controller(
             graph, graph.env_a, status=controller_state
         )
@@ -455,6 +461,35 @@ class TestControllerRemovalRule:
         assert [task.type for task in tasks_of(graph, controller)] == [
             TaskType.DELETE_DEPLOYMENT
         ]
+
+    @pytest.mark.parametrize(
+        "application_state", [DeploymentState.FAILED, DeploymentState.RESTORING]
+    )
+    async def test_not_removed_while_an_application_failed_or_restores(
+        self, graph, patch_crd, application_state
+    ):
+        """Review: Flux rolls a failed upgrade back to a release that can still use the controller."""
+        await deploy(graph, graph.env_a, "running-app")
+        await deploy(graph, graph.env_a, "unsettled-app", status=application_state)
+        controller = await deploy_controller(graph, graph.env_a)
+
+        removed = await tear_down_unused_ingress_controller(graph.env_a.id, graph.uow)
+
+        assert removed == 0
+        assert controller.status == DeploymentState.RUNNING
+        patch_crd.assert_not_awaited()
+
+    async def test_no_controller_returns_before_reading_the_deployments(
+        self, graph, patch_crd, mocker
+    ):
+        await deploy(graph, graph.env_a, "app-a")
+        find_all = mocker.spy(graph.uow.deployments, "find_all_by_environment")
+
+        removed = await tear_down_unused_ingress_controller(graph.env_a.id, graph.uow)
+
+        assert removed == 0
+        find_all.assert_not_called()
+        patch_crd.assert_not_awaited()
 
     async def test_last_application_deleted_rule_is_unchanged(self, graph, patch_crd):
         """#252: no application left removes the controller whatever its state or the config."""

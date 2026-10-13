@@ -111,3 +111,43 @@ def test_double_marked():
     result = pytester.runpytest_inprocess("--collect-only")
     assert result.ret != 0
     result.stdout.fnmatch_lines(["*has multiple shard markers*test_double_marked*"])
+
+
+def test_cluster_config_changes_run_first_whatever_the_file_name(
+    pytester: pytest.Pytester,
+) -> None:
+    pytester.syspathinsert(_BACKEND_DIR)
+    pytester.makepyfile(
+        conftest="""
+from tests.e2e.conftest import run_cluster_config_changes_first  # noqa: F401
+
+
+def pytest_collection_modifyitems(config, items):
+    run_cluster_config_changes_first(items)
+""",
+        test_a_first="""
+def test_one():
+    pass
+
+
+def test_two():
+    pass
+""",
+        test_z_last="""
+import pytest
+
+
+@pytest.mark.changes_cluster_config
+def test_changes_config():
+    pass
+""",
+    )
+    pytester.makeini(_INI + "    changes_cluster_config: foo\n")
+    result = pytester.runpytest_inprocess("--collect-only", "-q")
+    result.stdout.fnmatch_lines(
+        [
+            "test_z_last.py::test_changes_config",
+            "test_a_first.py::test_one",
+            "test_a_first.py::test_two",
+        ]
+    )

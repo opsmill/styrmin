@@ -2,17 +2,61 @@ mutation UpdateCluster(
   $input: UpdateClusterInput!
   $clusterId: UUID
   $clusterName: String
+  $dryRun: Boolean! = false
 ) {
   updateCluster(
     input: $input
     clusterId: $clusterId
     clusterName: $clusterName
+    dryRun: $dryRun
   ) {
-    id
-    name
-    config
-    capabilities
-    createdOn
-    updatedOn
+    cluster {
+      id
+      name
+      config
+      capabilities
+      createdOn
+      updatedOn
+    }
+    dryRun
+    redeployed {
+      deploymentId
+      deploymentName
+      environmentId
+      environmentName
+      taskId
+    }
+    waitingForIngress {
+      deploymentId
+      deploymentName
+      environmentId
+      environmentName
+      taskId
+    }
+    skippedRestoring {
+      deploymentId
+      deploymentName
+      environmentId
+      environmentName
+      taskId
+    }
+    failedToStart {
+      deploymentId
+      deploymentName
+      environmentId
+      environmentName
+      taskId
+    }
+    unchangedCount
+    ingressControllers {
+      environmentId
+      environmentName
+      action
+      failed
+    }
+    failedEnvironments {
+      environmentId
+      environmentName
+    }
   }
 }

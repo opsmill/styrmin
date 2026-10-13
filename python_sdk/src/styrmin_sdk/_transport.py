@@ -28,7 +28,7 @@ class Transport:
             headers=headers or {},
         )
 
-    def _describe_http_error(self, exc: httpx.HTTPError, method: str, path: str) -> str:
+    def _describe_http_error(self, exc: httpx.HTTPError, method: str, path: str, timeout: float | None = None) -> str:
         """Build a human-readable message for an httpx transport failure.
 
         Several httpx exceptions — notably ``ConnectError``, ``ConnectTimeout``,
@@ -48,7 +48,7 @@ class Transport:
         if isinstance(exc, httpx.TimeoutException):
             return (
                 f"{kind}: request to {target} timed out after "
-                f"{self._client.timeout.read}s — is the server reachable and "
+                f"{timeout or self._client.timeout.read}s — is the server reachable and "
                 f"healthy at {self._client.base_url}?{suffix}"
             )
         if isinstance(exc, httpx.ConnectError):
@@ -64,6 +64,8 @@ class Transport:
         self,
         query: str,
         variables: dict[str, Any] | None = None,
+        *,
+        request_timeout: float | None = None,
     ) -> dict[str, Any]:
         """Execute a GraphQL query/mutation and return the full result dict.
 
@@ -79,10 +81,14 @@ class Transport:
             payload["variables"] = variables
 
         try:
-            response = await self._client.post("/graphql", json=payload)
+            response = await self._client.post(
+                "/graphql",
+                json=payload,
+                timeout=httpx.USE_CLIENT_DEFAULT if request_timeout is None else request_timeout,
+            )
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise StyrminTransportError(self._describe_http_error(exc, "POST", "/graphql")) from exc
+            raise StyrminTransportError(self._describe_http_error(exc, "POST", "/graphql", request_timeout)) from exc
 
         return response.json()
 

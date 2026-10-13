@@ -51,6 +51,7 @@ from styrmin_backend.api.definitions.cluster.inputs import (
     update_cluster_input_to_dict,
 )
 from styrmin_backend.api.definitions.cluster.model import Cluster
+from styrmin_backend.api.definitions.cluster.update_result import UpdateClusterResult
 from styrmin_backend.api.definitions.deployment.inputs import (
     DeploymentConfigInput,
     ParameterValueInput,
@@ -455,7 +456,8 @@ class Mutation:
         extensions=[_requires(Role.ADMIN)],
         description=(
             "Replace a cluster's config and redeploy every deployment whose resolved "
-            "config changes. Requires the ADMIN role. Identify the cluster by id or name."
+            "config changes. Requires the ADMIN role. Identify the cluster by id or name. "
+            "With dryRun, nothing is saved and the result lists what saving would do."
         ),
     )
     async def update_cluster(
@@ -464,7 +466,8 @@ class Mutation:
         input: UpdateClusterInput,
         cluster_id: UUID | None = None,
         cluster_name: str | None = None,
-    ) -> Cluster | None:
+        dry_run: bool = False,
+    ) -> UpdateClusterResult:
         uow = info.context["uow"]
         current_user = info.context["current_user"]
         assert current_user is not None, (
@@ -473,13 +476,14 @@ class Mutation:
         cluster = await resolve_cluster(
             uow, cluster_id=cluster_id, cluster_name=cluster_name
         )
-        updated = await update_cluster(
+        result = await update_cluster(
             uow=uow,
             cluster_id=cluster.id,
             config=update_cluster_input_to_dict(input),
             acting_user_id=current_user.id,
+            dry_run=dry_run,
         )
-        return Cluster.from_instance(updated)
+        return UpdateClusterResult.from_result(result)
 
     @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])
     async def create_environment(

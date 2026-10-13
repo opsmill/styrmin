@@ -676,6 +676,12 @@ export type HelmChart = {
   version: Scalars['String']['output'];
 };
 
+/** What a cluster update does to an environment's dedicated ingress controller. REMOVE is requested once no application of the environment uses the controller. */
+export type IngressControllerAction =
+  | 'CREATE'
+  | 'REDEPLOY'
+  | 'REMOVE';
+
 /** Configuration for the dedicated ingress Kubernetes Service. */
 export type IngressServiceConfigInput = {
   annotations?: InputMaybe<Scalars['JSON']['input']>;
@@ -770,8 +776,8 @@ export type Mutation = {
   unassignBackupStorageLocation?: Maybe<Environment>;
   updateBackupSchedule?: Maybe<BackupSchedule>;
   updateBackupStorageLocation?: Maybe<BackupStorageLocation>;
-  /** Replace a cluster's config and redeploy every deployment whose resolved config changes. Requires the ADMIN role. Identify the cluster by id or name. */
-  updateCluster?: Maybe<Cluster>;
+  /** Replace a cluster's config and redeploy every deployment whose resolved config changes. Requires the ADMIN role. Identify the cluster by id or name. With dryRun, nothing is saved and the result lists what saving would do. */
+  updateCluster: UpdateClusterResult;
   updateDeployment?: Maybe<Task>;
   updateDeploymentVersion?: Maybe<Task>;
   updateEnvironment?: Maybe<Environment>;
@@ -1031,6 +1037,7 @@ export type MutationUpdateBackupStorageLocationArgs = {
 export type MutationUpdateClusterArgs = {
   clusterId?: InputMaybe<Scalars['UUID']['input']>;
   clusterName?: InputMaybe<Scalars['String']['input']>;
+  dryRun?: Scalars['Boolean']['input'];
   input: UpdateClusterInput;
 };
 
@@ -1570,6 +1577,34 @@ export type TopologySpreadConstraintInput = {
   whenUnsatisfiable: WhenUnsatisfiable;
 };
 
+/** A deployment that a cluster update redeploys, leaves waiting, skips or could not start. */
+export type UpdateClusterDeployment = {
+  __typename?: 'UpdateClusterDeployment';
+  deploymentId: Scalars['UUID']['output'];
+  deploymentName: Scalars['String']['output'];
+  environmentId: Scalars['UUID']['output'];
+  environmentName: Scalars['String']['output'];
+  /** The update_instance task of the redeploy. Null in a dry run and when the redeploy did not start. */
+  taskId?: Maybe<Scalars['UUID']['output']>;
+};
+
+/** An environment whose evaluation failed; none of its deployments was redeployed. */
+export type UpdateClusterEnvironment = {
+  __typename?: 'UpdateClusterEnvironment';
+  environmentId: Scalars['UUID']['output'];
+  environmentName: Scalars['String']['output'];
+};
+
+/** An action of a cluster update on an environment's dedicated ingress controller. */
+export type UpdateClusterIngressController = {
+  __typename?: 'UpdateClusterIngressController';
+  action: IngressControllerAction;
+  environmentId: Scalars['UUID']['output'];
+  environmentName: Scalars['String']['output'];
+  /** The controller could not be created or redeployed. Its applications wait. */
+  failed: Scalars['Boolean']['output'];
+};
+
 /** Full-replacement input for cluster configuration updates. Submit the complete desired configuration; any field omitted (null) is removed from the stored config, except ingressClass and runtimeClass, which default to "traefik" and "default" as on createCluster. */
 export type UpdateClusterInput = {
   backupTtl?: InputMaybe<Scalars['String']['input']>;
@@ -1585,6 +1620,26 @@ export type UpdateClusterInput = {
   runtimeClass?: InputMaybe<Scalars['String']['input']>;
   scheduling?: InputMaybe<SchedulingInput>;
   standardStorage?: InputMaybe<StandardStorageInput>;
+};
+
+/** The cluster after an update, and the deployments the update redeploys. In a dry run, the cluster is unchanged and the lists say what saving would do. */
+export type UpdateClusterResult = {
+  __typename?: 'UpdateClusterResult';
+  cluster: Cluster;
+  dryRun: Scalars['Boolean']['output'];
+  /** Environments whose evaluation failed. Save again to retry them. */
+  failedEnvironments: Array<UpdateClusterEnvironment>;
+  /** Deployments whose redeploy could not start. Save again to retry them. */
+  failedToStart: Array<UpdateClusterDeployment>;
+  ingressControllers: Array<UpdateClusterIngressController>;
+  /** Deployments whose redeploy started, or would start in a dry run. */
+  redeployed: Array<UpdateClusterDeployment>;
+  /** Deployments not redeployed because a restore is running. Save again after the restore. */
+  skippedRestoring: Array<UpdateClusterDeployment>;
+  /** Deployments already at their resolved configuration. */
+  unchangedCount: Scalars['Int']['output'];
+  /** Deployments that move onto a dedicated ingress controller. They are redeployed when the controller is running with the new values. */
+  waitingForIngress: Array<UpdateClusterDeployment>;
 };
 
 /** Full-replacement input for the ``updateDeployment`` mutation. Inherits every config field from ``DeploymentConfigInput`` (shared with the ``deploy`` create mutation) and adds the update-only ``name`` / ``parameters`` / ``serviceNameOverrides`` fields. Top-level fields use full-replacement semantics: an omitted (``null``) field means "do not touch the corresponding persisted state"; an empty list/dict means "explicitly clear". The single exception is ``parameters``, which uses merge semantics for backwards compatibility — entries in the input merge on top of the persisted parameters dict (existing keys not named in the input survive). */
@@ -2071,10 +2126,11 @@ export type UpdateClusterMutationVariables = Exact<{
   input: UpdateClusterInput;
   clusterId?: InputMaybe<Scalars['UUID']['input']>;
   clusterName?: InputMaybe<Scalars['String']['input']>;
+  dryRun?: Scalars['Boolean']['input'];
 }>;
 
 
-export type UpdateClusterMutation = { __typename?: 'Mutation', updateCluster?: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown>, capabilities: Record<string, unknown>, createdOn: any, updatedOn?: any | null } | null };
+export type UpdateClusterMutation = { __typename?: 'Mutation', updateCluster: { __typename?: 'UpdateClusterResult', dryRun: boolean, unchangedCount: number, cluster: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown>, capabilities: Record<string, unknown>, createdOn: any, updatedOn?: any | null }, redeployed: Array<{ __typename?: 'UpdateClusterDeployment', deploymentId: string, deploymentName: string, environmentId: string, environmentName: string, taskId?: string | null }>, waitingForIngress: Array<{ __typename?: 'UpdateClusterDeployment', deploymentId: string, deploymentName: string, environmentId: string, environmentName: string, taskId?: string | null }>, skippedRestoring: Array<{ __typename?: 'UpdateClusterDeployment', deploymentId: string, deploymentName: string, environmentId: string, environmentName: string, taskId?: string | null }>, failedToStart: Array<{ __typename?: 'UpdateClusterDeployment', deploymentId: string, deploymentName: string, environmentId: string, environmentName: string, taskId?: string | null }>, ingressControllers: Array<{ __typename?: 'UpdateClusterIngressController', environmentId: string, environmentName: string, action: IngressControllerAction, failed: boolean }>, failedEnvironments: Array<{ __typename?: 'UpdateClusterEnvironment', environmentId: string, environmentName: string }> } };
 
 export type UpdateDeploymentMutationVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
@@ -3935,14 +3991,61 @@ export const useUpdateBackupStorageLocationMutation = <
     )};
 
 export const UpdateClusterDocument = `
-    mutation UpdateCluster($input: UpdateClusterInput!, $clusterId: UUID, $clusterName: String) {
-  updateCluster(input: $input, clusterId: $clusterId, clusterName: $clusterName) {
-    id
-    name
-    config
-    capabilities
-    createdOn
-    updatedOn
+    mutation UpdateCluster($input: UpdateClusterInput!, $clusterId: UUID, $clusterName: String, $dryRun: Boolean! = false) {
+  updateCluster(
+    input: $input
+    clusterId: $clusterId
+    clusterName: $clusterName
+    dryRun: $dryRun
+  ) {
+    cluster {
+      id
+      name
+      config
+      capabilities
+      createdOn
+      updatedOn
+    }
+    dryRun
+    redeployed {
+      deploymentId
+      deploymentName
+      environmentId
+      environmentName
+      taskId
+    }
+    waitingForIngress {
+      deploymentId
+      deploymentName
+      environmentId
+      environmentName
+      taskId
+    }
+    skippedRestoring {
+      deploymentId
+      deploymentName
+      environmentId
+      environmentName
+      taskId
+    }
+    failedToStart {
+      deploymentId
+      deploymentName
+      environmentId
+      environmentName
+      taskId
+    }
+    unchangedCount
+    ingressControllers {
+      environmentId
+      environmentName
+      action
+      failed
+    }
+    failedEnvironments {
+      environmentId
+      environmentName
+    }
   }
 }
     `;

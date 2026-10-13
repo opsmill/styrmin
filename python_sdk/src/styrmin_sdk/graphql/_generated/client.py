@@ -2745,19 +2745,67 @@ class Client(AsyncBaseClient):
     async def update_cluster(
         self,
         input: UpdateClusterInput,
+        dry_run: bool,
         cluster_id: Union[Optional[UUID], UnsetType] = UNSET,
         cluster_name: Union[Optional[str], UnsetType] = UNSET,
         **kwargs: Any,
     ) -> UpdateCluster:
         query = gql("""
-            mutation UpdateCluster($input: UpdateClusterInput!, $clusterId: UUID, $clusterName: String) {
-              updateCluster(input: $input, clusterId: $clusterId, clusterName: $clusterName) {
-                id
-                name
-                config
-                capabilities
-                createdOn
-                updatedOn
+            mutation UpdateCluster($input: UpdateClusterInput!, $clusterId: UUID, $clusterName: String, $dryRun: Boolean! = false) {
+              updateCluster(
+                input: $input
+                clusterId: $clusterId
+                clusterName: $clusterName
+                dryRun: $dryRun
+              ) {
+                cluster {
+                  id
+                  name
+                  config
+                  capabilities
+                  createdOn
+                  updatedOn
+                }
+                dryRun
+                redeployed {
+                  deploymentId
+                  deploymentName
+                  environmentId
+                  environmentName
+                  taskId
+                }
+                waitingForIngress {
+                  deploymentId
+                  deploymentName
+                  environmentId
+                  environmentName
+                  taskId
+                }
+                skippedRestoring {
+                  deploymentId
+                  deploymentName
+                  environmentId
+                  environmentName
+                  taskId
+                }
+                failedToStart {
+                  deploymentId
+                  deploymentName
+                  environmentId
+                  environmentName
+                  taskId
+                }
+                unchangedCount
+                ingressControllers {
+                  environmentId
+                  environmentName
+                  action
+                  failed
+                }
+                failedEnvironments {
+                  environmentId
+                  environmentName
+                }
               }
             }
             """)
@@ -2765,6 +2813,7 @@ class Client(AsyncBaseClient):
             "input": input,
             "clusterId": cluster_id,
             "clusterName": cluster_name,
+            "dryRun": dry_run,
         }
         response = await self.execute(
             query=query, operation_name="UpdateCluster", variables=variables, **kwargs
