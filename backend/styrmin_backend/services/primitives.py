@@ -58,8 +58,8 @@ async def run_job(
                 f"Deployment with ID {deployment_id} has no active instance"
             )
 
-        # Get the runtime class
-        runtime_class = deployment.active_instance.context.cluster.config.runtime_class
+        # The resolved config; context.cluster.config is stale on a deployment the cluster fan-out skipped.
+        runtime_class = deployment.active_instance.context.instance.config.runtime_class
 
         # Get the namespace to run the job in
         namespace = deployment.active_instance.context.instance.namespace
