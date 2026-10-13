@@ -7,7 +7,10 @@ reconciler → HelmRelease post-render patch on the declared component container
 → rendered pod spec on the vcluster. Asserts on the live workload and on
 ``Deployment.componentImageOverrides``. The upgrade test also covers the
 pinned-override listing and a ``{{ app.version }}`` override following an
-upgrade. The misnamed-container test (SC-005) deploys a driver variant whose
+upgrade. The one-call upgrade test (#431) sets an override and an env var
+with the version change while the HelmRelease is suspended, and asserts the
+driver's upgrade Job runs with both before the workload has them.
+The misnamed-container test (SC-005) deploys a driver variant whose
 ``server`` component container is ``wrong-name`` and asserts an override fails
 the deployment instead of adding a container.
 
@@ -28,7 +31,11 @@ import pytest
 from kubernetes_asyncio import client as kubeclient
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
-from styrmin_sdk.models import ComponentConfigInput, UpdateDeploymentInput
+from styrmin_sdk.models import (
+    ComponentConfigInput,
+    EnvVarInput,
+    UpdateDeploymentInput,
+)
 
 from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.helpers.drivers import (
@@ -208,6 +215,51 @@ async def _wait_for_server_image(vcluster: dict, namespace: str, image: str) -> 
     )
 
 
+async def _read_server_workload(vcluster: dict, namespace: str) -> Any:
+    apps = kubeclient.AppsV1Api(vcluster["api"])
+    return await apps.read_namespaced_deployment(SERVER_WORKLOAD, namespace)
+
+
+async def _suspend_helmrelease(
+    vcluster: dict, namespace: str, *, suspend: bool
+) -> None:
+    """Set ``spec.suspend`` on the namespace's one HelmRelease; the operator keeps it."""
+    custom = kubeclient.CustomObjectsApi(vcluster["api"])
+    crd = {
+        "group": "helm.toolkit.fluxcd.io",
+        "version": "v2",
+        "namespace": namespace,
+        "plural": "helmreleases",
+    }
+    listed = await custom.list_namespaced_custom_object(**crd)
+    assert len(listed["items"]) == 1, [i["metadata"]["name"] for i in listed["items"]]
+    await custom.patch_namespaced_custom_object(
+        **crd,
+        name=listed["items"][0]["metadata"]["name"],
+        body=[{"op": "add", "path": "/spec/suspend", "value": suspend}],
+    )
+
+
+async def _wait_for_upgrade_job(vcluster: dict, namespace: str) -> Any:
+    """Return the Job that the driver's upgrade action starts (``execute_commands``)."""
+    batch = kubeclient.BatchV1Api(vcluster["api"])
+    deadline = time.monotonic() + RECONCILE_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        jobs = await batch.list_namespaced_job(namespace)
+        upgrade_jobs = [
+            j
+            for j in jobs.items
+            if j.spec.template.spec.containers[0].name == "user-job"
+        ]
+        if upgrade_jobs:
+            assert len(upgrade_jobs) == 1, [j.metadata.name for j in upgrade_jobs]
+            return upgrade_jobs[0]
+        await asyncio.sleep(2)
+    raise TimeoutError(
+        f"No upgrade Job in {namespace} after {RECONCILE_TIMEOUT_SECONDS}s"
+    )
+
+
 # ---------------------------------------------------------------------------
 # US1 (+ US3) — override, then clear
 # ---------------------------------------------------------------------------
@@ -276,6 +328,66 @@ async def test_override_then_clear(
         image=CHART_IMAGE,
     )
     assert await _read_image_overrides(client, deployment_id) == {}
+
+
+@pytest.mark.ci
+@pytest.mark.api_only(
+    reason="the upgrade dialog does not send the config; only the API sets it with the version"
+)
+async def test_override_with_version_change_reaches_upgrade_job(
+    image_override_environment: dict,
+    image_override_deployment: dict,
+    simple_app_override_images: dict[str, str],
+    vcluster: dict,
+) -> None:
+    """#431: one ``updateDeploymentVersion`` call sets an image override and an
+    env var on ``server`` and moves to 0.2.0. The HelmRelease is suspended until
+    the driver's upgrade action has started its Job, so the action reads a
+    workload that still runs 0.1.0 without the override, as when Flux renders
+    late. The Job must still run the override's build at 0.2.0 with the env var.
+
+    Runs after ``test_override_then_clear``, which leaves the deployment at 0.1.0
+    without overrides."""
+    client: StyrminClient = image_override_environment["client"]
+    deployment_id = image_override_deployment["deployment_id"]
+    namespace = image_override_deployment["namespace"]
+    patched_v2 = simple_app_override_images["0.2.0"]
+    marker = EnvVarInput(name="STYRMIN_E2E_UPGRADE_MARKER", value="one-call")
+
+    await _wait_for_server_image(vcluster, namespace, CHART_IMAGE)
+    await _suspend_helmrelease(vcluster, namespace, suspend=True)
+    try:
+        await client.deployments.update_version(
+            deployment_id,
+            "0.2.0",
+            input=UpdateDeploymentInput(
+                components=[
+                    ComponentConfigInput(
+                        name="server", image=TOKEN_IMAGE, env_vars=[marker]
+                    )
+                ]
+            ),
+        )
+        job = await _wait_for_upgrade_job(vcluster, namespace)
+        # The workload had not changed when the action read it.
+        assert _server_image(await _read_server_workload(vcluster, namespace)) == (
+            CHART_IMAGE
+        )
+    finally:
+        await _suspend_helmrelease(vcluster, namespace, suspend=False)
+
+    job_container = job.spec.template.spec.containers[0]
+    assert job_container.image == patched_v2
+    job_env = {e.name: e.value for e in job_container.env or []}
+    assert job_env.get(marker.name) == marker.value, job_env
+
+    await _wait_for_deployment_status(
+        client,
+        deployment_id,
+        lambda d: d["status"] == "running",
+        description="status == running",
+    )
+    await _wait_for_server_image(vcluster, namespace, patched_v2)
 
 
 # ---------------------------------------------------------------------------
@@ -349,8 +461,7 @@ async def test_token_follows_upgrade_and_action_job(
         image=patched_v2,
     )
 
-    # The upgrade action's ``<release>-job`` image is not asserted: its primitives call the
-    # API unauthenticated and fail under default-deny until #381, so the Job never runs.
+    # The upgrade Job's image is asserted by test_override_with_version_change_reaches_upgrade_job.
 
     rows = await _read_image_overrides(client, deployment_id)
     assert rows["server"]["reference"] == TOKEN_IMAGE

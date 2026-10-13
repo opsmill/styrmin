@@ -512,24 +512,28 @@ async def get_component_env(
     namespace: str,
     label_selector: str,
     client: ApiClient = Depends(get_api_client),
+    *,
+    container: str | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Extract env and envFrom from a component's pod template.
+
+    Reads the ``container`` container when it is present, else the first container.
 
     Args:
         namespace: The Kubernetes namespace.
         label_selector: Label selector string (e.g., "service=infrahub-server").
+        container: The component container's name, if the driver declares one.
 
     Returns:
         Tuple of (env, env_from) as lists of dicts in K8s API format.
     """
     pod_template = await _find_workload_pod_template(namespace, label_selector, client)
-    container = pod_template.spec.containers[0]
+    containers = pod_template.spec.containers
+    source = next((c for c in containers if c.name == container), containers[0])
 
-    env = client.sanitize_for_serialization(container.env) if container.env else []
+    env = client.sanitize_for_serialization(source.env) if source.env else []
     env_from = (
-        client.sanitize_for_serialization(container.env_from)
-        if container.env_from
-        else []
+        client.sanitize_for_serialization(source.env_from) if source.env_from else []
     )
 
     return env, env_from

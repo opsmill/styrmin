@@ -146,6 +146,14 @@ override. The in-repo `upgrade` actions (`simple-app`, `infrahub`, `infrahub-ent
 only when the part after the last `:` contains no `/`, so `registry:5000/app` keeps its port. This
 replaces research D-010's `rsplit(":", 1)` one-liner, which would have cut a registry port.
 
+> **Note (#431):** the action receives the context of the instance it runs for, and the
+> workload may not run that instance yet. When an image override applies in that context,
+> `get_component_images` now returns it as element 0 with `{{ app.version }}` set to the
+> context's application version, instead of the image the pod template still holds.
+> `execute_commands(env_from_component=...)` likewise reads the component container's env and
+> sets the context's env vars on top. See
+> [Overrides set with the version change](../knowledge/backend/hooks-and-actions.md#overrides-set-with-the-version-change).
+
 ### 7. Pinned overrides are flagged client-side
 
 The UI upgrade dialog lists every applicable override without the token, with its reference, above
@@ -183,7 +191,9 @@ including ones that do not apply; the UI lists only applicable ones.
   [ADR-065](0065-apply-writes-config-with-the-version.md), `apply` validates the config against
   the target driver version, so the separate apply is possible only when the current driver
   version accepts the override; the race itself is tracked in
-  [#431](https://github.com/opsmill/styrmin/issues/431).*
+  [#431](https://github.com/opsmill/styrmin/issues/431).* *Resolved by #431 for image
+  overrides and for added or changed env vars: the primitives take them from the action's
+  context (§6 note). An env var removed in the same apply still reaches the Job.*
 - **A pinned override diverges from upgrade Jobs.** The in-repo actions rebuild the tag from
   `images[0]`, so with a pinned override the Job runs the override's repository at the target
   version while the component stays pinned. The warning (§7) is the mitigation.

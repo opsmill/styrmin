@@ -34,6 +34,10 @@ from styrmin_backend.agent.service.kubernetes.primitives import (
 from styrmin_backend.agent.steps.reporter import StepReporter, uuid_from_env
 from styrmin_backend.agent.tasks.utils import STEP_ID_ENV
 from styrmin_backend.context.models.contexts import GlobalContext
+from styrmin_backend.services.component_container.overrides import (
+    applicable_env,
+    applicable_image,
+)
 
 _GRAPHQL_DIR = Path(__file__).resolve().parent
 
@@ -176,6 +180,28 @@ def _validate_component(component_name: str, context: GlobalContext) -> str:
     return context.components[component_name].config.identifier.label.label_selectable()
 
 
+def _with_env_vars(env: list[dict], env_vars: dict[str, str]) -> list[dict]:
+    """Set ``env_vars`` on env read from a workload, replacing same-name entries.
+
+    The workload may not run the action's instance yet, so env vars added or changed with
+    the version change are missing from it (#431). An env var removed with that change
+    stays: nothing tells it apart from a chart env var.
+    """
+    merged = [
+        {"name": entry["name"], "value": env_vars[entry["name"]]}
+        if entry.get("name") in env_vars
+        else entry
+        for entry in env
+    ]
+    present = {entry.get("name") for entry in env}
+    merged.extend(
+        {"name": name, "value": value}
+        for name, value in env_vars.items()
+        if name not in present
+    )
+    return merged
+
+
 @task(task_run_name="Get Component Labels {component}")
 async def get_component_labels(
     component: str, context: GlobalContext
@@ -202,8 +228,10 @@ async def get_component_images(component: str, context: GlobalContext) -> list[s
 
     Returns images from all containers in the pod template spec. When the
     component declares a component container present in the pod template, its
-    image is element 0 (it carries any image override); the others keep their
-    pod-template order.
+    image is element 0; the others keep their pod-template order. When an image
+    override applies in ``context``, element 0 is that override with
+    ``{{ app.version }}`` set to the context's application version, even if the
+    workload does not run it yet.
 
     Args:
         component: The component name (e.g., "server").
@@ -214,11 +242,18 @@ async def get_component_images(component: str, context: GlobalContext) -> list[s
     """
     label_selector = _validate_component(component, context)
     assert context.components is not None  # checked by _validate_component
-    return await _k8s_get_component_images(
+    component_ctx = context.components[component]
+    images = await _k8s_get_component_images(
         namespace=context.instance.namespace,
         label_selector=label_selector,
-        container=context.components[component].config.container,
+        container=component_ctx.config.container,
     )
+    # The context is the instance this action runs for: an override set with the
+    # version change may not have reached the workload yet (#431).
+    override = applicable_image(component, component_ctx, context.app.version)
+    if override is None:
+        return images
+    return [override, *images[1:]]
 
 
 @task(task_run_name="Execute Commands {commands}")
@@ -238,8 +273,10 @@ async def execute_commands(
         context (GlobalContext): The global context object.
         env_from_component (str | None): Name of a component whose environment variables
             should be copied into the job. The component's Deployment or StatefulSet is
-            looked up by label selector, and env/envFrom are extracted from its pod
-            template spec. Works even when the component is scaled to 0 replicas.
+            looked up by label selector, and env/envFrom are extracted from its component
+            container (else its first container), then the env vars that apply in
+            ``context`` are set on top. Works even when the component is scaled to 0
+            replicas.
         labels_from_component (str | None): Name of a component whose pod template labels
             should be copied onto the job's pods. Useful for network policy compatibility.
 
@@ -258,10 +295,14 @@ async def execute_commands(
 
     if env_from_component:
         label_selector = _validate_component(env_from_component, context)
+        assert context.components is not None  # checked by _validate_component
+        component_ctx = context.components[env_from_component]
         env, env_from = await get_component_env(
             namespace=context.instance.namespace,
             label_selector=label_selector,
+            container=component_ctx.config.container,
         )
+        env = _with_env_vars(env, applicable_env(component_ctx))
 
         if env:
             container_spec["env"] = env

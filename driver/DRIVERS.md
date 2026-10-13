@@ -434,7 +434,7 @@ await execute_commands(
 | `commands` | `list[str]` | Commands to execute (passed to container) |
 | `image` | `str` | Container image to use for the job |
 | `context` | `GlobalContext` | The global context object |
-| `env_from_component` | `str \| None` | Copy environment variables from this component |
+| `env_from_component` | `str \| None` | Copy environment variables from this component's component container, then set the user's env vars from the context on top |
 | `labels_from_component` | `str \| None` | Copy labels from this component |
 
 ## Components

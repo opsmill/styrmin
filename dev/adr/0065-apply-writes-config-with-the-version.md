@@ -110,6 +110,8 @@ these ways:
   can still read the workload before the override renders (ADR-058). Setting the override in
   an earlier apply avoids that only when the current driver version accepts it; when only the
   target version declares the component or its container, there is no workaround yet (#431).
+  *Resolved by #431: the action primitives take the image override and the env vars from the
+  action's context, so the upgrade Job uses them in the same apply (ADR-058 §6 note).*
 
 ## Alternatives Considered
 

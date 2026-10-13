@@ -513,13 +513,13 @@ version.
 
 Every component override (`env_vars`, `command`, `args`, `image`) is checked
 against the target driver version, so all of them can go in the apply that
-changes `spec.version`. The driver's upgrade action can, however, read the
-component's workload before the new values render, so its first Job can run
-with the previous image or env vars. When the upgrade action must see a new
-override, set it in an earlier apply that keeps `spec.version`. That works only
-when the current driver version declares the component and its component
-container; otherwise the override can only go with the version change, and
-[#431](https://github.com/opsmill/styrmin/issues/431) tracks the problem.
+changes `spec.version`. The driver's upgrade action can start before the new
+values reach the component's workload, so the action primitives take the
+`image` override and the `env_vars` from the new configuration: a Job that the
+action builds from the component's image and env runs with them. One
+exception: an env var that the same apply removes still reaches that Job,
+because it is still in the workload. To keep it out of the upgrade, remove it
+in an earlier apply that keeps `spec.version`.
 
 :::
 

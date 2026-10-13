@@ -489,7 +489,9 @@ consistent across drivers.
 component's pod template, with the component container's image first
 when the component declares one. Take `images[0]` rather than searching for an image name: when a user
 sets an image override, the first image is the override, so the
-migration Job runs the user's build.
+migration Job runs the user's build. The override comes from the
+deployment's new configuration, so this holds even when the user sets it
+in the same apply that changes the version.
 
 See [Lifecycle hooks and actions](../concepts-and-architecture/hooks-and-actions.md)
 for the full hook/mode model.
