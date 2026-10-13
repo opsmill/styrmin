@@ -22,19 +22,11 @@ export const clusterConfigShape = {
   ]),
   dedicated_ingress_enabled: z.boolean(),
   dedicated_ingress_implementation: z.string(),
-  dedicated_ingress_type: z.union([
-    z.enum(["ingress", "gateway"]),
-    z.literal(""),
-  ]),
-  dedicated_ingress_service_type: z.union([
-    z.enum(["LoadBalancer", "ClusterIP", "NodePort"]),
-    z.literal(""),
-  ]),
+  // Free strings in the backend: a stored value the form does not list is kept.
+  dedicated_ingress_type: z.string(),
+  dedicated_ingress_service_type: z.string(),
   dedicated_ingress_service_node_port: z.string(),
-  dedicated_ingress_service_external_traffic_policy: z.union([
-    z.enum(["Cluster", "Local"]),
-    z.literal(""),
-  ]),
+  dedicated_ingress_service_external_traffic_policy: z.string(),
   dedicated_ingress_service_ip_family_policy: z.union([
     z.enum(["SingleStack", "PreferDualStack", "RequireDualStack"]),
     z.literal(""),
@@ -211,16 +203,11 @@ export function configToFormValues(
     ]),
     dedicated_ingress_enabled: di !== null,
     dedicated_ingress_implementation: asString(di?.implementation),
-    dedicated_ingress_type: oneOf(di?.type, ["ingress", "gateway"]),
-    dedicated_ingress_service_type: oneOf(service?.type, [
-      "LoadBalancer",
-      "ClusterIP",
-      "NodePort",
-    ]),
+    dedicated_ingress_type: asString(di?.type),
+    dedicated_ingress_service_type: asString(service?.type),
     dedicated_ingress_service_node_port: asPortString(service?.node_port),
-    dedicated_ingress_service_external_traffic_policy: oneOf(
+    dedicated_ingress_service_external_traffic_policy: asString(
       service?.external_traffic_policy,
-      ["Cluster", "Local"],
     ),
     dedicated_ingress_service_ip_family_policy: oneOf(
       service?.ip_family_policy,
@@ -315,7 +302,9 @@ function mergeDedicatedIngress(
     ...without(stored, ["implementation", "type", "service"]),
     ...without(fromForm, ["service"]),
   };
-  if (Object.keys(service).length > 0) merged.service = service;
+  if (Object.keys(service).length > 0 || "service" in stored) {
+    merged.service = service;
+  }
   return merged;
 }
 
@@ -340,4 +329,167 @@ export function mergeFormValuesIntoConfig(
         : value;
   }
   return merged;
+}
+
+/** Labels shared by the cluster configuration view and the create and edit dialogs. */
+export const CLUSTER_CONFIG_LABELS = {
+  ingress_class: "Ingress class",
+  fqdn_suffix: "FQDN suffix",
+  runtime_class: "Runtime class",
+  external_url_scheme: "External URL scheme",
+  external_url_port: "External URL port",
+  external_dns_endpoints_type: "External DNS endpoints type",
+  dedicated_ingress: "Dedicated ingress",
+  implementation: "Implementation",
+  routing_type: "Routing type",
+  service_type: "Service type",
+  node_port: "NodePort",
+  external_traffic_policy: "External traffic policy",
+  ip_families: "IP families",
+  ip_family_policy: "IP family policy",
+  load_balancer_ip: "Load balancer IP",
+  service_annotations: "Service annotations",
+  standard_storage: "Standard storage",
+  standard_storage_class: "Standard storage class",
+  fast_storage: "Fast storage",
+  fast_storage_class: "Fast storage class",
+  db_size: "Database size",
+  node_selector: "Node selector",
+  scheduling: "Scheduling defaults",
+  backup_ttl: "Backup retention",
+} as const;
+
+// Defaults the backend applies when a key is absent (`_apply_cluster_defaults`,
+// `DedicatedIngressConfig`, `IngressServiceConfig`, `build_external_url`).
+export const DEFAULT_INGRESS_CLASS = "traefik";
+export const DEFAULT_RUNTIME_CLASS = "default";
+export const DEFAULT_EXTERNAL_URL_SCHEME = "https";
+export const DEFAULT_DEDICATED_INGRESS_IMPLEMENTATION = "traefik";
+export const DEFAULT_DEDICATED_INGRESS_TYPE = "ingress";
+export const DEFAULT_INGRESS_SERVICE_TYPE = "LoadBalancer";
+
+export const NOT_SET = "Not set";
+
+function displayValue(value: unknown): string {
+  if (value === undefined || value === null || value === "") return NOT_SET;
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+  if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
+    return value.join(", ");
+  }
+  return JSON.stringify(value);
+}
+
+/** Deep equality of JSON values; object key order does not matter. */
+export function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, i) => sameJson(item, b[i]))
+    );
+  }
+  const ra = asRecord(a);
+  const rb = asRecord(b);
+  if (ra === null || rb === null) return false;
+  const keys = new Set([...Object.keys(ra), ...Object.keys(rb)]);
+  return [...keys].every((key) => sameJson(ra[key], rb[key]));
+}
+
+const SHOWN_KEYS = new Set([
+  "ingress_class",
+  "fqdn_suffix",
+  "runtime_class",
+  "external_url_scheme",
+  "external_url_port",
+  "external_dns_endpoints_type",
+  "dedicated_ingress",
+  "standard_storage",
+  "fast_storage",
+  "db_size",
+  "node_selector",
+  "scheduling",
+  "backup_ttl",
+]);
+
+/** The config as label → displayed value, one entry per value an administrator can tell apart. */
+function describedValues(config: StoredConfig): Array<[string, string]> {
+  const L = CLUSTER_CONFIG_LABELS;
+  const di = asRecord(config.dedicated_ingress);
+  const service = asRecord(di?.service);
+  const entries: Array<[string, unknown]> = [
+    [L.ingress_class, config.ingress_class],
+    [L.fqdn_suffix, config.fqdn_suffix],
+    [L.runtime_class, config.runtime_class],
+    [L.external_url_scheme, config.external_url_scheme],
+    [L.external_url_port, config.external_url_port],
+    [L.external_dns_endpoints_type, config.external_dns_endpoints_type],
+    [L.dedicated_ingress, di === null ? "Off" : "On"],
+    [L.implementation, di?.implementation],
+    [L.routing_type, di?.type],
+    [L.service_type, service?.type],
+    [L.node_port, service?.node_port],
+    [L.external_traffic_policy, service?.external_traffic_policy],
+    [L.ip_families, service?.ip_families],
+    [L.ip_family_policy, service?.ip_family_policy],
+    [L.load_balancer_ip, service?.load_balancer_ip],
+    [L.service_annotations, service?.annotations],
+    [
+      L.standard_storage_class,
+      asRecord(config.standard_storage)?.storage_class,
+    ],
+    [L.fast_storage_class, asRecord(config.fast_storage)?.storage_class],
+    [L.db_size, config.db_size],
+    [L.node_selector, config.node_selector],
+    [L.scheduling, config.scheduling],
+    [L.backup_ttl, config.backup_ttl],
+  ];
+  for (const [key, value] of Object.entries(config)) {
+    if (!SHOWN_KEYS.has(key)) entries.push([key, value]);
+  }
+  return entries.map(([label, value]) => [label, displayValue(value)]);
+}
+
+export interface ConfigChange {
+  label: string;
+  before: string;
+  after: string;
+}
+
+/** The values that differ between two stored cluster configs, with the labels of the form. */
+export function clusterConfigChanges(
+  before: StoredConfig | null | undefined,
+  after: StoredConfig | null | undefined,
+): ConfigChange[] {
+  const beforeValues = new Map(describedValues(before ?? {}));
+  const afterValues = new Map(describedValues(after ?? {}));
+  const labels = [...new Set([...beforeValues.keys(), ...afterValues.keys()])];
+  return labels
+    .map((label) => ({
+      label,
+      before: beforeValues.get(label) ?? NOT_SET,
+      after: afterValues.get(label) ?? NOT_SET,
+    }))
+    .filter((change) => change.before !== change.after);
+}
+
+/** True when saving would neither change a value nor start a redeploy or a controller action. */
+export function nothingToSave(
+  before: StoredConfig,
+  after: StoredConfig,
+  plan: {
+    redeployed: readonly unknown[];
+    ingressControllers: readonly { action: string }[];
+  },
+): boolean {
+  return (
+    clusterConfigChanges(before, after).length === 0 &&
+    plan.redeployed.length === 0 &&
+    plan.ingressControllers.every(
+      (controller) => controller.action === "REMOVE",
+    )
+  );
 }

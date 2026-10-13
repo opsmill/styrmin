@@ -284,7 +284,11 @@ describe("deploymentConfigToInput", () => {
               topology_key: "",
               match_label_keys: ["a"],
               mismatch_label_keys: ["b"],
-              deployment_ref: { deployment_name: "peer" },
+              deployment_ref: {
+                deployment_id: "11111111-1111-1111-1111-111111111111",
+                deployment_name: "peer",
+                components: ["db"],
+              },
               label_selector: {
                 match_labels: { tier: "data" },
                 match_expressions: [
@@ -310,7 +314,11 @@ describe("deploymentConfigToInput", () => {
       topologyKey: "",
       matchLabelKeys: ["a"],
       mismatchLabelKeys: ["b"],
-      deploymentRef: { deployment_name: "peer" },
+      deploymentRef: {
+        deploymentId: "11111111-1111-1111-1111-111111111111",
+        deploymentName: "peer",
+        components: ["db"],
+      },
       labelSelector: {
         matchLabels: { tier: "data" },
         matchExpressions: [{ key: "role", operator: "IN", values: ["data"] }],
@@ -325,6 +333,7 @@ describe("deploymentConfigToInput", () => {
     // namespaceSelector.
     const allKeys = [
       ...Object.keys(term),
+      ...Object.keys(term.deploymentRef as Record<string, unknown>),
       ...Object.keys(term.labelSelector as Record<string, unknown>),
       ...Object.keys(term.namespaceSelector as Record<string, unknown>),
     ];

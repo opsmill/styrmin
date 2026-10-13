@@ -119,9 +119,18 @@ export function CreateClusterDialog({ onCreated }: { onCreated: () => void }) {
                   value={field.state.value}
                   onChange={(e) => field.handleChange(e.target.value)}
                   onBlur={field.handleBlur}
+                  aria-invalid={field.state.meta.errors.length > 0 || undefined}
+                  aria-describedby={
+                    field.state.meta.errors.length > 0
+                      ? "cluster-name-error"
+                      : undefined
+                  }
                 />
                 {field.state.meta.errors.length > 0 && (
-                  <p className="text-sm text-destructive">
+                  <p
+                    id="cluster-name-error"
+                    className="text-sm text-destructive"
+                  >
                     {field.state.meta.errors[0]?.toString()}
                   </p>
                 )}
