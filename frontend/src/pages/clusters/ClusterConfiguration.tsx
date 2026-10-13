@@ -1,17 +1,18 @@
 import type { ReactNode } from "react";
 import { ConfigSummaryCard } from "@/components/deployment/configuration/ConfigSummaryCard";
 import { DEFAULT_BACKUP_TTL } from "@/lib/backup-ttl";
+import {
+  CLUSTER_CONFIG_LABELS as LABELS,
+  DEFAULT_DEDICATED_INGRESS_IMPLEMENTATION,
+  DEFAULT_DEDICATED_INGRESS_TYPE,
+  DEFAULT_EXTERNAL_URL_SCHEME,
+  DEFAULT_INGRESS_CLASS,
+  DEFAULT_INGRESS_SERVICE_TYPE,
+  DEFAULT_RUNTIME_CLASS,
+  NOT_SET,
+} from "@/components/cluster/ClusterConfigFields.helpers";
 
 type JsonObject = Record<string, unknown>;
-
-const NOT_SET = "Not set";
-
-// Defaults the backend applies when a key is absent (see
-// ``DedicatedIngressConfig`` / ``IngressServiceConfig`` / ``BaseConfigSection``).
-const DEFAULT_DEDICATED_INGRESS_IMPLEMENTATION = "traefik";
-const DEFAULT_DEDICATED_INGRESS_TYPE = "ingress";
-const DEFAULT_INGRESS_SERVICE_TYPE = "LoadBalancer";
-const DEFAULT_EXTERNAL_URL_SCHEME = "https";
 
 // Keys rendered by a dedicated section; anything else lands in "Other settings".
 const KNOWN_KEYS = new Set([
@@ -84,17 +85,20 @@ function NetworkingSection({ config }: { config: JsonObject }) {
   return (
     <ConfigSummaryCard title="Networking">
       <Rows>
-        <Row label="Ingress class" value={display(config.ingress_class)} />
-        <Row label="FQDN suffix" value={display(config.fqdn_suffix)} />
         <Row
-          label="External URL scheme"
+          label={LABELS.ingress_class}
+          value={withDefault(config.ingress_class, DEFAULT_INGRESS_CLASS)}
+        />
+        <Row label={LABELS.fqdn_suffix} value={display(config.fqdn_suffix)} />
+        <Row
+          label={LABELS.external_url_scheme}
           value={withDefault(
             config.external_url_scheme,
             DEFAULT_EXTERNAL_URL_SCHEME,
           )}
         />
         <Row
-          label="External URL port"
+          label={LABELS.external_url_port}
           value={
             isSet(config.external_url_port)
               ? display(config.external_url_port)
@@ -102,7 +106,7 @@ function NetworkingSection({ config }: { config: JsonObject }) {
           }
         />
         <Row
-          label="External DNS endpoints type"
+          label={LABELS.external_dns_endpoints_type}
           value={display(config.external_dns_endpoints_type)}
         />
       </Rows>
@@ -114,7 +118,7 @@ function DedicatedIngressSection({ config }: { config: JsonObject }) {
   const ingress = asObject(config.dedicated_ingress);
   if (!ingress) {
     return (
-      <ConfigSummaryCard title="Dedicated ingress">
+      <ConfigSummaryCard title={LABELS.dedicated_ingress}>
         <EmptyMessage>
           Not configured. Deployments use the cluster ingress class unless their
           environment configures a dedicated ingress.
@@ -127,39 +131,39 @@ function DedicatedIngressSection({ config }: { config: JsonObject }) {
   const annotations = Object.entries(asObject(service.annotations) ?? {});
 
   return (
-    <ConfigSummaryCard title="Dedicated ingress">
+    <ConfigSummaryCard title={LABELS.dedicated_ingress}>
       <Rows>
         <Row
-          label="Implementation"
+          label={LABELS.implementation}
           value={withDefault(
             ingress.implementation,
             DEFAULT_DEDICATED_INGRESS_IMPLEMENTATION,
           )}
         />
         <Row
-          label="Routing type"
+          label={LABELS.routing_type}
           value={withDefault(ingress.type, DEFAULT_DEDICATED_INGRESS_TYPE)}
         />
         <Row
-          label="Service type"
+          label={LABELS.service_type}
           value={withDefault(service.type, DEFAULT_INGRESS_SERVICE_TYPE)}
         />
         <Row
-          label="Load balancer IP"
+          label={LABELS.load_balancer_ip}
           value={display(service.load_balancer_ip)}
         />
         <Row
-          label="External traffic policy"
+          label={LABELS.external_traffic_policy}
           value={display(service.external_traffic_policy)}
         />
-        <Row label="IP families" value={display(service.ip_families)} />
+        <Row label={LABELS.ip_families} value={display(service.ip_families)} />
         <Row
-          label="IP family policy"
+          label={LABELS.ip_family_policy}
           value={display(service.ip_family_policy)}
         />
-        <Row label="NodePort" value={display(service.node_port)} />
+        <Row label={LABELS.node_port} value={display(service.node_port)} />
         <Row
-          label="Service annotations"
+          label={LABELS.service_annotations}
           value={
             annotations.length === 0 ? (
               NOT_SET
@@ -186,14 +190,14 @@ function StorageSection({ config }: { config: JsonObject }) {
     <ConfigSummaryCard title="Storage">
       <Rows>
         <Row
-          label="Standard storage class"
+          label={LABELS.standard_storage_class}
           value={standard ? display(standard.storage_class) : "Not configured"}
         />
         <Row
-          label="Fast storage class"
+          label={LABELS.fast_storage_class}
           value={fast ? display(fast.storage_class) : "Not configured"}
         />
-        <Row label="Database size" value={display(config.db_size)} />
+        <Row label={LABELS.db_size} value={display(config.db_size)} />
       </Rows>
     </ConfigSummaryCard>
   );
@@ -205,12 +209,18 @@ function RuntimeSchedulingSection({ config }: { config: JsonObject }) {
   return (
     <ConfigSummaryCard title="Runtime and scheduling">
       <Rows>
-        <Row label="Runtime class" value={display(config.runtime_class)} />
-        <Row label="Node selector" value={display(config.node_selector)} />
+        <Row
+          label={LABELS.runtime_class}
+          value={withDefault(config.runtime_class, DEFAULT_RUNTIME_CLASS)}
+        />
+        <Row
+          label={LABELS.node_selector}
+          value={display(config.node_selector)}
+        />
       </Rows>
       <div className="mt-3">
         <p className="text-xs uppercase tracking-wide text-muted-foreground">
-          Scheduling defaults
+          {LABELS.scheduling}
         </p>
         {hasScheduling ? (
           <pre
@@ -232,7 +242,7 @@ function BackupSection({ config }: { config: JsonObject }) {
     <ConfigSummaryCard title="Backups">
       <Rows>
         <Row
-          label="Backup retention"
+          label={LABELS.backup_ttl}
           value={withDefault(config.backup_ttl, DEFAULT_BACKUP_TTL)}
         />
       </Rows>

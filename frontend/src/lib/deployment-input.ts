@@ -200,6 +200,14 @@ function normalizeLabelSelector(sel: unknown): unknown {
   return out;
 }
 
+function normalizeDeploymentRef(ref: unknown): unknown {
+  if (ref == null || typeof ref !== "object") return ref;
+  const out: Record<string, unknown> = { ...(ref as Record<string, unknown>) };
+  renameKey(out, "deployment_id", "deploymentId");
+  renameKey(out, "deployment_name", "deploymentName");
+  return out;
+}
+
 function normalizeAffinityTerm(term: unknown): unknown {
   if (term == null || typeof term !== "object") return term;
   const out: Record<string, unknown> = {
@@ -208,7 +216,12 @@ function normalizeAffinityTerm(term: unknown): unknown {
   renameKey(out, "topology_key", "topologyKey");
   renameKey(out, "match_label_keys", "matchLabelKeys");
   renameKey(out, "mismatch_label_keys", "mismatchLabelKeys");
-  renameKey(out, "deployment_ref", "deploymentRef");
+  moveAndTransform(
+    out,
+    "deployment_ref",
+    "deploymentRef",
+    normalizeDeploymentRef,
+  );
   moveAndTransform(
     out,
     "label_selector",

@@ -56,32 +56,32 @@ describe("CreateClusterDialog", () => {
     await user.click(
       screen.getByRole("button", { name: /Advanced Configuration/i }),
     );
-    await user.type(screen.getByLabelText("Ingress Class"), "nginx");
-    await user.type(screen.getByLabelText("FQDN Suffix"), "example.com");
+    await user.type(screen.getByLabelText("Ingress class"), "nginx");
+    await user.type(screen.getByLabelText("FQDN suffix"), "example.com");
     await user.selectOptions(
-      screen.getByLabelText("External URL Scheme"),
+      screen.getByLabelText("External URL scheme"),
       "https",
     );
-    await user.type(screen.getByLabelText("External URL Port"), "8443");
+    await user.type(screen.getByLabelText("External URL port"), "8443");
     await user.selectOptions(
-      screen.getByLabelText("external-dns Endpoints Type"),
+      screen.getByLabelText("External DNS endpoints type"),
       "NodeExternalIP",
     );
     await user.click(
-      screen.getByRole("checkbox", { name: "Dedicated Ingress" }),
+      screen.getByRole("checkbox", { name: "Dedicated ingress" }),
     );
     await user.type(screen.getByLabelText("Implementation"), "traefik");
-    await user.selectOptions(screen.getByLabelText("Service Type"), "NodePort");
+    await user.selectOptions(screen.getByLabelText("Service type"), "NodePort");
     await user.type(screen.getByLabelText("NodePort"), "30443");
     await user.click(screen.getByRole("checkbox", { name: "IPv6" }));
     await user.selectOptions(
-      screen.getByLabelText("IP Family Policy"),
+      screen.getByLabelText("IP family policy"),
       "SingleStack",
     );
     await user.click(
-      screen.getByRole("checkbox", { name: "Standard Storage" }),
+      screen.getByRole("checkbox", { name: "Standard storage" }),
     );
-    await user.type(screen.getByLabelText("Storage Class"), "ebs-gp3");
+    await user.type(screen.getByLabelText("Standard storage class"), "ebs-gp3");
     await user.click(screen.getByRole("button", { name: /^Create$/ }));
 
     await waitFor(() => expect(createClusterMutateAsync).toHaveBeenCalled());
@@ -114,7 +114,7 @@ describe("CreateClusterDialog", () => {
       screen.getByRole("button", { name: /Advanced Configuration/i }),
     );
     await user.click(
-      screen.getByRole("checkbox", { name: "Standard Storage" }),
+      screen.getByRole("checkbox", { name: "Standard storage" }),
     );
     await user.click(screen.getByRole("button", { name: /^Create$/ }));
 
@@ -124,5 +124,29 @@ describe("CreateClusterDialog", () => {
       ),
     ).toBeInTheDocument();
     expect(createClusterMutateAsync).not.toHaveBeenCalled();
+    const storageClass = screen.getByLabelText("Standard storage class");
+    expect(storageClass).toHaveAttribute("aria-invalid", "true");
+    expect(storageClass).toHaveAccessibleDescription(
+      "Storage class is required when standard storage is enabled",
+    );
+    expect(storageClass).toHaveFocus();
+  });
+
+  it("states the value used when Ingress class or Runtime class is empty", async () => {
+    const user = await openDialog();
+
+    await user.click(
+      screen.getByRole("button", { name: /Advanced Configuration/i }),
+    );
+
+    expect(screen.getByLabelText("Ingress class")).toHaveAccessibleDescription(
+      "Leave empty to use traefik.",
+    );
+    expect(screen.getByLabelText("Runtime class")).toHaveAccessibleDescription(
+      "Leave empty to use default.",
+    );
+    expect(
+      screen.getByRole("option", { name: "Default (https)" }),
+    ).toBeInTheDocument();
   });
 });
