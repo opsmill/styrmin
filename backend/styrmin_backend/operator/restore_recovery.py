@@ -420,7 +420,12 @@ async def reapply_with_counterpart_identity(
 
     Steps, in order:
 
-    1. Apply the counterpart's own CR body into the restored namespace,
+    1. Retarget the restored Helm release storage at this namespace
+       (``retarget_helm_release``). This comes first because step 2 makes kopf
+       create the counterpart's HelmRelease, and Flux upgrades the release
+       against this storage: still pointing at the source namespace, the
+       upgrade deletes the source's objects that the chart pins to a namespace.
+    2. Apply the counterpart's own CR body into the restored namespace,
        carrying over kopf's state-tracking annotations from the restored CR.
        Carrying them is deliberate and mirrors ``reapply_and_finalize``: a CR
        without ``last-handled-configuration`` makes kopf fire ``on.create``,
@@ -429,13 +434,11 @@ async def reapply_with_counterpart_identity(
        ``on.update``; that handler re-runs exactly the phases below against the
        same counterpart spec, so it is idempotent rather than harmful (its
        ``displayState`` bounce is settled by the operator's timer).
-    2. Delete the restored source-named CR — marked to skip teardown first, so
+    3. Delete the restored source-named CR — marked to skip teardown first, so
        kopf's ``on.delete`` handler never tears anything down (see
        ``_mark_skip_teardown``: that teardown would delete the counterpart's
        own HelmRelease and, through Flux, the restored volumes). Data
        survives; only identity objects are re-rendered.
-    3. Retarget the restored Helm release storage at this namespace
-       (``retarget_helm_release``).
     4. Re-apply prerequisites, **re-render the HelmRelease from the
        counterpart's spec** and re-apply utility resources, then mark the
        counterpart CR Ready.
@@ -448,8 +451,7 @@ async def reapply_with_counterpart_identity(
     ownership annotations the restored objects carry from the source. A
     counterpart-named release would instead be a fresh *install* over objects
     Helm already owns and would fail its ownership check outright. The Restore
-    CR leaves the HelmRelease itself out, so Flux cannot run that upgrade before
-    step 3 has retargeted the storage it diffs against.
+    CR leaves the HelmRelease itself out, so no HelmRelease exists before step 2.
 
     Caller is responsible for catching exceptions and translating to
     ``mark_failed`` (same contract as ``reapply_and_finalize``).
@@ -459,6 +461,17 @@ async def reapply_with_counterpart_identity(
         raise RuntimeError(
             "Cross-target restore recovery requires a named counterpart CR body"
         )
+
+    # The restored CR is named after the source namespace (research D2.3).
+    retargeted = await _retarget_helm_release_storage(
+        api_client, namespace, source_namespace=restored_crd_name
+    )
+    logger.info(
+        "Retargeted {} restored Helm release revision(s) in {} from {}",
+        retargeted,
+        namespace,
+        restored_crd_name,
+    )
 
     restored_crd = await _read_crd(api_client, namespace, restored_crd_name)
     inherited_annotations = {
@@ -497,17 +510,6 @@ async def reapply_with_counterpart_identity(
             namespace,
             restored_crd_name,
         )
-
-    # The restored CR is named after the source namespace (research D2.3).
-    retargeted = await _retarget_helm_release_storage(
-        api_client, namespace, source_namespace=restored_crd_name
-    )
-    logger.info(
-        "Retargeted {} restored Helm release revision(s) in {} from {}",
-        retargeted,
-        namespace,
-        restored_crd_name,
-    )
 
     await _reapply_phases_and_finalize(
         api_client,

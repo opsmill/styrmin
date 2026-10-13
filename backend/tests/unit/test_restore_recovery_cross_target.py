@@ -731,6 +731,35 @@ async def test_restored_helm_release_is_retargeted_before_the_helmrelease_phase(
 
 @pytest.mark.anyio
 @pytest.mark.usefixtures("fake_k8s")
+async def test_restored_helm_release_is_retargeted_before_the_counterpart_crd_exists(
+    phase_spy: list[dict[str, Any]],
+) -> None:
+    """The counterpart CR makes kopf create its HelmRelease straight away.
+
+    kopf's ``on.update`` for the applied counterpart CR runs the HelmRelease
+    phase, and Flux upgrades the release from whatever the storage holds then.
+    Retargeting after that (as the recovery once did) let a slow retarget lose
+    to the upgrade, which deleted the source's PostgreSQL StatefulSet and
+    Services.
+    """
+    api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
+    _seed_secret(api_client, HELM_SECRET_NAME)
+
+    await restore_recovery.reapply_with_counterpart_identity(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+        await counterpart_body(),
+    )
+
+    calls = api_client.calls
+    assert calls.index(("patch_secret", HELM_SECRET_NAME)) < calls.index(
+        ("create", COUNTERPART_NAME)
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
 async def test_only_helm_release_secrets_are_rewritten(
     phase_spy: list[dict[str, Any]],
 ) -> None:
