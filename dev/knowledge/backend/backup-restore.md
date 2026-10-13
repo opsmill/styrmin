@@ -980,12 +980,19 @@ storage driver).
 `reapply_with_counterpart_identity` then, in order: applies the counterpart's CR body
 carrying kopf's state annotations over from the restored CR (a CR without
 `last-handled-configuration` would make kopf fire `on.create` and race the finalize);
-deletes the restored source-named CR **after clearing and verifying its finalizers**
-(deleting it with kopf's finalizer intact fires the delete handler, which would tear down
-the counterpart's HelmRelease and, through Flux, the volumes just restored); retargets the
-restored release storage; and re-runs
+deletes the restored source-named CR **after annotating it `styrmin.io/skip-teardown: "true"`
+and clearing its finalizers in one patch**; retargets the restored release storage; and re-runs
 prerequisites → HelmRelease → services against the counterpart's spec before marking it
 Ready. Data survives; only identity objects are re-rendered.
+
+The annotation is what keeps the delete safe. The restored CR carries kopf's finalizer,
+and the operator's `on.delete` handler tears down the HelmRelease named by
+`spec.releaseReference` and every Service, NetworkPolicy and Secret labelled with it — in a
+cross-target restore, the counterpart's own. Clearing the finalizer is not enough: kopf
+adds it back on the next watch event, so it can be back before the delete arrives. The
+handler therefore skips the teardown for a CR annotated `styrmin.io/skip-teardown`. Before
+this, the race failed clones intermittently: the teardown removed the NetworkPolicies the
+recovery was re-applying, and the replace that followed a 409 on create returned 404.
 
 Two related notes:
 

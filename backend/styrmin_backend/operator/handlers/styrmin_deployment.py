@@ -15,6 +15,7 @@ import kopf
 
 from styrmin_backend import config
 from styrmin_backend.operator.config import (
+    ANNOTATION_SKIP_TEARDOWN,
     CRD_GROUP,
     CRD_PLURAL,
     CRD_VERSION,
@@ -1303,6 +1304,7 @@ async def kopf_on_styrmin_deployment_delete(
     status: kopf.Status,
     name: str,
     namespace: str | None,
+    annotations: kopf.Annotations,
     patch: kopf.Patch,
     logger: kopf.Logger,
     **_: Any,
@@ -1312,8 +1314,21 @@ async def kopf_on_styrmin_deployment_delete(
     Runs the teardown pipeline; does NOT produce a backend tombstone
     (out of scope per spec 008). The platform-driven path is handled by
     ``kopf_on_styrmin_deployment_deletion_requested`` instead.
+
+    A CR annotated with ``ANNOTATION_SKIP_TEARDOWN`` is deleted without
+    teardown: a cross-target restore discards its restored copy of the
+    source's CR, whose resources now belong to the counterpart CR.
     """
     ns = namespace or ""
+    if annotations.get(ANNOTATION_SKIP_TEARDOWN) == "true":
+        logger.info(
+            "Deleting StyrminDeployment %s/%s without teardown (%s)",
+            ns,
+            name,
+            ANNOTATION_SKIP_TEARDOWN,
+        )
+        return
+
     release_ref = spec.get("releaseReference", "")
     logger.info(
         "Deleting StyrminDeployment %s/%s (safety-net path), cleaning up resources",

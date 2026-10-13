@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 
 from styrmin_backend.operator import restore_recovery
-from styrmin_backend.operator.config import CRD_PLURAL
+from styrmin_backend.operator.config import ANNOTATION_SKIP_TEARDOWN, CRD_PLURAL
 from styrmin_backend.operator.crd.schema import DeploymentPhase, DisplayState
 from styrmin_backend.operator.pipeline import PhaseResult
 
@@ -547,19 +547,50 @@ async def test_in_place_recovery_does_not_touch_the_helmrelease(
     assert phase_order == ["prerequisites", "services"]
 
 
+def _deleted_bodies(
+    monkeypatch: pytest.MonkeyPatch, *, readd_finalizer: bool
+) -> list[dict[str, Any]]:
+    """Record each CR body as it is when deleted.
+
+    ``readd_finalizer`` puts kopf's finalizer straight back after every patch
+    of the restored CR, as kopf does on the next watch event.
+    """
+    deleted: list[dict[str, Any]] = []
+
+    class RecordingApi(FakeCustomObjectsApi):
+        async def patch_namespaced_custom_object(self, **kwargs: Any) -> dict[str, Any]:
+            result = await super().patch_namespaced_custom_object(**kwargs)
+            if readd_finalizer and kwargs["name"] == RESTORED_NAME:
+                result["metadata"]["finalizers"] = [
+                    "kopf.zalando.org/KopfFinalizerMarker"
+                ]
+            return result
+
+        async def delete_namespaced_custom_object(self, **kwargs: Any) -> None:
+            body = self._client.objects.get((kwargs["namespace"], kwargs["name"]))
+            deleted.append(json.loads(json.dumps(body)))
+            await super().delete_namespaced_custom_object(**kwargs)
+
+    class Module(FakeK8sClientModule):
+        CustomObjectsApi = RecordingApi
+
+    monkeypatch.setattr(restore_recovery, "k8s_client", Module)
+    return deleted
+
+
 @pytest.mark.anyio
-@pytest.mark.usefixtures("fake_k8s")
-async def test_restored_crd_finalizers_are_cleared_before_it_is_deleted(
+async def test_restored_crd_is_marked_to_skip_teardown_before_it_is_deleted(
+    monkeypatch: pytest.MonkeyPatch,
     phase_spy: list[dict[str, Any]],
 ) -> None:
-    """Deleting the restored CR with kopf's finalizer would destroy the data.
+    """Deleting the restored CR must not run the operator's teardown.
 
     kopf's ``on.delete`` handler for a ``StyrminDeployment`` runs
     ``_teardown_owned_resources``, which deletes the HelmRelease named by
     ``spec.releaseReference`` — for a cross-target restore that is the release
-    keeping the counterpart's chart (and its just-restored volumes) alive. The
-    finalizer must be gone before the delete so the handler never runs.
+    keeping the counterpart's chart (and its just-restored volumes) alive.
     """
+    deleted = _deleted_bodies(monkeypatch, readd_finalizer=False)
     api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
 
     await restore_recovery.reapply_with_counterpart_identity(
@@ -569,55 +600,42 @@ async def test_restored_crd_finalizers_are_cleared_before_it_is_deleted(
         await counterpart_body(),
     )
 
-    restored_patches = [
-        index
-        for index, (verb, name) in enumerate(api_client.calls)
-        if verb == "patch" and name == RESTORED_NAME
-    ]
-    delete_index = api_client.calls.index(("delete", RESTORED_NAME))
-    assert restored_patches, "the restored CR's finalizers were never cleared"
-    assert max(restored_patches) < delete_index
+    [body] = deleted
+    assert body["metadata"]["name"] == RESTORED_NAME
+    assert body["metadata"]["annotations"][ANNOTATION_SKIP_TEARDOWN] == "true"
+    assert body["metadata"]["finalizers"] == []
     assert (NAMESPACE, RESTORED_NAME) not in api_client.objects
 
 
 @pytest.mark.anyio
-async def test_restored_crd_is_not_deleted_while_finalizers_remain(
+async def test_restored_crd_is_deleted_when_kopf_re_adds_its_finalizer(
     monkeypatch: pytest.MonkeyPatch,
     phase_spy: list[dict[str, Any]],
 ) -> None:
-    """A finalizer that survives the clear aborts the recovery instead of deleting.
+    """kopf putting its finalizer back neither fails nor endangers the recovery.
 
-    Failing the restore is recoverable (discard the cloned environment and
-    re-clone); letting kopf's teardown run is not.
+    kopf re-adds its finalizer on the next watch event after the clear, so the
+    delete can reach a CR that holds it again and kopf runs ``on.delete``. The
+    skip-teardown annotation, set in the same patch, is what keeps that handler
+    from tearing down the counterpart's resources (the clone failure in CI,
+    where the teardown removed the NetworkPolicies the recovery was applying).
     """
+    deleted = _deleted_bodies(monkeypatch, readd_finalizer=True)
     api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
 
-    class StubbornApi(FakeCustomObjectsApi):
-        async def patch_namespaced_custom_object(self, **kwargs: Any) -> dict[str, Any]:
-            # Accept the patch, then put the finalizer straight back — the
-            # observable shape of another controller re-adding it.
-            result = await super().patch_namespaced_custom_object(**kwargs)
-            if kwargs["name"] == RESTORED_NAME:
-                result["metadata"]["finalizers"] = [
-                    "kopf.zalando.org/KopfFinalizerMarker"
-                ]
-            return result
+    await restore_recovery.reapply_with_counterpart_identity(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+        await counterpart_body(),
+    )
 
-    class Module(FakeK8sClientModule):
-        CustomObjectsApi = StubbornApi
-
-    monkeypatch.setattr(restore_recovery, "k8s_client", Module)
-
-    with pytest.raises(RuntimeError, match="Refusing to delete"):
-        await restore_recovery.reapply_with_counterpart_identity(
-            api_client,  # type: ignore[arg-type]
-            NAMESPACE,
-            RESTORED_NAME,
-            await counterpart_body(),
-        )
-
-    assert ("delete", RESTORED_NAME) not in api_client.calls
-    assert (NAMESPACE, RESTORED_NAME) in api_client.objects
+    [body] = deleted
+    assert body["metadata"]["finalizers"] == ["kopf.zalando.org/KopfFinalizerMarker"]
+    assert body["metadata"]["annotations"][ANNOTATION_SKIP_TEARDOWN] == "true"
+    assert api_client.objects[(NAMESPACE, COUNTERPART_NAME)]["status"]["phase"] == (
+        DeploymentPhase.READY.value
+    )
 
 
 SOURCE_NAMESPACE = RESTORED_NAME

@@ -18,6 +18,9 @@ ANNOTATION_DEPLOYMENT_IN_PROGRESS = "styrmin.io/deployment-in-progress"
 ANNOTATION_DEPLOYMENT_ID = "styrmin.io/deployment-id"
 #: The sequence of the instance in a StyrminDeployment's ``spec.instanceId``.
 ANNOTATION_INSTANCE_SEQUENCE = "styrmin.io/instance-sequence"
+#: Set to ``"true"`` on a StyrminDeployment whose deletion must not tear down the
+#: resources it names, because another StyrminDeployment now owns them.
+ANNOTATION_SKIP_TEARDOWN = "styrmin.io/skip-teardown"
 
 # --- Kubernetes Event reasons ---
 EVENT_RECONCILE_SUCCEEDED = "ReconcileSucceeded"

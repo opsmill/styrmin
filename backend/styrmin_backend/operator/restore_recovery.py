@@ -37,7 +37,12 @@ from kubernetes_asyncio import client as k8s_client
 from kubernetes_asyncio.client import ApiClient
 from loguru import logger
 
-from styrmin_backend.operator.config import CRD_GROUP, CRD_PLURAL, CRD_VERSION
+from styrmin_backend.operator.config import (
+    ANNOTATION_SKIP_TEARDOWN,
+    CRD_GROUP,
+    CRD_PLURAL,
+    CRD_VERSION,
+)
 from styrmin_backend.operator.crd.schema import (
     ConditionStatus,
     ConditionType,
@@ -264,19 +269,20 @@ async def _upsert_crd(
         )
 
 
-async def _clear_finalizers(api_client: ApiClient, namespace: str, name: str) -> None:
-    """Drop every finalizer from a CR so deleting it runs no delete handler.
+async def _mark_skip_teardown(api_client: ApiClient, namespace: str, name: str) -> None:
+    """Mark a CR so deleting it runs no teardown, and drop its finalizers.
 
-    This is what makes deleting the restored source-named CR safe. That CR
-    arrives from Velero with kopf's finalizer intact, and kopf only runs
-    ``@kopf.on.delete`` — which for a ``StyrminDeployment`` is
-    ``_teardown_owned_resources``: it deletes the HelmRelease named by
-    ``spec.releaseReference`` plus every resource labelled with it. In a
-    cross-target restore that HelmRelease is the one Flux uses to keep the
-    **counterpart's** chart alive, so letting the handler fire would have Flux
-    uninstall the release and take the just-restored PersistentVolumeClaims
-    with it. Without a finalizer the API server removes the object outright and
-    the handler never gets the chance.
+    The restored source-named CR arrives from Velero with kopf's finalizer, and
+    the operator's ``@kopf.on.delete`` handler runs ``_teardown_owned_resources``:
+    it deletes the HelmRelease named by ``spec.releaseReference`` plus every
+    resource labelled with it. In a cross-target restore those are the
+    **counterpart's** resources, and deleting the HelmRelease has Flux uninstall
+    the release and take the just-restored PersistentVolumeClaims with it.
+
+    Clearing the finalizers alone does not prevent that: kopf adds its finalizer
+    back on the next watch event, so it can be back before the delete. The
+    ``ANNOTATION_SKIP_TEARDOWN`` annotation makes the handler skip the teardown
+    whether or not the finalizer is back.
     """
     custom_api = k8s_client.CustomObjectsApi(api_client)
     await custom_api.patch_namespaced_custom_object(
@@ -285,7 +291,12 @@ async def _clear_finalizers(api_client: ApiClient, namespace: str, name: str) ->
         namespace=namespace,
         plural=CRD_PLURAL,
         name=name,
-        body={"metadata": {"finalizers": []}},
+        body={
+            "metadata": {
+                "annotations": {ANNOTATION_SKIP_TEARDOWN: "true"},
+                "finalizers": [],
+            }
+        },
         # See ``_patch_crd_status`` for why the content type is forced.
         _content_type="application/merge-patch+json",  # type: ignore[call-arg]
     )
@@ -312,37 +323,15 @@ async def _delete_restored_crd_without_teardown(
 ) -> None:
     """Remove the restored source-named CR without triggering kopf's teardown.
 
-    Finalizers are cleared first and the result is **verified** before the
-    delete: a delete that still had kopf's finalizer attached would run
-    ``_teardown_owned_resources`` against the counterpart's live HelmRelease
-    and destroy the restored data. Refusing to delete is the safe failure —
-    the caller turns it into a failed restore, which is recoverable by
-    discarding the cloned environment; data loss is not.
+    See ``_mark_skip_teardown``: the mark goes on before the delete, so the
+    delete handler skips the teardown even when kopf put its finalizer back.
     """
     try:
-        await _clear_finalizers(api_client, namespace, name)
+        await _mark_skip_teardown(api_client, namespace, name)
     except k8s_client.ApiException as exc:
         if exc.status == 404:
             return
         raise
-
-    try:
-        remaining = (await _read_crd(api_client, namespace, name)).get(
-            "metadata", {}
-        ).get("finalizers") or []
-    except k8s_client.ApiException as exc:
-        if exc.status == 404:
-            # Nothing left to delete: no finalizers means the clear itself
-            # completed a deletion that was already pending.
-            return
-        raise
-
-    if remaining:
-        raise RuntimeError(
-            f"Refusing to delete restored StyrminDeployment {namespace}/{name}: "
-            f"finalizers are still attached ({remaining}), and deleting it would "
-            "run the operator's teardown against the counterpart's Helm release"
-        )
 
     await _delete_crd(api_client, namespace, name)
 
@@ -440,11 +429,11 @@ async def reapply_with_counterpart_identity(
        ``on.update``; that handler re-runs exactly the phases below against the
        same counterpart spec, so it is idempotent rather than harmful (its
        ``displayState`` bounce is settled by the operator's timer).
-    2. Delete the restored source-named CR — finalizers first, so kopf's
-       ``on.delete`` teardown never fires (see
-       ``_delete_restored_crd_without_teardown``: that teardown would delete
-       the counterpart's own HelmRelease and, through Flux, the restored
-       volumes). Data survives; only identity objects are re-rendered.
+    2. Delete the restored source-named CR — marked to skip teardown first, so
+       kopf's ``on.delete`` handler never tears anything down (see
+       ``_mark_skip_teardown``: that teardown would delete the counterpart's
+       own HelmRelease and, through Flux, the restored volumes). Data
+       survives; only identity objects are re-rendered.
     3. Retarget the restored Helm release storage at this namespace
        (``retarget_helm_release``).
     4. Re-apply prerequisites, **re-render the HelmRelease from the
