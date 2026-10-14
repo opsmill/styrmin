@@ -1,35 +1,22 @@
-"""Unit tests for container `command`/`args` exposure through
-``ApplicationHelmReleaseBuilder.render_value_template`` (014-component-container-overrides).
+"""The retired ``component_command`` and ``component_args`` filters (022 T018, FR-005).
 
-Mirrors ``test_render_value_template_env_vars.py`` but verifies the
-**empty-list-marker** contract (ADR-045 §2): the ``component_command`` /
-``component_args`` Jinja filters return the resolved list when set, or **``[]``**
-(never ``None``) when unset. The driver template emits the key unconditionally
-and the chart's ``{{- with }}`` guard treats ``[]`` as falsy so the chart/image
-default flows through. The always-present key (empty-list marker, not an omitted
-key) is what lets a *cleared* override propagate under the operator's RFC 7386
-JSON merge-patch HelmRelease apply.
-
-Test cases (contracts/jinja-filters.md §Unit tests):
-
-1. Both set → both keys rendered.
-2. ``command`` set, ``args`` unset → ``command:`` is the list, ``args:`` is
-   ``[]`` (present-but-empty; the chart's ``{{- with }}`` guard skips it so the
-   chart default flows through). [US2 Sc.2]
-3. Neither set → both keys present as ``[]``, no ``UndefinedError``.
-4. Empty-string element ``["sh", "-c", ""]`` rendered verbatim. [US4 Sc.4]
-5. Filters return ``[]`` (not ``None``) for absent component / missing block.
+Styrmin applies container ``command`` and ``args`` overrides by post-render patch, so a
+``values.j2.yml`` that still calls either filter fails rendering with ``RETIRED_TEMPLATE_FILTER``
+and a message naming the filter and the container override migration guide. Mirrors
+``TestRetiredComponentEnvVarsFilter`` in ``test_render_value_template_env_vars.py``.
 """
 
 from __future__ import annotations
 
-from textwrap import dedent
+from collections.abc import Callable
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
+
+import pytest
 
 from styrmin_backend.agent.service.kubernetes.resources.builders.application import (
     ApplicationHelmReleaseBuilder,
-    component_args,
-    component_command,
+    get_jinja_environment,
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.context.models.components import (
@@ -59,6 +46,47 @@ from styrmin_backend.context.models.helm import (
     HelmInfo,
     RepositoryInfo,
 )
+from styrmin_backend.operator.pipeline import execute_phase_helmrelease
+from styrmin_backend.services.exceptions import RetiredTemplateFilterError
+
+MIGRATION_GUIDE = "https://styrmin.pages.dev/docs/drivers/migrating-container-overrides"
+RETIRED_FILTERS = ["component_command", "component_args"]
+ENV_VARS_MIGRATION_GUIDE = "https://styrmin.pages.dev/docs/drivers/migrating-env-vars"
+ENV_VARS_MESSAGE = (
+    "The 'component_env_vars' template filter was removed: Styrmin now injects "
+    "env vars into each component's declared component container. Deployment "
+    "users: upgrade this deployment to a driver version that declares component "
+    "containers. Driver authors: remove the filter from values.j2.yml and declare "
+    "components.<name>.container in driver.styrmin.yml. Migration guide: "
+    f"{ENV_VARS_MIGRATION_GUIDE}"
+)
+
+
+def _expected_message(filter_name: str) -> str:
+    # contracts/errors.md, RETIRED_TEMPLATE_FILTER (extended).
+    return (
+        f"The '{filter_name}' template filter was removed: Styrmin now applies "
+        "container command and args overrides to each component's declared component "
+        "container. Deployment users: move this deployment to a driver version that "
+        "no longer calls the filter. Driver authors: remove the filter from "
+        "values.j2.yml and declare components.<name>.container in driver.styrmin.yml. "
+        f"Migration guide: {MIGRATION_GUIDE}"
+    )
+
+
+def _plain_template(filter_name: str) -> str:
+    return f'command: {{{{ components | {filter_name}("server") | tojson }}}}\n'
+
+
+def _if_template(filter_name: str) -> str:
+    # The infrahub drivers called the filters inside `{% if %}` (ADR-045 §5).
+    return (
+        f'{{%- if components | {filter_name}("server") %}}\n'
+        f'args: {{{{ components | {filter_name}("server") | tojson }}}}\n'
+        "{%- else %}\n"
+        "args: null\n"
+        "{%- endif %}\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -67,37 +95,26 @@ from styrmin_backend.context.models.helm import (
 
 
 def _component(
-    name: str,
-    label_value: str,
-    *,
-    command: list[str] | None = None,
-    args: list[str] | None = None,
-    override_set: bool = True,
+    *, override: ResolvedComponentContainerOverride | None
 ) -> ComponentContext:
-    """Build a minimal ``ComponentContext`` carrying a container override.
-
-    When ``override_set`` is False the ``container_override`` attribute is
-    left ``None`` (the component declares no override at all), so the filters
-    must fall through to ``None``.
-    """
-    override = (
-        ResolvedComponentContainerOverride(command=command, args=args)
-        if override_set
-        else None
-    )
     return ComponentContext(
-        name=name,
+        name="server",
         enabled=True,
         config=ArbitrarySectionModel(
             identifier=Identifier(
-                label=LabelIdentifier(root={"app.kubernetes.io/name": label_value}),
+                label=LabelIdentifier(root={"app.kubernetes.io/name": "simple-app"}),
             ),
+            container="simple-app",
         ),
         container_override=override,
     )
 
 
-def _make_global_context(*, components: ComponentsContext) -> GlobalContext:
+def _make_global_context(
+    *,
+    override: ResolvedComponentContainerOverride | None,
+    values_template: str = "",
+) -> GlobalContext:
     deployment_id = uuid4()
     namespace = get_kubernetes_reference(deployment_id)
     return GlobalContext(
@@ -118,7 +135,7 @@ def _make_global_context(*, components: ComponentsContext) -> GlobalContext:
                     id=uuid4(),
                     name="test-chart",
                     version="1.0.0",
-                    values_template="",
+                    values_template=values_template,
                 ),
                 repository=RepositoryInfo(
                     id=uuid4(),
@@ -127,29 +144,22 @@ def _make_global_context(*, components: ComponentsContext) -> GlobalContext:
             ),
         ),
         deployed_services=[],
-        components=components,
+        components=ComponentsContext(root={"server": _component(override=override)}),
     )
 
 
-# Probe template — the canonical empty-list-marker driver pattern from
-# contracts/jinja-filters.md. The keys are emitted UNCONDITIONALLY; the filter
-# yields ``[]`` when unset (which the chart's ``{{- with }}`` guard skips), and
-# the always-present key is what lets a cleared override propagate through the
-# operator's JSON merge-patch HelmRelease apply (ADR-045).
-PROBE_TEMPLATE = dedent(
-    """
-    name: probe
-    command: {{ components | component_command("server") | tojson }}
-    args: {{ components | component_args("server") | tojson }}
-    """
-).strip()
-
-
-def _render(context: GlobalContext) -> dict:
-    return ApplicationHelmReleaseBuilder.render_value_template(
-        values_template=PROBE_TEMPLATE,
-        context=context,
-    )
+def _assert_retired_filter_error(
+    error: RetiredTemplateFilterError, filter_name: str
+) -> None:
+    assert error.error_code == "RETIRED_TEMPLATE_FILTER"
+    assert error.error_metadata == {
+        "filter": filter_name,
+        "migration_guide": MIGRATION_GUIDE,
+    }
+    message = str(error)
+    assert filter_name in message
+    assert MIGRATION_GUIDE in message
+    assert message == _expected_message(filter_name)
 
 
 # ---------------------------------------------------------------------------
@@ -157,121 +167,97 @@ def _render(context: GlobalContext) -> dict:
 # ---------------------------------------------------------------------------
 
 
-class TestRenderValueTemplateContainerOverrides:
-    def test_both_set_render_into_template(self) -> None:
-        """Both ``command`` and ``args`` set → both keys rendered. (US1/US2)."""
-        components = ComponentsContext(
-            root={
-                "server": _component(
-                    "server",
-                    "simple-app",
-                    command=["uvicorn", "simple_app.main:app"],
-                    args=["--host", "0.0.0.0", "--port", "8000"],
-                ),
-            }
-        )
-        result = _render(_make_global_context(components=components))
-        assert result["command"] == ["uvicorn", "simple_app.main:app"]
-        assert result["args"] == ["--host", "0.0.0.0", "--port", "8000"]
+@pytest.mark.parametrize("filter_name", RETIRED_FILTERS)
+class TestRetiredContainerOverrideFilters:
+    """A ``values.j2.yml`` calling ``component_command`` or ``component_args`` aborts rendering."""
 
-    def test_command_set_args_unset_emits_empty_args(self) -> None:
-        """``command`` set, ``args`` unset → ``command:`` is the list, ``args:``
-        is ``[]`` (present-but-empty). The chart's ``{{- with }}`` guard skips
-        ``[]`` so the chart default flows through, while the present key lets a
-        later clear propagate under merge-patch (US2 Sc.2, FR-007, ADR-045).
+    @pytest.mark.parametrize(
+        "override",
+        [
+            ResolvedComponentContainerOverride(
+                command=["uvicorn", "app"], args=["--port", "8000"]
+            ),
+            ResolvedComponentContainerOverride(args=["--port", "8000"]),
+            None,
+        ],
+        ids=["override-set", "args-only", "no-override"],
+    )
+    @pytest.mark.parametrize(
+        "template", [_plain_template, _if_template], ids=["plain", "inside-if"]
+    )
+    def test_template_calling_filter_raises_typed_error(
+        self,
+        filter_name: str,
+        override: ResolvedComponentContainerOverride | None,
+        template: Callable[[str], str],
+    ) -> None:
+        """Raises whatever the context holds, so an unmigrated driver fails on its
+        next render even when no override is set.
         """
-        components = ComponentsContext(
-            root={
-                "server": _component(
-                    "server", "simple-app", command=["python", "-m", "worker"]
-                ),
-            }
-        )
-        result = _render(_make_global_context(components=components))
-        assert result["command"] == ["python", "-m", "worker"]
-        assert result["args"] == []
+        context = _make_global_context(override=override)
 
-    def test_args_set_command_unset_emits_empty_command(self) -> None:
-        """``args`` set, ``command`` unset → ``args:`` is the list, ``command:``
-        is ``[]`` (US1 — the MVP override path).
+        with pytest.raises(RetiredTemplateFilterError) as exc_info:
+            ApplicationHelmReleaseBuilder.render_value_template(
+                values_template=template(filter_name), context=context
+            )
+
+        _assert_retired_filter_error(exc_info.value, filter_name)
+
+    def test_filter_stays_registered(self, filter_name: str) -> None:
+        """Unregistering would give Jinja's generic "no filter named" error at
+        compile time instead of the typed error pointing at the migration guide.
         """
-        components = ComponentsContext(
-            root={
-                "server": _component(
-                    "server",
-                    "simple-app",
-                    args=[
-                        "--host",
-                        "0.0.0.0",
-                        "--port",
-                        "8000",
-                        "--log-level",
-                        "debug",
-                    ],
-                ),
-            }
+        environment = get_jinja_environment()
+
+        assert filter_name in environment.filters
+        environment.from_string(_plain_template(filter_name))
+        environment.from_string(_if_template(filter_name))
+
+    async def test_operator_records_message_without_applying_helm_release(
+        self, filter_name: str
+    ) -> None:
+        """The operator pipeline keeps the message (code and metadata are not
+        carried by ``PhaseResult``) and never applies the HelmRelease.
+        """
+        context = _make_global_context(
+            override=ResolvedComponentContainerOverride(args=["--port", "8000"]),
+            values_template=_if_template(filter_name),
         )
-        result = _render(_make_global_context(components=components))
-        assert result["args"] == [
-            "--host",
-            "0.0.0.0",
-            "--port",
-            "8000",
-            "--log-level",
-            "debug",
+        upsert = AsyncMock()
+
+        with patch(
+            "styrmin_backend.agent.service.kubernetes.primitives.upsert_custom_resource",
+            upsert,
+        ):
+            result = await execute_phase_helmrelease(
+                crd_spec={"context": context.model_dump(mode="json")},
+                namespace=context.instance.namespace,
+            )
+
+        assert result.success is False
+        assert result.errors == [
+            f"Failed to create HelmRelease: {_expected_message(filter_name)}"
         ]
-        assert result["command"] == []
+        applied = [call.kwargs["plurals"] for call in upsert.await_args_list]
+        assert "helmreleases" not in applied
 
-    def test_nothing_set_emits_empty_lists(self) -> None:
-        """No override on the component → both keys present as ``[]``, no
-        ``UndefinedError``. The chart's ``{{- with }}`` guard skips ``[]`` so
-        the chart/image default applies.
-        """
-        components = ComponentsContext(
-            root={"server": _component("server", "simple-app", override_set=False)}
-        )
-        result = _render(_make_global_context(components=components))
-        assert result["command"] == []
-        assert result["args"] == []
 
-    def test_empty_string_element_rendered_verbatim(self) -> None:
-        """Empty-string elements (``["sh", "-c", ""]``) render verbatim
-        (US4 Sc.4 — mirrors Kubernetes).
-        """
-        components = ComponentsContext(
-            root={
-                "server": _component("server", "simple-app", command=["sh", "-c", ""]),
-            }
-        )
-        result = _render(_make_global_context(components=components))
-        assert result["command"] == ["sh", "-c", ""]
+class TestRetiredEnvVarsFilterMessageUnchanged:
+    """Adding the container override filters leaves the env var error as it was."""
 
-    def test_filters_return_empty_list_when_unset(self) -> None:
-        """The filters return ``[]`` (the empty-list marker, never ``None``) for
-        an absent component, a missing override block, or an unset slot — the
-        always-present-list contract (ADR-045). The set slot returns its list.
-        """
-        components = ComponentsContext(
-            root={
-                "server": _component(
-                    "server", "simple-app", command=["uvicorn", "app"]
-                ),
-                "bare": _component("bare", "bare-app", override_set=False),
-            }
-        )
-        dumped = _make_global_context(components=components).model_dump(
-            exclude_none=True
-        )
-
-        # ``server`` has a command but no args slot → command list, args [].
-        assert component_command(dumped["components"], "server") == ["uvicorn", "app"]
-        assert component_args(dumped["components"], "server") == []
-        # ``bare`` has no override block at all → both [].
-        assert component_command(dumped["components"], "bare") == []
-        assert component_args(dumped["components"], "bare") == []
-        # Absent component → both [].
-        assert component_command(dumped["components"], "missing") == []
-        assert component_args(dumped["components"], "missing") == []
-        # Garbage inputs collapse to [] — never raise.
-        assert component_command(None, "server") == []
-        assert component_args("not-a-dict", "server") == []
+    @pytest.mark.parametrize(
+        "error",
+        [
+            RetiredTemplateFilterError(),
+            RetiredTemplateFilterError(filter_name="component_env_vars"),
+        ],
+        ids=["defaults", "explicit-filter-name"],
+    )
+    def test_env_vars_message_and_guide(
+        self, error: RetiredTemplateFilterError
+    ) -> None:
+        assert str(error) == ENV_VARS_MESSAGE
+        assert error.error_metadata == {
+            "filter": "component_env_vars",
+            "migration_guide": ENV_VARS_MIGRATION_GUIDE,
+        }
