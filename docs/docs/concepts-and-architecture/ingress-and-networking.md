@@ -189,21 +189,33 @@ that waited.
 
 ### Changing the dedicated ingress of an environment
 
-When you update an environment and turn its own `dedicated_ingress`
-off, and the cluster does not set `dedicated_ingress`, Styrmin redeploys
-the applications to the shared ingress class and removes the
-environment's controller once they have moved.
+When you update an environment (with the `updateEnvironment` GraphQL
+mutation or the SDK) and the update turns the environment's own
+`dedicated_ingress` on, changes its values, or turns it off, Styrmin
+changes the environment's controller in the same order as a cluster
+update. See
+[Changing the dedicated ingress on the cluster](#changing-the-dedicated-ingress-on-the-cluster).
 
-An environment update does not create or redeploy the controller:
+- When the update turns `dedicated_ingress` on or changes its values,
+  Styrmin creates the controller or redeploys it with the new values.
+  The applications stay on their current ingress until the controller
+  is `RUNNING` with the new values, then Styrmin redeploys them onto it.
+  In an environment without applications, Styrmin creates no controller
+  until you deploy the first application.
+- When the update turns `dedicated_ingress` off and the cluster sets
+  `dedicated_ingress`, the environment takes the cluster's value.
+  Styrmin redeploys the controller with the cluster's values when they
+  differ, in the same order.
+- When the update turns `dedicated_ingress` off and the cluster does not
+  set it, Styrmin redeploys the applications to the shared ingress class
+  at once, and removes the controller once they have moved.
 
-- When it turns the environment's own `dedicated_ingress` on, Styrmin
-  redeploys the applications at once, and creates the controller the
-  next time an application in the environment is deployed, updated or
-  upgraded, or the next time you update the cluster config.
-- When it changes the values of the environment's own
-  `dedicated_ingress`, the controller keeps its previous values. A
-  cluster update, including one that submits the stored cluster config
-  again, redeploys the controller with the environment's values.
+A failed controller, and a controller that is being removed, are handled
+as in a cluster update. When you submit the environment config again,
+Styrmin retries a controller that could not be started, and redeploys a
+controller whose values differ from the environment's value, for example
+after an environment update made with an earlier Styrmin release, which
+changed only the applications.
 
 ### How an application URL gets assigned
 
