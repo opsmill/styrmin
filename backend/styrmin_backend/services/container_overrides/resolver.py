@@ -8,10 +8,10 @@ simply the stored block's ``command``/``args`` (or "unset").
 
 Read-vs-write asymmetry (FR-005, mirrors the env-vars/ADR-013 design): a stored
 block whose component is no longer declared by the current driver version is
-**preserved**, flagged ``is_orphaned=True``, and skipped by the renderer so no
-override reaches a container. The GraphQL read surface still exposes it so the
-operator can audit and remove it. New typos are blocked at the mutation
-boundary by :class:`UnknownComponentContainerOverrideError`.
+**preserved**, flagged ``is_orphaned=True``, and skipped by the post-render
+patch builder so no override reaches a container. The GraphQL read surface
+still exposes it so the operator can audit and remove it. New typos are blocked
+at the mutation boundary by :class:`UnknownComponentContainerOverrideError`.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ class ResolvedContainerOverrideEntry:
     ``command``/``args`` (or ``None``). Orphan entries (``is_orphaned=True``)
     target a component name no longer in the driver's component map (e.g. after
     a driver upgrade that renamed or removed the component); they remain
-    queryable but the renderer skips them.
+    queryable but the patch builder skips them.
     """
 
     component_name: str

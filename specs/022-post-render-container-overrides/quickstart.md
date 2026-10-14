@@ -14,17 +14,19 @@
 ```bash
 uv run pytest backend/tests/unit/services/component_container/ \
   backend/tests/unit/agent/test_render_value_template_container_overrides.py \
-  backend/tests/unit/agent/test_container_env_patch.py \
+  backend/tests/unit/agent/test_container_merge_patch.py \
   backend/tests/unit/services/driver/ \
   backend/tests/unit/services/test_container_overrides_validator.py \
+  backend/tests/unit/test_drivers_have_no_override_wiring.py \
   backend/tests/unit/db/ -q
 ```
 
-Expected (file names may be renamed during implementation, see `tasks.md`):
+Expected:
 
 - a template that calls `component_command` or `component_args` raises `RETIRED_TEMPLATE_FILTER` with the filter name and `.../docs/drivers/migrating-container-overrides`;
 - a driver file with `spec.container_overrides` fails to load like any unknown key;
 - a component with only `args` set gets a merge patch and a guard; a cleared override gets none;
+- no file under `driver/` calls the retired filters or contains `spec.container_overrides`;
 - the migration revision drops and restores `applicationdriverversion.container_overrides`, and there is one Alembic head.
 
 ## 2. Integration tests on real kustomize (FR-002, FR-004)
@@ -46,7 +48,8 @@ Expected: for `simple-app`, `infrahub` and `infrahub-enterprise`, the same store
 ## 4. GraphQL propagation
 
 ```bash
-uv run pytest backend/tests/functional/graphql/test_container_overrides_propagation.py -q
+uv run pytest backend/tests/functional/graphql/test_container_overrides_propagation.py \
+  backend/tests/functional/graphql/test_update_deployment_input_errors.py -q
 ```
 
 Expected: `isApplicable` true / false (no container) / false (orphaned); `COMPONENT_CONTAINER_NOT_DECLARED` with `override: "command"` and `override: "args"` on `updateDeployment` and `deploy`; a removal on a containerless component is accepted.

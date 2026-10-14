@@ -171,8 +171,8 @@ reach the upgrade Job. An env var removed in that apply is still copied from the
   `error in remove for path: '/spec/template/spec/styrmin.io~1component-container~1<component>~1<container>/image'`,
   and the operator fails the deployment with `COMPONENT_CONTAINER_NOT_FOUND`, naming the
   component and the container; Styrmin never adds a container. Nothing fails until a user
-  first sets an env var or an image override on that component, so verify the name when you
-  write the driver.
+  first sets an env var, an image override, or a `command` or `args` override on that
+  component, so verify the name when you write the driver.
 - **Identifier label not on the workload.** If the first identifier label matches only pods,
   or only a kind other than `Deployment`/`StatefulSet`, the patch matches nothing and the env
   vars silently never arrive.
@@ -201,14 +201,15 @@ reach the upgrade Job. An env var removed in that apply is still copied from the
 
 The Jinja environment for `values.j2.yml` is built in
 `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py:get_jinja_environment`.
-Custom filters (`to_fqdn_label`, `split`, `component_command`, `component_args`, and the
-retired `component_env_vars` stub) are registered there. Add a unit test that drives a new
-filter through `ApplicationHelmReleaseBuilder.render_value_template`
+Custom filters (`to_fqdn_label`, `split`, and the retired `component_env_vars`,
+`component_command` and `component_args` stubs) are registered there. Add a unit test that
+drives a new filter through `ApplicationHelmReleaseBuilder.render_value_template`
 (see `backend/tests/unit/agent/test_render_value_template_env_vars.py`).
 
 The env var patches are built by `build_component_container_patches()` in
 `backend/styrmin_backend/services/component_container/patch_builder.py` and rendered by
-`ContainerEnvPatch` (the merge) and `ComponentContainerPatch` (the guard) in
+`ContainerMergePatch` (the merge, which also carries `command` and `args` overrides) and
+`ComponentContainerPatch` (the guard) in
 `backend/styrmin_backend/agent/service/kubernetes/resources/blocks/patches.py`.
 
 ## Related
@@ -221,6 +222,9 @@ The env var patches are built by `build_component_container_patches()` in
   scopes, validation, read surface.
 - [`docs/docs/drivers/migrating-env-vars.md`](../../docs/docs/drivers/migrating-env-vars.md) —
   user and driver-author migration steps.
+- [ADR-069](../adr/0069-container-command-args-by-post-render.md) and
+  [`docs/docs/drivers/migrating-container-overrides.md`](../../docs/docs/drivers/migrating-container-overrides.md) —
+  `command` and `args` overrides, which use the same component container and patches.
 - Reference driver: `driver/examples/simple-app/driver.styrmin.yml` and
   `driver/examples/simple-app/src/helm/templates/deployment.yaml` (the `STYRMIN_CHART_DEFAULT`
   and `STYRMIN_CHART_DEFAULT_FROM` entries are the chart defaults the E2E asserts survive).

@@ -226,6 +226,31 @@ explanation, and a remove button (`Remove image override for <component>`)
 that sets `image` to `null`, which the backend accepts as a removal. Orphaned
 blocks are removed whole, image included.
 
+<!-- Extracted from specs/022-post-render-container-overrides on 2026-10-14 -->
+
+Container `command` and `args` overrides (022) follow the same rule, because the
+backend rejects adding or changing them on a component without a container
+([ADR-069](../../adr/0069-container-command-args-by-post-render.md)). A component
+with a container gets the **Command** and **Args** list editors
+(`component-command-editor-<component>`, `component-args-editor-<component>`). A
+component without one gets neither. A stored list there renders read-only in
+`ContainerlessContainerOverride` (`comp-command-readonly-<component>`,
+`comp-args-readonly-<component>`) with a **not applied** badge, the same
+explanation, and a remove button (`Remove command override for <component>`,
+`Remove args override for <component>`) that sets the list to `[]`. The submit
+boundary (`componentsFormToInput` in `lib/deployment-input.ts`, called in
+`ConfigDiffDialog.tsx`) leaves an empty list out of the input, which the backend reads as a removal.
+
+`diffComponents` in `lib/config-diff.ts` compares `command` and `args` as well as
+env vars and the image, and counts an empty list as no override. A change to only
+`command` or `args` therefore produces a diff entry and enables **Review &
+apply**.
+
+The read summary (`ComponentOverridesSummary.tsx`) still shows only the number
+of `command` and `args` entries per component, with no **applied** or **not
+applied** badge. `Deployment.componentContainerOverrides.isApplicable` exposes
+whether they apply.
+
 <!-- Extracted from specs/018-component-image-overrides on 2026-10-05 -->
 
 Two read-only views show image overrides from `Deployment.componentImageOverrides`:

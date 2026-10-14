@@ -454,6 +454,49 @@ sorted by name, then orphans sorted by name (the `Deployment.components` relatio
 order, so the resolver sorts). When `applicationVersion` is empty, `resolvedReference` is the
 stored reference unchanged, so a remaining `{{ app.version }}` token means "not resolved".
 
+#### Container override fields
+
+<!-- Extracted from specs/022-post-render-container-overrides on 2026-10-14 -->
+
+Container `command` and `args` overrides ride the same component container
+([ADR-069](../../adr/0069-container-command-args-by-post-render.md)):
+
+```graphql
+input ComponentConfigInput {     # UpdateDeploymentInput.components, deploy config
+  command: [String!]             # null/omitted clears it (full replacement); [] is rejected
+  args: [String!]
+}
+type ComponentContainerOverrides {   # Deployment.componentContainerOverrides
+  component: String!
+  command: [String!]             # null when not set: the chart's own value applies
+  args: [String!]
+  isOrphaned: Boolean!
+  isApplicable: Boolean!         # not isOrphaned and the component declares a container
+}
+```
+
+`isApplicable` is computed in the resolver with `override_applies`
+(`services/component_container/overrides.py`), from the component containers of the deployment's
+`Component` rows. `ComponentEnvVars.isApplicable` and `ComponentImageOverride.isApplicable` call the
+same function. Applicable overrides are applied by the post-render merge patch; the others are
+returned but not applied. Live components with neither slot set are left out; orphaned blocks are
+always returned.
+
+Writes raise `INVALID_CONTAINER_COMMAND`, `INVALID_CONTAINER_ARGS`,
+`CONTAINER_OVERRIDE_SIZE_LIMIT_EXCEEDED` or `UNKNOWN_COMPONENT_CONTAINER_OVERRIDE` first, then
+`COMPONENT_CONTAINER_NOT_DECLARED` with `override: "command"` or `override: "args"` when a value is
+added or changed on a component without a component container. A removal (`null` or an omitted
+key) and the same list sent again pass. `COMPONENT_CONTAINER_NOT_FOUND` also fires when `command`
+or `args` is the only override on a component; as for images, it reaches
+`Deployment.crdStatus.message`, not `extensions.code`.
+
+Spec 022 removed `ApplicationDriverVersion.containerOverrides` and the `DriverContainerOverrideDoc`
+type, together with `spec.container_overrides`. A query that selects `containerOverrides` fails
+validation, and the SDK no longer has `get_driver_container_override_docs`. The apply check in
+`styrminctl deployments apply` (`get_deployment_override_applicability.graphql`) reads
+`isApplicable` for env vars and image overrides only, so it does not warn about a stored `command`
+or `args` that does not apply.
+
 #### Environment-config update + fanout
 
 <!-- Extracted from specs/009-environment-update on 2026-05-08 -->
@@ -525,7 +568,7 @@ Detection at the flatten step is the only natural location — by the time the d
 
 Explicit empty list = full clear; omitted/null field = "do not touch". `components: []` clears every per-component block; `components: [{name: "web", envVars: null}]` keeps the `web` key but collapses its inner env-vars block to its absent state (recursive nested-omission rule inherited from the shared `_convert_value` helper in `api/definitions/config/inputs.py`).
 
-The full per-scope env-var error matrix from 008 — `INVALID_ENV_VAR_NAME`, `ENV_VAR_SIZE_LIMIT_EXCEEDED`, `DUPLICATE_ENV_VAR_NAME`, `UNKNOWN_COMPONENT_ENV_VAR` — surfaces at the GraphQL boundary for **both** the top-level `envVars` field and every per-component `envVars` field, with the offending name and scope in the payload. Per-component `envVars` additionally raise `COMPONENT_CONTAINER_NOT_DECLARED` (metadata `component_name`, `components_with_container`, `override: "env_vars"`; image overrides raise it with `override: "image"`) when they add or change a value on a component whose driver declares no component container (017, [ADR-057](../../adr/0057-post-render-component-overrides.md)). The wire layer (`EnvVarInput.value: String!`) rejects non-string values structurally — the legacy `INVALID_ENV_VAR_VALUE` error code is no longer reachable through `updateDeployment()` (it survives only on the JSON-config write path through `deploy()`).
+The full per-scope env-var error matrix from 008 — `INVALID_ENV_VAR_NAME`, `ENV_VAR_SIZE_LIMIT_EXCEEDED`, `DUPLICATE_ENV_VAR_NAME`, `UNKNOWN_COMPONENT_ENV_VAR` — surfaces at the GraphQL boundary for **both** the top-level `envVars` field and every per-component `envVars` field, with the offending name and scope in the payload. Per-component `envVars` additionally raise `COMPONENT_CONTAINER_NOT_DECLARED` (metadata `component_name`, `components_with_container`, `override: "env_vars"`; image overrides raise it with `override: "image"`, container overrides with `override: "command"` or `"args"`) when they add or change a value on a component whose driver declares no component container (017, [ADR-057](../../adr/0057-post-render-component-overrides.md)). The wire layer (`EnvVarInput.value: String!`) rejects non-string values structurally — the legacy `INVALID_ENV_VAR_VALUE` error code is no longer reachable through `updateDeployment()` (it survives only on the JSON-config write path through `deploy()`).
 
 Submitting an empty input (`input: {}`) surfaces a `VALIDATION_ERROR` from the existing service-side "at least one of config / parameters / name / serviceNameOverrides must be provided" check — no new GraphQL-level non-empty constraint is introduced.
 

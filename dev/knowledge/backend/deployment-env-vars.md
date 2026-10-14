@@ -106,9 +106,9 @@ Reads are typed: `Environment.envVars`, `Deployment.envVars`,
 `updateDeployment` and `deploy` raise `COMPONENT_CONTAINER_NOT_DECLARED`
 (`ComponentContainerNotDeclaredError`, metadata `component_name`,
 `components_with_container`, and `override`: `"env_vars"` here, `"image"` for
-image overrides) when a component-scope block **adds a key or
-changes a value** on a component that declares no component container in
-the deployment's pinned driver version. Removals and unchanged
+image overrides, `"command"` or `"args"` for container overrides) when a
+component-scope block **adds a key or changes a value** on a component that
+declares no component container in the deployment's pinned driver version. Removals and unchanged
 re-submissions pass, so the frontend's full-config submits and the removal
 of stranded values keep working. The check runs after
 `UNKNOWN_COMPONENT_ENV_VAR` and before any task is submitted. Component rows
@@ -199,7 +199,8 @@ the driver's values template. Each driver component may declare a component
 container (`components.<name>.container`, a DNS-1123 label validated at
 driver registration). For every component with a container and non-empty,
 non-orphaned resolved env vars, `build_component_container_patches()` emits,
-per kind (`Deployment`, `StatefulSet`), a strategic-merge `ContainerEnvPatch`
+per kind (`Deployment`, `StatefulSet`), a strategic-merge `ContainerMergePatch`
+(named `ContainerEnvPatch` before 022, when it carried env vars only)
 followed by the JSON6902 `ComponentContainerPatch` guard (018), both targeted
 by the component's first identifier label. The guard fails the render when
 the named container is missing instead of letting the merge add it. The
@@ -213,30 +214,31 @@ User entries land before the chart's remaining entries and the component
 container moves to `containers[0]` (research D-002; observed kyaml behaviour,
 not a contract). Patches are rebuilt on every render, so clearing an env var
 needs no marker. One info log per component with patches records `component`,
-`container`, the env var count, and whether an image override applies, never
-values.
+`container`, the env var count, whether an image override applies, and whether
+`command` and `args` are set (`command_set`, `args_set`), never values.
 
-### The shared component-container guard (018)
+### The shared component-container guard (018, 022)
 
 `build_component_container_patches()` (`services/component_container/patch_builder.py`)
-serves env vars and image overrides alike: a component with a component container gets
-patches when it has applicable env vars, a live image override, or both. Per kind, the
-strategic merge names the container (with env entries only when env vars apply), and the
-JSON6902 `ComponentContainerPatch` then:
+serves env vars, image overrides and container `command`/`args` overrides alike: a component
+with a component container gets patches when `applicable_overrides()`
+(`services/component_container/overrides.py`) returns at least one of them. Per kind, the
+strategic merge names the container, with env entries only when env vars apply and `command`
+or `args` only when that override applies, and the JSON6902 `ComponentContainerPatch` then:
 
 1. moves `containers/0` to the temporary key
    `/spec/template/spec/styrmin.io~1component-container~1<component>~1<container>`
    (names JSON-pointer escaped);
-2. removes its `image` and adds the substituted image override, or, for env vars only,
-   copies the chart image to `styrmin-image`, removes `image`, and moves it back;
+2. removes its `image` and adds the substituted image override, or, without an image
+   override, copies the chart image to `styrmin-image`, removes `image`, and moves it back;
 3. moves the container back to `containers/0`.
 
 kyaml's merge adds a container when the name is missing. Before 018 that container had no
 image and the API server rejected the workload; with an image override it would be valid.
 The `remove` fails on the added, image-less container, so a wrong name fails the Helm
 post-render with `error in remove for path: '…/styrmin.io~1component-container~1<component>~1<container>/image'`
-and no container is ever added. For env vars only, the rendered workload is byte-identical
-to the merge alone, so the extra patch restarts no pods.
+and no container is ever added. Without an image override, the rendered workload is
+byte-identical to the merge alone, so the extra patch restarts no pods.
 
 The operator turns that failure into a typed status. On every timer tick in
 `CreatingHelmRelease` (before the readiness check) and, for non-internal deployments,
@@ -292,7 +294,9 @@ clobbered chart defaults; 010 moved injection into driver templates
 replacement dropped chart defaults instead; 017 merges by name into the
 declared container ([ADR-057](../../adr/0057-post-render-component-overrides.md));
 018 adds the guard shared with image overrides
-([ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md)).
+([ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md));
+022 adds `command` and `args` to the same merge patch
+([ADR-069](../../adr/0069-container-command-args-by-post-render.md)).
 The [driver-author guide](../../guides/driver-env-var-consumption.md) covers
 declaring the container and the failure modes.
 
@@ -320,9 +324,10 @@ foot setting them in the past.
 | Resolver (merge + orphan detection) | `backend/styrmin_backend/services/env_vars/resolver.py` |
 | Component container field + validation | `backend/styrmin_backend/services/driver/models/resources/driver.py::ArbitrarySectionModel`, `backend/styrmin_backend/context/models/components.py::ArbitrarySectionModel` |
 | Patch builder | `backend/styrmin_backend/services/component_container/patch_builder.py::build_component_container_patches` |
-| Patch blocks | `backend/styrmin_backend/agent/service/kubernetes/resources/blocks/patches.py::ContainerEnvPatch`, `::ComponentContainerPatch` |
+| Applicability rule | `backend/styrmin_backend/services/component_container/overrides.py` (`override_applies`, `applicable_overrides`) |
+| Patch blocks | `backend/styrmin_backend/agent/service/kubernetes/resources/blocks/patches.py::ContainerMergePatch`, `::ComponentContainerPatch` |
 | Patch placement + rendering-context exposure | `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py` (`ApplicationHelmReleaseBuilder.build`, `render_value_template`, retired `component_env_vars` stub) |
-| Write guard | `backend/styrmin_backend/services/deployment.py::_validate_component_container_targets` (env vars and image overrides); error in `services/env_vars/exceptions.py` |
+| Write guard | `backend/styrmin_backend/services/deployment.py::_validate_component_container_targets` (env vars, image, `command` and `args` overrides); error in `services/env_vars/exceptions.py` |
 | Retired-filter error | `backend/styrmin_backend/services/exceptions.py::RetiredTemplateFilterError` |
 | Guard failure parser + error | `backend/styrmin_backend/services/component_container/exceptions.py` (`parse_guard_failure`, `ComponentContainerNotFoundError`) |
 | Guard failure surfacing | `backend/styrmin_backend/operator/reconciler.py::read_helmrelease_guard_failure`, `operator/handlers/styrmin_deployment.py::_fail_on_component_container_guard` |
@@ -331,7 +336,7 @@ foot setting them in the past.
 | Reference driver | `driver/examples/simple-app/driver.styrmin.yml` and `driver/examples/simple-app/src/helm/templates/deployment.yaml` |
 | GraphQL types | `backend/styrmin_backend/api/definitions/deployment/model.py`, `.../environment/model.py`, `.../application_driver/model.py`, `.../deployment_timeline/model.py` |
 | Frontend gating | `frontend/src/components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx`, `frontend/src/pages/drivers/driver-detail/tabs/ComponentsTab.tsx` |
-| Unit tests | `backend/tests/unit/agent/test_container_env_patch.py`, `.../test_component_container_patch.py`, `.../test_application_builder_env_vars.py`, `.../test_upsert_custom_resource_replace_spec.py`, `backend/tests/unit/services/component_container/test_patch_builder.py`, `.../component_container/test_exceptions.py`, `backend/tests/unit/test_styrmin_deployment_timer.py` (guard failure surfacing) |
+| Unit tests | `backend/tests/unit/agent/test_container_merge_patch.py`, `.../test_component_container_patch.py`, `.../test_application_builder_env_vars.py`, `.../test_upsert_custom_resource_replace_spec.py`, `backend/tests/unit/services/component_container/test_patch_builder.py`, `.../component_container/test_exceptions.py`, `backend/tests/unit/test_styrmin_deployment_timer.py` (guard failure surfacing) |
 | Kustomize integration test | `backend/tests/integration/test_component_container_kustomize.py` |
 | E2E coverage | `backend/tests/e2e/test_deployment_env_vars.py`, `backend/tests/e2e/test_infrahub_services.py` (chart env defaults kept), `backend/tests/e2e/test_deployment_image_override.py::test_misnamed_container_never_added` (guard failure) |
 | Propagation + mutation-error tests | `backend/tests/functional/graphql/test_env_vars_propagation.py`, `.../test_update_deployment_input_errors.py`, `.../test_application_driver_version_propagation.py` |

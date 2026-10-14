@@ -92,10 +92,11 @@ class ResolvedComponentContainerOverride(BaseModel):
     container overrides are component-scope-only (no environment/deployment
     layering — research.md D2), so each slot has exactly one possible source
     and provenance is meaningless. ``command`` / ``args`` are the resolved
-    lists (or ``None`` = unset → chart default). ``is_orphaned`` is set when
-    the targeted component is no longer declared by the deployment's current
-    driver (FR-005); orphaned blocks are surfaced on read but skipped by the
-    renderer so no value reaches a container.
+    lists, or ``None`` when unset so the chart's value applies. The patch
+    builder writes set lists into the component container's merge patch
+    (ADR-069). ``is_orphaned`` is set when the targeted component is no longer
+    declared by the deployment's current driver (FR-005); orphaned blocks are
+    surfaced on read but never patched.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -106,7 +107,7 @@ class ResolvedComponentContainerOverride(BaseModel):
 
     @model_validator(mode="after")
     def _reject_empty_lists(self) -> "ResolvedComponentContainerOverride":
-        """Reject the empty-list state so it can never reach the renderer.
+        """Reject the empty-list state so it can never reach the merge patch.
 
         ``[]`` is an invalid value upstream (the write boundary and
         ``validate_container_override`` reject it; "clear" is ``None``/omit,

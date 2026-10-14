@@ -154,6 +154,8 @@ class ApplicationDriverVersion(StyrminModel, table=True):
 
 <!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
 
+The table no longer has a `container_overrides` column. The column held the `spec.container_overrides` block of the driver specification file, which only documented which components accepted a `command` or `args` override. Spec 022 removed the block, and the Alembic revision `faf47e166160` drops the column; its downgrade adds the column back, nullable and empty. Which components accept a `command` or `args` override now follows from the component container in `components` ([ADR-069](../../adr/0069-container-command-args-by-post-render.md)).
+
 #### Action
 
 ```python

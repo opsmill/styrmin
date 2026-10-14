@@ -1,37 +1,18 @@
-"""Component-scope container ``command``/``args`` override resolution & validation.
+"""Component-scope container ``command``/``args`` override resolution and validation.
 
-Per-component, optional, nullable ``command`` (entrypoint) and ``args`` slots
-settable on a single deployment with **zero driver-source changes**
-(014-component-container-overrides). A faithful port of the deployment env-vars
-precedent (008/010, ADR-013) with two deliberate divergences, both flowing from
-the component-scope-only contract (FR-003):
-
-* **No layering.** Env-vars merge ``environment → deployment → component``
-  per-key. ``command``/``args`` have no broader scope — the resolved value is
-  simply the component block's value or "unset". Resolution is a direct lookup,
-  not a merge (research.md D2).
-* **Empty-list marker.** The driver-consumption filters return the list **or
-  ``[]``** (never ``None``) and the driver template emits the key
-  unconditionally; the chart's ``{{- with }}`` guard treats ``[]`` as falsy so
-  the chart/image default flows through when unset. The empty-list marker (not
-  an omitted key) is required so that *clearing* an override propagates under
-  the operator's RFC 7386 JSON merge-patch HelmRelease apply — an omitted key
-  would leave the previously-set value in place (ADR-045 §2).
+Per-component, optional, nullable ``command`` (entrypoint) and ``args`` slots set on a single
+deployment (014). There is no layering: the resolved value is the component block's value or
+"unset" (ADR-045 §1). Applicable values reach the component container through the post-render
+merge patch built in :mod:`styrmin_backend.services.component_container` (ADR-069).
 
 Modules:
 
-* :mod:`validator` — :func:`validate_container_override` (non-empty
-  list-of-string, empty-string elements accepted, ``[]`` rejected, per-list
-  size caps).
-* :mod:`resolver` — :class:`ContainerOverridesResolver` (per-component direct
-  lookup plus orphan detection; no merge).
-* :mod:`exceptions` — :class:`~styrmin_backend.services.exceptions.ServiceError`
-  subclasses surfaced through ``StructuredErrorExtension`` as precise
-  ``extensions.code`` values.
-
-See ``specs/014-component-container-overrides/`` for the feature spec and
-``dev/adr/adr-045-container-override-no-layering-and-omit-marker.md`` for the
-divergences from ADR-013.
+* :mod:`validator` — :func:`validate_container_override` (non-empty list of strings,
+  empty-string elements accepted, ``[]`` rejected, per-list size caps).
+* :mod:`resolver` — :class:`ContainerOverridesResolver` (per-component lookup plus orphan
+  detection; no merge).
+* :mod:`exceptions` — :class:`~styrmin_backend.services.exceptions.ServiceError` subclasses
+  surfaced through ``StructuredErrorExtension`` as ``extensions.code`` values.
 """
 
 from styrmin_backend.services.container_overrides.exceptions import (

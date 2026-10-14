@@ -484,10 +484,10 @@ def _populate_component_container_overrides(
     Orphan entries (stored blocks whose component the driver no longer
     declares) are produced by the resolver for the read surface but are NOT
     attached to any component context here — there is no live
-    ``ComponentContext`` to attach them to, and the renderer must never inject
-    an orphaned override into a pod (FR-005). Components whose resolved
-    ``command`` and ``args`` are both ``None`` get ``None`` so the render
-    filters fall through to the chart default.
+    ``ComponentContext`` to attach them to, and the post-render patch builder
+    must never apply an orphaned override (FR-005). Components whose resolved
+    ``command`` and ``args`` are both ``None`` get ``None``, so the patch builder
+    writes neither and the chart's values apply.
     """
     if context.components is None or len(context.components.root) == 0:
         return
