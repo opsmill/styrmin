@@ -1,4 +1,4 @@
-"""Wait and read helpers for the dedicated ingress controller and the cluster config fan-out E2E."""
+"""Wait and read helpers for the dedicated ingress controller and the config fan-out E2E."""
 
 from __future__ import annotations
 
@@ -12,9 +12,11 @@ import kr8s
 import kr8s.asyncio
 from kr8s.asyncio.objects import Namespace as AsyncNamespace
 from kr8s.asyncio.objects import Pod as AsyncPod
+from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
 
 INGRESS_CONTROLLER_NAME_PREFIX = "styrmin-ingress-controller"
+REDEPLOY_TASK = "update_instance"
 
 _ROLLOUT_STATUSES = frozenset({"pending", "deploying"})
 _ENDED_TASK_STATUSES = frozenset({"success", "failed"})
@@ -165,3 +167,94 @@ async def wait_for_cluster_settled(
         f"Cluster {cluster_id} did not settle within {timeout}s; still rolling out: "
         f"{rolling_out}"
     )
+
+
+async def task_ids(client: StyrminClient, deployment_id: str) -> set[str]:
+    return {task.id for task in await deployment_tasks(client, deployment_id)}
+
+
+async def new_tasks(
+    client: StyrminClient, deployment_id: str, known: set[str]
+) -> list[TaskTimes]:
+    return [
+        task
+        for task in await deployment_tasks(client, deployment_id)
+        if task.id not in known
+    ]
+
+
+def single_redeploy(tasks: list[TaskTimes], label: str) -> TaskTimes:
+    redeploys = [task for task in tasks if task.type == REDEPLOY_TASK]
+    assert len(redeploys) == 1, f"{label}: expected one redeploy task, got {tasks}"
+    return redeploys[0]
+
+
+async def wait_for_new_redeploy(
+    client: StyrminClient, deployment_id: str, known: set[str], timeout: float = 300.0
+) -> TaskTimes:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        tasks = await new_tasks(client, deployment_id, known)
+        if tasks:
+            return single_redeploy(tasks, f"deployment {deployment_id}")
+        await asyncio.sleep(3)
+    raise AssertionError(
+        f"Deployment {deployment_id} got no redeploy task within {timeout}s"
+    )
+
+
+async def wait_for_task_end(
+    client: StyrminClient, deployment_id: str, task_id: str, timeout: float = 300.0
+) -> TaskTimes:
+    deadline = time.time() + timeout
+    task = None
+    while time.time() < deadline:
+        tasks = {
+            task.id: task for task in await deployment_tasks(client, deployment_id)
+        }
+        task = tasks[task_id]
+        if task.ended_on is not None:
+            assert task.status == "success", f"Task {task_id} failed: {task}"
+            return task
+        await asyncio.sleep(3)
+    raise AssertionError(f"Task {task_id} did not end within {timeout}s: {task}")
+
+
+async def wait_for_controller_status(
+    client: StyrminClient,
+    environment_id: str,
+    controller_id: str,
+    expected: str,
+    timeout: float = 300.0,
+) -> None:
+    deadline = time.time() + timeout
+    history: dict[str, str] = {}
+    while time.time() < deadline:
+        history = await ingress_controller_ids(
+            client, environment_id, include_deleted=True
+        )
+        if history.get(controller_id) == expected:
+            return
+        await asyncio.sleep(3)
+    raise AssertionError(
+        f"Ingress controller {controller_id} never reached {expected!r}: {history}"
+    )
+
+
+async def traefik_service(
+    kr8s_api: kr8s.asyncio.Api, environment_id: str
+) -> AsyncService:
+    services = [
+        service
+        async for service in AsyncService.list(
+            namespace=kr8s.ALL,
+            label_selector={
+                "app.kubernetes.io/name": "traefik",
+                "styrmin/environment_id": environment_id,
+            },
+            api=kr8s_api,
+        )
+        if isinstance(service, AsyncService)
+    ]
+    assert services, f"Traefik Service not found for environment {environment_id}"
+    return services[0]

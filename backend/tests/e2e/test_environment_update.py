@@ -31,6 +31,9 @@ Scenarios:
   converges, and the failing deployment's timeline records a failed
   Task. Currently skipped pending a multi-driver fixture (see body for
   unskip path).
+* ``test_environment_update_redeploys_its_dedicated_ingress_controller`` —
+  #424: changing the environment's own ``dedicated_ingress`` redeploys its
+  dedicated ingress controller before the application moves onto it.
 """
 
 from __future__ import annotations
@@ -39,15 +42,29 @@ import asyncio
 import uuid
 from typing import Any, AsyncGenerator
 
+import kr8s.asyncio
 import pytest
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.graphql._generated.input_types import (
+    DedicatedIngressInput,
     EnvVarInput,
+    IngressServiceConfigInput,
     SchedulingInput,
     UpdateEnvironmentInput,
 )
 
+from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.helpers.ingress import (
+    ingress_controller_ids,
+    new_tasks,
+    task_ids,
+    traefik_service,
+    wait_for_controller_status,
+    wait_for_deployment_status,
+    wait_for_new_redeploy,
+    wait_for_task_end,
+)
 from tests.e2e.helpers.workloads import _wait_for_pod_template
 
 pytestmark = [
@@ -526,3 +543,97 @@ async def test_us4_env_vars_form_redeploys_environment(
         )
         envs = _container_zero_envs(rendered)
         assert {"name": "LOG_LEVEL", "value": "debug"} in envs
+
+
+# ---------------------------------------------------------------------------
+# #424 — the environment update redeploys the dedicated ingress controller
+# ---------------------------------------------------------------------------
+
+_INGRESS_NODE_PORT = 31744
+
+
+@pytest.mark.api_only(
+    reason="The update sets dedicatedIngress, which the environment form cannot "
+    "submit, and every check reads the SDK and kr8s; no dual-entrypoint "
+    "scenario_driver method is called, so the [ui-chromium] variant would repeat "
+    "the same calls without adding coverage."
+)
+@pytest.mark.ci
+async def test_environment_update_redeploys_its_dedicated_ingress_controller(
+    styrmin_resources: dict,
+    simple_app_image: str,  # noqa: ARG001 — ensures image is built
+    vcluster: dict,
+) -> None:
+    """The steps to reproduce of #424: the controller's Service goes from LoadBalancer to NodePort.
+
+    The controller is redeployed first. The application is redeployed only
+    after the controller's task ended, and then answers through the controller.
+    """
+    client: StyrminClient = styrmin_resources["client"]
+    cluster_id = str(styrmin_resources["cluster_id"])
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
+    fqdn_suffix = (await client.clusters.get(cluster_id=cluster_id)).config[
+        "fqdn_suffix"
+    ]
+
+    environment = await client.environments.create(
+        name=f"env-update-ingress-{uuid.uuid4().hex[:6]}",
+        cluster_id=cluster_id,
+        config={"dedicated_ingress": {"service": {"type": "LoadBalancer"}}},
+    )
+    environment_id = str(environment.id)
+    try:
+        task = await client.deployments.create(
+            driver="simple-app", version="0.1.0", environment_id=environment_id
+        )
+        app_id = str(task.deployment_id)
+        await wait_for_deployment_status(client, app_id, "running")
+        (controller_id,) = await ingress_controller_ids(client, environment_id)
+        await wait_for_controller_status(
+            client, environment_id, controller_id, "running"
+        )
+        known_app = await task_ids(client, app_id)
+        known_controller = await task_ids(client, controller_id)
+
+        await client.environments.update(
+            environment_id=environment_id,
+            input=UpdateEnvironmentInput(
+                dedicated_ingress=DedicatedIngressInput(
+                    service=IngressServiceConfigInput(
+                        type="NodePort", node_port=_INGRESS_NODE_PORT
+                    )
+                )
+            ),
+        )
+
+        [controller_task] = await new_tasks(client, controller_id, known_controller)
+        assert controller_task.type == "update_instance", controller_task
+        assert await new_tasks(client, app_id, known_app) == [], (
+            "The application was redeployed before its controller"
+        )
+        controller_task = await wait_for_task_end(
+            client, controller_id, controller_task.id
+        )
+        app_task = await wait_for_new_redeploy(client, app_id, known_app)
+        assert controller_task.ended_on is not None
+        assert controller_task.ended_on <= app_task.created_on, (
+            f"The application redeploy was created at {app_task.created_on}, "
+            f"before the controller task ended at {controller_task.ended_on}"
+        )
+        await wait_for_task_end(client, app_id, app_task.id)
+        await wait_for_deployment_status(client, app_id, "running")
+
+        service = await traefik_service(kr8s_api, environment_id)
+        spec = service.raw["spec"]
+        assert spec["type"] == "NodePort", spec
+        node_ports = {port["name"]: port.get("nodePort") for port in spec["ports"]}
+        assert node_ports["websecure"] == _INGRESS_NODE_PORT, node_ports
+        async with _portforward(service, remote_port=8000) as local_port:
+            await _wait_for_http(
+                f"http://localhost:{local_port}/count",
+                timeout=120.0,
+                interval=3.0,
+                headers={"Host": f"simple-app-{app_id}.{fqdn_suffix}"},
+            )
+    finally:
+        await client.environments.delete(environment_id=environment_id)
