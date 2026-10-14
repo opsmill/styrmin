@@ -515,7 +515,9 @@ class TestControllerRemovalRule:
         app = await deploy(graph, graph.env_a, "app-a")
         controller = await deploy_controller(graph, graph.env_a)
 
-        await update_environment(graph.env_a.id, graph.uow, config={})
+        await update_environment(
+            graph.env_a.id, graph.uow, config={}, acting_user_id=USER_ID
+        )
 
         [task] = tasks_of(graph, app)
         assert task.type == TaskType.UPDATE_INSTANCE
@@ -538,3 +540,161 @@ class TestControllerRemovalRule:
         assert app.status == DeploymentState.RUNNING
         assert controller.status == DeploymentState.DELETING
         patch_crd.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Environment config update (#424)
+# ---------------------------------------------------------------------------
+
+ENV_LOAD_BALANCER = {"dedicated_ingress": {"service": {"type": "LoadBalancer"}}}
+ENV_NODE_PORT = {
+    "dedicated_ingress": {"service": {"type": "NodePort", "node_port": 30443}}
+}
+NODE_PORT_INGRESS = DedicatedIngressConfig(
+    service=IngressServiceConfig(type="NodePort", node_port=30443)
+)
+
+
+async def _update_environment(
+    graph: SimpleNamespace, config: dict, acting_user_id=USER_ID
+) -> None:
+    await update_environment(
+        graph.env_a.id, graph.uow, config=config, acting_user_id=acting_user_id
+    )
+
+
+async def _report_running(
+    graph: SimpleNamespace, deployment: Deployment, task_type: TaskType
+) -> None:
+    [task] = [task for task in tasks_of(graph, deployment) if task.type == task_type]
+    task.status = TaskStatus.SUCCESS
+    await report_deployment_statuses(
+        [
+            {
+                "deployment_id": deployment.id,
+                "phase": "Ready",
+                "display_state": "Running",
+                "instance_id": task.instance_id,
+            }
+        ],
+        graph.uow,
+    )
+
+
+class TestEnvironmentUpdate:
+    @pytest.fixture(autouse=True)
+    def operator_steps(self, mocker) -> None:
+        mocker.patch.object(
+            deployment_status, "_record_operator_steps", new_callable=AsyncMock
+        )
+
+    async def test_changed_values_redeploy_the_controller_before_the_applications(
+        self, graph
+    ):
+        """The steps to reproduce of #424: LoadBalancer to NodePort."""
+        graph.env_a.config = dict(ENV_LOAD_BALANCER)
+        app = await deploy(graph, graph.env_a, "app-a")
+        controller = await deploy_controller(graph, graph.env_a)
+
+        await _update_environment(graph, ENV_NODE_PORT)
+
+        assert task_deployment_ids(update_tasks(graph)) == [controller.id]
+        assert controller.status == DeploymentState.DEPLOYING
+        assert _rendered_dedicated_ingress(controller) == NODE_PORT_INGRESS
+        assert tasks_of(graph, app) == []
+
+        await _report_running(graph, controller, TaskType.UPDATE_INSTANCE)
+
+        assert controller.status == DeploymentState.RUNNING
+        assert task_deployment_ids(update_tasks(graph)) == [controller.id, app.id]
+        assert _rendered_dedicated_ingress(app) == NODE_PORT_INGRESS
+
+    async def test_adding_dedicated_ingress_creates_the_controller_before_the_applications(
+        self, graph
+    ):
+        """The controller is attributed to the administrator who updated the environment."""
+        app = await deploy(graph, graph.env_a, "app-a")
+        administrator = uuid4()
+
+        await _update_environment(graph, ENV_LOAD_BALANCER, administrator)
+
+        [controller] = _controllers(graph, graph.env_a)
+        assert controller.created_by_user_id == administrator
+        assert [task.type for task in tasks_of(graph, controller)] == [
+            TaskType.CREATE_INSTANCE
+        ]
+        assert tasks_of(graph, app) == []
+        assert _rendered_dedicated_ingress(app) is None
+
+        await _report_running(graph, controller, TaskType.CREATE_INSTANCE)
+
+        assert task_deployment_ids(update_tasks(graph)) == [app.id]
+        assert _rendered_dedicated_ingress(app) == DedicatedIngressConfig(
+            service=IngressServiceConfig(type="LoadBalancer")
+        )
+
+    async def test_adding_dedicated_ingress_without_applications_creates_no_controller(
+        self, graph
+    ):
+        """The first deploy creates it, as before."""
+        await _update_environment(graph, ENV_LOAD_BALANCER)
+
+        assert _controllers(graph, graph.env_a) == []
+        assert graph.uow.tasks.models == []
+
+    async def test_other_change_redeploys_the_applications_and_leaves_the_controller(
+        self, graph
+    ):
+        graph.env_a.config = dict(ENV_LOAD_BALANCER)
+        app = await deploy(graph, graph.env_a, "app-a")
+        controller = await deploy_controller(graph, graph.env_a)
+
+        await _update_environment(
+            graph, {**ENV_LOAD_BALANCER, "env_vars": {"FOO": "bar"}}
+        )
+
+        assert task_deployment_ids(update_tasks(graph)) == [app.id]
+        assert tasks_of(graph, controller) == []
+        assert controller.status == DeploymentState.RUNNING
+
+    async def test_resubmission_redeploys_a_controller_left_with_the_previous_values(
+        self, graph
+    ):
+        """An update made before #424 redeployed the applications but not the controller."""
+        graph.env_a.config = dict(ENV_LOAD_BALANCER)
+        controller = await deploy_controller(graph, graph.env_a)
+        graph.env_a.config = dict(ENV_NODE_PORT)
+        app = await deploy(graph, graph.env_a, "app-a")
+
+        await _update_environment(graph, ENV_NODE_PORT)
+
+        assert task_deployment_ids(update_tasks(graph)) == [controller.id]
+        assert _rendered_dedicated_ingress(controller) == NODE_PORT_INGRESS
+        assert tasks_of(graph, app) == []
+
+    async def test_deleting_application_gets_no_redeploy(self, graph):
+        app = await deploy(graph, graph.env_a, "app-a", status=DeploymentState.DELETING)
+
+        await _update_environment(graph, {"env_vars": {"FOO": "bar"}})
+
+        assert tasks_of(graph, app) == []
+        assert app.status == DeploymentState.DELETING
+
+    async def test_controller_that_fails_to_start_keeps_the_applications_waiting(
+        self, graph, mocker
+    ):
+        app = await deploy(graph, graph.env_a, "app-a")
+        mocker.patch.object(
+            cluster_config_fanout,
+            "create_ingress_controller",
+            side_effect=RuntimeError("simulated dispatch failure"),
+        )
+        log_exception = mocker.spy(cluster_config_fanout.logger, "exception")
+
+        await _update_environment(graph, ENV_LOAD_BALANCER)
+
+        assert graph.env_a.config == ENV_LOAD_BALANCER
+        assert _controllers(graph, graph.env_a) == []
+        assert tasks_of(graph, app) == []
+        [call] = log_exception.call_args_list
+        assert call.args[0].startswith("env_config_fanout_ingress_controller_error")

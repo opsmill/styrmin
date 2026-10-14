@@ -819,14 +819,19 @@ async def test_created_environment_is_occupied_for_the_whole_clone(
 
     with pytest.raises(EnvironmentOperationInProgressError) as excinfo:
         await update_environment(
-            environment_id=created.id, uow=scenario.uow, config={"db_size": "10Gi"}
+            environment_id=created.id,
+            uow=scenario.uow,
+            config={"db_size": "10Gi"},
+            acting_user_id=uuid4(),
         )
     assert excinfo.value.operation_kind == "environment_clone"
 
     # A no-op update is refused too: "busy" is a property of the environment,
     # not of the payload.
     with pytest.raises(EnvironmentOperationInProgressError):
-        await update_environment(environment_id=created.id, uow=scenario.uow)
+        await update_environment(
+            environment_id=created.id, uow=scenario.uow, acting_user_id=uuid4()
+        )
 
 
 @pytest.mark.asyncio
@@ -864,7 +869,10 @@ async def test_created_environment_is_released_once_the_clone_is_terminal(
     assert await find_clone_occupying_environment(created.id, scenario.uow) is None
 
     refreshed = await update_environment(
-        environment_id=created.id, uow=scenario.uow, config={"db_size": "10Gi"}
+        environment_id=created.id,
+        uow=scenario.uow,
+        config={"db_size": "10Gi"},
+        acting_user_id=uuid4(),
     )
     assert refreshed.config == {"db_size": "10Gi"}
 
