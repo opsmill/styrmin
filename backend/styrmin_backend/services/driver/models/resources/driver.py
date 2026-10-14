@@ -85,10 +85,6 @@ from pydantic import (
 
 from ._shared import Kind
 from .actions import ActionDefinition
-from .container_overrides import (
-    DriverContainerOverrideDoc,
-    validate_container_override_doc_components_unique,
-)
 from .env_vars import DriverEnvVarDoc, validate_env_var_doc_names_unique
 from .parameters import DriverParameterDefinition, validate_parameter_names_unique
 from .services import ServiceDefinition, validate_service_names_unique
@@ -274,7 +270,6 @@ class Specification(BaseModel):
     services: list[ServiceDefinition] | None = None
     actions: list[ActionDefinition] = Field(default_factory=list)
     env_vars: list[DriverEnvVarDoc] | None = None
-    container_overrides: list[DriverContainerOverrideDoc] | None = None
 
     @field_validator("services", mode="after")
     @classmethod
@@ -305,16 +300,6 @@ class Specification(BaseModel):
         # ``validate_parameter_names`` — uniqueness across the list.
         if value is not None:
             validate_env_var_doc_names_unique(value)
-        return value
-
-    @field_validator("container_overrides", mode="after")
-    @classmethod
-    def validate_container_override_doc_components(
-        cls, value: list[DriverContainerOverrideDoc] | None
-    ) -> list[DriverContainerOverrideDoc] | None:
-        # 014 / US6: at most one container_overrides block per component.
-        if value is not None:
-            validate_container_override_doc_components_unique(value)
         return value
 
     @field_validator("supported_versions", mode="after")

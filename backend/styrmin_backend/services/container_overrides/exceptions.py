@@ -106,47 +106,6 @@ class InvalidContainerArgsError(ServiceError):
         return meta
 
 
-class DriverContainerOverrideDocComponentMismatchError(ServiceError):
-    """A driver's ``spec.container_overrides`` doc references an undeclared component.
-
-    Raised at driver load time (US6) — registration aborts so the driver
-    author fixes the typo before the bad declaration reaches consumers.
-    ``known_components`` lists the driver's declared component names so the
-    error message is actionable. Mirrors
-    :class:`~styrmin_backend.services.env_vars.exceptions.DriverEnvVarDocComponentMismatchError`.
-    """
-
-    error_code = "DRIVER_CONTAINER_OVERRIDE_DOC_COMPONENT_MISMATCH"
-    default_message = (
-        "Driver container_overrides doc references a component the driver "
-        "does not declare"
-    )
-
-    def __init__(
-        self,
-        message: str = "",
-        component_name: str = "",
-        known_components: list[str] | None = None,
-    ) -> None:
-        self.component_name = component_name
-        self.known_components = known_components or []
-        super().__init__(
-            message
-            or (
-                f"container_overrides doc references component "
-                f"{component_name!r} which is not declared by the driver. "
-                f"Declared components: {_format_known_components(self.known_components)}."
-            )
-        )
-
-    @property
-    def error_metadata(self) -> dict[str, Any]:
-        return {
-            "component_name": self.component_name,
-            "known_components": self.known_components,
-        }
-
-
 class UnknownComponentContainerOverrideError(ServiceError):
     """A ``command``/``args`` block targets a component the driver does not declare.
 

@@ -78,11 +78,6 @@ type ApplicationDriverVersion {
   envVars: [DriverEnvVarDoc!]!
 
   """
-  Doc-only container-override declarations from the driver's spec.container_overrides block (014). Empty when the driver omits the block.
-  """
-  containerOverrides: [DriverContainerOverrideDoc!]!
-
-  """
   Links from `spec.info.links`, in file order. Empty when the driver does not set any.
   """
   links: [DriverLink!]!
@@ -570,17 +565,6 @@ type DeploymentTimelineEntry {
   task: Task!
   applicationVersion: String
   contextDiff: ContextDiff
-}
-
-"""
-Doc-only declaration that a component's container ``command``/``args`` are overridable per deployment (014-component-container-overrides). Surfaces in the driver detail view; informational only — it does not validate, default, or constrain operator-set override values (FR-010/FR-011).
-"""
-type DriverContainerOverrideDoc {
-  component: String!
-  description: String!
-  container: String
-  command: Boolean!
-  args: Boolean!
 }
 
 """
