@@ -142,9 +142,9 @@ description: "Tasks for 022: container command and args overrides applied by pos
 - [X] T045 [P] Update `CONTEXT.md` entries **Component overrides**, **Component container** and **Container override** (applied by post-render to the component container; filters retired; `spec.container_overrides` removed; containerless rule and `isApplicable`)
 - [X] T046 [P] Update `dev/knowledge/backend/services.md` (error tree, `component_container` module), `dev/knowledge/backend/data-models.md` (column removed), `dev/knowledge/backend/api.md` (GraphQL changes), `dev/knowledge/backend/deployment-env-vars.md` (`ContainerMergePatch` name), `dev/knowledge/backend/hooks-and-actions.md` (`applicable_overrides`) and `dev/knowledge/frontend/deployment-configuration.md` (editor gating)
 - [X] T047 Update docstrings that still describe template consumption or the empty-list marker: `backend/styrmin_backend/services/container_overrides/__init__.py`, `backend/styrmin_backend/services/container_overrides/resolver.py`, `backend/styrmin_backend/context/models/components.py` (`ResolvedComponentContainerOverride`), `backend/styrmin_backend/context/models/config.py` (`ComponentConfigBlock`), `backend/styrmin_backend/services/component_container/__init__.py`, `backend/styrmin_backend/services/context.py` (`_populate_component_container_overrides`)
-- [ ] T048 Run `uv run invoke format lint`, `uv run invoke validate-graphql`, frontend `pnpm lint` and `pnpm test` (Node 22), and `uv run invoke test`; fix failures
-- [ ] T049 Re-run the E2E of T017 after all phases and update `specs/022-post-render-container-overrides/e2e-evidence.md` with the final passing run (Constitution §V)
-- [ ] T050 Walk through `specs/022-post-render-container-overrides/quickstart.md` §1–§8 and confirm each expected result, including the manual retired-filter check in §7
+- [X] T048 Run `uv run invoke format lint`, `uv run invoke validate-graphql`, frontend `pnpm lint` and `pnpm test` (Node 22), and `uv run invoke test`; fix failures
+- [X] T049 Re-run the E2E of T017 after all phases and update `specs/022-post-render-container-overrides/e2e-evidence.md` with the final passing run (Constitution §V)
+- [X] T050 Walk through `specs/022-post-render-container-overrides/quickstart.md` §1–§8 and confirm each expected result, including the manual retired-filter check in §7
 
 ---
 

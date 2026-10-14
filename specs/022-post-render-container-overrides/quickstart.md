@@ -7,7 +7,7 @@
 - `uv sync`, and `cd frontend && pnpm install` (needed by `uv run invoke generate`).
 - `kubectl` with kustomize v5 and `helm` on `PATH` for the integration and contract tests.
 - `docker` and `vcluster` on `PATH` for the E2E. The E2E fixtures create their own cluster; `uv run invoke dev` is not needed.
-- Node 22 for the frontend tests.
+- Node 22 for the frontend tests and for the frontend codegen step of `uv run invoke generate` (§8). On Node 18 that step exits 1 with no error message.
 
 ## 1. Unit and contract tests
 
@@ -99,3 +99,5 @@ uv run invoke generate
 uv run invoke validate-graphql
 uv run invoke format lint
 ```
+
+Expected: `git status` shows no change to `schema.graphql`, `python_sdk/src/styrmin_sdk/graphql/_generated/` or `frontend/src/generated/`; every `.graphql` file passes validation; format and lint pass.
