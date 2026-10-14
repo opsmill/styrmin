@@ -222,7 +222,7 @@ without an explicit pin re-resolves to the latest matching build again.
 
 The reference repository ships several example drivers under
 [`driver/examples/`](https://github.com/opsmill/styrmin/tree/develop/driver/examples)
-(`infrahub`, `infrahub-mcp`, `semaphore`, `slurpit`). They're a good
+(`generic-app`, `infrahub`, `infrahub-mcp`, `semaphore`, `slurpit`). They're a good
 starting point for writing your own.
 
 The `infrahub` example declares two services: `infrahub` (the Infrahub

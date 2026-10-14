@@ -553,6 +553,9 @@ async def git_server(
         "semaphore": {
             "source": PROJECT_ROOT / "driver" / "examples" / "semaphore",
         },
+        "generic-app": {
+            "source": PROJECT_ROOT / "driver" / "examples" / "generic-app",
+        },
         "infrahub": {
             "source": PROJECT_ROOT / "driver" / "examples" / "infrahub",
         },
@@ -1337,6 +1340,23 @@ async def load_semaphore(
         git_url=git_server["semaphore"], ref="master"
     )
     yield {**styrmin_resources, "semaphore_driver_id": version.application_driver_id}
+
+
+# ---------------------------------------------------------------------------
+# Fixture: load_generic_app
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="session")
+async def load_generic_app(
+    styrmin_resources: dict,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    git_server: dict[str, str],
+) -> AsyncGenerator[dict, None]:
+    """Load the generic-app application driver from the git server."""
+    driver, _ = session_scenario_driver
+    version = await driver.load_driver_version(
+        git_url=git_server["generic-app"], ref="master"
+    )
+    yield {**styrmin_resources, "generic_app_driver_id": version.application_driver_id}
 
 
 # ---------------------------------------------------------------------------

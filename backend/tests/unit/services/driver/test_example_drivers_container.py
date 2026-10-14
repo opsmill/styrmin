@@ -40,6 +40,7 @@ _EXPECTED_CONTAINERS: dict[str, dict[str, str]] = {
         "task-manager": "prefect-server",
         "task-manager-db": "postgresql",
     },
+    "generic-app": {"app": "app"},
     "infrahub-mcp": {"server": "infrahub-mcp"},
     "semaphore": {"server": "semaphore", "database": "postgresql"},
     "slurpit": {

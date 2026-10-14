@@ -512,5 +512,6 @@ See the [`examples/`](examples/) directory for complete driver examples:
 - [`examples/infrahub/`](examples/infrahub/) - Driver for the Infrahub application
 - [`examples/infrahub-mcp/`](examples/infrahub-mcp/) - Infrahub MCP server Driver — exposes an existing Infrahub instance to AI agents over the Model Context Protocol in token-passthrough auth mode
 - [`examples/slurpit/`](examples/slurpit/) - Driver for the Slurpit application
+- [`examples/generic-app/`](examples/generic-app/) - Generic driver for any single-container HTTP application, such as a Streamlit app
 - [`examples/semaphore/`](examples/semaphore/) - Driver for Ansible Semaphore
 - [`examples/db-test/`](examples/db-test/) - Database test driver

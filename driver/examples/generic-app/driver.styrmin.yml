@@ -1,0 +1,84 @@
+---
+# A generic driver for any single-container HTTP application: a Streamlit app, Semaphore, an
+# internal tool, anything that ships as one image and serves HTTP.
+#
+# Per driver version (parameters): the image, its health check, an optional persistent volume.
+# Per deployment (component `app`): environment variables, command, arguments and image override.
+#
+# The application must listen on port 8080. The service port of a driver is a fixed number, and
+# Styrmin's service discovery sends traffic to that port on the pod, so tell the application to
+# listen there with its own settings (an environment variable, a flag, the command).
+#
+# No lifecycle actions: the chart covers install, upgrade and uninstall.
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: generic-app
+spec:
+  version: "1"
+  supported_versions: ">=0"
+  info:
+    description: >-
+      Any single-container HTTP application: one image listening on port 8080, an optional
+      persistent volume, and environment variables and command set per deployment.
+    authors: [opsmill]
+    license: Apache-2.0
+  helm:
+    main:
+      location: oci://ghcr.io/bjw-s-labs/helm/app-template
+      version: 5.2.1
+
+  parameters:
+    - name: image_repository
+      label: "Image repository"
+      kind: string
+      # no default => required
+    - name: image_tag
+      label: "Image tag (empty: the deployment's application version)"
+      kind: string
+      default: ""
+    - name: image_pull_policy
+      label: "Image pull policy"
+      kind: enum
+      values: ["IfNotPresent", "Always", "Never"]
+      default: IfNotPresent
+    - name: health_path
+      label: "HTTP health check path (empty: a TCP check on port 8080)"
+      kind: string
+      default: ""
+    - name: storage_size
+      label: "Persistent volume size in Gi (0: no volume)"
+      kind: integer
+      default: 0
+    - name: storage_path
+      label: "Where the volume is mounted"
+      kind: string
+      default: "/data"
+    - name: fs_group
+      label: "Group ID that owns the volume (0: leave it to the image)"
+      kind: integer
+      default: 0
+    - name: allow_internet
+      label: "Allow egress to the internet"
+      kind: boolean
+      default: true
+
+  components:
+    app:
+      # Receives the per-deployment environment variables and image override.
+      container: app
+      identifier:
+        label:
+          styrmin/component: app
+      # The volume exists only when `storage_size` is above 0.
+      backup:
+        enabled: true
+        kind: disk
+        volume: data
+
+  services:
+    - name: app
+      kind: http
+      scope: external
+      port: 8080
+      component: app
