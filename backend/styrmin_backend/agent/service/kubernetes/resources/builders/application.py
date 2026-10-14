@@ -423,8 +423,8 @@ class ApplicationHelmReleaseBuilder:
         return patches
 
     def build_component_container_post_rendering_patches(self) -> list[TargetPatch]:
-        """Build Kustomize patches applying env vars and image overrides to each
-        component's component container, with the missing-container guard (018)."""
+        """Build Kustomize patches applying env var, image, command and args overrides
+        to each component's component container, with the missing-container guard."""
         return build_component_container_patches(self.context)
 
     def build_backup_annotation_patches(self) -> list[TargetPatch]:

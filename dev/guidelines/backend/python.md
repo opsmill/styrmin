@@ -642,7 +642,7 @@ No defaulting at render time, no defaulting at Pydantic-model time, no defaultin
 
 <!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
 
-A new per-component override of the pod spec (env vars and image overrides today) is a
+A new per-component override of the pod spec (env var, image, command and args overrides today) is a
 Kustomize post-render patch, not a Helm values key. Helm replaces lists, so writing a chart's
 list-shaped key from the values template drops every entry the chart ships.
 
