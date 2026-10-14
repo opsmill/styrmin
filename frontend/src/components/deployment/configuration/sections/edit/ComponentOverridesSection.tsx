@@ -207,9 +207,10 @@ function ensureComponentBlock(
  *    coming in future iterations" line so the section has visible room to
  *    grow without a structural rewrite.
  *
- * Components without a component container get no env var editor and no
- * Image input: stored env vars and a stored image render read-only and
- * removable (FR-006; 018 FR-011).
+ * Components without a component container get no env var editor, no Image
+ * input and no Command or Args editor: stored env vars, a stored image and a
+ * stored command or args render read-only and removable (FR-006; 018 FR-011;
+ * 022 FR-008).
  *
  * Field-array semantics: every read or write into the override list keys
  * on the component `name`. The array index is an implementation detail of
@@ -655,145 +656,165 @@ function ComponentOverrideBody({
         </form.Field>
       )}
 
-      <div data-testid={`component-command-editor-${componentName}`}>
-        <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Command
-        </Label>
-        <form.Field name={`${blockPath}.command`} mode="array">
-          {(commandField: any) => {
-            const commandRows: string[] = commandField.state.value ?? [];
-            return (
-              <div className="mt-2 space-y-2">
-                {commandRows.length === 0 && (
-                  <p className="text-xs italic text-muted-foreground">
-                    No command override.
-                  </p>
-                )}
-                {commandRows.map((_row, index) => {
-                  const itemPath = `${blockPath}.command.${index}` as const;
-                  return (
-                    <div
-                      key={`comp-${componentName}-command-${index}`}
-                      className="grid grid-cols-[1fr_auto] items-start gap-2"
-                    >
-                      <form.Field name={itemPath}>
-                        {(f: any) => (
-                          <ChangedFieldFrame
-                            name={itemPath}
-                            form={form}
-                            initial={initialCommand[index]}
-                            environment={envCommand[index]}
-                          >
-                            <Input
-                              data-testid={`comp-command-${componentName}-${index}`}
-                              value={f.state.value ?? ""}
-                              onChange={(e: any) =>
-                                f.handleChange(e.target.value)
-                              }
-                              onBlur={f.handleBlur}
-                              placeholder="/bin/sh"
-                              autoComplete="off"
-                            />
-                          </ChangedFieldFrame>
-                        )}
-                      </form.Field>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Remove command argument ${index + 1} on ${componentName}`}
-                        onClick={() => commandField.removeValue(index)}
-                        data-testid={`comp-command-remove-${componentName}-${index}`}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  );
-                })}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  data-testid={`comp-command-add-${componentName}`}
-                  onClick={() => commandField.pushValue("")}
-                >
-                  Add command argument
-                </Button>
-              </div>
-            );
-          }}
-        </form.Field>
-      </div>
+      {!hasContainer &&
+        (["command", "args"] as const).map((listField) => (
+          <form.Field key={listField} name={`${blockPath}.${listField}`}>
+            {(f: any) =>
+              Array.isArray(f.state.value) && f.state.value.length > 0 ? (
+                <ContainerlessContainerOverride
+                  componentName={componentName}
+                  field={listField}
+                  values={f.state.value as string[]}
+                  onRemove={() => f.handleChange([])}
+                />
+              ) : null
+            }
+          </form.Field>
+        ))}
 
-      <div data-testid={`component-args-editor-${componentName}`}>
-        <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Args
-        </Label>
-        <form.Field name={`${blockPath}.args`} mode="array">
-          {(argsField: any) => {
-            const argsRows: string[] = argsField.state.value ?? [];
-            return (
-              <div className="mt-2 space-y-2">
-                {argsRows.length === 0 && (
-                  <p className="text-xs italic text-muted-foreground">
-                    No args override.
-                  </p>
-                )}
-                {argsRows.map((_row, index) => {
-                  const itemPath = `${blockPath}.args.${index}` as const;
-                  return (
-                    <div
-                      key={`comp-${componentName}-args-${index}`}
-                      className="grid grid-cols-[1fr_auto] items-start gap-2"
-                    >
-                      <form.Field name={itemPath}>
-                        {(f: any) => (
-                          <ChangedFieldFrame
-                            name={itemPath}
-                            form={form}
-                            initial={initialArgs[index]}
-                            environment={envArgs[index]}
-                          >
-                            <Input
-                              data-testid={`comp-args-${componentName}-${index}`}
-                              value={f.state.value ?? ""}
-                              onChange={(e: any) =>
-                                f.handleChange(e.target.value)
-                              }
-                              onBlur={f.handleBlur}
-                              placeholder="--verbose"
-                              autoComplete="off"
-                            />
-                          </ChangedFieldFrame>
-                        )}
-                      </form.Field>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Remove args entry ${index + 1} on ${componentName}`}
-                        onClick={() => argsField.removeValue(index)}
-                        data-testid={`comp-args-remove-${componentName}-${index}`}
+      {hasContainer && (
+        <div data-testid={`component-command-editor-${componentName}`}>
+          <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Command
+          </Label>
+          <form.Field name={`${blockPath}.command`} mode="array">
+            {(commandField: any) => {
+              const commandRows: string[] = commandField.state.value ?? [];
+              return (
+                <div className="mt-2 space-y-2">
+                  {commandRows.length === 0 && (
+                    <p className="text-xs italic text-muted-foreground">
+                      No command override.
+                    </p>
+                  )}
+                  {commandRows.map((_row, index) => {
+                    const itemPath = `${blockPath}.command.${index}` as const;
+                    return (
+                      <div
+                        key={`comp-${componentName}-command-${index}`}
+                        className="grid grid-cols-[1fr_auto] items-start gap-2"
                       >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  );
-                })}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  data-testid={`comp-args-add-${componentName}`}
-                  onClick={() => argsField.pushValue("")}
-                >
-                  Add args entry
-                </Button>
-              </div>
-            );
-          }}
-        </form.Field>
-      </div>
+                        <form.Field name={itemPath}>
+                          {(f: any) => (
+                            <ChangedFieldFrame
+                              name={itemPath}
+                              form={form}
+                              initial={initialCommand[index]}
+                              environment={envCommand[index]}
+                            >
+                              <Input
+                                data-testid={`comp-command-${componentName}-${index}`}
+                                value={f.state.value ?? ""}
+                                onChange={(e: any) =>
+                                  f.handleChange(e.target.value)
+                                }
+                                onBlur={f.handleBlur}
+                                placeholder="/bin/sh"
+                                autoComplete="off"
+                              />
+                            </ChangedFieldFrame>
+                          )}
+                        </form.Field>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Remove command argument ${index + 1} on ${componentName}`}
+                          onClick={() => commandField.removeValue(index)}
+                          data-testid={`comp-command-remove-${componentName}-${index}`}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    data-testid={`comp-command-add-${componentName}`}
+                    onClick={() => commandField.pushValue("")}
+                  >
+                    Add command argument
+                  </Button>
+                </div>
+              );
+            }}
+          </form.Field>
+        </div>
+      )}
+
+      {hasContainer && (
+        <div data-testid={`component-args-editor-${componentName}`}>
+          <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Args
+          </Label>
+          <form.Field name={`${blockPath}.args`} mode="array">
+            {(argsField: any) => {
+              const argsRows: string[] = argsField.state.value ?? [];
+              return (
+                <div className="mt-2 space-y-2">
+                  {argsRows.length === 0 && (
+                    <p className="text-xs italic text-muted-foreground">
+                      No args override.
+                    </p>
+                  )}
+                  {argsRows.map((_row, index) => {
+                    const itemPath = `${blockPath}.args.${index}` as const;
+                    return (
+                      <div
+                        key={`comp-${componentName}-args-${index}`}
+                        className="grid grid-cols-[1fr_auto] items-start gap-2"
+                      >
+                        <form.Field name={itemPath}>
+                          {(f: any) => (
+                            <ChangedFieldFrame
+                              name={itemPath}
+                              form={form}
+                              initial={initialArgs[index]}
+                              environment={envArgs[index]}
+                            >
+                              <Input
+                                data-testid={`comp-args-${componentName}-${index}`}
+                                value={f.state.value ?? ""}
+                                onChange={(e: any) =>
+                                  f.handleChange(e.target.value)
+                                }
+                                onBlur={f.handleBlur}
+                                placeholder="--verbose"
+                                autoComplete="off"
+                              />
+                            </ChangedFieldFrame>
+                          )}
+                        </form.Field>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Remove args entry ${index + 1} on ${componentName}`}
+                          onClick={() => argsField.removeValue(index)}
+                          data-testid={`comp-args-remove-${componentName}-${index}`}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    data-testid={`comp-args-add-${componentName}`}
+                    onClick={() => argsField.pushValue("")}
+                  >
+                    Add args entry
+                  </Button>
+                </div>
+              );
+            }}
+          </form.Field>
+        </div>
+      )}
 
       <FutureExtensionPlaceholder />
 
@@ -812,7 +833,7 @@ function ComponentOverrideBody({
   );
 }
 
-/** The "not applied" explanation shared by the containerless env var and image areas. */
+/** The "not applied" explanation shared by the containerless env var, image, command and args areas. */
 function noContainerText(subject: string): string {
   return `The driver declares no container for this component, so ${subject} can't be applied to it.`;
 }
@@ -869,6 +890,71 @@ function ContainerlessImage({
         data-testid={`comp-image-no-container-${componentName}`}
       >
         {noContainerText("the image override")} It can only be removed.
+      </p>
+    </div>
+  );
+}
+
+interface ContainerlessContainerOverrideProps {
+  componentName: string;
+  field: "command" | "args";
+  values: readonly string[];
+  onRemove: () => void;
+}
+
+/**
+ * Stored `command` or `args` override on a component without a component
+ * container. The backend rejects setting or changing it there, so it can only
+ * be removed; Remove sets `[]`, which the submit boundary omits (clear).
+ */
+function ContainerlessContainerOverride({
+  componentName,
+  field,
+  values,
+  onRemove,
+}: ContainerlessContainerOverrideProps) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {field === "command" ? "Command" : "Args"}
+      </Label>
+      <div
+        className="flex items-center justify-between gap-2 rounded-md border border-dashed border-amber-400 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30"
+        data-testid={`comp-${field}-readonly-${componentName}`}
+      >
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          {values.map((value, index) => (
+            <code
+              key={`${field}-${index}`}
+              className="break-all font-mono text-xs text-amber-900 dark:text-amber-200"
+            >
+              {value}
+            </code>
+          ))}
+          <Badge
+            data-testid={`comp-${field}-not-applied-${componentName}`}
+            variant="warning"
+            className="px-1.5 py-0 text-[10px]"
+          >
+            not applied
+          </Badge>
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-label={`Remove ${field} override for ${componentName}`}
+          onClick={onRemove}
+          data-testid={`comp-${field}-remove-${componentName}`}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+      <p
+        className="text-xs italic text-muted-foreground"
+        data-testid={`comp-${field}-no-container-${componentName}`}
+      >
+        {noContainerText(`the ${field} override`)} It can only be removed.
       </p>
     </div>
   );

@@ -184,6 +184,47 @@ describe("config-diff: diff()", () => {
     expect(diff(before, after, emptySchema).hasChanges).toBe(false);
   });
 
+  it.each([
+    ["command", "add", undefined, ["/bin/sh"]],
+    ["command", "change", ["/bin/sh"], ["/bin/bash"]],
+    ["command", "remove", ["/bin/sh"], []],
+    ["args", "add", [], ["-v"]],
+    ["args", "change", ["-v"], ["-v", "-x"]],
+    ["args", "remove", ["-v"], undefined],
+  ] as const)(
+    "emits a %s %s entry for %j -> %j on an existing block",
+    (field, kind, beforeList, afterList) => {
+      const before: UpdateDeploymentInput = {
+        components: [{ name: "server", envVars: [], [field]: beforeList }],
+      };
+      const after: UpdateDeploymentInput = {
+        components: [{ name: "server", envVars: [], [field]: afterList }],
+      };
+      const text = (list: readonly string[] | undefined) =>
+        list?.length ? JSON.stringify(list) : "";
+      expect(diff(before, after, emptySchema).entries).toEqual([
+        {
+          section: "componentOverrides",
+          path: `components[server].${field}`,
+          label: `Component "server" ${field}`,
+          before: text(beforeList),
+          after: text(afterList),
+          kind,
+        },
+      ]);
+    },
+  );
+
+  it("treats an empty command or args list like an unset one", () => {
+    const before: UpdateDeploymentInput = {
+      components: [{ name: "server", envVars: [] }],
+    };
+    const after: UpdateDeploymentInput = {
+      components: [{ name: "server", envVars: [], command: [], args: [] }],
+    };
+    expect(diff(before, after, emptySchema).hasChanges).toBe(false);
+  });
+
   it("treats toleration reorders as no-op, but a key-change as add+remove", () => {
     const before: UpdateDeploymentInput = {
       scheduling: {

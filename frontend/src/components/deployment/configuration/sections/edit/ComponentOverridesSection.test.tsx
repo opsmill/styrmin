@@ -438,6 +438,152 @@ describe("ComponentOverridesSection: image override", () => {
   });
 });
 
+describe("ComponentOverridesSection: command and args without a component container (FR-008)", () => {
+  const COMMAND = ["/bin/sh", "-c"];
+  const ARGS = ["migrate", "--all"];
+
+  it("offers no Command or Args editor", async () => {
+    renderSection({ components: [{ name: "migrate", envVars: [] }] });
+
+    await openComponent("migrate");
+
+    expect(screen.queryByTestId("component-command-editor-migrate")).toBeNull();
+    expect(screen.queryByTestId("component-args-editor-migrate")).toBeNull();
+    expect(screen.queryByTestId("comp-command-add-migrate")).toBeNull();
+    expect(screen.queryByTestId("comp-args-add-migrate")).toBeNull();
+    expect(screen.queryByTestId("comp-command-readonly-migrate")).toBeNull();
+    expect(screen.queryByTestId("comp-args-readonly-migrate")).toBeNull();
+  });
+
+  it("shows a stored command and args read-only with a not applied badge", async () => {
+    renderSection({
+      components: [
+        { name: "migrate", envVars: [], command: COMMAND, args: ARGS },
+      ],
+    });
+
+    await openComponent("migrate");
+
+    const commandRow = screen.getByTestId("comp-command-readonly-migrate");
+    expect(commandRow).toHaveTextContent("/bin/sh");
+    expect(commandRow).toHaveTextContent("-c");
+    const argsRow = screen.getByTestId("comp-args-readonly-migrate");
+    expect(argsRow).toHaveTextContent("migrate");
+    expect(argsRow).toHaveTextContent("--all");
+    for (const field of ["command", "args"]) {
+      expect(
+        screen.getByTestId(`comp-${field}-not-applied-migrate`),
+      ).toHaveTextContent(/^not applied$/);
+      expect(
+        screen.getByTestId(`comp-${field}-no-container-migrate`),
+      ).toHaveTextContent(
+        `The driver declares no container for this component, so the ${field} override can't be applied to it. It can only be removed.`,
+      );
+    }
+    expect(screen.queryByTestId("comp-command-migrate-0")).toBeNull();
+    expect(screen.queryByTestId("comp-args-migrate-0")).toBeNull();
+    expect(screen.queryByTestId("comp-command-add-migrate")).toBeNull();
+    expect(screen.queryByTestId("comp-args-add-migrate")).toBeNull();
+  });
+
+  it("Remove clears the stored command, then args, on submit", async () => {
+    const initial: UpdateDeploymentInput = {
+      components: [
+        { name: "migrate", envVars: [], command: COMMAND, args: ARGS },
+      ],
+    };
+    const { components, values } = renderSection(initial);
+    const apply = screen.getByTestId("drawer-review-apply-button");
+    expect(apply).toBeDisabled();
+
+    await openComponent("migrate");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Remove command override for migrate",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(components()).toEqual([
+        { name: "migrate", envVars: [], command: [], args: ARGS },
+      ]),
+    );
+    expect(componentsFormToInput(components())).toEqual([
+      { name: "migrate", envVars: [], args: ARGS },
+    ]);
+    expect(diff(initial, values(), []).entries).toEqual([
+      expect.objectContaining({
+        path: "components[migrate].command",
+        kind: "remove",
+        before: JSON.stringify(COMMAND),
+      }),
+    ]);
+    await waitFor(() => expect(apply).toBeEnabled());
+    expect(screen.queryByTestId("comp-command-readonly-migrate")).toBeNull();
+    expect(screen.getByTestId("comp-args-readonly-migrate")).toBeVisible();
+    expect(
+      screen.getByTestId("component-override-trigger-migrate"),
+    ).not.toHaveTextContent("command");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove args override for migrate" }),
+    );
+
+    await waitFor(() =>
+      expect(componentsFormToInput(components())).toEqual([
+        { name: "migrate", envVars: [] },
+      ]),
+    );
+    expect(screen.queryByTestId("comp-args-readonly-migrate")).toBeNull();
+    expect(screen.queryByTestId("component-command-editor-migrate")).toBeNull();
+    expect(screen.queryByTestId("component-args-editor-migrate")).toBeNull();
+  });
+
+  it("keeps the Command and Args editors on a component with a container", async () => {
+    const initial: UpdateDeploymentInput = {
+      components: [
+        { name: "server", envVars: [], command: ["/bin/sh"], args: ["-v"] },
+      ],
+    };
+    const { components, values } = renderSection(initial);
+
+    await openComponent("server");
+
+    expect(screen.getByTestId("component-command-editor-server")).toBeVisible();
+    expect(screen.getByTestId("component-args-editor-server")).toBeVisible();
+    expect(screen.getByTestId("comp-command-server-0")).toHaveValue("/bin/sh");
+    expect(screen.getByTestId("comp-args-server-0")).toHaveValue("-v");
+    expect(screen.queryByTestId("comp-command-readonly-server")).toBeNull();
+    expect(screen.queryByTestId("comp-args-readonly-server")).toBeNull();
+
+    fireEvent.change(screen.getByTestId("comp-args-server-0"), {
+      target: { value: "--verbose" },
+    });
+
+    await waitFor(() =>
+      expect(components()).toEqual([
+        {
+          name: "server",
+          envVars: [],
+          command: ["/bin/sh"],
+          args: ["--verbose"],
+        },
+      ]),
+    );
+    expect(diff(initial, values(), []).entries).toEqual([
+      expect.objectContaining({
+        path: "components[server].args",
+        kind: "change",
+        before: JSON.stringify(["-v"]),
+        after: JSON.stringify(["--verbose"]),
+      }),
+    ]);
+    await waitFor(() =>
+      expect(screen.getByTestId("drawer-review-apply-button")).toBeEnabled(),
+    );
+  });
+});
+
 describe("ComponentOverridesSection: orphaned override blocks", () => {
   it("removes an orphaned block, image override included, as a whole", async () => {
     const initial: UpdateDeploymentInput = {
