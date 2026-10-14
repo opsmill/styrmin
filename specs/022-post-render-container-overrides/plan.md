@@ -120,6 +120,7 @@ backend/tests/
 ├── unit/services/                            # write check, resolver, context
 ├── unit/db/test_drop_container_overrides_migration.py
 ├── unit/test_drivers_have_no_override_wiring.py   # SC-002
+├── unit/services/component_container/test_example_driver_overrides.py   # SC-001 over every example driver
 ├── integration/test_component_container_kustomize.py   # command/args cases
 ├── integration/test_container_override_migration_parity.py   # SC-005 (+ fixtures/legacy_drivers/)
 ├── functional/graphql/test_container_overrides_propagation.py
@@ -132,7 +133,8 @@ frontend/src/components/deployment/configuration/sections/edit/
 driver/examples/{simple-app,infrahub,infrahub-enterprise}/   # values.j2.yml, driver.styrmin.yml, version bump
 
 docs/docs/drivers/{migrating-container-overrides.md (new), creating-a-driver.md, context.md}
-docs/docs/concepts-and-architecture/glossary.md, docs/docs/changelog.md
+docs/docs/concepts-and-architecture/glossary.md (Component overrides, Component container), docs/docs/changelog.md
+docs/docs/reference/styrminctl.md (apply note on component override checks)
 dev/adr/0069-container-command-args-by-post-render.md (new), dev/adr/0045-…md (status note), dev/adr/0058-…md (link)
 dev/guides/driver-container-override-consumption.md (deleted) and its links
 dev/knowledge/backend/{services,data-models,api,hooks-and-actions}.md, dev/knowledge/frontend/deployment-configuration.md
@@ -145,11 +147,11 @@ CONTEXT.md, changelog/457.removed.md, changelog/457.changed.md
 
 The user stories ship together (spec Context), but the work has a natural order:
 
-1. **Foundation**: `override_applies`, `ApplicableOverrides`, `ContainerMergePatch` with `command`/`args`, patch builder condition, primitives switch-over. Unit tests.
-2. **User Story 1 (P1)**: integration tests on kustomize; migrate the three example drivers and bump versions; E2E extension. Without step 3 the old filters still work, so this step can land first in the branch.
+1. **Foundation**: `override_applies`, `ApplicableOverrides`, `ContainerMergePatch` with `command`/`args` serialised by `yaml.dump` only, patch builder condition (log booleans, never values), primitives switch-over. Unit tests, including a value with a newline and `- op:`.
+2. **User Story 1 (P1)**: integration tests on kustomize; SC-001 test over every example driver; migrate the three example drivers and bump versions; E2E extension inside the existing `test_us2` and `test_us3` nodes. Without step 3 the old filters still work, so this step can land first in the branch.
 3. **User Story 2 (P2)**: retire the filters with the new message and URL; remove `spec.container_overrides` from model, loader, validators, persistence, database (revision + migration test), GraphQL and SDK; parity test; SC-002 test.
 4. **User Story 3 (P3)**: write check for `command`/`args`; `isApplicable` read field and propagation test; frontend editor gating and test.
-5. **Documentation and changelog**: migration guide, driver docs, glossary, changelog page and fragments, ADR-069 and status notes on ADR-045/058, CONTEXT.md, `dev/knowledge`, delete the old guide.
+5. **Documentation and changelog**: migration guide (including that pods on an unmigrated driver version keep running while the render fails), driver docs, glossary, `styrminctl` reference, changelog page and fragments, ADR-069 and status notes on ADR-045/058, CONTEXT.md, `dev/knowledge`, delete the old guide.
 6. **Verification**: regenerate schema and SDK, `format lint`, unit/functional/integration suites, frontend tests, E2E with recorded PASS evidence (Constitution §V).
 
 ## Risks

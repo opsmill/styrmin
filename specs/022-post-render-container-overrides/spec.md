@@ -118,6 +118,8 @@ Covers needs 4, 5 and 9. A user cannot add or change `command` or `args` on a co
 - The first time a `command` or `args` override applies, the component container moves to `containers[0]`, as it does for env vars and images ([ADR-057](../../dev/adr/0057-post-render-component-overrides.md) §3). This changes the default container that `kubectl logs` reads.
 - The component's label matches several workloads: the component container must exist in each one, or the render fails ([ADR-058](../../dev/adr/0058-image-overrides-and-component-container-guard.md)).
 - A driver upgrade removes the component: the override is kept, reported as orphaned, and never applied.
+- A driver declares a component container on a component whose workload is a `DaemonSet`, `Job` or `CronJob`: Styrmin patches only `Deployment` and `StatefulSet` workloads, so the override does not reach that workload. This is the same as for env vars and image overrides, and patching other kinds is out of scope.
+- A deployment is pinned to a driver version that calls the retired filters: its render fails and Styrmin does not apply the HelmRelease, so the pods that run keep running. Only changes to the deployment are blocked until the user moves it to a migrated driver version.
 - Styrmin is rolled back to an earlier version after migrated drivers are loaded: stored `command` and `args` overrides are kept but not applied, because the migrated templates no longer call the filters.
 - A deployment pinned to an old version of `simple-app`, `infrahub` or `infrahub-enterprise` fails its next render, also when it has no override set. These three are the only in-repo drivers that call the filters.
 - Some deployments may store an override that their template never passed to the chart, for example `command` on the infrahub `server` component. When the user moves such a deployment to a migrated driver version, Styrmin applies the override for the first time. The migration guide and the changelog entry tell users to review their stored `command` and `args` overrides before the move.
@@ -152,9 +154,9 @@ Covers needs 4, 5 and 9. A user cannot add or change `command` or `args` on a co
 - **FR-011**: System MUST NOT add a new error code. `RETIRED_TEMPLATE_FILTER` covers the two filters, `COMPONENT_CONTAINER_NOT_DECLARED` gains the `override` values `command` and `args`, and `COMPONENT_CONTAINER_NOT_FOUND` also fires when `command` or `args` is the only override.
   - Verified by: the tests of FR-004, FR-005 and FR-007.
 - **FR-012**: The documentation MUST change in the same release (Constitution §VII):
-  - a new user-facing page for migrating container overrides, which the `RETIRED_TEMPLATE_FILTER` error links to. It follows the sections of [Migrating Env Var Wiring](../../docs/docs/drivers/migrating-env-vars.md) and includes the step to review stored overrides. The env var migration page stays separate, so the URL in the existing env var error stays valid;
+  - a new user-facing page for migrating container overrides, which the `RETIRED_TEMPLATE_FILTER` error links to. It follows the sections of [Migrating Env Var Wiring](../../docs/docs/drivers/migrating-env-vars.md), includes the step to review stored overrides, and states that pods on an unmigrated driver version keep running while their render fails. The env var migration page stays separate, so the URL in the existing env var error stays valid;
   - a rewritten section on container `command` and `args` overrides in [Creating a driver](../../docs/docs/drivers/creating-a-driver.md);
-  - updated concept pages and user-facing glossary entries that mention the filters or the block;
+  - updated concept pages, reference pages and user-facing glossary entries that mention the filters, the block or which overrides need a component container;
   - deletion of the [driver container override guide](../../dev/guides/driver-container-override-consumption.md) and its links;
   - a new ADR that supersedes [ADR-045](../../dev/adr/0045-container-override-no-layering-and-omit-marker.md) §2 (the empty-list marker) and §5 (the `null` marker) and extends ADR-058 to `command` and `args`. ADR-045 §1, §3 and §4 stay valid;
   - in [`CONTEXT.md`](../../CONTEXT.md), updated Component overrides, Component container and Container override entries;
@@ -176,7 +178,7 @@ No new entity is needed. Names follow [`CONTEXT.md`](../../CONTEXT.md).
 - **SC-001**: For every in-repo component that declares a component container, a user can set `command` and `args`, and the pod runs with them after one reconcile. This includes `command` on the infrahub `server` and `task-worker` components.
 - **SC-002**: No driver in the repository contains code for `command` or `args` overrides, either in `values.j2.yml` or in `driver.styrmin.yml`.
 - **SC-003**: After a user clears an override, the component container's `command` and `args` equal the chart's rendered values in every tested case.
-- **SC-004**: No `command` or `args` override is reported as applicable without reaching the pod. A value that cannot apply is either rejected on write or reported with `isApplicable: false`.
+- **SC-004**: No `command` or `args` override is reported as applicable without reaching the pods of the component's `Deployment` or `StatefulSet` workloads. A value that cannot apply is either rejected on write or reported with `isApplicable: false`.
 - **SC-005**: A deployment that had an override before the change, and moves to a migrated driver version, runs with the same `command` and `args` as before the move.
 
 ## Verification Approach

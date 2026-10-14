@@ -19,6 +19,7 @@ Every unknown in the plan's Technical Context is resolved below. Each decision l
   - a wrong container name failed the render at the guard's `remove .../image` op, which `parse_guard_failure` turns into `COMPONENT_CONTAINER_NOT_FOUND`.
 - One patch per container for every "value" override keeps one ordering rule (ADR-057 §3) and one place where the container is named.
 - A clear needs no marker: with no stored value the field is absent from the patch, so the chart's rendered value reaches the pod (Constitution §I, the same output for the same config).
+- The patch is serialised with `yaml.dump` only, as the env entries are today. User strings are never formatted into YAML text (unlike `GenericPatch` and `SpecPatch`), so a value that contains a newline and `- op: remove` stays one string and cannot add patch operations. A unit test passes such a value (critique E3).
 
 **Alternatives considered**:
 
@@ -49,7 +50,7 @@ The patch builder and the action primitives call `applicable_overrides`. The Gra
 
 ## D-003: When the component container patches are built
 
-**Decision**: `build_component_container_patches` builds the merge patch and the guard for a component when `applicable_overrides(...).is_empty` is false, so a component whose only override is `command` or `args` gets both patches. The log line gains `command_set` and `args_set` booleans.
+**Decision**: `build_component_container_patches` builds the merge patch and the guard for a component when `applicable_overrides(...).is_empty` is false, so a component whose only override is `command` or `args` gets both patches. The log line gains `command_set` and `args_set` booleans. It never logs the values, because `args` often carry flags such as `--password=...` (critique E4).
 
 **Rationale**: FR-004 requires `COMPONENT_CONTAINER_NOT_FOUND` also when `command` or `args` is the only override. The guard runs only when the patches are built.
 
@@ -139,9 +140,11 @@ All their components that accepted an override already declare a component conta
   - the driver loader (a file with `spec.container_overrides` fails like any unknown key);
   - the migration revision.
 - Integration tests in [`test_component_container_kustomize.py`](../../backend/tests/integration/test_component_container_kustomize.py) on real `kubectl kustomize`: `args`-only keeps the chart `command`; `command` + `args` replace both; other containers and init containers unchanged; wrong container name with only `args` fails with a guard key that `parse_guard_failure` reads (FR-002, FR-004).
+- Test for SC-001 over every example driver (critique E6): load each `driver/examples/*/driver.styrmin.yml`, set `command` and `args` on every component with a component container, and assert that the merge patch names that container and carries both lists. This covers `command` on the infrahub `server` and `task-worker` components, which the old templates could not send.
+- Test for SC-002: no file under `driver/` contains `component_command`, `component_args` or `container_overrides`.
 - Contract test for SC-005: render the same stored config with the pre-migration `values.j2.yml` of each example driver (vendored as test fixtures, with the old filter code kept in the test) and with the migrated driver plus the post-render patches, and compare the component container's `command` and `args`. For `simple-app` the comparison runs `helm template` on the local chart (`driver/examples/simple-app/src/helm`) and `kubectl kustomize`. For `infrahub` and `infrahub-enterprise` the chart is not in the repository, so the test compares the value the old template sends to the chart with the list in the merge patch, which A-002 makes equivalent.
 - GraphQL propagation test in [`test_container_overrides_propagation.py`](../../backend/tests/functional/graphql/test_container_overrides_propagation.py): `isApplicable` true, false for a component without a container, false for an orphan; `COMPONENT_CONTAINER_NOT_DECLARED` for `command` and `args` through `updateDeployment` and `deploy`; the two driver-doc tests are deleted.
-- E2E: extend [`test_deployment_container_overrides.py`](../../backend/tests/e2e/test_deployment_container_overrides.py) on `shard_configuration` (see [quickstart.md](quickstart.md)).
+- E2E: extend [`test_deployment_container_overrides.py`](../../backend/tests/e2e/test_deployment_container_overrides.py) on `shard_configuration` (see [quickstart.md](quickstart.md)). The "change `command`" step goes inside `test_us2` and the comparison with the chart's spec inside `test_us3`; no test node is added, because each reconcile adds about one minute to the shard (critique E7).
 
 **Rationale**: the PRD's testing decisions; tests read rendered workloads or pod specs, not patch text, except where the unit under test is the patch text itself.
 

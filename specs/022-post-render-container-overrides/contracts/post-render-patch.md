@@ -51,6 +51,7 @@ Both target `kind` + the component's label selector, in this order, after every 
 | The component container moves to `containers[0]` | integration (existing behaviour, ADR-057 §3) |
 | A wrong container name fails the render at the guard, also with only `command` or `args` set; `parse_guard_failure` returns `(component, container)` | integration, FR-004 |
 | Strings such as `yes`, `8000`, `""`, `null`, `$(VAR)` reach the container as the same strings | unit (patch text) + integration |
+| A value with a newline and `- op: remove` stays one string: the patch is built with `yaml.dump`, never by formatting strings | unit (patch text) |
 | Env-only output is unchanged by this feature | existing integration test `TestEnvOnly` |
 
 ## Values that pass through unchanged
