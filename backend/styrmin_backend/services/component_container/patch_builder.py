@@ -1,10 +1,11 @@
-"""Translation of component-container overrides (env vars, image) to post-renderer patches.
+"""Translation of component-container overrides to post-renderer patches.
 
-For each component with a component container and at least one applicable override, emits per
-workload kind a :class:`ContainerEnvPatch` naming the container (with env entries when env vars
-apply), then a :class:`ComponentContainerPatch` guard that sets the image override and fails the
-render when the container is missing. The agent appends these to the HelmRelease
-``spec.postRenderers`` after every other patch (018 contracts/post-render-patch.md, ADR-057).
+For each component with at least one applicable override (env vars, image, ``command`` or
+``args``), emits per workload kind a :class:`ContainerMergePatch` naming the container, with the
+env entries, ``command`` and ``args`` that apply, then a :class:`ComponentContainerPatch` guard
+that sets the image override and fails the render when the container is missing. The agent
+appends these to the HelmRelease ``spec.postRenderers`` after every other patch (022
+contracts/post-render-patch.md, ADR-057).
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from loguru import logger
 
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     ComponentContainerPatch,
-    ContainerEnvPatch,
+    ContainerMergePatch,
     Target,
     TargetPatch,
 )
@@ -22,8 +23,7 @@ from styrmin_backend.services.component_container.exceptions import (
     ComponentContainerPatchRenderingError,
 )
 from styrmin_backend.services.component_container.overrides import (
-    applicable_env,
-    applicable_image,
+    applicable_overrides,
 )
 
 #: Workload kinds whose pod template receives component-container patches.
@@ -49,10 +49,10 @@ def _validate_renders(patches: list[TargetPatch]) -> list[TargetPatch]:
 def build_component_container_patches(context: GlobalContext) -> list[TargetPatch]:
     """Build component-container post-render patches for every applicable component.
 
-    Skips components without a component container or without an applicable override. Image
-    overrides are substituted with ``context.app.version`` and validated, raising
-    :class:`InvalidImageReferenceError` (reason ``after_substitution``) when the result is not a
-    valid reference. Disabled components still get patches; their replica count is governed by
+    Skips components with no applicable override, which includes every component without a
+    component container. Image overrides are substituted with ``context.app.version`` and
+    validated, raising :class:`InvalidImageReferenceError` (reason ``after_substitution``) when
+    the result is not a valid reference. Disabled components still get patches; their replica count is governed by
     the component state patch.
     """
     patches: list[TargetPatch] = []
@@ -63,9 +63,8 @@ def build_component_container_patches(context: GlobalContext) -> list[TargetPatc
         container = component.config.container
         if container is None:
             continue
-        env = applicable_env(component)
-        image = applicable_image(name, component, context.app.version)
-        if not env and image is None:
+        overrides = applicable_overrides(name, component, context.app.version)
+        if overrides.is_empty:
             continue
 
         selector = component.config.identifier.label.label_selectable()
@@ -75,14 +74,23 @@ def build_component_container_patches(context: GlobalContext) -> list[TargetPatc
             component_patches.append(
                 TargetPatch(
                     target=Target(kind=kind, label_selector=selector),
-                    patch=ContainerEnvPatch(container=container, env=env, kind=kind),
+                    patch=ContainerMergePatch(
+                        container=container,
+                        env=overrides.env,
+                        command=overrides.command,
+                        args=overrides.args,
+                        kind=kind,
+                    ),
                 )
             )
             component_patches.append(
                 TargetPatch(
                     target=Target(kind=kind, label_selector=selector),
                     patch=ComponentContainerPatch(
-                        component=name, container=container, image=image, kind=kind
+                        component=name,
+                        container=container,
+                        image=overrides.image,
+                        kind=kind,
                     ),
                 )
             )
@@ -90,10 +98,13 @@ def build_component_container_patches(context: GlobalContext) -> list[TargetPatc
         logger.info(
             "component_container_patches_built component={component} "
             "container={container} env_var_count={env_var_count} "
-            "image_override={image_override}",
+            "image_override={image_override} command_set={command_set} "
+            "args_set={args_set}",
             component=name,
             container=container,
-            env_var_count=len(env),
-            image_override=image is not None,
+            env_var_count=len(overrides.env),
+            image_override=overrides.image is not None,
+            command_set=overrides.command is not None,
+            args_set=overrides.args is not None,
         )
     return patches

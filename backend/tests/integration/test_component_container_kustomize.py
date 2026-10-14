@@ -21,7 +21,7 @@ import pytest
 import yaml
 
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
-    ContainerEnvPatch,
+    ContainerMergePatch,
     TargetPatch,
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
@@ -265,7 +265,9 @@ class TestEnvOnly:
         patches = build_component_container_patches(
             _context(env_vars={"LOG_LEVEL": "debug", "NEW_VAR": "x"})
         )
-        merges_only = [tp for tp in patches if isinstance(tp.patch, ContainerEnvPatch)]
+        merges_only = [
+            tp for tp in patches if isinstance(tp.patch, ContainerMergePatch)
+        ]
         assert len(merges_only) < len(patches)
 
         with_guard = _kustomize(_resources(), patches)

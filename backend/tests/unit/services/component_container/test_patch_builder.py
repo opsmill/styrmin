@@ -1,9 +1,10 @@
-"""Unit tests for ``build_component_container_patches`` (018-component-image-overrides, T007).
+"""Unit tests for ``build_component_container_patches`` (018 T007, 022 T009).
 
-Pins contracts/post-render-patch.md: per workload kind, a strategic merge naming the component
-container (with env entries when env vars apply) followed by the JSON6902 guard, which also sets
-the image when an override applies. The env cases moved here from the 017 env-var builder tests;
-the scope cases resolve env vars through the context service before building.
+Pins 022 contracts/post-render-patch.md: per workload kind, a strategic merge naming the
+component container (with env entries, ``command`` and ``args`` when they apply) followed by the
+JSON6902 guard, which also sets the image when an override applies. The env cases moved here from
+the 017 env-var builder tests; the scope cases resolve env vars through the context service before
+building.
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ from loguru import logger
 
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     ComponentContainerPatch,
-    ContainerEnvPatch,
+    ContainerMergePatch,
+    TargetPatch,
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.context.models.components import (
@@ -27,6 +29,7 @@ from styrmin_backend.context.models.components import (
     ComponentsContext,
     Identifier,
     LabelIdentifier,
+    ResolvedComponentContainerOverride,
     ResolvedComponentEnvVars,
     ResolvedComponentImageOverride,
 )
@@ -52,6 +55,7 @@ from styrmin_backend.services.component_container.patch_builder import (
     build_component_container_patches,
 )
 from styrmin_backend.services.context import (
+    _populate_component_container_overrides,
     _populate_component_env_vars,
     _populate_component_image_overrides,
 )
@@ -73,6 +77,9 @@ def _component(  # noqa: PLR0913
     is_orphaned: bool = False,
     image: str | None = None,
     image_orphaned: bool = False,
+    command: list[str] | None = None,
+    args: list[str] | None = None,
+    container_orphaned: bool = False,
 ) -> ComponentContext:
     return ComponentContext(
         name=name,
@@ -91,6 +98,13 @@ def _component(  # noqa: PLR0913
         image_override=(
             ResolvedComponentImageOverride(reference=image, is_orphaned=image_orphaned)
             if image is not None
+            else None
+        ),
+        container_override=(
+            ResolvedComponentContainerOverride(
+                command=command, args=args, is_orphaned=container_orphaned
+            )
+            if command is not None or args is not None
             else None
         ),
     )
@@ -131,11 +145,11 @@ def _context(
     )
 
 
-def _env_patches(context: GlobalContext) -> list[ContainerEnvPatch]:
+def _merge_patches(context: GlobalContext) -> list[ContainerMergePatch]:
     return [
         tp.patch
         for tp in build_component_container_patches(context)
-        if isinstance(tp.patch, ContainerEnvPatch)
+        if isinstance(tp.patch, ContainerMergePatch)
     ]
 
 
@@ -171,9 +185,9 @@ class TestEnvOnly:
         patches = build_component_container_patches(context)
 
         assert [(tp.target.kind, type(tp.patch)) for tp in patches] == [
-            ("Deployment", ContainerEnvPatch),
+            ("Deployment", ContainerMergePatch),
             ("Deployment", ComponentContainerPatch),
-            ("StatefulSet", ContainerEnvPatch),
+            ("StatefulSet", ContainerMergePatch),
             ("StatefulSet", ComponentContainerPatch),
         ]
         for tp in patches:
@@ -181,7 +195,7 @@ class TestEnvOnly:
             assert tp.target.name is None
             assert tp.patch.kind == tp.target.kind
             assert tp.patch.container == "simple-app"
-            if isinstance(tp.patch, ContainerEnvPatch):
+            if isinstance(tp.patch, ContainerMergePatch):
                 assert tp.patch.env == {"LOG_LEVEL": "debug"}
             else:
                 assert isinstance(tp.patch, ComponentContainerPatch)
@@ -244,12 +258,12 @@ class TestImageOverride:
         patches = build_component_container_patches(context)
 
         assert [(tp.target.kind, type(tp.patch)) for tp in patches] == [
-            ("Deployment", ContainerEnvPatch),
+            ("Deployment", ContainerMergePatch),
             ("Deployment", ComponentContainerPatch),
-            ("StatefulSet", ContainerEnvPatch),
+            ("StatefulSet", ContainerMergePatch),
             ("StatefulSet", ComponentContainerPatch),
         ]
-        assert [p.env for p in _env_patches(context)] == [{}, {}]
+        assert [p.env for p in _merge_patches(context)] == [{}, {}]
         assert [p.image for p in _guard_patches(context)] == [_PATCHED, _PATCHED]
         merge = yaml.safe_load(patches[0].render_value()["patch"])
         assert merge["spec"]["template"]["spec"]["containers"] == [
@@ -262,7 +276,7 @@ class TestImageOverride:
         )
 
         assert len(build_component_container_patches(context)) == 4
-        assert [p.env for p in _env_patches(context)] == [{"LOG_LEVEL": "debug"}] * 2
+        assert [p.env for p in _merge_patches(context)] == [{"LOG_LEVEL": "debug"}] * 2
         assert [p.image for p in _guard_patches(context)] == [_PATCHED] * 2
 
     def test_app_version_token_resolves_from_context(self) -> None:
@@ -311,7 +325,7 @@ class TestImageOverride:
             _component("server", env_vars={"A": "1"}, is_orphaned=True, image=_PATCHED)
         )
 
-        assert [p.env for p in _env_patches(context)] == [{}, {}]
+        assert [p.env for p in _merge_patches(context)] == [{}, {}]
         assert [p.image for p in _guard_patches(context)] == [_PATCHED] * 2
 
     def test_image_on_component_without_container_is_not_applied_nor_validated(
@@ -325,6 +339,98 @@ class TestImageOverride:
         assert build_component_container_patches(context) == []
 
 
+def _merge_container(tp: TargetPatch) -> dict[str, Any]:
+    doc = yaml.safe_load(tp.render_value()["patch"])
+    containers = doc["spec"]["template"]["spec"]["containers"]
+    assert len(containers) == 1
+    return containers[0]
+
+
+class TestCommandArgs:
+    """022 FR-002/FR-004: ``command`` or ``args`` alone gets the merge and the guard."""
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("args", ["--log-level", "debug"]), ("command", ["/bin/sh", "-c"])],
+    )
+    def test_single_field_gets_one_merge_and_one_guard_per_kind(
+        self, field: str, value: list[str]
+    ) -> None:
+        context = _context(
+            _component(
+                "server",
+                label="simple-app",
+                container="simple-app",
+                **{field: value},
+            )
+        )
+
+        patches = build_component_container_patches(context)
+
+        assert [(tp.target.kind, type(tp.patch)) for tp in patches] == [
+            ("Deployment", ContainerMergePatch),
+            ("Deployment", ComponentContainerPatch),
+            ("StatefulSet", ContainerMergePatch),
+            ("StatefulSet", ComponentContainerPatch),
+        ]
+        for merge in (patches[0], patches[2]):
+            assert _merge_container(merge) == {"name": "simple-app", field: value}
+        assert [p.image for p in _guard_patches(context)] == [None, None]
+        assert [p.container for p in _guard_patches(context)] == ["simple-app"] * 2
+
+    @pytest.mark.parametrize(
+        "component",
+        [
+            _component(
+                "server", command=["run"], args=["--x"], container_orphaned=True
+            ),
+            _component("server", container=None, command=["run"], args=["--x"]),
+        ],
+        ids=["orphaned", "no-container"],
+    )
+    def test_stored_values_that_do_not_apply_get_no_patch(
+        self, component: ComponentContext
+    ) -> None:
+        assert build_component_container_patches(_context(component)) == []
+
+    def test_all_overrides_share_one_merge_and_one_guard_per_kind(self) -> None:
+        context = _context(
+            _component(
+                "server",
+                env_vars={"LOG_LEVEL": "debug"},
+                image=_PATCHED,
+                command=["/bin/sh", "-c"],
+                args=["run"],
+            )
+        )
+
+        patches = build_component_container_patches(context)
+
+        assert len(patches) == 4
+        for merge in (patches[0], patches[2]):
+            assert _merge_container(merge) == {
+                "name": "server",
+                "env": [{"name": "LOG_LEVEL", "value": "debug", "valueFrom": None}],
+                "command": ["/bin/sh", "-c"],
+                "args": ["run"],
+            }
+        assert [p.image for p in _guard_patches(context)] == [_PATCHED] * 2
+
+    def test_orphaned_container_override_keeps_other_overrides(self) -> None:
+        context = _context(
+            _component(
+                "server",
+                env_vars={"A": "1"},
+                command=["run"],
+                container_orphaned=True,
+            )
+        )
+
+        assert [(p.env, p.command, p.args) for p in _merge_patches(context)] == [
+            ({"A": "1"}, None, None)
+        ] * 2
+
+
 def _rendered_from_config(deployment_config: dict[str, Any]) -> GlobalContext:
     """A fresh context resolved from the stored config, as every render builds one."""
     context = _context(_component("server", label="simple-app", container="simple-app"))
@@ -332,6 +438,9 @@ def _rendered_from_config(deployment_config: dict[str, Any]) -> GlobalContext:
         context=context, environment_config=None, deployment_config=deployment_config
     )
     _populate_component_image_overrides(
+        context=context, deployment_config=deployment_config
+    )
+    _populate_component_container_overrides(
         context=context, deployment_config=deployment_config
     )
     return context
@@ -355,12 +464,34 @@ class TestClearedOverride:
 
         assert build_component_container_patches(_rendered_from_config(cleared)) == []
 
+    @pytest.mark.parametrize(
+        "cleared",
+        [
+            {},
+            {"components": {}},
+            {"components": {"server": {}}},
+            {"components": {"server": {"command": None, "args": None}}},
+        ],
+        ids=["no-config", "block-dropped", "block-empty", "both-none"],
+    )
+    def test_cleared_command_and_args_yield_no_patch(
+        self, cleared: dict[str, Any]
+    ) -> None:
+        overridden = _rendered_from_config(
+            {"components": {"server": {"command": ["run"], "args": ["--x"]}}}
+        )
+        assert [(p.command, p.args) for p in _merge_patches(overridden)] == [
+            (["run"], ["--x"])
+        ] * 2
+
+        assert build_component_container_patches(_rendered_from_config(cleared)) == []
+
     def test_cleared_image_with_env_vars_keeps_env_only_guard(self) -> None:
         context = _rendered_from_config(
             {"components": {"server": {"env_vars": {"LOG_LEVEL": "debug"}}}}
         )
 
-        assert [p.env for p in _env_patches(context)] == [{"LOG_LEVEL": "debug"}] * 2
+        assert [p.env for p in _merge_patches(context)] == [{"LOG_LEVEL": "debug"}] * 2
         assert [p.image for p in _guard_patches(context)] == [None, None]
 
 
@@ -380,7 +511,7 @@ def _env_by_selector(context: GlobalContext) -> dict[str | None, dict[str, str]]
     return {
         tp.target.label_selector: tp.patch.env
         for tp in build_component_container_patches(context)
-        if isinstance(tp.patch, ContainerEnvPatch)
+        if isinstance(tp.patch, ContainerMergePatch)
     }
 
 
@@ -472,11 +603,13 @@ class TestSkips:
 
 
 class TestRenderFailure:
-    @pytest.mark.parametrize("patch_type", [ContainerEnvPatch, ComponentContainerPatch])
+    @pytest.mark.parametrize(
+        "patch_type", [ContainerMergePatch, ComponentContainerPatch]
+    )
     def test_serialisation_failure_raises_typed_operation_failed(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        patch_type: type[ContainerEnvPatch | ComponentContainerPatch],
+        patch_type: type[ContainerMergePatch | ComponentContainerPatch],
     ) -> None:
         def _boom(self: object) -> str:
             raise yaml.representer.RepresenterError("cannot represent")
@@ -503,6 +636,8 @@ class TestLogging:
             _component("server", env_vars={"SECRET_TOKEN": "s3cr3t-value", "B": "2"}),
             _component("worker", image=_PATCHED),
             _component("database", container=None, env_vars={"A": "1"}),
+            _component("migrate", args=["--password=s3cr3t-arg"]),
+            _component("cache", command=["/bin/s3cr3t-cmd"], args=["--x"]),
         )
 
         build_component_container_patches(context)
@@ -518,14 +653,34 @@ class TestLogging:
                 "container": "server",
                 "env_var_count": 2,
                 "image_override": False,
+                "command_set": False,
+                "args_set": False,
             },
             {
                 "component": "worker",
                 "container": "worker",
                 "env_var_count": 0,
                 "image_override": True,
+                "command_set": False,
+                "args_set": False,
+            },
+            {
+                "component": "migrate",
+                "container": "migrate",
+                "env_var_count": 0,
+                "image_override": False,
+                "command_set": False,
+                "args_set": True,
+            },
+            {
+                "component": "cache",
+                "container": "cache",
+                "env_var_count": 0,
+                "image_override": False,
+                "command_set": True,
+                "args_set": True,
             },
         ]
         for line in lines:
-            assert "s3cr3t-value" not in line["message"]
+            assert "s3cr3t" not in line["message"]
             assert _PATCHED not in line["message"]
