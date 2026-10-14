@@ -137,8 +137,10 @@ Per-component configuration. A driver declares its components in
 `driver.styrmin.yml`; this is where the resolved per-component values
 end up at runtime: the component's definition under
 `components.<name>.config` (including its declared `container`), its
-resolved env vars under `components.<name>.env_vars.config`, and its
-image override under `components.<name>.image_override`.
+resolved env vars under `components.<name>.env_vars.config`, its
+image override under `components.<name>.image_override`, and its
+container `command` and `args` override under
+`components.<name>.container_override`.
 
 May be `None` if the driver has no per-component configuration.
 
@@ -171,6 +173,18 @@ user set one, and it is applied only when the component declares a
 component container. Its `reference` is the stored string, with any
 `{{ app.version }}` token not yet substituted. Don't write it into a
 chart image key; Styrmin already sets the image.
+
+#### Container overrides are read-only data
+
+Styrmin applies a user's container `command` and `args` override to the
+component container after the chart renders, so templates do not pass
+it to the chart. `components.<name>.container_override` is present only when the user
+set `command` or `args`, and it is applied only when the component
+declares a component container. Its `command` and `args` are lists, or
+`None` for a field the user did not set. Don't write them into a chart
+`command` or `args` key: Styrmin already applies them, and when no
+override is set the chart key would no longer hold the chart's own
+value.
 
 #### `parameters`
 
@@ -242,13 +256,12 @@ Notice the typical patterns:
   declared container without template code; the `component_env_vars`
   filter is removed (see
   [Migrating env var wiring](./migrating-env-vars.md)).
-- **`components | component_command("<name>")`** /
-  **`components | component_args("<name>")`** as Jinja filters to read a
-  user's per-component container `command`/`args` override. Each returns
-  the list or **`[]`** when unset; emit the keys unconditionally and guard
-  consumption in your chart with `{{- with .Values.command }}` so an empty list
-  falls through to the image/chart default. See
-  [Creating a driver](./creating-a-driver.md) for the canonical pattern.
+- **No `command` or `args` wiring.** A user's container `command` and
+  `args` overrides reach each component's declared container without
+  template code. The `component_command` and `component_args` filters are
+  retired: a template that calls either one fails to render with
+  `RETIRED_TEMPLATE_FILTER` (see
+  [Migrating container overrides](./migrating-container-overrides.md)).
 
 ### Using context in an action
 

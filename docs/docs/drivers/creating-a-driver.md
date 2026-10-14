@@ -208,12 +208,14 @@ already sets is better than fighting it.
 
 The optional **`container`** field names the **component container**:
 the one container in the component's pod that receives the per-component
-overrides users set on a deployment: env vars and
-[image overrides](../concepts-and-architecture/image-overrides.md).
-Styrmin applies both after the chart renders. Env vars merge in by name,
-so every env entry the chart ships survives and a user value with the
-same name replaces the chart's; an image override replaces the
-container's image. Your `values.j2.yml` mentions neither.
+overrides users set on a deployment: env vars,
+[image overrides](../concepts-and-architecture/image-overrides.md), and
+container `command` and `args` overrides. Styrmin applies them after the
+chart renders. Env vars merge in by name, so every env entry the chart
+ships survives and a user value with the same name replaces the chart's;
+an image override replaces the container's image; a `command` or `args`
+override replaces that whole list. Your `values.j2.yml` mentions none of
+them.
 
 - Use the application container's name from the rendered chart (from
   Step 1's `helm install --dry-run`), not a sidecar's.
@@ -222,22 +224,24 @@ container's image. Your `values.j2.yml` mentions neither.
   against the workload's own `metadata.labels`, so the chart must label
   the workload, not only its pods (`podLabels` alone is not enough; many
   charts also expose a `labels` or `commonLabels` value).
-- A wrong name fails the reconcile the first time a user sets an env var
-  or an image override on that component. Styrmin never adds a
-  container: the deployment fails with `COMPONENT_CONTAINER_NOT_FOUND`
-  and a message naming the component and the container.
+- A wrong name fails the reconcile the first time any override applies
+  to that component, including a `command` or `args` override alone.
+  Styrmin never adds a container: the deployment fails with
+  `COMPONENT_CONTAINER_NOT_FOUND` and a message naming the component and
+  the container.
 - Without `container`, the component accepts no component-scope env
-  vars and no image override, and deployment- or environment-scope env
-  vars skip it.
+  vars, no image override and no `command` or `args` override, and
+  deployment- or environment-scope env vars skip it.
 
 Overrides reach only this container: not other containers in the pod,
-not init containers, and not chart `Job`s or `CronJob`s. Once an env var
-or an image override applies, the component container moves to the
-first position in the pod, which changes the default container of
-`kubectl logs` for multi-container pods. In the container's env list,
-user entries come before the chart's. See
-[Migrating env var wiring](./migrating-env-vars.md) if your driver used
-the removed `component_env_vars` filter.
+not init containers, and not chart `Job`s or `CronJob`s. Once any
+override applies, the component container moves to the first position
+in the pod, which changes the default container of `kubectl logs` for
+multi-container pods. In the container's env list, user entries come
+before the chart's. See [Migrating env var wiring](./migrating-env-vars.md)
+if your driver used the removed `component_env_vars` filter, and
+[Migrating container overrides](./migrating-container-overrides.md) if
+it used the retired `component_command` or `component_args` filter.
 
 ### Step 4: Configure backups
 
@@ -313,78 +317,30 @@ Patterns to know:
   the chart's `env` or `extraEnv` keys: Helm replaces lists, so that
   drops the chart's own env defaults.
 
-#### Container `command` / `args` overrides (optional)
+#### Container `command` and `args` overrides
 
-To let a user override a component's container entrypoint or args for one
-deployment — without forking your driver — emit the `component_command` /
-`component_args` filters **unconditionally** in `values.j2.yml`:
+A user can override the `command` or `args` of one component for one
+deployment, for example to run a debug mode or change worker flags,
+without forking your driver. The component container is the only
+declaration this needs: Styrmin patches the override into that
+container after the chart renders, whether or not the chart exposes
+`command` or `args` as values. Do not pass the override to the chart in
+`values.j2.yml`.
 
-```jinja
-command: {{ components | component_command("server") | tojson }}
-args: {{ components | component_args("server") | tojson }}
-```
+- A set `command` or `args` replaces the whole list on the component
+  container. A field without an override keeps the chart's value, so an
+  `args`-only override keeps the chart's `command`.
+- When the user clears the override, the next reconcile brings back the
+  `command` and `args` the chart renders.
+- Adding or changing `command` or `args` on a component without a
+  `container` is rejected with `COMPONENT_CONTAINER_NOT_DECLARED`.
 
-Each filter returns the user's list when set, or **`[]`** when unset. Emit
-the keys unconditionally (do **not** wrap them in an `if`) and let the chart
-decide. In your **chart**, guard consumption with a `with` block so an empty
-list falls through to the image/chart default:
-
-```yaml
-{{- with .Values.command }}
-command:
-  {{- toYaml . | nindent 2 }}
-{{- end }}
-{{- with .Values.args }}
-args:
-  {{- toYaml . | nindent 2 }}
-{{- end }}
-```
-
-An empty list is falsy, so `{{- with }}` skips it and never blanks the
-container entrypoint. `command` and `args` are independent — one may be
-overridden while the other falls through.
-
-:::note Charts you don't control
-
-The pattern above assumes your chart guards consumption with `{{- with }}`. Some
-upstream charts consume the value **unconditionally** (e.g. the Infrahub chart
-does `args: {{- toYaml .Values…args }}` with no guard, and exposes no `command`
-field). For those, never hand the chart the `[]` marker — it would blank the
-entrypoint. The Infrahub examples instead emit the override when set, or a
-literal `null` when unset:
-
-```jinja
-{%- if components | component_args("server") %}
-args: {{ components | component_args("server") | tojson }}
-{%- else %}
-args: null
-{%- endif %}
-```
-
-Styrmin strips the `null` before it applies the HelmRelease, on both the
-initial create and every update, so the key is simply absent and the chart's
-own default applies (clearing reverts to the default). See `driver/examples/infrahub`
-for the worked example and the
-[container-override consumption guide](https://github.com/opsmill/styrmin/blob/develop/dev/guides/driver-container-override-consumption.md)
-for this and the default-fallback alternative.
-
-:::
-
-Optionally advertise overridability (doc-only, discoverable via the API/UI)
-under `spec.container_overrides` in `driver.styrmin.yml`:
-
-```yaml
-spec:
-  container_overrides:
-    - component: server
-      container: my-app       # informational: which rendered container
-      command: true
-      args: true
-      description: "Override the server entrypoint/args for a worker/debug mode."
-```
-
-The declaration does **not** enforce consumption: a driver that declares but
-does not wire the filters stores the override and silently never applies it.
+The `component_command` and `component_args` filters are retired: a
+template that calls either one fails to render. `spec.container_overrides`
+is removed from `driver.styrmin.yml`, and a driver file that still
+contains it fails to load. See
+[Migrating container overrides](./migrating-container-overrides.md) to
+migrate a driver that uses them.
 
 See [The Context](./context.md) for the full set of available fields.
 
@@ -549,10 +505,10 @@ Before you call the driver done:
       made a conscious decision not to expose one).
 - [ ] Each component's `identifier.label` matches the pods you expect
       it to — verify with `kubectl get pods -l <label>=<value>`.
-- [ ] Each component that should receive env vars or an image override
-      declares a `container` that exists in every workload its label
-      selects, and `values.j2.yml` wires neither env vars nor the
-      image override.
+- [ ] Each component that should receive env vars, an image override,
+      or a `command` or `args` override declares a `container` that
+      exists in every workload its label selects, and `values.j2.yml`
+      wires none of these overrides.
 - [ ] Every stateful component has a `backup` block with the right
       strategy.
 - [ ] Every externally reachable service is declared under
