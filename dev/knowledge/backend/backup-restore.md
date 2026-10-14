@@ -123,7 +123,7 @@ class Backup(StyrminModel, table=True):
     status: BackupStatus          # PENDING, IN_PROGRESS, COMPLETED, FAILED
     instance_id: UUID             # FK to ApplicationInstance, indexed
     schedule_id: UUID | None      # FK to BackupSchedule (for scheduled backups)
-    environment_backup_id: UUID | None  # FK to EnvironmentBackup (constituent membership)
+    environment_backup_id: UUID | None  # FK to EnvironmentBackup (constituent membership), indexed
     started_at: datetime | None
     completed_at: datetime | None
     size_bytes: int | None
@@ -170,7 +170,7 @@ class Restore(StyrminModel, table=True):
     backup_id: UUID               # FK to Backup, indexed
     target_namespace: str         # K8s namespace to restore into
     target_instance_id: UUID | None  # Optional target instance
-    environment_restore_id: UUID | None  # FK to EnvironmentRestore (constituent membership)
+    environment_restore_id: UUID | None  # FK to EnvironmentRestore (constituent membership), indexed
     component_statuses: dict      # JSON: component-level restore status
     metadata_: dict
 ```
@@ -561,7 +561,7 @@ status](#derived-status) below. Both ship in one Alembic revision
 ```python
 class EnvironmentBackup(StyrminModel, table=True):
     name: str                      # unique; defaults to styrmin-envbackup-<id>
-    environment_id: UUID           # FK to Environment (non-nullable)
+    environment_id: UUID           # FK to Environment (non-nullable), indexed
     environment_config: dict | None    # JSON: Environment.config at backup time
     deployment_snapshots: list | None  # JSON: list[DeploymentSnapshot]
     constituent_errors: list | None    # JSON: list[ConstituentError]
@@ -570,7 +570,7 @@ class EnvironmentBackup(StyrminModel, table=True):
 
 
 class EnvironmentRestore(StyrminModel, table=True):
-    environment_backup_id: UUID        # FK to EnvironmentBackup (non-nullable)
+    environment_backup_id: UUID        # FK to EnvironmentBackup (non-nullable), indexed
     skipped_constituents: list | None  # JSON: list[SkippedConstituent]
     restores: list[Restore]            # constituents, via Restore.environment_restore_id
 ```
@@ -605,12 +605,13 @@ on the GraphQL `DeploymentSnapshot` type
 
 <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 
-The four foreign-key columns these two tables added have no index:
+Revision `c1d2e3f4a5b6` created the four foreign-key columns these two tables
+added without an index. Revision `33b679d3d5dd` indexes each of them:
 `environmentbackup.environment_id`, `environmentrestore.environment_backup_id`,
 `backup.environment_backup_id` and `restore.environment_restore_id`
-(`db/models.py:572`, `:592`, `:695`, `:723`; revision `c1d2e3f4a5b6` creates
-none). The in-progress `EXISTS` queries of the concurrency guard filter on
-them (`repository/environment_backup.py`).
+([issue #455](https://github.com/opsmill/styrmin/issues/455)). The in-progress
+`EXISTS` queries of the concurrency guard filter on them
+(`repository/environment_backup.py`).
 
 <!-- Extracted from specs/001-env-backup-restore on 2026-10-13 -->
 
@@ -761,6 +762,11 @@ flight" is itself derived for the first two — repository `EXISTS` queries
 over linked children in `PENDING`/`IN_PROGRESS` — so there is no lock row to
 leak if a process dies. Clone occupancy cannot be written as an `EXISTS` query,
 so `find_clone_occupying_environment` derives it in Python.
+The two `EXISTS` queries read through the indexes on
+`environmentbackup.environment_id`, `environmentrestore.environment_backup_id`,
+`backup.environment_backup_id` and `restore.environment_restore_id`, so they
+read only the rows linked to the environment instead of every `backup` and
+`restore` row ([issue #455](https://github.com/opsmill/styrmin/issues/455)).
 
 `update_environment` applies only the clone check, through
 `guard_no_clone_occupying_environment`. An environment backup or restore in
