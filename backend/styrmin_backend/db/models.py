@@ -569,7 +569,7 @@ class EnvironmentBackup(StyrminModel, table=True):
 
     name: str = Field(unique=True)
 
-    environment_id: UUID = Field(foreign_key="environment.id")
+    environment_id: UUID = Field(foreign_key="environment.id", index=True)
     environment: Environment = Relationship(back_populates="environment_backups")
 
     environment_config: dict | None = Field(default=None, sa_column=Column(JSON))
@@ -589,7 +589,7 @@ class EnvironmentRestore(StyrminModel, table=True):
     derived from the constituent restores plus ``skipped_constituents``.
     """
 
-    environment_backup_id: UUID = Field(foreign_key="environmentbackup.id")
+    environment_backup_id: UUID = Field(foreign_key="environmentbackup.id", index=True)
     environment_backup: EnvironmentBackup = Relationship(back_populates="restores")
 
     skipped_constituents: list | None = Field(default=None, sa_column=Column(JSON))
@@ -693,7 +693,7 @@ class Backup(StyrminModel, table=True):
     schedule_id: UUID | None = Field(default=None, foreign_key="backupschedule.id")
 
     environment_backup_id: UUID | None = Field(
-        default=None, foreign_key="environmentbackup.id"
+        default=None, foreign_key="environmentbackup.id", index=True
     )
     environment_backup: Optional["EnvironmentBackup"] = Relationship(
         back_populates="backups"
@@ -721,7 +721,7 @@ class Restore(StyrminModel, table=True):
     )
 
     environment_restore_id: UUID | None = Field(
-        default=None, foreign_key="environmentrestore.id"
+        default=None, foreign_key="environmentrestore.id", index=True
     )
     environment_restore: Optional["EnvironmentRestore"] = Relationship(
         back_populates="restores"
