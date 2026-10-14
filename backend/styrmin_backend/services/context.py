@@ -286,14 +286,9 @@ async def generate_context_from_deployment(
             deployment_config=deployment.config,
         )
 
-        # Resolve container command/args overrides per component
-        # (014-component-container-overrides / US1). Reads per-component
-        # ``command``/``args`` blocks from
-        # ``DeploymentConfig.components[<name>]`` and assigns the resolved
-        # value (component-scope only, NO layering — research.md D2) to each
-        # ``ComponentContext.container_override``. Orphan blocks are computed
-        # by the resolver but never attached here (they surface only on the
-        # GraphQL read path; the renderer skips them).
+        # Attach each live component's ``command``/``args`` (component scope only) to
+        # ``ComponentContext.container_override``; orphaned blocks are not attached here,
+        # only the GraphQL read path returns them.
         _populate_component_container_overrides(
             context=context,
             deployment_config=deployment.config,

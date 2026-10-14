@@ -52,8 +52,8 @@ def build_component_container_patches(context: GlobalContext) -> list[TargetPatc
     Skips components with no applicable override, which includes every component without a
     component container. Image overrides are substituted with ``context.app.version`` and
     validated, raising :class:`InvalidImageReferenceError` (reason ``after_substitution``) when
-    the result is not a valid reference. Disabled components still get patches; their replica count is governed by
-    the component state patch.
+    the result is not a valid reference. Disabled components still get patches; their replica
+    count is governed by the component state patch.
     """
     patches: list[TargetPatch] = []
     if context.components is None:

@@ -180,8 +180,8 @@ Styrmin applies a user's container `command` and `args` override to the
 component container after the chart renders, so templates do not pass
 it to the chart. `components.<name>.container_override` is present only when the user
 set `command` or `args`, and it is applied only when the component
-declares a component container. Its `command` and `args` are lists, or
-`None` for a field the user did not set. Don't write them into a chart
+declares a component container. Its `command` and `args` are lists, and
+a field the user did not set is absent. Don't write them into a chart
 `command` or `args` key: Styrmin already applies them, and when no
 override is set the chart key would no longer hold the chart's own
 value.

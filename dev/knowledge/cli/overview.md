@@ -231,10 +231,10 @@ manifest's config and parameters as `input`, also when the version is unchanged,
 validates the config against the driver version the manifest resolves to and one task reconciles
 it. A `null` result is `unchanged`. A rejected call is `failed` with `ApplyOutcome.error_code`, and
 the CLI prints the code in brackets at the end of the `failed` line. After an `updated` outcome
-whose manifest sets component env vars or images, `_apply_update` reads `isApplicable` back
-(`get_deployment_override_applicability.graphql`) and lists the components it cannot apply in
-`ApplyOutcome.inapplicable_components`; the CLI warns about them on stderr, like the pinned-image
-warning, and a failed read lists nothing. See
+whose manifest sets component env vars, images, `command` or `args`, `_apply_update` reads
+`isApplicable` back (`get_deployment_override_applicability.graphql`) and lists the components it
+cannot apply in `ApplyOutcome.inapplicable_components`; the CLI warns about them on stderr, like
+the pinned-image warning, and a failed read lists nothing. See
 [ADR-065](../../adr/0065-apply-writes-config-with-the-version.md).
 
 **Server compatibility.** `update_version()` sends `input` in its own operation

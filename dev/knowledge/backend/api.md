@@ -494,8 +494,9 @@ Spec 022 removed `ApplicationDriverVersion.containerOverrides` and the `DriverCo
 type, together with `spec.container_overrides`. A query that selects `containerOverrides` fails
 validation, and the SDK no longer has `get_driver_container_override_docs`. The apply check in
 `styrminctl deployments apply` (`get_deployment_override_applicability.graphql`) reads
-`isApplicable` for env vars and image overrides only, so it does not warn about a stored `command`
-or `args` that does not apply.
+`isApplicable` from `componentEnvVars`, `componentImageOverrides` and
+`componentContainerOverrides`, so it warns about a submitted `command` or `args` that does not
+apply.
 
 #### Environment-config update + fanout
 

@@ -138,9 +138,9 @@ In `services/deployment.py`:
   message names the field.
 
 The order of checks does not change: unknown component and list shape first, the container check
-last, on `deploy` and `updateDeployment`. The SDK, `styrminctl apply` and the UI call these
-mutations, so they get the same check. The check reads the driver version that the deployment is
-pinned to after the write.
+last, on `deploy`, `updateDeployment` and `updateDeploymentVersion`. The SDK, `styrminctl apply`
+and the UI call these mutations, so they get the same check. The check reads the driver version
+that the deployment is pinned to after the write.
 
 ### 6. `spec.container_overrides` is removed (research D-006 to D-008)
 
@@ -182,8 +182,8 @@ No error code is added (spec FR-011).
 - The deployment edit drawer shows the Command and Args editors only on a component with a
   component container. A stored value on a component without one is shown read-only with a **not
   applied** badge and can be removed.
-- `styrminctl deployments apply` reads `isApplicable` back for env vars and image overrides only.
-  It does not warn about a stored `command` or `args` that does not apply.
+- `styrminctl deployments apply` reads `isApplicable` back for env vars, image overrides and
+  `command`/`args` overrides, and warns about a component whose submitted overrides do not apply.
 - The action primitives use the env vars and the image override from `applicable_overrides`.
   `command` and `args` overrides do not reach action Jobs.
 - Rolling Styrmin back below this change after loading migrated drivers stops container overrides:

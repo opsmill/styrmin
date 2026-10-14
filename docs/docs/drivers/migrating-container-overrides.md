@@ -74,11 +74,13 @@ Do these steps in order. With `styrminctl deployments apply`, steps 2 and 3 are 
    - A driver whose template never called the filters, such as the `slurpit`, `semaphore`,
      `infrahub-mcp` and `db-test` example drivers: every stored `command` and `args` on a
      component with a component container. These deployments need no move: the values apply
-     on the deployment's next change after you upgrade Styrmin, so remove the values you do not
-     want before you change anything else on the deployment.
+     the next time Styrmin renders the deployment after you upgrade Styrmin. A change to the
+     deployment renders it again, and so do an env var edit on its environment and a cluster
+     config update that changes its resolved config. Remove the values you do not want before
+     any of these happens.
 
    The **Component Overrides** card on the deployment's **Configuration** tab shows how many
-   `command` and `args` entries each component stores. Click **Update Settings** and pick a
+   `command` and `args` entries each component stores. Click **Update Settings** and expand the
    component to view the values. Through the API, `Deployment.componentContainerOverrides`
    returns `command`, `args` and `isApplicable` for each component that stores an override.
 
@@ -218,8 +220,8 @@ chart key would no longer hold the chart's own value.
 - **Upgrades keep stored values.** If a driver upgrade drops a component's container, its
   stored `command` and `args` are kept and reported with `isApplicable: false` in the API; they
   are not applied until a driver version declares the container again. `styrminctl deployments
-  apply` warns about env vars and image overrides stored this way, but not about `command` and
-  `args`: read `isApplicable` to find them.
+  apply` prints a warning on stderr for a component whose `command`, `args`, env vars or image
+  override the manifest sets and the driver version does not apply.
 - **A wrong container name fails the release.** The first time any override applies to the
   component, including `command` or `args` alone, the deployment fails with
   `COMPONENT_CONTAINER_NOT_FOUND` and a message naming the component and the container. Styrmin

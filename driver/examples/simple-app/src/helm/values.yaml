@@ -11,8 +11,8 @@ nameOverride: ""
 fullnameOverride: ""
 
 # Server container command/args; the deployment template skips an empty list, so the
-# image ENTRYPOINT/CMD apply. A user's command/args override is applied by Styrmin after
-# the chart renders and replaces the rendered list.
+# image ENTRYPOINT/CMD apply. A user's command/args override sets the container's list
+# after the chart renders.
 command: []
 args: []
 
