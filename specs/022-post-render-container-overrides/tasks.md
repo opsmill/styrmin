@@ -63,14 +63,14 @@ description: "Tasks for 022: container command and args overrides applied by pos
 - [X] T013 [P] [US1] Migrate `driver/examples/infrahub`: in `values.j2.yml` delete the `{%- if components | component_args("server") %} ... args: null {%- endif %}` block for `server`, the same block for `task-worker`, and the `command`/`args` blocks for `task-manager`, keeping the surrounding YAML valid; in `driver.styrmin.yml` delete the `container_overrides` block and its comments, and change `spec.version` from `"3"` to `"4"`
 - [X] T014 [P] [US1] Migrate `driver/examples/infrahub-enterprise` the same way as T013, and change `spec.version` from `"2"` to `"3"`
 - [X] T015 [US1] Render each migrated `values.j2.yml` with `ApplicationHelmReleaseBuilder.render_value_template` in a quick check (or an existing driver render test) to confirm valid YAML, then search `backend/tests`, `tasks/`, `helm/` and `docs/` for pins of the old example driver versions (`simple-app` "2", `infrahub` "3", `infrahub-enterprise` "2") and update any that must follow the migrated versions (research D-009)
-- [ ] T016 [US1] Extend `backend/tests/e2e/test_deployment_container_overrides.py` (shard `shard_configuration`, keep `api_only` markers, add no test node):
+- [X] T016 [US1] Extend `backend/tests/e2e/test_deployment_container_overrides.py` (shard `shard_configuration`, keep `api_only` markers, add no test node):
   - rewrite the module docstring for the post-render path (no filters, no `container_overrides` block);
   - in the `container_overrides_deployment` fixture, after the deployment runs, read the `server` Deployment's `simple-app` container and store its `command` and `args` as the baseline;
   - in `test_us1_override_args_on_server` keep the exact-`args` assertion on the pod template;
   - in `test_us2_command_independent_of_args` add a step that changes `command` and asserts the new value on the pod template after the reconcile;
   - in `test_us3_clear_override_falls_back_to_chart_default`, after the clear, wait until the container's `command` and `args` equal the baseline (FR-003, SC-003) and keep the read-surface assertion; update its docstring;
   - delete `test_us6_driver_declares_overridable_component` and its `load_query("get_driver_container_override_docs")` use
-- [ ] T017 [US1] Run the E2E with `sleep infinity | uv run pytest backend/tests/e2e/test_deployment_container_overrides.py -k api-chromium -v -s --pdb` until it passes. If the clear does not roll the workload, follow the operator log while paused and fix the change detection in the same change (research D-012). Record the evidence (node IDs, command, ISO 8601 timestamp, vcluster id and kubeconfig path, verbatim `PASSED` lines) in `specs/022-post-render-container-overrides/e2e-evidence.md`
+- [X] T017 [US1] Run the E2E with `sleep infinity | uv run pytest backend/tests/e2e/test_deployment_container_overrides.py -k api-chromium -v -s --pdb` until it passes. If the clear does not roll the workload, follow the operator log while paused and fix the change detection in the same change (research D-012). Record the evidence (node IDs, command, ISO 8601 timestamp, vcluster id and kubeconfig path, verbatim `PASSED` lines) in `specs/022-post-render-container-overrides/e2e-evidence.md`
 
 **Checkpoint**: US1 works on `simple-app` end to end; infrahub components produce the right patches.
 
