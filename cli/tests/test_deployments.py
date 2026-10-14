@@ -1070,8 +1070,8 @@ def test_deployments_apply_warns_about_overrides_the_driver_version_cannot_apply
 
     captured = capsys.readouterr()
     assert captured.err.splitlines() == [
-        "warning: my-app: env vars and image overrides on worker are stored but not applied "
-        "(no component container in the driver version)"
+        "warning: my-app: env var, image, command or args overrides on worker are stored but not "
+        "applied (no component container in the driver version)"
     ]
     assert captured.out.splitlines() == ["updated my-app", "0 created, 1 updated, 0 unchanged, 0 failed"]
 

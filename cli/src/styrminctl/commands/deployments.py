@@ -292,7 +292,7 @@ def _print_inapplicable_warning(outcome: ApplyOutcome) -> None:
         return
     sys.stdout.flush()
     print(
-        f"warning: {outcome.name}: env vars and image overrides on {', '.join(components)} "
+        f"warning: {outcome.name}: env var, image, command or args overrides on {', '.join(components)} "
         "are stored but not applied (no component container in the driver version)",
         file=sys.stderr,
         flush=True,

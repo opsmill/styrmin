@@ -1166,6 +1166,10 @@ class Client(AsyncBaseClient):
                   component
                   isApplicable
                 }
+                componentContainerOverrides {
+                  component
+                  isApplicable
+                }
               }
             }
             """)

@@ -575,17 +575,22 @@ def _update_version_noop_response() -> dict[str, Any]:
     return {"data": {"updateDeploymentVersion": None}}
 
 
-def _applicability_response(*, env_vars: dict[str, bool], images: dict[str, bool] | None = None) -> dict[str, Any]:
+def _applicability_response(
+    *,
+    env_vars: dict[str, bool],
+    images: dict[str, bool] | None = None,
+    containers: dict[str, bool] | None = None,
+) -> dict[str, Any]:
+    def rows(blocks: dict[str, bool] | None) -> list[dict[str, Any]]:
+        return [{"component": name, "isApplicable": applicable} for name, applicable in (blocks or {}).items()]
+
     return {
         "data": {
             "deployment": {
                 "id": DEPLOYMENT_ID,
-                "componentEnvVars": [
-                    {"component": name, "isApplicable": applicable} for name, applicable in env_vars.items()
-                ],
-                "componentImageOverrides": [
-                    {"component": name, "isApplicable": applicable} for name, applicable in (images or {}).items()
-                ],
+                "componentEnvVars": rows(env_vars),
+                "componentImageOverrides": rows(images),
+                "componentContainerOverrides": rows(containers),
             }
         }
     }
@@ -793,6 +798,55 @@ async def test_apply_lists_components_whose_overrides_the_driver_version_cannot_
     assert outcome.action == "updated"
     # ``cron`` keeps a stored override the manifest does not set, so it is not listed.
     assert outcome.inapplicable_components == ["worker"]
+
+
+async def test_apply_lists_components_whose_command_or_args_the_driver_version_cannot_apply(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """A re-sent ``command`` or ``args`` on a component without a component container
+    passes validation and is stored; the outcome names the component so the CLI can warn."""
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+        _applicability_response(env_vars={}, containers={"server": True, "worker": False, "migrate": False}),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(
+            version="2.0.0",
+            config={
+                "components": [
+                    {"name": "server", "command": ["/bin/server"]},
+                    {"name": "worker", "args": ["--queue", "low"]},
+                    {"name": "migrate"},
+                ]
+            },
+        )
+    )
+
+    assert outcome.action == "updated"
+    # ``migrate`` sets neither ``command`` nor ``args``, so it is not listed.
+    assert outcome.inapplicable_components == ["worker"]
+    assert _operation_names(mock_transport)[3].startswith("query GetDeploymentOverrideApplicability(")
+
+
+async def test_apply_skips_the_applicability_read_when_no_block_sets_an_override(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(version="2.0.0", config={"components": [{"name": "worker"}]})
+    )
+
+    assert outcome.action == "updated"
+    assert outcome.inapplicable_components == []
+    assert len(_operation_names(mock_transport)) == 3
 
 
 async def test_apply_ignores_a_failed_applicability_read(client: StyrminClient, mock_transport: AsyncMock) -> None:

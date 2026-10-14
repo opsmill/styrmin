@@ -112,8 +112,8 @@ class ApplyOutcome(BaseModel):
     target_version: str | None = None
     # Components whose effective image override has no `{{ app.version }}` token (FR-008).
     pinned_image_components: list[str] = Field(default_factory=list)
-    # Components whose env vars or image override the manifest sets but the bound driver
-    # version cannot apply: they are stored, not injected.
+    # Components whose env vars, image, `command` or `args` the manifest sets but the bound
+    # driver version cannot apply: they are stored, not applied.
     inapplicable_components: list[str] = Field(default_factory=list)
 
 

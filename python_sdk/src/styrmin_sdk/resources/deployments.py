@@ -736,13 +736,17 @@ class DeploymentResource(BaseResource):
         )
 
     async def _inapplicable_components(self, deployment_id: UUID, update_input: UpdateDeploymentInput) -> list[str]:
-        """Components whose env vars or image override in ``update_input`` are stored but not applied.
+        """Components whose env vars, image, ``command`` or ``args`` in ``update_input`` are stored but not applied.
 
         Unchanged values on a component that the bound driver version gives no component
         container pass validation, so they are read back once the update is written. A failed
         read returns no components: it never fails the apply.
         """
-        submitted = {block.name for block in update_input.components or [] if block.env_vars or block.image is not None}
+        submitted = {
+            block.name
+            for block in update_input.components or []
+            if block.env_vars or block.image is not None or block.command is not None or block.args is not None
+        }
         if not submitted:
             return []
         try:
@@ -758,7 +762,11 @@ class DeploymentResource(BaseResource):
             )
         except StyrminError:
             return []
-        blocks = [*deployment.component_env_vars, *deployment.component_image_overrides]
+        blocks = [
+            *deployment.component_env_vars,
+            *deployment.component_image_overrides,
+            *deployment.component_container_overrides,
+        ]
         return sorted({block.component for block in blocks if not block.is_applicable} & submitted)
 
     async def _wait_for_terminal(self, outcome: ApplyOutcome, max_wait: float | None = None) -> ApplyOutcome:

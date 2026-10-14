@@ -137,6 +137,7 @@ from .get_deployment_component_image_overrides_full import (
 from .get_deployment_override_applicability import (
     GetDeploymentOverrideApplicability,
     GetDeploymentOverrideApplicabilityDeployment,
+    GetDeploymentOverrideApplicabilityDeploymentComponentContainerOverrides,
     GetDeploymentOverrideApplicabilityDeploymentComponentEnvVars,
     GetDeploymentOverrideApplicabilityDeploymentComponentImageOverrides,
 )
@@ -511,6 +512,7 @@ __all__ = [
     "GetDeploymentDeploymentDeployedServices",
     "GetDeploymentOverrideApplicability",
     "GetDeploymentOverrideApplicabilityDeployment",
+    "GetDeploymentOverrideApplicabilityDeploymentComponentContainerOverrides",
     "GetDeploymentOverrideApplicabilityDeploymentComponentEnvVars",
     "GetDeploymentOverrideApplicabilityDeploymentComponentImageOverrides",
     "GetDeploymentPodStatuses",
