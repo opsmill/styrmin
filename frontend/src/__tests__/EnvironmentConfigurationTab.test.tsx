@@ -197,6 +197,30 @@ describe("EnvironmentConfigurationTab", () => {
     expect(screen.getByTestId("env-vars-form-save-button")).toBeDisabled();
   });
 
+  // An empty dedicated_ingress turns the controller on with default
+  // values (#409); saving would send null and remove the controller.
+  it("blocks Save and shows the controller as on when dedicated_ingress is empty", async () => {
+    const config: Record<string, unknown> = {
+      env_vars: { LOG_LEVEL: "info" },
+      dedicated_ingress: {},
+    };
+    await render(
+      <EnvironmentConfigurationTab
+        environmentId={ENV_ID}
+        config={config}
+        deployments={noDeployments}
+      />,
+    );
+    expect(
+      screen.getByText("Dedicated ingress controller on, default values."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Using default ingress controller.")).toBeNull();
+    expect(
+      screen.getByTestId("env-vars-form-blocked-warning"),
+    ).toHaveTextContent(/dedicated_ingress/i);
+    expect(screen.getByTestId("env-vars-form-save-button")).toBeDisabled();
+  });
+
   it("blocks Save when scheduling is set on the persisted config", async () => {
     const config: Record<string, unknown> = {
       env_vars: { LOG_LEVEL: "info" },
