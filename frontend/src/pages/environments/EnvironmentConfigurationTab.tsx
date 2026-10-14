@@ -183,9 +183,9 @@ function EmptySectionMessage({ message }: { message: string }) {
 /**
  * Detect whether the persisted environment config carries
  * ``dedicated_ingress`` or ``scheduling`` overrides. Either presence
- * (non-empty object) trips the v1 form's submission block — saving
- * would silently clear them under FR-003 / FR-020 full-replacement
- * semantics. Returns a human-readable explanation for the warning
+ * trips the v1 form's submission block — saving would silently clear
+ * them under FR-003 / FR-020 full-replacement semantics. An empty
+ * ``dedicated_ingress`` counts: it turns the controller on (#409). Returns a human-readable explanation for the warning
  * Alert, or ``null`` when the form is safe to submit.
  *
  * Note (011/US2): pre-011, ``ingress_class`` and ``db_size`` would
@@ -202,7 +202,7 @@ function detectNestedOverridesBlock(
   const dedicatedIngress = asObject(config?.dedicated_ingress);
   const scheduling = asObject(config?.scheduling);
   const present: string[] = [];
-  if (dedicatedIngress && Object.keys(dedicatedIngress).length > 0) {
+  if (dedicatedIngress) {
     present.push("dedicated_ingress");
   }
   if (scheduling && Object.keys(scheduling).length > 0) {
@@ -362,8 +362,13 @@ function DedicatedIngressSection({
 }: {
   ingress: Record<string, unknown> | null;
 }) {
-  if (!ingress || Object.keys(ingress).length === 0) {
+  if (!ingress) {
     return <EmptySectionMessage message="Using default ingress controller." />;
+  }
+  if (Object.keys(ingress).length === 0) {
+    return (
+      <EmptySectionMessage message="Dedicated ingress controller on, default values." />
+    );
   }
   return <KeyValueRows entries={Object.entries(ingress)} />;
 }
