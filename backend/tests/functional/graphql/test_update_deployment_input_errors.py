@@ -788,7 +788,10 @@ async def test_component_container_gained_on_switch_accepts_every_write(
 
 
 async def _deploy_with_worker_env(
-    client: AsyncClient, session: AsyncSession, containers: dict[str, str | None]
+    client: AsyncClient,
+    session: AsyncSession,
+    containers: dict[str, str | None],
+    config: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], str]:
     environment = await seed_environment(session)
     adv = await seed_application_driver_version(session, version="1.0.0")
@@ -805,7 +808,7 @@ async def _deploy_with_worker_env(
                 "environmentId": str(environment.id),
                 "version": "1.0.0",
                 "name": name,
-                "config": _worker_input({"A": "1"}),
+                "config": config or _worker_input({"A": "1"}),
             },
         },
     )
@@ -845,3 +848,139 @@ async def test_deploy_accepts_component_env_var_with_container(
         await session.exec(select(Deployment).where(Deployment.name == name))
     ).one()
     assert created.config["components"]["worker"]["env_vars"] == {"A": "1"}
+
+
+# -- Container command and args (022 FR-007, research D-005) -------------------
+#
+# ``command`` and ``args`` follow the image rule: a submitted list that differs
+# from the stored one is rejected on ``worker``; a removal (``null`` or an
+# omitted key) and the stored list sent again are accepted.
+
+_STORED_WORKER_LIST = ["--port", "8000"]
+_LIST_FIELDS = ["command", "args"]
+_OMIT = object()
+
+
+async def _store_worker_block(
+    session: AsyncSession, deployment_id: UUID, block: dict[str, Any]
+) -> dict | None:
+    row = await session.get(Deployment, deployment_id)
+    assert row is not None
+    row.config = {"components": {"worker": block}}
+    session.add(row)
+    await session.commit()
+    return await _stored_config(session, deployment_id)
+
+
+def _assert_list_override_not_declared(payload: dict[str, Any], field: str) -> None:
+    _assert_container_not_declared(payload, components_with_container=["api"])
+    error = payload["errors"][0]
+    assert error["extensions"].get("override") == field, error
+    assert error["message"].startswith(
+        f"Container {field} override targets component 'worker'"
+    ), error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", _LIST_FIELDS)
+@pytest.mark.parametrize(
+    ("stored", "submitted"),
+    [
+        (None, ["--debug"]),
+        (_STORED_WORKER_LIST, ["--port", "9000"]),
+    ],
+    ids=["add", "change"],
+)
+async def test_component_container_not_declared_rejects_command_args_add_or_change(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    field: str,
+    stored: list[str] | None,
+    submitted: list[str],
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    deployment_id = await _seed_container_deployment(
+        session, containers={"api": "api-app", "worker": None}, stored_worker_env=None
+    )
+    stored_before = (
+        await _store_worker_block(session, deployment_id, {field: stored})
+        if stored is not None
+        else None
+    )
+
+    payload = await _post_update(
+        client,
+        deployment_id,
+        {"components": [{"name": "worker", field: submitted}]},
+    )
+
+    _assert_list_override_not_declared(payload, field)
+    await _assert_rejected_without_task(
+        session,
+        prefect_manager_mock,
+        deployment_id,
+        payload,
+        components_with_container=["api"],
+        stored_before=stored_before,
+        tasks_before=0,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", _LIST_FIELDS)
+@pytest.mark.parametrize(
+    ("submitted", "expected"),
+    [
+        (None, None),
+        (_OMIT, None),
+        (_STORED_WORKER_LIST, _STORED_WORKER_LIST),
+    ],
+    ids=["remove-null", "remove-omitted", "unchanged"],
+)
+async def test_component_container_not_declared_accepts_command_args_remove_or_unchanged(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    field: str,
+    submitted: object,
+    expected: list[str] | None,
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    deployment_id = await _seed_container_deployment(
+        session, containers={"api": "api-app", "worker": None}, stored_worker_env=None
+    )
+    await _store_worker_block(session, deployment_id, {field: _STORED_WORKER_LIST})
+    component: dict[str, Any] = {"name": "worker"}
+    if submitted is not _OMIT:
+        component[field] = submitted
+
+    payload = await _post_update(client, deployment_id, {"components": [component]})
+
+    assert "errors" not in payload, payload
+    stored = await _stored_config(session, deployment_id) or {}
+    worker = (stored.get("components") or {}).get("worker") or {}
+    assert worker.get(field) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", _LIST_FIELDS)
+async def test_deploy_rejects_component_command_args_without_container(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    field: str,
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+
+    payload, name = await _deploy_with_worker_env(
+        client,
+        session,
+        {"api": "api-app", "worker": None},
+        config={"components": [{"name": "worker", field: ["--debug"]}]},
+    )
+
+    _assert_list_override_not_declared(payload, field)
+    prefect_manager_mock.run_action.assert_not_awaited()
+    created = await session.exec(select(Deployment).where(Deployment.name == name))
+    assert created.first() is None

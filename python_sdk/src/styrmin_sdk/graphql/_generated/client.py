@@ -1079,6 +1079,7 @@ class Client(AsyncBaseClient):
                   command
                   args
                   isOrphaned
+                  isApplicable
                 }
               }
             }

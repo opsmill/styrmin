@@ -39,6 +39,7 @@ from styrmin_backend.domain.models import (
 from styrmin_backend.domain.models import (
     Instance as ApplicationInstanceEntity,
 )
+from styrmin_backend.services.component_container.overrides import override_applies
 from styrmin_backend.services.exceptions import (
     ApplicationDriverVersionNotFoundError,
     EnvironmentNotFoundError,
@@ -130,12 +131,15 @@ class ComponentEnvVars:
 
 @strawberry.type(
     description=(
-        "The resolved container ``command``/``args`` override targeting one "
-        "component of a deployment, plus an ``isOrphaned`` flag indicating "
-        "whether the deployment's current driver still declares the targeted "
-        "component. Orphaned blocks remain visible in the API but are NOT "
-        "injected into rendered pods. ``command``/``args`` are ``null`` when "
-        "no override is set for that slot (the chart default flows through)."
+        "The container ``command``/``args`` override targeting one component "
+        "of a deployment. Applicable overrides are applied by a post-render "
+        "patch to the component container the driver declares. "
+        "``isOrphaned`` flags blocks whose component the deployment's current "
+        "driver no longer declares; ``isApplicable`` flags whether the "
+        "override can reach a container. Non-applicable blocks remain visible "
+        "in the API but are NOT applied to rendered pods. "
+        "``command``/``args`` are ``null`` when no override is set for that "
+        "slot (the chart's own value applies)."
     )
 )
 class ComponentContainerOverrides:
@@ -156,8 +160,15 @@ class ComponentContainerOverrides:
         description=(
             "True when the deployment's current driver no longer declares "
             "this component (the upgrade renamed or removed it). Orphaned "
-            "blocks are visible in the API but are NOT injected into rendered "
+            "blocks are visible in the API but are NOT applied to rendered "
             "pods, so the operator can audit and clean them up."
+        )
+    )
+    is_applicable: bool = strawberry.field(
+        description=(
+            "False when the override cannot reach a container: the component "
+            "is orphaned (`isOrphaned`) or the driver declares no component "
+            "container for it. The stored values are kept but not applied."
         )
     )
 
@@ -577,9 +588,9 @@ class Deployment:
                         for k, v in entry.resolved.config.items()
                     ],
                     is_orphaned=entry.resolved.is_orphaned,
-                    is_applicable=(
-                        not entry.resolved.is_orphaned
-                        and containers.get(entry.component_name) is not None
+                    is_applicable=override_applies(
+                        containers.get(entry.component_name),
+                        entry.resolved.is_orphaned,
                     ),
                 )
             )
@@ -590,10 +601,12 @@ class Deployment:
             "Per-component container ``command``/``args`` overrides, including "
             "orphaned blocks (``isOrphaned=true``). Component-scope only — "
             "there is NO environment/deployment layering. Live components with "
-            "neither slot set are omitted to keep the surface tidy. Orphaned "
-            "blocks (component renamed or removed by a driver upgrade — FR-005) "
-            "are always surfaced here but skipped by the renderer so no value "
-            "reaches a rendered pod. Cleared slots are returned as ``null``."
+            "neither slot set are omitted to keep the surface tidy. "
+            "Non-applicable blocks (``isApplicable=false``: component renamed "
+            "or removed by a driver upgrade, or no component container "
+            "declared) are visible here but skipped by the post-render patch "
+            "so no value reaches a rendered pod. Cleared slots are returned as "
+            "``null``."
         )
     )
     async def component_container_overrides(
@@ -605,7 +618,8 @@ class Deployment:
         and runs :class:`ContainerOverridesResolver` (direct per-component
         lookup, no merge). Orphaned blocks are always surfaced regardless of
         whether they carry both slots — their purpose is operator visibility
-        after a driver upgrade.
+        after a driver upgrade. ``isApplicable`` reads the component container
+        from the deployment's components, which mirror its pinned driver version.
         """
         from styrmin_backend.services.container_overrides.resolver import (
             ContainerOverridesResolver,
@@ -623,7 +637,8 @@ class Deployment:
                 )
                 return []
             dep_config_raw = deployment.config
-            driver_components = [c.name for c in (deployment.components or [])]
+            containers = _component_containers(deployment)
+            driver_components = list(containers)
 
         dep_cfg = (
             DeploymentConfig.model_validate(dep_config_raw) if dep_config_raw else None
@@ -654,6 +669,10 @@ class Deployment:
                     command=entry.resolved.command,
                     args=entry.resolved.args,
                     is_orphaned=entry.resolved.is_orphaned,
+                    is_applicable=override_applies(
+                        containers.get(entry.component_name),
+                        entry.resolved.is_orphaned,
+                    ),
                 )
             )
         return results
@@ -708,9 +727,8 @@ class Deployment:
                     else entry.resolved.reference
                 ),
                 is_orphaned=entry.resolved.is_orphaned,
-                is_applicable=(
-                    not entry.resolved.is_orphaned
-                    and containers.get(entry.component_name) is not None
+                is_applicable=override_applies(
+                    containers.get(entry.component_name), entry.resolved.is_orphaned
                 ),
             )
             for entry in entries

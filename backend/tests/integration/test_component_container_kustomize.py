@@ -438,3 +438,16 @@ class TestCommandArgs:
             "CHART_VAR": "chart",
             "LOG_LEVEL": "debug",
         }
+
+    def test_wrong_container_name_with_only_args_fails_with_guard_key(self) -> None:
+        # FR-004: the guard is built when ``args`` is the only applicable override.
+        patches = build_component_container_patches(
+            _context(container="wrong", args=["--log-level", "debug"])
+        )
+
+        result = _kustomize(_resources(pod_spec=_COMMAND_ARGS_POD_SPEC), patches)
+
+        assert result.returncode != 0
+        assert result.stdout == ""
+        assert f"{GUARD_KEY_PREFIX}server~1wrong/image" in result.stderr
+        assert parse_guard_failure(result.stderr) == ("server", "wrong")

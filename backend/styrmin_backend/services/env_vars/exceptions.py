@@ -258,10 +258,14 @@ class UnknownComponentEnvVarError(ServiceError):
         }
 
 
+ComponentContainerSlot = Literal["env_vars", "image", "command", "args"]
+
+
 class ComponentContainerNotDeclaredError(ServiceError):
     """A component-scope override write targets a component with no component container.
 
-    Raised for env vars (017) and image overrides (018, ``override="image"``) when the write
+    Raised for env vars (017), image overrides (018, ``override="image"``) and container
+    ``command``/``args`` overrides (022, ``override="command"`` or ``"args"``) when the write
     adds or changes a value relative to the stored block, checked against the driver version
     the deployment is pinned to after the write. Removals and unchanged re-submissions are
     accepted (FR-003).
@@ -277,16 +281,23 @@ class ComponentContainerNotDeclaredError(ServiceError):
         message: str = "",
         component_name: str = "",
         components_with_container: list[str] | None = None,
-        override: Literal["env_vars", "image"] = "env_vars",
+        override: ComponentContainerSlot = "env_vars",
         checked_against: str = "",
     ) -> None:
         self.component_name = component_name
         self.components_with_container = sorted(components_with_container or [])
-        self.override: Literal["env_vars", "image"] = override
+        self.override: ComponentContainerSlot = override
         self.checked_against = checked_against or "the driver version"
         super().__init__(message or self._build_default_message())
 
     def _build_default_message(self) -> str:
+        if self.override in ("command", "args"):
+            return (
+                f"Container {self.override} override targets component "
+                f"{self.component_name!r}, which declares no component container in "
+                f"{self.checked_against}. Components that accept overrides: "
+                f"{self.components_with_container}"
+            )
         if self.override == "image":
             return (
                 f"Image override targets component {self.component_name!r}, "

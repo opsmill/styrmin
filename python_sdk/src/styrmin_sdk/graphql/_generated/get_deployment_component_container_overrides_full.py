@@ -27,6 +27,7 @@ class GetDeploymentComponentContainerOverridesFullDeploymentComponentContainerOv
     command: Optional[list[str]]
     args: Optional[list[str]]
     is_orphaned: bool = Field(alias="isOrphaned")
+    is_applicable: bool = Field(alias="isApplicable")
 
 
 GetDeploymentComponentContainerOverridesFull.model_rebuild()
