@@ -26,18 +26,23 @@ import kr8s
 import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Ingress as AsyncIngress
-from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.models import IngressControllerAction
 
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.helpers.ingress import (
-    TaskTimes,
     deployment_tasks,
     ingress_controller_ids,
+    new_tasks,
+    single_redeploy,
+    task_ids,
+    traefik_service,
     wait_for_cluster_settled,
+    wait_for_controller_status,
     wait_for_deployment_status,
     wait_for_namespace_gone,
+    wait_for_new_redeploy,
+    wait_for_task_end,
 )
 from tests.e2e.pages.cluster_detail import ClusterDetailPage
 
@@ -49,8 +54,6 @@ pytestmark = [
     pytest.mark.shard_compute,
     pytest.mark.changes_cluster_config,
 ]
-
-_REDEPLOY_TASK = "update_instance"
 
 
 def _deployment_ids(entries: list[Any]) -> set[str]:
@@ -70,78 +73,6 @@ async def _restore(
     """Restore the original cluster config and wait for the cluster to settle."""
     await client.clusters.update(original, cluster_id=cluster_id)
     await wait_for_cluster_settled(client, cluster_id)
-
-
-async def _task_ids(client: StyrminClient, deployment_id: str) -> set[str]:
-    return {task.id for task in await deployment_tasks(client, deployment_id)}
-
-
-async def _new_tasks(
-    client: StyrminClient, deployment_id: str, known: set[str]
-) -> list[TaskTimes]:
-    return [
-        task
-        for task in await deployment_tasks(client, deployment_id)
-        if task.id not in known
-    ]
-
-
-def _single_redeploy(tasks: list[TaskTimes], label: str) -> TaskTimes:
-    redeploys = [task for task in tasks if task.type == _REDEPLOY_TASK]
-    assert len(redeploys) == 1, f"{label}: expected one redeploy task, got {tasks}"
-    return redeploys[0]
-
-
-async def _wait_for_new_redeploy(
-    client: StyrminClient, deployment_id: str, known: set[str], timeout: float = 300.0
-) -> TaskTimes:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        tasks = await _new_tasks(client, deployment_id, known)
-        if tasks:
-            return _single_redeploy(tasks, f"deployment {deployment_id}")
-        await asyncio.sleep(3)
-    raise AssertionError(
-        f"Deployment {deployment_id} got no redeploy task within {timeout}s"
-    )
-
-
-async def _wait_for_task_end(
-    client: StyrminClient, deployment_id: str, task_id: str, timeout: float = 300.0
-) -> TaskTimes:
-    deadline = time.time() + timeout
-    task = None
-    while time.time() < deadline:
-        tasks = {
-            task.id: task for task in await deployment_tasks(client, deployment_id)
-        }
-        task = tasks[task_id]
-        if task.ended_on is not None:
-            assert task.status == "success", f"Task {task_id} failed: {task}"
-            return task
-        await asyncio.sleep(3)
-    raise AssertionError(f"Task {task_id} did not end within {timeout}s: {task}")
-
-
-async def _wait_for_controller_status(
-    client: StyrminClient,
-    environment_id: str,
-    controller_id: str,
-    expected: str,
-    timeout: float = 300.0,
-) -> None:
-    deadline = time.time() + timeout
-    history: dict[str, str] = {}
-    while time.time() < deadline:
-        history = await ingress_controller_ids(
-            client, environment_id, include_deleted=True
-        )
-        if history.get(controller_id) == expected:
-            return
-        await asyncio.sleep(3)
-    raise AssertionError(
-        f"Ingress controller {controller_id} never reached {expected!r}: {history}"
-    )
 
 
 async def _wait_for_shared_ingress_class(
@@ -181,25 +112,6 @@ async def _wait_for_shared_ingress_class(
         f"Ingresses in {namespace} do not use the shared class {ingress_class!r}: "
         f"(ingressClassName, kubernetes.io/ingress.class) = {seen}"
     )
-
-
-async def _traefik_service(
-    kr8s_api: kr8s.asyncio.Api, environment_id: str
-) -> AsyncService:
-    services = [
-        service
-        async for service in AsyncService.list(
-            namespace=kr8s.ALL,
-            label_selector={
-                "app.kubernetes.io/name": "traefik",
-                "styrmin/environment_id": environment_id,
-            },
-            api=kr8s_api,
-        )
-        if isinstance(service, AsyncService)
-    ]
-    assert services, f"Traefik Service not found for environment {environment_id}"
-    return services[0]
 
 
 @pytest.mark.e2e
@@ -268,8 +180,8 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
         (controller_b,) = await ingress_controller_ids(client, env_b)
 
         # Phase 1: dedicated_ingress off moves both applications to the shared class.
-        known_a = await _task_ids(client, app_a)
-        known_b = await _task_ids(client, app_b)
+        known_a = await task_ids(client, app_a)
+        known_b = await task_ids(client, app_b)
         result = await client.clusters.update(shared, cluster_id=cluster_id)
         assert {app_a, app_b} <= _deployment_ids(result.redeployed), result
         assert {env_a, env_b} <= {
@@ -277,21 +189,21 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
             for controller in result.ingress_controllers
             if controller.action == IngressControllerAction.REMOVE
         }, result
-        redeploy_a = _single_redeploy(await _new_tasks(client, app_a, known_a), "A")
-        redeploy_b = _single_redeploy(await _new_tasks(client, app_b, known_b), "B")
+        redeploy_a = single_redeploy(await new_tasks(client, app_a, known_a), "A")
+        redeploy_b = single_redeploy(await new_tasks(client, app_b, known_b), "B")
         assert {str(entry.task_id) for entry in result.redeployed} >= {
             redeploy_a.id,
             redeploy_b.id,
         }, result
 
-        redeploy_a = await _wait_for_task_end(client, app_a, redeploy_a.id)
-        await _wait_for_task_end(client, app_b, redeploy_b.id)
+        redeploy_a = await wait_for_task_end(client, app_a, redeploy_a.id)
+        await wait_for_task_end(client, app_b, redeploy_b.id)
         for app_id in app_ids:
             await wait_for_deployment_status(client, app_id, "running")
             await _wait_for_shared_ingress_class(kr8s_api, app_id, "traefik")
 
-        await _wait_for_controller_status(client, env_a, controller_a, "deleted")
-        await _wait_for_controller_status(client, env_b, controller_b, "deleted")
+        await wait_for_controller_status(client, env_a, controller_a, "deleted")
+        await wait_for_controller_status(client, env_b, controller_b, "deleted")
         removals = [
             task
             for task in await deployment_tasks(client, controller_a)
@@ -307,8 +219,8 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
 
         # Phase 2: ingress_class nginx reaches A only; B overrides it.
         await wait_for_cluster_settled(client, cluster_id)
-        known_a = await _task_ids(client, app_a)
-        known_b = await _task_ids(client, app_b)
+        known_a = await task_ids(client, app_a)
+        known_b = await task_ids(client, app_b)
         preview = await client.clusters.update(
             nginx, cluster_id=cluster_id, dry_run=True
         )
@@ -316,23 +228,23 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
         assert app_a in _deployment_ids(preview.redeployed), preview
         assert app_b not in _deployment_ids(preview.redeployed), preview
         assert (await client.clusters.get(cluster_id=cluster_id)).config == shared
-        assert await _new_tasks(client, app_a, known_a) == []
+        assert await new_tasks(client, app_a, known_a) == []
 
         result = await client.clusters.update(nginx, cluster_id=cluster_id)
         _assert_no_failure(result)
         stored = (await client.clusters.get(cluster_id=cluster_id)).config
         assert stored.get("ingress_class") == "nginx", stored
-        redeploy_a = _single_redeploy(await _new_tasks(client, app_a, known_a), "A")
-        assert await _new_tasks(client, app_b, known_b) == []
+        redeploy_a = single_redeploy(await new_tasks(client, app_a, known_a), "A")
+        assert await new_tasks(client, app_b, known_b) == []
 
-        await _wait_for_task_end(client, app_a, redeploy_a.id)
+        await wait_for_task_end(client, app_a, redeploy_a.id)
         await wait_for_deployment_status(client, app_a, "running")
         await _wait_for_shared_ingress_class(kr8s_api, app_a, "nginx")
-        assert await _new_tasks(client, app_b, known_b) == []
+        assert await new_tasks(client, app_b, known_b) == []
 
         # Phase 3: the original config creates A's controller before A's application moves.
         await wait_for_cluster_settled(client, cluster_id)
-        known_a = await _task_ids(client, app_a)
+        known_a = await task_ids(client, app_a)
         result = await client.clusters.update(original, cluster_id=cluster_id)
         _assert_no_failure(result)
         assert app_a in _deployment_ids(result.waiting_for_ingress), result
@@ -344,7 +256,7 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
         assert len(controllers) == 1, controllers
         (new_controller_a,) = controllers
         assert new_controller_a != controller_a
-        assert await _new_tasks(client, app_a, known_a) == [], (
+        assert await new_tasks(client, app_a, known_a) == [], (
             "A's application was redeployed before its controller was ready"
         )
 
@@ -353,20 +265,20 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
             for task in await deployment_tasks(client, new_controller_a)
             if task.type == "create_instance"
         ]
-        controller_task = await _wait_for_task_end(
+        controller_task = await wait_for_task_end(
             client, new_controller_a, controller_task.id
         )
-        redeploy_a = await _wait_for_new_redeploy(client, app_a, known_a)
+        redeploy_a = await wait_for_new_redeploy(client, app_a, known_a)
         assert controller_task.ended_on is not None
         assert controller_task.ended_on <= redeploy_a.created_on, (
             f"A's application redeploy was created at {redeploy_a.created_on}, "
             f"before A's controller task ended at {controller_task.ended_on}"
         )
-        await _wait_for_task_end(client, app_a, redeploy_a.id)
+        await wait_for_task_end(client, app_a, redeploy_a.id)
         await wait_for_deployment_status(client, app_a, "running")
 
-        traefik_service = await _traefik_service(kr8s_api, env_a)
-        async with _portforward(traefik_service, remote_port=8000) as local_port:
+        service = await traefik_service(kr8s_api, env_a)
+        async with _portforward(service, remote_port=8000) as local_port:
             await _wait_for_http(
                 f"http://localhost:{local_port}/count",
                 timeout=120.0,
@@ -376,14 +288,14 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
 
         # Phase 4: resubmitting the stored config starts no redeploy.
         await wait_for_cluster_settled(client, cluster_id)
-        known_a = await _task_ids(client, app_a)
-        known_b = await _task_ids(client, app_b)
+        known_a = await task_ids(client, app_a)
+        known_b = await task_ids(client, app_b)
         result = await client.clusters.update(original, cluster_id=cluster_id)
         _assert_no_failure(result)
         assert not {app_a, app_b} & _deployment_ids(result.redeployed), result
         await wait_for_cluster_settled(client, cluster_id)
-        assert await _new_tasks(client, app_a, known_a) == []
-        assert await _new_tasks(client, app_b, known_b) == []
+        assert await new_tasks(client, app_a, known_a) == []
+        assert await new_tasks(client, app_b, known_b) == []
     finally:
         try:
             await _restore(client, cluster_id, original)
