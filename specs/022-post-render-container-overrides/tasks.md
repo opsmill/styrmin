@@ -25,8 +25,8 @@ description: "Tasks for 022: container command and args overrides applied by pos
 
 **Purpose**: Record a green baseline and keep a copy of the pre-migration templates before any driver changes.
 
-- [ ] T001 Run `uv sync`, `cd frontend && pnpm install`, then `uv run pytest backend/tests/unit/services/component_container backend/tests/unit/agent/test_container_env_patch.py backend/tests/integration/test_component_container_kustomize.py -q` and note the result as the baseline (no file change)
-- [ ] T002 Copy the current (pre-migration) `driver/examples/simple-app/values.j2.yml`, `driver/examples/infrahub/values.j2.yml` and `driver/examples/infrahub-enterprise/values.j2.yml` unchanged into `backend/tests/integration/fixtures/legacy_drivers/<driver-name>/values.j2.yml`, with a `README.md` in `backend/tests/integration/fixtures/legacy_drivers/` that says these are the templates that called `component_command`/`component_args`, kept for the SC-005 parity test (research D-011). This MUST happen before T012–T014 change the drivers
+- [X] T001 Run `uv sync`, `cd frontend && pnpm install`, then `uv run pytest backend/tests/unit/services/component_container backend/tests/unit/agent/test_container_env_patch.py backend/tests/integration/test_component_container_kustomize.py -q` and note the result as the baseline (no file change)
+- [X] T002 Copy the current (pre-migration) `driver/examples/simple-app/values.j2.yml`, `driver/examples/infrahub/values.j2.yml` and `driver/examples/infrahub-enterprise/values.j2.yml` unchanged into `backend/tests/integration/fixtures/legacy_drivers/<driver-name>/values.j2.yml`, with a `README.md` in `backend/tests/integration/fixtures/legacy_drivers/` that says these are the templates that called `component_command`/`component_args`, kept for the SC-005 parity test (research D-011). This MUST happen before T012–T014 change the drivers
 
 ---
 
