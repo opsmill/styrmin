@@ -51,6 +51,8 @@ from styrmin_backend.services.exceptions import (
 )
 from tests.unit.services.fakes import FakeEnvironmentRepository, FakeUnitOfWork
 
+ACTING_USER_ID = UUID("22222222-2222-2222-2222-222222222222")
+
 
 async def test_create_environment(
     uow: FakeUnitOfWork,
@@ -434,6 +436,7 @@ async def test_update_environment_invalid_env_var_name_surfaces_typed_error(
             environment_id=environment.id,
             uow=uow,
             config={"env_vars": {"1invalid": "y"}},
+            acting_user_id=ACTING_USER_ID,
         )
 
 
@@ -674,7 +677,7 @@ async def test_fanout_dispatches_to_all_fresh_deployments(
     )
 
     redeploy_mock = mocker.patch(
-        "styrmin_backend.services.environments.redeploy_for_environment_update",
+        "styrmin_backend.services.cluster_config_fanout.redeploy_for_environment_update",
         autospec=True,
     )
     log_info = mocker.patch(
@@ -685,6 +688,7 @@ async def test_fanout_dispatches_to_all_fresh_deployments(
         environment_id=environment.id,
         uow=uow,
         config={"env_vars": {"FOO": "bar"}},
+        acting_user_id=ACTING_USER_ID,
     )
 
     assert redeploy_mock.await_count == 3
@@ -737,7 +741,7 @@ async def test_fanout_skips_deployments_already_at_config(
     )
 
     redeploy_mock = mocker.patch(
-        "styrmin_backend.services.environments.redeploy_for_environment_update",
+        "styrmin_backend.services.cluster_config_fanout.redeploy_for_environment_update",
         autospec=True,
     )
     log_info = mocker.patch(
@@ -748,6 +752,7 @@ async def test_fanout_skips_deployments_already_at_config(
         environment_id=environment.id,
         uow=uow,
         config=target_config.model_dump(mode="json", exclude_none=True),
+        acting_user_id=ACTING_USER_ID,
     )
 
     assert redeploy_mock.await_count == 1
@@ -793,7 +798,7 @@ async def test_fanout_excludes_tombstoned_deployments(
     )
 
     redeploy_mock = mocker.patch(
-        "styrmin_backend.services.environments.redeploy_for_environment_update",
+        "styrmin_backend.services.cluster_config_fanout.redeploy_for_environment_update",
         autospec=True,
     )
 
@@ -801,6 +806,7 @@ async def test_fanout_excludes_tombstoned_deployments(
         environment_id=environment.id,
         uow=uow,
         config={"env_vars": {"FOO": "bar"}},
+        acting_user_id=ACTING_USER_ID,
     )
 
     # The fake's ``find_all_by_environment`` excludes tombstoned rows by
@@ -835,7 +841,7 @@ async def test_fanout_excludes_internal_deployments(
     )
 
     redeploy_mock = mocker.patch(
-        "styrmin_backend.services.environments.redeploy_for_environment_update",
+        "styrmin_backend.services.cluster_config_fanout.redeploy_for_environment_update",
         autospec=True,
     )
 
@@ -843,6 +849,7 @@ async def test_fanout_excludes_internal_deployments(
         environment_id=environment.id,
         uow=uow,
         config={"env_vars": {"FOO": "bar"}},
+        acting_user_id=ACTING_USER_ID,
     )
 
     assert redeploy_mock.await_count == 2
@@ -887,7 +894,7 @@ async def test_fanout_partial_recovery_dispatches_only_laggards(
     environment.capabilities = compute_environment_capabilities(environment)
 
     redeploy_mock = mocker.patch(
-        "styrmin_backend.services.environments.redeploy_for_environment_update",
+        "styrmin_backend.services.cluster_config_fanout.redeploy_for_environment_update",
         autospec=True,
     )
 
@@ -895,6 +902,7 @@ async def test_fanout_partial_recovery_dispatches_only_laggards(
         environment_id=environment.id,
         uow=uow,
         config=target_config.model_dump(mode="json", exclude_none=True),
+        acting_user_id=ACTING_USER_ID,
     )
 
     assert redeploy_mock.await_count == 1
@@ -935,7 +943,7 @@ async def test_fanout_per_deployment_failure_isolation(
         return Task.create(type=TaskType.UPDATE_INSTANCE, deployment_id=deployment.id)
 
     redeploy_mock = mocker.patch(
-        "styrmin_backend.services.environments.redeploy_for_environment_update",
+        "styrmin_backend.services.cluster_config_fanout.redeploy_for_environment_update",
         side_effect=fake_redeploy,
     )
     log_info = mocker.patch(
@@ -951,6 +959,7 @@ async def test_fanout_per_deployment_failure_isolation(
         environment_id=environment.id,
         uow=uow,
         config=new_config,
+        acting_user_id=ACTING_USER_ID,
     )
 
     # All three were attempted (B raised but A and C dispatched).
@@ -1021,7 +1030,7 @@ async def test_fanout_commits_env_config_before_dispatch(
             raise RuntimeError("boom")
 
     mocker.patch(
-        "styrmin_backend.services.environments.redeploy_for_environment_update",
+        "styrmin_backend.services.cluster_config_fanout.redeploy_for_environment_update",
         side_effect=first_dispatch_raises,
     )
     # Suppress the structured exception log to keep test output clean.
@@ -1031,6 +1040,7 @@ async def test_fanout_commits_env_config_before_dispatch(
         environment_id=environment.id,
         uow=uow,
         config=new_config,
+        acting_user_id=ACTING_USER_ID,
     )
 
     # The snapshot taken BEFORE any dispatch attempt finished must already
@@ -1090,7 +1100,7 @@ async def test_fanout_commits_task_writes_after_dispatch_loop(
         commit_count_at_dispatch.append(uow.commit_count)
 
     mocker.patch(
-        "styrmin_backend.services.environments.redeploy_for_environment_update",
+        "styrmin_backend.services.cluster_config_fanout.redeploy_for_environment_update",
         side_effect=record_commit_count,
     )
     mocker.patch("styrmin_backend.services.environments.logger.info")
@@ -1101,6 +1111,7 @@ async def test_fanout_commits_task_writes_after_dispatch_loop(
         environment_id=environment.id,
         uow=uow,
         config=new_config,
+        acting_user_id=ACTING_USER_ID,
     )
 
     # Pre-fanout commit ran before any dispatch (FR-009a).

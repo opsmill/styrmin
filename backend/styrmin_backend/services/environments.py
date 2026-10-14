@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING, Any, Sequence
 from uuid import UUID
 
@@ -17,11 +18,9 @@ from styrmin_backend.services.backup.environment import (
     guard_no_clone_occupying_environment,
 )
 from styrmin_backend.services.capabilities import compute_environment_capabilities
+from styrmin_backend.services.cluster_config_fanout import fan_out_environment_config
 from styrmin_backend.services.clusters import resolve_cluster
-from styrmin_backend.services.deployment import (
-    redeploy_for_environment_update,
-    request_cluster_teardown,
-)
+from styrmin_backend.services.deployment import request_cluster_teardown
 from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
@@ -239,13 +238,14 @@ async def get_environments(uow: UnitOfWork) -> Sequence[Environment]:
         return await uow.environments.get_all()
 
 
-def _emit_fanout_metric(environment_id: UUID, outcome: str) -> None:
-    """Emit a per-deployment fanout outcome metric (FR-023a).
+def _emit_fanout_metric(environment_id: UUID, outcome: str, count: int) -> None:
+    """Emit the number of deployments of one fanout outcome (FR-023a).
 
     The target metric is
     ``env_config_fanout_deployments_total{environment, outcome}`` where
-    ``outcome`` is one of ``dispatched``, ``skipped_noop``, or
-    ``dispatch_failed``. The project does not yet wire a metrics backend
+    ``outcome`` is one of ``dispatched``, ``skipped_noop``,
+    ``skipped_restoring``, ``skipped_waiting_for_ingress``,
+    ``evaluation_failed`` or ``dispatch_failed``. The project does not yet wire a metrics backend
     (Prometheus / OTel exporter), so this helper is the call-site stub:
     it logs the would-be metric at ``info`` level with a clear marker so
     the data is recoverable from logs today and the wiring becomes a
@@ -253,41 +253,60 @@ def _emit_fanout_metric(environment_id: UUID, outcome: str) -> None:
     FR-023a requires.
 
     TODO (metrics-backend): replace the ``logger.info`` with the real
-    counter increment (e.g. ``METRIC.labels(...).inc()``) once a metrics
+    counter increment (e.g. ``METRIC.labels(...).inc(count)``) once a metrics
     client is registered with the backend.
     """
     logger.info(
-        "metric=env_config_fanout_deployments_total environment_id={} outcome={}",
+        "metric=env_config_fanout_deployments_total environment_id={} outcome={} count={}",
         environment_id,
         outcome,
+        count,
     )
 
 
+_FANOUT_METRIC_OUTCOMES = (
+    "dispatched",
+    "skipped_noop",
+    "skipped_restoring",
+    "skipped_waiting_for_ingress",
+    "evaluation_failed",
+    "dispatch_failed",
+)
+
+
 async def update_environment(
-    environment_id: UUID, uow: UnitOfWork, config: dict | None = None
+    environment_id: UUID,
+    uow: UnitOfWork,
+    config: dict | None = None,
+    *,
+    acting_user_id: UUID,
 ) -> Environment:
     """Update an environment's config and fan out redeploys to its deployments.
 
     Persists the validated ``EnvironmentConfig`` on the environment row,
-    commits the row **before** entering the fanout loop (FR-009a so a
+    commits the row **before** the fanout starts (FR-009a so a
     crash mid-fanout never leaves the persisted config behind), then
-    iterates over every non-tombstoned, non-internal deployment in the
-    environment dispatching :func:`redeploy_for_environment_update`. Each
-    iteration runs ``_deployment_already_at_config`` first; deployments
-    whose active instance is already at ``new_config`` are skipped (no
-    spurious Task / timeline entry, FR-010 / data-model.md §3). Each
-    redeploy runs in its own savepoint, so a dispatch failure rolls back
-    only that deployment's writes; it is caught, logged, counted, and does
-    not propagate — the env-config row stays persisted and peer deployments
+    redeploys every live, non-internal deployment whose active instance
+    stores another environment config (``_deployment_already_at_config``,
+    FR-010 / data-model.md §3) through :func:`fan_out_environment_config`.
+    Each redeploy runs in its own savepoint, so a failure rolls back only
+    that deployment's writes; it is caught, logged, counted, and does not
+    propagate — the env-config row stays persisted and peer deployments
     are unaffected (FR-008 / Edge Cases "Per-deployment failure", #452).
 
-    Tombstoned (``deleted_at IS NOT NULL``) and internal deployments are
-    excluded from the fanout per FR-012 / FR-013. They are NOT counted
-    toward ``skipped_noop`` (which is reserved for "deployment evaluated
-    and found already at config"); ``evaluated`` counts the total
-    iteration including the excluded rows so operators can see the
-    distinction between "no rows to consider" and "rows considered, all
-    skipped".
+    The fanout manages the environment's dedicated ingress controller as the
+    cluster config fan-out does (ADR-066, #424): it creates the controller,
+    attributed to ``acting_user_id``, or redeploys it when its values differ,
+    and an application that moves onto the controller waits until the
+    controller is RUNNING with the new values; the status reporter then
+    redeploys it. The controller is removed once no application uses it.
+
+    Tombstoned (``deleted_at IS NOT NULL``), ``DELETING`` and internal
+    deployments get no redeploy. They are NOT counted toward ``skipped_noop``
+    (which is reserved for "deployment evaluated and found already at
+    config"); ``evaluated`` counts every listed deployment so operators can
+    see the distinction between "no rows to consider" and "rows considered,
+    all skipped".
 
     An environment a non-terminal clone is still building is refused outright
     (010 research D8): its counterpart deployments are mid-restore, and this
@@ -339,91 +358,49 @@ async def update_environment(
         environment.capabilities = compute_environment_capabilities(environment)
         await uow.commit()
 
-        validated_config = EnvironmentConfig.model_validate(config)
+        result = await fan_out_environment_config(
+            environment,
+            uow,
+            acting_user_id,
+            at_config=partial(
+                _deployment_already_at_config,
+                new_config=EnvironmentConfig.model_validate(config),
+            ),
+        )
 
-        # Enumerate non-tombstoned deployments in the environment. We
-        # rely on the repository to return domain entities; the fanout
-        # filters internal rows in-loop (FR-013) so the counters
-        # accurately reflect "evaluated".
-        deployments = await uow.deployments.find_all_by_environment(environment_id)
-
-        counts = {
-            "evaluated": 0,
-            "dispatched": 0,
-            "skipped_noop": 0,
-            "skipped_restoring": 0,
-            "dispatch_failed": 0,
-        }
-        for deployment in deployments:
-            counts["evaluated"] += 1
-            # Tombstoned + internal deployments are excluded per FR-012 /
-            # FR-013. They are NOT counted toward ``skipped_noop`` —
-            # ``skipped_noop`` is reserved for "deployment evaluated and
-            # already at the new config".
-            if deployment.deleted_at is not None or deployment.internal:
-                continue
-            if _deployment_already_at_config(deployment, validated_config):
-                counts["skipped_noop"] += 1
-                _emit_fanout_metric(environment_id, "skipped_noop")
-                continue
-            try:
-                # A failure rolls back only this savepoint, not the redeploys before it (#452, ADR-066 decision 6).
-                async with uow.session.begin_nested():
-                    task = await redeploy_for_environment_update(deployment, uow)
-            except Exception:  # noqa: BLE001 — broad catch is intentional for per-deployment isolation (FR-008)
-                counts["dispatch_failed"] += 1
-                logger.exception(
-                    "env_config_fanout_dispatch_error environment_id={} deployment_id={}",
-                    environment_id,
-                    deployment.id,
-                )
-                _emit_fanout_metric(environment_id, "dispatch_failed")
-                continue
-            if task is None:
-                # ``redeploy_for_environment_update`` returns None only for a
-                # ``RESTORING`` deployment, which it deliberately leaves alone
-                # (010 research D8). Counting that as ``dispatched`` would have
-                # the audit line claim a redeploy that never happened — most
-                # visibly for a clone's counterparts, which sit in ``RESTORING``
-                # for the whole clone.
-                counts["skipped_restoring"] += 1
-                _emit_fanout_metric(environment_id, "skipped_restoring")
-                continue
-            counts["dispatched"] += 1
-            _emit_fanout_metric(environment_id, "dispatched")
-
-        # Persist the per-deployment writes accumulated across the
-        # fanout loop. ``redeploy_for_environment_update`` calls
-        # ``uow.deployments.save(...)`` (refreshes
-        # ``active_application_instance_id``) and ``uow.tasks.save(...)``
-        # (the dispatched Task row) but does NOT commit — the helper is
-        # invoked from inside this enclosing UoW context, so the caller
-        # owns the commit cadence. ``UnitOfWork.__aexit__`` only rolls
-        # back on exception; on a clean exit it is a no-op. Without this
-        # explicit commit the persisted env-config row (committed above
-        # per FR-009a) is intact but every Task row and every
-        # ``active_application_instance_id`` flip from the loop is
-        # silently dropped — operators see "fanout dispatched=N" in the
-        # audit log but no Task rows in storage. Sibling write paths
-        # (``update_deployment``, ``update_deployment_version``,
-        # ``delete_deployment``) all explicitly commit at the end of
-        # their ``async with uow:`` block; this commit puts
-        # ``update_environment`` back in line with them. (FR-006/FR-009.)
+        # ``redeploy_for_environment_update`` and the controller actions save
+        # the Task rows and the active-instance pointers but do NOT commit;
+        # ``UnitOfWork.__aexit__`` does not commit either, so without this
+        # commit they are dropped (FR-006/FR-009).
         await uow.commit()
 
+        counts = result.counts()
+        for outcome in _FANOUT_METRIC_OUTCOMES:
+            if counts[outcome]:
+                _emit_fanout_metric(environment_id, outcome, counts[outcome])
         # One audit log entry per fanout invocation regardless of
         # dispatched count — FR-023. True environment-wide no-ops still
         # produce an entry with ``dispatched=0``.
         logger.info(
             "env_config_fanout_dispatched environment_id={} evaluated={} "
             "dispatched={} skipped_noop={} skipped_restoring={} "
-            "dispatch_failed={}",
+            "dispatch_failed={} skipped_waiting_for_ingress={} "
+            "evaluation_failed={} ingress_controllers_created={} "
+            "ingress_controllers_redeployed={} ingress_controllers_removed={} "
+            "ingress_controller_failed={} ingress_controller_removal_failed={}",
             environment_id,
-            counts["evaluated"],
-            counts["dispatched"],
-            counts["skipped_noop"],
-            counts["skipped_restoring"],
-            counts["dispatch_failed"],
+            result.evaluated,
+            result.dispatched,
+            result.skipped_noop,
+            result.skipped_restoring,
+            result.dispatch_failed,
+            result.skipped_waiting_for_ingress,
+            result.evaluation_failed,
+            result.ingress_controllers_created,
+            result.ingress_controllers_redeployed,
+            result.ingress_controllers_removed,
+            result.ingress_controller_failed,
+            result.ingress_controller_removal_failed,
         )
 
         refreshed = await uow.environments.get(environment_id)

@@ -512,10 +512,12 @@ class Mutation:
     ) -> Environment | None:
         """Update an environment's config with a typed ``UpdateEnvironmentInput``.
 
-        Triggers a redeploy fanout: every non-tombstoned, non-internal
-        deployment in the environment receives a fresh ``ApplicationInstance``
-        version and a redeploy ``Task``. See
-        ``specs/009-environment-update/contracts/graphql.md`` §2.
+        Triggers a redeploy fanout: every live, non-internal deployment whose
+        environment config changed receives a fresh ``ApplicationInstance``
+        version and a redeploy ``Task``, and the environment's dedicated
+        ingress controller is created or redeployed for the calling user
+        (ADR-066, #424). See
+        ``specs/archive/009-environment-update/contracts/graphql.md`` §2.
 
         The typed input is converted to a plain dict (``None``-valued
         fields omitted to express full-replacement semantics) and forwarded
@@ -525,11 +527,16 @@ class Mutation:
         boundary intact.
         """
         uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        assert current_user is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
         config_dict = update_environment_input_to_dict(input)
         environment = await update_environment(
             environment_id=environment_id,
             uow=uow,
             config=config_dict,
+            acting_user_id=current_user.id,
         )
         return Environment.from_instance(environment)
 
