@@ -262,8 +262,12 @@ application version and driver version:
   [ADR-012](../adr/0012-environment-config-fanout.md)). `update_environment`
   commits the environment row, then redeploys each live, non-internal
   deployment of the environment whose active instance stores a different
-  environment config (`context.environment.config`). Each redeploy runs in a
-  savepoint, so a failure rolls back only that deployment's writes.
+  environment config (`context.environment.config`). It runs the
+  per-environment steps of the cluster config fan-out below
+  (`fan_out_environment_config`) with this comparison, so it also creates,
+  redeploys and removes the environment's dedicated ingress controller in
+  the same order (#424). Each redeploy runs in a savepoint, so a failure
+  rolls back only that deployment's writes.
 - **Cluster config fan-out** (`services/cluster_config_fanout.py`,
   [ADR-066](../adr/0066-cluster-config-fanout.md)). `update_cluster` commits
   the cluster config and its recomputed capabilities, then
@@ -304,10 +308,10 @@ savepoint (see [`backend/services.md`](backend/services.md#unit-of-work-pattern)
 Both fan-outs compare per deployment, so a resubmission of the same config
 redeploys only the deployments that are not at the config the fan-out
 compares, whatever the cause, such as a redeploy that an earlier fan-out
-could not start. The cluster config fan-out also redeploys a dedicated
-ingress controller whose `dedicated_ingress` values differ from its
-environment's, for example after an environment update changed them; it
-leaves a `RUNNING` controller whose values match as it is.
+could not start. Both fan-outs also redeploy a dedicated ingress controller
+whose `dedicated_ingress` values differ from its environment's, for example
+after an environment update made before #424 changed only the applications;
+they leave a `RUNNING` controller whose values match as it is.
 
 A resubmission does not retry a redeploy whose rollout started and then
 failed. `redeploy_for_environment_update` makes the new instance active

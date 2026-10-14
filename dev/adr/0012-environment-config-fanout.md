@@ -13,6 +13,14 @@
 > `dedicated_ingress` off also leads to the removal of the environment's dedicated ingress
 > controller once the applications have moved off it. The environment fan-out described below is
 > unchanged.
+>
+> **Amended 2026-10-14** ([#424](https://github.com/opsmill/styrmin/issues/424)). The environment
+> fan-out keeps the comparison of decision 1, and now carries out each update with the
+> per-environment steps of the cluster config fan-out (ADR-066 decisions 2 and 3): it creates or
+> redeploys the environment's dedicated ingress controller, holds back the applications that would
+> move onto it until it is `RUNNING` with the new values, and runs each redeploy in a savepoint.
+> It no longer redeploys a `DELETING` deployment, and `_emit_fanout_metric` is called once per
+> outcome with its count instead of once per deployment.
 
 ## Context
 

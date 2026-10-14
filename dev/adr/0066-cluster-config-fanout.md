@@ -74,8 +74,14 @@ started is caught, logged and counted, and the other redeploys still start. A re
 same config therefore redeploys only the deployments that are not at their resolved config,
 whatever the cause.
 
-The environment fan-out in `services/environments.py` is not changed and keeps its comparison of
-the stored environment config.
+The environment fan-out in `services/environments.py` keeps its comparison of the stored
+environment config.
+
+> Amended 2026-10-14 ([#424](https://github.com/opsmill/styrmin/issues/424)): the first version of
+> this paragraph said that the environment fan-out is not changed. `update_environment` now runs
+> the per-environment steps of decisions 2, 3 and 6 through `fan_out_environment_config`, with its
+> own comparison passed as `at_config` and its own log prefix (`env_config_fanout_*`). See the
+> amendment of decision 3.
 
 ### 2. Order the dedicated ingress changes through the status reporter
 
@@ -156,8 +162,17 @@ The check runs at the end of each environment's fan-out and from the status repo
 reads only stored state, it also acts after an environment update. When `updateEnvironment`
 turns the environment's own `dedicated_ingress` off and the cluster sets none, the controller is
 now removed once the applications have been redeployed without it. Before this decision, it
-stayed until the last application of the environment was deleted. The environment update still
-neither creates nor redeploys the controller.
+stayed until the last application of the environment was deleted.
+
+> Amended 2026-10-14 ([#424](https://github.com/opsmill/styrmin/issues/424)): the first version of
+> this decision ended with "The environment update still neither creates nor redeploys the
+> controller." An environment update now acts on the controller as decision 2 describes, for the
+> environment it updates: it creates the controller, attributed to the administrator who submitted
+> the environment config, or redeploys it when its values differ, and the applications that move
+> onto it wait until it is `RUNNING` with the new values. The status reporter's continuation then
+> redeploys them, with the resolved-config comparison of decision 1. `update_environment` runs
+> the removal check at the end of the update, like the cluster fan-out. No dry run is added to
+> `updateEnvironment`, and its result type is unchanged.
 
 ### 4. A typed `UpdateClusterInput`, while `createCluster` keeps its JSON argument
 
@@ -313,9 +328,11 @@ written, and the caller kept using a session whose transaction was gone. An expl
   nested block that failed during one of its redeploys rolled back the whole open transaction,
   including the redeploys written before it in the same fan-out. Since
   [#452](https://github.com/opsmill/styrmin/issues/452), `update_environment` runs each redeploy
-  in its own savepoint, as decision 6 does.
-- The environment and cluster fan-outs now use different comparisons. The cluster fan-out could
-  replace the environment fan-out; that is left for a later change.
+  in its own savepoint, as decision 6 does. Since #424, it also runs each controller action and
+  removal check in a savepoint (amended 2026-10-14).
+- The environment and cluster fan-outs now use different comparisons. Since #424 they share the
+  per-environment steps and differ only in the comparison (amended 2026-10-14). Replacing the
+  environment comparison with the resolved-config comparison is left for a later change.
 - New fan-outs whose change reaches deployments through more than one config level should compare
   the resolved config, as decision 1 does, not the stored config of one level.
 
