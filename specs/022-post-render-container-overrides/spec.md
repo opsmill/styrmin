@@ -36,7 +36,7 @@ The PRD lists no open questions. Its decisions were taken in a review session on
 
 - Q: Do the `component_command` and `component_args` filters stay, become deprecated or get removed? → A: They are retired with no deprecation period. A template that calls either one fails to render with `RETIRED_TEMPLATE_FILTER`, as `component_env_vars` did ([ADR-057](../../dev/adr/0057-post-render-component-overrides.md) §4). The three in-repo drivers that call them move in the same change.
 - Q: How does clearing an override restore the chart's or the image's default `command` and `args`? → A: Styrmin builds the patches again on every render. With no stored value it builds no `command` or `args` patch, so the chart's rendered values reach the pod unchanged. No empty-list or `null` marker is needed.
-- Q: What happens to `spec.container_overrides` in `driver.styrmin.yml`? → A: It is removed from the driver specification file, from the stored driver version and from the API. A driver file that still contains it fails to load with the unknown-key error.
+- Q: What happens to `spec.container_overrides` in `driver.styrmin.yml`? → A: It is removed from the driver specification file, from the stored driver version and from the API. A driver file that still contains it fails to load with an error that names the removed block and links the migration guide (changed from the unknown-key error after the PR review).
 - Q: Does a component without a declared component container still accept a `command` or `args` override? → A: No. The same rule as for env vars and image overrides applies: an added or changed value is rejected with `COMPONENT_CONTAINER_NOT_DECLARED`, and stored values are reported with `isApplicable: false`.
 - Q: Which write paths carry the `COMPONENT_CONTAINER_NOT_DECLARED` rejection for `command` and `args`? → A: Every path that already carries it for env vars and image overrides (GraphQL, the SDK, `styrminctl apply` and the UI), because they share the deployment service check.
 
@@ -89,7 +89,7 @@ Covers needs 6, 7 and 10. A deployment pinned to a driver version that calls the
 **Acceptance Scenarios**:
 
 1. **Given** a deployment pinned to a driver version whose `values.j2.yml` calls `component_args`, **When** the deployment is rendered again, **Then** the render fails with `RETIRED_TEMPLATE_FILTER`, Styrmin does not apply the HelmRelease, and the deployment message names the filter and the migration guide.
-2. **Given** a driver file that contains `spec.container_overrides`, **When** a driver author loads it, **Then** the load fails with the unknown-key error.
+2. **Given** a driver file that contains `spec.container_overrides`, **When** a driver author loads it, **Then** the load fails with an error that names the removed block and links the migration guide.
 3. **Given** an `infrahub` deployment with a stored `args` override on `server`, **When** the user moves it to the migrated driver version, **Then** the `server` pods run with the same `args` as before the move.
 
 ---
@@ -136,9 +136,9 @@ Covers needs 4, 5 and 9. A user cannot add or change `command` or `args` on a co
   - Verified by: an E2E compares the container spec after the clear with a render that never had an override.
 - **FR-004**: When the declared component container is missing from the rendered workload, System MUST fail the reconcile with `COMPONENT_CONTAINER_NOT_FOUND`, also when `command` or `args` is the only override on the component.
   - Verified by: an integration test with a wrong container name.
-- **FR-005**: The `component_command` and `component_args` filters MUST fail rendering with `RETIRED_TEMPLATE_FILTER`, and the error MUST link the container override migration guide.
+- **FR-005**: The `component_command` and `component_args` filters MUST fail rendering with `RETIRED_TEMPLATE_FILTER`, and the error MUST link the container override migration guide. Loading a driver version whose `values.j2.yml` calls a retired filter MUST fail with the same code (added after the PR review).
   - Verified by: a unit test that renders a template calling each filter.
-- **FR-006**: System MUST reject a driver file that contains `spec.container_overrides`, with the same unknown-key error as any other unknown key.
+- **FR-006**: System MUST reject a driver file that contains `spec.container_overrides`, with an error that names the removed block and links the container override migration guide.
   - Verified by: a driver loader unit test.
 - **FR-007**: For `command` and `args` on a component without a component container, System MUST apply the same rule as for env vars and image overrides:
   - reject an added or changed value with `COMPONENT_CONTAINER_NOT_DECLARED`, with the metadata `override: "command"` or `override: "args"`;

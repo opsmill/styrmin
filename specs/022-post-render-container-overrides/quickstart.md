@@ -24,7 +24,7 @@ uv run pytest backend/tests/unit/services/component_container/ \
 Expected:
 
 - a template that calls `component_command` or `component_args` raises `RETIRED_TEMPLATE_FILTER` with the filter name and `.../docs/drivers/migrating-container-overrides`;
-- a driver file with `spec.container_overrides` fails to load like any unknown key;
+- a driver file with `spec.container_overrides` fails to load with an error that links the migration guide;
 - a component with only `args` set gets a merge patch and a guard; a cleared override gets none;
 - no file under `driver/` calls the retired filters or contains `spec.container_overrides`;
 - the migration revision drops and restores `applicationdriverversion.container_overrides`, and there is one Alembic head.

@@ -215,3 +215,12 @@ The review used `speckit-review-run` with six agents in sequence: code, tests, c
    - detect retired filters when the driver loads.
 3. Run `speckit-reconcile-run` to correct spec assumption A-001. It should also record the work done beyond tasks.md: the `config-diff.ts` fix and the `apply` warning for `command` and `args`.
 4. After the merge, run `speckit-opsmill-extract`.
+
+## 8. Changes after the PR review
+
+- **Upgrade order** (Critical): the migration guide has a "Before you upgrade Styrmin" section that lists and removes stored `command` and `args` with `styrminctl deployments get` and `deployments update --config`, because the editor of earlier releases cannot submit that removal. The docs changelog and `457.removed.md` say the same.
+- **Driver load**: `JinjaTemplateValidator` rejects a `values.j2.yml` that calls any retired filter, with `RETIRED_TEMPLATE_FILTER` and the line of the call. A `driver.styrmin.yml` with `spec.container_overrides` fails with an error that links the migration guide (FR-005 and FR-006 updated).
+- **E2E**: US3 runs under both variants through the new dual-entrypoint `set_component_container_override`, so `[ui-chromium]` sets and clears `command` and `args` in the editor and submits through Review & apply. The hidden editors and "not applied" rows need a component without a container, which no example driver has; Vitest covers them.
+- **Read-only card**: lists `command` and `args` as JSON lists with an applied or not applied badge from `componentContainerOverrides.isApplicable`, and shows every orphaned block.
+- **Editor**: no Add override on a component without a container; JSON for read-only lists; hint, empty state and accessible names on the Command and Args editors; a warning on an empty command element; a not applied badge on the collapsed row.
+- **`apply` warning**: one line per component naming the override kinds and the two fixes; the SDK adds `ApplyOutcome.inapplicable_overrides`.

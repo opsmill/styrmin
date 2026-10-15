@@ -56,7 +56,7 @@ Order inside `spec.postRenderers` is unchanged: every other patch, then per kind
 | Removed column | `container_overrides` (`JSON`, nullable), added by revision `a8b9c0d1e2f3` |
 | Migration | new revision, `down_revision = "9548830f81cd"`. Upgrade: `op.drop_column("applicationdriverversion", "container_overrides")`. Downgrade: `op.add_column` with `sa.JSON()`, nullable, no data |
 
-Driver specification file (`Specification` model): the `container_overrides` key is removed. `extra="forbid"` rejects it as an unknown key.
+Driver specification file (`Specification` model): the `container_overrides` key is removed. A `before` model validator rejects it with an error that links the migration guide.
 
 ## Read surface (GraphQL)
 

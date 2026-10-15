@@ -4,7 +4,7 @@
 
 ## `driver.styrmin.yml`
 
-`spec.container_overrides` is removed. A file that still contains it fails to load with the same validation error as any other unknown key under `spec` (`Specification` has `extra="forbid"`).
+`spec.container_overrides` is removed. A file that still contains it fails to load: a `before` model validator on `Specification` raises a `removed_key` error that names the block and links the migration guide. Other unknown keys under `spec` keep the generic `extra_forbidden` error.
 
 ```yaml
 # Before (rejected after this change)

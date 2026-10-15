@@ -4,7 +4,7 @@
 
 ## `RETIRED_TEMPLATE_FILTER` (extended)
 
-`RetiredTemplateFilterError` in [`services/exceptions.py`](../../../backend/styrmin_backend/services/exceptions.py). Raised while `values.j2.yml` renders, before the HelmRelease is built, so no HelmRelease is applied.
+`RetiredTemplateFilterError` in [`services/exceptions.py`](../../../backend/styrmin_backend/services/exceptions.py). Raised when a driver version is loaded, by `JinjaTemplateValidator`, with a message that names the line of the call (`retired_filter_load_message()`). For a driver version loaded before that check, raised while `values.j2.yml` renders, before the HelmRelease is built, so no HelmRelease is applied.
 
 | Filter | Metadata `filter` | Metadata `migration_guide` |
 |--------|-------------------|----------------------------|
@@ -40,7 +40,7 @@ Message for the new values: "Container `<command|args>` override targets compone
 
 | Code | Why |
 |------|-----|
-| `DRIVER_CONTAINER_OVERRIDE_DOC_COMPONENT_MISMATCH` | Validated `spec.container_overrides`, which is removed. A driver file with that block now fails earlier with the unknown-key error |
+| `DRIVER_CONTAINER_OVERRIDE_DOC_COMPONENT_MISMATCH` | Validated `spec.container_overrides`, which is removed. A driver file with that block now fails earlier, with an error that names the removed block and links the migration guide |
 
 ## Unchanged
 
