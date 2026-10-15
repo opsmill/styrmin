@@ -122,7 +122,7 @@ No new entity. The change affects these existing ones:
 
 - **SC-001**: The three example drivers and the two driver documentation pages ("Creating a driver" and "Context") contain no Ingress class value.
 - **SC-002**: For a deployment of each example driver, every Ingress has the same `spec.ingressClassName` and annotation before and after the change, with and without a dedicated ingress controller.
-- **SC-003**: In an environment with a dedicated ingress controller, a driver version whose chart sets its own class, either the resolved `ingress_class` or another value such as `nginx`, reaches `RUNNING`, and its Ingress has the shape that the dedicated ingress controller serves: no `spec.ingressClassName` and the annotation `traefik`.
+- **SC-003**: In an environment with a dedicated ingress controller, a driver version whose chart sets its own class, either the resolved `ingress_class` or another value such as `nginx`, reaches `RUNNING`, and its Ingress has the shape that the dedicated ingress controller serves: no `spec.ingressClassName` and the annotation `traefik`. Verified by the Ingress shape that the integration test checks, which is the shape that `test_traffic_routes_through_dedicated_ingress` reaches over HTTP (see Testing Approach, accepted gap).
 - **SC-004**: No deployment has to move to a new driver version because of this change.
 
 ## Testing Approach
@@ -136,6 +136,7 @@ No new entity. The change affects these existing ones:
   - [`test_cluster_update_redeploys_and_moves_dedicated_ingress`](../../backend/tests/e2e/test_cluster_update.py) expects `spec.ingressClassName: nginx` without a dedicated ingress controller (FR-001, FR-004, SC-002).
   - [`test_traffic_routes_through_dedicated_ingress`](../../backend/tests/e2e/test_ingress_controller.py) checks that the application responds through the dedicated ingress controller (FR-002, FR-004, SC-002).
 - Skipping a new E2E test was approved during the idea review of issue #471, because the two CI tests above cover the changed path. The integration test covers the case that no E2E test deploys.
+- The E2E fixture drivers `late-container` and `failing-actions` ([`backend/tests/e2e/fixtures/drivers/`](../../backend/tests/e2e/fixtures/drivers/)) keep their `className: "{{ instance.config.ingress_class }}"` line on purpose. The main E2E cluster has a dedicated ingress controller, so the CI tests that deploy them (`shard_apply`, `shard_task_steps`) render a template that still sets the class in dedicated mode (FR-005).
 - Accepted gap: no HTTP request reaches an application whose template still sets the class. The integration test checks that its Ingress has the same shape as the one that the second E2E test reaches over HTTP.
 
 ## Documentation Changes

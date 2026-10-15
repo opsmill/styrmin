@@ -15,7 +15,7 @@ Technical approach (details in [research.md](research.md)):
 - The values template renderer stops removing `ingress_class` from the template data (D-004).
 - The three example drivers drop the class line and keep their `spec.version` (D-005).
 - Unit tests, one new integration test on real `helm template` and `kubectl kustomize`, and local runs of two existing E2E tests (D-006).
-- Documentation, `CONTEXT.md`, ADR-070 and a changelog fragment in the same change (D-007).
+- Documentation, `CONTEXT.md`, ADR-070 and a changelog fragment in the same change (D-007). The fragment tells driver authors they can drop the class line, that a chart's own class is removed with a dedicated ingress controller, and that templates now read `ingress_class` in that mode too.
 
 ## Technical Context
 
@@ -107,6 +107,9 @@ dev/
 ├── adr/0070-ingress-class-set-by-post-render.md   # new
 └── knowledge/backend/data-models.md               # DedicatedIngressConfig section
 
+backend/tests/e2e/fixtures/drivers/{late-container,failing-actions}/values.j2.yml
+                                       # unchanged on purpose: still set the class (FR-005 in CI)
+
 CONTEXT.md                             # "Dedicated ingress controller" entry
 changelog/471.changed.md               # new towncrier fragment
 ```
@@ -127,6 +130,8 @@ changelog/471.changed.md               # new towncrier fragment
 
 - **A driver outside this repository reads `ingress_class` for something other than the Ingress class** (spec A-001): in dedicated mode its template now gets the resolved value instead of an empty value. Not known; accepted by the PRD.
 - **Flux applies the strategic merge patch differently from `kubectl kustomize`**: low. Both use the Kustomize API, strategic merge patches with a target are already in production (`TemplateAnnotationPatch`, `RuntimeClassPatch`), and `test_traffic_routes_through_dedicated_ingress` runs the dedicated-mode path on a real cluster.
+- **Rollback**: safe. On the previous Styrmin version, the example drivers without the class line get the same Ingress: the old code sets the class in shared mode and wants no class in dedicated mode.
+- **Default IngressClass on clusters that define one**: the `DefaultIngressClass` admission plugin skips an Ingress with the `kubernetes.io/ingress.class` annotation, which Styrmin always sets in dedicated mode, so the removed class is not replaced by the cluster default (research D-001).
 - **Dedicated-mode HelmReleases change**: every application in dedicated mode gets one more patch, so Flux upgrades each release on its next render. The resulting Ingress is the same unless the chart sets its own class, which is the case this change fixes.
 
 ## Complexity Tracking
