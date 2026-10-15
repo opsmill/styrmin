@@ -243,6 +243,8 @@ The "request validation" branch is what surfaces messages like `Variable '$statu
 
 `deleteDeployment` deserves a note: a delete on a tombstoned deployment surfaces `NOT_FOUND` (intentionally conflated with unknown id so automation can treat both identically as "already gone"); a delete during a restore raises the typed `DEPLOYMENT_RESTORING` so callers can specifically recover. A repeat delete on a deployment that's already `DELETING` returns the existing in-flight `DELETE_DEPLOYMENT` task without re-issuing the cluster patch (idempotent retry).
 
+`deleteCluster` never cascades: a cluster that still has environments is refused with the typed `IN_USE` code, the same one `deleteBackupStorageLocation` uses, and lists them in `extensions.environment_names`. Without the check, SQLAlchemy would null out the `NOT NULL` `environment.cluster_id` foreign key and the resulting `IntegrityError` would surface as `INTERNAL_ERROR`. `deleteEnvironment` is the opposite: it deletes the environment's snapshots and deployments with it (`delete_environment` in `services/environments.py`).
+
 `deploy` and `updateDeployment` enforce **per-environment** name uniqueness: an `ALREADY_EXISTS` error fires when an active deployment with the chosen name already lives in the target environment. Names are reusable across environments, and a tombstoned deployment in the same environment does **not** block reuse — operators who delete `ansible` can immediately deploy a new `ansible` in the same env. The DB-side gate is a partial unique index on `(environment_id, name) WHERE deleted_at IS NULL` (see [`data-models.md`](data-models.md) → Deployment).
 
 ```python

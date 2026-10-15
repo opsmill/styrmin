@@ -25,6 +25,7 @@ from styrmin_backend.services.cluster_config_fanout import (
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
     ClusterAlreadyExistsError,
+    ClusterInUseError,
     ClusterLimitReachedError,
     ClusterNotFoundError,
     EnvironmentOperationInProgressError,
@@ -217,10 +218,21 @@ async def get_clusters(uow: UnitOfWork) -> Sequence[Cluster]:
 
 
 async def delete_cluster(cluster_id: UUID, uow: UnitOfWork) -> None:
-    """Delete a cluster by its id."""
+    """Delete a cluster by its id.
+
+    Raises:
+        ClusterNotFoundError: When ``cluster_id`` does not exist.
+        ClusterInUseError: When the cluster still has environments. Deleting
+            it anyway would null out the ``NOT NULL`` ``environment.cluster_id``.
+    """
     async with uow:
         cluster = await uow.clusters.get(cluster_id)
         if cluster is None:
             raise ClusterNotFoundError(f"Cluster with id {cluster_id} not found.")
+        if cluster.environments:
+            raise ClusterInUseError(
+                cluster_name=cluster.name,
+                environment_names=sorted(env.name for env in cluster.environments),
+            )
         await uow.clusters.delete(cluster)
         await uow.commit()

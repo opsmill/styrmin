@@ -80,6 +80,28 @@ class ClusterNotFoundError(ServiceError):
     default_message = "Cluster not found"
 
 
+class ClusterInUseError(ServiceError):
+    """Cannot delete a cluster that still has environments."""
+
+    error_code = "IN_USE"
+    default_message = "Cluster still has one or more environments"
+
+    def __init__(
+        self, cluster_name: str, environment_names: list[str], message: str = ""
+    ) -> None:
+        self.environment_names = environment_names
+        super().__init__(
+            message
+            or f"Cluster '{cluster_name}' still has environments: "
+            f"{', '.join(environment_names)}. "
+            "Delete them before deleting the cluster."
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {"environment_names": self.environment_names}
+
+
 class EnvironmentAlreadyExistsError(ServiceError):
     """The environment already exists."""
 
