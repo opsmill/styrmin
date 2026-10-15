@@ -67,7 +67,6 @@ Example:
 import re
 from typing import Any, Literal, Self
 
-from loguru import logger
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import Version
 from pydantic import (
@@ -85,7 +84,10 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
-from styrmin_backend.context.models.components import ReplicaDeclaration
+from styrmin_backend.context.models.components import (
+    ReplicaDeclaration,
+    validate_ignoring_invalid_replica_keys,
+)
 from styrmin_backend.services.exceptions import CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL
 
 from ._shared import Kind
@@ -265,35 +267,21 @@ class ArbitrarySectionModel(ReplicaDeclaration):
         return value
 
 
-_REPLICA_KEYS = ("replicas", "singleton")
-
-
 def parse_stored_component_declaration(
-    raw: dict[str, Any], *, driver_version: str, component: str
+    raw: dict[str, Any], *, driver_version: str | None, component: str
 ) -> ArbitrarySectionModel:
     """Parse a component declaration stored by an earlier driver load.
 
-    A driver version stored before 023 may hold untyped ``replicas`` or ``singleton`` values
-    that the typed fields reject. When dropping both keys makes the declaration valid, they are
-    dropped with a warning; any other error is raised. The driver load path stays strict.
+    Invalid ``replicas`` and ``singleton`` values are dropped with a warning, as on a stored
+    deployment context (:func:`validate_ignoring_invalid_replica_keys`). The driver load path
+    stays strict.
     """
-    try:
-        return ArbitrarySectionModel.model_validate(raw)
-    except ValidationError as err:
-        if not any(key in raw for key in _REPLICA_KEYS):
-            raise
-        try:
-            declaration = ArbitrarySectionModel.model_validate(
-                {key: value for key, value in raw.items() if key not in _REPLICA_KEYS}
-            )
-        except ValidationError:
-            raise err from None
-    logger.warning(
-        "Ignoring the invalid replicas/singleton keys of component {} in driver version {}",
-        component,
-        driver_version,
+    return validate_ignoring_invalid_replica_keys(
+        ArbitrarySectionModel.model_validate,
+        raw,
+        component=component,
+        driver_version=driver_version,
     )
-    return declaration
 
 
 class Components(RootModel):

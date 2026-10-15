@@ -205,10 +205,17 @@ to 2147483647) and `singleton` (a `StrictBool`, default `false`). `ReplicaDeclar
   `spec.components.<name>`.
 - `model_dump()` leaves out `replicas` when it is `None` and `singleton` when it is `false`, so a
   declaration that uses neither key is stored and serialised as before 023.
-- `parse_stored_component_declaration(raw, driver_version=..., component=...)` reads a stored
+- `validate_ignoring_invalid_replica_keys` (`context/models/components.py`) reads a stored
   declaration. A row stored before 023 can hold an untyped `replicas` or `singleton` that the
-  typed fields reject; the function then drops both keys and logs a warning that names the driver
-  version and the component. Any other validation error is raised.
+  typed fields reject; when dropping both keys makes the declaration valid, the function drops
+  them and logs a warning that names the component, and the driver version when the caller passes
+  it. Any other validation error is raised unchanged. A model validator on `ComponentContext` runs
+  it, so every read of a stored context gets it: the repository, the operator, the agent and
+  `resolve_global_context`, which passes the driver version as the validation context
+  `driver_version`. `parse_stored_component_declaration(raw, driver_version=..., component=...)`
+  runs it with the driver-load model for the write checks, `componentReplicas` and the
+  `ComponentConfig.replicas` and `ComponentConfig.singleton` resolvers. The driver load path does
+  not run it.
 
 No column and no Alembic revision: the keys ride the existing JSON. They are read through
 `ComponentConfig.replicas` and `ComponentConfig.singleton` in GraphQL, which default to `null` and

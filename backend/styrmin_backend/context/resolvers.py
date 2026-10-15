@@ -563,22 +563,12 @@ def _resolve_component_context(
     driver_version: str,
 ) -> ComponentContext:
     """Build one declared component's context, with its replica override (023)."""
-    # Imported here: the driver models import the context models, so a top-level import cycles.
-    from styrmin_backend.services.driver.models.resources.driver import (
-        parse_stored_component_declaration,
-    )
-
     raw = component.model_dump()
-    try:
-        raw["config"] = parse_stored_component_declaration(
-            raw["config"], driver_version=driver_version, component=component.name
-        ).model_dump()
-    except ValidationError:
-        # Left as stored: ``ComponentContext`` reports the error with its ``config.`` path.
-        pass
     block = (deployment_config.components or {}).get(component.name)
     raw["replica_override"] = block.replicas if block is not None else None
-    return ComponentContext.model_validate(raw)
+    return ComponentContext.model_validate(
+        raw, context={"driver_version": driver_version}
+    )
 
 
 def resolve_global_context(context_input: ContextInput) -> GlobalContext:
