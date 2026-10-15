@@ -2,7 +2,14 @@ import re
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 
 class IngressServiceConfig(BaseModel):
@@ -498,14 +505,34 @@ class EnvironmentConfig(BaseConfigSection):
         return validate_env_vars_dict("environment", v)
 
 
+# Kubernetes ``spec.replicas`` is an ``int32``.
+MAX_REPLICA_COUNT = 2_147_483_647
+
+
+def _check_replica_count(value: Any, component_name: str | None) -> Any:
+    """Return ``value`` when it is ``None`` or an ``int`` from 1 to ``MAX_REPLICA_COUNT``."""
+    if value is None or (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and 1 <= value <= MAX_REPLICA_COUNT
+    ):
+        return value
+    from styrmin_backend.services.replicas.exceptions import InvalidReplicaCountError
+
+    raise InvalidReplicaCountError(
+        component_name=component_name, requested_replicas=value
+    )
+
+
 class ComponentConfigBlock(BaseModel):
     """Per-component override block carried under ``DeploymentConfig.components``.
 
     Carries the per-component free-form ``env_vars`` dict (008-deployment-env-vars,
     FR-001 component scope, FR-002 deepest-wins precedence), the
     component-scope container ``command``/``args`` overrides
-    (014-component-container-overrides), and the component container's
-    ``image`` override (018-component-image-overrides). Future iterations may
+    (014-component-container-overrides), the component container's
+    ``image`` override (018-component-image-overrides), and the component's
+    ``replicas`` override (023-per-component-replicas). Future iterations may
     add per-component ``scheduling`` or ``inject`` overrides under the same
     block.
 
@@ -520,8 +547,14 @@ class ComponentConfigBlock(BaseModel):
     It is validated through :func:`validate_stored_reference`, which
     substitutes a placeholder version because the real one is unknown here.
 
-    All four reach the pod only through post-render patches to the component
+    These four reach the pod only through post-render patches to the component
     container, and only when the driver declares one (ADR-057, ADR-058, ADR-069).
+
+    ``replicas`` is an integer from 1 to ``MAX_REPLICA_COUNT``; ``None`` means
+    "no override" (the driver default or the chart's count applies). A ``bool``,
+    a non-integer or a value out of range raises ``InvalidReplicaCountError``
+    before type conversion. It is patched onto the workload, not the component
+    container, so it needs no component container.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -530,6 +563,7 @@ class ComponentConfigBlock(BaseModel):
     command: list[str] | None = None
     args: list[str] | None = None
     image: str | None = None
+    replicas: int | None = None
 
     @field_validator("env_vars")
     @classmethod
@@ -582,6 +616,14 @@ class ComponentConfigBlock(BaseModel):
 
         return validate_stored_reference(v)
 
+    # ``mode="before"`` so ``True``, ``"2"`` and ``2.0`` raise the typed error, not a coerced int.
+    # The component name comes from the validation context or ``DeploymentConfig.components``.
+    @field_validator("replicas", mode="before")
+    @classmethod
+    def _validate_replicas(cls, v: Any, info: ValidationInfo) -> Any:
+        context = info.context if isinstance(info.context, dict) else {}
+        return _check_replica_count(v, context.get("component_name"))
+
 
 class DeploymentConfig(ClusterConfig, EnvironmentConfig):
     """Deployment context.
@@ -598,8 +640,9 @@ class DeploymentConfig(ClusterConfig, EnvironmentConfig):
             override blocks keyed by component name (US3). Each block carries
             the component-scope ``env_vars`` dict, the component-scope
             container ``command``/``args`` overrides
-            (014-component-container-overrides), and the component
-            container's ``image`` override (018-component-image-overrides).
+            (014-component-container-overrides), the component
+            container's ``image`` override (018-component-image-overrides),
+            and the ``replicas`` override (023-per-component-replicas).
             Component names that do not match a driver-declared component are
             rejected at the service boundary with
             ``UnknownComponentEnvVarError`` (env-var block),
@@ -610,6 +653,16 @@ class DeploymentConfig(ClusterConfig, EnvironmentConfig):
     model_config = ConfigDict(extra="forbid")
 
     components: dict[str, ComponentConfigBlock] | None = None
+
+    @field_validator("components", mode="before")
+    @classmethod
+    def _validate_component_replicas(cls, v: Any) -> Any:
+        # Runs before each block is built so the error names the component (the dict key).
+        if isinstance(v, dict):
+            for name, block in v.items():
+                if isinstance(block, dict):
+                    _check_replica_count(block.get("replicas"), name)
+        return v
 
     @field_validator("env_vars")
     @classmethod

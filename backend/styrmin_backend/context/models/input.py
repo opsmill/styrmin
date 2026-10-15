@@ -89,3 +89,5 @@ class ContextInput(BaseModel):
     utilities: list[UtilityInput] = Field(default_factory=list)
     parameters: dict[str, Any] = Field(default_factory=dict)
     environment_name: str = ""
+    # The bound driver version, named in log messages only.
+    driver_version: str = ""

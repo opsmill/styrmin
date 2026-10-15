@@ -211,6 +211,7 @@ async def generate_context_from_deployment(
                     "deployment_id": deployment.id,
                 },
                 "parameters": deployment.parameters,
+                "driver_version": application_driver_version.version,
             }
         )
 
