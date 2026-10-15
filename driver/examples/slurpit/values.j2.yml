@@ -85,7 +85,6 @@ portal:
 
 ingress:
   enabled: true
-  className: "{{ instance.config.ingress_class }}"
   hosts:
     - host: "{{ services.slurpit.primary_fqdn }}"
       paths:

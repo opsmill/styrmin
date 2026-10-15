@@ -6,7 +6,6 @@ image:
 
 ingress:
   enabled: true
-  className: "{{ instance.config.ingress_class }}"
   hosts:
     - host: "{{ services['simple-app'].primary_fqdn }}"
       paths:
