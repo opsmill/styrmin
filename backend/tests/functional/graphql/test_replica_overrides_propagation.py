@@ -42,6 +42,7 @@ from ._queries import load_query
 from .conftest import gql
 from .seeds import (
     seed_application_driver_version,
+    seed_application_instance,
     seed_deployment,
     seed_environment,
 )
@@ -902,3 +903,61 @@ async def test_stopped_component_keeps_its_override_and_renders_zero(
 
     assert (await _enabled_by_component(session, deployment_id))["worker"] is True
     assert (await _patch_counts(session, deployment_id))[worker] == {3}
+
+
+# ---------------------------------------------------------------------------
+# Invalid stored ``replicas``/``singleton`` keys are ignored on read (research D-002)
+# ---------------------------------------------------------------------------
+
+# Values a driver version loaded before 023 can hold; a load of either fails now.
+INVALID_DECLARATIONS: dict[str, dict[str, Any]] = {
+    "server": {"replicas": 0},
+    "worker": {"replicas": 2},
+    "database": {"singleton": True, "replicas": 3},
+}
+
+
+@pytest.mark.asyncio
+async def test_invalid_stored_replica_keys_do_not_make_the_deployment_unreadable(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """The driver version, the Component rows and the active instance context hold invalid
+    ``replicas``/``singleton`` keys: ``componentReplicas``, ``ComponentConfig.replicas`` and the
+    replica patches ignore them alike and use the chart's count."""
+    deployment_id, _ = await _seed_deployment(session, INVALID_DECLARATIONS)
+    context = await generate_context_from_deployment_id(
+        deployment_id, SqlModelUnitOfWork(session=session)
+    )
+    stored_context = context.model_dump(mode="json")
+    for name, keys in INVALID_DECLARATIONS.items():
+        stored_context["components"][name]["config"].update(keys)
+    deployment = await _stored_row(session, deployment_id)
+    instance = await seed_application_instance(session, deployment=deployment)
+    instance.context = stored_context
+    deployment.active_application_instance_id = instance.id
+    session.add_all([instance, deployment])
+    await session.commit()
+    adv = await session.get(
+        ApplicationDriverVersion, deployment.application_driver_version_id
+    )
+    assert adv is not None
+
+    assert await _read_rows(client, deployment_id) == [
+        _row("database", None, "CHART"),
+        _row("server", None, "CHART"),
+        WORKER_ROW,
+    ]
+    data = await gql(
+        client,
+        "get_driver_component_replicas",
+        {"applicationDriverId": str(adv.application_driver_id)},
+    )
+    [version] = [
+        v for v in data["applicationDriver"]["versions"] if v["id"] == str(adv.id)
+    ]
+    assert {
+        c["name"]: (c["replicas"], c["singleton"]) for c in version["componentConfigs"]
+    } == {"server": (None, False), "worker": (2, False), "database": (None, False)}
+    assert await _patch_counts(session, deployment_id) == {
+        "app.kubernetes.io/name=worker-app": {2}
+    }

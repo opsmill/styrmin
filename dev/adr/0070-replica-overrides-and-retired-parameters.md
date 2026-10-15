@@ -66,10 +66,12 @@ type the keys the same way.
   before the change, so the stored declaration, the context in the `StyrminDeployment` resource and
   the instance that the no-op check compares do not change (critique E1).
 - Driver versions stored before the change may hold an untyped `replicas` or `singleton` extra
-  that the typed fields reject. `parse_stored_component_declaration` parses stored declarations
-  for the context resolver, the write checks and the read field; when dropping both keys makes the
-  declaration valid, it drops them and logs a warning that names the driver version and the
-  component. The driver load path does not use it, so new driver versions are checked strictly.
+  that the typed fields reject. `validate_ignoring_invalid_replica_keys` reads stored
+  declarations: when dropping both keys makes the declaration valid, it drops them and logs a
+  warning that names the component. `ComponentContext` runs it in a model validator, so every read
+  of a stored deployment context gets it; `parse_stored_component_declaration` runs it for the
+  write checks and the read fields. The driver load path does not use it, so new driver versions
+  are checked strictly.
 
 GraphQL exposes the two keys as `ComponentConfig.replicas: Int` and `ComponentConfig.singleton:
 Boolean!`, which default to `null` and `false` for rows that do not have them.

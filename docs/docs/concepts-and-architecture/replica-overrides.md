@@ -298,9 +298,10 @@ version. See
 - **A driver version loaded before this release that already sets
   `components.<name>.replicas`** to a whole number starts to apply it as
   the driver default. No example driver set this key before this release.
-  A stored `replicas` or `singleton` value that is not valid is ignored,
-  and Styrmin logs a warning that names the driver version and the
-  component.
+  When a stored `replicas` or `singleton` value is not valid, Styrmin
+  ignores both keys of that component and logs a warning that names the
+  component. The deployment stays readable, and the component runs its
+  replica override, or the chart's count when it has none.
 - **Clear every replica override before you roll Styrmin back** below the
   release that added them: earlier releases reject a deployment config
   that carries a `replicas` key.

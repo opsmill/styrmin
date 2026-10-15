@@ -822,7 +822,9 @@ class Deployment:
             dep_config_raw = deployment.config
             # The Component rows mirror the bound driver version's declarations.
             declared = {c.name: c.config for c in deployment.components or []}
-            driver_version = str(deployment.application_driver_version_id)
+            driver_version = (
+                f"driver version {deployment.application_driver_version_id}"
+            )
 
         dep_cfg = (
             DeploymentConfig.model_validate(dep_config_raw) if dep_config_raw else None

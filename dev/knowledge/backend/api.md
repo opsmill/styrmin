@@ -524,14 +524,15 @@ type ComponentReplicas {         # Deployment.componentReplicas
   isApplicable: Boolean!         # false only when a stored override is not applied
 }
 type ComponentConfig {           # ApplicationDriverVersion.componentConfigs
-  replicas: Int                  # config["replicas"] when it is an int, else null
-  singleton: Boolean!            # config["singleton"] is True
+  replicas: Int                  # null when not declared or when the stored value is invalid
+  singleton: Boolean!            # false when not declared or when the stored value is invalid
 }
 ```
 
 `componentReplicas` has one row per component of the deployment's `Component` rows (the bound
 driver version's components) plus one row per orphaned override, sorted by component name. The
-resolver parses each stored declaration with `parse_stored_component_declaration` and computes
+resolver parses each stored declaration with `parse_stored_component_declaration`, as the
+`ComponentConfig.replicas` and `ComponentConfig.singleton` resolvers do, and computes
 `count` and `source` with `resolve_replicas` (`services/replicas/resolver.py`), the function the
 patch builder uses. `count` ignores the stopped state: a stopped component reports the count it
 returns to, and `Deployment.components[].enabled` is `false`. `ReplicaSource` is a plain Strawberry

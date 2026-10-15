@@ -21,6 +21,10 @@ from styrmin_backend.db.models import (
     ApplicationDriverVersion as ApplicationDriverVersionModel,
 )
 from styrmin_backend.domain.models import ComponentConfig as DomainComponentConfig
+from styrmin_backend.services.driver.models.resources.driver import (
+    ArbitrarySectionModel,
+    parse_stored_component_declaration,
+)
 from styrmin_backend.services.driver.models.resources.env_vars import (
     DriverEnvVarLevel as DriverEnvVarLevelPydantic,
 )
@@ -87,6 +91,8 @@ class ComponentConfig:
     id: UUID
     name: str
     config: JSON | None = None
+    # Names the driver version in the warning about ignored replica keys.
+    driver_version: strawberry.Private[str | None] = None
 
     @strawberry.field(
         description=(
@@ -110,11 +116,8 @@ class ComponentConfig:
         )
     )
     def replicas(self) -> int | None:
-        # Rows stored before the field existed have no ``replicas`` key.
-        if not isinstance(self.config, dict):
-            return None
-        value = self.config.get("replicas")
-        return value if type(value) is int else None
+        declaration = self._replica_declaration()
+        return declaration.replicas if declaration is not None else None
 
     @strawberry.field(
         description=(
@@ -123,16 +126,26 @@ class ComponentConfig:
         )
     )
     def singleton(self) -> bool:
+        declaration = self._replica_declaration()
+        return declaration.singleton if declaration is not None else False
+
+    def _replica_declaration(self) -> ArbitrarySectionModel | None:
+        # Invalid stored keys read as unset, as in ``componentReplicas`` and the patch builder.
         if not isinstance(self.config, dict):
-            return False
-        return self.config.get("singleton") is True
+            return None
+        return parse_stored_component_declaration(
+            self.config, driver_version=self.driver_version, component=self.name
+        )
 
     @classmethod
-    def from_instance(cls, instance: DomainComponentConfig) -> ComponentConfig:
+    def from_instance(
+        cls, instance: DomainComponentConfig, *, driver_version: str | None = None
+    ) -> ComponentConfig:
         return cls(
             id=instance.id,
             name=instance.name,
             config=instance.config,
+            driver_version=driver_version,
         )
 
 
@@ -260,7 +273,9 @@ class ApplicationDriverVersion:
     @strawberry.field
     def component_configs(self) -> list[ComponentConfig]:
         return [
-            ComponentConfig.from_instance(component)  # type: ignore[arg-type]
+            ComponentConfig.from_instance(  # type: ignore[arg-type]
+                component, driver_version=f"driver version {self.id}"
+            )
             for component in self.instance.component_configs
         ]
 

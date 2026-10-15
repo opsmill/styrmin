@@ -282,3 +282,80 @@ def test_invalid_replica_override_is_rejected(value: object) -> None:
     assert {error["loc"] for error in exc_info.value.errors()} == {
         ("replica_override",)
     }
+
+
+def _stored_context(**server_config: Any) -> dict[str, Any]:
+    """A stored instance context whose ``server`` config carries ``server_config`` on top."""
+    context = resolve_global_context(
+        context_input=_context_input(_component("server", port=8000))
+    )
+    stored = context.model_dump(mode="json")
+    stored["components"]["server"]["config"].update(server_config)
+    return stored
+
+
+def test_stored_context_with_invalid_replicas_validates_without_the_key(
+    warnings: list[str],
+) -> None:
+    restored = GlobalContext.model_validate(_stored_context(replicas="3"))
+
+    assert restored.components is not None
+    server = restored.components["server"]
+    assert server.config.replicas is None
+    assert server.config["port"] == 8000
+    assert "replicas" not in restored.model_dump()["components"]["server"]["config"]
+    assert len(warnings) == 1
+    assert "server" in warnings[0]
+
+
+def test_stored_context_with_singleton_and_replicas_validates_without_both(
+    warnings: list[str],
+) -> None:
+    restored = GlobalContext.model_validate(_stored_context(singleton=True, replicas=3))
+
+    assert restored.components is not None
+    server = restored.components["server"]
+    assert server.config.replicas is None
+    assert server.config.singleton is False
+    assert len(warnings) == 1
+    assert "server" in warnings[0]
+
+
+def test_stored_context_with_an_unrelated_invalid_field_still_raises(
+    warnings: list[str],
+) -> None:
+    stored = _stored_context(replicas="3")
+    stored["components"]["server"]["config"]["identifier"] = "not-a-label"
+
+    with pytest.raises(ValidationError) as exc_info:
+        GlobalContext.model_validate(stored)
+
+    locs = {error["loc"] for error in exc_info.value.errors()}
+    assert ("components", "server", "config", "identifier") in locs
+    assert ("components", "server", "config", "replicas") in locs
+    assert warnings == []
+
+
+def test_stored_context_with_an_invalid_override_still_raises(
+    warnings: list[str],
+) -> None:
+    stored = _stored_context(replicas="3")
+    stored["components"]["server"]["replica_override"] = 0
+
+    with pytest.raises(ValidationError) as exc_info:
+        GlobalContext.model_validate(stored)
+
+    locs = {error["loc"] for error in exc_info.value.errors()}
+    assert ("components", "server", "replica_override") in locs
+    assert warnings == []
+
+
+def test_stored_context_with_valid_replica_keys_logs_nothing(
+    warnings: list[str],
+) -> None:
+    restored = GlobalContext.model_validate(_stored_context(singleton=True, replicas=1))
+
+    assert restored.components is not None
+    assert restored.components["server"].config.replicas == 1
+    assert restored.components["server"].config.singleton is True
+    assert warnings == []

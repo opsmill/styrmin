@@ -1,13 +1,18 @@
+from collections.abc import Callable, Mapping
 from typing import Any, ItemsView, Literal, Self
 
+from loguru import logger
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ModelWrapValidatorHandler,
     RootModel,
     SerializerFunctionWrapHandler,
     StrictBool,
     StrictInt,
+    ValidationError,
+    ValidationInfo,
     model_serializer,
     model_validator,
 )
@@ -75,6 +80,47 @@ class ReplicaDeclaration(BaseModel):
         if data.get("singleton") is False:
             del data["singleton"]
         return data
+
+
+_REPLICA_KEYS = ("replicas", "singleton")
+
+
+def validate_ignoring_invalid_replica_keys[T](
+    validate: Callable[[dict[str, Any]], T],
+    declaration: Mapping[str, Any],
+    *,
+    component: str,
+    driver_version: str | None = None,
+) -> T:
+    """Run ``validate`` on a stored component declaration, ignoring invalid replica keys (023).
+
+    A driver version loaded before 023 may hold ``replicas`` or ``singleton`` values that the
+    typed keys reject. When dropping both keys makes ``validate`` pass, they are dropped with a
+    warning; any other error is raised unchanged. The driver load path does not call this.
+    """
+    try:
+        return validate(dict(declaration))
+    except ValidationError as err:
+        if not any(key in declaration for key in _REPLICA_KEYS):
+            raise
+        try:
+            result = validate(
+                {k: v for k, v in declaration.items() if k not in _REPLICA_KEYS}
+            )
+        except ValidationError:
+            raise err from None
+    if driver_version:
+        logger.warning(
+            "Ignoring the invalid replicas and singleton keys of component {} in {}",
+            component,
+            driver_version,
+        )
+    else:
+        logger.warning(
+            "Ignoring the invalid replicas and singleton keys of component {}",
+            component,
+        )
+    return result
 
 
 class ArbitrarySectionModel(ReplicaDeclaration):
@@ -195,6 +241,21 @@ class ComponentContext(BaseModel):
     image_override: ResolvedComponentImageOverride | None = None
     # ``DeploymentConfig.components[<name>].replicas``; declared components only (023).
     replica_override: StrictInt | None = Field(default=None, ge=1, le=MAX_REPLICA_COUNT)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _ignore_invalid_stored_replica_keys(
+        cls, data: Any, handler: ModelWrapValidatorHandler[Self], info: ValidationInfo
+    ) -> Self:
+        # Pass ``context={"driver_version": ...}`` to name the driver version in the warning.
+        if not isinstance(data, dict) or not isinstance(data.get("config"), Mapping):
+            return handler(data)
+        return validate_ignoring_invalid_replica_keys(
+            lambda config: handler({**data, "config": config}),
+            data["config"],
+            component=str(data.get("name")),
+            driver_version=(info.context or {}).get("driver_version"),
+        )
 
     @model_serializer(mode="wrap")
     def _omit_unset_replica_override(

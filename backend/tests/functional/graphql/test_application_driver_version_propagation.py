@@ -721,3 +721,42 @@ async def test_singleton_with_more_than_one_replica_fails_load_and_stores_nothin
     assert drivers == []
     assert (await session.exec(select(ApplicationDriverVersion))).all() == []
     assert (await session.exec(select(ComponentConfig))).all() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+@pytest.mark.parametrize(
+    ("keys", "field"),
+    [
+        ({"replicas": "3"}, "replicas"),
+        ({"replicas": 0}, "replicas"),
+        ({"singleton": "yes"}, "singleton"),
+    ],
+    ids=["string-replicas", "zero-replicas", "string-singleton"],
+)
+async def test_invalid_replica_keys_fail_load_and_store_nothing(
+    client: AsyncClient,
+    session: AsyncSession,
+    tmp_path: Path,
+    keys: dict[str, Any],
+    field: str,
+) -> None:
+    """A stored invalid value is ignored on read, but the load of one still fails (023)."""
+    _write_replica_driver(tmp_path, {"server": keys})
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("load_local_driver_component_replicas"),
+            "variables": {"path": str(tmp_path)},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"] == {"loadLocalApplicationDriverVersion": None}, payload
+    [error] = payload["errors"]
+    assert error["extensions"]["code"] == "VALIDATION_ERROR"
+    assert f"spec.components.server.{field}" in error["message"]
+    assert (await session.exec(select(ApplicationDriverVersion))).all() == []
+    assert (await session.exec(select(ComponentConfig))).all() == []
