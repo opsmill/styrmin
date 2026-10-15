@@ -246,7 +246,6 @@ image:
 
 ingress:
   enabled: true
-  className: "{{ instance.config.ingress_class }}"
   hosts:
     - host: "{{ app.name }}-{{ instance.deployment_id }}.{{ instance.config.fqdn_suffix }}"
 
@@ -275,6 +274,10 @@ Notice the typical patterns:
   retired: a template that calls either one fails to load with
   `RETIRED_TEMPLATE_FILTER` (see
   [Migrating container overrides](./migrating-container-overrides.md)).
+- **No Ingress class.** Styrmin sets the class of every Ingress after
+  the chart renders, or removes it when the environment has a dedicated
+  ingress controller, so the values template sets no class. See
+  [Dedicated ingress controller or shared ingress class](../concepts-and-architecture/ingress-and-networking.md#dedicated-ingress-controller-or-shared-ingress-class).
 
 ### Using context in an action
 
