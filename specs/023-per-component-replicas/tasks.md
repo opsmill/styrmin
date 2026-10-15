@@ -167,10 +167,10 @@ description: "Tasks for 023: per-component replica counts"
 - [X] T060 [P] Update `dev/knowledge/backend/api.md` (the four new error codes and the new fields), `dev/knowledge/backend/services.md` (`services/replicas/`, `services/parameters/retired.py`), `dev/knowledge/backend/data-models.md` (`ComponentConfigBlock.replicas`, driver `replicas`/`singleton`, `ComponentContext.replica_override`), `dev/knowledge/frontend/deployment-configuration.md` and `dev/knowledge/frontend/driver-pages.md`
 - [X] T061 [P] Check `CONTEXT.md` against the final behaviour (replica override, singleton component, parameter rule, component overrides note) and adjust only what drifted
 - [X] T062 [P] Add `changelog/202.added.md` and `changelog/202.changed.md` with `uv run towncrier create` (content per research D-015, including the notes for a driver that already declares `components.<name>.replicas`, the agent chart upgrade and clearing overrides before a downgrade)
-- [ ] T063 Run `uv run styrmin export graphql-schema schema.graphql`, `uv run invoke generate`, `uv run invoke validate-graphql` and `uv run invoke format lint`; fix any failure
-- [ ] T064 Run `uv run invoke test` (backend unit, functional, integration) and, in a Node 22 container, `cd frontend && pnpm test && pnpm lint`; fix any failure
-- [ ] T065 Run the rest of `shard_configuration` once per variant, because `simple-app` moves to version 4: `sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_configuration" -k api-chromium -v -s --pdb`, then `-k ui-chromium`; record the summary lines in `specs/023-per-component-replicas/e2e-evidence.md`
-- [ ] T066 Walk through `specs/023-per-component-replicas/quickstart.md` sections 1 to 4 and tick each expected result
+- [X] T063 Run `uv run styrmin export graphql-schema schema.graphql`, `uv run invoke generate`, `uv run invoke validate-graphql` and `uv run invoke format lint`; fix any failure
+- [X] T064 Run `uv run invoke test` (backend unit, functional, integration) and, in a Node 22 container, `cd frontend && pnpm test && pnpm lint`; fix any failure
+- [X] T065 Run the rest of `shard_configuration` once per variant, because `simple-app` moves to version 4: `sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_configuration" -k api-chromium -v -s --pdb`, then `-k ui-chromium`; record the summary lines in `specs/023-per-component-replicas/e2e-evidence.md`
+- [X] T066 Walk through `specs/023-per-component-replicas/quickstart.md` sections 1 to 4 and tick each expected result
 
 ---
 

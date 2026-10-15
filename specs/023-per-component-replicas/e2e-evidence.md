@@ -101,3 +101,87 @@ sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_configuration"
 ```text
 ===== 9 passed, 12 skipped, 172 deselected, 1 warning in 627.75s (0:10:27) =====
 ```
+
+## Verification runs at commit `973f9a47` (T065, X1, X2)
+
+Commit `973f9a47` adds two UI assertions to existing tests:
+
+- X1: in the UI variant of `test_scale_server_and_singleton_guard`, while `server` has an override of 2, the Component Overrides card of the Settings tab shows `server` `2 (override)` and `database` `1 (driver default, singleton)`. These are the only two components `simple-app` declares, and the test asserts the whole mapping.
+- X2: in `test_driver_detail_inspects_versions_via_tabs`, the Components tab of the `simple-app` driver shows Replicas `not set` and Singleton `no` for `server`, and Replicas `not set` and Singleton `yes` for `database`.
+
+The same server image was used for all three sessions, which ran one after another:
+
+```bash
+export STYRMIN_IMAGE_VER=replicas-c12-973f9a47
+docker compose build server
+```
+
+With `-s`, the vCluster output is printed between the node ID and `PASSED`; the lines below join them. Pytest keeps only the three most recent base directories, and other sessions on the host created newer ones, so the directories of these sessions no longer exist. A kubeconfig path is recorded only where the file was observed during the session.
+
+### X2: driver detail Components tab (`shard_general`, UI variant)
+
+```bash
+sleep infinity | uv run pytest "backend/tests/e2e/test_ui_smoke.py::test_driver_detail_inspects_versions_via_tabs" \
+  -m "ci and shard_general" -k ui-chromium -v -s --pdb
+```
+
+- vCluster: `pytest-56f1ca93-fb99-41be-857e-f472d6ed2b09` (created and deleted by the session fixture)
+- Kubeconfig: `/tmp/pytest-of-root/pytest-1639/vcluster0/kubeconfig` (the only `vcluster0/kubeconfig` written during the session, at 11:59:29)
+- Session: 2026-10-15T11:58:06+00:00 to 2026-10-15T11:59:47+00:00; the test passed by 2026-10-15T11:59:43+00:00
+
+```text
+backend/tests/e2e/test_ui_smoke.py::test_driver_detail_inspects_versions_via_tabs[ui-chromium] PASSED
+============ 1 passed, 1 deselected, 1 warning in 99.81s (0:01:39) =============
+```
+
+### T065: whole `shard_configuration`, API variant
+
+```bash
+sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_configuration" -k api-chromium -v -s --pdb
+```
+
+- vCluster: `pytest-42e00438-962b-4575-ae76-3634975c344c`
+- Kubeconfig: `/tmp/pytest-of-root/pytest-1646/vcluster0/kubeconfig` (written at 12:01:56, when the session created its vCluster)
+- Session: 2026-10-15T12:01:36+00:00 to 2026-10-15T12:16:04+00:00
+- The 12 skipped tests are the `ui_only` drawer tests under `backend/tests/e2e/configuration/`
+
+```text
+backend/tests/e2e/test_deployment_container_overrides.py::test_us1_override_args_on_server[api-chromium] PASSED
+backend/tests/e2e/test_deployment_container_overrides.py::test_us2_command_independent_of_args[api-chromium] PASSED
+backend/tests/e2e/test_deployment_container_overrides.py::test_us3_set_and_clear_command_and_args[api-chromium] PASSED
+backend/tests/e2e/test_deployment_container_overrides.py::test_us4_invalid_overrides_rejected[api-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_scale_server_and_singleton_guard[api-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_override_then_clear[api-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_override_with_version_change_reaches_upgrade_job[api-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_token_follows_upgrade_and_action_job[api-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_misnamed_container_never_added[api-chromium] PASSED
+===== 9 passed, 12 skipped, 172 deselected, 1 warning in 866.43s (0:14:26) =====
+```
+
+### T065 and X1: whole `shard_configuration`, UI variant
+
+```bash
+sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_configuration" -k ui-chromium -v -s --pdb
+```
+
+- vCluster: `pytest-8cccd72c-f7b5-4192-ba2c-00979ed67c3f`
+- Kubeconfig: not recorded. The log does not print the base directory, and pytest removed it before it was read.
+- Session: 2026-10-15T12:16:43+00:00 to 2026-10-15T12:28:17+00:00; `test_scale_server_and_singleton_guard[ui-chromium]`, which holds the X1 assertion, passed by 2026-10-15T12:25:08+00:00
+- Skipped: 5 `api_only` tests, plus 3 drawer tests that carry `skip` or `skipif` markers (`test_drawer_driver_params_edit`, `test_drawer_networking_edit`, `test_drawer_storage_runtime_edit`)
+
+```text
+backend/tests/e2e/configuration/test_configuration_tab_read.py::test_configuration_tab_renders_inheritance_and_overrides[ui-chromium] PASSED
+backend/tests/e2e/configuration/test_drawer_component_overrides_edit.py::test_drawer_component_overrides_edit[ui-chromium] PASSED
+backend/tests/e2e/configuration/test_drawer_disruptive_change.py::test_drawer_disruptive_toleration_effect_change[ui-chromium] PASSED
+backend/tests/e2e/configuration/test_drawer_env_vars_edit.py::test_drawer_env_vars_edit[ui-chromium] PASSED
+backend/tests/e2e/configuration/test_drawer_multi_section_edit.py::test_drawer_multi_section_edit[ui-chromium] PASSED
+backend/tests/e2e/configuration/test_drawer_multi_section_edit.py::test_drawer_concurrent_edit_surfaces_conflict_panel[ui-chromium] PASSED
+backend/tests/e2e/configuration/test_drawer_scheduling_edit.py::test_drawer_scheduling_edit[ui-chromium] PASSED
+backend/tests/e2e/configuration/test_drawer_scheduling_edit.py::test_drawer_scheduling_edit_keyboard_only[ui-chromium] PASSED
+backend/tests/e2e/configuration/test_drawer_service_overrides_edit.py::test_drawer_service_overrides_edit[ui-chromium] PASSED
+backend/tests/e2e/test_deployment_container_overrides.py::test_us3_set_and_clear_command_and_args[ui-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_scale_server_and_singleton_guard[ui-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_override_then_clear[ui-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_token_follows_upgrade_and_action_job[ui-chromium] PASSED
+===== 13 passed, 8 skipped, 172 deselected, 1 warning in 691.23s (0:11:31) =====
+```
