@@ -89,6 +89,24 @@ An environment that does not set `dedicated_ingress` takes the
 cluster's value, so an environment cannot turn off a dedicated ingress
 that the cluster sets.
 
+Styrmin sets the class of every Ingress of an application after the
+chart renders, including the Ingresses of subcharts, so the driver's
+values template does not set it:
+
+- With a dedicated ingress controller, Styrmin removes
+  `spec.ingressClassName` and sets the `kubernetes.io/ingress.class`
+  annotation to `traefik`, the controller implementation. The dedicated
+  ingress controller creates no IngressClass, so it does not serve an
+  Ingress that sets `spec.ingressClassName`.
+- Without one, Styrmin sets `spec.ingressClassName` and the
+  `kubernetes.io/ingress.class` annotation to the resolved
+  `ingress_class` (the deployment's value, else the environment's, else
+  the cluster's), whatever class the chart sets.
+- When the resolved `ingress_class` is empty, Styrmin does not change
+  the class that the chart sets. This happens only when the cluster was
+  created with `ingress_class: null` and neither the environment nor the
+  deployment sets a class, or when one of them sets an empty string.
+
 The next two sections describe how Styrmin changes the ingress of an
 environment when `dedicated_ingress` changes on the cluster or on the
 environment.
