@@ -307,3 +307,61 @@ def test_no_class_resolved_keeps_the_chart_class(tmp_path: Path) -> None:
     classes = _classes_by_ingress(_post_render(values, context, tmp_path))
 
     assert classes == {_CHART_INGRESS: ("nginx", None)}
+
+
+# ---------------------------------------------------------------------------
+# User Story 3: a released driver version that still sets the class
+# ---------------------------------------------------------------------------
+
+_INGRESS_ENABLED = "ingress:\n  enabled: true\n"
+_OLD_STYLE_CLASS_LINE = '  className: "{{ instance.config.ingress_class }}"\n'
+
+
+def _old_style_template(migrated: str) -> str:
+    """The migrated ``simple-app`` template with the class line that released driver versions still have."""
+    assert migrated.count(_INGRESS_ENABLED) == 1, (
+        "the ingress block of simple-app/values.j2.yml changed"
+    )
+    assert _OLD_STYLE_CLASS_LINE not in migrated
+    old_style = migrated.replace(
+        _INGRESS_ENABLED, _INGRESS_ENABLED + _OLD_STYLE_CLASS_LINE
+    )
+    # The two templates differ only by the class line.
+    old_style_lines = old_style.splitlines(keepends=True)
+    old_style_lines.remove(_OLD_STYLE_CLASS_LINE)
+    assert old_style_lines == migrated.splitlines(keepends=True)
+    return old_style
+
+
+@pytest.mark.parametrize("dedicated", [True, False], ids=["dedicated", "shared"])
+def test_template_that_still_sets_the_class_gives_the_same_ingress(
+    dedicated: bool, tmp_path: Path
+) -> None:
+    """FR-003, FR-005, SC-004: a template that still sets the class gives the Ingress of the migrated template."""
+    context = _context(dedicated=dedicated, ingress_class="nginx")
+    migrated = _SIMPLE_APP_TEMPLATE.read_text()
+    templates = {"migrated": migrated, "old-style": _old_style_template(migrated)}
+    values = {name: _render_values(text, context) for name, text in templates.items()}
+
+    # Dedicated mode used to remove ingress_class from the template data, so the class rendered empty.
+    assert values["old-style"]["ingress"]["className"] == "nginx"
+    assert values["old-style"] == {
+        **values["migrated"],
+        "ingress": {**values["migrated"]["ingress"], "className": "nginx"},
+    }
+
+    ingresses: dict[str, list[dict[str, Any]]] = {}
+    for name, chart_values in values.items():
+        workdir = tmp_path / name
+        workdir.mkdir()
+        manifests = _helm_template(chart_values, workdir)
+        rendered = [doc for doc in yaml.safe_load_all(manifests) if doc]
+        ingresses[name] = _ingresses(
+            _kustomize(manifests, _ingress_patches(context), workdir)
+        )
+        # Only the old-style chart renders a class, so the comparison below cannot pass vacuously.
+        rendered_class = "nginx" if name == "old-style" else None
+        assert _classes_by_ingress(rendered) == {_CHART_INGRESS: (rendered_class, None)}
+
+    assert ingresses["old-style"], "the simple-app chart rendered no Ingress"
+    assert ingresses["old-style"] == ingresses["migrated"]
