@@ -381,10 +381,13 @@ Patterns to know:
   declared in Step 3 without any template code. Do not write them into
   the chart's `env` or `extraEnv` keys: Helm replaces lists, so that
   drops the chart's own env defaults.
-- **Do not set the Ingress class.** Styrmin sets the class of every
-  Ingress after the chart renders, or removes it when the environment
-  has a dedicated ingress controller, so the values template sets no
-  class. See
+- **You do not need to set the Ingress class.** Styrmin sets the class
+  of every Ingress after the chart renders, or removes it when the
+  environment has a dedicated ingress controller. A template that still
+  sets the class gives the same Ingress, so you can remove the line in
+  the driver's next version. The class that the template sets stays only
+  when the environment has no dedicated ingress controller and no
+  `ingress_class` is resolved. See
   [Dedicated ingress controller or shared ingress class](../concepts-and-architecture/ingress-and-networking.md#dedicated-ingress-controller-or-shared-ingress-class).
 
 #### Container `command` and `args` overrides

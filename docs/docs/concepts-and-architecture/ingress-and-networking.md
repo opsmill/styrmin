@@ -91,15 +91,19 @@ cluster's value, so an environment cannot turn off a dedicated ingress
 that the cluster sets.
 
 After the chart renders, Styrmin sets or removes the class of every
-Ingress of an application, including the Ingresses of subcharts, so the
-driver's values template does not set it:
+Kubernetes Ingress resource of an application, including the Ingresses
+of subcharts, so the driver's values template does not need to set it.
+Styrmin does not change other routing resources that a chart renders,
+such as a Traefik IngressRoute or a Gateway API HTTPRoute.
 
 - With a dedicated ingress controller, Styrmin removes
   `spec.ingressClassName` and sets the `kubernetes.io/ingress.class`
   annotation to `traefik`, the controller implementation. The dedicated
   ingress controller serves an Ingress by this annotation. It does not
   read IngressClass resources, so it does not serve an Ingress that sets
-  `spec.ingressClassName`, whatever the value.
+  `spec.ingressClassName`, whatever the value. An `ingress_class` set on
+  the cluster, the environment or the deployment does not change the
+  Ingress in this case.
 - Without one, Styrmin sets `spec.ingressClassName` and the
   `kubernetes.io/ingress.class` annotation to the resolved
   `ingress_class`, whatever class the chart sets.
@@ -110,6 +114,18 @@ driver's values template does not set it:
   deployment sets a class, or when the deepest level that sets
   `ingress_class` (the deployment, else the environment, else the
   cluster) sets an empty string.
+
+In the last case, an Ingress whose chart sets no class has no class.
+Kubernetes gives it the default IngressClass of the cluster, when the
+cluster has one. Otherwise, whether an ingress controller serves it
+depends on that controller: some serve an Ingress without a class,
+others ignore it. When no controller serves it, the deployment still
+reaches `RUNNING` and Styrmin reports no error, but the application's
+URL does not respond, and `kubectl get ingress -n
+styrmin-<deployment-id>` shows no address for the Ingress. To fix it,
+set `ingress_class` on the cluster, the environment or the deployment.
+Styrmin sets that class on the Ingress the next time it deploys the
+application.
 
 The next two sections describe how Styrmin changes the ingress of an
 environment when `dedicated_ingress` changes on the cluster or on the
