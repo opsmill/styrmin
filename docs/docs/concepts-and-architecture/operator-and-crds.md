@@ -243,6 +243,91 @@ not render, the message is the `COMPONENT_CONTAINER_NOT_FOUND` message
 by FluxCD's message, and the `Ready` condition becomes `False` with the
 reason of the event.
 
+### A `StyrminDeployment` that keeps its finalizer
+
+The agents of Styrmin v0.1.48 and earlier can keep the
+`styrmin.io/kopf-finalizer` finalizer of a `StyrminDeployment` that is
+being deleted ([#446](https://github.com/opsmill/styrmin/issues/446),
+[#461](https://github.com/opsmill/styrmin/issues/461)). This happens
+when the deployment's namespace is deleted while the operator's timer
+is checking that `StyrminDeployment`. Kubernetes does not delete the
+namespace while the custom resource in it keeps a finalizer, so the
+namespace stays `Terminating`.
+
+You see one of these symptoms:
+
+- A restore fails in its "Delete the namespace" step with
+  `Namespace <namespace> was not deleted within 600s`.
+- An application deployment stays `DELETING`.
+- A dedicated ingress controller stays `DELETING`. See
+  [A controller that stays `DELETING`](./ingress-and-networking.md#a-controller-that-stays-deleting)
+  for the steps that follow the recovery.
+
+To read the version of the agent that runs on a cluster, list the image
+of the agent pod. The image tag is the Styrmin version:
+
+```bash
+kubectl get pods -A -l app.kubernetes.io/name=styrmin-agent \
+  -o jsonpath='{range .items[*]}{.spec.containers[0].image}{"\n"}{end}'
+```
+
+#### Tell the finalizer apart from pods that take long to stop
+
+A namespace also stays `Terminating` while its pods stop, and a pod can
+need longer than 600 seconds. The
+[Neo4j Helm chart](https://github.com/neo4j/helm-charts/blob/dev/neo4j/values.yaml),
+for example, gives the Neo4j pod up to 3600 seconds to stop. List the
+pods and the finalizers of the `StyrminDeployment` in the namespace:
+
+```bash
+kubectl get pods -n <namespace>
+kubectl get styrmindeployments -n <namespace> \
+  -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.metadata.finalizers}{"\n"}{end}'
+```
+
+- No pods are left, and the `StyrminDeployment` still lists
+  `styrmin.io/kopf-finalizer`: the operator kept the finalizer. Follow
+  the recovery steps below.
+- Pods are still `Terminating`: Kubernetes deletes the namespace once
+  they have stopped.
+
+In both cases, a restore that failed with `Namespace <namespace> was not
+deleted within 600s` does not continue. Start it again once the
+namespace is gone.
+
+#### Remove the finalizer
+
+- Upgrade the agent to a Styrmin release later than v0.1.48. When the
+  new agent starts, it removes the finalizer that the earlier agent
+  kept, and Kubernetes finishes deleting the namespace. You do not need
+  to add an annotation.
+- Until you upgrade, add any annotation to the `StyrminDeployment`. The
+  operator then checks the custom resource again and removes the
+  finalizer:
+
+  ```bash
+  kubectl annotate styrmindeployments.styrmin.io <name> -n <namespace> \
+    styrmin.io/retry-delete="$(date +%s)" --overwrite
+  ```
+
+#### When an agent later than v0.1.48 keeps the finalizer
+
+The agent keeps the finalizer only until the timer's current check of
+the `StyrminDeployment` ends, which normally takes a few seconds. The
+agent log then shows this line once:
+
+```text
+StyrminDeployment <namespace>/<name> keeps its finalizer until its timer run ends
+```
+
+If the finalizer stays for more than a few minutes, the timer's check
+does not end, for example because a request to the Kubernetes API does
+not return. Restart the agent: the new agent removes the finalizer when
+it starts. Restarting the agent also stops the tasks it runs at that
+moment, such as a backup or a restore. Then open an
+[issue](https://github.com/opsmill/styrmin/issues) and attach the agent
+log.
+
 ### What this means in practice
 
 - A `StyrminDeployment` is what Styrmin's operator acts on. If you're

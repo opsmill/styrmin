@@ -304,8 +304,10 @@ written, and the caller kept using a session whose transaction was gone. An expl
   stays `DELETING`, the applications that would move onto a controller keep waiting, and the
   recovery "resubmit after the removal has finished" is not available. A change to the
   StyrminDeployment custom resource, such as a new annotation, made kopf run the handler again and
-  remove the finalizer. This decision does not change the operator; the race is tracked in
-  [#446](https://github.com/opsmill/styrmin/issues/446).
+  remove the finalizer. This decision does not change the operator. The race was fixed later for
+  agents of releases after v0.1.48 ([#446](https://github.com/opsmill/styrmin/issues/446),
+  [PR #474](https://github.com/opsmill/styrmin/pull/474)); see the Deletion section of
+  [`dev/knowledge/agent/operator.md`](../knowledge/agent/operator.md#deletion).
 - A nested `async with uow` block that fails inside any savepoint now undoes only that savepoint's
   writes. The only savepoints are the status reporter's two and the cluster config fan-out's, all
   opened to isolate a failure, so no other caller changes behaviour. `uow.commit()` inside a

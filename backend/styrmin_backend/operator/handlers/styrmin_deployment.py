@@ -58,6 +58,11 @@ _ROLLOUT_PHASES = frozenset(
 )
 
 
+_DELETING_MESSAGE = "Cleaning up resources"
+# How many times kopf ran the delete handler for a CR, in kopf's per-CR memo.
+_MEMO_DELETE_HANDLER_RUNS = "deleteHandlerRuns"
+
+
 def _is_internal(spec: dict[str, Any]) -> bool:
     """Check if a StyrminDeployment is an internal deployment (e.g., ingress controller)."""
     return spec.get("internal", False)
@@ -1285,7 +1290,7 @@ async def kopf_on_styrmin_deployment_deletion_requested(
 
     logger.info("Deletion requested via spec for %s/%s — running teardown", ns, name)
 
-    set_phase(patch.status, DeploymentPhase.DELETING, "Cleaning up resources")
+    set_phase(patch.status, DeploymentPhase.DELETING, _DELETING_MESSAGE)
     patch.status["displayState"] = DisplayState.DELETING.value
 
     await _teardown_owned_resources(
@@ -1306,6 +1311,7 @@ async def kopf_on_styrmin_deployment_delete(
     namespace: str | None,
     annotations: kopf.Annotations,
     patch: kopf.Patch,
+    memo: kopf.Memo,
     logger: kopf.Logger,
     **_: Any,
 ) -> None:
@@ -1320,9 +1326,15 @@ async def kopf_on_styrmin_deployment_delete(
     source's CR, whose resources now belong to the counterpart CR.
     """
     ns = namespace or ""
-    # A new value on every run, so the patch always makes an event: kopf then checks again
-    # for a timer run that has not ended, instead of keeping the finalizer (#446, #461).
-    patch.status["deletionHandledAt"] = _now()
+    completed_runs = memo.get(_MEMO_DELETE_HANDLER_RUNS, 0)
+    if completed_runs == 1:
+        # kopf runs a handler that succeeded again only while it keeps the finalizer for a
+        # timer run that has not ended (#461).
+        logger.info(
+            "StyrminDeployment %s/%s keeps its finalizer until its timer run ends",
+            ns,
+            name,
+        )
     if annotations.get(ANNOTATION_SKIP_TEARDOWN) == "true":
         logger.info(
             "Deleting StyrminDeployment %s/%s without teardown (%s)",
@@ -1330,6 +1342,7 @@ async def kopf_on_styrmin_deployment_delete(
             name,
             ANNOTATION_SKIP_TEARDOWN,
         )
+        memo[_MEMO_DELETE_HANDLER_RUNS] = completed_runs + 1
         return
 
     release_ref = spec.get("releaseReference", "")
@@ -1338,10 +1351,17 @@ async def kopf_on_styrmin_deployment_delete(
         ns,
         name,
     )
-    set_phase(patch.status, DeploymentPhase.DELETING, "Cleaning up resources")
+    # A patch that changes nothing makes no event, and kopf would wait for that event instead
+    # of checking the timer run again, so the finalizer would stay (#446, #461).
+    if (status.get("phase"), status.get("message")) != (
+        DeploymentPhase.DELETING.value,
+        _DELETING_MESSAGE,
+    ):
+        set_phase(patch.status, DeploymentPhase.DELETING, _DELETING_MESSAGE)
 
     await _teardown_owned_resources(
         namespace=ns, release_reference=release_ref, name=name, logger=logger
     )
 
     logger.info("Cleanup complete for StyrminDeployment %s/%s", ns, name)
+    memo[_MEMO_DELETE_HANDLER_RUNS] = completed_runs + 1

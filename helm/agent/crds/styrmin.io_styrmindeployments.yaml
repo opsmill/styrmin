@@ -118,12 +118,6 @@ spec:
                   description: |
                     When the create or update handler started the current rollout. The readiness
                     timeout counts from it, or from metadata.creationTimestamp when it is missing.
-                deletionHandledAt:
-                  type: string
-                  format: date-time
-                  description: |
-                    When the delete handler last ran. Each run writes a new value, so kopf processes
-                    the CR again until the CR's timer has ended and the finalizer can be removed.
                 conditions:
                   type: array
                   description: |

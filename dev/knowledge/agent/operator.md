@@ -68,9 +68,8 @@ For an ordinary deployment the two strings are equal: `styrmin-<deployment id>`.
 | `managedResources` | Counts by type (networkPolicies, secrets, helmReleases, services, middlewares) |
 | `instanceId` | The `spec.instanceId` that the create, update or resume handler last acted on. Written at the end of the handler, also when the handler raises. The status reporter sends it, so the server can link each report to the task that rolled out that instance. |
 | `rolloutStartedAt` | When the current rollout started (ISO 8601). Set by the create and update handlers; the resume handler sets it only when it is missing. The readiness timeout counts from it. |
-| `deletionHandledAt` | When the `@kopf.on.delete` handler last ran (ISO 8601). Each run writes a new value, so the handler's patch always produces an event (see [Deletion](#deletion)). |
 
-The CRD's status schema keeps `x-kubernetes-preserve-unknown-fields: true`, so `instanceId`, `rolloutStartedAt`, `deletionHandledAt` and `HelmReleaseRemediated` need no CRD change on existing installs. `helm/agent/crds/styrmin.io_styrmindeployments.yaml` documents them.
+The CRD's status schema keeps `x-kubernetes-preserve-unknown-fields: true`, so `instanceId`, `rolloutStartedAt` and `HelmReleaseRemediated` need no CRD change on existing installs. `helm/agent/crds/styrmin.io_styrmindeployments.yaml` documents them.
 
 Printer columns for `kubectl get styrmindeployments`: Phase, App, Version, Age.
 
@@ -100,18 +99,23 @@ Two paths exist:
 
 **Platform-driven (preferred)**: the backend's `deleteDeployment` mutation patches `spec.deletionRequested = true`. A `@kopf.on.update(field="spec.deletionRequested", new=True)` handler observes the flip and runs `_teardown_owned_resources` in reverse order (Services/Middlewares → HelmRelease → NetworkPolicies/Secrets), then issues a namespace delete. The periodic timer advances `phase` to `Deleted` once the namespace returns 404. Because the StyrminDeployment CR lives inside the deployment's own namespace, the CR is garbage-collected with the namespace; the agent's status reporter detects "DB DELETING + CR absent" and synthesises a final `displayState: Deleted` report so the DB is tombstoned race-free.
 
-A race used to leave the namespace in `Terminating` when the namespace deletion deleted the CR during a run of the CR's timer ([#446](https://github.com/opsmill/styrmin/issues/446), [#461](https://github.com/opsmill/styrmin/issues/461)). In kopf 1.44.5:
+A race used to leave the namespace in `Terminating` when the namespace deletion deleted the CR during a run of the CR's timer ([#446](https://github.com/opsmill/styrmin/issues/446), [#461](https://github.com/opsmill/styrmin/issues/461)). It affects agents of Styrmin v0.1.48 and earlier. In kopf 1.44.5 (`kopf/_core/engines/daemons.py`, `kopf/_core/actions/application.py`):
 
-- kopf keeps the `styrmin.io/kopf-finalizer` finalizer while a timer run has not ended. By default it waits only a few zero-time asyncio cycles for the run to end;
-- kopf then skips its 60-second re-check because the cycle also has a patch, and relies on the event of that patch to process the CR again;
-- kopf runs the `@kopf.on.delete` handler again in each cycle. Its patch sets `phase: Deleting`, which the earlier run had already set, so from the second cycle the patch changed nothing and produced no event.
+- kopf keeps the `styrmin.io/kopf-finalizer` finalizer while a timer run has not ended, and plans another check after `settings.background.cancellation_polling` seconds (60 by default);
+- kopf runs the `@kopf.on.delete` handler again in each check;
+- when the patch of a check is empty, kopf sleeps that delay and then writes a `touch-dummy` annotation, whose event starts the next check. When the patch is not empty, kopf skips the sleep and waits for the event of that patch;
+- the delete handler's patch set `phase: Deleting`, which the earlier run had already set. From the second check on, the patch was not empty but changed nothing, so no event came and kopf never checked again.
 
 The finalizer stayed, the namespace stayed `Terminating`, and the status reporter kept reporting `Deleting`. The same race stopped restores: `execute_velero_restore` deletes the target namespace and waits up to 600 seconds for it before it creates the Velero `Restore`.
 
-Two settings prevent it:
+Two changes prevent it:
 
-- `on_startup` in `entrypoint/combined.py` sets `settings.background.instant_exit_timeout` to `TIMER_EXIT_TIMEOUT_SECONDS` (5 seconds). kopf waits that long for the timer run to end and, when it ends, removes the finalizer in the same cycle.
-- The delete handler writes `status.deletionHandledAt` with the current time on every run, so its patch always changes the CR. A timer run that takes longer than 5 seconds therefore gets another cycle, until it ends.
+- The delete handler writes `phase` and `message` only when they differ from the CR's status, so a later run leaves the patch empty and kopf keeps checking.
+- `on_startup` in `entrypoint/combined.py` sets `settings.background.cancellation_polling` to `TIMER_EXIT_POLLING_SECONDS` (5 seconds), so kopf removes the finalizer at most about 5 seconds after the timer run ends. kopf also uses this delay when it stops a timer because its resource no longer matches the timer's filters (the HelmRelease timer filters on labels) or because the operator is pausing for peering. It does not use it on operator exit. The agent has no `@kopf.daemon`.
+
+While the finalizer stays, the delete handler and its teardown run again every 5 seconds. On its second completed run for a CR, the handler logs `StyrminDeployment <namespace>/<name> keeps its finalizer until its timer run ends` once. The count lives in kopf's per-CR `memo`, so it restarts with the agent.
+
+A restarted agent removes a finalizer that an earlier agent kept: the new process has no timer run for the CR, so its first check removes the finalizer. `backend/tests/unit/agent/test_kopf_deletion_cycle.py` runs kopf's own event processing to check both behaviours, so a kopf upgrade that changes them fails there. kopf 1.45.1 has the same logic in these files.
 
 <!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
 

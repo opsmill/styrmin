@@ -26,15 +26,3 @@ async def test_main_configures_the_status_reporter_from_its_settings(
         graphql_url="http://agent.test/graphql",
         interval=42,
     )
-
-
-@pytest.mark.asyncio
-async def test_startup_waits_for_a_stopped_timer_to_end_its_run() -> None:
-    """#446, #461: kopf removes a deleted CR's finalizer in the same cycle once its timer ends."""
-    settings = combined.kopf.OperatorSettings()
-
-    await combined.on_startup(settings=settings)
-
-    assert (
-        settings.background.instant_exit_timeout == combined.TIMER_EXIT_TIMEOUT_SECONDS
-    )

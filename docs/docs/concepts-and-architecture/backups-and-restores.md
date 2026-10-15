@@ -232,6 +232,13 @@ A restore has three steps, in this order:
    so that the operator takes it over again. This step runs only after
    Velero completed the restore.
 
+"Delete the namespace" fails with `Namespace <namespace> was not deleted
+within 600s` when the namespace is still `Terminating` after 600
+seconds. Either its pods take longer than that to stop, or an agent of
+Styrmin v0.1.48 or earlier kept the finalizer of the namespace's
+`StyrminDeployment`. To find which, and to recover, see
+[A `StyrminDeployment` that keeps its finalizer](./operator-and-crds.md#a-styrmindeployment-that-keeps-its-finalizer).
+
 A backup has one step per component, "Back up" followed by the component
 name. Velero backs up the whole namespace at once and creates one
 `PodVolumeBackup` object for each pod volume it backs up. Styrmin maps
