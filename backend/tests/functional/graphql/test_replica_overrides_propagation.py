@@ -5,20 +5,24 @@ Constitution §V: ``ComponentConfigInput.replicas`` written through ``updateDepl
 ``Deployment.config["components"][name]["replicas"]`` through the real service and repository
 layers, and ``Deployment.componentReplicas`` projects the stored state. Invalid writes are
 rejected with typed errors before any task or flow run, and the deployment row is unchanged
-(SC-003).
+(SC-003). A driver version's ``replicas`` and ``singleton`` keys give the count when no override
+is stored (US2).
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
+import yaml
 from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import SpecPatch
 from styrmin_backend.db.models import (
     ApplicationDriver,
     ApplicationDriverVersion,
@@ -27,6 +31,12 @@ from styrmin_backend.db.models import (
     Deployment,
     Task,
 )
+from styrmin_backend.services.context import generate_context_from_deployment_id
+from styrmin_backend.services.replicas.patch_builder import (
+    REPLICA_PATCH_KINDS,
+    build_component_replica_patches,
+)
+from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 
 from ._queries import load_query
 from .conftest import gql
@@ -646,3 +656,100 @@ async def test_version_change_to_new_singleton_succeeds_when_input_fixes_overrid
     assert await _task_count(session, deployment_id) == 1
     rows = await _read_rows(client, deployment_id)
     assert rows[0] == expected_database
+
+
+# ---------------------------------------------------------------------------
+# T033 — driver defaults reach componentReplicas and the replica patch (US2)
+# ---------------------------------------------------------------------------
+
+
+def _write_driver(path: Path, components: dict[str, dict[str, Any]]) -> None:
+    """Write a local driver whose components carry the given ``replicas`` / ``singleton`` keys."""
+    spec: dict[str, Any] = {
+        "apiVersion": "styrmin.io/v1",
+        "kind": "ApplicationDriver",
+        "metadata": {"name": f"replica-defaults-{uuid4().hex[:8]}"},
+        "spec": {
+            "version": "0.1.0",
+            "supported_versions": ">=1.0,<2.0",
+            "info": {"description": "Driver default replicas fixture"},
+            "helm": {
+                "main": {
+                    "location": "oci://registry.example.com/charts/simple-app",
+                    "version": "0.1.0",
+                }
+            },
+            "components": {
+                name: {
+                    "identifier": {"label": {"app.kubernetes.io/name": f"{name}-app"}},
+                    "container": name,
+                    **keys,
+                }
+                for name, keys in components.items()
+            },
+        },
+    }
+    (path / "driver.styrmin.yml").write_text(yaml.safe_dump(spec))
+    (path / "values.j2.yml").write_text("{}\n")
+
+
+@pytest.mark.asyncio
+async def test_driver_defaults_report_without_an_override(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock, tmp_path: Path
+) -> None:
+    """A deployment created with no override of a loaded driver version that declares
+    ``server.replicas: 2`` and ``database.singleton: true`` reports 2 and 1 from the driver
+    default, and the chart's count for ``worker``; the replica patches carry the same counts."""
+    _arm_prefect(prefect_manager_mock)
+    _write_driver(
+        tmp_path,
+        {"server": {"replicas": 2}, "database": {"singleton": True}, "worker": {}},
+    )
+    loaded = await gql(
+        client, "load_local_driver_component_replicas", {"path": str(tmp_path)}
+    )
+    version = loaded["loadLocalApplicationDriverVersion"]
+    driver = await session.get(ApplicationDriver, UUID(version["applicationDriverId"]))
+    assert driver is not None
+    environment = await seed_environment(session)
+    name = f"replica-defaults-{uuid4().hex[:8]}"
+
+    payload = await _post(
+        client,
+        "deploy_with_driver_version",
+        {
+            "driver": driver.name,
+            "environmentId": str(environment.id),
+            "name": name,
+            "version": "1.0.0",
+            "driverVersionId": version["id"],
+        },
+    )
+
+    assert "errors" not in payload, payload
+    session.expire_all()
+    created = (
+        await session.exec(select(Deployment).where(Deployment.name == name))
+    ).one()
+    assert not (created.config or {}).get("components")
+    assert await _read_rows(client, created.id) == [
+        _row("database", 1, "DRIVER_DEFAULT", singleton=True),
+        _row("server", 2, "DRIVER_DEFAULT"),
+        _row("worker", None, "CHART"),
+    ]
+
+    context = await generate_context_from_deployment_id(
+        created.id, SqlModelUnitOfWork(session=session)
+    )
+    patches = build_component_replica_patches(context)
+    summary = []
+    for tp in patches:
+        assert isinstance(tp.patch, SpecPatch)
+        summary.append(
+            (tp.target.kind, tp.target.label_selector, tp.patch.specs["replicas"])
+        )
+    assert sorted(summary) == sorted(
+        (kind, f"app.kubernetes.io/name={component}-app", count)
+        for component, count in (("server", 2), ("database", 1))
+        for kind in REPLICA_PATCH_KINDS
+    )

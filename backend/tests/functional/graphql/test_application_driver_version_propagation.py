@@ -32,6 +32,10 @@ returned in ``loadWarnings``, and the load succeeds (PR #418 review, item 2).
 ``STYRMIN_DRIVER_SHOW_LOGOS=false`` hides ``icon`` from every response (item 5).
 T033 adds the reload case: an unchanged driver fills in a pre-feature row (FR-006).
 
+023-per-component-replicas (T032) adds ``componentConfigs { replicas singleton }``: the driver
+default replica count and the singleton flag, loaded through ``loadLocalApplicationDriverVersion``,
+plus the load failure for ``singleton: true`` with ``replicas`` above 1.
+
 Test location note: the task list specifies
 ``backend/tests/unit/api/schema/test_application_driver_version_propagation.py``
 but the project's documented propagation-test harness (fixtures, seeds,
@@ -52,8 +56,13 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend import config
-from styrmin_backend.db.models import ApplicationDriverVersion, ComponentConfig
+from styrmin_backend.db.models import (
+    ApplicationDriver,
+    ApplicationDriverVersion,
+    ComponentConfig,
+)
 
+from ._queries import load_query
 from .conftest import gql
 from .seeds import seed_application_driver_version
 
@@ -564,3 +573,151 @@ async def test_component_container_is_null_for_rows_without_the_key(
         v for v in data["applicationDriver"]["versions"] if v["id"] == str(adv.id)
     ]
     assert version["componentConfigs"] == [{"name": "legacy", "container": None}]
+
+
+def _write_replica_driver(path: Path, components: dict[str, dict[str, Any]]) -> None:
+    """Write a local driver named ``replica-propagation`` whose components carry the given
+    ``replicas`` / ``singleton`` keys on top of a label identifier."""
+    spec: dict[str, Any] = {
+        "apiVersion": "styrmin.io/v1",
+        "kind": "ApplicationDriver",
+        "metadata": {"name": "replica-propagation"},
+        "spec": {
+            "version": "0.1.0",
+            "supported_versions": ">=0.1,<1.0",
+            "info": {"description": "Component replica propagation fixture"},
+            "helm": {
+                "main": {
+                    "location": "oci://registry.example.com/charts/simple-app",
+                    "version": "0.1.0",
+                }
+            },
+            "components": {
+                name: {
+                    "identifier": {"label": {"app.kubernetes.io/name": name}},
+                    **keys,
+                }
+                for name, keys in components.items()
+            },
+        },
+    }
+    (path / "driver.styrmin.yml").write_text(yaml.safe_dump(spec))
+    (path / "values.j2.yml").write_text("{}\n")
+
+
+def _replica_fields(component_configs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {c["name"]: (c["replicas"], c["singleton"]) for c in component_configs}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_component_replicas_propagate_from_driver_load_to_graphql(
+    client: AsyncClient, session: AsyncSession, tmp_path: Path
+) -> None:
+    """023 T032: a driver's ``replicas`` and ``singleton`` keys reach the ``ComponentConfig``
+    rows and project through ``componentConfigs``; a component without them reads as null and
+    false."""
+    _write_replica_driver(
+        tmp_path,
+        {"server": {"replicas": 2}, "database": {"singleton": True}, "worker": {}},
+    )
+    expected = {"server": (2, False), "database": (None, True), "worker": (None, False)}
+
+    loaded = await gql(
+        client, "load_local_driver_component_replicas", {"path": str(tmp_path)}
+    )
+    version = loaded["loadLocalApplicationDriverVersion"]
+    assert _replica_fields(version["componentConfigs"]) == expected
+
+    rows = (
+        await session.exec(
+            select(ComponentConfig).where(
+                ComponentConfig.application_driver_version_id == UUID(version["id"])
+            )
+        )
+    ).all()
+    # Each key is stored only when declared: no ``replicas: null`` or ``singleton: false``.
+    assert {
+        row.name: {
+            k: row.config[k] for k in ("replicas", "singleton") if k in row.config
+        }
+        for row in rows
+    } == {"server": {"replicas": 2}, "database": {"singleton": True}, "worker": {}}
+
+    data = await gql(
+        client,
+        "get_driver_component_replicas",
+        {"applicationDriverId": version["applicationDriverId"]},
+    )
+    [read_back] = [
+        v for v in data["applicationDriver"]["versions"] if v["id"] == version["id"]
+    ]
+    assert _replica_fields(read_back["componentConfigs"]) == expected
+
+
+@pytest.mark.asyncio
+async def test_component_replicas_default_for_rows_without_the_keys(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """023 T032: rows stored before the keys existed read as ``replicas: null`` and
+    ``singleton: false``."""
+    adv = await seed_application_driver_version(session)
+    session.add(
+        ComponentConfig(
+            name="legacy",
+            config={"identifier": {"label": {"app.kubernetes.io/name": "legacy"}}},
+            application_driver_version_id=adv.id,
+        )
+    )
+    await session.commit()
+
+    data = await gql(
+        client,
+        "get_driver_component_replicas",
+        {"applicationDriverId": str(adv.application_driver_id)},
+    )
+    [version] = [
+        v for v in data["applicationDriver"]["versions"] if v["id"] == str(adv.id)
+    ]
+    assert version["componentConfigs"] == [
+        {"name": "legacy", "replicas": None, "singleton": False}
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_singleton_with_more_than_one_replica_fails_load_and_stores_nothing(
+    client: AsyncClient, session: AsyncSession, tmp_path: Path
+) -> None:
+    """023 T032: ``singleton: true`` with ``replicas: 3`` fails the load with an error naming
+    the component, and no driver, driver version or component config row is stored."""
+    _write_replica_driver(
+        tmp_path, {"server": {}, "database": {"singleton": True, "replicas": 3}}
+    )
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("load_local_driver_component_replicas"),
+            "variables": {"path": str(tmp_path)},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"] == {"loadLocalApplicationDriverVersion": None}, payload
+    [error] = payload["errors"]
+    assert error["extensions"]["code"] == "VALIDATION_ERROR"
+    message = error["message"]
+    assert "spec.components.database" in message
+    assert "singleton" in message
+    drivers = (
+        await session.exec(
+            select(ApplicationDriver).where(
+                ApplicationDriver.name == "replica-propagation"
+            )
+        )
+    ).all()
+    assert drivers == []
+    assert (await session.exec(select(ApplicationDriverVersion))).all() == []
+    assert (await session.exec(select(ComponentConfig))).all() == []
