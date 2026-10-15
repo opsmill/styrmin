@@ -8,9 +8,19 @@ import type {
   DriverParameterSchema,
 } from "@/lib/configuration-types";
 import { validateImageReference } from "@/lib/image-reference";
+import { replicaFieldError } from "@/lib/replicas";
+
+/** Components whose override fails validation, per field. */
+export interface DrawerInvalidFields {
+  images: readonly string[];
+  replicas: readonly string[];
+}
+
+const NO_INVALID_FIELDS: DrawerInvalidFields = { images: [], replicas: [] };
 
 const DrawerDiffContextValue = createContext<ConfigurationDiff | null>(null);
-const DrawerInvalidImagesValue = createContext<readonly string[]>([]);
+const DrawerInvalidFieldsValue =
+  createContext<DrawerInvalidFields>(NO_INVALID_FIELDS);
 
 interface FormLike {
   store: Parameters<typeof useStore>[0];
@@ -40,8 +50,9 @@ interface ProviderProps {
  * array; that filter is O(entries) — cheap relative to a re-run of
  * `diff`.
  *
- * Also exposes the components whose image override fails validation, derived
- * from the values so the footer can block Review & apply and name them.
+ * Also exposes the components whose image override or replica count fails
+ * validation, derived from the values so the footer can block Review & apply
+ * and name them.
  */
 export function DrawerDiffProvider({
   form,
@@ -59,26 +70,30 @@ export function DrawerDiffProvider({
     [initialValues, currentValues, driverSchema],
   );
 
-  const invalidImages = useMemo(
-    () =>
-      (currentValues.components ?? [])
-        .filter((block) => block?.image && validateImageReference(block.image))
+  const invalidFields = useMemo<DrawerInvalidFields>(() => {
+    const blocks = (currentValues.components ?? []).filter(Boolean);
+    return {
+      images: blocks
+        .filter((block) => block.image && validateImageReference(block.image))
         .map((block) => block.name),
-    [currentValues.components],
-  );
+      replicas: blocks
+        .filter((block) => replicaFieldError(block.replicas))
+        .map((block) => block.name),
+    };
+  }, [currentValues.components]);
 
   return (
     <DrawerDiffContextValue.Provider value={diffResult}>
-      <DrawerInvalidImagesValue.Provider value={invalidImages}>
+      <DrawerInvalidFieldsValue.Provider value={invalidFields}>
         {children}
-      </DrawerInvalidImagesValue.Provider>
+      </DrawerInvalidFieldsValue.Provider>
     </DrawerDiffContextValue.Provider>
   );
 }
 
-/** Components whose image override is invalid; Review & apply stays blocked while any remain. */
-export function useDrawerInvalidImages(): readonly string[] {
-  return useContext(DrawerInvalidImagesValue);
+/** Components with an invalid image or replica count; Review & apply stays blocked while any remain. */
+export function useDrawerInvalidFields(): DrawerInvalidFields {
+  return useContext(DrawerInvalidFieldsValue);
 }
 
 export function useDrawerDiff(): ConfigurationDiff {

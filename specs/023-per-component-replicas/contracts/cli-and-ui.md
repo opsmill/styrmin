@@ -44,7 +44,7 @@ The Components table gains a `Replicas` column:
 
 | Surface | Behaviour |
 |---------|-----------|
-| Edit drawer, per component | "Replicas" number field (`aria-label="Replicas for <component>"`, `data-testid="comp-replicas-<component>"`). Placeholder shows the value that applies without an override: `2 (driver default)` or `set by the chart`. Empty field = no override. Below 1: "Must be 1 or more. To run no pods, stop the component." |
+| Edit drawer, per component | "Replicas" number field (`aria-label="Replicas for <component>"`, `data-testid="comp-replicas-<component>"`). Placeholder shows the value that applies without an override: `2 (driver default)` or `set by the chart`. Empty field = no override. Below 1: "Must be 1 or more. To run no pods, stop the component." While a count is invalid (below 1, not whole, above 2147483647), Review & apply is disabled and the footer names the component. |
 | Edit drawer, singleton component | Read-only field showing `1 (singleton)`. A stored override above 1 shows with a remove button only. |
 | Create form | "Component replicas" section listing the selected driver version's components with the same field; sends `config.components` only for components with a value. |
 | Configuration view | "Replicas" line per component: `3 (override)`, `2 (driver default)`, `set by the chart`; "not applied" badge when `isApplicable` is false; "stopped: 0 pods" when the component is stopped; orphaned rows as for other overrides. |

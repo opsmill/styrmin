@@ -4,6 +4,7 @@
 // `any` and validated through the section's Zod schema and runtime guards
 // inside each input.
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { useStore } from "@tanstack/react-form";
 import { ChevronDown, X } from "lucide-react";
 import { z } from "zod";
 
@@ -29,7 +30,7 @@ import {
   imageReferenceMessage,
   validateImageReference,
 } from "@/lib/image-reference";
-import { replicaDefault, replicaFieldError } from "@/lib/replicas";
+import { replicaDefault } from "@/lib/replicas";
 import { cn } from "@/lib/utils";
 
 import { ChangedFieldFrame } from "../../ChangedFieldFrame";
@@ -58,9 +59,9 @@ function imageFieldError(value: unknown): string | undefined {
  * The backend `ComponentConfigInput` accepts a name, an env-var list, the
  * container-override slots `command` / `args` (014-component-container-overrides),
  * an `image` override (018-component-image-overrides) and a `replicas` override
- * (023). Future per-component knobs (CPU/memory) are rendered as a muted
- * "coming soon" placeholder and are **not** part of this validation schema
- * until the GraphQL surface widens.
+ * (023, checked by `DrawerDiffProvider`, not here). Future per-component knobs
+ * (CPU/memory) are rendered as a muted "coming soon" placeholder and are
+ * **not** part of this validation schema until the GraphQL surface widens.
  *
  * Rules:
  *  - `name` non-empty (driver-declared component name; backend re-validates).
@@ -75,8 +76,6 @@ function imageFieldError(value: unknown): string | undefined {
  *    schema is fine because it never reaches the wire.
  *  - `image` is an optional image reference checked with the shared grammar
  *    (`lib/image-reference.ts`); empty is valid and submits `image: null`.
- *  - `replicas` is an optional whole number of 1 or more (`lib/replicas.ts`);
- *    empty is valid and submits `replicas: null`.
  */
 export const componentOverridesSchema = z
   .array(
@@ -91,14 +90,6 @@ export const componentOverridesSchema = z
           if (message) ctx.addIssue({ code: "custom", message });
         })
         .optional(),
-      replicas: z
-        .number()
-        .nullable()
-        .optional()
-        .superRefine((value: number | null | undefined, ctx: any) => {
-          const message = replicaFieldError(value);
-          if (message) ctx.addIssue({ code: "custom", message });
-        }),
       envVars: z
         .array(
           z.object({
@@ -466,22 +457,23 @@ function ComponentOverrideBody({
   // `form.Field` paths bind to; the index itself never appears in the
   // diff because `config-diff.ts` keys components by name.
   const existingIndex = rows.findIndex((r) => r?.name === componentName);
+  const initialReplicas = initialBlock?.replicas ?? undefined;
+  // First child of the body in both branches, so the first digit (which
+  // creates the block) keeps the same input mounted and focused.
+  const replicas = (
+    <ComponentReplicasEditor
+      key="replicas"
+      form={form}
+      field={field}
+      componentName={componentName}
+      blockIndex={existingIndex}
+      initialReplicas={initialReplicas}
+      driverDefault={driverDefault}
+      singleton={singleton}
+    />
+  );
 
   if (existingIndex < 0) {
-    // Replicas need no component container; a count creates the block.
-    const replicas = (
-      <ReplicasField
-        componentName={componentName}
-        value={undefined}
-        onChange={(next) => {
-          if (next !== undefined) {
-            field.pushValue({ name: componentName, replicas: next });
-          }
-        }}
-        driverDefault={driverDefault}
-        singleton={singleton}
-      />
-    );
     if (!hasContainer) {
       return (
         <div className="space-y-3">
@@ -516,7 +508,6 @@ function ComponentOverrideBody({
   }
 
   const blockPath = `components.${existingIndex}` as const;
-  const initialReplicas = initialBlock?.replicas ?? undefined;
   const initialEnvVars = initialBlock?.envVars ?? [];
   const envEnvVars = environmentBlock?.envVars ?? [];
   const initialCommand = initialBlock?.command ?? [];
@@ -527,43 +518,7 @@ function ComponentOverrideBody({
 
   return (
     <div className="space-y-4">
-      <form.Field name={`${blockPath}.replicas`}>
-        {(f: any) => (
-          <div className="space-y-2">
-            {/* Replica overrides have no environment scope. */}
-            <ChangedFieldFrame
-              name={`${blockPath}.replicas`}
-              form={form}
-              initial={initialReplicas}
-              environment={null}
-            >
-              <ReplicasField
-                componentName={componentName}
-                value={f.state.value}
-                onChange={(next) =>
-                  // Nothing stored: clearing returns to undefined, so typing
-                  // then clearing is not a change. Otherwise clearing submits null.
-                  f.handleChange(
-                    next ?? (initialReplicas === undefined ? undefined : null),
-                  )
-                }
-                onBlur={f.handleBlur}
-                driverDefault={driverDefault}
-                singleton={singleton}
-              />
-            </ChangedFieldFrame>
-            {singleton &&
-              typeof f.state.value === "number" &&
-              f.state.value > 1 && (
-                <SingletonReplicaOverride
-                  componentName={componentName}
-                  replicas={f.state.value}
-                  onRemove={() => f.handleChange(null)}
-                />
-              )}
-          </div>
-        )}
-      </form.Field>
+      {replicas}
 
       <div>
         <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1013,6 +968,84 @@ function ComponentOverrideBody({
           Remove override
         </Button>
       </div>
+    </div>
+  );
+}
+
+interface ComponentReplicasEditorProps {
+  form: ReactFormLike;
+  field: ComponentOverridesField;
+  componentName: string;
+  /** Index of the component's override block; -1 while it has none. */
+  blockIndex: number;
+  /** Count stored when the drawer opened; `undefined` when none is stored. */
+  initialReplicas: number | undefined;
+  driverDefault: number | null;
+  singleton: boolean;
+}
+
+/**
+ * Replicas field of one component (023). The same element renders with and
+ * without an override block: a count on a component without a block creates
+ * a block holding only `replicas`.
+ */
+function ComponentReplicasEditor({
+  form,
+  field,
+  componentName,
+  blockIndex,
+  initialReplicas,
+  driverDefault,
+  singleton,
+}: ComponentReplicasEditorProps) {
+  // Index -1 resolves to no value, so a missing block reads as no override.
+  const path = `components.${blockIndex}.replicas`;
+  const value = useStore(form.store, (state) =>
+    blockIndex < 0
+      ? undefined
+      : (state as { values: UpdateDeploymentInput }).values.components?.[
+          blockIndex
+        ]?.replicas,
+  );
+
+  const setReplicas = (next: number | null | undefined) => {
+    if (blockIndex >= 0) {
+      form.setFieldValue(path, next);
+    } else if (next != null) {
+      field.pushValue({ name: componentName, replicas: next });
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      {/* Replica overrides have no environment scope. */}
+      <ChangedFieldFrame
+        name={path}
+        form={form}
+        initial={blockIndex < 0 ? undefined : initialReplicas}
+        environment={null}
+      >
+        <ReplicasField
+          componentName={componentName}
+          value={value}
+          onChange={(next) =>
+            // Nothing stored: clearing returns to undefined, so typing then
+            // clearing is not a change. Otherwise clearing submits null.
+            setReplicas(
+              next ?? (initialReplicas === undefined ? undefined : null),
+            )
+          }
+          driverDefault={driverDefault}
+          singleton={singleton}
+        />
+      </ChangedFieldFrame>
+      {singleton && typeof value === "number" && value > 1 && (
+        <SingletonReplicaOverride
+          componentName={componentName}
+          replicas={value}
+          onRemove={() => setReplicas(null)}
+        />
+      )}
     </div>
   );
 }
