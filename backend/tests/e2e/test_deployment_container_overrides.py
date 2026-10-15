@@ -22,19 +22,22 @@ Scenarios:
   container, with the chart's ``command`` kept.
 * US2 — set ``command`` alongside ``args``; both land. Then change ``command``
   and observe the new value after the reconcile.
-* US3 — clear the override; the container's ``command`` and ``args`` return to
-  the baseline (FR-003, SC-003) and the read surface drops the override.
+* US3 — set ``command`` and ``args`` through
+  ``scenario_driver.set_component_container_override`` (the SDK, or the Command
+  and Args editors of the Settings edit drawer), then clear both; the
+  container's ``command`` and ``args`` return to the baseline (FR-003, SC-003)
+  and the read surface drops the override.
 * US4 — invalid overrides are rejected at the mutation boundary with a precise
   typed code and no redeploy; an empty-string element is accepted.
 
-Marker landscape: every scenario is ``api_only``. The frontend Command/Args
-editor
-(``components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx``)
-is covered by the frontend Vitest suite. The deployment-detail Configuration
-form is not driven by ``UiScenarioDriver.update_deployment`` (which only drives
-the ``scheduling`` sub-tree today, exactly as for the env-vars E2E), so the
-``[ui-chromium]`` variant would re-run the same SDK call without exercising
-additional coverage.
+Marker landscape: US3 runs under both variants, so ``[ui-chromium]`` sets and
+clears ``command`` and ``args`` in the editor and submits through **Review &
+apply**. US1, US2 and US4 are ``api_only``: they write the whole config through
+``update_deployment``, whose UI driver only drives the ``scheduling`` sub-tree,
+or call the GraphQL mutation directly. The editor parts that need a component
+without a component container (hidden editors, "not applied" rows) are covered
+by the frontend Vitest suite, because every example driver component declares
+a container.
 """
 
 from __future__ import annotations
@@ -158,9 +161,8 @@ async def _server_container(vcluster: dict, namespace: str, predicate: Any, desc
 @pytest.mark.api_only(
     reason=(
         "Sets args via scenario_driver.update_deployment; the UI driver only "
-        "drives the 'scheduling' sub-tree today (the Command/Args editor is "
-        "covered by the frontend Vitest suite), so [ui-chromium] would just "
-        "re-run the same SDK call."
+        "drives the 'scheduling' sub-tree today, so [ui-chromium] would just "
+        "re-run the same SDK call. US3 drives the Command and Args editors."
     )
 )
 @pytest.mark.ci
@@ -213,7 +215,7 @@ async def test_us1_override_args_on_server(
 @pytest.mark.api_only(
     reason=(
         "Sets command+args via scenario_driver.update_deployment; UI driver "
-        "drives scheduling only (Command/Args editor covered by Vitest)."
+        "drives scheduling only. US3 drives the Command and Args editors."
     )
 )
 @pytest.mark.ci
@@ -294,24 +296,18 @@ async def test_us2_command_independent_of_args(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.api_only(
-    reason=(
-        "Clears the override via scenario_driver.update_deployment; UI driver "
-        "drives scheduling only (Command/Args editor covered by Vitest)."
-    )
-)
 @pytest.mark.ci
-async def test_us3_clear_override_falls_back_to_chart_default(
+async def test_us3_set_and_clear_command_and_args(
     container_overrides_environment: dict,
     container_overrides_deployment: dict,
     vcluster: dict,
     scenario_driver: ScenarioDriver,
     _co_driver_bound: None,
 ) -> None:
-    """Clear the override (full replacement, omit both slots) and assert the
-    container's ``command`` and ``args`` return to the chart's values captured
-    before any override was set (FR-003, SC-003), and that the override is gone
-    from the read surface.
+    """Set ``command`` and ``args``, then clear both, through the SDK or the
+    Command and Args editors. The container gets both lists, then returns to the
+    chart's values captured before any override was set (FR-003, SC-003), and the
+    override is gone from the read surface.
 
     A clear removes the ``command``/``args`` patch from the HelmRelease
     ``spec.postRenderers``, so helm-controller re-renders the workload without it.
@@ -323,12 +319,11 @@ async def test_us3_clear_override_falls_back_to_chart_default(
         container_overrides_deployment["baseline_command"],
         container_overrides_deployment["baseline_args"],
     )
+    command = ["uvicorn", "simple_app.main:app"]
     args = ["--host", "0.0.0.0", "--port", "8000"]
 
-    # First set an override so the clear has something observable to remove.
-    await scenario_driver.update_deployment(
-        deployment_id=deployment_id,
-        config={"components": {"server": {"args": args}}},
+    await scenario_driver.set_component_container_override(
+        deployment_id=deployment_id, component="server", command=command, args=args
     )
     await scenario_driver.wait_for_deployment_running(
         deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
@@ -338,17 +333,17 @@ async def test_us3_clear_override_falls_back_to_chart_default(
         namespace,
         lambda d: (
             container_command_args(d, container_name=SERVER_CONTAINER)
-            == (baseline[0], args)
+            == (command, args)
         ),
-        f"server container (command, args) == {(baseline[0], args)}",
+        f"server container (command, args) == {(command, args)}",
     )
-    assert "server" in await _read_overrides(client, deployment_id)
+    rows = await _read_overrides(client, deployment_id)
+    assert rows["server"]["command"] == command
+    assert rows["server"]["args"] == args
+    assert rows["server"]["isApplicable"] is True
 
-    # Clear: submit the component block with neither slot → full-replacement
-    # clear (omit = clear, never []).
-    await scenario_driver.update_deployment(
-        deployment_id=deployment_id,
-        config={"components": {"server": {}}},
+    await scenario_driver.set_component_container_override(
+        deployment_id=deployment_id, component="server", command=None, args=None
     )
     await scenario_driver.wait_for_deployment_running(
         deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS

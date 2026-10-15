@@ -428,7 +428,7 @@ class DeploymentDetailPage:
                 ).fill(",".join(str(v) for v in values))
 
     # ------------------------------------------------------------------
-    # Settings drawer — component overrides (017 env vars, 018 image)
+    # Settings drawer — component overrides (017 env vars, 018 image, 022 command/args)
     # ------------------------------------------------------------------
 
     async def set_component_env_vars(
@@ -518,6 +518,73 @@ class DeploymentDetailPage:
         if not desired:
             await self._remove_component_block_if_empty(block, component)
         await self._apply_config_drawer(drawer, what="component image")
+
+    async def set_component_container_override(
+        self, *, component: str, command: list[str] | None, args: list[str] | None
+    ) -> None:
+        """Make ``component``'s Command and Args rows in the Settings edit drawer
+        equal ``command`` and ``args`` (``None`` means no rows), then apply
+        through the diff dialog.
+
+        Rows are found by their accessible names, edited in place and extras
+        removed from the end. The block stays when both lists end up empty.
+        Closes the drawer without submitting when the rows already match.
+        """
+        drawer, block = await self._open_component_override_block(component)
+        add_block = block.locator(f"[data-testid=component-override-add-{component}]")
+        command_editor = block.locator(
+            f"[data-testid=component-command-editor-{component}]"
+        )
+        await expect(add_block.or_(command_editor)).to_be_visible()
+        if await add_block.is_visible():
+            await add_block.click()
+
+        changed = False
+        for field, label, values in (
+            ("command", "Command", command or []),
+            ("args", "Args", args or []),
+        ):
+            changed |= await self._set_component_list(
+                block, component, field=field, label=label, values=values
+            )
+
+        if not changed:
+            await self._close_config_drawer(drawer)
+            return
+        await self._apply_config_drawer(drawer, what="component command and args")
+
+    async def _set_component_list(
+        self,
+        block: Locator,
+        component: str,
+        *,
+        field: str,
+        label: str,
+        values: list[str],
+    ) -> bool:
+        """Edit one Command or Args list in place; returns whether it changed."""
+
+        def element(index: int) -> Locator:
+            return block.get_by_label(
+                f"{label} element {index + 1} for {component}", exact=True
+            )
+
+        current: list[str] = []
+        while await element(len(current)).count() > 0:
+            current.append(await element(len(current)).input_value())
+        if current == values:
+            return False
+        for index, value in enumerate(values):
+            if index >= len(current):
+                await block.locator(
+                    f"[data-testid=comp-{field}-add-{component}]"
+                ).click()
+            await element(index).fill(value)
+        for index in range(len(current) - 1, len(values) - 1, -1):
+            await block.locator(
+                f"[data-testid=comp-{field}-remove-{component}-{index}]"
+            ).click()
+        return True
 
     async def _open_component_override_block(
         self, component: str

@@ -522,18 +522,31 @@ class ApiScenarioDriver:
     async def set_component_env_vars(
         self, *, deployment_id: str, component: str, env_vars: dict[str, str]
     ) -> None:
-        await self._replace_component_slot(
+        await self._replace_component_slots(
             deployment_id=deployment_id,
             component=component,
-            slot="env_vars",
-            value=dict(env_vars) if env_vars else None,
+            slots={"env_vars": dict(env_vars) if env_vars else None},
         )
 
     async def set_component_image(
         self, *, deployment_id: str, component: str, image: str | None
     ) -> None:
-        await self._replace_component_slot(
-            deployment_id=deployment_id, component=component, slot="image", value=image
+        await self._replace_component_slots(
+            deployment_id=deployment_id, component=component, slots={"image": image}
+        )
+
+    async def set_component_container_override(
+        self,
+        *,
+        deployment_id: str,
+        component: str,
+        command: list[str] | None,
+        args: list[str] | None,
+    ) -> None:
+        await self._replace_component_slots(
+            deployment_id=deployment_id,
+            component=component,
+            slots={"command": command, "args": args},
         )
 
     async def pinned_image_components(
@@ -557,11 +570,11 @@ class ApiScenarioDriver:
             }
         )
 
-    async def _replace_component_slot(
-        self, *, deployment_id: str, component: str, slot: str, value: Any
+    async def _replace_component_slots(
+        self, *, deployment_id: str, component: str, slots: dict[str, Any]
     ) -> None:
         # ``updateDeployment`` is full-replacement: resubmit the stored config
-        # with only this component slot swapped; ``None`` clears it.
+        # with only these component slots swapped; ``None`` clears a slot.
         try:
             deployment = await self._client.deployments.get(deployment_id)
         except StyrminError as exc:
@@ -575,10 +588,11 @@ class ApiScenarioDriver:
         block = {
             key: existing
             for key, existing in components.pop(component, {}).items()
-            if key != slot and existing is not None
+            if key not in slots and existing is not None
         }
-        if value is not None:
-            block[slot] = value
+        block.update(
+            {slot: value for slot, value in slots.items() if value is not None}
+        )
         if block:
             components[component] = block
         config["components"] = components

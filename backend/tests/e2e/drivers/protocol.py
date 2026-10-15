@@ -189,6 +189,35 @@ class ScenarioDriver(Protocol):
         wait for the reconcile to reach the workload.
         """
 
+    async def set_component_container_override(
+        self,
+        *,
+        deployment_id: str,
+        component: str,
+        command: list[str] | None,
+        args: list[str] | None,
+    ) -> None:
+        """Set or clear one component's ``command`` and ``args`` overrides (022).
+
+        ``None`` clears a field. Every other stored config field, including the
+        other components' blocks and this component's env vars and image, is
+        preserved.
+
+        API driver: reads the stored ``Deployment.config``, swaps
+        ``components[<component>].command`` and ``.args``, and resubmits the
+        whole config through ``update_deployment``. A block left empty is
+        dropped.
+
+        UI driver: opens the Settings tab's edit drawer, expands
+        ``component-override-trigger-<component>``, edits the Command and Args
+        rows in place (adding, changing and removing rows), then applies
+        through the diff dialog. The block stays, so a clear submits only the
+        ``command`` and ``args`` removal.
+
+        Both block until the server has accepted the mutation; callers still
+        wait for the reconcile to reach the workload.
+        """
+
     async def pinned_image_components(
         self, *, deployment_id: str, target_version: str
     ) -> list[str]:
