@@ -67,6 +67,7 @@ Example:
 import re
 from typing import Any, Literal, Self
 
+from loguru import logger
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import Version
 from pydantic import (
@@ -84,6 +85,7 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
+from styrmin_backend.context.models.components import ReplicaDeclaration
 from styrmin_backend.services.exceptions import CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL
 
 from ._shared import Kind
@@ -235,7 +237,14 @@ _CONTAINER_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 _CONTAINER_NAME_MAX_LENGTH = 63
 
 
-class ArbitrarySectionModel(BaseModel):
+class ArbitrarySectionModel(ReplicaDeclaration):
+    """One ``spec.components.<name>`` declaration.
+
+    ``replicas`` (1 to 2147483647) and ``singleton`` come from :class:`ReplicaDeclaration`:
+    they are typed on load, ``singleton: true`` with ``replicas`` above 1 fails the load, and
+    each is left out of ``model_dump()`` at its default. Other keys are kept as extras.
+    """
+
     model_config = ConfigDict(extra="allow")
 
     identifier: Identifier
@@ -254,6 +263,37 @@ class ArbitrarySectionModel(BaseModel):
                 "alphanumeric"
             )
         return value
+
+
+_REPLICA_KEYS = ("replicas", "singleton")
+
+
+def parse_stored_component_declaration(
+    raw: dict[str, Any], *, driver_version: str, component: str
+) -> ArbitrarySectionModel:
+    """Parse a component declaration stored by an earlier driver load.
+
+    A driver version stored before 023 may hold untyped ``replicas`` or ``singleton`` values
+    that the typed fields reject. When dropping both keys makes the declaration valid, they are
+    dropped with a warning; any other error is raised. The driver load path stays strict.
+    """
+    try:
+        return ArbitrarySectionModel.model_validate(raw)
+    except ValidationError as err:
+        if not any(key in raw for key in _REPLICA_KEYS):
+            raise
+        try:
+            declaration = ArbitrarySectionModel.model_validate(
+                {key: value for key, value in raw.items() if key not in _REPLICA_KEYS}
+            )
+        except ValidationError:
+            raise err from None
+    logger.warning(
+        "Ignoring the invalid replicas/singleton keys of component {} in driver version {}",
+        component,
+        driver_version,
+    )
+    return declaration
 
 
 class Components(RootModel):

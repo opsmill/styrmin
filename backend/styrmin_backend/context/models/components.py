@@ -1,8 +1,18 @@
-from typing import Any, ItemsView, Literal
+from typing import Any, ItemsView, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    SerializerFunctionWrapHandler,
+    StrictBool,
+    StrictInt,
+    model_serializer,
+    model_validator,
+)
 
-from .config import SchedulingConfig
+from .config import MAX_REPLICA_COUNT, SchedulingConfig
 
 
 class LabelIdentifier(RootModel):
@@ -35,7 +45,39 @@ class Identifier(BaseModel):
     label: LabelIdentifier
 
 
-class ArbitrarySectionModel(BaseModel):
+class ReplicaDeclaration(BaseModel):
+    """The ``replicas`` and ``singleton`` keys of a driver component declaration (023).
+
+    Shared by the driver-load model and the context model, so both type the keys the same way.
+    Each key is left out of a dump at its default, so a declaration that uses neither key dumps
+    as it did before the keys were typed.
+    """
+
+    replicas: StrictInt | None = Field(default=None, ge=1, le=MAX_REPLICA_COUNT)
+    singleton: StrictBool = False
+
+    @model_validator(mode="after")
+    def _singleton_runs_one_replica(self) -> Self:
+        if self.singleton and self.replicas is not None and self.replicas > 1:
+            raise ValueError(
+                f"a singleton component runs exactly 1 replica; `singleton: true` "
+                f"cannot be combined with `replicas: {self.replicas}`"
+            )
+        return self
+
+    @model_serializer(mode="wrap")
+    def _omit_replica_defaults(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        data = handler(self)
+        if data.get("replicas", 0) is None:
+            del data["replicas"]
+        if data.get("singleton") is False:
+            del data["singleton"]
+        return data
+
+
+class ArbitrarySectionModel(ReplicaDeclaration):
     model_config = ConfigDict(extra="allow")
 
     identifier: Identifier
@@ -151,6 +193,8 @@ class ComponentContext(BaseModel):
     env_vars: ResolvedComponentEnvVars | None = None
     container_override: ResolvedComponentContainerOverride | None = None
     image_override: ResolvedComponentImageOverride | None = None
+    # ``DeploymentConfig.components[<name>].replicas``; declared components only (023).
+    replica_override: int | None = None
 
 
 class ComponentsContext(RootModel):
