@@ -55,6 +55,7 @@ from styrmin_sdk.graphql._generated.get_deployment_timeline import (
     GetDeploymentTimelineDeploymentTimeline,
 )
 from styrmin_sdk.graphql._generated.input_types import (
+    ComponentConfigInput,
     DeploymentConfigInput,
     ParameterValueInput,
     UpdateDeploymentInput,
@@ -78,6 +79,7 @@ from styrmin_sdk.models.deployment_manifest import (
     ApplyOutcome,
     ApplyOverrides,
     DeploymentManifest,
+    OverrideKind,
     ResolvedManifest,
     resolve_overrides,
 )
@@ -250,6 +252,20 @@ def _effective_image_overrides(update_input: UpdateDeploymentInput, stored_confi
         for name, block in stored.items()
         if isinstance(name, str)
     }
+
+
+def _override_kinds(block: ComponentConfigInput) -> list[OverrideKind]:
+    """The override kinds a component block sets, in a fixed order."""
+    kinds: list[OverrideKind] = []
+    if block.env_vars:
+        kinds.append("env_vars")
+    if block.image is not None:
+        kinds.append("image")
+    if block.command is not None:
+        kinds.append("command")
+    if block.args is not None:
+        kinds.append("args")
+    return kinds
 
 
 def _build_config_input(manifest: ResolvedManifest) -> DeploymentConfigInput | None:
@@ -692,8 +708,8 @@ class DeploymentResource(BaseResource):
         with the server's message and ``error_code``; nothing was written. An
         ``updated`` outcome that changes the application version also carries
         ``target_version`` and the token-free ``pinned_image_components`` (FR-008),
-        and ``inapplicable_components`` lists the manifest's overrides that the bound
-        driver version cannot apply; ``apply`` never prompts.
+        and ``inapplicable_overrides`` lists, per component, the manifest's overrides that
+        the bound driver version cannot apply; ``apply`` never prompts.
         """
         existing_driver_name = existing.application_driver_version.application_driver.name
         if existing_driver_name != manifest.driver:
@@ -721,6 +737,7 @@ class DeploymentResource(BaseResource):
             )
 
         version_changed = manifest.version != existing.application_version
+        inapplicable = await self._inapplicable_overrides(existing.id, update_input)
         return ApplyOutcome(
             name=manifest.name,
             action="updated",
@@ -732,23 +749,22 @@ class DeploymentResource(BaseResource):
                 if version_changed
                 else []
             ),
-            inapplicable_components=await self._inapplicable_components(existing.id, update_input),
+            inapplicable_components=list(inapplicable),
+            inapplicable_overrides=inapplicable,
         )
 
-    async def _inapplicable_components(self, deployment_id: UUID, update_input: UpdateDeploymentInput) -> list[str]:
-        """Components whose env vars, image, ``command`` or ``args`` in ``update_input`` are stored but not applied.
+    async def _inapplicable_overrides(
+        self, deployment_id: UUID, update_input: UpdateDeploymentInput
+    ) -> dict[str, list[OverrideKind]]:
+        """Per component, the env vars, image, ``command`` or ``args`` in ``update_input`` that are stored but not applied.
 
         Unchanged values on a component that the bound driver version gives no component
         container pass validation, so they are read back once the update is written. A failed
         read returns no components: it never fails the apply.
         """
-        submitted = {
-            block.name
-            for block in update_input.components or []
-            if block.env_vars or block.image is not None or block.command is not None or block.args is not None
-        }
+        submitted = {block.name: kinds for block in update_input.components or [] if (kinds := _override_kinds(block))}
         if not submitted:
-            return []
+            return {}
         try:
             result = await self._transport.execute(
                 load_query("get_deployment_override_applicability"), {"deploymentId": str(deployment_id)}
@@ -761,13 +777,19 @@ class DeploymentResource(BaseResource):
                 GetDeploymentOverrideApplicabilityDeployment,
             )
         except StyrminError:
-            return []
-        blocks = [
-            *deployment.component_env_vars,
-            *deployment.component_image_overrides,
-            *deployment.component_container_overrides,
-        ]
-        return sorted({block.component for block in blocks if not block.is_applicable} & submitted)
+            return {}
+        container_not_applied = {b.component for b in deployment.component_container_overrides if not b.is_applicable}
+        not_applied: dict[OverrideKind, set[str]] = {
+            "env_vars": {b.component for b in deployment.component_env_vars if not b.is_applicable},
+            "image": {b.component for b in deployment.component_image_overrides if not b.is_applicable},
+            "command": container_not_applied,
+            "args": container_not_applied,
+        }
+        result: dict[str, list[OverrideKind]] = {}
+        for name in sorted(submitted):
+            if kinds := [kind for kind in submitted[name] if name in not_applied[kind]]:
+                result[name] = kinds
+        return result
 
     async def _wait_for_terminal(self, outcome: ApplyOutcome, max_wait: float | None = None) -> ApplyOutcome:
         """Poll the deployment until its ``Deployment.status`` reaches a terminal state.

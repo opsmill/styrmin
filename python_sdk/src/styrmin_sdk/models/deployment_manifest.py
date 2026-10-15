@@ -96,6 +96,9 @@ class ApplyOverrides(BaseModel):
     cluster: str | None = None
 
 
+OverrideKind = Literal["env_vars", "image", "command", "args"]
+
+
 class ApplyOutcome(BaseModel):
     """Result of applying a single manifest."""
 
@@ -115,6 +118,8 @@ class ApplyOutcome(BaseModel):
     # Components whose env vars, image, `command` or `args` the manifest sets but the bound
     # driver version cannot apply: they are stored, not applied.
     inapplicable_components: list[str] = Field(default_factory=list)
+    # The same components, each with the override kinds the manifest sets that are not applied.
+    inapplicable_overrides: dict[str, list[OverrideKind]] = Field(default_factory=dict)
 
 
 class ApplyEvent(BaseModel):

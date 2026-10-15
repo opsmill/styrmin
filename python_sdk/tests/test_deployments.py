@@ -798,6 +798,7 @@ async def test_apply_lists_components_whose_overrides_the_driver_version_cannot_
     assert outcome.action == "updated"
     # ``cron`` keeps a stored override the manifest does not set, so it is not listed.
     assert outcome.inapplicable_components == ["worker"]
+    assert outcome.inapplicable_overrides == {"worker": ["env_vars"]}
 
 
 async def test_apply_lists_components_whose_command_or_args_the_driver_version_cannot_apply(
@@ -828,7 +829,45 @@ async def test_apply_lists_components_whose_command_or_args_the_driver_version_c
     assert outcome.action == "updated"
     # ``migrate`` sets neither ``command`` nor ``args``, so it is not listed.
     assert outcome.inapplicable_components == ["worker"]
+    assert outcome.inapplicable_overrides == {"worker": ["args"]}
     assert _operation_names(mock_transport)[3].startswith("query GetDeploymentOverrideApplicability(")
+
+
+async def test_apply_names_only_the_override_kinds_that_are_not_applied(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """Each kind is checked against its own block: an applied image next to unapplied
+    ``command`` and ``args`` lists only the container overrides."""
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+        _applicability_response(
+            env_vars={"worker": False},
+            images={"worker": True},
+            containers={"worker": False},
+        ),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(
+            version="2.0.0",
+            config={
+                "components": [
+                    {
+                        "name": "worker",
+                        "envVars": [{"name": "B", "value": "2"}],
+                        "image": "registry.example/worker:1",
+                        "command": ["/bin/worker"],
+                        "args": ["--queue", "low"],
+                    },
+                ]
+            },
+        )
+    )
+
+    assert outcome.inapplicable_components == ["worker"]
+    assert outcome.inapplicable_overrides == {"worker": ["env_vars", "command", "args"]}
 
 
 async def test_apply_skips_the_applicability_read_when_no_block_sets_an_override(
@@ -846,6 +885,7 @@ async def test_apply_skips_the_applicability_read_when_no_block_sets_an_override
 
     assert outcome.action == "updated"
     assert outcome.inapplicable_components == []
+    assert outcome.inapplicable_overrides == {}
     assert len(_operation_names(mock_transport)) == 3
 
 
