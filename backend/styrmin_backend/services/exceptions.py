@@ -802,6 +802,22 @@ def _retired_filter_message(filter_name: RetiredTemplateFilter, guide: str) -> s
     )
 
 
+def retired_filter_load_message(filter_name: RetiredTemplateFilter, lineno: int) -> str:
+    """The message for a driver ``values.j2.yml`` that calls a retired filter at load time."""
+    guide = _RETIRED_FILTER_MIGRATION_GUIDES[filter_name]
+    applied = (
+        "injects env vars into"
+        if filter_name == "component_env_vars"
+        else "applies container command and args overrides to"
+    )
+    return (
+        f"values.j2.yml line {lineno} calls the '{filter_name}' template filter, which "
+        f"was removed: Styrmin now {applied} each component's declared component "
+        "container. Remove the filter from values.j2.yml and declare "
+        f"components.<name>.container in driver.styrmin.yml. Migration guide: {guide}"
+    )
+
+
 class RetiredTemplateFilterError(ServiceError):
     """A driver values template called a template filter Styrmin removed.
 

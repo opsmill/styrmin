@@ -1,7 +1,7 @@
 """A driver file with the removed ``spec.container_overrides`` block fails to load (022 / FR-006).
 
-The block gets no special handling: ``Specification`` forbids extra keys, so the loader
-rejects it exactly as it rejects any other unknown key under ``spec``.
+The error names the removed block and links the migration guide, unlike the generic
+``extra_forbidden`` error of any other unknown key under ``spec``.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from styrmin_backend.services.driver.exceptions import DriverLoadingError
 from styrmin_backend.services.driver.loaders import get_local_driver_loader
+from styrmin_backend.services.exceptions import CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL
 
 CONTAINER_OVERRIDES_BLOCK = [
     {
@@ -74,35 +75,30 @@ def test_driver_without_the_block_loads(tmp_path: Path) -> None:
     assert driver.driver_spec.spec.components is not None  # type: ignore[union-attr]
 
 
-def test_container_overrides_block_fails_with_extra_forbidden(tmp_path: Path) -> None:
+def test_container_overrides_block_fails_with_the_migration_guide(
+    tmp_path: Path,
+) -> None:
     error = _load_failure(
         tmp_path, _driver_spec(container_overrides=CONTAINER_OVERRIDES_BLOCK)
     )
 
+    assert _pydantic_errors(error) == [{"type": "removed_key", "loc": ("spec",)}]
+    assert "spec.container_overrides was removed" in str(error)
+    assert CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL in str(error)
+
+
+def test_container_overrides_block_fails_even_when_empty(tmp_path: Path) -> None:
+    error = _load_failure(tmp_path, _driver_spec(container_overrides=None))
+
+    assert _pydantic_errors(error) == [{"type": "removed_key", "loc": ("spec",)}]
+
+
+def test_other_unknown_spec_keys_keep_the_generic_error(tmp_path: Path) -> None:
+    error = _load_failure(
+        tmp_path, _driver_spec(not_a_spec_key=CONTAINER_OVERRIDES_BLOCK)
+    )
+
     assert _pydantic_errors(error) == [
-        {"type": "extra_forbidden", "loc": ("spec", "container_overrides")}
+        {"type": "extra_forbidden", "loc": ("spec", "not_a_spec_key")}
     ]
-    assert "spec.container_overrides: Extra inputs are not permitted" in str(error)
-
-
-def test_container_overrides_block_fails_like_any_unknown_spec_key(
-    tmp_path: Path,
-) -> None:
-    removed_dir = tmp_path / "removed"
-    unknown_dir = tmp_path / "unknown"
-    removed_dir.mkdir()
-    unknown_dir.mkdir()
-
-    removed = _load_failure(
-        removed_dir, _driver_spec(container_overrides=CONTAINER_OVERRIDES_BLOCK)
-    )
-    unknown = _load_failure(
-        unknown_dir, _driver_spec(not_a_spec_key=CONTAINER_OVERRIDES_BLOCK)
-    )
-
-    assert type(removed) is type(unknown)
-    assert type(removed.__cause__) is type(unknown.__cause__)
-    assert [e["type"] for e in _pydantic_errors(removed)] == [
-        e["type"] for e in _pydantic_errors(unknown)
-    ]
-    assert str(removed) == str(unknown).replace("not_a_spec_key", "container_overrides")
+    assert CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL not in str(error)
