@@ -160,9 +160,12 @@ resolve to.
 
 ### A controller that stays `DELETING`
 
-A known race in the operator can stop the removal of a dedicated
-ingress controller ([#446](https://github.com/opsmill/styrmin/issues/446)). Changes to `dedicated_ingress` remove controllers
-more often, so you are more likely to see it after a cluster update.
+With an agent released before the fix of
+[#446](https://github.com/opsmill/styrmin/issues/446), a race in the
+operator can stop the removal of a dedicated ingress controller.
+Changes to `dedicated_ingress` remove controllers more often, so you
+are more likely to see it after a cluster update. An agent with the fix
+removes the finalizer itself.
 
 You see these symptoms:
 

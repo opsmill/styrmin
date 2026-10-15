@@ -68,8 +68,9 @@ For an ordinary deployment the two strings are equal: `styrmin-<deployment id>`.
 | `managedResources` | Counts by type (networkPolicies, secrets, helmReleases, services, middlewares) |
 | `instanceId` | The `spec.instanceId` that the create, update or resume handler last acted on. Written at the end of the handler, also when the handler raises. The status reporter sends it, so the server can link each report to the task that rolled out that instance. |
 | `rolloutStartedAt` | When the current rollout started (ISO 8601). Set by the create and update handlers; the resume handler sets it only when it is missing. The readiness timeout counts from it. |
+| `deletionHandledAt` | When the `@kopf.on.delete` handler last ran (ISO 8601). Each run writes a new value, so the handler's patch always produces an event (see [Deletion](#deletion)). |
 
-The CRD's status schema keeps `x-kubernetes-preserve-unknown-fields: true`, so `instanceId`, `rolloutStartedAt` and `HelmReleaseRemediated` need no CRD change on existing installs. `helm/agent/crds/styrmin.io_styrmindeployments.yaml` documents them.
+The CRD's status schema keeps `x-kubernetes-preserve-unknown-fields: true`, so `instanceId`, `rolloutStartedAt`, `deletionHandledAt` and `HelmReleaseRemediated` need no CRD change on existing installs. `helm/agent/crds/styrmin.io_styrmindeployments.yaml` documents them.
 
 Printer columns for `kubectl get styrmindeployments`: Phase, App, Version, Age.
 
@@ -99,13 +100,18 @@ Two paths exist:
 
 **Platform-driven (preferred)**: the backend's `deleteDeployment` mutation patches `spec.deletionRequested = true`. A `@kopf.on.update(field="spec.deletionRequested", new=True)` handler observes the flip and runs `_teardown_owned_resources` in reverse order (Services/Middlewares → HelmRelease → NetworkPolicies/Secrets), then issues a namespace delete. The periodic timer advances `phase` to `Deleted` once the namespace returns 404. Because the StyrminDeployment CR lives inside the deployment's own namespace, the CR is garbage-collected with the namespace; the agent's status reporter detects "DB DELETING + CR absent" and synthesises a final `displayState: Deleted` report so the DB is tombstoned race-free.
 
-A known race can leave the namespace in `Terminating` ([#446](https://github.com/opsmill/styrmin/issues/446), not fixed). The only record of it is one E2E run in `specs/archive/021-cluster-config-update/e2e-evidence.md`. In that run:
+A race used to leave the namespace in `Terminating` when the namespace deletion deleted the CR during a run of the CR's timer ([#446](https://github.com/opsmill/styrmin/issues/446), [#461](https://github.com/opsmill/styrmin/issues/461)). In kopf 1.44.5:
 
-- the namespace deletion deleted the CR, and the `@kopf.on.delete` handler ran at the same moment as the CR's timer tick;
-- kopf 1.44.5 keeps the `styrmin.io/kopf-finalizer` finalizer while a timer is still exiting, and then waits for the event of its own patch to process the object again;
-- the delete handler's patch set the `Deleting` phase that the `deletionRequested` handler had already set, so the patch changed nothing and produced no event.
+- kopf keeps the `styrmin.io/kopf-finalizer` finalizer while a timer run has not ended. By default it waits only a few zero-time asyncio cycles for the run to end;
+- kopf then skips its 60-second re-check because the cycle also has a patch, and relies on the event of that patch to process the CR again;
+- kopf runs the `@kopf.on.delete` handler again in each cycle. Its patch sets `phase: Deleting`, which the earlier run had already set, so from the second cycle the patch changed nothing and produced no event.
 
-The finalizer stayed, the namespace stayed `Terminating`, and the status reporter kept reporting `Deleting`. Adding an annotation to the CR by hand made kopf run the handler again and remove the finalizer.
+The finalizer stayed, the namespace stayed `Terminating`, and the status reporter kept reporting `Deleting`. The same race stopped restores: `execute_velero_restore` deletes the target namespace and waits up to 600 seconds for it before it creates the Velero `Restore`.
+
+Two settings prevent it:
+
+- `on_startup` in `entrypoint/combined.py` sets `settings.background.instant_exit_timeout` to `TIMER_EXIT_TIMEOUT_SECONDS` (5 seconds). kopf waits that long for the timer run to end and, when it ends, removes the finalizer in the same cycle.
+- The delete handler writes `status.deletionHandledAt` with the current time on every run, so its patch always changes the CR. A timer run that takes longer than 5 seconds therefore gets another cycle, until it ends.
 
 <!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
 

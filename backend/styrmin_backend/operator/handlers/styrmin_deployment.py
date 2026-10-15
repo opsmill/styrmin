@@ -1320,6 +1320,9 @@ async def kopf_on_styrmin_deployment_delete(
     source's CR, whose resources now belong to the counterpart CR.
     """
     ns = namespace or ""
+    # A new value on every run, so the patch always makes an event: kopf then checks again
+    # for a timer run that has not ended, instead of keeping the finalizer (#446, #461).
+    patch.status["deletionHandledAt"] = _now()
     if annotations.get(ANNOTATION_SKIP_TEARDOWN) == "true":
         logger.info(
             "Deleting StyrminDeployment %s/%s without teardown (%s)",

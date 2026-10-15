@@ -80,6 +80,12 @@ The condition types are `NetworkPoliciesReady`, `SecretsReady`,
 them, see
 [When a rollout is ready or failed](../concepts-and-architecture/operator-and-crds.md#when-a-rollout-is-ready-or-failed).
 
+### Deletion field in `status`
+
+- `status.deletionHandledAt` — when the operator last ran its handler
+  for the deletion of the `StyrminDeployment`. The operator writes a new
+  value each time the handler runs.
+
 ### Auto-generation source
 
 - **Schema**: the CRD's OpenAPI schema (the same one the kopf operator

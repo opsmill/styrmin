@@ -211,6 +211,41 @@ async def test_delete_handler_runs_teardown(mocker) -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("annotations", [{}, {ANNOTATION_SKIP_TEARDOWN: "true"}])
+async def test_delete_handler_rerun_still_changes_the_cr(
+    mocker, annotations: dict[str, str]
+) -> None:
+    """#446, #461: kopf runs the handler again while a timer run has not ended.
+
+    kopf keeps the finalizer until it processes the CR again, which needs an
+    event. A second run that only repeats ``phase: Deleting`` changes nothing,
+    so no event comes and the namespace stays Terminating.
+    """
+    mocker.patch.object(handlers_module, "_teardown_owned_resources", autospec=True)
+    previous_run = (datetime.now(tz=timezone.utc) - timedelta(seconds=1)).isoformat()
+    status = {
+        "phase": DeploymentPhase.DELETING.value,
+        "message": "Cleaning up resources",
+        "deletionHandledAt": previous_run,
+    }
+    patch = _Patch()
+
+    await kopf_on_styrmin_deployment_delete(
+        spec={"releaseReference": "rel-1"},
+        status=status,
+        name="dep-1",
+        namespace="styrmin-abc",
+        annotations=annotations,
+        patch=patch,
+        logger=_Logger(),
+    )
+
+    assert {**status, **patch.status} != status
+    handled_at = datetime.fromisoformat(patch.status["deletionHandledAt"])
+    assert handled_at > datetime.fromisoformat(previous_run)
+
+
+@pytest.mark.anyio
 async def test_delete_handler_skips_teardown_when_annotated(mocker) -> None:
     """A cross-target restore discards its restored copy of the source's CR.
 
@@ -235,7 +270,7 @@ async def test_delete_handler_skips_teardown_when_annotated(mocker) -> None:
     )
 
     teardown_mock.assert_not_called()
-    assert patch.status == {}
+    assert set(patch.status) == {"deletionHandledAt"}
 
 
 # ---------------------------------------------------------------------------
