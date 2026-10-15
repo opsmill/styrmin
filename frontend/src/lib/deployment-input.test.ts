@@ -156,6 +156,26 @@ describe("deploymentConfigToInput", () => {
     ]);
   });
 
+  it("carries a per-component replica override from the config block into the input", () => {
+    const input = deploymentConfigToInput({
+      components: {
+        server: { replicas: 3 },
+        worker: { env_vars: {}, replicas: null },
+      },
+    });
+    expect(input.components).toEqual([
+      {
+        name: "server",
+        envVars: undefined,
+        command: undefined,
+        args: undefined,
+        replicas: 3,
+      },
+      { name: "worker", envVars: [], command: undefined, args: undefined },
+    ]);
+    expect(input.components?.[1]?.replicas).toBeUndefined();
+  });
+
   it("preserves every other field unchanged from a fully-populated config", () => {
     const fullConfig = {
       env_vars: { GLOBAL: "1" },
@@ -466,6 +486,33 @@ describe("componentsFormToInput", () => {
       { name: "server", envVars: [] },
       { name: "worker", command: ["/bin/sh"], args: ["-c"] },
     ]);
+  });
+
+  it("maps an empty or unparseable replicas field to replicas: null (clear)", () => {
+    expect(
+      componentsFormToInput([
+        { name: "server", replicas: "" as unknown as number },
+        { name: "worker", replicas: Number.NaN },
+      ]),
+    ).toEqual([
+      { name: "server", replicas: null },
+      { name: "worker", replicas: null },
+    ]);
+  });
+
+  it("keeps a set replica count, a cleared one and leaves an untouched one absent", () => {
+    const out = componentsFormToInput([
+      { name: "server", envVars: [], replicas: 2 },
+      { name: "migrate", replicas: null },
+      { name: "worker", envVars: [] },
+    ]);
+    expect(out).toEqual([
+      { name: "server", envVars: [], replicas: 2 },
+      { name: "migrate", replicas: null },
+      { name: "worker", envVars: [] },
+    ]);
+    expect(out?.[1]?.replicas).toBeNull();
+    expect(out?.[2]).not.toHaveProperty("replicas");
   });
 
   it("round-trips image read -> form -> ComponentConfigInput", () => {

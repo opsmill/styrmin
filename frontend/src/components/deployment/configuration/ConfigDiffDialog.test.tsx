@@ -101,6 +101,7 @@ function buildDeployment(overrides: Partial<Deployment> = {}): Deployment {
         name: "demo-driver",
       },
       parameters: [],
+      componentConfigs: [],
     },
     environment: {
       __typename: "Environment",
@@ -112,6 +113,7 @@ function buildDeployment(overrides: Partial<Deployment> = {}): Deployment {
     components: [],
     componentImageOverrides: [],
     componentContainerOverrides: [],
+    componentReplicas: [],
     deployedServices: [],
     ...overrides,
   } as Deployment;

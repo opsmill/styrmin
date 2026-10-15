@@ -24,6 +24,10 @@ query GetDeployment($deploymentId: UUID!) {
         default
         values
       }
+      componentConfigs {
+        name
+        replicas
+      }
     }
     environmentId
     environment {
@@ -61,6 +65,15 @@ query GetDeployment($deploymentId: UUID!) {
       component
       command
       args
+      isOrphaned
+      isApplicable
+    }
+    componentReplicas {
+      component
+      count
+      source
+      override
+      singleton
       isOrphaned
       isApplicable
     }

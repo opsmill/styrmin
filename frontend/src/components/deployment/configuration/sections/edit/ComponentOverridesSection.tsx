@@ -29,14 +29,18 @@ import {
   imageReferenceMessage,
   validateImageReference,
 } from "@/lib/image-reference";
+import { replicaDefault, replicaFieldError } from "@/lib/replicas";
 import { cn } from "@/lib/utils";
 
 import { ChangedFieldFrame } from "../../ChangedFieldFrame";
 import { useDrawerDiff } from "../../DrawerDiffContext";
+import { ReplicasField } from "../../ReplicasField";
 
-type DeploymentComponent = NonNullable<
-  GetDeploymentQuery["deployment"]
->["components"][number];
+type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
+type DeploymentComponent = Deployment["components"][number];
+type ComponentReplicasRow = Deployment["componentReplicas"][number];
+type DriverComponentConfig =
+  Deployment["applicationDriverVersion"]["componentConfigs"][number];
 
 // POSIX env-var name regex — mirrors `EnvVarsSection`.
 const POSIX_ENV_VAR = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -53,9 +57,10 @@ function imageFieldError(value: unknown): string | undefined {
  *
  * The backend `ComponentConfigInput` accepts a name, an env-var list, the
  * container-override slots `command` / `args` (014-component-container-overrides),
- * and an `image` override (018-component-image-overrides). Future per-component
- * knobs (CPU/memory, replicas) are rendered as a muted "coming soon" placeholder
- * and are **not** part of this validation schema until the GraphQL surface widens.
+ * an `image` override (018-component-image-overrides) and a `replicas` override
+ * (023). Future per-component knobs (CPU/memory) are rendered as a muted
+ * "coming soon" placeholder and are **not** part of this validation schema
+ * until the GraphQL surface widens.
  *
  * Rules:
  *  - `name` non-empty (driver-declared component name; backend re-validates).
@@ -70,6 +75,8 @@ function imageFieldError(value: unknown): string | undefined {
  *    schema is fine because it never reaches the wire.
  *  - `image` is an optional image reference checked with the shared grammar
  *    (`lib/image-reference.ts`); empty is valid and submits `image: null`.
+ *  - `replicas` is an optional whole number of 1 or more (`lib/replicas.ts`);
+ *    empty is valid and submits `replicas: null`.
  */
 export const componentOverridesSchema = z
   .array(
@@ -84,6 +91,14 @@ export const componentOverridesSchema = z
           if (message) ctx.addIssue({ code: "custom", message });
         })
         .optional(),
+      replicas: z
+        .number()
+        .nullable()
+        .optional()
+        .superRefine((value: number | null | undefined, ctx: any) => {
+          const message = replicaFieldError(value);
+          if (message) ctx.addIssue({ code: "custom", message });
+        }),
       envVars: z
         .array(
           z.object({
@@ -137,17 +152,21 @@ function emptyEnvVar(): EnvVarInput {
 
 /**
  * Right-aligned one-line summary for a component-override trigger. Renders a
- * token per non-empty scope (env vars / command / args / image) so a component
- * with only a command/args or image override still reads sensibly. Falls back
- * to "override (empty)" when the block exists but carries no scope yet.
+ * token per non-empty scope (replicas / env vars / command / args / image) so a
+ * component with only a replicas, command/args or image override still reads
+ * sensibly. Falls back to "override (empty)" when the block carries no scope yet.
  */
 function summariseOverrideRow(
   envVarCount: number,
   commandCount: number,
   argsCount: number,
   hasImage: boolean,
+  replicas: number | null | undefined,
 ): string {
   const parts: string[] = [];
+  if (replicas != null && !Number.isNaN(replicas)) {
+    parts.push(`replicas: ${replicas}`);
+  }
   if (envVarCount > 0) {
     parts.push(`${envVarCount} env var${envVarCount === 1 ? "" : "s"}`);
   }
@@ -170,6 +189,10 @@ interface Props {
   anchorId: SectionId;
   /** All components declared by the deployment's currently-pinned driver. */
   components: readonly DeploymentComponent[];
+  /** `Deployment.componentReplicas`: singleton flag and where each count comes from. */
+  componentReplicas: readonly ComponentReplicasRow[];
+  /** The pinned driver version's `componentConfigs`: its declared `replicas`. */
+  driverComponentConfigs: readonly DriverComponentConfig[];
 }
 
 interface ComponentOverridesField {
@@ -201,16 +224,19 @@ function ensureComponentBlock(
  *
  * One Base UI Collapsible per driver-declared component. Inside the body:
  *  - Per-component env-var field array (`ComponentConfigInput.envVars`).
+ *  - A "Replicas" field (`ComponentConfigInput.replicas`, 023) on every
+ *    component, container or not; read-only `1 (singleton)` on a singleton.
  *  - An "Image" input (`ComponentConfigInput.image`, 018) and the
  *    command/args editors (014).
- *  - A muted "future per-component fields (CPU / memory / replicas)
- *    coming in future iterations" line so the section has visible room to
- *    grow without a structural rewrite.
+ *  - A muted "future per-component fields (CPU / memory) coming in future
+ *    iterations" line so the section has visible room to grow without a
+ *    structural rewrite.
  *
  * Components without a component container get no env var editor, no Image
  * input and no Command or Args editor: stored env vars, a stored image and a
  * stored command or args render read-only and removable (FR-006; 018 FR-011;
- * 022 FR-008).
+ * 022 FR-008). A stored replica override above 1 on a singleton component can
+ * only be removed (023).
  *
  * Field-array semantics: every read or write into the override list keys
  * on the component `name`. The array index is an implementation detail of
@@ -223,11 +249,19 @@ export function ComponentOverridesSection({
   environment,
   anchorId,
   components,
+  componentReplicas,
+  driverComponentConfigs,
 }: Props) {
   const initialBlocks = (initial.components ?? []) as ComponentConfigInput[];
   const envBlocks = (environment.components ?? []) as ComponentConfigInput[];
   const initialByName = new Map(initialBlocks.map((b) => [b.name, b] as const));
   const envByName = new Map(envBlocks.map((b) => [b.name, b] as const));
+  const replicasByName = new Map(
+    componentReplicas.map((row) => [row.component, row] as const),
+  );
+  const declaredReplicasByName = new Map(
+    driverComponentConfigs.map((c) => [c.name, c.replicas] as const),
+  );
 
   const changedCount = useDrawerDiff().entries.filter(
     (e) => e.section === anchorId,
@@ -287,13 +321,17 @@ export function ComponentOverridesSection({
                   commandCount,
                   argsCount,
                   Boolean(overrideRow?.image),
+                  overrideRow?.replicas,
                 );
+                const replicaRow = replicasByName.get(componentName);
+                const singleton = replicaRow?.singleton ?? false;
                 const notApplied =
-                  !component.container &&
-                  (envVarCount > 0 ||
-                    commandCount > 0 ||
-                    argsCount > 0 ||
-                    Boolean(overrideRow?.image));
+                  (!component.container &&
+                    (envVarCount > 0 ||
+                      commandCount > 0 ||
+                      argsCount > 0 ||
+                      Boolean(overrideRow?.image))) ||
+                  (singleton && (overrideRow?.replicas ?? 0) > 1);
 
                 return (
                   <Collapsible
@@ -343,6 +381,11 @@ export function ComponentOverridesSection({
                         form={form}
                         componentName={componentName}
                         hasContainer={Boolean(component.container)}
+                        singleton={singleton}
+                        driverDefault={replicaDefault(
+                          replicaRow,
+                          declaredReplicasByName.get(componentName),
+                        )}
                         field={field}
                         rows={rows}
                         initialBlock={initialByName.get(componentName)}
@@ -397,6 +440,10 @@ interface ComponentOverrideBodyProps {
   componentName: string;
   /** False when the driver declares no component container for this component. */
   hasContainer: boolean;
+  /** The driver version fixes this component at 1 replica. */
+  singleton: boolean;
+  /** Count that applies without a replica override; `null` when the chart sets it. */
+  driverDefault: number | null;
   field: ComponentOverridesField;
   rows: ComponentConfigInput[];
   initialBlock: ComponentConfigInput | undefined;
@@ -407,6 +454,8 @@ function ComponentOverrideBody({
   form,
   componentName,
   hasContainer,
+  singleton,
+  driverDefault,
   field,
   rows,
   initialBlock,
@@ -418,20 +467,37 @@ function ComponentOverrideBody({
   // diff because `config-diff.ts` keys components by name.
   const existingIndex = rows.findIndex((r) => r?.name === componentName);
 
-  if (existingIndex < 0 && !hasContainer) {
-    return (
-      <p
-        className="text-xs italic text-muted-foreground"
-        data-testid={`component-override-no-container-${componentName}`}
-      >
-        {noContainerText("env var, image, command and args overrides")}
-      </p>
-    );
-  }
-
   if (existingIndex < 0) {
+    // Replicas need no component container; a count creates the block.
+    const replicas = (
+      <ReplicasField
+        componentName={componentName}
+        value={undefined}
+        onChange={(next) => {
+          if (next !== undefined) {
+            field.pushValue({ name: componentName, replicas: next });
+          }
+        }}
+        driverDefault={driverDefault}
+        singleton={singleton}
+      />
+    );
+    if (!hasContainer) {
+      return (
+        <div className="space-y-3">
+          {replicas}
+          <p
+            className="text-xs italic text-muted-foreground"
+            data-testid={`component-override-no-container-${componentName}`}
+          >
+            {noContainerText("env var, image, command and args overrides")}
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="space-y-3">
+        {replicas}
         <p className="text-xs italic text-muted-foreground">
           No override on this component yet.
         </p>
@@ -450,6 +516,7 @@ function ComponentOverrideBody({
   }
 
   const blockPath = `components.${existingIndex}` as const;
+  const initialReplicas = initialBlock?.replicas ?? undefined;
   const initialEnvVars = initialBlock?.envVars ?? [];
   const envEnvVars = environmentBlock?.envVars ?? [];
   const initialCommand = initialBlock?.command ?? [];
@@ -460,6 +527,44 @@ function ComponentOverrideBody({
 
   return (
     <div className="space-y-4">
+      <form.Field name={`${blockPath}.replicas`}>
+        {(f: any) => (
+          <div className="space-y-2">
+            {/* Replica overrides have no environment scope. */}
+            <ChangedFieldFrame
+              name={`${blockPath}.replicas`}
+              form={form}
+              initial={initialReplicas}
+              environment={null}
+            >
+              <ReplicasField
+                componentName={componentName}
+                value={f.state.value}
+                onChange={(next) =>
+                  // Nothing stored: clearing returns to undefined, so typing
+                  // then clearing is not a change. Otherwise clearing submits null.
+                  f.handleChange(
+                    next ?? (initialReplicas === undefined ? undefined : null),
+                  )
+                }
+                onBlur={f.handleBlur}
+                driverDefault={driverDefault}
+                singleton={singleton}
+              />
+            </ChangedFieldFrame>
+            {singleton &&
+              typeof f.state.value === "number" &&
+              f.state.value > 1 && (
+                <SingletonReplicaOverride
+                  componentName={componentName}
+                  replicas={f.state.value}
+                  onRemove={() => f.handleChange(null)}
+                />
+              )}
+          </div>
+        )}
+      </form.Field>
+
       <div>
         <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Environment variables
@@ -917,6 +1022,61 @@ function noContainerText(subject: string): string {
   return `The driver declares no container for this component, so ${subject} can't be applied to it.`;
 }
 
+interface SingletonReplicaOverrideProps {
+  componentName: string;
+  replicas: number;
+  onRemove: () => void;
+}
+
+/**
+ * Stored replica override above 1 on a singleton component. The backend
+ * rejects resubmitting it, so it can only be removed (sets `replicas: null`).
+ */
+function SingletonReplicaOverride({
+  componentName,
+  replicas,
+  onRemove,
+}: SingletonReplicaOverrideProps) {
+  return (
+    <div className="space-y-1">
+      <div
+        className="flex items-center justify-between gap-2 rounded-md border border-dashed border-amber-400 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/30"
+        data-testid={`comp-replicas-readonly-${componentName}`}
+      >
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="text-xs text-amber-900 dark:text-amber-200">
+            Stored override: <code className="font-mono">{replicas}</code>
+          </span>
+          <Badge
+            data-testid={`comp-replicas-not-applied-${componentName}`}
+            variant="warning"
+            className="px-1.5 py-0 text-[10px]"
+          >
+            not applied
+          </Badge>
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-label={`Remove replica override for ${componentName}`}
+          onClick={onRemove}
+          data-testid={`comp-replicas-remove-${componentName}`}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+      <p
+        className="text-xs italic text-muted-foreground"
+        data-testid={`comp-replicas-singleton-note-${componentName}`}
+      >
+        The driver marks this component as a singleton, so the stored override
+        of {replicas} can&apos;t be applied. It can only be removed.
+      </p>
+    </div>
+  );
+}
+
 interface ContainerlessImageProps {
   componentName: string;
   image: string;
@@ -1098,8 +1258,8 @@ function FutureExtensionPlaceholder() {
       className="rounded-md border border-dashed border-border bg-muted/40 px-3 py-2 text-[11px] italic text-muted-foreground"
       data-testid="component-override-future-placeholder"
     >
-      More per-component fields (CPU / memory requests &amp; limits, replicas)
-      are coming in future iterations.
+      More per-component fields (CPU / memory requests &amp; limits) are coming
+      in future iterations.
     </p>
   );
 }

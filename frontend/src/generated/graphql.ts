@@ -200,6 +200,10 @@ export type ComponentConfig = {
   container?: Maybe<Scalars['String']['output']>;
   id: Scalars['UUID']['output'];
   name: Scalars['String']['output'];
+  /** Default replica count the driver version declares (components.<name>.replicas). Null when not declared. */
+  replicas?: Maybe<Scalars['Int']['output']>;
+  /** The driver version marks the component as a singleton component: its replica count is fixed at 1. */
+  singleton: Scalars['Boolean']['output'];
 };
 
 /** Per-component override block for a deployment: env vars, the container ``command``/``args``, and the component container's ``image``. Future per-component knobs (e.g. replicas) slot into this same input without a schema renumber. */
@@ -1931,7 +1935,7 @@ export type GetDeploymentQueryVariables = Exact<{
 }>;
 
 
-export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriver: { __typename?: 'ApplicationDriver', id: string, name: string }, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }> }, environment: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown> } }, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean, container?: string | null }>, componentImageOverrides: Array<{ __typename?: 'ComponentImageOverride', component: string, reference: string, resolvedReference: string, isOrphaned: boolean, isApplicable: boolean }>, componentContainerOverrides: Array<{ __typename?: 'ComponentContainerOverrides', component: string, command?: Array<string> | null, args?: Array<string> | null, isOrphaned: boolean, isApplicable: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null, primaryUrl?: string | null, humanReadableUrl?: string | null }> } | null };
+export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriver: { __typename?: 'ApplicationDriver', id: string, name: string }, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', name: string, replicas?: number | null }> }, environment: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown> } }, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean, container?: string | null }>, componentImageOverrides: Array<{ __typename?: 'ComponentImageOverride', component: string, reference: string, resolvedReference: string, isOrphaned: boolean, isApplicable: boolean }>, componentContainerOverrides: Array<{ __typename?: 'ComponentContainerOverrides', component: string, command?: Array<string> | null, args?: Array<string> | null, isOrphaned: boolean, isApplicable: boolean }>, componentReplicas: Array<{ __typename?: 'ComponentReplicas', component: string, count?: number | null, source: ReplicaSource, override?: number | null, singleton: boolean, isOrphaned: boolean, isApplicable: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null, primaryUrl?: string | null, humanReadableUrl?: string | null }> } | null };
 
 export type GetDeploymentPodsQueryVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
@@ -2005,7 +2009,7 @@ export type GetTaskQuery = { __typename?: 'Query', task?: { __typename?: 'Task',
 export type ListApplicationDriversQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type ListApplicationDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, defaultVersion?: string | null, contentHash?: string | null, sourceCommitSha?: string | null, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }> }> }> };
+export type ListApplicationDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, defaultVersion?: string | null, contentHash?: string | null, sourceCommitSha?: string | null, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', name: string, replicas?: number | null, singleton: boolean }> }> }> };
 
 export type ListBackupStorageLocationsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2775,6 +2779,10 @@ export const GetDeploymentDocument = `
         default
         values
       }
+      componentConfigs {
+        name
+        replicas
+      }
     }
     environmentId
     environment {
@@ -2812,6 +2820,15 @@ export const GetDeploymentDocument = `
       component
       command
       args
+      isOrphaned
+      isApplicable
+    }
+    componentReplicas {
+      component
+      count
+      source
+      override
+      singleton
       isOrphaned
       isApplicable
     }
@@ -3336,6 +3353,11 @@ export const ListApplicationDriversDocument = `
         kind
         default
         values
+      }
+      componentConfigs {
+        name
+        replicas
+        singleton
       }
     }
   }

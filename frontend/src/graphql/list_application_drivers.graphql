@@ -16,6 +16,11 @@ query ListApplicationDrivers {
         default
         values
       }
+      componentConfigs {
+        name
+        replicas
+        singleton
+      }
     }
   }
 }

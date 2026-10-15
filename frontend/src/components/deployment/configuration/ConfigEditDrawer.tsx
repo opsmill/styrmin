@@ -311,6 +311,10 @@ export function ConfigEditDrawer({
             environment={environmentValues}
             anchorId={sectionId}
             components={deployment.components}
+            componentReplicas={deployment.componentReplicas}
+            driverComponentConfigs={
+              deployment.applicationDriverVersion.componentConfigs
+            }
           />
         );
       case "storageRuntime":

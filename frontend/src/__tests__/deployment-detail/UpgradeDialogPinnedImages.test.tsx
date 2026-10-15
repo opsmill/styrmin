@@ -92,6 +92,7 @@ function makeDeployment(
       sourceCommitSha: null,
       applicationDriver: { id: "drv-1", name: "simple-app" },
       parameters: [],
+      componentConfigs: [],
     },
     environment: {
       id: "env-1",
@@ -103,6 +104,7 @@ function makeDeployment(
     components: [],
     componentImageOverrides,
     componentContainerOverrides: [],
+    componentReplicas: [],
     deployedServices: [],
   } as unknown as DeploymentShape;
 }
