@@ -1,0 +1,11 @@
+mutation LoadLocalDriverParameters($path: String!) {
+    loadLocalApplicationDriverVersion(path: $path) {
+        id
+        applicationDriverId
+        version
+        parameters {
+            name
+            default
+        }
+    }
+}

@@ -65,6 +65,7 @@ from styrmin_backend.services.parameters import (
     parse_parameter_definitions,
     validate_parameter_values,
 )
+from styrmin_backend.services.parameters.retired import drop_retired_parameters
 from styrmin_backend.services.reconciliation import (
     apply_state,
     generate_instance_from_deployment,
@@ -853,6 +854,8 @@ async def update_deployment_version(
         InvalidReplicaCountError, UnknownComponentReplicaOverrideError,
         SingletonReplicaOverrideError: If a submitted replica override is invalid,
             or a submitted or stored one breaks the target driver version's rules.
+        RetiredParameterValueError: If the driver version changes and a parameter the
+            target no longer declares holds a value other than its current default.
         DeploymentNameValidationError, DeploymentNameConflictError: If
             ``deployment_name`` is invalid or used by another deployment.
         InvalidServiceOverrideError, ServiceNameConflictError: If a service
@@ -972,12 +975,26 @@ async def update_deployment_version(
         )
         if parameter_updates is not None:
             values_to_validate = {**values_to_validate, **parameter_updates}
+        driver_changed = (
+            target_driver_version.id != deployment.application_driver_version_id
+        )
+        if driver_changed:
+            # Parameters the target no longer declares: drop a default, reject a change (023 D-007).
+            values_to_validate = drop_retired_parameters(
+                values_to_validate or {},
+                current_definitions=parse_parameter_definitions(
+                    application_driver_version.parameters
+                ),
+                target_definitions=parse_parameter_definitions(
+                    target_driver_version.parameters
+                ),
+                checked_against=_checked_against(
+                    application_driver.name, target_driver_version, version
+                ),
+            )
         resolved_parameters = validate_parameter_values(
             definitions=parse_parameter_definitions(target_driver_version.parameters),
             values=values_to_validate,
-        )
-        driver_changed = (
-            target_driver_version.id != deployment.application_driver_version_id
         )
         service_definitions = parse_service_definitions(target_driver_version.services)
         service_overrides, service_names_change = await _resolve_service_overrides(

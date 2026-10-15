@@ -7,6 +7,8 @@ Modules:
 
 * :mod:`validator` — :func:`parse_parameter_definitions` and
   :func:`validate_parameter_values`, the validation entry points.
+* :mod:`retired` — :func:`~styrmin_backend.services.parameters.retired.drop_retired_parameters`,
+  the rule for parameters a target driver version no longer declares.
 * :mod:`exceptions` — :class:`~styrmin_backend.services.exceptions.ServiceError`
   subclasses surfaced through ``StructuredErrorExtension`` as precise
   GraphQL ``extensions.code`` values.
