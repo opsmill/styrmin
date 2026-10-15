@@ -210,6 +210,9 @@ helm/styrmin/Chart.lock
 test-results/
 playwright-report/
 
+# Full agent pod logs from failed E2E tests (uploaded by CI)
+e2e-logs/
+
 # Local demo runtime state (port-forward PID, etc.)
 .vcluster/
 
