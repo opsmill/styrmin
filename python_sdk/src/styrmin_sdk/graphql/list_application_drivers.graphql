@@ -1,0 +1,11 @@
+query ListApplicationDrivers {
+    applicationDrivers {
+        id
+        name
+        versions {
+            id
+            version
+            supportedVersions
+        }
+    }
+}
