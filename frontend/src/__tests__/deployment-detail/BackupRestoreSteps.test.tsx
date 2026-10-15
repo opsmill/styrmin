@@ -113,6 +113,7 @@ function makeDeployment(): NonNullable<GetDeploymentQuery["deployment"]> {
       sourceCommitSha: null,
       applicationDriver: { id: "drv-1", name: "nginx" },
       parameters: [],
+      componentConfigs: [],
     },
     environment: {
       id: "env-1",
@@ -124,6 +125,7 @@ function makeDeployment(): NonNullable<GetDeploymentQuery["deployment"]> {
     components: [],
     componentImageOverrides: [],
     componentContainerOverrides: [],
+    componentReplicas: [],
     deployedServices: [],
   } as unknown as NonNullable<GetDeploymentQuery["deployment"]>;
 }

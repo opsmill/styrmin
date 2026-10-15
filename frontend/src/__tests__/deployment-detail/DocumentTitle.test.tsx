@@ -111,6 +111,7 @@ function makeDeployment(): DeploymentShape {
       sourceCommitSha: null,
       applicationDriver: { id: "drv-1", name: "nginx" },
       parameters: [],
+      componentConfigs: [],
     },
     environment: {
       id: "env-1",
@@ -122,6 +123,7 @@ function makeDeployment(): DeploymentShape {
     components: [],
     componentImageOverrides: [],
     componentContainerOverrides: [],
+    componentReplicas: [],
     deployedServices: [],
   } as DeploymentShape;
 }

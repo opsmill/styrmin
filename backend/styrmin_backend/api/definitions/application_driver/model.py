@@ -103,6 +103,30 @@ class ComponentConfig:
             return None
         return self.config.get("container")
 
+    @strawberry.field(
+        description=(
+            "Default replica count the driver version declares "
+            "(components.<name>.replicas). Null when not declared."
+        )
+    )
+    def replicas(self) -> int | None:
+        # Rows stored before the field existed have no ``replicas`` key.
+        if not isinstance(self.config, dict):
+            return None
+        value = self.config.get("replicas")
+        return value if type(value) is int else None
+
+    @strawberry.field(
+        description=(
+            "The driver version marks the component as a singleton component: "
+            "its replica count is fixed at 1."
+        )
+    )
+    def singleton(self) -> bool:
+        if not isinstance(self.config, dict):
+            return False
+        return self.config.get("singleton") is True
+
     @classmethod
     def from_instance(cls, instance: DomainComponentConfig) -> ComponentConfig:
         return cls(

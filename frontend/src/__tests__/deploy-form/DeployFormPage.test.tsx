@@ -5,6 +5,7 @@
  * `<driverName> v<version>@<short>` for fixture drivers with content
  * hashes, and that two driver versions with the same `version` string
  * but different fingerprints render as visually distinct options.
+ * Also covers the "Component replicas" section (023).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, act, within } from "@testing-library/react";
@@ -153,6 +154,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             contentHash: "a".repeat(64),
             sourceCommitSha: null,
             parameters: [],
+            componentConfigs: [],
           },
         ],
       },
@@ -168,6 +170,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             contentHash: null,
             sourceCommitSha: "b".repeat(40),
             parameters: [],
+            componentConfigs: [],
           },
         ],
       },
@@ -203,6 +206,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             contentHash: "a".repeat(64),
             sourceCommitSha: null,
             parameters: [],
+            componentConfigs: [],
           },
         ],
       },
@@ -242,6 +246,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             contentHash: "a".repeat(64),
             sourceCommitSha: null,
             parameters: [],
+            componentConfigs: [],
           },
           {
             id: "v-nginx-new",
@@ -251,6 +256,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             contentHash: "c".repeat(64),
             sourceCommitSha: null,
             parameters: [],
+            componentConfigs: [],
           },
         ],
       },
@@ -269,5 +275,189 @@ describe("DeployFormPage driver-version dropdown", () => {
       expect(screen.getByText("nginx v1.2.3@aaaaaaa")).toBeInTheDocument();
     });
     expect(screen.getByText("nginx v1.2.3@ccccccc")).toBeInTheDocument();
+  });
+});
+
+describe("DeployFormPage component replicas (023)", () => {
+  const BELOW_ONE = "Must be 1 or more. To run no pods, stop the component.";
+  const drivers: DriversShape = [
+    {
+      id: "drv-simple",
+      name: "simple-app",
+      versions: [
+        {
+          id: "v-simple-4",
+          version: "4",
+          supportedVersions: "*",
+          defaultVersion: "1.0.0",
+          contentHash: "d".repeat(64),
+          sourceCommitSha: null,
+          parameters: [],
+          componentConfigs: [
+            { name: "server", replicas: 2, singleton: false },
+            { name: "worker", replicas: null, singleton: false },
+            { name: "database", replicas: null, singleton: true },
+          ],
+        },
+      ],
+    },
+  ] as DriversShape;
+
+  beforeEach(() => {
+    useListApplicationDriversQueryMock.mockReset();
+    useListApplicationDriversQueryMock.mockReturnValue(
+      makeQueryResult(drivers),
+    );
+    noopMutationResult.mutateAsync.mockClear();
+  });
+
+  async function selectVersion(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByTestId("driver-version-select"));
+    await user.click(await screen.findByText("simple-app v4@ddddddd"));
+    await screen.findByRole("group", { name: "Component replicas" });
+  }
+
+  it("lists no section until a driver version is selected", async () => {
+    await renderPage();
+
+    await screen.findByTestId("driver-version-select");
+    expect(
+      screen.queryByRole("group", { name: "Component replicas" }),
+    ).toBeNull();
+  });
+
+  it("lists the selected version's components with the replicas field", async () => {
+    await renderPage();
+    const user = userEvent.setup();
+    await selectVersion(user);
+
+    const section = screen.getByRole("group", { name: "Component replicas" });
+    const server = within(section).getByRole("spinbutton", {
+      name: "Replicas for server",
+    });
+    expect(server).toBe(screen.getByTestId("comp-replicas-server"));
+    expect(server).toHaveAttribute("placeholder", "2 (driver default)");
+    expect(
+      within(section).getByRole("spinbutton", { name: "Replicas for worker" }),
+    ).toHaveAttribute("placeholder", "set by the chart");
+    const database = within(section).getByRole("textbox", {
+      name: "Replicas for database",
+    });
+    expect(database).toHaveValue("1 (singleton)");
+    expect(database).toHaveAttribute("readonly");
+  });
+
+  it("sends config.components only for components with a value", async () => {
+    await renderPage();
+    const user = userEvent.setup();
+    await selectVersion(user);
+
+    await user.type(screen.getByLabelText("Deployment Name"), "my-app");
+    await user.type(screen.getByTestId("comp-replicas-server"), "3");
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+
+    await waitFor(() =>
+      expect(noopMutationResult.mutateAsync).toHaveBeenCalledTimes(1),
+    );
+    expect(noopMutationResult.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        driver: "simple-app",
+        name: "my-app",
+        config: { components: [{ name: "server", replicas: 3 }] },
+      }),
+    );
+  });
+
+  it("sends no config when no component has a value", async () => {
+    await renderPage();
+    const user = userEvent.setup();
+    await selectVersion(user);
+
+    await user.type(screen.getByLabelText("Deployment Name"), "my-app");
+    await user.type(screen.getByTestId("comp-replicas-worker"), "2");
+    await user.clear(screen.getByTestId("comp-replicas-worker"));
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+
+    await waitFor(() =>
+      expect(noopMutationResult.mutateAsync).toHaveBeenCalledTimes(1),
+    );
+    expect(noopMutationResult.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ config: null }),
+    );
+  });
+
+  it("shows the error for a count below 1 and does not deploy", async () => {
+    await renderPage();
+    const user = userEvent.setup();
+    await selectVersion(user);
+
+    await user.type(screen.getByLabelText("Deployment Name"), "my-app");
+    await user.type(screen.getByTestId("comp-replicas-worker"), "0");
+
+    expect(
+      await screen.findByTestId("comp-replicas-error-worker"),
+    ).toHaveTextContent(BELOW_ONE);
+    expect(screen.getByTestId("comp-replicas-worker")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+
+    expect(noopMutationResult.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("refuses to deploy a count the backend would reject", async () => {
+    await renderPage();
+    const user = userEvent.setup();
+    await selectVersion(user);
+
+    await user.type(screen.getByLabelText("Deployment Name"), "my-app");
+    await user.type(screen.getByTestId("comp-replicas-worker"), "2147483648");
+    expect(
+      await screen.findByTestId("comp-replicas-error-worker"),
+    ).toHaveTextContent("Must be 2147483647 or less.");
+
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+
+    expect(
+      await screen.findByText(
+        "Fix the replica count of worker before deploying.",
+      ),
+    ).toBeInTheDocument();
+    expect(noopMutationResult.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("clears the counts when another driver version is selected", async () => {
+    const twoVersions: DriversShape = [
+      {
+        ...drivers[0],
+        versions: [
+          drivers[0].versions[0],
+          {
+            ...drivers[0].versions[0],
+            id: "v-simple-5",
+            version: "5",
+            contentHash: "e".repeat(64),
+          },
+        ],
+      },
+    ] as DriversShape;
+    useListApplicationDriversQueryMock.mockReturnValue(
+      makeQueryResult(twoVersions),
+    );
+    await renderPage();
+    // The select popup keeps `pointer-events: none` while it reopens.
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    await selectVersion(user);
+    await user.type(screen.getByTestId("comp-replicas-server"), "3");
+    expect(screen.getByTestId("comp-replicas-server")).toHaveValue(3);
+
+    await user.click(screen.getByTestId("driver-version-select"));
+    await user.click(await screen.findByText("simple-app v5@eeeeeee"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("comp-replicas-server")).toHaveValue(null),
+    );
   });
 });

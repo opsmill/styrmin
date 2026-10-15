@@ -26,7 +26,9 @@ import { AlertCircle } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { IfRole } from "@/auth/IfRole";
 import { ParameterField } from "@/components/deployment/configuration/ParameterField";
+import { ReplicasField } from "@/components/deployment/configuration/ReplicasField";
 import { formatDriverVersionLabel } from "@/lib/driverVersion";
+import { replicaFieldError } from "@/lib/replicas";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const deployFormSchema = z.object({
@@ -78,6 +80,18 @@ export default function DeployFormPage() {
     },
     onSubmit: async ({ value }) => {
       setSubmitError(null);
+      const replicaComponents = Object.entries(componentReplicas).map(
+        ([name, replicas]) => ({ name, replicas }),
+      );
+      const invalidReplicas = replicaComponents
+        .filter((c) => replicaFieldError(c.replicas))
+        .map((c) => c.name);
+      if (invalidReplicas.length > 0) {
+        setSubmitError(
+          `Fix the replica count of ${invalidReplicas.join(", ")} before deploying.`,
+        );
+        return;
+      }
       try {
         const overrides = serviceOverrides
           .map((o) => ({
@@ -101,6 +115,11 @@ export default function DeployFormPage() {
                 }))
               : null,
           serviceNameOverrides: overrides.length > 0 ? overrides : null,
+          // Only components with a count; none means no config at all.
+          config:
+            replicaComponents.length > 0
+              ? { components: replicaComponents }
+              : null,
         });
         queryClient.invalidateQueries({ queryKey: ["GetEnvironment"] });
         if (data.deploy) {
@@ -141,6 +160,11 @@ export default function DeployFormPage() {
   const [dynamicParams, setDynamicParams] = useState<Record<string, unknown>>(
     {},
   );
+
+  // Replica override per component of the selected driver version (023).
+  const [componentReplicas, setComponentReplicas] = useState<
+    Record<string, number>
+  >({});
 
   const [serviceOverrides, setServiceOverrides] = useState<
     Array<{ driverServiceName: string; overrideName: string }>
@@ -266,6 +290,7 @@ export default function DeployFormPage() {
                 onValueChange={(value) => {
                   field.handleChange(value);
                   setDynamicParams({});
+                  setComponentReplicas({});
                 }}
               >
                 <SelectTrigger data-testid="driver-version-select">
@@ -345,6 +370,39 @@ export default function DeployFormPage() {
                     [param.name]: value,
                   }))
                 }
+              />
+            ))}
+          </div>
+        )}
+
+        {selectedVersion && selectedVersion.componentConfigs.length > 0 && (
+          <div
+            role="group"
+            aria-labelledby="component-replicas-heading"
+            data-testid="component-replicas-section"
+            className="space-y-3"
+          >
+            <Label id="component-replicas-heading" className="text-base">
+              Component replicas
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Optional. Set how many pods a component runs.
+            </p>
+            {selectedVersion.componentConfigs.map((component) => (
+              <ReplicasField
+                key={component.name}
+                componentName={component.name}
+                value={componentReplicas[component.name]}
+                onChange={(next) =>
+                  setComponentReplicas((prev) => {
+                    const updated = { ...prev };
+                    if (next === undefined) delete updated[component.name];
+                    else updated[component.name] = next;
+                    return updated;
+                  })
+                }
+                driverDefault={component.replicas ?? null}
+                singleton={component.singleton}
               />
             ))}
           </div>

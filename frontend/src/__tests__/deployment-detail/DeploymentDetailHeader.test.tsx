@@ -110,6 +110,7 @@ function makeDeployment(
     sourceCommitSha: null,
     applicationDriver: { id: "drv-1", name: "nginx" },
     parameters: [],
+    componentConfigs: [],
   } as AdvShape;
 
   const base: DeploymentShape = {
@@ -133,6 +134,7 @@ function makeDeployment(
     components: [],
     componentImageOverrides: [],
     componentContainerOverrides: [],
+    componentReplicas: [],
     deployedServices: [],
   } as DeploymentShape;
 
@@ -218,6 +220,7 @@ describe("DeploymentDetailPage header driver label", () => {
         sourceCommitSha: null,
         applicationDriver: { id: "drv-1", name: "nginx" },
         parameters: [],
+        componentConfigs: [],
       } as AdvShape,
     });
     useGetDeploymentQueryMock.mockReturnValue(makeQueryResult(deployment));
@@ -244,6 +247,7 @@ describe("DeploymentDetailPage header driver label", () => {
         sourceCommitSha: "b".repeat(40),
         applicationDriver: { id: "drv-2", name: "redis" },
         parameters: [],
+        componentConfigs: [],
       } as AdvShape,
     });
     useGetDeploymentQueryMock.mockReturnValue(makeQueryResult(deployment));
@@ -285,6 +289,7 @@ describe("DeploymentDetailPage header driver label", () => {
         sourceCommitSha: null,
         applicationDriver: { id: "drv-1", name: "nginx" },
         parameters: [],
+        componentConfigs: [],
       } as AdvShape,
     });
     useGetDeploymentQueryMock.mockReturnValue(makeQueryResult(deployment));

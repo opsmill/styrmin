@@ -185,6 +185,45 @@ describe("config-diff: diff()", () => {
   });
 
   it.each([
+    ["add", undefined, 2, "", "2"],
+    ["change", 2, 3, "2", "3"],
+    ["remove", 3, null, "3", ""],
+    ["remove", 3, undefined, "3", ""],
+  ] as const)(
+    "emits a replicas %s entry for %j -> %j on an existing block",
+    (kind, beforeReplicas, afterReplicas, beforeText, afterText) => {
+      const before: UpdateDeploymentInput = {
+        components: [{ name: "server", envVars: [], replicas: beforeReplicas }],
+      };
+      const after: UpdateDeploymentInput = {
+        components: [{ name: "server", envVars: [], replicas: afterReplicas }],
+      };
+      const result = diff(before, after, emptySchema);
+      expect(result.entries).toEqual([
+        {
+          section: "componentOverrides",
+          path: "components[server].replicas",
+          label: 'Component "server" replicas',
+          before: beforeText,
+          after: afterText,
+          kind,
+        },
+      ]);
+      expect(result.sectionsChanged).toEqual(["componentOverrides"]);
+    },
+  );
+
+  it("treats a null replicas field like an unset one", () => {
+    const before: UpdateDeploymentInput = {
+      components: [{ name: "server", envVars: [] }],
+    };
+    const after: UpdateDeploymentInput = {
+      components: [{ name: "server", envVars: [], replicas: null }],
+    };
+    expect(diff(before, after, emptySchema).hasChanges).toBe(false);
+  });
+
+  it.each([
     ["command", "add", undefined, ["/bin/sh"]],
     ["command", "change", ["/bin/sh"], ["/bin/bash"]],
     ["command", "remove", ["/bin/sh"], []],

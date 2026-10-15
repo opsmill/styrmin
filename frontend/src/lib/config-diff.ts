@@ -571,6 +571,15 @@ function diffComponents(
         b.image || null,
         a.image || null,
       );
+      // Replica override (023); null and undefined both mean "no override".
+      diffScalar(
+        entries,
+        "componentOverrides",
+        `components[${name}].replicas`,
+        `Component "${name}" replicas`,
+        b.replicas ?? null,
+        a.replicas ?? null,
+      );
       // Command and args (014); an empty list means "no override".
       for (const field of ["command", "args"] as const) {
         diffScalar(

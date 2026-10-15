@@ -18,9 +18,11 @@ import {
   componentOverridesSchema,
 } from "./ComponentOverridesSection";
 
-type DeploymentComponent = NonNullable<
-  GetDeploymentQuery["deployment"]
->["components"][number];
+type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
+type DeploymentComponent = Deployment["components"][number];
+type ReplicaRow = Deployment["componentReplicas"][number];
+type DriverComponentConfig =
+  Deployment["applicationDriverVersion"]["componentConfigs"][number];
 
 describe("componentOverridesSchema", () => {
   it("accepts an empty list", () => {
@@ -70,6 +72,28 @@ describe("componentOverridesSchema", () => {
   });
 });
 
+describe("componentOverridesSchema: replicas", () => {
+  it.each([1, 3, null, undefined])("accepts %j", (replicas) => {
+    const result = componentOverridesSchema.safeParse([
+      { name: "server", replicas },
+    ]);
+    expect(result.success).toBe(true);
+  });
+
+  it.each([
+    [0, "Must be 1 or more. To run no pods, stop the component."],
+    [-1, "Must be 1 or more. To run no pods, stop the component."],
+    [1.5, "Must be a whole number."],
+  ])("rejects %j", (replicas, message) => {
+    const result = componentOverridesSchema.safeParse([
+      { name: "server", replicas },
+    ]);
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0].path).toEqual([0, "replicas"]);
+    expect(result.error?.issues[0].message).toBe(message);
+  });
+});
+
 describe("componentOverridesSchema: image", () => {
   it.each([
     "registry.example/acme/app:1.0.0",
@@ -99,15 +123,51 @@ describe("componentOverridesSchema: image", () => {
 const COMPONENTS: DeploymentComponent[] = [
   { id: "c-server", name: "server", enabled: true, container: "server" },
   { id: "c-migrate", name: "migrate", enabled: true, container: null },
+  { id: "c-database", name: "database", enabled: true, container: "postgres" },
+];
+
+function replicaRow(
+  component: string,
+  fields: Partial<ReplicaRow> = {},
+): ReplicaRow {
+  return {
+    component,
+    count: null,
+    source: "CHART",
+    override: null,
+    singleton: false,
+    isOrphaned: false,
+    isApplicable: true,
+    ...fields,
+  };
+}
+
+// server: driver default 2; migrate: chart; database: singleton.
+const REPLICAS: ReplicaRow[] = [
+  replicaRow("database", {
+    count: 1,
+    source: "DRIVER_DEFAULT",
+    singleton: true,
+  }),
+  replicaRow("migrate"),
+  replicaRow("server", { count: 2, source: "DRIVER_DEFAULT" }),
+];
+
+const DRIVER_COMPONENTS: DriverComponentConfig[] = [
+  { name: "server", replicas: 2 },
+  { name: "migrate", replicas: null },
+  { name: "database", replicas: null },
 ];
 
 /** Mount the section against a real TanStack Form, as `ConfigEditDrawer` does. */
 function Harness({
   initial,
   publish,
+  replicas,
 }: {
   initial: UpdateDeploymentInput;
   publish: (form: AnyFormApi) => void;
+  replicas: ReplicaRow[];
 }) {
   const form = useForm({ defaultValues: initial });
   useEffect(() => {
@@ -121,17 +181,23 @@ function Harness({
         environment={{}}
         anchorId="componentOverrides"
         components={COMPONENTS}
+        componentReplicas={replicas}
+        driverComponentConfigs={DRIVER_COMPONENTS}
       />
       <DrawerFooter onDiscard={() => {}} onReviewApply={() => {}} />
     </DrawerDiffProvider>
   );
 }
 
-function renderSection(initial: UpdateDeploymentInput = {}) {
+function renderSection(
+  initial: UpdateDeploymentInput = {},
+  replicas: ReplicaRow[] = REPLICAS,
+) {
   let formApi: AnyFormApi | undefined;
   render(
     <Harness
       initial={initial}
+      replicas={replicas}
       publish={(form) => {
         formApi = form;
       }}
@@ -728,5 +794,256 @@ describe("ComponentOverridesSection: orphaned override blocks", () => {
     expect(diff(initial, values(), []).entries).toEqual([
       expect.objectContaining({ path: "components[legacy]", kind: "remove" }),
     ]);
+  });
+});
+
+describe("ComponentOverridesSection: replicas (023)", () => {
+  const BELOW_ONE = "Must be 1 or more. To run no pods, stop the component.";
+
+  it("renders a Replicas field on every component, container or not", async () => {
+    const { components } = renderSection();
+
+    await openComponent("server");
+    await openComponent("migrate");
+
+    const server = screen.getByRole("spinbutton", {
+      name: "Replicas for server",
+    });
+    expect(server).toBe(screen.getByTestId("comp-replicas-server"));
+    expect(server).toHaveValue(null);
+    expect(
+      screen.getByRole("spinbutton", { name: "Replicas for migrate" }),
+    ).toBe(screen.getByTestId("comp-replicas-migrate"));
+    expect(components()).toEqual([]);
+  });
+
+  it("shows the value that applies without an override as the placeholder", async () => {
+    renderSection();
+
+    await openComponent("server");
+    await openComponent("migrate");
+
+    expect(screen.getByTestId("comp-replicas-server")).toHaveAttribute(
+      "placeholder",
+      "2 (driver default)",
+    );
+    expect(screen.getByTestId("comp-replicas-migrate")).toHaveAttribute(
+      "placeholder",
+      "set by the chart",
+    );
+  });
+
+  it("creates a block holding only the count on a component without a block", async () => {
+    const initial: UpdateDeploymentInput = {};
+    const { components, values } = renderSection(initial);
+
+    await openComponent("migrate");
+    fireEvent.change(screen.getByTestId("comp-replicas-migrate"), {
+      target: { value: "3" },
+    });
+
+    await waitFor(() =>
+      expect(components()).toEqual([{ name: "migrate", replicas: 3 }]),
+    );
+    expect(componentsFormToInput(components())).toEqual([
+      { name: "migrate", replicas: 3 },
+    ]);
+    expect(diff(initial, values(), []).entries).toEqual([
+      expect.objectContaining({ path: "components[migrate]", kind: "add" }),
+    ]);
+    expect(screen.getByTestId("comp-replicas-migrate")).toHaveValue(3);
+    expect(
+      screen.getByTestId("component-override-trigger-migrate"),
+    ).toHaveTextContent("replicas: 3");
+    expect(
+      screen.queryByTestId("component-override-not-applied-migrate"),
+    ).toBeNull();
+  });
+
+  it("pre-fills a stored override and clearing it submits replicas: null", async () => {
+    const initial: UpdateDeploymentInput = {
+      components: [{ name: "server", envVars: [], replicas: 3 }],
+    };
+    const { components, values } = renderSection(initial, [
+      replicaRow("database", {
+        count: 1,
+        source: "DRIVER_DEFAULT",
+        singleton: true,
+      }),
+      replicaRow("migrate"),
+      replicaRow("server", { count: 3, source: "OVERRIDE", override: 3 }),
+    ]);
+
+    await openComponent("server");
+    expect(screen.getByTestId("comp-replicas-server")).toHaveValue(3);
+
+    fireEvent.change(screen.getByTestId("comp-replicas-server"), {
+      target: { value: "" },
+    });
+
+    await waitFor(() =>
+      expect(components()).toEqual([
+        { name: "server", envVars: [], replicas: null },
+      ]),
+    );
+    // Without the override the driver default applies again.
+    expect(screen.getByTestId("comp-replicas-server")).toHaveAttribute(
+      "placeholder",
+      "2 (driver default)",
+    );
+    expect(componentsFormToInput(components())).toEqual([
+      { name: "server", envVars: [], replicas: null },
+    ]);
+    expect(diff(initial, values(), []).entries).toEqual([
+      expect.objectContaining({
+        path: "components[server].replicas",
+        kind: "remove",
+        before: "3",
+      }),
+    ]);
+  });
+
+  it("changes a stored override with a replicas diff entry", async () => {
+    const initial: UpdateDeploymentInput = {
+      components: [{ name: "server", envVars: [], replicas: 2 }],
+    };
+    const { components, values } = renderSection(initial);
+
+    await openComponent("server");
+    fireEvent.change(screen.getByTestId("comp-replicas-server"), {
+      target: { value: "4" },
+    });
+
+    await waitFor(() =>
+      expect(components()).toEqual([
+        { name: "server", envVars: [], replicas: 4 },
+      ]),
+    );
+    expect(diff(initial, values(), []).entries).toEqual([
+      expect.objectContaining({
+        path: "components[server].replicas",
+        kind: "change",
+        before: "2",
+        after: "4",
+      }),
+    ]);
+  });
+
+  it.each(["0", "-1"])(
+    "shows the stop-the-component error for %s",
+    async (typed) => {
+      renderSection({ components: [{ name: "server", envVars: [] }] });
+
+      await openComponent("server");
+      fireEvent.change(screen.getByTestId("comp-replicas-server"), {
+        target: { value: typed },
+      });
+
+      const error = await screen.findByTestId("comp-replicas-error-server");
+      expect(error).toHaveTextContent(BELOW_ONE);
+      const input = screen.getByTestId("comp-replicas-server");
+      expect(input).toHaveAttribute("aria-invalid", "true");
+      expect(input).toHaveAccessibleDescription(new RegExp(BELOW_ONE));
+
+      fireEvent.change(screen.getByTestId("comp-replicas-server"), {
+        target: { value: "2" },
+      });
+      await waitFor(() =>
+        expect(screen.queryByTestId("comp-replicas-error-server")).toBeNull(),
+      );
+    },
+  );
+
+  it("shows a singleton component as a read-only 1 (singleton) field", async () => {
+    const { components } = renderSection();
+
+    await openComponent("database");
+
+    const field = screen.getByRole("textbox", {
+      name: "Replicas for database",
+    });
+    expect(field).toBe(screen.getByTestId("comp-replicas-database"));
+    expect(field).toHaveValue("1 (singleton)");
+    expect(field).toHaveAttribute("readonly");
+    expect(field).toHaveAccessibleDescription(
+      "The driver marks this component as a singleton, so it runs 1 pod.",
+    );
+    fireEvent.change(field, { target: { value: "2" } });
+    expect(components()).toEqual([]);
+    expect(screen.queryByTestId("comp-replicas-readonly-database")).toBeNull();
+  });
+
+  it("lets a stored override above 1 on a singleton only be removed", async () => {
+    const initial: UpdateDeploymentInput = {
+      components: [{ name: "database", envVars: [], replicas: 3 }],
+    };
+    const { components, values } = renderSection(initial, [
+      replicaRow("database", {
+        count: 1,
+        source: "DRIVER_DEFAULT",
+        override: 3,
+        singleton: true,
+      }),
+      replicaRow("migrate"),
+      replicaRow("server", { count: 2, source: "DRIVER_DEFAULT" }),
+    ]);
+
+    expect(
+      screen.getByTestId("component-override-not-applied-database"),
+    ).toHaveTextContent(/^not applied$/);
+    await openComponent("database");
+
+    expect(screen.getByTestId("comp-replicas-database")).toHaveValue(
+      "1 (singleton)",
+    );
+    const row = screen.getByTestId("comp-replicas-readonly-database");
+    expect(row).toHaveTextContent("3");
+    expect(row).toHaveTextContent("not applied");
+    expect(
+      screen.getByTestId("comp-replicas-singleton-note-database"),
+    ).toHaveTextContent(
+      "The driver marks this component as a singleton, so the stored override of 3 can't be applied. It can only be removed.",
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Remove replica override for database",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(components()).toEqual([
+        { name: "database", envVars: [], replicas: null },
+      ]),
+    );
+    expect(componentsFormToInput(components())).toEqual([
+      { name: "database", envVars: [], replicas: null },
+    ]);
+    expect(diff(initial, values(), []).entries).toEqual([
+      expect.objectContaining({
+        path: "components[database].replicas",
+        kind: "remove",
+        before: "3",
+      }),
+    ]);
+    expect(screen.queryByTestId("comp-replicas-readonly-database")).toBeNull();
+    expect(screen.getByTestId("comp-replicas-database")).toHaveValue(
+      "1 (singleton)",
+    );
+    expect(
+      screen.queryByTestId("component-override-not-applied-database"),
+    ).toBeNull();
+  });
+
+  it("no longer lists replicas among the future per-component fields", async () => {
+    renderSection({ components: [{ name: "server", envVars: [] }] });
+
+    await openComponent("server");
+
+    const note = screen.getByTestId("component-override-future-placeholder");
+    expect(note).toHaveTextContent(
+      "More per-component fields (CPU / memory requests & limits) are coming in future iterations.",
+    );
+    expect(note).not.toHaveTextContent(/replicas/i);
   });
 });

@@ -210,6 +210,16 @@ type ComponentConfig {
   The component container the driver declares for this component (`components.<name>.container` in the driver specification file): the container that receives per-component post-render overrides such as env vars. Null when the driver declares none — component-scope env vars are then rejected and broader scopes skip this component.
   """
   container: String
+
+  """
+  Default replica count the driver version declares (components.<name>.replicas). Null when not declared.
+  """
+  replicas: Int
+
+  """
+  The driver version marks the component as a singleton component: its replica count is fixed at 1.
+  """
+  singleton: Boolean!
 }
 
 """

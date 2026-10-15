@@ -35,12 +35,14 @@ type ReadEnvVars = Record<string, string>;
  * slots (014-component-container-overrides); each is a `list[str] | null` in
  * the persisted `ComponentConfigBlock`. `image` is the stored image override
  * (018-component-image-overrides), `{{ app.version }}` tokens included.
+ * `replicas` is the stored replica override (023).
  */
 type ReadComponentBlock = {
   env_vars?: ReadEnvVars | null;
   command?: string[] | null;
   args?: string[] | null;
   image?: string | null;
+  replicas?: number | null;
 };
 
 function envVarsDictToList(
@@ -64,14 +66,16 @@ function componentsDictToList(
     args: block?.args ?? undefined,
     // Image override (018); the drawer edits it as a string.
     image: block?.image ?? undefined,
+    // Replica override (023); absent means no override.
+    replicas: block?.replicas ?? undefined,
   }));
 }
 
 /**
  * Map the drawer's component blocks onto `ComponentConfigInput` for submit.
  * Under full replacement both encode "clear": an empty `command`/`args` list
- * is omitted (the backend rejects `[]`), and an empty `image` field becomes
- * `image: null`. `envVars: []` is a legitimate clear and passes through.
+ * is omitted (the backend rejects `[]`), and an empty `image` or `replicas`
+ * field becomes `null`. `envVars: []` is a legitimate clear and passes through.
  */
 export function componentsFormToInput(
   blocks: readonly ComponentConfigInput[] | null | undefined,
@@ -87,6 +91,8 @@ export function componentsFormToInput(
       delete next.args;
     }
     if (next.image === "") next.image = null;
+    const replicas: unknown = next.replicas;
+    if (replicas === "" || Number.isNaN(replicas)) next.replicas = null;
     return next;
   });
 }

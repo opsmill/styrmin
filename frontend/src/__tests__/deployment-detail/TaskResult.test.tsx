@@ -370,6 +370,7 @@ describe("DeploymentDetailPage Overview", () => {
         sourceCommitSha: null,
         applicationDriver: { id: "drv-1", name: "nginx" },
         parameters: [],
+        componentConfigs: [],
       },
       environment: {
         id: "env-1",
@@ -381,6 +382,7 @@ describe("DeploymentDetailPage Overview", () => {
       components: [],
       componentImageOverrides: [],
       componentContainerOverrides: [],
+      componentReplicas: [],
       deployedServices: [],
     } as NonNullable<GetDeploymentQuery["deployment"]>;
   }
