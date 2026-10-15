@@ -1,7 +1,7 @@
-"""One failing redeploy or controller check does not undo the rest of the transaction (021 review F1, F2, F5).
+"""One failing redeploy or controller check does not undo the rest of the transaction (021 review F1, F2, F5; #452).
 
-The tests drive ``updateCluster`` and ``reportDeploymentStatuses`` over HTTP on
-the real SQLModel session. Context generation, which opens its own
+The tests drive ``updateCluster``, ``updateEnvironment`` and
+``reportDeploymentStatuses`` over HTTP on the real SQLModel session. Context generation, which opens its own
 ``async with uow`` block, fails for the second deployment it runs for, so a
 redeploy already written in the same transaction precedes the failure whatever
 order the deployments are listed in.
@@ -26,7 +26,11 @@ from styrmin_backend.db.models import (
     Task,
     TaskType,
 )
-from styrmin_backend.services import cluster_config_fanout, deployment_status
+from styrmin_backend.services import (
+    cluster_config_fanout,
+    deployment_status,
+    environments,
+)
 from styrmin_backend.services import context as context_module
 from styrmin_backend.services.env_vars.exceptions import EnvVarSizeLimitExceededError
 
@@ -213,6 +217,49 @@ async def test_update_cluster_returns_normally_when_one_redeploy_fails(
     assert fields["environments_failed"] == "0"
     assert fields["dispatched"] == "2"
     assert fields["dispatch_failed"] == "1"
+
+
+async def test_update_environment_keeps_the_other_redeploys_when_one_fails(
+    client: AsyncClient, session: AsyncSession, prefect: MagicMock, mocker
+) -> None:
+    """#452: the redeploys before and after the failed one keep their instance and task."""
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session)
+    deployment_ids = {
+        (await seed_deployment(session, environment=environment, adv=adv, name=name)).id
+        for name in ("first", "second", "third")
+    }
+    environment_id = environment.id
+    failed = _fail_second_context_generation(mocker)
+    log_info = mocker.patch.object(environments.logger, "info")
+
+    data = await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment_id),
+            "input": {"envVars": [{"name": "OTEL_ENDPOINT", "value": "https://otel"}]},
+        },
+    )
+
+    assert data["updateEnvironment"]["config"] == {
+        "env_vars": {"OTEL_ENDPOINT": "https://otel"}
+    }
+    session.expire_all()
+    [bad_id] = failed
+    for redeployed in deployment_ids - {bad_id}:
+        assert await _task_types(session, redeployed) == [TaskType.UPDATE_INSTANCE]
+        assert await _status(session, redeployed) == DeploymentState.DEPLOYING
+    assert await _task_types(session, bad_id) == []
+    assert await _status(session, bad_id) == DeploymentState.PENDING
+    assert prefect.run_action.await_count == 2
+    [line] = [
+        line
+        for line in _logged(log_info)
+        if line.startswith("env_config_fanout_dispatched ")
+    ]
+    assert _fields(line)["dispatched"] == "2"
+    assert _fields(line)["dispatch_failed"] == "1"
 
 
 async def test_status_report_commits_when_the_removal_check_fails_after_a_deletion(

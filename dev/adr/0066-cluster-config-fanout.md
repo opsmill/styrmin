@@ -309,9 +309,11 @@ written, and the caller kept using a session whose transaction was gone. An expl
 - A nested `async with uow` block that fails inside any savepoint now undoes only that savepoint's
   writes. The only savepoints are the status reporter's two and the cluster config fan-out's, all
   opened to isolate a failure, so no other caller changes behaviour. `uow.commit()` inside a
-  savepoint raises. `update_environment` opens no
-  savepoint, so a nested block that fails during one of its redeploys still rolls back the whole
-  open transaction, including the redeploys written before it in the same fan-out.
+  savepoint raises. When this decision was taken, `update_environment` opened no savepoint, so a
+  nested block that failed during one of its redeploys rolled back the whole open transaction,
+  including the redeploys written before it in the same fan-out. Since
+  [#452](https://github.com/opsmill/styrmin/issues/452), `update_environment` runs each redeploy
+  in its own savepoint, as decision 6 does.
 - The environment and cluster fan-outs now use different comparisons. The cluster fan-out could
   replace the environment fan-out; that is left for a later change.
 - New fan-outs whose change reaches deployments through more than one config level should compare

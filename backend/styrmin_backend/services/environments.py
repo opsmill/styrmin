@@ -275,10 +275,11 @@ async def update_environment(
     environment dispatching :func:`redeploy_for_environment_update`. Each
     iteration runs ``_deployment_already_at_config`` first; deployments
     whose active instance is already at ``new_config`` are skipped (no
-    spurious Task / timeline entry, FR-010 / data-model.md §3). Per-
-    deployment dispatch failures are caught, logged, counted, and do not
-    propagate — the env-config row stays persisted and peer deployments
-    are unaffected (FR-008 / Edge Cases "Per-deployment failure").
+    spurious Task / timeline entry, FR-010 / data-model.md §3). Each
+    redeploy runs in its own savepoint, so a dispatch failure rolls back
+    only that deployment's writes; it is caught, logged, counted, and does
+    not propagate — the env-config row stays persisted and peer deployments
+    are unaffected (FR-008 / Edge Cases "Per-deployment failure", #452).
 
     Tombstoned (``deleted_at IS NOT NULL``) and internal deployments are
     excluded from the fanout per FR-012 / FR-013. They are NOT counted
@@ -366,7 +367,9 @@ async def update_environment(
                 _emit_fanout_metric(environment_id, "skipped_noop")
                 continue
             try:
-                task = await redeploy_for_environment_update(deployment, uow)
+                # A failure rolls back only this savepoint, not the redeploys before it (#452, ADR-066 decision 6).
+                async with uow.session.begin_nested():
+                    task = await redeploy_for_environment_update(deployment, uow)
             except Exception:  # noqa: BLE001 — broad catch is intentional for per-deployment isolation (FR-008)
                 counts["dispatch_failed"] += 1
                 logger.exception(

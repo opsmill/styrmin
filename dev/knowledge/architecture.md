@@ -262,7 +262,8 @@ application version and driver version:
   [ADR-012](../adr/0012-environment-config-fanout.md)). `update_environment`
   commits the environment row, then redeploys each live, non-internal
   deployment of the environment whose active instance stores a different
-  environment config (`context.environment.config`).
+  environment config (`context.environment.config`). Each redeploy runs in a
+  savepoint, so a failure rolls back only that deployment's writes.
 - **Cluster config fan-out** (`services/cluster_config_fanout.py`,
   [ADR-066](../adr/0066-cluster-config-fanout.md)). `update_cluster` commits
   the cluster config and its recomputed capabilities, then
