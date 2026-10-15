@@ -3,7 +3,7 @@ name = "styrmin-backend"
 version = "0.1.0"
 description = "Styrmin backend services and CLI"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.14,<3.15"
 dependencies = [
     "alembic>=1.14.0",
 ]
