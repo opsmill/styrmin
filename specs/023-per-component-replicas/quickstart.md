@@ -1,0 +1,82 @@
+# Quickstart: Validate Per-Component Replica Counts
+
+**Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
+
+Run from the repository root. Contracts: [graphql.md](contracts/graphql.md), [errors.md](contracts/errors.md), [post-render-patch.md](contracts/post-render-patch.md), [driver-format.md](contracts/driver-format.md), [cli-and-ui.md](contracts/cli-and-ui.md).
+
+## Prerequisites
+
+- `uv sync`; frontend dependencies installed (in an emdash worktree: `pnpm install --ignore-workspace` in `frontend/`, inside a Node 22 container when the host Node is older).
+- For E2E: `docker` and `vcluster` on `PATH`. Build the server image once before the run: `docker compose build server`.
+
+## 1. Regenerate and lint
+
+```bash
+uv run styrmin export graphql-schema schema.graphql
+uv run invoke generate
+uv run invoke format lint
+```
+
+Expected: `schema.graphql` has `ComponentConfigInput.replicas`, `Deployment.componentReplicas`, `ComponentReplicas`, `ReplicaSource`, `ComponentConfig.replicas` and `ComponentConfig.singleton`; lint passes.
+
+## 2. Unit, integration and functional tests
+
+```bash
+uv run pytest backend/tests/unit/services/replicas backend/tests/unit/services/driver/test_component_replicas.py \
+  backend/tests/unit/services/parameters/test_retired.py -q
+uv run pytest backend/tests/unit/agent -q -k "replica or post_render or ordering"
+uv run pytest backend/tests/integration/test_component_container_kustomize.py -q
+uv run pytest backend/tests/functional/graphql -q -k "replica or retired or infrahub_replica"
+uv run pytest backend/tests/unit/test_e2e_driver_conformance.py -q
+```
+
+Expected:
+
+- The resolver follows the order of precedence in [data-model.md](data-model.md); a stopped component patches 0.
+- Real `kubectl kustomize` sets `spec.replicas` to the override on a chart that renders 3 and on one that renders none, and to 0 when stopped.
+- A driver file with `singleton: true` and `replicas: 3` fails to load.
+- `SINGLETON_REPLICA_OVERRIDE` on create, update, `updateDeploymentVersion(input:)` and a version change; no task is created and the row is unchanged.
+- The `infrahub` version 4 → 5 change with default parameter values succeeds, and `componentReplicas` reports `server` 1 and `task-worker` 2 (`DRIVER_DEFAULT`); with `replicas_task_worker: 4` it fails with `RETIRED_PARAMETER_VALUE` naming the parameter and `4`.
+
+## 3. SDK, CLI and frontend tests
+
+```bash
+uv run pytest python_sdk/tests/test_deployments.py cli/tests/test_deployments.py -q
+cd frontend && pnpm test -- ComponentOverridesSection ComponentOverridesSummary DeployFormPage ComponentsTab deployment-input config-diff
+cd frontend && pnpm lint
+```
+
+## 4. E2E (both variants, one per session)
+
+```bash
+sleep infinity | uv run pytest "backend/tests/e2e/test_deployment_replicas.py" -m "ci and shard_configuration" \
+  -k api-chromium -v -s --pdb 2>&1 | tee /tmp/replicas-api.log
+sleep infinity | uv run pytest "backend/tests/e2e/test_deployment_replicas.py" -m "ci and shard_configuration" \
+  -k ui-chromium -v -s --pdb 2>&1 | tee /tmp/replicas-ui.log
+```
+
+Expected for `test_scale_server_and_singleton_guard`:
+
+1. Setting `server` to 2 completes the update task only after the `styrmin-simple-app` `Deployment` has 2 updated, ready and available replicas; `componentReplicas` reports `server` 2 / `OVERRIDE`.
+2. The `database` `StatefulSet` has 1 ready replica; `componentReplicas` reports 1 / `DRIVER_DEFAULT` / `singleton: true`. The UI variant shows `database` fixed at 1 in the edit drawer.
+3. Submitting `database` replicas 2 through the SDK fails with `SINGLETON_REPLICA_OVERRIDE`; no new task.
+4. Clearing the `server` override returns the `Deployment` to 1 ready replica (`status.replicas` 1); the source is `CHART`.
+
+Record for each variant (Constitution §V): the node ID, the command, the ISO 8601 time of the passing run, the vcluster id and kubeconfig path, and the verbatim `PASSED` line. Stop a paused run by PID, not with `pkill -f`.
+
+Also run the rest of `shard_configuration` once in each variant, because the `simple-app` driver version changes (D-013):
+
+```bash
+sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_configuration" -k ui-chromium -v -s --pdb
+```
+
+## 5. Manual check (optional)
+
+```bash
+uv run invoke dev
+```
+
+1. Deploy `simple-app` with "Component replicas" `server` = 2 in the create form; the deployment runs 2 `server` pods.
+2. Open the configuration view: `server` shows `2 (override)`, `database` shows `1 (driver default)`.
+3. In the edit drawer, the `database` field is fixed at `1 (singleton)`; clear the `server` field and apply: the view shows `set by the chart`.
+4. `uv run styrminctl deployments get <name>`: the Components table shows the `Replicas` column.
