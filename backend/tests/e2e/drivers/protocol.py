@@ -218,6 +218,31 @@ class ScenarioDriver(Protocol):
         wait for the reconcile to reach the workload.
         """
 
+    async def set_component_replicas(
+        self, *, deployment_id: str, component: str, replicas: int | None
+    ) -> None:
+        """Set or clear one component's replica override on a deployment (023).
+
+        ``None`` clears it, so the driver default or the chart's count applies.
+        Every other stored config field, including the other components' blocks
+        and this component's env vars, image and ``command``/``args``, is
+        preserved.
+
+        API driver: reads the stored ``Deployment.config``, swaps
+        ``components[<component>].replicas``, and resubmits the whole config
+        through ``update_deployment``. A block left empty is dropped.
+
+        UI driver: opens the Settings tab's edit drawer, expands
+        ``component-override-trigger-<component>``, fills or clears the
+        ``comp-replicas-<component>`` field, then applies through the diff
+        dialog. A block left with no override is removed. Raises
+        ``ScenarioActionError`` for a singleton component, whose field is
+        read-only.
+
+        Both block until the server has accepted the mutation; callers still
+        wait for the update task to complete.
+        """
+
     async def pinned_image_components(
         self, *, deployment_id: str, target_version: str
     ) -> list[str]:

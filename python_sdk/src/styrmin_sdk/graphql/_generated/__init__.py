@@ -135,6 +135,11 @@ from .get_deployment_component_image_overrides_full import (
     GetDeploymentComponentImageOverridesFullDeployment,
     GetDeploymentComponentImageOverridesFullDeploymentComponentImageOverrides,
 )
+from .get_deployment_component_replicas_full import (
+    GetDeploymentComponentReplicasFull,
+    GetDeploymentComponentReplicasFullDeployment,
+    GetDeploymentComponentReplicasFullDeploymentComponentReplicas,
+)
 from .get_deployment_override_applicability import (
     GetDeploymentOverrideApplicability,
     GetDeploymentOverrideApplicabilityDeployment,
@@ -509,6 +514,9 @@ __all__ = [
     "GetDeploymentComponentImageOverridesFull",
     "GetDeploymentComponentImageOverridesFullDeployment",
     "GetDeploymentComponentImageOverridesFullDeploymentComponentImageOverrides",
+    "GetDeploymentComponentReplicasFull",
+    "GetDeploymentComponentReplicasFullDeployment",
+    "GetDeploymentComponentReplicasFullDeploymentComponentReplicas",
     "GetDeploymentDeployment",
     "GetDeploymentDeploymentApplicationDriverVersion",
     "GetDeploymentDeploymentApplicationInstance",

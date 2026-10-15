@@ -506,6 +506,9 @@ class ApiScenarioDriver:
                     command=(block.get("command") if isinstance(block, dict) else None),
                     args=(block.get("args") if isinstance(block, dict) else None),
                     image=(block.get("image") if isinstance(block, dict) else None),
+                    replicas=(
+                        block.get("replicas") if isinstance(block, dict) else None
+                    ),
                 )
                 for name, block in components.items()
             ]
@@ -547,6 +550,15 @@ class ApiScenarioDriver:
             deployment_id=deployment_id,
             component=component,
             slots={"command": command, "args": args},
+        )
+
+    async def set_component_replicas(
+        self, *, deployment_id: str, component: str, replicas: int | None
+    ) -> None:
+        await self._replace_component_slots(
+            deployment_id=deployment_id,
+            component=component,
+            slots={"replicas": replicas},
         )
 
     async def pinned_image_components(

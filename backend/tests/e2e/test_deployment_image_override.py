@@ -14,6 +14,13 @@ The misnamed-container test (SC-005) deploys a driver variant whose
 ``server`` component container is ``wrong-name`` and asserts an override fails
 the deployment instead of adding a container.
 
+The replica test (023-per-component-replicas) runs first on the same
+deployment: it scales ``server`` to 2 and back through ``set_component_replicas``
+and reads each workload once after the update task completes, so the counts
+prove that the task waited for the pods. It also checks that the singleton
+``database`` stays at 1 and that an override of 2 on it is rejected. A
+finalizer clears the ``server`` override, so the image tests start at 1 replica.
+
 The override images are the simple-app builds re-tagged by the session fixture
 ``simple_app_override_images`` under ``registry.example/acme/simple-app-patched``;
 the vcluster nodes pull them from the host Docker daemon like the base images.
@@ -31,6 +38,7 @@ import pytest
 from kubernetes_asyncio import client as kubeclient
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
+from styrmin_sdk.exceptions import OperationFailedError
 from styrmin_sdk.models import (
     ComponentConfigInput,
     EnvVarInput,
@@ -38,6 +46,7 @@ from styrmin_sdk.models import (
 )
 
 from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.drivers.api_driver import ApiScenarioDriver
 from tests.e2e.helpers.drivers import (
     MISNAMED_CONTAINER,
     MISNAMED_DRIVER_NAME,
@@ -46,8 +55,10 @@ from tests.e2e.helpers.drivers import (
 from tests.e2e.helpers.workloads import (
     _wait_for_pod_template,
     container_spec,
+    read_workload_replicas,
     wait_for_ready_container_image,
 )
+from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 
 pytestmark = [
     pytest.mark.shard_configuration,
@@ -62,6 +73,8 @@ TOKEN_IMAGE = "registry.example/acme/simple-app-patched:{{ app.version }}"
 SERVER_WORKLOAD = "styrmin-simple-app"
 # Two 5s operator timer ticks plus the Flux reconcile and the 5s status report, with headroom.
 GUARD_FAILURE_TIMEOUT_SECONDS = 120.0
+# The bitnami subchart's ``fullnameOverride`` in the simple-app values template.
+DATABASE_WORKLOAD = "styrmin-postgresql"
 
 
 # ---------------------------------------------------------------------------
@@ -141,9 +154,88 @@ def _io_driver_bound(
     )
 
 
+@pytest.fixture
+async def _clear_server_replicas(
+    image_override_environment: dict,
+    image_override_deployment: dict,
+) -> AsyncGenerator[None, None]:
+    """Clear a ``server`` replica override the test leaves behind and wait for
+    the scale-down, so the image tests that share the deployment see 1 replica."""
+    yield
+    client: StyrminClient = image_override_environment["client"]
+    deployment_id = image_override_deployment["deployment_id"]
+    if await _stored_replicas(client, deployment_id, "server") is None:
+        return
+    known = await _task_ids(client, deployment_id)
+    await ApiScenarioDriver(client).set_component_replicas(
+        deployment_id=deployment_id, component="server", replicas=None
+    )
+    await _wait_for_new_task_succeeded(client, deployment_id, known)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+async def _stored_replicas(
+    client: StyrminClient, deployment_id: str, component: str
+) -> int | None:
+    config = (await client.deployments.get(deployment_id)).config or {}
+    block = (config.get("components") or {}).get(component) or {}
+    return block.get("replicas")
+
+
+async def _task_ids(client: StyrminClient, deployment_id: str) -> set[str]:
+    return {
+        str(e.task.id) for e in await client.deployments.get_timeline(deployment_id)
+    }
+
+
+async def _wait_for_new_task_succeeded(
+    client: StyrminClient, deployment_id: str, known: set[str]
+) -> str:
+    """Wait for the one task created after ``known`` to end; assert its task
+    result is ``SUCCEEDED`` and return its id.
+
+    ``Deployment.status`` stays ``running`` through an update, so only the
+    task result tells that the rollout (the operator's HelmRelease step) ended.
+    """
+    deadline = time.monotonic() + RECONCILE_TIMEOUT_SECONDS
+    new: list[Any] = []
+    while time.monotonic() < deadline:
+        timeline = await client.deployments.get_timeline(deployment_id)
+        new = [e.task for e in timeline if str(e.task.id) not in known]
+        assert len(new) <= 1, [(str(t.id), t.type_, t.result.value) for t in new]
+        if new and new[0].result.value != "RUNNING":
+            task = new[0]
+            assert task.result.value == "SUCCEEDED", (
+                f"task {task.id} ({task.type_}) ended {task.result.value}: "
+                f"{[(step.name, step.status, step.error) for step in task.steps]}"
+            )
+            return str(task.id)
+        await asyncio.sleep(2)
+    raise TimeoutError(
+        f"No new task on deployment {deployment_id} ended within "
+        f"{RECONCILE_TIMEOUT_SECONDS}s: {[(str(t.id), t.result.value) for t in new]}"
+    )
+
+
+async def _read_component_replicas(
+    client: StyrminClient, deployment_id: str
+) -> dict[str, dict]:
+    raw = await client._transport.execute(
+        load_query("get_deployment_component_replicas_full"),
+        {"deploymentId": deployment_id},
+    )
+    assert "errors" not in raw, raw
+    return {
+        row["component"]: row for row in raw["data"]["deployment"]["componentReplicas"]
+    }
+
+
+def _all_counts(n: int) -> dict[str, int]:
+    return {"spec": n, "status": n, "updated": n, "ready": n, "available": n}
 
 
 async def _read_image_overrides(
@@ -258,6 +350,120 @@ async def _wait_for_upgrade_job(vcluster: dict, namespace: str) -> Any:
     raise TimeoutError(
         f"No upgrade Job in {namespace} after {RECONCILE_TIMEOUT_SECONDS}s"
     )
+
+
+# ---------------------------------------------------------------------------
+# 023 — scale a component, singleton guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.ci
+async def test_scale_server_and_singleton_guard(
+    image_override_environment: dict,
+    image_override_deployment: dict,
+    vcluster: dict,
+    scenario_driver: ScenarioDriver,
+    driver_mode: str,
+    session_ui_page: Any,
+    _io_driver_bound: None,
+    _clear_server_replicas: None,
+) -> None:
+    """023 US1 (research D-012): ``server`` scaled to 2 runs 2 ready pods when
+    the update task completes, and 1 again once the override is cleared. The
+    singleton ``database`` stays at 1, shows a fixed field in the edit drawer,
+    and an override of 2 on it is rejected before any task is created.
+
+    Each workload is read once right after its task ends, without polling:
+    the counts prove that the task waited for the scale-up and the scale-down
+    (SC-002, critique E7)."""
+    client: StyrminClient = image_override_environment["client"]
+    deployment_id = image_override_deployment["deployment_id"]
+    namespace = image_override_deployment["namespace"]
+    apps = kubeclient.AppsV1Api(vcluster["api"])
+
+    rows = await _read_component_replicas(client, deployment_id)
+    assert rows["server"]["source"] == "CHART", rows
+    assert rows["server"]["override"] is None, rows
+
+    # 1. Scale ``server`` to 2.
+    known = await _task_ids(client, deployment_id)
+    await scenario_driver.set_component_replicas(
+        deployment_id=deployment_id, component="server", replicas=2
+    )
+    await _wait_for_new_task_succeeded(client, deployment_id, known)
+    assert await read_workload_replicas(
+        apps, namespace=namespace, kind="Deployment", name=SERVER_WORKLOAD
+    ) == _all_counts(2)
+
+    rows = await _read_component_replicas(client, deployment_id)
+    assert set(rows) == {"server", "database"}, rows
+    assert rows["server"] == {
+        "component": "server",
+        "count": 2,
+        "source": "OVERRIDE",
+        "override": 2,
+        "singleton": False,
+        "isOrphaned": False,
+        "isApplicable": True,
+    }
+
+    # 2. The singleton ``database`` stays at 1.
+    assert await read_workload_replicas(
+        apps, namespace=namespace, kind="StatefulSet", name=DATABASE_WORKLOAD
+    ) == _all_counts(1)
+    assert rows["database"] == {
+        "component": "database",
+        "count": 1,
+        "source": "DRIVER_DEFAULT",
+        "override": None,
+        "singleton": True,
+        "isOrphaned": False,
+        "isApplicable": True,
+    }
+    if driver_mode == "ui":
+        assert session_ui_page is not None
+        detail = DeploymentDetailPage(session_ui_page)
+        await detail.goto(
+            environment_id=image_override_environment["environment_id"],
+            deployment_id=deployment_id,
+        )
+        assert await detail.read_component_replicas_field(component="database") == {
+            "value": "1 (singleton)",
+            "read_only": True,
+        }
+
+    # 3. An override of 2 on ``database`` is rejected; nothing changes.
+    config_before = (await client.deployments.get(deployment_id)).config
+    known = await _task_ids(client, deployment_id)
+    with pytest.raises(OperationFailedError) as exc_info:
+        await client.deployments.update(
+            deployment_id,
+            input=UpdateDeploymentInput(
+                components=[
+                    ComponentConfigInput(name="server", replicas=2),
+                    ComponentConfigInput(name="database", replicas=2),
+                ]
+            ),
+        )
+    assert exc_info.value.typename == "SINGLETON_REPLICA_OVERRIDE", exc_info.value
+    assert "'database'" in str(exc_info.value)
+    assert await _task_ids(client, deployment_id) == known
+    assert (await client.deployments.get(deployment_id)).config == config_before
+
+    # 4. Clear the override: back to the chart's 1 replica.
+    await scenario_driver.set_component_replicas(
+        deployment_id=deployment_id, component="server", replicas=None
+    )
+    await _wait_for_new_task_succeeded(client, deployment_id, known)
+    assert await read_workload_replicas(
+        apps, namespace=namespace, kind="Deployment", name=SERVER_WORKLOAD
+    ) == _all_counts(1)
+
+    rows = await _read_component_replicas(client, deployment_id)
+    assert rows["server"]["count"] is None, rows
+    assert rows["server"]["source"] == "CHART", rows
+    assert rows["server"]["override"] is None, rows
+    assert await _stored_replicas(client, deployment_id, "server") is None
 
 
 # ---------------------------------------------------------------------------

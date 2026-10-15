@@ -4,7 +4,7 @@ kind: ApplicationDriver
 metadata:
   name: simple-app
 spec:
-  version: "3"
+  version: "4"
   supported_versions: ">=0.1,<1.0"
   info:
     description: Simple 3-tier FastAPI application with PostgreSQL
@@ -24,6 +24,8 @@ spec:
 
     database:
       container: postgresql
+      # The chart runs a single PostgreSQL primary.
+      singleton: true
       identifier:
         label:
           app.kubernetes.io/name: postgresql
