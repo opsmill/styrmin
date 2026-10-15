@@ -443,6 +443,31 @@ async def test_delete_bsl_deletes_its_saved_keys(
 
 
 @pytest.mark.asyncio
+async def test_delete_last_environment_of_bsl_dispatches_cluster_cleanup(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """Issue #475: deleting the last environment of a BSL removes it from the cluster.
+
+    Unassigning dispatches ``SYNC_BSL_DELETE`` when the environment was the last
+    one using the location; deleting that same environment must do the same, or
+    the Velero object and its credentials Secret stay in the cluster.
+    """
+    bsl = await seed_backup_storage_location(session, name="bsl-475")
+    env = await seed_environment(session, bsl=bsl)
+    prefect_manager_mock.run_action = AsyncMock()
+
+    await gql(client, "delete_environment", {"environmentId": str(env.id)})
+
+    cleanup_calls = [
+        call
+        for call in prefect_manager_mock.run_action.await_args_list
+        if call.kwargs.get("action") == PrefectAction.SYNC_BSL_DELETE
+    ]
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0].kwargs["parameters"]["bsl_name"] == "bsl-475"
+
+
+@pytest.mark.asyncio
 async def test_list_bsls_projects_seeded(
     client: AsyncClient, session: AsyncSession
 ) -> None:
