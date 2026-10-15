@@ -989,6 +989,15 @@ class Client(AsyncBaseClient):
                   isOrphaned
                   isApplicable
                 }
+                componentReplicas {
+                  component
+                  count
+                  source
+                  override
+                  singleton
+                  isOrphaned
+                  isApplicable
+                }
                 deployedServices {
                   id
                   driverServiceName
@@ -1198,6 +1207,10 @@ class Client(AsyncBaseClient):
                   isApplicable
                 }
                 componentContainerOverrides {
+                  component
+                  isApplicable
+                }
+                componentReplicas {
                   component
                   isApplicable
                 }

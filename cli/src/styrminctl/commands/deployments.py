@@ -8,7 +8,7 @@ from typing import Annotated
 
 from cyclopts import App, Parameter
 from styrmin_sdk.exceptions import ApplyError, BatchNameConflictError, StyrminError
-from styrmin_sdk.models import UpdateDeploymentInput
+from styrmin_sdk.models import ComponentReplicas, ReplicaSource, UpdateDeploymentInput
 from styrmin_sdk.models.deployment_manifest import ApplyEvent, ApplyOutcome, ApplyOverrides
 
 from styrminctl import client
@@ -107,9 +107,41 @@ async def get(deployment_id: DeploymentId) -> None:
         instance = deployment.application_instance
         console.print(f"  Instance: {instance.id} (status: {instance.status})")
 
-    if deployment.components:
-        rows = [{"id": str(c.id), "name": c.name, "enabled": str(c.enabled)} for c in deployment.components]
-        print_table(rows, columns=["id", "name", "enabled"], title="Components")
+    replicas = {row.component: row for row in deployment.component_replicas}
+    rows = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "enabled": str(c.enabled),
+            "replicas": _replicas_cell(replicas.get(c.name), enabled=c.enabled),
+        }
+        for c in deployment.components
+    ]
+    rows.extend(
+        {"id": "-", "name": row.component, "enabled": "-", "replicas": _replicas_cell(row, enabled=True)}
+        for row in deployment.component_replicas
+        if row.is_orphaned
+    )
+    if rows:
+        print_table(rows, columns=["id", "name", "enabled", "replicas"], title="Components")
+
+
+def _replicas_cell(row: ComponentReplicas | None, *, enabled: bool) -> str:
+    """Replica count and its source for the Components table (contracts/cli-and-ui.md)."""
+    if row is None:
+        return ""
+    if row.is_orphaned:
+        return f"{row.override} (override, not applied: no longer declared)"
+    if row.count is None:
+        cell = "chart"
+    else:
+        labels = ["override" if row.source == ReplicaSource.OVERRIDE else "driver default"]
+        if row.singleton:
+            labels.append("singleton")
+        cell = f"{row.count} ({', '.join(labels)})"
+    if row.override is not None and not row.is_applicable:
+        cell += f", override {row.override} not applied"
+    return cell if enabled else f"{cell}, stopped: 0 pods"
 
 
 @deployments_app.command
@@ -285,7 +317,13 @@ def _print_pinned_image_warning(outcome: ApplyOutcome) -> None:
     )
 
 
-_OVERRIDE_KIND_LABELS = {"env_vars": "env var", "image": "image", "command": "command", "args": "args"}
+_OVERRIDE_KIND_LABELS = {
+    "env_vars": "env var",
+    "image": "image",
+    "command": "command",
+    "args": "args",
+    "replicas": "replica",
+}
 
 
 def _join_words(words: list[str]) -> str:
@@ -298,16 +336,29 @@ def _print_inapplicable_warning(outcome: ApplyOutcome) -> None:
         return
     sys.stdout.flush()
     for component, kinds in outcome.inapplicable_overrides.items():
-        overrides = f"{_join_words([_OVERRIDE_KIND_LABELS[kind] for kind in kinds])} override"
-        stored, pronoun = (f"{overrides} is", "it") if len(kinds) == 1 else (f"{overrides}s are", "them")
-        print(
-            f"warning: {outcome.name}: {stored} stored on {component} but not applied: the driver "
-            f"version declares no component container for {component}. Remove {pronoun} from the "
-            f"manifest, or load a driver version that declares components.{component}.container "
-            "and apply again",
-            file=sys.stderr,
-            flush=True,
-        )
+        container_kinds = [kind for kind in kinds if kind != "replicas"]
+        if container_kinds:
+            overrides = f"{_join_words([_OVERRIDE_KIND_LABELS[kind] for kind in container_kinds])} override"
+            plural = len(container_kinds) > 1
+            stored, pronoun = (f"{overrides}s are", "them") if plural else (f"{overrides} is", "it")
+            print(
+                f"warning: {outcome.name}: {stored} stored on {component} but not applied: the driver "
+                f"version declares no component container for {component}. Remove {pronoun} from the "
+                f"manifest, or load a driver version that declares components.{component}.container "
+                "and apply again",
+                file=sys.stderr,
+                flush=True,
+            )
+        if "replicas" in kinds:
+            # A replica override needs no container; it is not applied only on an undeclared component.
+            print(
+                f"warning: {outcome.name}: {_OVERRIDE_KIND_LABELS['replicas']} override is stored on "
+                f"{component} but not applied: the driver version does not declare {component}. "
+                f"Remove it from the manifest, or load a driver version that declares "
+                f"components.{component} and apply again",
+                file=sys.stderr,
+                flush=True,
+            )
 
 
 def _print_warnings(outcome: ApplyOutcome) -> None:

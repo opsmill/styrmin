@@ -34,6 +34,15 @@ query GetDeployment($deploymentId: UUID!) {
             isOrphaned
             isApplicable
         }
+        componentReplicas {
+            component
+            count
+            source
+            override
+            singleton
+            isOrphaned
+            isApplicable
+        }
         deployedServices {
             id
             driverServiceName

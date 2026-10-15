@@ -96,7 +96,7 @@ class ApplyOverrides(BaseModel):
     cluster: str | None = None
 
 
-OverrideKind = Literal["env_vars", "image", "command", "args"]
+OverrideKind = Literal["env_vars", "image", "command", "args", "replicas"]
 
 
 class ApplyOutcome(BaseModel):
@@ -115,8 +115,8 @@ class ApplyOutcome(BaseModel):
     target_version: str | None = None
     # Components whose effective image override has no `{{ app.version }}` token (FR-008).
     pinned_image_components: list[str] = Field(default_factory=list)
-    # Components whose env vars, image, `command` or `args` the manifest sets but the bound
-    # driver version cannot apply: they are stored, not applied.
+    # Components whose env vars, image, `command`, `args` or replica count the manifest sets but
+    # the bound driver version cannot apply: they are stored, not applied.
     inapplicable_components: list[str] = Field(default_factory=list)
     # The same components, each with the override kinds the manifest sets that are not applied.
     inapplicable_overrides: dict[str, list[OverrideKind]] = Field(default_factory=dict)

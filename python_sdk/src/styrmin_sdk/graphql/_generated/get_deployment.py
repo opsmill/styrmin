@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import Field
 
 from .base_model import BaseModel
+from .enums import ReplicaSource
 
 
 class GetDeployment(BaseModel):
@@ -34,6 +35,9 @@ class GetDeploymentDeployment(BaseModel):
     component_image_overrides: list[
         "GetDeploymentDeploymentComponentImageOverrides"
     ] = Field(alias="componentImageOverrides")
+    component_replicas: list["GetDeploymentDeploymentComponentReplicas"] = Field(
+        alias="componentReplicas"
+    )
     deployed_services: list["GetDeploymentDeploymentDeployedServices"] = Field(
         alias="deployedServices"
     )
@@ -66,6 +70,16 @@ class GetDeploymentDeploymentComponentImageOverrides(BaseModel):
     component: str
     reference: str
     resolved_reference: str = Field(alias="resolvedReference")
+    is_orphaned: bool = Field(alias="isOrphaned")
+    is_applicable: bool = Field(alias="isApplicable")
+
+
+class GetDeploymentDeploymentComponentReplicas(BaseModel):
+    component: str
+    count: Optional[int]
+    source: ReplicaSource
+    override: Optional[int]
+    singleton: bool
     is_orphaned: bool = Field(alias="isOrphaned")
     is_applicable: bool = Field(alias="isApplicable")
 

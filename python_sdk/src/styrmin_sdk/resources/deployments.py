@@ -265,6 +265,8 @@ def _override_kinds(block: ComponentConfigInput) -> list[OverrideKind]:
         kinds.append("command")
     if block.args is not None:
         kinds.append("args")
+    if block.replicas is not None:
+        kinds.append("replicas")
     return kinds
 
 
@@ -756,11 +758,11 @@ class DeploymentResource(BaseResource):
     async def _inapplicable_overrides(
         self, deployment_id: UUID, update_input: UpdateDeploymentInput
     ) -> dict[str, list[OverrideKind]]:
-        """Per component, the env vars, image, ``command`` or ``args`` in ``update_input`` that are stored but not applied.
+        """Per component, the env vars, image, ``command``, ``args`` or replica count in ``update_input`` that are stored but not applied.
 
         Unchanged values on a component that the bound driver version gives no component
-        container pass validation, so they are read back once the update is written. A failed
-        read returns no components: it never fails the apply.
+        container, or no longer declares, pass validation, so they are read back once the update
+        is written. A failed read returns no components: it never fails the apply.
         """
         submitted = {block.name: kinds for block in update_input.components or [] if (kinds := _override_kinds(block))}
         if not submitted:
@@ -784,6 +786,7 @@ class DeploymentResource(BaseResource):
             "image": {b.component for b in deployment.component_image_overrides if not b.is_applicable},
             "command": container_not_applied,
             "args": container_not_applied,
+            "replicas": {b.component for b in deployment.component_replicas if not b.is_applicable},
         }
         result: dict[str, list[OverrideKind]] = {}
         for name in sorted(submitted):

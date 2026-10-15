@@ -143,6 +143,26 @@ async def test_get_deployment_success(client: StyrminClient, mock_transport: Asy
                         "isApplicable": True,
                     }
                 ],
+                "componentReplicas": [
+                    {
+                        "component": "web",
+                        "count": 3,
+                        "source": "OVERRIDE",
+                        "override": 3,
+                        "singleton": False,
+                        "isOrphaned": False,
+                        "isApplicable": True,
+                    },
+                    {
+                        "component": "legacy",
+                        "count": None,
+                        "source": "CHART",
+                        "override": 2,
+                        "singleton": False,
+                        "isOrphaned": True,
+                        "isApplicable": False,
+                    },
+                ],
                 "deployedServices": [],
             }
         }
@@ -161,6 +181,11 @@ async def test_get_deployment_success(client: StyrminClient, mock_transport: Asy
     assert override.component == "web"
     assert override.resolved_reference == "registry.example/acme/web:1.0.0"
     assert override.is_applicable is True
+    web, legacy = deployment.component_replicas
+    assert (web.component, web.count, web.source, web.override) == ("web", 3, "OVERRIDE", 3)
+    assert web.is_applicable is True
+    assert (legacy.count, legacy.source, legacy.override) == (None, "CHART", 2)
+    assert (legacy.is_orphaned, legacy.is_applicable) == (True, False)
 
 
 async def test_get_deployment_not_found(client: StyrminClient, mock_transport: AsyncMock) -> None:
@@ -580,6 +605,7 @@ def _applicability_response(
     env_vars: dict[str, bool],
     images: dict[str, bool] | None = None,
     containers: dict[str, bool] | None = None,
+    replicas: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     def rows(blocks: dict[str, bool] | None) -> list[dict[str, Any]]:
         return [{"component": name, "isApplicable": applicable} for name, applicable in (blocks or {}).items()]
@@ -591,6 +617,7 @@ def _applicability_response(
                 "componentEnvVars": rows(env_vars),
                 "componentImageOverrides": rows(images),
                 "componentContainerOverrides": rows(containers),
+                "componentReplicas": rows(replicas),
             }
         }
     }
@@ -868,6 +895,91 @@ async def test_apply_names_only_the_override_kinds_that_are_not_applied(
 
     assert outcome.inapplicable_components == ["worker"]
     assert outcome.inapplicable_overrides == {"worker": ["env_vars", "command", "args"]}
+
+
+async def test_apply_lists_a_replica_override_that_does_not_apply(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """A replica override re-sent for a component the driver version no longer declares is
+    kept but not applied (FR-009); the outcome lists it with kind ``replicas``."""
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+        _applicability_response(env_vars={}, replicas={"server": True, "legacy": False}),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(
+            version="2.0.0",
+            config={
+                "components": [
+                    {"name": "legacy", "replicas": 2},
+                    {"name": "server", "replicas": 3},
+                ]
+            },
+        )
+    )
+
+    assert outcome.action == "updated"
+    assert outcome.inapplicable_components == ["legacy"]
+    assert outcome.inapplicable_overrides == {"legacy": ["replicas"]}
+    assert _operation_names(mock_transport)[3].startswith("query GetDeploymentOverrideApplicability(")
+
+
+async def test_apply_create_sends_component_replicas(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _missing_deployment_response(),
+        _deploy_response(),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(config={"components": [{"name": "task-worker", "replicas": 4}]})
+    )
+
+    assert outcome.action == "created"
+    deploy_vars = mock_transport.execute.call_args_list[2].args[1]
+    assert deploy_vars["config"] == {"components": [{"name": "task-worker", "replicas": 4}]}
+
+
+_REPLICAS_MANIFEST = """\
+apiVersion: styrmin/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  driver: my-app
+  version: "1.0.0"
+  environment: prod
+  config:
+    components:
+      - name: task-worker
+        replicas: 4
+      - name: server
+"""
+
+
+async def test_apply_files_sends_manifest_replicas_and_omits_a_cleared_one(
+    client: StyrminClient, mock_transport: AsyncMock, tmp_path: Path
+) -> None:
+    """``components[].replicas`` in a YAML manifest reaches ``updateDeploymentVersion(input:)``;
+    a block without ``replicas`` sends none, which clears a stored override (full replacement)."""
+    manifest_path = tmp_path / "app.yaml"
+    manifest_path.write_text(_REPLICAS_MANIFEST, encoding="utf-8")
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+        _applicability_response(env_vars={}, replicas={"task-worker": True, "server": True}),
+    ]
+
+    [outcome] = await client.deployments.apply_files([manifest_path])
+
+    assert outcome.action == "updated"
+    assert outcome.inapplicable_overrides == {}
+    version_vars = mock_transport.execute.call_args_list[2].args[1]
+    assert version_vars["input"] == {"components": [{"name": "task-worker", "replicas": 4}, {"name": "server"}]}
 
 
 async def test_apply_skips_the_applicability_read_when_no_block_sets_an_override(
@@ -1276,6 +1388,7 @@ def _get_deployment_response(*, deployment_status: str = "running") -> dict[str,
                 },
                 "components": [],
                 "componentImageOverrides": [],
+                "componentReplicas": [],
                 "deployedServices": [],
             }
         }
