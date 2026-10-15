@@ -726,6 +726,39 @@ class RuntimeClassPatch(Patch):
 
 
 @dataclass
+class IngressClassNameRemovalPatch(Patch):
+    """Strategic-merge YAML patch deleting ``spec.ingressClassName`` when present and doing nothing when absent.
+
+    A JSON6902 ``remove`` fails on an absent field (023 research D-001).
+
+    Example:
+        >>> print(IngressClassNameRemovalPatch().render_value())
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata:
+          name: any
+        spec:
+          ingressClassName: null
+        <BLANKLINE>
+    """
+
+    api_version: str = "networking.k8s.io/v1"
+    kind: str = "Ingress"
+    name: str = "any"
+    _path: str = field(init=False, default="/spec/ingressClassName")
+    _operation: str = field(init=False, default="remove")
+
+    def render_value(self) -> str:
+        doc: dict[str, Any] = {
+            "apiVersion": self.api_version,
+            "kind": self.kind,
+            "metadata": {"name": self.name},
+            "spec": {"ingressClassName": None},
+        }
+        return yaml.dump(doc, default_flow_style=False, sort_keys=False)
+
+
+@dataclass
 class ContainerMergePatch(Patch):
     """Strategic-merge YAML patch setting env, ``command`` and ``args`` on one named container.
 

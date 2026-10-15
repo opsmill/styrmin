@@ -4,6 +4,7 @@ import yaml
 
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     AnnotationPatch,
+    IngressClassNameRemovalPatch,
     SpecPatch,
     Target,
     TargetPatch,
@@ -45,11 +46,16 @@ class IngressUtility(Utility):
                 context.instance.config.external_dns_endpoints_type
             )
         if context.instance.config.dedicated_ingress is not None:
-            # Derive ingress class name from the dedicated ingress implementation
-            ingress_class_name = (
+            # The dedicated controller matches on the annotation, so the class the chart rendered is removed.
+            annotations["kubernetes.io/ingress.class"] = (
                 context.instance.config.dedicated_ingress.implementation
             )
-            annotations["kubernetes.io/ingress.class"] = ingress_class_name
+            patches.append(
+                TargetPatch(
+                    target=Target(kind="Ingress"),
+                    patch=IngressClassNameRemovalPatch(),
+                )
+            )
         elif context.instance.config.ingress_class:
             annotations["kubernetes.io/ingress.class"] = (
                 context.instance.config.ingress_class
