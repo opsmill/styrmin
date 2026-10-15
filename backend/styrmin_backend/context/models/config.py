@@ -647,7 +647,9 @@ class DeploymentConfig(ClusterConfig, EnvironmentConfig):
             rejected at the service boundary with
             ``UnknownComponentEnvVarError`` (env-var block),
             ``UnknownComponentContainerOverrideError`` (command/args block,
-            FR-004), or ``UnknownComponentImageOverrideError`` (image).
+            FR-004), ``UnknownComponentImageOverrideError`` (image), or
+            ``UnknownComponentReplicaOverrideError`` (an added or changed
+            ``replicas``; an unchanged stored one is kept).
     """
 
     model_config = ConfigDict(extra="forbid")

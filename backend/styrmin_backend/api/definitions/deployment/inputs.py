@@ -137,6 +137,22 @@ class ComponentConfigInput:
             "container; removing it is always accepted)."
         ),
     )
+    replicas: int | None = strawberry.field(
+        default=None,
+        description=(
+            "Replica count for this component, scoped to this deployment: an "
+            "integer of 1 or more, applied to `spec.replicas` of every "
+            "Deployment and StatefulSet that matches the component's label "
+            "selector. Needs no component container. Under full-replacement "
+            "semantics `null`/omitting it CLEARS the override, and the "
+            "component returns to the driver default or to the chart's count. "
+            "A value below 1 raises `INVALID_REPLICA_COUNT` (stop the component "
+            "instead); a value above 1 on a singleton component raises "
+            "`SINGLETON_REPLICA_OVERRIDE`; adding or changing it on a component "
+            "the driver version does not declare raises "
+            "`UNKNOWN_COMPONENT_REPLICA_OVERRIDE`."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -344,12 +360,13 @@ def update_deployment_input_to_dict(input: UpdateDeploymentInput) -> dict[str, A
     * ``parameters`` — list of ``{name, value}`` → ``dict[str, Any]``
       with duplicate-name detection raising
       :class:`DuplicateParameterNameError`.
-    * ``components`` — list of ``{name, env_vars?, command?, args?, image?}``
+    * ``components`` — list of
+      ``{name, env_vars?, command?, args?, image?, replicas?}``
       → ``dict[str, dict]`` with duplicate-name detection raising
       :class:`DuplicateComponentNameError`. Each component's
       ``env_vars`` sub-list is flattened recursively with scope
-      ``f"component:{name}"``; ``command``/``args``/``image`` pass through
-      verbatim.
+      ``f"component:{name}"``; ``command``/``args``/``image``/``replicas``
+      pass through verbatim.
     * ``service_name_overrides`` — list of
       ``{driver_service_name, override_name}`` →
       ``dict[str, str]`` keyed on ``driver_service_name``.
@@ -515,8 +532,9 @@ def _flatten_components(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
     The per-component ``env_vars`` sub-list is flattened recursively
     with scope ``f"component:{name}"`` so the eventual
     ``DUPLICATE_ENV_VAR_NAME`` payload identifies the offending
-    component; the other slots (``command``, ``args``, ``image``) pass
-    through, and unset ones are already dropped by ``_convert_value``.
+    component; the other slots (``command``, ``args``, ``image``,
+    ``replicas``) pass through, and unset ones are already dropped by
+    ``_convert_value``.
     Duplicate component names raise :class:`DuplicateComponentNameError`
     (FR-009).
     """

@@ -214,6 +214,8 @@ export type ComponentConfigInput = {
   image?: InputMaybe<Scalars['String']['input']>;
   /** The component name as declared by the application-driver version the deployment is bound to after the write: the pinned one on updateDeployment, the target one on updateDeploymentVersion. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. Overrides on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``). */
   name: Scalars['String']['input'];
+  /** Replica count for this component, scoped to this deployment: an integer of 1 or more, applied to `spec.replicas` of every Deployment and StatefulSet that matches the component's label selector. Needs no component container. Under full-replacement semantics `null`/omitting it CLEARS the override, and the component returns to the driver default or to the chart's count. A value below 1 raises `INVALID_REPLICA_COUNT` (stop the component instead); a value above 1 on a singleton component raises `SINGLETON_REPLICA_OVERRIDE`; adding or changing it on a component the driver version does not declare raises `UNKNOWN_COMPONENT_REPLICA_OVERRIDE`. */
+  replicas?: InputMaybe<Scalars['Int']['input']>;
 };
 
 /** The container ``command``/``args`` override targeting one component of a deployment. Applicable overrides are applied by a post-render patch to the component container the driver declares. ``isOrphaned`` flags blocks whose component the deployment's current driver no longer declares; ``isApplicable`` flags whether the override can reach a container. Non-applicable blocks remain visible in the API but are NOT applied to rendered pods. ``command``/``args`` are ``null`` when no override is set for that slot (the chart's own value applies). */
@@ -257,6 +259,25 @@ export type ComponentImageOverride = {
   reference: Scalars['String']['output'];
   /** `reference` with every `{{ app.version }}` token replaced by the deployment's `applicationVersion`. */
   resolvedReference: Scalars['String']['output'];
+};
+
+/** The replica count of one component of a deployment and where it comes from. One row per component the bound driver version declares, plus one per orphaned replica override. */
+export type ComponentReplicas = {
+  __typename?: 'ComponentReplicas';
+  /** Name of the component. */
+  component: Scalars['String']['output'];
+  /** The count Styrmin applies while the component runs. Null when the source is CHART or the row is orphaned. A stopped component runs 0 pods whatever this is; see Deployment.components[].enabled. */
+  count?: Maybe<Scalars['Int']['output']>;
+  /** False only when a stored override is not applied (orphaned component). */
+  isApplicable: Scalars['Boolean']['output'];
+  /** The bound driver version no longer declares the component. */
+  isOrphaned: Scalars['Boolean']['output'];
+  /** The stored replica override, applied or not. Null when none is stored. */
+  override?: Maybe<Scalars['Int']['output']>;
+  /** The bound driver version marks the component singleton: true. */
+  singleton: Scalars['Boolean']['output'];
+  /** Where `count` comes from. */
+  source: ReplicaSource;
 };
 
 export type ComponentRestoreStatus = {
@@ -345,6 +366,8 @@ export type Deployment = {
   componentEnvVars: Array<ComponentEnvVars>;
   /** Per-component image overrides: live components by name, then orphaned blocks (``isOrphaned=true``) by name. Components without an override are omitted. */
   componentImageOverrides: Array<ComponentImageOverride>;
+  /** One row per component the bound driver version declares, plus one per orphaned replica override, sorted by component name. */
+  componentReplicas: Array<ComponentReplicas>;
   components: Array<Component>;
   config: Scalars['JSON']['output'];
   crdStatus?: Maybe<DeploymentStatusType>;
@@ -1337,6 +1360,15 @@ export type RecordStepInput = {
   stepId?: InputMaybe<Scalars['UUID']['input']>;
   taskId?: InputMaybe<Scalars['UUID']['input']>;
 };
+
+/** Where a component's replica count comes from. */
+export type ReplicaSource =
+  /** No replica patch: the chart's own count applies. Styrmin does not read it. */
+  | 'CHART'
+  /** components.<name>.replicas in the driver version, or 1 for a singleton component. */
+  | 'DRIVER_DEFAULT'
+  /** The user's replica override on this deployment. */
+  | 'OVERRIDE';
 
 export type ReportDeploymentStatusesResponse = {
   __typename?: 'ReportDeploymentStatusesResponse';

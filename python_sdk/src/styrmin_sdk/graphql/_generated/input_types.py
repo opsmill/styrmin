@@ -63,6 +63,8 @@ class ComponentConfigInput(BaseModel):
     "Container args override for this component. Same shape and rules as ``command``, raising ``INVALID_CONTAINER_ARGS`` or ``COMPONENT_CONTAINER_NOT_DECLARED``."
     image: Optional[str] = None
     "Image reference for this component's component container, scoped to this deployment. A full reference with an explicit tag or digest; every ``{{ app.version }}`` token is replaced with the deployment's application version at render time, and a literal tag pins the image. Under full-replacement semantics ``null``/omitting it CLEARS the override (the chart image applies). Raises ``UNKNOWN_COMPONENT_IMAGE_OVERRIDE``, ``INVALID_IMAGE_REFERENCE``, or ``COMPONENT_CONTAINER_NOT_DECLARED`` (adding or changing it on a component without a component container; removing it is always accepted)."
+    replicas: Optional[int] = None
+    "Replica count for this component, scoped to this deployment: an integer of 1 or more, applied to `spec.replicas` of every Deployment and StatefulSet that matches the component's label selector. Needs no component container. Under full-replacement semantics `null`/omitting it CLEARS the override, and the component returns to the driver default or to the chart's count. A value below 1 raises `INVALID_REPLICA_COUNT` (stop the component instead); a value above 1 on a singleton component raises `SINGLETON_REPLICA_OVERRIDE`; adding or changing it on a component the driver version does not declare raises `UNKNOWN_COMPONENT_REPLICA_OVERRIDE`."
 
 
 class CrdConditionInput(BaseModel):

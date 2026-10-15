@@ -78,6 +78,12 @@ class PodPhase(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class ReplicaSource(str, Enum):
+    OVERRIDE = "OVERRIDE"
+    DRIVER_DEFAULT = "DRIVER_DEFAULT"
+    CHART = "CHART"
+
+
 class RestoreStatus(str, Enum):
     PENDING = "PENDING"
     IN_PROGRESS = "IN_PROGRESS"

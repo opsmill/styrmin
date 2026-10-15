@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
@@ -201,6 +202,66 @@ class ComponentImageOverride:
             "False when the override cannot reach a container: the component is "
             "orphaned (`isOrphaned`) or the driver declares no component container "
             "for it. The stored reference is kept but not rendered."
+        )
+    )
+
+
+@strawberry.enum(
+    name="ReplicaSource",
+    description="Where a component's replica count comes from.",
+)
+class ReplicaSource(Enum):
+    """GraphQL mirror of the service-layer ``ReplicaSource``, with the same values."""
+
+    OVERRIDE = strawberry.enum_value(
+        "override", description="The user's replica override on this deployment."
+    )
+    DRIVER_DEFAULT = strawberry.enum_value(
+        "driver_default",
+        description=(
+            "components.<name>.replicas in the driver version, or 1 for a "
+            "singleton component."
+        ),
+    )
+    CHART = strawberry.enum_value(
+        "chart",
+        description=(
+            "No replica patch: the chart's own count applies. Styrmin does not read it."
+        ),
+    )
+
+
+@strawberry.type(
+    description=(
+        "The replica count of one component of a deployment and where it comes "
+        "from. One row per component the bound driver version declares, plus one "
+        "per orphaned replica override."
+    )
+)
+class ComponentReplicas:
+    component: str = strawberry.field(description="Name of the component.")
+    count: int | None = strawberry.field(
+        description=(
+            "The count Styrmin applies while the component runs. Null when the "
+            "source is CHART or the row is orphaned. A stopped component runs 0 "
+            "pods whatever this is; see Deployment.components[].enabled."
+        )
+    )
+    source: ReplicaSource = strawberry.field(description="Where `count` comes from.")
+    override: int | None = strawberry.field(
+        description=(
+            "The stored replica override, applied or not. Null when none is stored."
+        )
+    )
+    singleton: bool = strawberry.field(
+        description="The bound driver version marks the component singleton: true."
+    )
+    is_orphaned: bool = strawberry.field(
+        description="The bound driver version no longer declares the component."
+    )
+    is_applicable: bool = strawberry.field(
+        description=(
+            "False only when a stored override is not applied (orphaned component)."
         )
     )
 
@@ -733,6 +794,82 @@ class Deployment:
             )
             for entry in entries
         ]
+
+    @strawberry.field(
+        description=(
+            "One row per component the bound driver version declares, plus one "
+            "per orphaned replica override, sorted by component name."
+        )
+    )
+    async def component_replicas(
+        self, info: strawberry.Info
+    ) -> list[ComponentReplicas]:
+        from styrmin_backend.services.driver.models.resources.driver import (
+            parse_stored_component_declaration,
+        )
+        from styrmin_backend.services.replicas.resolver import resolve_replicas
+
+        uow = info.context["uow"]
+        async with uow:
+            deployment = await uow.deployments.find(self.id)
+            if deployment is None:
+                logger.warning(
+                    "component_replicas: deployment {} not found (likely deleted "
+                    "between parent query and sub-field resolution)",
+                    self.id,
+                )
+                return []
+            dep_config_raw = deployment.config
+            # The Component rows mirror the bound driver version's declarations.
+            declared = {c.name: c.config for c in deployment.components or []}
+            driver_version = str(deployment.application_driver_version_id)
+
+        dep_cfg = (
+            DeploymentConfig.model_validate(dep_config_raw) if dep_config_raw else None
+        )
+        overrides = {
+            name: block.replicas
+            for name, block in ((dep_cfg.components or {}) if dep_cfg else {}).items()
+            if block.replicas is not None
+        }
+
+        rows: list[ComponentReplicas] = []
+        for name in sorted(set(declared) | set(overrides)):
+            override = overrides.get(name)
+            if name not in declared:
+                rows.append(
+                    ComponentReplicas(
+                        component=name,
+                        count=None,
+                        source=ReplicaSource.CHART,
+                        override=override,
+                        singleton=False,
+                        is_orphaned=True,
+                        is_applicable=False,
+                    )
+                )
+                continue
+            declaration = parse_stored_component_declaration(
+                declared[name], driver_version=driver_version, component=name
+            )
+            resolved = resolve_replicas(
+                declared_replicas=declaration.replicas,
+                singleton=declaration.singleton,
+                override=override,
+                is_orphaned=False,
+            )
+            rows.append(
+                ComponentReplicas(
+                    component=name,
+                    count=resolved.count,
+                    source=ReplicaSource(resolved.source.value),
+                    override=override,
+                    singleton=declaration.singleton,
+                    is_orphaned=False,
+                    is_applicable=override is None or resolved.override_applies,
+                )
+            )
+        return rows
 
     @strawberry.field
     async def crd_status(self, info: strawberry.Info) -> DeploymentStatusType | None:
