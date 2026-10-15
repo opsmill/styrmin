@@ -89,9 +89,9 @@ An environment that does not set `dedicated_ingress` takes the
 cluster's value, so an environment cannot turn off a dedicated ingress
 that the cluster sets.
 
-Styrmin sets the class of every Ingress of an application after the
-chart renders, including the Ingresses of subcharts, so the driver's
-values template does not set it:
+After the chart renders, Styrmin sets or removes the class of every
+Ingress of an application, including the Ingresses of subcharts, so the
+driver's values template does not set it:
 
 - With a dedicated ingress controller, Styrmin removes
   `spec.ingressClassName` and sets the `kubernetes.io/ingress.class`
