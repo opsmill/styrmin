@@ -20,6 +20,8 @@ interface ComponentsTabProps {
  *   - the component name (mono, matches version-number visual style),
  *   - the declared component container (from `componentConfigs`), or an
  *     explicit "None declared" state,
+ *   - the driver default replica count (`not set` when undeclared) and the
+ *     singleton flag (`yes` / `no`), also from `componentConfigs`,
  *   - `identifier.label` (when a plain object) as a key/value list,
  *   - any other declared scalar properties as additional key/value rows,
  *   - any other declared shallow-dict properties expanded one level deep.
@@ -57,9 +59,7 @@ export function ComponentsTab({
     );
   }
 
-  const containers = new Map(
-    componentConfigs.map((cc) => [cc.name, cc.container ?? null]),
-  );
+  const configsByName = new Map(componentConfigs.map((cc) => [cc.name, cc]));
 
   return (
     <div
@@ -71,7 +71,9 @@ export function ComponentsTab({
           key={name}
           name={name}
           decl={decl}
-          container={containers.get(name) ?? null}
+          container={configsByName.get(name)?.container ?? null}
+          replicas={configsByName.get(name)?.replicas ?? null}
+          singleton={configsByName.get(name)?.singleton ?? false}
         />
       ))}
     </div>
@@ -82,9 +84,17 @@ interface ComponentRowProps {
   name: string;
   decl: Record<string, unknown>;
   container: string | null;
+  replicas: number | null;
+  singleton: boolean;
 }
 
-function ComponentRow({ name, decl, container }: ComponentRowProps) {
+function ComponentRow({
+  name,
+  decl,
+  container,
+  replicas,
+  singleton,
+}: ComponentRowProps) {
   const fields = flattenDecl(decl);
   return (
     <div
@@ -118,6 +128,38 @@ function ComponentRow({ name, decl, container }: ComponentRowProps) {
           </span>
         )}
       </div>
+      <div
+        className="mt-1 flex items-baseline gap-2 text-xs"
+        data-testid="driver-component-replicas"
+      >
+        <span className="text-muted-foreground">Replicas</span>
+        {replicas !== null ? (
+          <span className="font-mono text-[13px]">{replicas}</span>
+        ) : (
+          <span
+            className="italic text-muted-foreground"
+            title="The driver declares no default replica count, so the chart's count applies unless a deployment overrides it"
+          >
+            not set
+          </span>
+        )}
+      </div>
+      <div
+        className="mt-1 flex items-baseline gap-2 text-xs"
+        data-testid="driver-component-singleton"
+      >
+        <span className="text-muted-foreground">Singleton</span>
+        <span
+          className="font-mono text-[13px]"
+          title={
+            singleton
+              ? "The replica count is fixed at 1; a deployment cannot scale this component"
+              : undefined
+          }
+        >
+          {singleton ? "yes" : "no"}
+        </span>
+      </div>
       {fields.length > 0 ? (
         <dl className="mt-3 grid grid-cols-[165px_1fr] gap-x-4 gap-y-1.5 border-t border-border/60 pt-3">
           {fields.map(([key, value]) => (
@@ -142,6 +184,13 @@ function ComponentRow({ name, decl, container }: ComponentRowProps) {
   );
 }
 
+const OWN_ROW_KEYS = new Set([
+  "identifier",
+  "container",
+  "replicas",
+  "singleton",
+]);
+
 /**
  * Flatten a component declaration into single-line key/value pairs for display:
  * the `identifier.label` selectors, top-level scalars, and nested objects
@@ -159,8 +208,8 @@ function flattenDecl(decl: Record<string, unknown>): Array<[string, string]> {
     }
   }
   for (const [key, value] of Object.entries(decl)) {
-    // `container` has its own row, sourced from `componentConfigs`.
-    if (key === "identifier" || key === "container") continue;
+    // `identifier` is listed above as its labels; the rest have their own rows.
+    if (OWN_ROW_KEYS.has(key)) continue;
     if (isScalar(value)) {
       pairs.push([key, String(value)]);
     } else if (value === null) {

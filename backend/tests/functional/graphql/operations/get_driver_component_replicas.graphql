@@ -1,0 +1,13 @@
+query GetDriverComponentReplicas($applicationDriverId: UUID!) {
+    applicationDriver(applicationDriverId: $applicationDriverId) {
+        id
+        versions {
+            id
+            componentConfigs {
+                name
+                replicas
+                singleton
+            }
+        }
+    }
+}

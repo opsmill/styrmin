@@ -19,8 +19,16 @@ function renderComponents(
 function componentConfig(
   name: string,
   container: string | null,
+  replicaKeys: { replicas?: number; singleton?: boolean } = {},
 ): DriverVersionDetail["componentConfigs"][number] {
-  return { id: `${name}-id`, name, config: {}, container };
+  return {
+    id: `${name}-id`,
+    name,
+    config: {},
+    container,
+    replicas: replicaKeys.replicas ?? null,
+    singleton: replicaKeys.singleton ?? false,
+  };
 }
 
 describe("ComponentsTab", () => {
@@ -105,5 +113,61 @@ describe("ComponentsTab", () => {
     expect(container).toHaveTextContent("None declared");
     // the container is shown once, not repeated as a raw "container: —" field
     expect(screen.queryByText("—")).toBeNull();
+  });
+
+  it("shows each component's driver default replica count and singleton flag", () => {
+    renderComponents(
+      {
+        server: { identifier: { label: { service: "web" } } },
+        database: { identifier: { label: { service: "db" } } },
+      },
+      [
+        componentConfig("server", "simple-app", { replicas: 2 }),
+        componentConfig("database", "postgresql", { singleton: true }),
+      ],
+    );
+    const [serverReplicas, databaseReplicas] = screen.getAllByTestId(
+      "driver-component-replicas",
+    );
+    const [serverSingleton, databaseSingleton] = screen.getAllByTestId(
+      "driver-component-singleton",
+    );
+    expect(serverReplicas).toHaveTextContent(/^Replicas2$/);
+    expect(serverSingleton).toHaveTextContent(/^Singletonno$/);
+    expect(databaseReplicas).toHaveTextContent(/^Replicasnot set$/);
+    expect(databaseSingleton).toHaveTextContent(/^Singletonyes$/);
+  });
+
+  it("shows not set and no for a component without a component config", () => {
+    renderComponents({ server: { identifier: { label: { service: "web" } } } });
+    expect(screen.getByTestId("driver-component-replicas")).toHaveTextContent(
+      "not set",
+    );
+    expect(screen.getByTestId("driver-component-singleton")).toHaveTextContent(
+      "no",
+    );
+  });
+
+  it("does not repeat replicas and singleton as raw declaration fields", () => {
+    renderComponents(
+      {
+        server: {
+          identifier: { label: { service: "web" } },
+          replicas: 1,
+          singleton: true,
+          cpu: 4,
+        },
+      },
+      [
+        componentConfig("server", "simple-app", {
+          replicas: 1,
+          singleton: true,
+        }),
+      ],
+    );
+    expect(screen.getByText("cpu")).toBeInTheDocument();
+    expect(screen.queryByText("replicas")).toBeNull();
+    expect(screen.queryByText("singleton")).toBeNull();
+    expect(screen.queryByText("true")).toBeNull();
   });
 });

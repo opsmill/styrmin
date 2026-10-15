@@ -1963,7 +1963,7 @@ export type GetDriverQueryVariables = Exact<{
 }>;
 
 
-export type GetDriverQuery = { __typename?: 'Query', applicationDriver?: { __typename?: 'ApplicationDriver', id: string, name: string, createdOn: any, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, sourceCommitSha?: string | null, contentHash?: string | null, components?: Record<string, unknown> | null, createdOn: any, icon?: string | null, description?: string | null, links: Array<{ __typename?: 'DriverLink', label: string, url: string }>, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', id: string, name: string, config?: Record<string, unknown> | null, container?: string | null }>, helmChart: { __typename?: 'HelmChart', id: string, name: string, version: string, repository: string, valueTemplate: string }, actions: Array<{ __typename?: 'Action', id: string, name: string, description: string, location: string }> }> } | null };
+export type GetDriverQuery = { __typename?: 'Query', applicationDriver?: { __typename?: 'ApplicationDriver', id: string, name: string, createdOn: any, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, sourceCommitSha?: string | null, contentHash?: string | null, components?: Record<string, unknown> | null, createdOn: any, icon?: string | null, description?: string | null, links: Array<{ __typename?: 'DriverLink', label: string, url: string }>, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', id: string, name: string, config?: Record<string, unknown> | null, container?: string | null, replicas?: number | null, singleton: boolean }>, helmChart: { __typename?: 'HelmChart', id: string, name: string, version: string, repository: string, valueTemplate: string }, actions: Array<{ __typename?: 'Action', id: string, name: string, description: string, location: string }> }> } | null };
 
 export type GetEnvironmentQueryVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
@@ -3055,6 +3055,8 @@ export const GetDriverDocument = `
         name
         config
         container
+        replicas
+        singleton
       }
       helmChart {
         id

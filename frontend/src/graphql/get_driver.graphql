@@ -33,6 +33,8 @@ query GetDriver($applicationDriverId: UUID!) {
         name
         config
         container
+        replicas
+        singleton
       }
       helmChart {
         id

@@ -1,0 +1,11 @@
+mutation LoadLocalDriverComponentReplicas($path: String!) {
+    loadLocalApplicationDriverVersion(path: $path) {
+        id
+        applicationDriverId
+        componentConfigs {
+            name
+            replicas
+            singleton
+        }
+    }
+}
