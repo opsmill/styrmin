@@ -6,6 +6,8 @@ contracts/post-render-patch.md: the image lands on the named container only, a w
 the render with a guard key the operator parser understands, env-only output is byte-identical to
 the env strategic merge alone (SC-002), a kind matching nothing is a no-op, and a ``command`` or
 ``args`` override replaces that whole list on the component container only (022 FR-002).
+The replica patches (023 T014) set ``spec.replicas`` on every ``Deployment`` and ``StatefulSet`` of
+the component, whether or not the chart renders it, and leave other kinds unchanged.
 """
 
 from __future__ import annotations
@@ -57,6 +59,9 @@ from styrmin_backend.services.component_container.exceptions import (
 )
 from styrmin_backend.services.component_container.patch_builder import (
     build_component_container_patches,
+)
+from styrmin_backend.services.replicas.patch_builder import (
+    build_component_replica_patches,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -157,16 +162,23 @@ def _context(  # noqa: PLR0913
     command: list[str] | None = None,
     args: list[str] | None = None,
     component: str = "server",
+    enabled: bool = True,
+    replica_override: int | None = None,
+    replicas: int | None = None,
+    singleton: bool = False,
 ) -> GlobalContext:
     deployment_id = uuid4()
     namespace = get_kubernetes_reference(deployment_id)
     server = ComponentContext(
         name=component,
-        enabled=True,
+        enabled=enabled,
         config=ArbitrarySectionModel(
             identifier=Identifier(label=LabelIdentifier(root={LABEL: "server"})),
             container=container,
+            replicas=replicas,
+            singleton=singleton,
         ),
+        replica_override=replica_override,
         env_vars=ResolvedComponentEnvVars(config=env_vars) if env_vars else None,
         image_override=(
             ResolvedComponentImageOverride(reference=image) if image else None
@@ -451,3 +463,126 @@ class TestCommandArgs:
         assert result.stdout == ""
         assert f"{GUARD_KEY_PREFIX}server~1wrong/image" in result.stderr
         assert parse_guard_failure(result.stderr) == ("server", "wrong")
+
+
+def _replica_resources() -> list[dict[str, Any]]:
+    """A Deployment the chart scales to 3, one without ``replicas``, a StatefulSet and a Job."""
+    scaled = _workload("Deployment", "server")
+    scaled["spec"]["replicas"] = 3
+    store = _workload("StatefulSet", "server-store")
+    store["spec"]["replicas"] = 3
+    return [
+        scaled,
+        _workload("Deployment", "server-api"),
+        store,
+        _workload("Job", "server-migrate", api_version="batch/v1"),
+    ]
+
+
+_REPLICA_WORKLOADS = ("server", "server-api", "server-store")
+
+
+def _render_by_name(
+    resources: list[dict[str, Any]], patches: list[TargetPatch]
+) -> dict[str, dict[str, Any]]:
+    result = _kustomize(resources, patches)
+    assert result.returncode == 0, result.stderr
+    return {doc["metadata"]["name"]: doc for doc in yaml.safe_load_all(result.stdout)}
+
+
+def _base_by_name(name: str) -> dict[str, Any]:
+    return next(r for r in _replica_resources() if r["metadata"]["name"] == name)
+
+
+class TestReplicaPatches:
+    """023 contracts/post-render-patch.md through real ``kubectl kustomize``."""
+
+    @pytest.mark.parametrize(
+        ("replica_override", "replicas", "singleton", "expected"),
+        [
+            pytest.param(2, None, False, 2, id="override-2"),
+            pytest.param(2, 4, False, 2, id="override-2-over-driver-default"),
+            pytest.param(None, 2, False, 2, id="driver-default-2"),
+            pytest.param(None, None, True, 1, id="singleton"),
+        ],
+    )
+    def test_sets_the_count_on_every_deployment_and_statefulset(
+        self,
+        replica_override: int | None,
+        replicas: int | None,
+        singleton: bool,
+        expected: int,
+    ) -> None:
+        patches = build_component_replica_patches(
+            _context(
+                replica_override=replica_override,
+                replicas=replicas,
+                singleton=singleton,
+            )
+        )
+
+        rendered = _render_by_name(_replica_resources(), patches)
+
+        for name in _REPLICA_WORKLOADS:
+            doc = rendered[name]
+            assert doc["spec"]["replicas"] == expected
+            assert {**doc, "spec": {**doc["spec"], "replicas": 3}} == {
+                **_base_by_name(name),
+                "spec": {**_base_by_name(name)["spec"], "replicas": 3},
+            }, "only spec.replicas changes"
+        assert rendered["server-migrate"] == _base_by_name("server-migrate")
+
+    @pytest.mark.parametrize("replica_override", [None, 2])
+    def test_stopped_component_is_scaled_to_zero(
+        self, replica_override: int | None
+    ) -> None:
+        patches = build_component_replica_patches(
+            _context(enabled=False, replica_override=replica_override)
+        )
+
+        rendered = _render_by_name(_replica_resources(), patches)
+
+        for name in _REPLICA_WORKLOADS:
+            assert rendered[name]["spec"]["replicas"] == 0
+        assert rendered["server-migrate"] == _base_by_name("server-migrate")
+
+    def test_no_override_and_no_declaration_leaves_the_chart_count(self) -> None:
+        patches = build_component_replica_patches(_context())
+        assert patches == []
+
+        result = _kustomize(_replica_resources(), patches)
+        unpatched = _kustomize(_replica_resources(), [])
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == unpatched.stdout
+        rendered = {d["metadata"]["name"]: d for d in yaml.safe_load_all(result.stdout)}
+        assert rendered["server"]["spec"]["replicas"] == 3
+        assert "replicas" not in rendered["server-api"]["spec"]
+        assert rendered["server-store"]["spec"]["replicas"] == 3
+
+    def test_component_container_merge_patch_on_the_same_workload_still_applies(
+        self,
+    ) -> None:
+        context = _context(
+            env_vars={"LOG_LEVEL": "debug"}, image=PATCHED, replica_override=2
+        )
+        # The order ``ApplicationHelmReleaseBuilder.build()`` uses.
+        patches = build_component_replica_patches(
+            context
+        ) + build_component_container_patches(context)
+
+        rendered = _render_by_name(_replica_resources(), patches)
+
+        for name in _REPLICA_WORKLOADS:
+            doc = rendered[name]
+            main = _containers(doc)["main"]
+            assert doc["spec"]["replicas"] == 2
+            assert main["image"] == PATCHED
+            assert {e["name"]: e.get("value") for e in main["env"]} == {
+                "CHART_VAR": "chart",
+                "LOG_LEVEL": "debug",
+            }
+            assert (
+                _containers(doc)["sidecar"]
+                == _containers(_base_by_name(name))["sidecar"]
+            )
