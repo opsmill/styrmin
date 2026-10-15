@@ -194,7 +194,17 @@ class ComponentContext(BaseModel):
     container_override: ResolvedComponentContainerOverride | None = None
     image_override: ResolvedComponentImageOverride | None = None
     # ``DeploymentConfig.components[<name>].replicas``; declared components only (023).
-    replica_override: int | None = None
+    replica_override: StrictInt | None = Field(default=None, ge=1, le=MAX_REPLICA_COUNT)
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_replica_override(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        # An agent or server of the release before 023 rejects the key (``extra="forbid"``).
+        data = handler(self)
+        if data.get("replica_override", 0) is None:
+            del data["replica_override"]
+        return data
 
 
 class ComponentsContext(RootModel):

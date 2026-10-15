@@ -9,8 +9,11 @@ from __future__ import annotations
 import pytest
 
 from styrmin_backend.context.models.config import ComponentConfigBlock, DeploymentConfig
+from styrmin_backend.context.resolvers import resolve_global_context
 from styrmin_backend.context.validators import validate_deployment_config
 from styrmin_backend.services.replicas.exceptions import InvalidReplicaCountError
+
+from .test_component_context_replicas import _component, _context_input
 
 _INVALID = [0, -1, 2147483648, True, False, "2", 2.0]
 _INVALID_IDS = ["zero", "negative", "above-int32", "true", "false", "string", "float"]
@@ -77,3 +80,40 @@ def test_write_path_surfaces_typed_error() -> None:
     """``validate_deployment_config`` wraps only ``ValidationError``; the typed code survives."""
     with pytest.raises(InvalidReplicaCountError):
         validate_deployment_config({"components": {"server": {"replicas": 0}}})
+
+
+# A release before 023 declares the block with ``extra="forbid"`` and no ``replicas`` field.
+_BLOCK_KEYS_BEFORE_023 = {"env_vars", "command", "args", "image"}
+
+
+@pytest.mark.parametrize("mode", ["python", "json"])
+def test_block_without_override_dumps_as_before_023(mode: str) -> None:
+    block = ComponentConfigBlock.model_validate({"env_vars": {"A": "1"}})
+
+    assert block.model_dump(mode=mode) == {
+        "env_vars": {"A": "1"},
+        "command": None,
+        "args": None,
+        "image": None,
+    }
+
+
+@pytest.mark.parametrize("mode", ["python", "json"])
+def test_block_with_override_keeps_the_key(mode: str) -> None:
+    block = ComponentConfigBlock.model_validate({"replicas": 3})
+
+    assert block.model_dump(mode=mode)["replicas"] == 3
+
+
+@pytest.mark.parametrize("mode", ["python", "json"])
+def test_context_blocks_without_override_dump_as_before_023(mode: str) -> None:
+    context = resolve_global_context(
+        context_input=_context_input(
+            _component("server"),
+            deployment_config={"components": {"server": {"env_vars": {"A": "1"}}}},
+        )
+    )
+
+    dumped = context.model_dump(mode=mode)
+    for config in (dumped["deployment"]["config"], dumped["instance"]["config"]):
+        assert set(config["components"]["server"]) == _BLOCK_KEYS_BEFORE_023

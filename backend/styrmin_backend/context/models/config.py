@@ -6,8 +6,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     ValidationInfo,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -623,6 +625,16 @@ class ComponentConfigBlock(BaseModel):
     def _validate_replicas(cls, v: Any, info: ValidationInfo) -> Any:
         context = info.context if isinstance(info.context, dict) else {}
         return _check_replica_count(v, context.get("component_name"))
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_replicas(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        # A release before 023 rejects the key (``extra="forbid"``) in a deployment context.
+        data = handler(self)
+        if data.get("replicas", 0) is None:
+            del data["replicas"]
+        return data
 
 
 class DeploymentConfig(ClusterConfig, EnvironmentConfig):
