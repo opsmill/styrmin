@@ -2,6 +2,7 @@ import asyncio
 import errno
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -220,6 +221,58 @@ def _dump_namespace_logs(kubeconfig: str, namespace: str) -> None:
             print(f"(stderr) {log_result.stderr}")
 
 
+# CI uploads this directory as the e2e-agent-logs-<entrypoint>-<shard> artifact.
+E2E_LOG_DIR = PROJECT_ROOT / "e2e-logs"
+
+
+def _save_agent_logs(kubeconfig: str, nodeid: str) -> None:
+    """Write the full log of the agent pod to E2E_LOG_DIR; the job output keeps a tail."""
+    pod_result = subprocess.run(
+        [
+            "kubectl",
+            "--kubeconfig",
+            kubeconfig,
+            "get",
+            "pods",
+            "-n",
+            "styrmin",
+            "-l",
+            "app.kubernetes.io/component=agent",
+            "-o",
+            "name",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    out_dir = E2E_LOG_DIR / re.sub(r"[^\w.-]+", "_", nodeid)
+    for pod in pod_result.stdout.split():
+        # --previous returns the log of a container that restarted during the session.
+        for suffix, extra in (("log", []), ("previous.log", ["--previous"])):
+            log_result = subprocess.run(
+                [
+                    "kubectl",
+                    "--kubeconfig",
+                    kubeconfig,
+                    "logs",
+                    pod,
+                    "-n",
+                    "styrmin",
+                    "--all-containers",
+                    *extra,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if log_result.returncode != 0:
+                if not extra:
+                    print(f"(stderr) {log_result.stderr}")
+                continue
+            path = out_dir / f"{pod.removeprefix('pod/')}.{suffix}"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(log_result.stdout)
+            print(f"Full agent log: {path.relative_to(PROJECT_ROOT)}")
+
+
 @pytest.fixture(autouse=True)
 def _dump_k8s_logs_on_failure(request, vcluster):
     yield
@@ -246,6 +299,7 @@ def _dump_k8s_logs_on_failure(request, vcluster):
 
     for namespace in sorted(namespaces):
         _dump_namespace_logs(kubeconfig, namespace)
+    _save_agent_logs(kubeconfig, request.node.nodeid)
 
 
 async def _wait_for_deployment_running(

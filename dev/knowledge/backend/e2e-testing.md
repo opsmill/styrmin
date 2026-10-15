@@ -514,6 +514,9 @@ The autouse function-scoped `_dump_k8s_logs_on_failure` fixture hooks into pytes
 1. Lists all namespaces matching `styrmin*`
 2. For each namespace, prints pod statuses (`kubectl get pods -o wide`)
 3. For each pod, prints the last 200 lines of container logs
+4. Writes the full log of the agent pod (label `app.kubernetes.io/component=agent` in the `styrmin` namespace) to `e2e-logs/<test node id>/<pod>.log`, and the log of the previous container to `<pod>.previous.log` when the agent restarted
+
+The 200-line tail of the agent pod often starts after the failure began, so the operator actions that led to it are only in the full log. In CI, the `Upload agent logs` step of the E2E job uploads `e2e-logs/` as the `e2e-agent-logs-<entrypoint>-<shard>` artifact when the job fails. GitHub keeps it for 7 days. Download it from the run's summary page or with `gh run download <run-id> -n e2e-agent-logs-<entrypoint>-<shard>`.
 
 This runs via a `pytest_runtest_makereport` hook that stores the test result on the item, then the fixture checks `rep_call.failed` in its teardown.
 

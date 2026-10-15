@@ -334,3 +334,11 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
+      - name: Upload agent logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-agent-logs-${{ matrix.entrypoint }}-${{ matrix.shard }}
+          path: e2e-logs/
+          if-no-files-found: ignore
+          retention-days: 7
