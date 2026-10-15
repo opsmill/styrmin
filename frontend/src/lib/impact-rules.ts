@@ -167,11 +167,6 @@ export const impactRules: ImpactRule[] = [
     severity: "informational",
   },
   {
-    matcher: "nodeSelector",
-    consequence: "Pods will be rescheduled to match new node selector",
-    severity: "warning",
-  },
-  {
     matcher: "serviceNameOverrides",
     consequence:
       "Kubernetes Service objects will be renamed; DNS clients will see new names",

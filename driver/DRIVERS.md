@@ -225,7 +225,6 @@ The template receives a context object with the following structure:
 | `cluster.config.storage_class` | `str` | Default storage class |
 | `cluster.config.ingress_class` | `str` | Ingress class name |
 | `cluster.config.runtime_class` | `str` | Runtime class |
-| `cluster.config.node_selector` | `str` | Node selector |
 | `cluster.config.standard_storage.storage_class` | `str` | Standard storage class |
 | `environment.config.ingress_class` | `str` | Environment-level ingress class |
 | `environment.config.ip_whitelist` | `list[str]` | IP whitelist |

@@ -117,7 +117,6 @@ async def test_create_environment_with_wrong_config(
         "ingress_class": "value",
         "db_size": "10Gi",
         "runtime_class": "value",
-        "node_selector": "value",
         "dedicated_ingress": "value",
         "wrong_key": "value",
     }

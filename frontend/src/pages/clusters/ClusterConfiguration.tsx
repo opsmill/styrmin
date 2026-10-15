@@ -26,7 +26,6 @@ const KNOWN_KEYS = new Set([
   "fast_storage",
   "db_size",
   "runtime_class",
-  "node_selector",
   "scheduling",
   "backup_ttl",
 ]);
@@ -212,10 +211,6 @@ function RuntimeSchedulingSection({ config }: { config: JsonObject }) {
         <Row
           label={LABELS.runtime_class}
           value={withDefault(config.runtime_class, DEFAULT_RUNTIME_CLASS)}
-        />
-        <Row
-          label={LABELS.node_selector}
-          value={display(config.node_selector)}
         />
       </Rows>
       <div className="mt-3">

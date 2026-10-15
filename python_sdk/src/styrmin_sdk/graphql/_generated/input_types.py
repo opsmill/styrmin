@@ -134,8 +134,6 @@ class DeploymentConfigInput(BaseModel):
     'Retention applied to backups taken for this deployment, as a strictly positive Go duration in ``h``/``m``/``s`` units (e.g. ``"720h"``). Overrides the environment- and cluster-scope policy (deepest scope wins). Omitted means this deployment sets no policy and inherits the shallower scope, ultimately the built-in 720h default.'
     runtime_class: Optional[str] = Field(alias="runtimeClass", default=None)
     "Kubernetes RuntimeClass name applied to pods in this deployment."
-    node_selector: Optional[str] = Field(alias="nodeSelector", default=None)
-    "Node-selector expression applied to pods in this deployment."
     standard_storage: Optional["StandardStorageInput"] = Field(
         alias="standardStorage", default=None
     )
@@ -357,7 +355,6 @@ class UpdateClusterInput(BaseModel):
 
     ingress_class: Optional[str] = Field(alias="ingressClass", default=None)
     runtime_class: Optional[str] = Field(alias="runtimeClass", default=None)
-    node_selector: Optional[str] = Field(alias="nodeSelector", default=None)
     fqdn_suffix: Optional[str] = Field(alias="fqdnSuffix", default=None)
     external_url_scheme: Optional[ExternalUrlScheme] = Field(
         alias="externalUrlScheme", default=None
@@ -415,8 +412,6 @@ class UpdateDeploymentInput(BaseModel):
     'Retention applied to backups taken for this deployment, as a strictly positive Go duration in ``h``/``m``/``s`` units (e.g. ``"720h"``). Overrides the environment- and cluster-scope policy (deepest scope wins). Omitted means this deployment sets no policy and inherits the shallower scope, ultimately the built-in 720h default.'
     runtime_class: Optional[str] = Field(alias="runtimeClass", default=None)
     "Kubernetes RuntimeClass name applied to pods in this deployment."
-    node_selector: Optional[str] = Field(alias="nodeSelector", default=None)
-    "Node-selector expression applied to pods in this deployment."
     standard_storage: Optional["StandardStorageInput"] = Field(
         alias="standardStorage", default=None
     )

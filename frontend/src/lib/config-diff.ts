@@ -155,14 +155,6 @@ export function diff(
     before.runtimeClass,
     after.runtimeClass,
   );
-  diffScalar(
-    entries,
-    "storageRuntime",
-    "nodeSelector",
-    "Node selector",
-    before.nodeSelector,
-    after.nodeSelector,
-  );
   // Backup retention TTL (016). Storage-adjacent: it governs how long the
   // deployment's backup data is kept, so it belongs with the other
   // data-lifecycle knobs rather than in networking or scheduling.

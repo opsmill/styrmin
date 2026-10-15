@@ -296,7 +296,7 @@ const ruleCases: RuleCase[] = [
   {
     matcher: "dbSize",
     positive: diffEntry("dbSize", { section: "storageRuntime" }),
-    negative: diffEntry("nodeSelector", { section: "storageRuntime" }),
+    negative: diffEntry("runtimeClass", { section: "storageRuntime" }),
   },
   {
     matcher: "backupTtl",
@@ -314,11 +314,6 @@ const ruleCases: RuleCase[] = [
     matcher: "fastStorage",
     positive: diffEntry("fastStorage", { section: "storageRuntime" }),
     negative: diffEntry("standardStorage", { section: "storageRuntime" }),
-  },
-  {
-    matcher: "nodeSelector",
-    positive: diffEntry("nodeSelector", { section: "storageRuntime" }),
-    negative: diffEntry("dbSize", { section: "storageRuntime" }),
   },
   {
     matcher: "serviceNameOverrides",

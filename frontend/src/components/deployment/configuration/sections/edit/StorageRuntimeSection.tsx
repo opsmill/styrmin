@@ -26,9 +26,9 @@ interface Props {
  * Editable fields:
  *  - `backupTtl` — the deployment's own backup retention policy (016).
  *
- * Scope note: `dbSize`, `standardStorage.storageClass`, and `nodeSelector`
- * are deliberately **not** editable here. They remain read-only on the
- * Settings tab (see `StorageRuntimeSummary`), which is the state
+ * Scope note: `dbSize` and `standardStorage.storageClass` are deliberately
+ * **not** editable here. They remain read-only on the Settings tab (see
+ * `StorageRuntimeSummary`), which is the state
  * 011-unified-deployment-config left them in; re-opening them is a product
  * decision, not a side effect of shipping retention. The section header says
  * as much so an operator does not hunt for fields that are not here.

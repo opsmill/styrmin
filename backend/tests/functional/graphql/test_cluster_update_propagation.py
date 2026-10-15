@@ -32,7 +32,6 @@ from .seeds import (
 FULL_INPUT: dict[str, Any] = {
     "ingressClass": "nginx",
     "runtimeClass": "gvisor",
-    "nodeSelector": "pool=apps",
     "fqdnSuffix": "apps.example.com",
     "externalUrlScheme": "HTTP",
     "externalUrlPort": 8443,
@@ -71,7 +70,6 @@ FULL_INPUT: dict[str, Any] = {
 FULL_CONFIG: dict[str, Any] = {
     "ingress_class": "nginx",
     "runtime_class": "gvisor",
-    "node_selector": "pool=apps",
     "fqdn_suffix": "apps.example.com",
     "external_url_scheme": "http",
     "external_url_port": 8443,
@@ -174,11 +172,11 @@ async def test_update_cluster_clears_omitted_fields_and_applies_defaults(
     data = await gql(
         client,
         "update_cluster",
-        {"clusterId": str(cluster.id), "input": {"nodeSelector": "pool=apps"}},
+        {"clusterId": str(cluster.id), "input": {"dbSize": "20Gi"}},
     )
 
     expected = {
-        "node_selector": "pool=apps",
+        "db_size": "20Gi",
         "ingress_class": "traefik",
         "runtime_class": "default",
     }

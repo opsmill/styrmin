@@ -60,7 +60,6 @@ async def test_create_cluster_with_valid_configuration(
         "ingress_class": "value",
         "db_size": "10Gi",
         "runtime_class": "value",
-        "node_selector": "value",
         "dedicated_ingress": {"implementation": "traefik", "type": "ingress"},
     }
 

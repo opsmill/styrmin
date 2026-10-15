@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .components import ComponentsContext
 from .config import ClusterConfig, DeploymentConfig, EnvironmentConfig, ResolvedConfig
@@ -118,3 +118,19 @@ class GlobalContext(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     services: dict[str, Any] = Field(default_factory=dict)
     deployed_services: list[dict[str, Any]] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_removed_node_selector(cls, data: Any) -> Any:
+        # StyrminDeployment resources written before #472 still carry node_selector.
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        for scope in ("cluster", "deployment", "instance"):
+            section = data.get(scope)
+            if isinstance(section, dict) and isinstance(section.get("config"), dict):
+                config = section["config"]
+                if "node_selector" in config:
+                    config = {k: v for k, v in config.items() if k != "node_selector"}
+                    data[scope] = {**section, "config": config}
+        return data

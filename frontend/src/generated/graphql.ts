@@ -419,8 +419,6 @@ export type DeploymentConfigInput = {
   ingressClass?: InputMaybe<Scalars['String']['input']>;
   /** CIDR allowlist applied at the ingress layer. An empty list explicitly clears the persisted allowlist. */
   ipWhitelist?: InputMaybe<Array<Scalars['String']['input']>>;
-  /** Node-selector expression applied to pods in this deployment. */
-  nodeSelector?: InputMaybe<Scalars['String']['input']>;
   /** Kubernetes RuntimeClass name applied to pods in this deployment. */
   runtimeClass?: InputMaybe<Scalars['String']['input']>;
   /** Hierarchical pod scheduling & resource configuration (affinities, tolerations, topology spread, resource requests/limits, runtime class, post-render injection opt-outs). */
@@ -1642,7 +1640,6 @@ export type UpdateClusterInput = {
   fastStorage?: InputMaybe<FastStorageInput>;
   fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
   ingressClass?: InputMaybe<Scalars['String']['input']>;
-  nodeSelector?: InputMaybe<Scalars['String']['input']>;
   runtimeClass?: InputMaybe<Scalars['String']['input']>;
   scheduling?: InputMaybe<SchedulingInput>;
   standardStorage?: InputMaybe<StandardStorageInput>;
@@ -1696,8 +1693,6 @@ export type UpdateDeploymentInput = {
   ipWhitelist?: InputMaybe<Array<Scalars['String']['input']>>;
   /** New name for the deployment. Omitted means "do not rename". */
   name?: InputMaybe<Scalars['String']['input']>;
-  /** Node-selector expression applied to pods in this deployment. */
-  nodeSelector?: InputMaybe<Scalars['String']['input']>;
   /** Driver-defined parameter assignments. **Merge semantics** (asymmetric with the rest of this input): entries in the list merge on top of the persisted parameters dict, so existing keys not named in the input survive. Duplicate ``name`` entries within the list raise ``DUPLICATE_PARAMETER_NAME``. */
   parameters?: InputMaybe<Array<ParameterValueInput>>;
   /** Kubernetes RuntimeClass name applied to pods in this deployment. */

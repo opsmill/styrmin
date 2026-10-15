@@ -75,7 +75,6 @@ export function clusterConfigToInput(config: StoredConfig): UpdateClusterInput {
   return defined({
     ingressClass: asString(config.ingress_class),
     runtimeClass: asString(config.runtime_class),
-    nodeSelector: asString(config.node_selector),
     fqdnSuffix: asString(config.fqdn_suffix),
     externalUrlScheme:
       transformEnumValue(

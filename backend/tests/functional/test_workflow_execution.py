@@ -82,7 +82,6 @@ def runtime_context():
         cluster=ClusterConfig(
             ingress_class="nginx",
             runtime_class="k8s",
-            node_selector="node-type=worker",
             dedicated_ingress="true",
         ),
         environment=EnvironmentConfig(
@@ -94,7 +93,6 @@ def runtime_context():
             ingress_class="nginx",
             db_size="1Gi",
             runtime_class="k8s",
-            node_selector="node-type=worker",
             dedicated_ingress="true",
         ),
         app=ApplicationContext(
