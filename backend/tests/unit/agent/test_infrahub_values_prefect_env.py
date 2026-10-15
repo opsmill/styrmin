@@ -35,8 +35,6 @@ def _context(*, enable_analytics: bool) -> dict[str, Any]:
     return {
         "app": {"version": "1.5.0"},
         "parameters": {
-            "replicas_server": 1,
-            "replicas_task_worker": 2,
             "database_storage_size": 100,
             "enable_analytics": enable_analytics,
         },

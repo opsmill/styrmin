@@ -22,14 +22,12 @@ infrahub:
       accessMode: ReadWriteOnce
       enabled: true
       storageClassName: "{{ instance.config.standard_storage.storage_class }}"
-    replicas: "{{ parameters.replicas_server }}"
   infrahubTaskWorker:
     infrahubTaskWorker:
       # Hard-coded chart wiring, map shape (see the infrahubServer note above).
       env:
         PREFECT_API_URL: "http://styrmin-task-manager:4200/api"
         INFRAHUB_WORKFLOW_ADDRESS: styrmin-task-manager
-    replicas: "{{ parameters.replicas_task_worker }}"
   nats:
     enabled: false
   neo4j:

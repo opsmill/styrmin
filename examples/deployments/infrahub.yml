@@ -10,22 +10,27 @@ spec:
   # cluster: us-east        # only needed if the env name is ambiguous across clusters
 
   # Driver-declared parameters (see driver.styrmin.yml). Omitted ones use
-  # the driver defaults: replicas_server=1, replicas_task_worker=2,
-  # database_storage_size=100, enable_analytics=true.
-  parameters:
-    replicas_server: 1
-    replicas_task_worker: 1
+  # the driver defaults: database_storage_size=100, enable_analytics=true.
+  # parameters:
+  #   database_storage_size: 200
 
   # Deployment configuration (maps to DeploymentConfig — snake_case keys).
   # Every field is optional; include only what you want to set.
-  # config:
-  #   ingress_class: traefik
-  #   fqdn_suffix: infrahub.example.com
-  #   ip_whitelist:
-  #     - 10.0.0.0/8
-  #     - 192.168.0.0/16
-  #   env_vars:
-  #     - name: INFRAHUB_LOG_LEVEL
-  #       value: INFO
-  #     - name: INFRAHUB_PRODUCTION
-  #       value: "true"
+  config:
+    # ingress_class: traefik
+    # fqdn_suffix: infrahub.example.com
+    # ip_whitelist:
+    #   - 10.0.0.0/8
+    #   - 192.168.0.0/16
+    # env_vars:
+    #   - name: INFRAHUB_LOG_LEVEL
+    #     value: INFO
+    #   - name: INFRAHUB_PRODUCTION
+    #     value: "true"
+    #
+    # Replica override: task-worker runs 1 pod instead of the driver default
+    # of 2. database, task-manager-db and cache are singleton components and
+    # do not accept a count above 1.
+    components:
+      - name: task-worker
+        replicas: 1

@@ -45,6 +45,7 @@ const sidebars: SidebarsConfig = {
         'drivers/generic-app',
         'drivers/migrating-env-vars',
         'drivers/migrating-container-overrides',
+        'drivers/migrating-replica-parameters',
       ],
     },
     {
