@@ -255,17 +255,15 @@ class ApplicationHelmReleaseBuilder:
             component container by post-render patch, not through the values
             template (see :meth:`build_component_container_post_rendering_patches` and
             ``dev/guides/driver-env-var-consumption.md``).
+
+            ``ingress_class`` is template data in both modes, with or without
+            a dedicated ingress controller. Driver templates do not set the
+            Ingress class, because Styrmin sets it, or removes it with a
+            dedicated ingress controller, after the chart renders (see
+            ``IngressUtility.build_app_post_rendering_patches``).
         """
         # Turn the context model into a dict
         context_dict: dict = context.model_dump(exclude_none=True)
-
-        # When dedicated_ingress is enabled, strip ingress_class from the rendering
-        # context so driver templates do not set spec.ingressClassName on Ingress
-        # resources.  The dedicated controller uses annotation-based matching instead.
-        if context.instance.config.dedicated_ingress is not None:
-            for section in ("instance", "cluster", "environment", "deployment"):
-                config = context_dict.get(section, {}).get("config", {})
-                config.pop("ingress_class", None)
 
         # Render the value template using jinja
         environment = get_jinja_environment(undefined=SilentUndefined)

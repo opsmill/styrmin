@@ -8,8 +8,10 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+import yaml
 
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
+    IngressClassNameRemovalPatch,
     TargetPatch,
 )
 from styrmin_backend.agent.service.kubernetes.resources.blocks.spec import PostRenderers
@@ -514,22 +516,46 @@ class TestUtilityExtensibility:
         assert resources[0]["metadata"]["name"] == "rel-test"
 
 
-class TestDedicatedIngressPatching:
-    """T021-T022: Test ingressClassName patching with DedicatedIngressConfig."""
+class TestIngressClassNameRemovalPatch:
+    """023 research D-001: the strategic merge patch sets ``spec.ingressClassName`` to null."""
 
-    def test_dedicated_ingress_does_not_set_ingress_class_name(
+    def test_renders_ingress_class_name_null(self) -> None:
+        rendered = IngressClassNameRemovalPatch().render_value()
+
+        assert yaml.safe_load(rendered) == {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "Ingress",
+            "metadata": {"name": "any"},
+            "spec": {"ingressClassName": None},
+        }
+        assert "ingressClassName: null" in rendered
+
+
+def _removal_patches(patches: list[TargetPatch]) -> list[TargetPatch]:
+    return [p for p in patches if isinstance(p.patch, IngressClassNameRemovalPatch)]
+
+
+class TestDedicatedIngressPatching:
+    """Ingress class patches per mode (023 contracts/post-render-patch.md).
+
+    Dedicated ingress controller: remove ``spec.ingressClassName`` and set the
+    annotation to the implementation. Otherwise: set both to the resolved
+    ``ingress_class``, or neither when no class is resolved.
+    """
+
+    def test_dedicated_ingress_removes_ingress_class_name(
         self, ingress_utility: IngressUtility
     ) -> None:
-        """T021: When dedicated_ingress is set, ingressClassName is NOT patched.
-
-        The dedicated controller uses annotation-based matching
-        (kubernetes.io/ingress.class), not spec.ingressClassName.
-        """
+        """FR-002: the class the chart rendered is removed, not replaced."""
         ctx = _make_context(
             dedicated_ingress=DedicatedIngressConfig(implementation="traefik"),
             ingress_class="cluster-traefik",
         )
         patches = ingress_utility.build_app_post_rendering_patches(ctx, RELEASE_REF)
+
+        removal_patches = _removal_patches(patches)
+        assert len(removal_patches) == 1
+        assert removal_patches[0].target.render_value() == {"kind": "Ingress"}
         spec_patches = [p for p in patches if hasattr(p.patch, "specs")]
         assert len(spec_patches) == 0
 
@@ -550,21 +576,29 @@ class TestDedicatedIngressPatching:
     def test_fallback_to_cluster_ingress_class(
         self, ingress_utility: IngressUtility
     ) -> None:
-        """T022: When dedicated_ingress is not set, falls back to cluster ingress_class."""
+        """FR-001: When dedicated_ingress is not set, falls back to cluster ingress_class."""
         ctx = _make_context(dedicated_ingress=None, ingress_class="cluster-traefik")
         patches = ingress_utility.build_app_post_rendering_patches(ctx, RELEASE_REF)
         spec_patches = [p for p in patches if hasattr(p.patch, "specs")]
         assert len(spec_patches) == 1
         assert spec_patches[0].patch.specs["ingressClassName"] == "cluster-traefik"  # type: ignore[attr-defined]
+        assert _removal_patches(patches) == []
+        annotation_patches = [p for p in patches if hasattr(p.patch, "annotations")]
+        annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
+        assert annotations["kubernetes.io/ingress.class"] == "cluster-traefik"
 
     def test_no_ingress_class_patch_when_neither_set(
         self, ingress_utility: IngressUtility
     ) -> None:
-        """No ingressClassName patch when neither dedicated_ingress nor ingress_class is set."""
+        """FR-006: no class patch, removal patch or class annotation, so the chart's class stays."""
         ctx = _make_context(dedicated_ingress=None, ingress_class=None)
         patches = ingress_utility.build_app_post_rendering_patches(ctx, RELEASE_REF)
         spec_patches = [p for p in patches if hasattr(p.patch, "specs")]
         assert len(spec_patches) == 0
+        assert _removal_patches(patches) == []
+        annotation_patches = [p for p in patches if hasattr(p.patch, "annotations")]
+        annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
+        assert "kubernetes.io/ingress.class" not in annotations
 
 
 def _make_context(
