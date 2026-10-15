@@ -427,6 +427,11 @@ async def test_scale_server_and_singleton_guard(
             environment_id=image_override_environment["environment_id"],
             deployment_id=deployment_id,
         )
+        # Every component simple-app declares has a replicas line.
+        assert await detail.read_component_replicas_summary() == {
+            "server": "2 (override)",
+            "database": "1 (driver default, singleton)",
+        }
         assert await detail.read_component_replicas_field(component="database") == {
             "value": "1 (singleton)",
             "read_only": True,

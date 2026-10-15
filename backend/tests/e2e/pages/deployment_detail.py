@@ -571,6 +571,20 @@ class DeploymentDetailPage:
         await self._close_config_drawer(drawer)
         return field
 
+    async def read_component_replicas_summary(self) -> dict[str, str]:
+        """Open the Settings tab and read each replicas line of the Component
+        Overrides card: ``{component: "2 (override)", ...}``."""
+        await self._page.get_by_role("button", name="Settings", exact=True).click()
+        lines = self._page.locator("[data-testid=component-replicas]")
+        await expect(lines.first).to_be_visible()
+        pairs = await lines.evaluate_all(
+            """rows => rows.map(row => [
+              row.dataset.component,
+              row.querySelector('[data-testid=component-replicas-value]')?.textContent ?? '',
+            ])"""
+        )
+        return dict(pairs)
+
     async def set_component_container_override(
         self, *, component: str, command: list[str] | None, args: list[str] | None
     ) -> None:
