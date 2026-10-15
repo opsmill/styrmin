@@ -131,7 +131,7 @@ The deterministic rule that picks which **application driver version** a **deplo
 _Avoid_: "newest version" (ambiguous between the two orderings), "first match" (the pre-rule behavior), "default driver version" (conflates with `default_version`).
 
 **Component**:
-A logical sub-part of an application (e.g. `server`, `task-worker`) declared by the **application driver** and identified by a Kubernetes label selector (`styrmin/component`). A **deployment** can enable/disable and configure components individually. Lifecycle controls (start/stop, restart) act on the **component** as a unit. The replica count is set by a **replica override**.
+A logical sub-part of an application (e.g. `server`, `task-worker`) declared by the **application driver** and identified by a Kubernetes label selector (`styrmin/component`). A **deployment** can enable/disable and configure components individually. Lifecycle controls (start/stop, restart) act on the **component** as a unit. Its replica count comes from a **replica override**, the driver default or the chart's count, in that order.
 _Avoid_: "service" (that is its own concept), "pod" (a **component** is observed via one or more **pods**), "module".
 
 **Singleton component**:
@@ -143,7 +143,7 @@ A network-addressable endpoint declared by the **application driver** under `spe
 _Avoid_: "endpoint" (HTTP-specific), "port" (one attribute of a service), conflating with Kubernetes-`Service` when ambiguity matters — qualify as "K8s Service" if needed.
 
 **Parameter**:
-A user-configurable input declared by the **application driver** (`name`, `label`, `kind`, `default`). Surfaced through the GraphQL API and **frontend** forms; flows through to **context** as part of the **deployment**'s config. On a **driver version** change, Styrmin drops a stored value for a parameter that the target version no longer declares when the value equals the parameter's default in the current version; otherwise Styrmin rejects the change and names the parameter and its value.
+A user-configurable input declared by the **application driver** (`name`, `label`, `kind`, `default`). Surfaced through the GraphQL API and **frontend** forms; flows through to **context** as part of the **deployment**'s config. On a **driver version** change, Styrmin drops a stored or submitted value for a parameter that the target version no longer declares when the value equals the parameter's default in the current version, with the same type; otherwise Styrmin rejects the change (`RETIRED_PARAMETER_VALUE`) and names the parameter and its value ([ADR-070](dev/adr/0070-replica-overrides-and-retired-parameters.md)).
 _Avoid_: "field" (UI term), "option", "setting", conflating with **prompt argument** in driver action templates.
 
 **Action**:
@@ -243,7 +243,7 @@ The per-**component** image reference a user may set on a single **deployment**,
 _Avoid_: "custom image", "image patch", "tag override". Distinct from a registry mirror (release-wide rewrite of every image, a separate issue).
 
 **Replica override**:
-The replica count a user sets on one **component** of a single **deployment** (`DeploymentConfig.components[<name>].replicas`), an integer of 1 or more. Styrmin applies it with a post-render patch to `spec.replicas` of every `Deployment` and `StatefulSet` that matches the component's label selector; it needs no **component container**. Order of precedence: the replica override, then the driver default (`components.<name>.replicas` in the **driver specification file**), then the count the chart renders, which Styrmin does not patch. A stopped component stays at 0 pods and keeps its override. Component scope only, no layering. See [issue #202](https://github.com/opsmill/styrmin/issues/202).
+The replica count a user sets on one **component** of a single **deployment** (`DeploymentConfig.components[<name>].replicas`), an integer from 1 to 2147483647. Styrmin applies it with a post-render patch to `spec.replicas` of every `Deployment` and `StatefulSet` that matches the component's label selector; it needs no **component container**. Order of precedence: the replica override, then the driver default (`components.<name>.replicas` in the **driver specification file**), then the count the chart renders, which Styrmin does not patch. A stopped component stays at 0 pods and keeps its override. An override on a component that the bound **driver version** no longer declares is kept and not applied. Component scope only, no layering. See [ADR-070](dev/adr/0070-replica-overrides-and-retired-parameters.md) and [issue #202](https://github.com/opsmill/styrmin/issues/202).
 _Avoid_: "scale override", "replica parameter", "replicas setting".
 
 ### Recorded intent and kubernetes

@@ -64,8 +64,9 @@ Deployment on it. One **agent** runs per Cluster.
 
 **Component** — A logical sub-part of an application (e.g. `server`,
 `task-worker`) declared by the Application Driver and identified by a
-Kubernetes label selector. Lifecycle controls (start/stop, restart,
-scale) act on the Component as a unit.
+Kubernetes label selector. Lifecycle controls (start/stop, restart) act
+on the Component as a unit. Its replica count comes from a **Replica
+override**, the driver default or the Helm chart.
 
 **Component container** — The one container in a Component's pod
 that the Application Driver names (`components.<name>.container`) to
@@ -82,10 +83,13 @@ Driver](../drivers/creating-a-driver.md#the-component-container).
 
 **Component overrides** — The mechanism by which a Deployment
 overrides the Application Driver Version's default Component config:
-per-component env vars, **Image override**, and container `command` and
-`args`. Styrmin applies all of them after the Helm chart renders, to the
-**Component container**; the driver's values template does not pass
-them to the chart. See [Migrating container
+per-component env vars, **Image override**, container `command` and
+`args`, and **Replica override**. Styrmin applies all of them after the
+Helm chart renders; the driver's values template does not pass them to
+the chart. Env vars, the image override, `command` and `args` go to the
+**Component container**; the replica override goes to the component's
+`Deployment` and `StatefulSet` workloads and needs no component
+container. See [Migrating container
 overrides](../drivers/migrating-container-overrides.md).
 
 **Constituent backup / constituent restore** — An ordinary
@@ -202,7 +206,12 @@ Kubernetes resources. See [The operator and
 ### P
 
 **Parameter** — A user-configurable input declared by the Application
-Driver. Surfaced through the GraphQL API and frontend forms.
+Driver. Surfaced through the GraphQL API and frontend forms. When a
+Deployment changes to a driver version that no longer declares a
+parameter, Styrmin drops the parameter's value if it equals the
+parameter's default in the current driver version, and otherwise rejects
+the change (`RETIRED_PARAMETER_VALUE`). See [Migrating Replica
+Parameters](../drivers/migrating-replica-parameters.md).
 
 **PodStatus** — Per-pod observed-state record (one row per
 `(deployment_id, pod_name)`).
@@ -224,6 +233,16 @@ calls the agent directly.
 **Remediator** — The server service that maps the diff between a
 newly generated Instance and the active Instance to a Prefect flow.
 
+**Replica override** — The replica count a user sets on one Component of
+one Deployment, a whole number of 1 or more. Styrmin applies it after the
+Helm chart renders, to `spec.replicas` of every `Deployment` and
+`StatefulSet` that matches the component's label selector. Order of
+precedence: the replica override, then the driver default
+(`components.<name>.replicas`, or 1 for a **Singleton component**), then
+the chart's count, which Styrmin does not change. A stopped component
+runs 0 pods and keeps its override. See [Replica
+overrides](./replica-overrides.md).
+
 ### S
 
 **SDK / styrmin-sdk** — The async Python client SDK that wraps
@@ -236,6 +255,13 @@ running.
 **Service (deployed service)** — A network-addressable endpoint
 declared by the Application Driver and materialised as a Kubernetes
 `Service` object.
+
+**Singleton component** — A Component that the Application Driver
+Version marks `singleton: true`. Styrmin sets its replica count to 1 and
+rejects a **Replica override** greater than 1
+(`SINGLETON_REPLICA_OVERRIDE`). The flag limits the replica count, not
+the number of pods that run at the same time during a rolling update.
+See [Replica overrides](./replica-overrides.md#singleton-components).
 
 **Status reporter** — The coroutine inside the agent that polls
 Kubernetes and posts `PodStatus` / `DeploymentStatus` snapshots back

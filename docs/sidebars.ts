@@ -74,6 +74,7 @@ const sidebars: SidebarsConfig = {
         'concepts-and-architecture/ingress-and-networking',
         'concepts-and-architecture/backups-and-restores',
         'concepts-and-architecture/image-overrides',
+        'concepts-and-architecture/replica-overrides',
         'concepts-and-architecture/hooks-and-actions',
         'concepts-and-architecture/status-reporting',
       ],

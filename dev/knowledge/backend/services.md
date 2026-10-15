@@ -17,7 +17,6 @@ styrmin_backend/services/
 ├── instances.py                   # Instance lifecycle
 ├── tasks.py                       # Task state management
 ├── pod_status.py                  # Server-side handler for reportPodStatuses
-├── parameters.py                  # Driver parameter resolution
 ├── services_discovery.py          # In-cluster service discovery
 ├── capabilities.py                # Cluster/environment capability derivation
 ├── backup_storage_locations.py    # Backup storage location (BSL) management
@@ -84,6 +83,17 @@ styrmin_backend/services/
 │   ├── overrides.py               # override_applies, applicable_overrides: the overrides that apply in a context
 │   ├── patch_builder.py           # merge patch (env, command, args) + JSON6902 guard (and image) per Deployment/StatefulSet
 │   └── exceptions.py              # guard-failure parser, ComponentContainerNotFoundError
+│
+├── replicas/                      # Per-component replica counts (023, ADR-070)
+│   ├── resolver.py                # ReplicaSource, ResolvedReplicas, resolve_replicas, replica_patch_count
+│   ├── patch_builder.py           # build_component_replica_patches: one spec.replicas patch per kind per component
+│   ├── validator.py               # write-time checks: unknown component, singleton above 1
+│   └── exceptions.py              # InvalidReplicaCountError, UnknownComponentReplicaOverrideError, SingletonReplicaOverrideError
+│
+├── parameters/                    # Driver parameter values
+│   ├── validator.py               # validate_parameter_values: defaults, kinds, unknown parameters
+│   ├── retired.py                 # drop_retired_parameters: the rule on a driver version change (023)
+│   └── exceptions.py              # RetiredParameterValueError
 │
 └── utilities/                     # Infrastructure utilities (ingress, etc.)
     └── utilities.py               # Utility management
@@ -270,6 +280,11 @@ Orchestrates application deployments.
 | `effective_dedicated_ingress(environment_config, cluster_config)` | The environment's own `dedicated_ingress`, else the cluster's. Any object, including `{}`, turns the controller on; only an absent or null value turns it off. |
 | `rendered_dedicated_ingress(deployment)` | The `dedicated_ingress` value that the deployment's active instance was rendered with, or `None` without an active instance. |
 | `tear_down_unused_ingress_controller(environment_id, uow) -> int` | Request the deletion of the environment's controller once no application depends on it (lifecycle step 5 below). Runs in the caller's transaction, does not commit, and returns the number of controllers whose deletion it requested. |
+
+Replica overrides and retired parameters (023, [ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md)):
+
+- `_validate_replica_overrides` builds the component declarations of a driver version with `parse_stored_component_declaration` and calls `validate_replica_overrides`. `_validate_config_write` calls it after `validate_deployment_config`, so `INVALID_REPLICA_COUNT` comes first, and before `_validate_component_container_targets`. `deploy_application` calls it with no stored config. `update_deployment_version` without a submitted config calls it on the stored config against the target driver version.
+- `update_deployment_version` calls `drop_retired_parameters` on the merged parameter map only when the target driver version differs from the bound one, before `validate_parameter_values` runs against the target driver version and before any ingress dispatch or task.
 
 **Deployment Flow:**
 
@@ -505,6 +520,40 @@ member; the deploy-time validator rejects out-of-set values before any render.
 Values that must not vary per deployment belong as literals in `values.j2.yml`,
 not as parameters with a default — a default is an invitation to change it.
 
+A replica count is not a parameter. Since 023, a component declares a driver default with
+`replicas` and a fixed count of 1 with `singleton: true` (see [Replica counts](#replica-counts-servicesreplicas)).
+
+## Replica counts (`services/replicas/`)
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-15 -->
+
+Design rationale: [ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md).
+
+| Module | Contents |
+|--------|----------|
+| `resolver.py` | `ReplicaSource` (`OVERRIDE`, `DRIVER_DEFAULT`, `CHART`), the frozen `ResolvedReplicas(count, source, override_applies)`, `resolve_replicas(declared_replicas, singleton, override, is_orphaned)` and `replica_patch_count(resolved, enabled)`. Pure functions; the patch builder and `Deployment.componentReplicas` call them. |
+| `patch_builder.py` | `build_component_replica_patches(context)`: for each component of `context.components` and each kind in `REPLICA_PATCH_KINDS` (`Deployment`, `StatefulSet`), at most one `SpecPatch(specs={"replicas": N})` targeted by the component's label selector. `N` is 0 for a stopped component; no patch when the source is `CHART`. Logs the component, count, source and enabled flag at debug level. `ApplicationHelmReleaseBuilder.build()` places the patches after the component label patches and before the backup, scheduling and component container patches. |
+| `validator.py` | `validate_replica_overrides(config, components, stored_config, checked_against)` on the raw config dict: `UnknownComponentReplicaOverrideError` for an added or changed override on an undeclared component (the stored value sent again passes), `SingletonReplicaOverrideError` for an override above 1 on a singleton component, changed or not. |
+| `exceptions.py` | `InvalidReplicaCountError` (`INVALID_REPLICA_COUNT`), `UnknownComponentReplicaOverrideError` (`UNKNOWN_COMPONENT_REPLICA_OVERRIDE`), `SingletonReplicaOverrideError` (`SINGLETON_REPLICA_OVERRIDE`). |
+
+The count itself is checked by `ComponentConfigBlock` (`context/models/config.py`), which raises
+`InvalidReplicaCountError` before type conversion. The driver-side keys are typed by
+`ReplicaDeclaration` (`context/models/components.py`), the base of both `ArbitrarySectionModel`
+classes; see [data-models.md](data-models.md#componentconfig).
+
+## Retired parameters (`services/parameters/retired.py`)
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-15 -->
+
+`drop_retired_parameters(values, current_definitions, target_definitions, checked_against)`
+returns the parameter map without the parameters that the current driver version declares and the
+target does not, when each holds the current default with the same type
+(`type(value) is type(default) and value == default`). It logs each drop at info level. Any other
+value raises `RetiredParameterValueError` (`RETIRED_PARAMETER_VALUE`, in
+`services/parameters/exceptions.py`) for the first such parameter by name. Keys that neither
+version declares are kept for `validate_parameter_values`, which rejects them as unknown. The input
+map is not modified.
+
 ## Reconciliation Engine (`services/reconciliation/`)
 
 Implements declarative state management by comparing desired state (deployment) with current state (instance). See [reconciliation.md](reconciliation.md) for full details.
@@ -699,6 +748,10 @@ ServiceError (base)
 ├── InvalidContainerArgsError
 ├── UnknownComponentContainerOverrideError
 ├── ContainerOverrideSizeLimitExceededError
+├── InvalidReplicaCountError                # services/replicas/exceptions.py; INVALID_REPLICA_COUNT
+├── UnknownComponentReplicaOverrideError    # UNKNOWN_COMPONENT_REPLICA_OVERRIDE
+├── SingletonReplicaOverrideError           # SINGLETON_REPLICA_OVERRIDE
+├── RetiredParameterValueError              # services/parameters/exceptions.py; RETIRED_PARAMETER_VALUE
 └── RetiredTemplateFilterError              # services/exceptions.py; component_env_vars, component_command, component_args
 ```
 
@@ -781,6 +834,9 @@ The resolver hands the user-supplied list straight in; normalisation (dedup, ord
 | [services/applications.py](backend/styrmin_backend/services/applications.py) | Driver management |
 | [services/reconciliation/remediation.py](backend/styrmin_backend/services/reconciliation/remediation.py) | State reconciliation |
 | [services/driver/provider.py](backend/styrmin_backend/services/driver/provider.py) | Git-based driver loading |
+| [services/replicas/resolver.py](backend/styrmin_backend/services/replicas/resolver.py) | Order of precedence of a component's replica count |
+| [services/replicas/patch_builder.py](backend/styrmin_backend/services/replicas/patch_builder.py) | `spec.replicas` post-render patches, stopped state included |
+| [services/parameters/retired.py](backend/styrmin_backend/services/parameters/retired.py) | Rule for parameters a target driver version no longer declares |
 | [services/telemetry/payload.py](backend/styrmin_backend/services/telemetry/payload.py) | Data of the daily telemetry report |
 | [api/auth/admin_guards.py](backend/styrmin_backend/api/auth/admin_guards.py) | Pure last-admin guard functions over `AdminSnapshot` |
 | [api/auth/membership.py](backend/styrmin_backend/api/auth/membership.py) | Set-semantics membership replacement (diff-and-mutate) |

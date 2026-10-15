@@ -31,6 +31,7 @@ the deeper internal docs when you want more.
 | [Ingress and networking](./ingress-and-networking.md) | You want to understand how an application becomes reachable on a URL after you deploy it. |
 | [Backups and restores](./backups-and-restores.md) | You want to know what Styrmin actually does when you click "backup", and where the data ends up. |
 | [Image overrides](./image-overrides.md) | You want one component of a deployment to run a custom or patched build without forking its driver. |
+| [Replica overrides](./replica-overrides.md) | You want one component of a deployment to run more or fewer pods, or you want to know where a component's pod count comes from. |
 | [Lifecycle hooks and actions](./hooks-and-actions.md) | You're about to write a driver, or you want to know how Styrmin runs the right code at the right moment. |
 | [Status reporting](./status-reporting.md) | You're wondering how the UI stays up-to-date with what's actually running in the cluster. |
 

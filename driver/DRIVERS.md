@@ -52,6 +52,8 @@ spec:
   components:              # Optional component definitions
     <component-name>:
       container: <string>  # Optional component container: receives user env var, image, command and args overrides by post-render
+      replicas: <integer>  # Optional driver default replica count, from 1 to 2147483647
+      singleton: <boolean> # Optional, default false: the replica count is fixed at 1
       identifier:
         label:
           <key>: <value>   # Kubernetes label selector
@@ -463,6 +465,9 @@ components:
       label:
         <key>: <value>   # Kubernetes label selector
     # Optional fields:
+    container: <string>  # Component container that receives env var, image, command and args overrides
+    replicas: <integer>  # Driver default replica count, from 1 to 2147483647
+    singleton: <boolean> # Default false; true fixes the replica count at 1
     cpu: <number>        # CPU allocation
     memory: <string>     # Memory allocation
 ```
@@ -470,9 +475,41 @@ components:
 ### How Components Work
 
 1. The `identifier.label` is used to select Kubernetes resources (Deployments, StatefulSets, etc.)
-2. When `stop_components` is called, Styrmin scales down the matching resources
-3. When `start_components` is called, Styrmin scales them back up
+2. When `stop_components` is called, Styrmin sets `spec.replicas` of the matching `Deployment` and `StatefulSet` resources to 0
+3. When `start_components` is called, Styrmin sets them back to the component's replica count (see [Replica counts](#replica-counts))
 4. Component names in action primitives must match the names defined in the driver spec
+
+### Replica counts
+
+Styrmin sets each component's replica count after the chart renders, with a post-render patch on `spec.replicas` of every `Deployment` and `StatefulSet` that the component's label selector matches. `Job`, `CronJob` and `DaemonSet` resources are not changed. The count comes from the first of these that is set:
+
+1. The **replica override** that a user sets on the component of a deployment (`components[].replicas` in the deployment config).
+2. The **driver default**: `replicas` on the component, or 1 when the component sets `singleton: true` and no `replicas`.
+3. The count that the chart renders: Styrmin does not change `spec.replicas`.
+
+| Key | Type | Default | Effect |
+|-----|------|---------|--------|
+| `replicas` | integer from 1 to 2147483647 | not set | The count of the component when a deployment sets no replica override |
+| `singleton` | boolean | `false` | The count is fixed at 1: Styrmin sets 1 when `replicas` is not set, and rejects a replica override greater than 1 with `SINGLETON_REPLICA_OVERRIDE` |
+
+Mark a component `singleton: true` when a second pod would break it, for example a database that runs as a single primary. The flag limits the replica count, not the number of pods during a rolling update: the chart's update strategy can run a second pod for a short time.
+
+A component needs no `container` to receive a replica count, and `values.j2.yml` does not pass a count to the chart. Do not declare a parameter for a replica count; users set a replica override instead.
+
+The driver fails to load, and no driver version is stored, when:
+
+- `singleton: true` is combined with `replicas` greater than 1;
+- `replicas` is below 1 or above 2147483647, a string, a float or a boolean;
+- `singleton` is not a boolean.
+
+The error names the field, for example:
+
+```text
+- spec.components.database: Value error, a singleton component runs exactly 1 replica; `singleton: true` cannot be combined with `replicas: 3`
+- spec.components.server.replicas: Input should be greater than or equal to 1 (found 0)
+```
+
+`singleton: true` with `replicas: 1` loads.
 
 ### Example
 
@@ -480,14 +517,17 @@ components:
 components:
   server:
     cpu: 4
+    replicas: 1
     identifier:
       label:
         service: infrahub-server
   task-worker:
+    replicas: 2
     identifier:
       label:
         service: infrahub-task-worker
   database:
+    singleton: true
     identifier:
       label:
         infrahub/service: database
