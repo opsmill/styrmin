@@ -82,8 +82,6 @@ service:
 
 ingress:
   main:
-    # Empty with a dedicated ingress: Styrmin removes the class from the context and annotates the Ingress itself.
-    className: "{{ instance.config.ingress_class }}"
     # A host is emitted only when known: an empty host would make a catch-all rule.
     hosts:
 {%- for host in [services['app'].primary_fqdn, readable_fqdn] if host %}

@@ -103,7 +103,7 @@ A driver author has released a driver version whose template still sets the clas
 - **FR-004**: Driver authors MUST be able to leave every Ingress class value out of `values.j2.yml` and get the results of FR-001 and FR-002. Test: the example drivers without the class line, deployed in both modes.
 - **FR-005**: A driver version whose template still sets the class MUST deploy in both modes without moving to a new driver version. Test: the `simple-app` chart rendered with `className` set, in both modes.
 - **FR-006**: Without a dedicated ingress controller and with no `ingress_class` resolved, Styrmin MUST leave the class that the chart rendered unchanged, in both `spec.ingressClassName` and the annotation.
-- **FR-007**: The `simple-app`, `semaphore` and `slurpit` example drivers MUST drop the Ingress class line from their values template and keep their `spec.version`.
+- **FR-007**: The `simple-app`, `semaphore`, `slurpit` and `generic-app` example drivers MUST drop the Ingress class line from their values template and keep their `spec.version`.
 - **FR-008**: The driver documentation pages "Creating a driver" and "Context" MUST drop the `className` line from their examples and say that Styrmin sets the Ingress class. The page "Ingress and networking" MUST state which class each mode gives an application's Ingress.
 - **FR-009**: The change MUST NOT change the GraphQL schema, the SDK, `styrminctl`, the frontend, the database schema, the driver format or the `ingress_class` config key, and MUST NOT add an error type or error code.
 
@@ -120,7 +120,7 @@ No new entity. The change affects these existing ones:
 
 ### Measurable Outcomes
 
-- **SC-001**: The three example drivers and the two driver documentation pages ("Creating a driver" and "Context") contain no Ingress class value.
+- **SC-001**: The four example drivers and the two driver documentation pages ("Creating a driver" and "Context") contain no Ingress class value.
 - **SC-002**: For a deployment of each example driver, every Ingress has the same `spec.ingressClassName` and annotation before and after the change, with and without a dedicated ingress controller.
 - **SC-003**: In an environment with a dedicated ingress controller, a driver version whose chart sets its own class, either the resolved `ingress_class` or another value such as `nginx`, reaches `RUNNING`, and its Ingress has the shape that the dedicated ingress controller serves: no `spec.ingressClassName` and the annotation `traefik`. Verified by the Ingress shape that the integration test checks, which is the shape that `test_traffic_routes_through_dedicated_ingress` reaches over HTTP (see Testing Approach, accepted gap).
 - **SC-004**: No deployment has to move to a new driver version because of this change.
