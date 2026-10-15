@@ -25,8 +25,8 @@ description: "Tasks for 023: per-component replica counts"
 
 **Purpose**: Record a green baseline and keep the pre-change infrahub drivers for the upgrade tests.
 
-- [ ] T001 Run `uv sync`, then `uv run pytest backend/tests/unit/agent backend/tests/unit/services/component_container backend/tests/unit/services/driver backend/tests/integration/test_component_container_kustomize.py -q` and note the result as the baseline (no file change)
-- [ ] T002 Copy `driver/examples/infrahub/` (version 4: `driver.styrmin.yml`, `values.j2.yml`, `actions.py`) unchanged into `backend/tests/functional/fixtures/legacy_drivers/infrahub-v4/`, and `driver/examples/infrahub-enterprise/` (version 3) into `backend/tests/functional/fixtures/legacy_drivers/infrahub-enterprise-v3/`, with a `README.md` in `backend/tests/functional/fixtures/legacy_drivers/` that says these are the driver versions that declared `replicas_server` and `replicas_task_worker`, kept for the retired-parameter upgrade tests (research D-014). This MUST happen before T046 and T047 change the example drivers
+- [X] T001 Run `uv sync`, then `uv run pytest backend/tests/unit/agent backend/tests/unit/services/component_container backend/tests/unit/services/driver backend/tests/integration/test_component_container_kustomize.py -q` and note the result as the baseline (no file change)
+- [X] T002 Copy `driver/examples/infrahub/` (version 4: `driver.styrmin.yml`, `values.j2.yml`, `actions.py`) unchanged into `backend/tests/functional/fixtures/legacy_drivers/infrahub-v4/`, and `driver/examples/infrahub-enterprise/` (version 3) into `backend/tests/functional/fixtures/legacy_drivers/infrahub-enterprise-v3/`, with a `README.md` in `backend/tests/functional/fixtures/legacy_drivers/` that says these are the driver versions that declared `replicas_server` and `replicas_task_worker`, kept for the retired-parameter upgrade tests (research D-014). This MUST happen before T046 and T047 change the example drivers
 
 ---
 

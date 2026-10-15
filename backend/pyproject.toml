@@ -11,6 +11,10 @@ dependencies = [
 [project.scripts]
 styrmin = "styrmin_backend.cli:app"
 
+[tool.ruff]
+# Byte-identical copies of earlier example driver versions; see the README there.
+extend-exclude = ["tests/functional/fixtures/legacy_drivers"]
+
 [tool.ruff.lint.per-file-ignores]
 "backend/tests/**.py" = [
     "S101", # Use of assert detected
