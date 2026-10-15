@@ -31,7 +31,6 @@ admin:
 
 ingress:
   enabled: true
-  className: "{{ instance.config.ingress_class }}"
   hosts:
     - host: "{{ services.semaphore.primary_fqdn }}"
       paths:
