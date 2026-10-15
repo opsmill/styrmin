@@ -553,9 +553,6 @@ input DeploymentConfigInput {
   """Kubernetes RuntimeClass name applied to pods in this deployment."""
   runtimeClass: String = null
 
-  """Node-selector expression applied to pods in this deployment."""
-  nodeSelector: String = null
-
   """
   Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment.
   """
@@ -1502,7 +1499,6 @@ Full-replacement input for cluster configuration updates. Submit the complete de
 input UpdateClusterInput {
   ingressClass: String = null
   runtimeClass: String = null
-  nodeSelector: String = null
   fqdnSuffix: String = null
   externalUrlScheme: ExternalUrlScheme = null
   externalUrlPort: Int = null
@@ -1610,9 +1606,6 @@ input UpdateDeploymentInput {
 
   """Kubernetes RuntimeClass name applied to pods in this deployment."""
   runtimeClass: String = null
-
-  """Node-selector expression applied to pods in this deployment."""
-  nodeSelector: String = null
 
   """
   Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment.

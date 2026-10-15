@@ -35,12 +35,11 @@ function ttlTile(): HTMLElement {
 }
 
 describe("StorageRuntimeSummary: backup retention tile", () => {
-  it("renders a BACKUP TTL tile alongside the pre-existing three", () => {
+  it("renders a BACKUP TTL tile alongside the pre-existing two", () => {
     renderSummary();
 
     expect(screen.getByText("DB SIZE")).toBeInTheDocument();
     expect(screen.getByText("STORAGE CLASS")).toBeInTheDocument();
-    expect(screen.getByText("NODE SELECTOR")).toBeInTheDocument();
     expect(screen.getByText("BACKUP TTL")).toBeInTheDocument();
   });
 
@@ -125,10 +124,10 @@ describe("StorageRuntimeSummary: backup retention tile", () => {
 
   it("leaves the pre-existing tiles' env-inheritance labelling untouched", () => {
     // The `origin` prop defaults to "env", so adding it must not change how
-    // the three two-scope tiles read.
+    // the two-scope tiles read.
     renderSummary({
       current: {},
-      environment: { dbSize: "small", nodeSelector: "role=worker" },
+      environment: { dbSize: "small" },
       cluster: {},
     });
 

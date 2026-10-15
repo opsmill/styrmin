@@ -163,7 +163,6 @@ _EXTERNAL_DNS_ENDPOINTS_TYPE_ROW: dict[str, Any] = {
 _INGRESS_CLASS_ROW: dict[str, Any] = {"ingressClass": "nginx"}
 _DB_SIZE_ROW: dict[str, Any] = {"dbSize": "20Gi"}
 _RUNTIME_CLASS_ROW: dict[str, Any] = {"runtimeClass": "kata"}
-_NODE_SELECTOR_ROW: dict[str, Any] = {"nodeSelector": "tier=batch"}
 _STANDARD_STORAGE_ROW: dict[str, Any] = {
     "standardStorage": {"storageClass": "fast-ssd"}
 }
@@ -319,8 +318,6 @@ _PROPAGATION_ROWS: list[tuple[str, dict[str, Any], str, Any]] = [
     ("db_size", _DB_SIZE_ROW, "config", {"db_size": "20Gi"}),
     # Row 20
     ("runtime_class", _RUNTIME_CLASS_ROW, "config", {"runtime_class": "kata"}),
-    # Row 21
-    ("node_selector", _NODE_SELECTOR_ROW, "config", {"node_selector": "tier=batch"}),
     # Row 22
     (
         "standard_storage",

@@ -15,14 +15,14 @@ interface Props {
    * would be a false statement about live behaviour, so the tile needs this
    * layer to tell the two apart.
    *
-   * The other three tiles keep their two-scope display unchanged.
+   * The other two tiles keep their two-scope display unchanged.
    */
   cluster: UpdateDeploymentInput;
 }
 
 /**
- * Read-only summary for `dbSize`, `standardStorage.storageClass`,
- * `nodeSelector`, and `backupTtl`. Rendered as a horizontal strip of
+ * Read-only summary for `dbSize`, `standardStorage.storageClass`, and
+ * `backupTtl`. Rendered as a horizontal strip of
  * label/value pairs in small-caps mono labels (per Paper mock D2).
  */
 export function StorageRuntimeSummary({
@@ -36,11 +36,6 @@ export function StorageRuntimeSummary({
     environment.standardStorage?.storageClass,
     (v) => v ?? "—",
   );
-  const nodeSelector = resolve(
-    current.nodeSelector,
-    environment.nodeSelector,
-    (v) => v ?? "—",
-  );
   const backupTtl = resolveBackupTtl(
     current.backupTtl,
     environment.backupTtl,
@@ -49,12 +44,11 @@ export function StorageRuntimeSummary({
 
   return (
     <ConfigSummaryCard title="Storage & Runtime">
-      {/* Four tiles: two-up on small screens rather than four-up, so the
+      {/* Three tiles: two-up on small screens rather than three-up, so the
           mono values are not crushed on a narrow viewport. */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Pair label="DB SIZE" {...dbSize} />
         <Pair label="STORAGE CLASS" {...storageClass} />
-        <Pair label="NODE SELECTOR" {...nodeSelector} />
         <Pair label="BACKUP TTL" testId="storage-backup-ttl" {...backupTtl} />
       </div>
     </ConfigSummaryCard>

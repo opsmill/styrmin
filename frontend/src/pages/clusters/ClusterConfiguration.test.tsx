@@ -73,7 +73,6 @@ describe("ClusterConfiguration", () => {
           fast_storage: { storage_class: "local-path" },
           db_size: "10Gi",
           runtime_class: "gvisor",
-          node_selector: "pool=apps",
           scheduling: { tolerations: [{ key: "dedicated" }] },
           backup_ttl: "168h",
         }}
@@ -95,7 +94,6 @@ describe("ClusterConfiguration", () => {
 
     const runtime = section("Runtime and scheduling");
     expect(runtime).toHaveTextContent("gvisor");
-    expect(runtime).toHaveTextContent("pool=apps");
     expect(within(runtime).getByTestId("cluster-scheduling")).toHaveTextContent(
       '"key": "dedicated"',
     );

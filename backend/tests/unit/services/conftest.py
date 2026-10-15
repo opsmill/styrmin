@@ -131,7 +131,6 @@ async def fake_helm_chart(
                 db_size: {{ instance.db_size }}
                 ip_whitelist: {{ instance.ip_whitelist }}
                 runtime_class: {{ instance.runtime_class }}
-                node_selector: {{ instance.node_selector }}
                 dedicated_ingress: {{ instance.dedicated_ingress }}
             """,
         )

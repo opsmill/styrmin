@@ -48,9 +48,9 @@ export const SECTION_ORDER: readonly SectionId[] = [
  *     `SectionId` back into a group when the editing flow is restored.
  *
  *     Storage & Runtime *is* included, but its editor covers only
- *     `backupTtl` (016-backup-retention-ttl). `dbSize`,
- *     `standardStorage.storageClass`, and `nodeSelector` stay read-only on the
- *     Settings tab — see `StorageRuntimeSection`.
+ *     `backupTtl` (016-backup-retention-ttl). `dbSize` and
+ *     `standardStorage.storageClass` stay read-only on the Settings tab — see
+ *     `StorageRuntimeSection`.
  *  2. **Names two visible groupings** — "Global settings" and "Components" —
  *     to distinguish deployment-wide knobs from component-scoped ones.
  *  3. **Treats Identity as its own un-labelled group** so the deployment-name

@@ -445,7 +445,6 @@ export function deploymentConfigToInput(
     ingressClass: config.ingress_class as string | undefined,
     dbSize: config.db_size as string | undefined,
     runtimeClass: config.runtime_class as string | undefined,
-    nodeSelector: config.node_selector as string | undefined,
     standardStorage: config.standard_storage as
       | StandardStorageInput
       | undefined,

@@ -808,7 +808,6 @@ class SchedulingConfig(BaseModel):
     tolerations: list[Toleration] | None = None
     topology_spread: list[TopologySpreadConstraint] | None = None
     resources: ResourceSpec | None = None          # requests + limits (see below)
-    node_selector: dict[str, str] | None = None
     runtime_class: str | None = None               # DNS-1123 subdomain validated; no rollout-time check — unknown classes surface as Pending pods at scheduling time
     inject: PostRenderInjection | None = None      # per-feature opt-out booleans
 ```

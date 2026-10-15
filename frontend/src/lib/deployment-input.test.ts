@@ -25,7 +25,6 @@ describe("deploymentConfigToInput", () => {
       ingressClass: undefined,
       dbSize: undefined,
       runtimeClass: undefined,
-      nodeSelector: undefined,
       standardStorage: undefined,
       fastStorage: undefined,
       backupTtl: undefined,
@@ -190,7 +189,6 @@ describe("deploymentConfigToInput", () => {
       ingress_class: "nginx",
       db_size: "100Gi",
       runtime_class: "kata-e2e",
-      node_selector: "topology.kubernetes.io/zone=us-east-1a",
       standard_storage: { className: "gp3", size: "50Gi" },
     };
 
@@ -215,7 +213,6 @@ describe("deploymentConfigToInput", () => {
     expect(input.ingressClass).toBe("nginx");
     expect(input.dbSize).toBe("100Gi");
     expect(input.runtimeClass).toBe("kata-e2e");
-    expect(input.nodeSelector).toBe("topology.kubernetes.io/zone=us-east-1a");
     expect(input.standardStorage).toEqual({ className: "gp3", size: "50Gi" });
   });
 

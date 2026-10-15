@@ -58,7 +58,6 @@ const STORED_CONFIG = {
   external_url_scheme: "http",
   external_url_port: 8443,
   external_dns_endpoints_type: "NodeExternalIP",
-  node_selector: "topology.kubernetes.io/zone=eu-west-1a",
   db_size: "20Gi",
   backup_ttl: "720h",
   dedicated_ingress: {
@@ -102,7 +101,6 @@ const EXPECTED_INPUT = {
   externalUrlScheme: "HTTP",
   externalUrlPort: 8443,
   externalDnsEndpointsType: "NODE_EXTERNAL_IP",
-  nodeSelector: "topology.kubernetes.io/zone=eu-west-1a",
   dbSize: "20Gi",
   backupTtl: "720h",
   dedicatedIngress: {

@@ -453,7 +453,6 @@ class ClusterConfig(BaseConfigSection):
 
     Attributes:
         runtime_class (str | None): The runtime class.
-        node_selector (str | None): The node selector.
         dedicated_ingress (DedicatedIngressConfig | None): The dedicated ingress controller config.
             ``None`` turns the controller off; any object, including ``{}``,
             turns it on with the default values.
@@ -464,7 +463,6 @@ class ClusterConfig(BaseConfigSection):
     model_config = ConfigDict(extra="forbid")
 
     runtime_class: str | None = None
-    node_selector: str | None = None
     dedicated_ingress: DedicatedIngressConfig | None = None
     standard_storage: StandardStorage | None = None
     fast_storage: FastStorage | None = None

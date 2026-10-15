@@ -612,7 +612,7 @@ updateCluster(input: UpdateClusterInput!, clusterId: UUID = null, clusterName: S
 
 `updateCluster` requires the `ADMIN` role. It identifies the cluster by `clusterId` or `clusterName` ([ADR-031](../../adr/0031-dual-identifier-resolution-service-layer.md)), saves the new config, and starts the cluster config fan-out. The decisions are in [ADR-066](../../adr/0066-cluster-config-fanout.md); the fan-out itself is described in [services.md](services.md#cluster-config-fan-out).
 
-`UpdateClusterInput` has 13 fields that mirror `ClusterConfig` field by field: `ingressClass`, `runtimeClass`, `nodeSelector`, `fqdnSuffix`, `externalUrlScheme`, `externalUrlPort`, `externalDnsEndpointsType`, `dedicatedIngress`, `standardStorage`, `fastStorage`, `scheduling`, `dbSize` and `backupTtl`. A parity test (`backend/tests/functional/graphql/test_cluster_update_propagation.py`) fails when a `ClusterConfig` field has no input field. The input replaces the whole config: a top-level field that is `null` or omitted is removed from the stored config, except `ingressClass` and `runtimeClass`, which get the `createCluster` defaults (`traefik` and `default`). `createCluster` still takes `config: JSON`.
+`UpdateClusterInput` has 12 fields that mirror `ClusterConfig` field by field: `ingressClass`, `runtimeClass`, `fqdnSuffix`, `externalUrlScheme`, `externalUrlPort`, `externalDnsEndpointsType`, `dedicatedIngress`, `standardStorage`, `fastStorage`, `scheduling`, `dbSize` and `backupTtl`. A parity test (`backend/tests/functional/graphql/test_cluster_update_propagation.py`) fails when a `ClusterConfig` field has no input field. The input replaces the whole config: a top-level field that is `null` or omitted is removed from the stored config, except `ingressClass` and `runtimeClass`, which get the `createCluster` defaults (`traefik` and `default`). `createCluster` still takes `config: JSON`.
 
 `UpdateClusterResult` reports what the update did, or would do in a dry run:
 
@@ -642,7 +642,7 @@ Errors:
 
 `updateDeployment(deploymentId: UUID!, input: UpdateDeploymentInput!)` is the single typed write surface for deployment configuration. The prior loose-argument shape (`name`, `config: JSON`, `parameters: JSON`, `serviceNameOverrides: [ServiceNameOverride!]`) is **gone** in the same release that ships the typed input — clean replace, no deprecation window (mirrors the 009 cutover precedent; see [ADR-012](../adr/0012-environment-config-fanout.md) §3 and [ADR-018](../adr/0018-typed-update-deployment-input.md)).
 
-`UpdateDeploymentInput` is **full-replacement** at the top level with **one deliberate exception**: `parameters` keeps merge semantics. Omitting any other top-level field (`envVars`, `ipWhitelist`, `dedicatedIngress`, `scheduling`, `fqdnSuffix`, `externalUrlScheme`, `externalUrlPort`, `externalDnsEndpointsType`, `ingressClass`, `dbSize`, `runtimeClass`, `nodeSelector`, `standardStorage`, `components`, `serviceNameOverrides`, `name`) persists it as its unset state; omitting `parameters` leaves the persisted parameters dict alone. The asymmetry is documented on the GraphQL field description so introspection consumers see it without reading source. See [ADR-018](../adr/0018-typed-update-deployment-input.md) for the rationale (operators bumping one parameter value continue to work with a single-entry input; the unnamed keys survive).
+`UpdateDeploymentInput` is **full-replacement** at the top level with **one deliberate exception**: `parameters` keeps merge semantics. Omitting any other top-level field (`envVars`, `ipWhitelist`, `dedicatedIngress`, `scheduling`, `fqdnSuffix`, `externalUrlScheme`, `externalUrlPort`, `externalDnsEndpointsType`, `ingressClass`, `dbSize`, `runtimeClass`, `standardStorage`, `components`, `serviceNameOverrides`, `name`) persists it as its unset state; omitting `parameters` leaves the persisted parameters dict alone. The asymmetry is documented on the GraphQL field description so introspection consumers see it without reading source. See [ADR-018](../adr/0018-typed-update-deployment-input.md) for the rationale (operators bumping one parameter value continue to work with a single-entry input; the unnamed keys survive).
 
 Named-dict-typed config fields (`parameters`, `components`, top-level `envVars`, per-component `envVars`) travel as `list[{name, value, …}]` on the wire and are flattened to `dict` at the GraphQL-input boundary with typed duplicate detection. The flatten step raises:
 
@@ -808,7 +808,7 @@ Per-component resolved scheduling exposed as `Deployment.resolvedScheduling: [Re
 ```graphql
 type ResolvedComponentScheduling {
   component: String!
-  scheduling: JSON!     # serialised SchedulingConfig (affinity / tolerations / topology_spread / resources / node_selector / runtime_class / inject)
+  scheduling: JSON!     # serialised SchedulingConfig (affinity / tolerations / topology_spread / resources / runtime_class / inject)
   provenance: JSON!     # dotted-path → "environment" | "deployment" | "component"
 }
 ```

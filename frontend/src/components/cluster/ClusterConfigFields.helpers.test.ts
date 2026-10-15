@@ -58,7 +58,6 @@ describe("mergeFormValuesIntoConfig(stored, configToFormValues(stored))", () => 
             ],
           },
         },
-        node_selector: "pool=apps",
         db_size: "10Gi",
         backup_ttl: "720h",
       },

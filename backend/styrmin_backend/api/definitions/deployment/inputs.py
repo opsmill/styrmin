@@ -278,10 +278,6 @@ class DeploymentConfigInput:
             "Kubernetes RuntimeClass name applied to pods in this deployment."
         ),
     )
-    node_selector: str | None = strawberry.field(
-        default=None,
-        description=("Node-selector expression applied to pods in this deployment."),
-    )
     standard_storage: StandardStorageInput | None = strawberry.field(
         default=None,
         description=(

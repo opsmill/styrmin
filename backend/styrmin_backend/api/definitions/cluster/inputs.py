@@ -33,7 +33,6 @@ from styrmin_backend.api.definitions.config.inputs import (
 class UpdateClusterInput:
     ingress_class: str | None = None
     runtime_class: str | None = None
-    node_selector: str | None = None
     fqdn_suffix: str | None = None
     external_url_scheme: ExternalUrlScheme | None = None
     external_url_port: int | None = None
