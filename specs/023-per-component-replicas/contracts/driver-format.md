@@ -23,7 +23,7 @@ spec:
 
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
-| `replicas` | integer ≥ 1 | not set | Styrmin patches this count onto the component's `Deployment` and `StatefulSet` workloads when the deployment has no replica override. Not set: the chart's count applies. |
+| `replicas` | integer from 1 to 2147483647 | not set | Styrmin patches this count onto the component's `Deployment` and `StatefulSet` workloads when the deployment has no replica override. Not set: the chart's count applies. |
 | `singleton` | boolean | `false` | The component's count is fixed at 1. Without `replicas`, Styrmin patches 1. A replica override above 1 is rejected. Does not limit how many pods run during a rolling update. |
 
 ## Load errors
@@ -31,7 +31,7 @@ spec:
 The driver version fails to load, and no row is stored, when:
 
 - `singleton: true` and `replicas` is greater than 1;
-- `replicas` is below 1, a string, a float or a boolean;
+- `replicas` is below 1 or above 2147483647, a string, a float or a boolean;
 - `singleton` is not a boolean.
 
 `singleton: true` with `replicas: 1` loads.
@@ -40,7 +40,7 @@ The driver version fails to load, and no row is stored, when:
 
 | Driver | Version | Change |
 |--------|---------|--------|
-| `infrahub` | `4` → `5` | Remove parameters `replicas_server` and `replicas_task_worker` and their `values.j2.yml` lines; `server.replicas: 1`, `task-worker.replicas: 2`, `database.singleton: true` |
+| `infrahub` | `4` → `5` | Remove parameters `replicas_server` and `replicas_task_worker` and their `values.j2.yml` lines; `server.replicas: 1`, `task-worker.replicas: 2`; `singleton: true` on `database`, `task-manager-db` and `cache` |
 | `infrahub-enterprise` | `3` → `4` | Same as `infrahub` |
 | `simple-app` | `3` → `4` | `database.singleton: true` |
 | `db-test`, `infrahub-mcp`, `semaphore`, `slurpit` | unchanged | — |

@@ -6,7 +6,7 @@ Every unknown in the plan's Technical Context is resolved below. Each decision l
 
 ## D-001: Where the replica override is stored
 
-**Decision**: Add `replicas: int | None = None` to [`ComponentConfigBlock`](../../backend/styrmin_backend/context/models/config.py) (the per-component block of `DeploymentConfig.components`). A `mode="before"` validator rejects a value that is not an integer, a `bool`, or an integer below 1 with the typed `InvalidReplicaCountError` (`INVALID_REPLICA_COUNT`), the way the `command`, `args` and `image` validators raise their typed errors before type conversion. `None` (or omitting the key) means "no override".
+**Decision**: Add `replicas: int | None = None` to [`ComponentConfigBlock`](../../backend/styrmin_backend/context/models/config.py) (the per-component block of `DeploymentConfig.components`). A `mode="before"` validator rejects a value that is not an integer, a `bool`, or an integer below 1 with the typed `InvalidReplicaCountError` (`INVALID_REPLICA_COUNT`), the way the `command`, `args` and `image` validators raise their typed errors before type conversion. `None` (or omitting the key) means "no override". Values above 2147483647 are rejected with the same error, because Kubernetes `spec.replicas` is an `int32` and a larger value would fail only when helm-controller applies the release (critique E3).
 
 **Rationale**:
 
@@ -21,7 +21,7 @@ Every unknown in the plan's Technical Context is resolved below. Each decision l
 
 ## D-002: Where the driver default and the singleton flag are declared and parsed
 
-**Decision**: Add two typed fields to [`ArbitrarySectionModel`](../../backend/styrmin_backend/services/driver/models/resources/driver.py) (the component model of the driver specification file): `replicas: StrictInt | None = Field(default=None, ge=1)` and `singleton: StrictBool = False`, plus a `model_validator(mode="after")` that raises `ValueError` when `singleton` is true and `replicas` is greater than 1. A Pydantic error becomes a `DriverLoadingError` with the field path (for example `spec.components.database`), as `container` errors do today, so the driver version is not stored.
+**Decision**: Add two typed fields to [`ArbitrarySectionModel`](../../backend/styrmin_backend/services/driver/models/resources/driver.py) (the component model of the driver specification file): `replicas: StrictInt | None = Field(default=None, ge=1, le=2147483647)` and `singleton: StrictBool = False`, plus a `model_validator(mode="after")` that raises `ValueError` when `singleton` is true and `replicas` is greater than 1. A Pydantic error becomes a `DriverLoadingError` with the field path (for example `spec.components.database`), as `container` errors do today, so the driver version is not stored.
 
 **Rationale**:
 
@@ -29,6 +29,8 @@ Every unknown in the plan's Technical Context is resolved below. Each decision l
 - `StrictInt` rejects `true`, `"2"` and `2.0`; `ge=1` rejects `0` and negative values.
 - The declaration reaches the agent unchanged: `ComponentContext.config` is the same `ArbitrarySectionModel`, so the patch builder reads `component.config.replicas` and `component.config.singleton` with no new context field for the driver side.
 - Storage is JSON in two places, `ApplicationDriverVersion.components` and `ComponentConfig.config` ([`db/models.py`](../../backend/styrmin_backend/db/models.py)). Rows of driver versions loaded before the change have no keys; the typed model and the GraphQL resolvers default them to `None` and `false`, as the `container` resolver defaults a missing container. No migration.
+
+**Serialisation** (critique E1): `ArbitrarySectionModel` serialises `replicas` only when it is not `None` and `singleton` only when it is `true` (a `model_serializer(mode="wrap")` that removes the two keys at their defaults). Without this, every `model_dump()` of every component would gain `replicas: null, singleton: false`: the stored declaration of new driver versions, the `ComponentContext.config` written into the `StyrminDeployment` resource, and the instance that `_update_is_noop` compares. The first update after a Styrmin upgrade would then differ from the stored instance only by these keys and start a HelmRelease upgrade that changes nothing, against SC-006. A unit test checks that a declaration without the keys dumps to the same dict as before the change.
 
 **Reading stored declarations**: the agent and operator parse each component's stored declaration into `ArbitrarySectionModel` when they build `ComponentContext`. A driver version stored before this change may hold an untyped `replicas` or `singleton` extra that the new typed fields reject (for example `replicas: "3"`). So that such a deployment keeps rendering, the context resolver parses the stored declaration with a helper `parse_stored_component_declaration(raw)` that, on a validation error limited to `replicas` or `singleton`, drops both keys, logs a warning naming the driver version and component, and parses again. The driver load path does not use the helper, so new driver versions are always checked strictly.
 
@@ -163,7 +165,7 @@ The existing wait limit is the HelmRelease `timeout` (`5m`, E2E value from `STYR
 
 - Regenerate the SDK. `ComponentConfigInput.replicas` reaches the manifest model automatically, because `_Spec.config` is validated against the generated input types. `components[].replicas` in a manifest needs no CLI code.
 - Add `"replicas"` to `OverrideKind` and to `_inapplicable_overrides`, so `styrminctl deployments apply` warns about an override that is kept but not applied, as it does for the other kinds.
-- `get_deployment.graphql` selects `componentReplicas`. `styrminctl deployments get` adds a `Replicas` column to its Components table: `3 (override)`, `2 (driver default)`, `chart`, and `not applied` next to a stored override that does not apply (FR-014). Orphaned overrides get a row with `no longer declared`.
+- `get_deployment.graphql` selects `componentReplicas`. `styrminctl deployments get` adds a `Replicas` column to its Components table: `3 (override)`, `2 (driver default)`, `chart`, and `not applied` next to a stored override that does not apply (FR-014). A stopped component adds `stopped: 0 pods` to the cell (critique P4). Orphaned overrides get a row with `no longer declared`.
 
 ## D-011: Frontend
 
@@ -171,7 +173,7 @@ The existing wait limit is the HelmRelease `timeout` (`5m`, E2E value from `STYR
 
 - **Edit drawer** ([`ComponentOverridesSection.tsx`](../../frontend/src/components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx)): add a "Replicas" number field per component, bound to `components.<i>.replicas`, with the resolved value as placeholder text ("2 (driver default)", "set by the chart"). A value below 1 shows "Must be 1 or more. To run no pods, stop the component." A singleton component shows a read-only "1 (singleton)" field; a stored override above 1 on it can only be removed. The `FutureExtensionPlaceholder` text drops "replicas" and keeps CPU and memory. `componentsFormToInput` and `diffComponents` handle `replicas` (empty field means `null`).
 - **Create form** ([`DeployFormPage.tsx`](../../frontend/src/pages/deployments/DeployFormPage.tsx)): today it has no per-component section and never sends `config.components`. Add a "Component replicas" section that lists the components of the selected driver version with the same field, and sends `config.components` with only the components that have a value.
-- **Configuration view** ([`ComponentOverridesSummary.tsx`](../../frontend/src/components/deployment/configuration/sections/read/ComponentOverridesSummary.tsx)): a "Replicas" line per component, from `componentReplicas`: "3 (override)", "2 (driver default)", "set by the chart", with the existing "not applied" badge for `isApplicable: false`.
+- **Configuration view** ([`ComponentOverridesSummary.tsx`](../../frontend/src/components/deployment/configuration/sections/read/ComponentOverridesSummary.tsx)): a "Replicas" line per component, from `componentReplicas`: "3 (override)", "2 (driver default)", "set by the chart", with the existing "not applied" badge for `isApplicable: false`, and "stopped: 0 pods" when the component is stopped (critique P4).
 - **Driver version page** ([`ComponentsTab.tsx`](../../frontend/src/pages/drivers/driver-detail/tabs/ComponentsTab.tsx)): explicit "Replicas" and "Singleton" rows from `componentConfigs { replicas singleton }`, and `flattenDecl` skips the two keys so they are not shown twice.
 - **Upgrade dialog**: no change (spec Clarifications, question 2). It already shows the mutation's error message, which names the parameter and how to resolve it.
 
@@ -179,12 +181,12 @@ The existing wait limit is the HelmRelease `timeout` (`5m`, E2E value from `STYR
 
 **Decision**: A new module [`backend/tests/e2e/test_deployment_replicas.py`](../../backend/tests/e2e/test_deployment_replicas.py), marked `shard_configuration` and `ci`, with one module-scoped `simple-app` deployment and one dual-entrypoint test node `test_scale_server_and_singleton_guard`:
 
-1. `scenario_driver.set_component_replicas(component="server", replicas=2)` (new protocol method: API through `_replace_component_slots(slots={"replicas": 2})`, UI through `DeploymentDetailPage.set_component_replicas`); wait for the task; assert the `styrmin-simple-app` `Deployment` has 2 updated, ready and available replicas and `componentReplicas` reports `2`/`OVERRIDE`.
+1. `scenario_driver.set_component_replicas(component="server", replicas=2)` (new protocol method: API through `_replace_component_slots(slots={"replicas": 2})`, UI through `DeploymentDetailPage.set_component_replicas`); wait for the update task to complete; then read the `styrmin-simple-app` `Deployment` **once** (no polling) and assert `updatedReplicas`, `readyReplicas`, `availableReplicas` and `status.replicas` all equal 2, and `componentReplicas` reports `2`/`OVERRIDE`. Reading once after the task, instead of waiting for the counts, is what proves that the task itself waited for the pods (SC-002, critique E7).
 2. Assert the `database` `StatefulSet` has 1 ready replica and `componentReplicas` reports `1`/`DRIVER_DEFAULT`/`singleton: true`. In the UI variant, assert the drawer shows `database` fixed at 1.
 3. Through the SDK client in both variants, submit `database` replicas 2 and assert `SINGLETON_REPLICA_OVERRIDE`, no new task, and the stored config unchanged.
-4. `set_component_replicas(component="server", replicas=None)` (clear); assert the `Deployment` returns to 1 ready replica and `status.replicas` is 1, and the source is `CHART`.
+4. `set_component_replicas(component="server", replicas=None)` (clear); wait for the update task; read the `Deployment` once and assert all counts equal 1 (so the scale-down finished before the task completed), and the source is `CHART`.
 
-To have a singleton component, the `simple-app` example driver marks `database` as `singleton: true` and its version goes from `3` to `4` (D-013). A new helper `wait_for_workload_replicas(...)` in [`helpers/workloads.py`](../../backend/tests/e2e/helpers/workloads.py) waits for `updatedReplicas == readyReplicas == availableReplicas == status.replicas == N`.
+To have a singleton component, the `simple-app` example driver marks `database` as `singleton: true` and its version goes from `3` to `4` (D-013). A new helper `read_workload_replicas(apps_api, *, namespace, kind, name)` in [`helpers/workloads.py`](../../backend/tests/e2e/helpers/workloads.py) returns the four status counts and `spec.replicas` in one read.
 
 **Rationale**:
 
@@ -198,7 +200,7 @@ To have a singleton component, the `simple-app` example driver marks `database` 
 
 **Decision**:
 
-- `infrahub` version `4` → `5` and `infrahub-enterprise` version `3` → `4`: remove the `replicas_server` and `replicas_task_worker` parameters and the two `replicas:` lines in `values.j2.yml`; declare `server: replicas: 1`, `task-worker: replicas: 2` and `database: singleton: true` (FR-011). The charts' own defaults are the same counts (`infrahubServer.replicas | default 1`, `infrahubTaskWorker.replicas | default 2`), so the rendered chart and the patch agree.
+- `infrahub` version `4` → `5` and `infrahub-enterprise` version `3` → `4`: remove the `replicas_server` and `replicas_task_worker` parameters and the two `replicas:` lines in `values.j2.yml`; declare `server: replicas: 1`, `task-worker: replicas: 2`, and `singleton: true` on `database`, `task-manager-db` and `cache` (FR-011 and spec Clarifications; critique P2). The charts' own defaults are the same counts (`infrahubServer.replicas | default 1`, `infrahubTaskWorker.replicas | default 2`), so the rendered chart and the patch agree.
 - `simple-app` version `3` → `4`: `database: singleton: true` (the chart runs a single PostgreSQL primary). The chart already renders 1 replica for it, so every E2E that deploys `simple-app` keeps the same pod count.
 - Other example drivers are unchanged. SC-001 holds for them because the override needs nothing from the driver.
 
@@ -211,9 +213,10 @@ To have a singleton component, the `simple-app` example driver marks `database` 
 | Resolver | `tests/unit/services/replicas/test_resolver.py`: every row of the order of precedence, singleton without `replicas`, singleton with override 1, defensive singleton with stored override 3, orphaned, `replica_patch_count` with `enabled=False` |
 | Patch builder | `tests/unit/services/replicas/test_patch_builder.py`: one patch per kind, stopped → 0, chart → none, no container required; `tests/unit/agent/test_application_builder_replicas.py`: position in the post-renderer list |
 | Kustomize | `tests/integration/test_component_container_kustomize.py` (or a sibling): stop patch and replica patch on a chart that renders `replicas: 3` and one that renders none |
-| Driver fields | `tests/unit/services/driver/test_component_replicas.py`: valid, `replicas: 0`, `"2"`, `true`, singleton with `replicas: 3`, singleton with `replicas: 1`, old row without keys |
+| Driver fields | `tests/unit/services/driver/test_component_replicas.py`: valid, `replicas: 0`, `"2"`, `true`, above 2147483647, singleton with `replicas: 3`, singleton with `replicas: 1`, old row without keys, dump without the keys equals the dump before the change, `parse_stored_component_declaration` with an invalid stored value |
 | Write checks | `tests/functional/graphql/test_replica_overrides_propagation.py`: round trip on update and create, clear, read field projection (all sources, orphan, singleton), `INVALID_REPLICA_COUNT`, `UNKNOWN_COMPONENT_REPLICA_OVERRIDE`, `SINGLETON_REPLICA_OVERRIDE` on create, update, `updateDeploymentVersion(input:)` (the apply path) and a version change that marks a component singleton, with no task and an unchanged row |
 | Retired parameters | `tests/unit/services/parameters/test_retired.py` and functional `test_retired_parameters_propagation.py`: default dropped, changed value rejected with metadata, `"1"` vs `1`, merged `input.parameters`, unknown key still `OPERATION_FAILED` |
+| Upgrade hook path | functional test: the infrahub upgrade path (the outer `updateDeploymentVersion`, then the hook primitive's nested `upgrade_deployment_version` on the already-bound target) succeeds with default parameter values and does not apply the retired-parameter rule twice (critique E4) |
 | Infrahub upgrade | functional `test_infrahub_replica_parameter_upgrade.py`: loads `infrahub` version 4 from a fixture copy (`tests/fixtures/legacy_drivers/infrahub-v4/`) and version 5 from `driver/examples/`; a deployment with default values moves and resolves `server` to 1 and `task-worker` to 2 (SC-004); one with `replicas_task_worker: 4` is rejected (SC-005); resubmitting with a `task-worker` override of 4 succeeds |
 | No change for other drivers | unit test over every example driver except the singleton ones: with no override, the builder emits no replica patch (SC-006) |
 | Propagation | one per new field and input: `ComponentConfigInput.replicas`, `Deployment.componentReplicas`, `ComponentConfig.replicas`, `ComponentConfig.singleton` |
@@ -224,7 +227,7 @@ To have a singleton component, the `simple-app` example driver marks `database` 
 
 **Decision**: in the same change (Constitution §VII):
 
-- `docs/docs/concepts-and-architecture/replica-overrides.md` (new), modelled on `image-overrides.md`, in `docs/sidebars.ts`; it states that a singleton component can run 2 pods for a short time during a rolling update.
+- `docs/docs/concepts-and-architecture/replica-overrides.md` (new), modelled on `image-overrides.md`, in `docs/sidebars.ts`; it states that a singleton component can run 2 pods for a short time during a rolling update, and that a component whose pods mount a `ReadWriteOnce` volume (such as the infrahub `server`) can leave extra pods `Pending` on other nodes (critique P5).
 - `driver/DRIVERS.md` (schema block and `## Components`) and `docs/docs/drivers/creating-a-driver.md` (Step 3): `replicas`, `singleton`, the load error.
 - `docs/docs/drivers/migrating-replica-parameters.md` (new): the infrahub upgrade note: the rule for retired parameters and the two ways to resolve a rejection (one API request, or the edit drawer then the upgrade).
 - `docs/docs/concepts-and-architecture/glossary.md`: replica override, singleton component.
@@ -232,7 +235,7 @@ To have a singleton component, the `simple-app` example driver marks `database` 
 - `dev/adr/0070-replica-overrides-and-retired-parameters.md` (new): FR-002 order of precedence, the single replica patch per kind (D-004), and the rule for retired parameters (D-007).
 - `dev/knowledge/backend/api.md` (error codes), `dev/knowledge/backend/services.md`, `dev/knowledge/backend/data-models.md`, `dev/knowledge/frontend/deployment-configuration.md`.
 - `CONTEXT.md` (drafted on this branch).
-- `changelog/202.added.md` (replica overrides, driver `replicas` and `singleton`), `changelog/202.changed.md` (infrahub drivers retire the two parameters; retired parameters with default values are dropped on a version change; a driver that already declares `components.<name>.replicas` starts to apply it).
+- `changelog/202.added.md` (replica overrides, driver `replicas` and `singleton`), `changelog/202.changed.md` (infrahub drivers retire the two parameters; retired parameters with default values are dropped on a version change; a driver that already declares `components.<name>.replicas` starts to apply it; the agent chart must be upgraded with the server; clear replica overrides before downgrading Styrmin, because an older server rejects the stored key; critique E2, E9).
 
 ## Dependency evaluation (research directive)
 

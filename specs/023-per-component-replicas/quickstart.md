@@ -57,10 +57,10 @@ sleep infinity | uv run pytest "backend/tests/e2e/test_deployment_replicas.py" -
 
 Expected for `test_scale_server_and_singleton_guard`:
 
-1. Setting `server` to 2 completes the update task only after the `styrmin-simple-app` `Deployment` has 2 updated, ready and available replicas; `componentReplicas` reports `server` 2 / `OVERRIDE`.
+1. After setting `server` to 2 and waiting for the update task, a single read of the `styrmin-simple-app` `Deployment` shows 2 updated, ready and available replicas and `status.replicas` 2; `componentReplicas` reports `server` 2 / `OVERRIDE`.
 2. The `database` `StatefulSet` has 1 ready replica; `componentReplicas` reports 1 / `DRIVER_DEFAULT` / `singleton: true`. The UI variant shows `database` fixed at 1 in the edit drawer.
 3. Submitting `database` replicas 2 through the SDK fails with `SINGLETON_REPLICA_OVERRIDE`; no new task.
-4. Clearing the `server` override returns the `Deployment` to 1 ready replica (`status.replicas` 1); the source is `CHART`.
+4. After clearing the `server` override and waiting for the update task, a single read shows all counts at 1; the source is `CHART`.
 
 Record for each variant (Constitution §V): the node ID, the command, the ISO 8601 time of the passing run, the vcluster id and kubeconfig path, and the verbatim `PASSED` line. Stop a paused run by PID, not with `pkill -f`.
 
