@@ -25,7 +25,7 @@ description: "Tasks for 023: Ingress class set only after the chart renders"
 
 **Purpose**: Record a green baseline before any change.
 
-- [ ] T001 Run `uv sync`, then `uv run pytest backend/tests/unit/agent/test_utility_resources.py backend/tests/unit/agent/test_render_value_template_env_vars.py backend/tests/integration/test_container_override_migration_parity.py -q` and note the result as the baseline (no file change). Confirm `helm` and `kubectl` are on `PATH` (`helm version`, `kubectl version --client`); without them the integration tests are skipped, and a skip does not count as a pass
+- [X] T001 Run `uv sync`, then `uv run pytest backend/tests/unit/agent/test_utility_resources.py backend/tests/unit/agent/test_render_value_template_env_vars.py backend/tests/integration/test_container_override_migration_parity.py -q` and note the result as the baseline (no file change). Confirm `helm` and `kubectl` are on `PATH` (`helm version`, `kubectl version --client`); without them the integration tests are skipped, and a skip does not count as a pass
 
 ---
 
