@@ -24,6 +24,7 @@ import kr8s.asyncio
 import pytest
 import yaml
 from dulwich import porcelain
+from kr8s.asyncio.objects import Ingress as AsyncIngress
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
@@ -509,6 +510,22 @@ async def test_apply_sets_env_vars_with_the_version_that_adds_their_container(
         predicate=lambda workload: _server_env(workload).get("LOG_LEVEL") == "debug",
         description="LOG_LEVEL=debug on the simple-app container",
     )
+
+    # #471: late-container's template still sets the class; the session cluster has
+    # a dedicated ingress controller, so Flux's post-render must remove it.
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
+    ingresses = [
+        ingress
+        async for ingress in AsyncIngress.list(
+            namespace=f"styrmin-{deployment_id}", api=kr8s_api
+        )
+        if isinstance(ingress, AsyncIngress)
+    ]
+    assert ingresses, "late-container renders an Ingress"
+    for ingress in ingresses:
+        assert ingress.spec.get("ingressClassName") is None, ingress.raw
+        annotations = ingress.metadata.get("annotations", {})
+        assert annotations.get("kubernetes.io/ingress.class") == "traefik", ingress.raw
 
 
 @pytest.mark.api_only(
