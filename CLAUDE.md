@@ -64,4 +64,5 @@
 - 058-frontend-testing: Added TypeScript 5.9.3, React 19.2.4, Node 22 + Vite 8.0.1, urql 5.0.1 (GraphQL), Radix UI, React Router 7, React Hook Form 7
 
 <!-- SPECKIT START -->
+Active plan: [specs/023-ingress-class-post-render/plan.md](specs/023-ingress-class-post-render/plan.md)
 <!-- SPECKIT END -->
