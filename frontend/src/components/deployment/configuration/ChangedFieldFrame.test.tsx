@@ -71,6 +71,19 @@ describe("ChangedFieldFrame", () => {
     expect(screen.getByTestId("changed-from")).not.toHaveTextContent("(env)");
   });
 
+  it("keeps the input mounted and focused when the value starts to differ", async () => {
+    const user = userEvent.setup();
+    await render(<Harness initialValue="" initialProp="" environmentProp="" />);
+
+    const input = screen.getByTestId("cpu-input");
+    await user.type(input, "250m");
+
+    expect(screen.getByTestId("changed-field-frame")).toBeInTheDocument();
+    expect(screen.getByTestId("cpu-input")).toBe(input);
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("250m");
+  });
+
   it('renders the "(env)" suffix when the original value came from the environment', async () => {
     const user = userEvent.setup();
     await render(

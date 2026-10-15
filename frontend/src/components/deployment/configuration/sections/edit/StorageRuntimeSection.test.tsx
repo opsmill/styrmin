@@ -76,15 +76,7 @@ function renderSection(
 
 const input = () => screen.getByTestId("storage-backup-ttl-input");
 
-/**
- * Set the field in one change event.
- *
- * Deliberately not `userEvent.type`: `ChangedFieldFrame` swaps its wrapper for
- * a framed variant the moment the value differs from `initial`, which
- * remounts the input and drops focus, so a per-keystroke helper would only
- * ever land the first character. A single change event is also what a paste
- * or an autofill produces.
- */
+/** Set the field in one change event, as a paste or an autofill does. */
 function setTtl(value: string): void {
   fireEvent.change(input(), { target: { value } });
 }

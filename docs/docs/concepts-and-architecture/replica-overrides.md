@@ -149,8 +149,9 @@ To set or clear an override on an existing deployment:
 3. Type the count in **Replicas**. When the field is empty, its placeholder
    shows the count that applies without an override, for example
    `2 (driver default)`, or `set by the chart`. Under a count below 1, the
-   drawer shows "Must be 1 or more. To run no pods, stop the component.",
-   and the server rejects such a count.
+   drawer shows "Must be 1 or more. To run no pods, stop the component."
+   While a count is below 1, not a whole number or above 2147483647,
+   **Review & apply** stays disabled and names the component to fix.
 4. Click **Review & apply** and confirm.
 
 To clear the override, empty the **Replicas** field and apply.

@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 
-import { useDrawerDiff, useDrawerInvalidImages } from "./DrawerDiffContext";
+import { useDrawerDiff, useDrawerInvalidFields } from "./DrawerDiffContext";
 
 interface Props {
   onDiscard: () => void;
@@ -16,14 +16,20 @@ interface Props {
  * disagree on what "changed" means.
  *
  * Both action buttons are disabled when there are no pending changes
- * (FR-013). Review & apply is also disabled while an image override is
- * invalid (018), with a hint naming the components.
+ * (FR-013). Review & apply is also disabled while an image override (018) or
+ * a replica count (023) is invalid, with a hint naming the components.
  */
 export function DrawerFooter({ onDiscard, onReviewApply }: Props) {
   const pendingCount = useDrawerDiff().entries.length;
   const noChanges = pendingCount === 0;
-  const invalidImages = useDrawerInvalidImages();
-  const blocked = invalidImages.length > 0;
+  const invalid = useDrawerInvalidFields();
+  const hints = [
+    invalid.images.length > 0 &&
+      `Fix the invalid image reference on ${invalid.images.join(", ")} before applying.`,
+    invalid.replicas.length > 0 &&
+      `Fix the invalid replica count on ${invalid.replicas.join(", ")} before applying.`,
+  ].filter(Boolean);
+  const blocked = hints.length > 0;
 
   return (
     <footer
@@ -46,8 +52,7 @@ export function DrawerFooter({ onDiscard, onReviewApply }: Props) {
             data-testid="drawer-invalid-hint"
             className="text-xs text-destructive"
           >
-            Fix the invalid image reference on {invalidImages.join(", ")} before
-            applying.
+            {hints.join(" ")}
           </p>
         )}
       </div>

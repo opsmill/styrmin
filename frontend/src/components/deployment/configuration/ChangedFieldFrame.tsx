@@ -23,7 +23,7 @@ interface Props {
 /**
  * Wraps a single form field so it visually reflects whether the operator has
  * changed it. When the field's current value matches `initial` the children
- * render unchanged. When it differs, the frame adds an amber outline, a
+ * render undecorated. When it differs, the frame adds an amber outline, a
  * "changed" pill, and a "from X" annotation — suffixed with "(env)" when the
  * original value came from the environment, not from an explicit deployment-
  * level setting.
@@ -50,34 +50,36 @@ export function ChangedFieldFrame({
   const isChanged = !valuesEqual(value, initial);
   const fromEnvironment = valuesEqual(initial, environment);
 
-  if (!isChanged) {
-    return <div className={cn("space-y-1", className)}>{children}</div>;
-  }
-
+  // One wrapper, children always second: the input stays mounted (and
+  // focused) when the first keystroke makes the value differ.
   return (
     <div
-      data-testid="changed-field-frame"
-      data-changed="true"
+      data-testid={isChanged ? "changed-field-frame" : undefined}
+      data-changed={isChanged ? "true" : undefined}
       className={cn(
-        "rounded-md border border-amber-400 bg-amber-50/40 p-2 dark:bg-amber-950/20",
+        isChanged
+          ? "rounded-md border border-amber-400 bg-amber-50/40 p-2 dark:bg-amber-950/20"
+          : "space-y-1",
         className,
       )}
     >
-      <div className="mb-1 flex items-center gap-2">
-        <span
-          data-testid="changed-pill"
-          className="inline-flex items-center rounded-md border border-amber-400 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
-        >
-          changed
-        </span>
-        <span
-          data-testid="changed-from"
-          className="text-xs text-muted-foreground"
-        >
-          from {stringifyValue(initial)}
-          {fromEnvironment ? " (env)" : ""}
-        </span>
-      </div>
+      {isChanged && (
+        <div className="mb-1 flex items-center gap-2">
+          <span
+            data-testid="changed-pill"
+            className="inline-flex items-center rounded-md border border-amber-400 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
+          >
+            changed
+          </span>
+          <span
+            data-testid="changed-from"
+            className="text-xs text-muted-foreground"
+          >
+            from {stringifyValue(initial)}
+            {fromEnvironment ? " (env)" : ""}
+          </span>
+        </div>
+      )}
       {children}
     </div>
   );

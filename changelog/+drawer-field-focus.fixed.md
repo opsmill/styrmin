@@ -1,0 +1,1 @@
+Fixed typing in the Edit configuration drawer: a field outside the Driver Parameters section lost focus after the first character that made its value differ from the stored one, so the characters typed next were dropped.

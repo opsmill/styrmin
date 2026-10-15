@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import { useForm, type AnyFormApi } from "@tanstack/react-form";
 
@@ -69,28 +70,6 @@ describe("componentOverridesSchema", () => {
       },
     ]);
     expect(result.success).toBe(false);
-  });
-});
-
-describe("componentOverridesSchema: replicas", () => {
-  it.each([1, 3, null, undefined])("accepts %j", (replicas) => {
-    const result = componentOverridesSchema.safeParse([
-      { name: "server", replicas },
-    ]);
-    expect(result.success).toBe(true);
-  });
-
-  it.each([
-    [0, "Must be 1 or more. To run no pods, stop the component."],
-    [-1, "Must be 1 or more. To run no pods, stop the component."],
-    [1.5, "Must be a whole number."],
-  ])("rejects %j", (replicas, message) => {
-    const result = componentOverridesSchema.safeParse([
-      { name: "server", replicas },
-    ]);
-    expect(result.success).toBe(false);
-    expect(result.error?.issues[0].path).toEqual([0, "replicas"]);
-    expect(result.error?.issues[0].message).toBe(message);
   });
 });
 
@@ -464,7 +443,6 @@ describe("ComponentOverridesSection: image override", () => {
       "Fix the invalid image reference on server before applying.",
     );
 
-    // Re-query: the changed-field frame remounts the input.
     fireEvent.change(screen.getByTestId("comp-image-server"), {
       target: { value: IMAGE },
     });
@@ -859,6 +837,68 @@ describe("ComponentOverridesSection: replicas (023)", () => {
       screen.queryByTestId("component-override-not-applied-migrate"),
     ).toBeNull();
   });
+
+  it.each(["server", "migrate"])(
+    "keeps the Replicas input on %s, which has no block, focused while typing",
+    async (name) => {
+      const user = userEvent.setup();
+      const { components } = renderSection();
+
+      await openComponent(name);
+      const input = screen.getByTestId(`comp-replicas-${name}`);
+      await user.type(input, "12");
+
+      expect(screen.getByTestId(`comp-replicas-${name}`)).toBe(input);
+      expect(input).toHaveFocus();
+      expect(input).toHaveValue(12);
+      expect(components()).toEqual([{ name, replicas: 12 }]);
+      expect(componentsFormToInput(components())).toEqual([
+        { name, replicas: 12 },
+      ]);
+    },
+  );
+
+  it("keeps the Replicas input of an existing block focused while typing", async () => {
+    const user = userEvent.setup();
+    const { components } = renderSection({
+      components: [{ name: "server", envVars: [] }],
+    });
+
+    await openComponent("server");
+    const input = screen.getByTestId("comp-replicas-server");
+    await user.type(input, "12");
+
+    expect(screen.getByTestId("comp-replicas-server")).toBe(input);
+    expect(input).toHaveFocus();
+    expect(components()).toEqual([
+      { name: "server", envVars: [], replicas: 12 },
+    ]);
+  });
+
+  it.each(["0", "1.5", "2147483648"])(
+    "blocks Review & apply while a count of %s is in the field",
+    async (typed) => {
+      renderSection();
+
+      await openComponent("migrate");
+      fireEvent.change(screen.getByTestId("comp-replicas-migrate"), {
+        target: { value: typed },
+      });
+
+      const apply = screen.getByTestId("drawer-review-apply-button");
+      await waitFor(() => expect(apply).toBeDisabled());
+      expect(apply).toHaveAccessibleDescription(
+        "Fix the invalid replica count on migrate before applying.",
+      );
+
+      fireEvent.change(screen.getByTestId("comp-replicas-migrate"), {
+        target: { value: "2" },
+      });
+
+      await waitFor(() => expect(apply).toBeEnabled());
+      expect(screen.queryByTestId("drawer-invalid-hint")).toBeNull();
+    },
+  );
 
   it("pre-fills a stored override and clearing it submits replicas: null", async () => {
     const initial: UpdateDeploymentInput = {
