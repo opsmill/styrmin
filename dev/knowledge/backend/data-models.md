@@ -664,11 +664,11 @@ GlobalContext
 
 `ComponentContext.replica_override` (023) is filled by `resolve_global_context`
 (`context/resolvers.py`) from `DeploymentConfig.components[<name>].replicas`, for declared
-components only, so an orphaned override never reaches the context. The same resolver parses each
-stored declaration with `parse_stored_component_declaration`. `ComponentContext` has
-`extra="forbid"`, so an agent from before 023 rejects a context that carries `replica_override`;
-the context written into the `StyrminDeployment` resource is dumped with `exclude_none=True`, so
-the key is present only when an override is set.
+components only, so an orphaned override never reaches the context. It is a `StrictInt` from 1 to
+`MAX_REPLICA_COUNT`. `ComponentContext` has `extra="forbid"`, so an agent or server from before
+023 rejects a context that carries `replica_override`. A `model_serializer(mode="wrap")` leaves
+the key out of every dump when it is `None`, and `ComponentConfigBlock` does the same for
+`replicas`, so only a context of a deployment with an override carries either key.
 
 ### Configuration Models
 
@@ -738,8 +738,9 @@ class ResolvedConfig(DeploymentConfig):
 
 A `mode="before"` validator on `replicas`, and a check in `DeploymentConfig.components` that names
 the component from the dict key, raise `InvalidReplicaCountError` (`INVALID_REPLICA_COUNT`) for a
-`bool`, a non-integer or a value out of range, before Pydantic converts the type. Configs stored
-before 023 have no `replicas` key and read as `None`; no Alembic revision
+`bool`, a non-integer or a value out of range, before Pydantic converts the type. A dump leaves
+`replicas` out when it is `None`, so a block without an override dumps as before 023. Configs
+stored before 023 have no `replicas` key and read as `None`; no Alembic revision
 ([ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md)).
 
 #### DedicatedIngressConfig

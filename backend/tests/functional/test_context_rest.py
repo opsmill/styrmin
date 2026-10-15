@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
+from styrmin_backend.context.models.components import ComponentsContext
 from styrmin_backend.context.models.config import (
     ClusterConfig,
     DeploymentConfig,
@@ -139,3 +140,33 @@ async def test_get_context_generation_fails(client: AsyncClient):
 
     assert response.status_code == 500
     assert "Context generation failed" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_get_context_omits_an_unset_replica_override(client: AsyncClient):
+    """An agent of the release before 023 rejects any ``replica_override`` key (023)."""
+    deployment_id = uuid4()
+    context = make_global_context(deployment_id)
+    context.components = ComponentsContext.model_validate(
+        {
+            name: {
+                "config": {"identifier": {"label": {"app": name}}},
+                "name": name,
+                "enabled": True,
+                "replica_override": override,
+            }
+            for name, override in (("server", None), ("worker", 3))
+        }
+    )
+
+    with patch(
+        "styrmin_backend.api.rest.deployments.generate_context_from_deployment_id",
+        new_callable=AsyncMock,
+    ) as mock_gen:
+        mock_gen.return_value = context
+        response = await client.get(f"/deployments/{deployment_id}/context")
+
+    assert response.status_code == 200
+    components = response.json()["components"]
+    assert "replica_override" not in components["server"]
+    assert components["worker"]["replica_override"] == 3

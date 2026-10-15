@@ -86,7 +86,6 @@ class TestComponentConfigBlockImage:
             "command": ["serve"],
             "args": None,
             "image": None,
-            "replicas": None,
         }
         assert block.model_dump(exclude_none=True) == {"command": ["serve"]}
 
