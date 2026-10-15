@@ -146,5 +146,3 @@ class StyrminDeploymentStatus(BaseModel):
     # The instance whose spec the operator last handled, and when that rollout started.
     instance_id: str | None = Field(default=None, alias="instanceId")
     rollout_started_at: str | None = Field(default=None, alias="rolloutStartedAt")
-    # Rewritten on every delete handler run, so kopf gets an event to remove the finalizer.
-    deletion_handled_at: str | None = Field(default=None, alias="deletionHandledAt")

@@ -160,12 +160,11 @@ resolve to.
 
 ### A controller that stays `DELETING`
 
-With an agent released before the fix of
-[#446](https://github.com/opsmill/styrmin/issues/446), a race in the
-operator can stop the removal of a dedicated ingress controller.
-Changes to `dedicated_ingress` remove controllers more often, so you
-are more likely to see it after a cluster update. An agent with the fix
-removes the finalizer itself.
+With an agent of Styrmin v0.1.48 or earlier, a race in the operator can
+stop the removal of a dedicated ingress controller
+([#446](https://github.com/opsmill/styrmin/issues/446)). Changes to
+`dedicated_ingress` remove controllers more often, so you are more
+likely to see it after a cluster update.
 
 You see these symptoms:
 
@@ -176,19 +175,16 @@ You see these symptoms:
   `styrmin-<controller-id>`, still has the `styrmin.io/kopf-finalizer`
   finalizer although the operator logged `Deletion is processed`.
 
-The operator's delete handler and its timer ran at the same moment, and
-the operator kept the finalizer. To recover, add any annotation to the
-custom resource. The operator then runs the delete handler again and
-removes the finalizer:
+An agent of a release later than v0.1.48 removes the finalizer itself.
+To read the agent's version, and to remove the finalizer, follow
+[A `StyrminDeployment` that keeps its finalizer](./operator-and-crds.md#a-styrmindeployment-that-keeps-its-finalizer),
+with `styrmin-<controller-id>` as both the name and the namespace. That
+section also covers an agent later than v0.1.48 that still shows these
+symptoms.
 
-```bash
-kubectl annotate styrmindeployments.styrmin.io styrmin-<controller-id> \
-  -n styrmin-<controller-id> styrmin.io/retry-delete="$(date +%s)" --overwrite
-```
-
-The namespace is then deleted, Styrmin marks the controller as deleted,
-and you can submit the cluster config again to move the applications
-that waited.
+Once the finalizer is gone, Kubernetes deletes the namespace, Styrmin
+marks the controller as deleted, and you can submit the cluster config
+again to move the applications that waited.
 
 ### Changing the dedicated ingress of an environment
 

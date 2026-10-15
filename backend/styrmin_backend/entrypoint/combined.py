@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
 # Shared shutdown signal: set by kopf cleanup, observed by Prefect worker
 _shutdown = asyncio.Event()
 
-#: How long kopf waits for a stopped timer to end its current run before it keeps the finalizer.
-TIMER_EXIT_TIMEOUT_SECONDS = 5.0
+#: How often kopf checks whether a timer it stopped has ended its run.
+TIMER_EXIT_POLLING_SECONDS = 5.0
 
 
 # --- Kopf lifecycle handlers ---
@@ -51,9 +51,10 @@ async def on_startup(settings: kopf.OperatorSettings, **_: Any) -> None:
     settings.persistence.progress_storage = kopf.AnnotationsProgressStorage(
         prefix="styrmin.io",
     )
-    # Without it, a CR deleted during a timer run waits for another event to lose
-    # its finalizer, and its namespace can stay Terminating (#446, #461).
-    settings.background.instant_exit_timeout = TIMER_EXIT_TIMEOUT_SECONDS
+    # When kopf stops a timer whose run has not ended (resource deleted, filters no longer
+    # matching, operator pausing), it checks again after this delay instead of 60 s. A deleted
+    # CR keeps its finalizer until then (#446, #461).
+    settings.background.cancellation_polling = TIMER_EXIT_POLLING_SECONDS
     logger.info(
         "Kopf operator starting with peering=%s priority=%d",
         operator.peering_name,
