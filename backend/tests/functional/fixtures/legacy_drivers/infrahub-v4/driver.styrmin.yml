@@ -1,0 +1,133 @@
+---
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: infrahub
+spec:
+  version: "4"
+  supported_versions: ">=1.5,<2.0"
+  info:
+    icon: https://docs.infrahub.app/img/infrahub-logo.svg
+    description: Next generation source of truth for infrastructure management
+    authors: [fatih]
+    license: Apache-2.0
+    links:
+      - link: Homepage
+        url: 'https://www.opsmill.com/'
+      - link: Documentation
+        url: 'https://docs.infrahub.app'
+      - link: Github
+        url: 'https://github.com/opsmill/infrahub'
+  helm:
+    main:
+      location: oci://registry.opsmill.io/opsmill/chart/infrahub
+      version: 4.33.2
+
+  parameters:
+    - name: replicas_server
+      label: "Number of server replicas"
+      kind: integer
+      default: 1
+    - name: replicas_task_worker
+      label: "Number of task worker replicas"
+      kind: integer
+      default: 2
+    - name: database_storage_size
+      label: "Database storage size (Gi)"
+      kind: integer
+      default: 100
+    - name: enable_analytics
+      label: "Enable analytics"
+      kind: boolean
+      default: true
+
+  components:
+    server:
+      container: infrahub-server
+      cpu: 4
+      identifier:
+        label:
+          service: infrahub-server
+      backup:
+        enabled: true
+        kind: disk
+        # Pod-template volume name mounted at /opt/infrahub/storage (artifact
+        # content / object store). Required: without it the disk backup emits
+        # no Velero backup-volumes annotation and silently captures nothing.
+        volume: infrahub-server-storage-data
+
+    task-worker:
+      container: infrahub-task-worker
+      identifier:
+        label:
+          service: infrahub-task-worker
+
+    database:
+      container: neo4j
+      identifier:
+        label:
+          infrahub/service: database
+      backup:
+        enabled: true
+        kind: neo4j
+
+    cache:
+      container: redis
+      identifier:
+        label:
+          infrahub/service: cache
+
+    message-queue:
+      container: rabbitmq
+      identifier:
+        label:
+          infrahub/service: message-queue
+
+    task-manager:
+      container: prefect-server
+      identifier:
+        label:
+          app.kubernetes.io/name: prefect-server
+
+    task-manager-db:
+      container: postgresql
+      identifier:
+        label:
+          infrahub/service: task-manager-db
+      backup:
+        enabled: true
+        kind: postgres
+        database_name: prefect
+
+  services:
+    - name: infrahub
+      kind: http
+      scope: internal
+      port: 8000
+      component: server
+
+    # Prefect UI (and API at /api) served by the task-manager component.
+    - name: task-manager
+      kind: http
+      scope: internal
+      port: 4200
+      component: task-manager
+
+  actions:
+    - name: upgrade
+      hook: upgrade
+      mode: core
+      description: Upgrade Infrahub
+      location: "actions.py::upgrade"
+
+    - name: pre_setup
+      hook: setup
+      mode: pre
+      description: Initial Setup of Infrahub
+      location: "actions.py::pre_setup"
+
+    - name: post_setup
+      hook: setup
+      mode: post
+      description: Initial Setup of Infrahub
+      location: "actions.py::post_setup"
