@@ -124,7 +124,7 @@ version and adds component env vars is validated against the driver version
 that `spec.version` resolves to. The errors name the driver, driver version and
 application version they checked. Unchanged env vars on a component that this
 driver version declares without a container pass and are stored inert;
-`apply` warns about them (`ApplyOutcome.inapplicable_components`). Env vars on
+`apply` warns about them (`ApplyOutcome.inapplicable_overrides`). Env vars on
 a component it does not declare are rejected even when unchanged.
 
 ## Driver-side documentation
@@ -275,7 +275,9 @@ The resolved dicts stay in the rendering context as **read-only data**:
 The `component_env_vars` template filter is retired: it raises
 `RetiredTemplateFilterError` (`RETIRED_TEMPLATE_FILTER`, metadata `filter`
 and `migration_guide`), which aborts rendering before a HelmRelease is
-built. The operator records `Failed to create HelmRelease: <message>` on the
+built. `JinjaTemplateValidator` raises the same error when a driver version
+whose `values.j2.yml` calls a retired filter is loaded, so only driver
+versions loaded before that check reach the render. The operator records `Failed to create HelmRelease: <message>` on the
 deployment; the typed code and metadata do not survive the CR → operator hop,
 the message and the migration guide URL do.
 

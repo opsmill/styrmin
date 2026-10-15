@@ -702,7 +702,12 @@ ServiceError (base)
 
 `RetiredTemplateFilterError` (`RETIRED_TEMPLATE_FILTER`) builds its message and its `migration_guide`
 metadata from the filter name: `component_env_vars` links the env var migration guide, and
-`component_command` and `component_args` link `CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL`. Spec 022
+`component_command` and `component_args` link `CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL`. At driver
+load, `JinjaTemplateValidator` walks the parsed template's `Filter` nodes and raises the same error
+with `retired_filter_load_message()`, which names the line of the call, so a driver version that
+calls a retired filter is not loaded; the render-time filters stay registered for driver versions
+loaded earlier. A `driver.styrmin.yml` with `spec.container_overrides` fails in a `before` model
+validator on `Specification` with a `removed_key` error that links the same guide. Spec 022
 removed `DriverContainerOverrideDocComponentMismatchError`
 (`DRIVER_CONTAINER_OVERRIDE_DOC_COMPONENT_MISMATCH`) together with `spec.container_overrides`
 ([ADR-069](../../adr/0069-container-command-args-by-post-render.md)).

@@ -25,6 +25,15 @@ that deployment is pinned to a driver version whose `values.j2.yml` still calls 
 filter. Follow [If you run deployments](#if-you-run-deployments) to fix it, and
 [If you write drivers](#if-you-write-drivers) to migrate a driver.
 
+If you arrived here from an error while loading a driver:
+
+```text
+values.j2.yml line 12 calls the 'component_args' template filter, which was removed: ...
+```
+
+that driver version is not migrated yet, and Styrmin does not load it. Follow
+[If you write drivers](#if-you-write-drivers).
+
 ### Why it changed
 
 Under the old route, a container override reached the pod only when the driver's
@@ -44,6 +53,62 @@ component container afterwards. The driver needs no template code, and a user ca
 `command` and `args` whether or not the chart exposes them as values.
 
 ### If you run deployments
+
+#### Before you upgrade Styrmin
+
+After the upgrade, Styrmin applies the stored `command` and `args` of every component that
+declares a component container, and any new render of a deployment applies them. A render
+happens on a change to the deployment, and also on changes other users make: an env var edit
+on the deployment's environment, or a cluster config update that changes its resolved config.
+So remove the values you do not want while you still run the Styrmin release you have now.
+
+This matters most for deployments of a driver whose template never called the filters, such
+as the `slurpit`, `semaphore`, `infrahub-mcp` and `db-test` example drivers. Styrmin stored
+their `command` and `args` but never applied them, and after the upgrade they apply on the next
+render, without any move to a new driver version.
+
+1. **List the stored `command` and `args` of each deployment.** The `Config:` line of
+   `styrminctl deployments get` shows `components`, and each component block shows its
+   `command` and `args`:
+
+   ```shell
+   uv run styrminctl deployments get <deployment-id>
+   ```
+
+   Through the API, `Deployment.componentContainerOverrides` returns them for each component
+   that stores one:
+
+   ```graphql
+   query {
+     deployment(deploymentId: "<deployment-id>") {
+       componentContainerOverrides { component command args isOrphaned }
+     }
+   }
+   ```
+
+2. **Remove the values you do not want, with the CLI or the API.** The Configuration editor of
+   releases before this one cannot submit a change that only removes `command` or `args`.
+   `components` in the payload replaces every stored component block, so include the env vars,
+   image, `command` and `args` of every component you keep:
+
+   ```shell
+   uv run styrminctl deployments update <deployment-id> --config @config.json
+   ```
+
+   ```json
+   {
+     "components": [
+       { "name": "server", "envVars": [{ "name": "LOG_LEVEL", "value": "debug" }] },
+       { "name": "worker", "args": ["--queue", "low"] }
+     ]
+   }
+   ```
+
+   If you manage the deployment with a manifest, remove the values from
+   `spec.config.components` and run `styrminctl deployments apply` instead. Either way, Styrmin
+   redeploys the deployment on its current driver version.
+
+#### After you upgrade Styrmin
 
 Do these steps in order. With `styrminctl deployments apply`, steps 2 and 3 are one apply: see
 [Steps 2 and 3 with `styrminctl apply`](#steps-2-and-3-with-styrminctl-apply).
@@ -73,16 +138,15 @@ Do these steps in order. With `styrminctl deployments apply`, steps 2 and 3 are 
      `server` only.
    - A driver whose template never called the filters, such as the `slurpit`, `semaphore`,
      `infrahub-mcp` and `db-test` example drivers: every stored `command` and `args` on a
-     component with a component container. These deployments need no move: the values apply
-     the next time Styrmin renders the deployment after you upgrade Styrmin. A change to the
-     deployment renders it again, and so do an env var edit on its environment and a cluster
-     config update that changes its resolved config. Remove the values you do not want before
-     any of these happens.
+     component with a component container. These deployments need no move, and the values
+     apply on their next render. If you did not remove the values you do not want
+     [before you upgraded Styrmin](#before-you-upgrade-styrmin), remove them now.
 
-   The **Component Overrides** card on the deployment's **Configuration** tab shows how many
-   `command` and `args` entries each component stores. Click **Update Settings** and expand the
-   component to view the values. Through the API, `Deployment.componentContainerOverrides`
-   returns `command`, `args` and `isApplicable` for each component that stores an override.
+   The **Component Overrides** card on the deployment's **Configuration** tab lists the stored
+   `command` and `args` of each component, with an **applied** or **not applied** badge. Users
+   who cannot edit the deployment see the card too. Through the API,
+   `Deployment.componentContainerOverrides` returns `command`, `args` and `isApplicable` for
+   each component that stores an override.
 
    Remove the values you do not want in the same write that moves the deployment (step 3), so
    they never reach the pods.
@@ -172,15 +236,20 @@ adds or changes `command` or `args` on that component is rejected with
    {# After: nothing. Styrmin patches command and args into each component container. #}
    ```
 
-   Both filters fail the render wherever they appear, also inside `{% if %}` and when no
-   override is set. A fixed `command` or `args` that the template sets for its own reasons can
-   stay: an override replaces it, and clearing the override brings it back.
+   Both filters fail wherever they appear, also inside `{% if %}` and when no override is set.
+   Styrmin rejects the driver version when you load it, with `RETIRED_TEMPLATE_FILTER` and the
+   line of the first call. A driver version loaded before the upgrade stays loaded and fails
+   when Styrmin renders a deployment of it. A fixed `command` or `args` that the template sets
+   for its own reasons can stay: an override replaces it, and clearing the override brings it
+   back.
 
 3. **Delete `spec.container_overrides` from `driver.styrmin.yml`.** A driver file that still
-   contains the block fails to load, like a file with any other unknown key under `spec`:
+   contains the block fails to load:
 
    ```text
-   - spec.container_overrides: Extra inputs are not permitted
+   - spec: spec.container_overrides was removed: Styrmin now applies container command and args
+     overrides to each component's declared component container. Delete the block and declare
+     components.<name>.container instead. Migration guide: ...
    ```
 
 4. **Bump `spec.version` and load the driver.** Users then move their deployments to it (see
@@ -214,14 +283,17 @@ chart key would no longer hold the chart's own value.
   on a component without a container fails with `COMPONENT_CONTAINER_NOT_DECLARED`, with the
   `override` metadata set to `command` or `args`. Removing a stored value, or sending the same
   value again, is accepted.
-- **The UI follows the driver.** The deployment's Configuration editor hides the Command and
-  Args editors for a component without a container, and shows any stored values read-only,
-  marked **not applied**, with a remove button.
+- **The UI follows the driver.** For a component without a container, the deployment's
+  Configuration editor explains that the component accepts no overrides instead of offering
+  **Add override**. It hides the Command and Args editors, and shows any stored values
+  read-only, marked **not applied**, with a remove button.
 - **Upgrades keep stored values.** If a driver upgrade drops a component's container, its
   stored `command` and `args` are kept and reported with `isApplicable: false` in the API; they
-  are not applied until a driver version declares the container again. `styrminctl deployments
-  apply` prints a warning on stderr for a component whose `command`, `args`, env vars or image
-  override the manifest sets and the driver version does not apply.
+  are not applied until a driver version declares the container again. For each component
+  whose `command`, `args`, env vars or image override the manifest sets and the driver version
+  does not apply, `styrminctl deployments apply` prints a warning on stderr. The warning names
+  the component and the kinds of override, and says to remove them from the manifest or to load
+  a driver version that declares a container for the component.
 - **A wrong container name fails the release.** The first time any override applies to the
   component, including `command` or `args` alone, the deployment fails with
   `COMPONENT_CONTAINER_NOT_FOUND` and a message naming the component and the container. Styrmin

@@ -209,9 +209,12 @@ rejects added or changed component-scope env vars on a component without one
 which `get_deployment.graphql` selects on `Deployment.components`:
 
 - **Container declared**: the env var editor is unchanged.
-- **No container**: no add or edit control is rendered. An explanation
-  (`comp-env-no-container-<component>`) says the driver declares no container, so
-  env vars can't be applied. Stored values, typically left by a driver upgrade
+- **No container**: no add or edit control is rendered. A component without a
+  stored block shows one line (`component-override-no-container-<component>`)
+  instead of **Add override**, so the drawer never creates an empty block for it.
+  An explanation (`comp-env-no-container-<component>`) says the driver declares
+  no container, so env vars can't be applied. A collapsed row that stores any
+  value gets a **not applied** badge (`component-override-not-applied-<component>`). Stored values, typically left by a driver upgrade
   that dropped the container, render read-only (`component-env-var-readonly-row`)
   with a remove button, the same treatment as orphaned override blocks. Removing
   them submits a subset of the stored block, which the backend accepts.
@@ -233,9 +236,14 @@ backend rejects adding or changing them on a component without a container
 ([ADR-069](../../adr/0069-container-command-args-by-post-render.md)). A component
 with a container gets the **Command** and **Args** list editors
 (`component-command-editor-<component>`, `component-args-editor-<component>`). A
-component without one gets neither. A stored list there renders read-only in
-`ContainerlessContainerOverride` (`comp-command-readonly-<component>`,
-`comp-args-readonly-<component>`) with a **not applied** badge, the same
+component without one gets neither. Each editor is a labelled `group` described
+by a hint, shows an empty state that says the chart's value applies, names each
+input (`Command element <n> for <component>`, `Args element <n> for <component>`)
+and warns under an empty command element, which the container would receive as
+an empty string. A stored list on a component without a container renders
+read-only as one JSON list in `ContainerlessContainerOverride`
+(`comp-command-readonly-<component>`, `comp-args-readonly-<component>`), so
+`["a b"]` and `["a", "b"]` read differently, with a **not applied** badge, the same
 explanation, and a remove button (`Remove command override for <component>`,
 `Remove args override for <component>`) that sets the list to `[]`. The submit
 boundary (`componentsFormToInput` in `lib/deployment-input.ts`, called in
@@ -246,10 +254,13 @@ env vars and the image, and counts an empty list as no override. A change to onl
 `command` or `args` therefore produces a diff entry and enables **Review &
 apply**.
 
-The read summary (`ComponentOverridesSummary.tsx`) still shows only the number
-of `command` and `args` entries per component, with no **applied** or **not
-applied** badge. `Deployment.componentContainerOverrides.isApplicable` exposes
-whether they apply.
+The read summary (`ComponentOverridesSummary.tsx`) lists each stored `command`
+and `args` as a JSON list (`component-container-override`) with an **applied** or
+**not applied** badge from `Deployment.componentContainerOverrides.isApplicable`,
+which `get_deployment.graphql` selects. Users who cannot open the drawer see the
+values there. Orphan rows (`component-override-orphan-row`) cover every block
+stored on an undeclared component, from `deployment.config.components`, the image
+overrides and the container overrides, not only image overrides.
 
 <!-- Extracted from specs/018-component-image-overrides on 2026-10-05 -->
 

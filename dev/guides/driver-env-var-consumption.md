@@ -65,8 +65,9 @@ records the command and result for every in-repo driver.
 `extraEnvVars` keys with user values: Helm replaces lists wholesale, which is what dropped
 chart defaults under the retired route.
 
-The `component_env_vars` filter is retired. Calling it fails rendering with
-`RETIRED_TEMPLATE_FILTER`; the deployment reports
+The `component_env_vars` filter is retired. Loading a driver version that calls it fails with
+`RETIRED_TEMPLATE_FILTER` and names the line of the call. A driver version loaded before that
+check fails rendering with the same code; the deployment reports
 `Failed to create HelmRelease: The 'component_env_vars' template filter was removed: …`.
 
 Keep hard-coded chart wiring in the template where the chart reads a map or a dedicated key.

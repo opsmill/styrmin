@@ -679,15 +679,18 @@ component, remove its block from the manifest in the same change that moves
 `spec.version`. Unchanged `env_vars`, `image`, `command` or `args` on a
 component that the driver version declares without a component container are
 accepted, stored and not applied. `apply` prints a warning on stderr for each
-deployment with such a component:
+such component. The warning names the kinds of override and the two ways to fix
+it:
 
 ```text
 updated my-app
-warning: my-app: env var, image, command or args overrides on worker are stored but not applied (no component container in the driver version)
+warning: my-app: env var and args overrides are stored on worker but not applied: the driver version declares no component container for worker. Remove them from the manifest, or load a driver version that declares components.worker.container and apply again
 0 created, 1 updated, 0 unchanged, 0 failed
 ```
 
-The SDK returns these components as `ApplyOutcome.inapplicable_components`.
+The SDK returns these components as `ApplyOutcome.inapplicable_components`, and
+the kinds of override per component (`env_vars`, `image`, `command`, `args`) as
+`ApplyOutcome.inapplicable_overrides`.
 See [Migrating env var wiring](../drivers/migrating-env-vars.md) and
 [Migrating container overrides](../drivers/migrating-container-overrides.md).
 

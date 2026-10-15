@@ -259,7 +259,7 @@ Notice the typical patterns:
 - **No `command` or `args` wiring.** A user's container `command` and
   `args` overrides reach each component's declared container without
   template code. The `component_command` and `component_args` filters are
-  retired: a template that calls either one fails to render with
+  retired: a template that calls either one fails to load with
   `RETIRED_TEMPLATE_FILTER` (see
   [Migrating container overrides](./migrating-container-overrides.md)).
 

@@ -232,9 +232,13 @@ validates the config against the driver version the manifest resolves to and one
 it. A `null` result is `unchanged`. A rejected call is `failed` with `ApplyOutcome.error_code`, and
 the CLI prints the code in brackets at the end of the `failed` line. After an `updated` outcome
 whose manifest sets component env vars, images, `command` or `args`, `_apply_update` reads
-`isApplicable` back (`get_deployment_override_applicability.graphql`) and lists the components it
-cannot apply in `ApplyOutcome.inapplicable_components`; the CLI warns about them on stderr, like
-the pinned-image warning, and a failed read lists nothing. See
+`isApplicable` back (`get_deployment_override_applicability.graphql`) and lists, per component,
+the kinds it set that are not applied in `ApplyOutcome.inapplicable_overrides` (`env_vars`,
+`image`, `command`, `args`; `command` and `args` share the `componentContainerOverrides` row), with
+the component names in `ApplyOutcome.inapplicable_components`. The CLI prints one stderr warning
+per component that names those kinds and the two fixes (remove them from the manifest, or load a
+driver version that declares the component container), like the pinned-image warning, and a
+failed read lists nothing. See
 [ADR-065](../../adr/0065-apply-writes-config-with-the-version.md).
 
 **Server compatibility.** `update_version()` sends `input` in its own operation
