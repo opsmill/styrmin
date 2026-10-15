@@ -91,3 +91,7 @@ Observed in the same vCluster while the test ran (read with `kubectl` using the 
 
 - The `simple-app` Ingress `styrmin-simple-app` in namespace `styrmin-11c84ef7-5eb7-43b7-89a2-57acfd2e38c2` had no `spec.ingressClassName` and had the annotation `kubernetes.io/ingress.class: traefik`.
 - The first `postRenderers` patch of its HelmRelease targets `kind: Ingress` and sets `spec.ingressClassName: null`. A later patch adds the `kubernetes.io/ingress.class: traefik` annotation.
+
+## T027: No production or driver change after the recorded runs
+
+No file under `backend/styrmin_backend/` or `driver/examples/` changed after the runs above, which used HEAD `8ad5053f`. Checked on `2026-10-15T09:48:18Z` at HEAD `9a607117` with `git diff --stat 8ad5053f..HEAD -- backend/styrmin_backend driver/examples`, which printed nothing. The commits after `8ad5053f` changed only `backend/tests/integration/test_ingress_class_post_render.py`, this file, `tasks.md`, the documentation pages, `CONTEXT.md`, ADR-070 and the changelog fragment, so the two runs above are the final runs and were not repeated.
