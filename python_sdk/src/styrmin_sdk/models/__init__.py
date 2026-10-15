@@ -6,6 +6,7 @@ from styrmin_sdk.graphql._generated.enums import (
     EnvironmentCloneStatus,
     EnvironmentRestoreStatus,
     IngressControllerAction,
+    ReplicaSource,
     StepKind,
     StepStatus,
     TaskResult,
@@ -23,6 +24,9 @@ from styrmin_sdk.graphql._generated.get_deployment import (
 )
 from styrmin_sdk.graphql._generated.get_deployment import (
     GetDeploymentDeploymentApplicationInstance as ApplicationInstance,
+)
+from styrmin_sdk.graphql._generated.get_deployment import (
+    GetDeploymentDeploymentComponentReplicas as ComponentReplicas,
 )
 from styrmin_sdk.graphql._generated.get_deployment import (
     GetDeploymentDeploymentComponents as Component,
@@ -114,6 +118,7 @@ __all__ = [
     "Component",
     "ComponentConfig",
     "ComponentConfigInput",
+    "ComponentReplicas",
     "Context",
     "Deployment",
     "DeploymentConfigInput",
@@ -134,6 +139,7 @@ __all__ = [
     "HelmChart",
     "IngressControllerAction",
     "ParameterValueInput",
+    "ReplicaSource",
     "ResolvedManifest",
     "ResourceRequirementsInput",
     "ResourceSpecInput",

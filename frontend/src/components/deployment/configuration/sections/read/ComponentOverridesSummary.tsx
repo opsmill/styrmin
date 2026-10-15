@@ -1,11 +1,13 @@
 import type { GetDeploymentQuery } from "@/generated/graphql";
 import { Badge } from "@/components/ui/badge";
+import { replicaPlaceholder } from "@/lib/replicas";
 import { ConfigSummaryCard } from "../../ConfigSummaryCard";
 
 type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
 type DeploymentComponent = Deployment["components"][number];
 type ImageOverride = Deployment["componentImageOverrides"][number];
 type ContainerOverride = Deployment["componentContainerOverrides"][number];
+type ComponentReplicas = Deployment["componentReplicas"][number];
 
 interface Props {
   /** Raw `Deployment.config` JSON blob (snake_case). */
@@ -26,6 +28,8 @@ interface Props {
   imageOverrides?: readonly ImageOverride[];
   /** `Deployment.componentContainerOverrides` (022): stored `command`/`args`, applied. */
   containerOverrides?: readonly ContainerOverride[];
+  /** `Deployment.componentReplicas` (023): each count, its source and the stored override. */
+  replicas?: readonly ComponentReplicas[];
 }
 
 interface ComponentOverrideBlock {
@@ -35,6 +39,8 @@ interface ComponentOverrideBlock {
   args?: string[] | null;
   /** Image override (018-component-image-overrides). */
   image?: string | null;
+  /** Replica override (023-per-component-replicas). */
+  replicas?: number | null;
   [key: string]: unknown;
 }
 
@@ -42,9 +48,9 @@ interface ComponentOverrideBlock {
  * One-line override summary for a component override block. Each scope
  * the block carries is rendered as a small token; the persisted
  * `components` shape carries env vars, the `command`/`args` container
- * overrides (014-component-container-overrides) and the image override
- * (018), and the future-extension hook (resources / replicas) plugs in
- * here without touching callers.
+ * overrides (014-component-container-overrides), the image override
+ * (018) and the replica override (023); the future-extension hook
+ * (resources) plugs in here without touching callers.
  */
 function summariseOverride(block: ComponentOverrideBlock): string {
   const parts: string[] = [];
@@ -64,6 +70,9 @@ function summariseOverride(block: ComponentOverrideBlock): string {
   }
   if (typeof block.image === "string" && block.image !== "") {
     parts.push("image");
+  }
+  if (typeof block.replicas === "number") {
+    parts.push("replicas");
   }
   if (parts.length === 0) return "override (empty)";
   return parts.join(" · ");
@@ -152,6 +161,61 @@ function AppliedBadge({
   );
 }
 
+/** The count and its source: `3 (override)`, `2 (driver default)`, `set by the chart`. */
+function replicaCountLabel(row: ComponentReplicas): string {
+  if (row.isOrphaned) return `${row.override} (override)`;
+  if (row.count == null) return replicaPlaceholder(null);
+  const source = row.source === "OVERRIDE" ? "override" : "driver default";
+  return `${row.count} (${source}${row.singleton ? ", singleton" : ""})`;
+}
+
+/**
+ * Replicas line under a component row. A stored override gets an applied /
+ * not applied badge; a stopped component runs 0 pods whatever the count.
+ */
+function ReplicasLine({
+  row,
+  stopped,
+}: {
+  row: ComponentReplicas;
+  stopped: boolean;
+}) {
+  const showStoredOverride =
+    row.override != null && !row.isApplicable && !row.isOrphaned;
+  return (
+    <div
+      data-testid="component-replicas"
+      data-component={row.component}
+      data-source={row.source}
+      data-applicable={row.isApplicable ? "true" : "false"}
+      data-stopped={stopped ? "true" : "false"}
+      className="ml-3.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+    >
+      <span className="text-muted-foreground">replicas</span>
+      <span data-testid="component-replicas-value" className="text-foreground">
+        {replicaCountLabel(row)}
+      </span>
+      {showStoredOverride && (
+        <span className="text-muted-foreground">override {row.override}</span>
+      )}
+      {row.override != null && (
+        <AppliedBadge
+          applicable={row.isApplicable}
+          testId="component-replicas-applied-badge"
+        />
+      )}
+      {stopped && (
+        <span
+          data-testid="component-replicas-stopped"
+          className="text-muted-foreground"
+        >
+          stopped: 0 pods
+        </span>
+      )}
+    </div>
+  );
+}
+
 /**
  * `command` and `args` lines under a component row, each list shown as JSON so
  * `["a b"]` and `["a", "b"]` read differently, with an applied / not applied badge.
@@ -202,20 +266,25 @@ function ContainerOverrideLines({ override }: { override: ContainerOverride }) {
  * layers don't define them — so the dot fires whenever any per-component
  * block exists for that component at the deployment layer. A component
  * with an image, `command` or `args` override gets a line for each, with its
- * value and an applied / not applied badge; an override on a component the
- * driver no longer declares gets its own row.
+ * value and an applied / not applied badge; every component gets a replicas
+ * line with the count and its source. An override on a component the driver
+ * no longer declares gets its own row.
  */
 export function ComponentOverridesSummary({
   deploymentConfig,
   components,
   imageOverrides = [],
   containerOverrides = [],
+  replicas = [],
 }: Props) {
   const imageByComponent = new Map(
     imageOverrides.map((o) => [o.component, o] as const),
   );
   const containerByComponent = new Map(
     containerOverrides.map((o) => [o.component, o] as const),
+  );
+  const replicasByComponent = new Map(
+    replicas.map((r) => [r.component, r] as const),
   );
   const declared = new Set(components.map((c) => c.name));
   const storedNames = Object.keys(readComponentBlocks(deploymentConfig) ?? {});
@@ -224,6 +293,7 @@ export function ComponentOverridesSummary({
       ...storedNames,
       ...imageOverrides.map((o) => o.component),
       ...containerOverrides.map((o) => o.component),
+      ...replicas.filter((r) => r.isOrphaned).map((r) => r.component),
     ]),
   ]
     .filter((name) => !declared.has(name))
@@ -244,6 +314,7 @@ export function ComponentOverridesSummary({
             const fromDeployment = override !== null;
             const imageOverride = imageByComponent.get(component.name);
             const containerOverride = containerByComponent.get(component.name);
+            const replicaRow = replicasByComponent.get(component.name);
             return (
               <li
                 key={component.id}
@@ -282,6 +353,9 @@ export function ComponentOverridesSummary({
                 {containerOverride && (
                   <ContainerOverrideLines override={containerOverride} />
                 )}
+                {replicaRow && (
+                  <ReplicasLine row={replicaRow} stopped={!component.enabled} />
+                )}
               </li>
             );
           })}
@@ -289,6 +363,7 @@ export function ComponentOverridesSummary({
             const block = readComponentBlock(deploymentConfig, name);
             const imageOverride = imageByComponent.get(name);
             const containerOverride = containerByComponent.get(name);
+            const replicaRow = replicasByComponent.get(name);
             return (
               <li
                 key={`orphan-${name}`}
@@ -314,6 +389,9 @@ export function ComponentOverridesSummary({
                 )}
                 {containerOverride && (
                   <ContainerOverrideLines override={containerOverride} />
+                )}
+                {replicaRow?.override != null && (
+                  <ReplicasLine row={replicaRow} stopped={false} />
                 )}
               </li>
             );

@@ -808,3 +808,97 @@ async def test_version_change_keeps_override_on_a_dropped_component(
         "app.kubernetes.io/name=database-app",
         "app.kubernetes.io/name=worker-app",
     }
+
+
+# ---------------------------------------------------------------------------
+# T050 — clearing returns to the next source; a stopped component keeps its override (US3)
+# ---------------------------------------------------------------------------
+
+
+async def _patch_counts(
+    session: AsyncSession, deployment_id: UUID
+) -> dict[str, set[int]]:
+    """The ``spec.replicas`` values the replica patches render, per label selector."""
+    context = await generate_context_from_deployment_id(
+        deployment_id, SqlModelUnitOfWork(session=session)
+    )
+    counts: dict[str, set[int]] = {}
+    for tp in build_component_replica_patches(context):
+        assert isinstance(tp.patch, SpecPatch)
+        assert tp.target.label_selector is not None
+        counts.setdefault(tp.target.label_selector, set()).add(
+            tp.patch.specs["replicas"]
+        )
+    return counts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("component", "expected_row"),
+    [("worker", WORKER_ROW), ("server", _row("server", None, "CHART"))],
+    ids=["driver-default", "chart"],
+)
+async def test_clearing_an_override_returns_to_the_next_source(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    component: str,
+    expected_row: dict[str, Any],
+) -> None:
+    """Clearing an override of 3 gives the driver default of 2 on ``worker`` and the chart's
+    count on ``server``, which then gets no replica patch."""
+    _arm_prefect(prefect_manager_mock)
+    deployment_id, _ = await _seed_deployment(
+        session, config={"components": {component: {"replicas": 3}}}
+    )
+    rows = {row["component"]: row for row in await _read_rows(client, deployment_id)}
+    assert rows[component] == _row(component, 3, "OVERRIDE", override=3)
+
+    payload = await _post_update(client, deployment_id, [{"name": component}])
+
+    assert "errors" not in payload, payload
+    assert await _stored_components(session, deployment_id) == {component: {}}
+    rows = {row["component"]: row for row in await _read_rows(client, deployment_id)}
+    assert rows[component] == expected_row
+    selector = f"app.kubernetes.io/name={component}-app"
+    patched = (await _patch_counts(session, deployment_id)).get(selector)
+    assert patched == ({expected_row["count"]} if expected_row["count"] else None)
+
+
+async def _enabled_by_component(
+    session: AsyncSession, deployment_id: UUID
+) -> dict[str, bool]:
+    session.expire_all()
+    rows = await session.exec(
+        select(Component).where(Component.deployment_id == deployment_id)
+    )
+    return {row.name: row.enabled for row in rows.all()}
+
+
+@pytest.mark.asyncio
+async def test_stopped_component_keeps_its_override_and_renders_zero(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """FR-005: ``stopComponents`` keeps the stored override of 3, ``componentReplicas`` still
+    reports 3 from the override, and the rendered patch is 0; ``startComponents`` renders 3."""
+    _arm_prefect(prefect_manager_mock)
+    deployment_id, _ = await _seed_deployment(
+        session, config={"components": {"worker": {"replicas": 3}}}
+    )
+    worker = "app.kubernetes.io/name=worker-app"
+    variables = {"deploymentId": str(deployment_id), "components": ["worker"]}
+
+    await gql(client, "stop_components", variables)
+
+    assert (await _enabled_by_component(session, deployment_id))["worker"] is False
+    assert await _stored_components(session, deployment_id) == {
+        "worker": {"replicas": 3}
+    }
+    rows = {row["component"]: row for row in await _read_rows(client, deployment_id)}
+    assert rows["worker"] == _row("worker", 3, "OVERRIDE", override=3)
+    assert (await _patch_counts(session, deployment_id))[worker] == {0}
+
+    await gql(client, "start_components", variables)
+
+    assert (await _enabled_by_component(session, deployment_id))["worker"] is True
+    assert (await _patch_counts(session, deployment_id))[worker] == {3}

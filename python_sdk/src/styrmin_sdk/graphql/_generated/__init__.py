@@ -106,6 +106,7 @@ from .get_deployment import (
     GetDeploymentDeploymentApplicationDriverVersion,
     GetDeploymentDeploymentApplicationInstance,
     GetDeploymentDeploymentComponentImageOverrides,
+    GetDeploymentDeploymentComponentReplicas,
     GetDeploymentDeploymentComponents,
     GetDeploymentDeploymentCreatedBy,
     GetDeploymentDeploymentDeployedServices,
@@ -146,6 +147,7 @@ from .get_deployment_override_applicability import (
     GetDeploymentOverrideApplicabilityDeploymentComponentContainerOverrides,
     GetDeploymentOverrideApplicabilityDeploymentComponentEnvVars,
     GetDeploymentOverrideApplicabilityDeploymentComponentImageOverrides,
+    GetDeploymentOverrideApplicabilityDeploymentComponentReplicas,
 )
 from .get_deployment_pod_statuses import (
     GetDeploymentPodStatuses,
@@ -521,6 +523,7 @@ __all__ = [
     "GetDeploymentDeploymentApplicationDriverVersion",
     "GetDeploymentDeploymentApplicationInstance",
     "GetDeploymentDeploymentComponentImageOverrides",
+    "GetDeploymentDeploymentComponentReplicas",
     "GetDeploymentDeploymentComponents",
     "GetDeploymentDeploymentCreatedBy",
     "GetDeploymentDeploymentDeployedServices",
@@ -529,6 +532,7 @@ __all__ = [
     "GetDeploymentOverrideApplicabilityDeploymentComponentContainerOverrides",
     "GetDeploymentOverrideApplicabilityDeploymentComponentEnvVars",
     "GetDeploymentOverrideApplicabilityDeploymentComponentImageOverrides",
+    "GetDeploymentOverrideApplicabilityDeploymentComponentReplicas",
     "GetDeploymentPodStatuses",
     "GetDeploymentPodStatusesDeployment",
     "GetDeploymentPodStatusesDeploymentPodStatuses",

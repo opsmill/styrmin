@@ -290,6 +290,81 @@ def test_deployments_get_renders_driver_version_label_with_short_suffix(
     assert "Commit SHA:" not in output
 
 
+def _replica_row(
+    component: str,
+    count: int | None,
+    source: str,
+    *,
+    override: int | None = None,
+    singleton: bool = False,
+    orphaned: bool = False,
+) -> MagicMock:
+    return MagicMock(
+        component=component,
+        count=count,
+        source=source,
+        override=override,
+        singleton=singleton,
+        is_orphaned=orphaned,
+        is_applicable=not orphaned,
+    )
+
+
+def test_deployments_get_shows_each_replica_count_and_its_source(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """023 US3 / FR-014: the Components table has a replicas cell per row, per
+    contracts/cli-and-ui.md, plus a row for an override on a component no longer declared."""
+    from styrminctl.output import console
+
+    monkeypatch.setattr(console, "_width", 1000)
+    names = ["api", "cache", "database", "server", "worker"]
+    components = [MagicMock(id=f"c-{name}", enabled=name != "api") for name in names]
+    for component, name in zip(components, names, strict=True):
+        component.name = name
+    mock_deployment = MagicMock(
+        id=DEPLOYMENT_UUID,
+        name="my-app",
+        status="running",
+        application_version="1.0.0",
+        application_driver_version_id="dv-1",
+        environment_id=ENV_UUID,
+        config=None,
+        application_instance=None,
+        components=components,
+        component_replicas=[
+            _replica_row("api", 3, "OVERRIDE", override=3),
+            _replica_row("cache", None, "CHART"),
+            _replica_row("database", 1, "DRIVER_DEFAULT", singleton=True),
+            _replica_row("legacy", None, "CHART", override=3, orphaned=True),
+            _replica_row("server", 3, "OVERRIDE", override=3),
+            _replica_row("worker", 2, "DRIVER_DEFAULT"),
+        ],
+    )
+    mock_client.deployments.get = AsyncMock(return_value=mock_deployment)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "get", DEPLOYMENT_UUID])
+    assert exc.value.code == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    [header] = [line for line in lines if line.startswith("┃")]
+    assert [cell.strip() for cell in header.split("┃")[1:-1]] == ["id", "name", "enabled", "replicas"]
+    cells = {
+        line.split("│")[2].strip(): [cell.strip() for cell in line.split("│")[3:5]]
+        for line in lines
+        if line.startswith("│")
+    }
+    assert cells == {
+        "api": ["False", "3 (override), stopped: 0 pods"],
+        "cache": ["True", "chart"],
+        "database": ["True", "1 (driver default, singleton)"],
+        "server": ["True", "3 (override)"],
+        "worker": ["True", "2 (driver default)"],
+        "legacy": ["-", "3 (override, not applied: no longer declared)"],
+    }
+
+
 # --------------------------------------------------------------------------
 # `deployments apply` — delegates to `apply_files` (chunks 6 + 9).
 # --------------------------------------------------------------------------
@@ -1081,6 +1156,41 @@ def test_deployments_apply_warns_about_overrides_the_driver_version_cannot_apply
         "warning: my-app: env var, command and args overrides are stored on worker but not applied: "
         "the driver version declares no component container for worker. Remove them from the "
         "manifest, or load a driver version that declares components.worker.container and apply again",
+    ]
+    assert captured.out.splitlines() == ["updated my-app", "0 created, 1 updated, 0 unchanged, 0 failed"]
+
+
+def test_deployments_apply_warns_about_a_replica_override_that_is_not_applied(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """A replica override needs no component container, so its warning names the component
+    that the driver version no longer declares."""
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    outcome = _outcome("my-app", "updated").model_copy(
+        update={
+            "inapplicable_components": ["legacy", "worker"],
+            "inapplicable_overrides": {"legacy": ["replicas"], "worker": ["env_vars", "replicas"]},
+        }
+    )
+    mock_client.deployments.apply_files = AsyncMock(return_value=[outcome])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest)])
+    assert exc.value.code == 0
+
+    captured = capsys.readouterr()
+    assert captured.err.splitlines() == [
+        "warning: my-app: replica override is stored on legacy but not applied: the driver version "
+        "does not declare legacy. Remove it from the manifest, or load a driver version that "
+        "declares components.legacy and apply again",
+        "warning: my-app: env var override is stored on worker but not applied: the driver version "
+        "declares no component container for worker. Remove it from the manifest, or load a "
+        "driver version that declares components.worker.container and apply again",
+        "warning: my-app: replica override is stored on worker but not applied: the driver version "
+        "does not declare worker. Remove it from the manifest, or load a driver version that "
+        "declares components.worker and apply again",
     ]
     assert captured.out.splitlines() == ["updated my-app", "0 created, 1 updated, 0 unchanged, 0 failed"]
 

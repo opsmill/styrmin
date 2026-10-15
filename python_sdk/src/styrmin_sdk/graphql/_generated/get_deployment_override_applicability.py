@@ -24,6 +24,9 @@ class GetDeploymentOverrideApplicabilityDeployment(BaseModel):
     component_container_overrides: list[
         "GetDeploymentOverrideApplicabilityDeploymentComponentContainerOverrides"
     ] = Field(alias="componentContainerOverrides")
+    component_replicas: list[
+        "GetDeploymentOverrideApplicabilityDeploymentComponentReplicas"
+    ] = Field(alias="componentReplicas")
 
 
 class GetDeploymentOverrideApplicabilityDeploymentComponentEnvVars(BaseModel):
@@ -39,6 +42,11 @@ class GetDeploymentOverrideApplicabilityDeploymentComponentImageOverrides(BaseMo
 class GetDeploymentOverrideApplicabilityDeploymentComponentContainerOverrides(
     BaseModel
 ):
+    component: str
+    is_applicable: bool = Field(alias="isApplicable")
+
+
+class GetDeploymentOverrideApplicabilityDeploymentComponentReplicas(BaseModel):
     component: str
     is_applicable: bool = Field(alias="isApplicable")
 

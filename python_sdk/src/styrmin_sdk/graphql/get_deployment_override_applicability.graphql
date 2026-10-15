@@ -13,5 +13,9 @@ query GetDeploymentOverrideApplicability($deploymentId: UUID!) {
             component
             isApplicable
         }
+        componentReplicas {
+            component
+            isApplicable
+        }
     }
 }

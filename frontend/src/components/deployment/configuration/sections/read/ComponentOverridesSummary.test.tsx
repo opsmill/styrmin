@@ -1,7 +1,8 @@
 /**
  * Read-only Component Overrides summary: per-component image overrides
- * (018-component-image-overrides, User Story 1 scenario 3) and `command`/`args`
- * overrides (022-post-render-container-overrides).
+ * (018-component-image-overrides, User Story 1 scenario 3), `command`/`args`
+ * overrides (022-post-render-container-overrides) and replica counts
+ * (023-per-component-replicas, User Story 3).
  */
 import { describe, expect, it } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -14,6 +15,7 @@ type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
 type DeploymentComponent = Deployment["components"][number];
 type ImageOverride = Deployment["componentImageOverrides"][number];
 type ContainerOverride = Deployment["componentContainerOverrides"][number];
+type ComponentReplicas = Deployment["componentReplicas"][number];
 
 const COMPONENTS: DeploymentComponent[] = [
   { id: "c-server", name: "server", enabled: true, container: "server" },
@@ -311,5 +313,199 @@ describe("ComponentOverridesSummary: command and args overrides", () => {
     expect(orphanRow).toHaveTextContent(
       "no longer declared by driver · env_vars: 1 key",
     );
+  });
+});
+
+function replicaRow(partial: Partial<ComponentReplicas>): ComponentReplicas {
+  return {
+    component: "server",
+    count: null,
+    source: "CHART",
+    override: null,
+    singleton: false,
+    isOrphaned: false,
+    isApplicable: true,
+    ...partial,
+  };
+}
+
+const REPLICA_COMPONENTS: DeploymentComponent[] = [
+  { id: "c-database", name: "database", enabled: true, container: "db" },
+  { id: "c-migrate", name: "migrate", enabled: true, container: null },
+  { id: "c-server", name: "server", enabled: true, container: "server" },
+  { id: "c-worker", name: "worker", enabled: false, container: "worker" },
+];
+
+function renderReplicaSummary(
+  replicas: ComponentReplicas[],
+  deploymentConfig: Record<string, unknown> = {},
+) {
+  return render(
+    <ComponentOverridesSummary
+      deploymentConfig={deploymentConfig}
+      environmentConfig={{}}
+      clusterConfig={{}}
+      components={REPLICA_COMPONENTS}
+      replicas={replicas}
+    />,
+  );
+}
+
+function replicaLine(component: string): HTMLElement {
+  const line = screen
+    .getAllByTestId("component-replicas")
+    .find((r) => r.dataset.component === component);
+  if (!line) throw new Error(`no replicas line for ${component}`);
+  return line;
+}
+
+describe("ComponentOverridesSummary: replica counts", () => {
+  it("shows the count and its source on every component", () => {
+    renderReplicaSummary(
+      [
+        replicaRow({
+          component: "database",
+          count: 1,
+          source: "DRIVER_DEFAULT",
+          singleton: true,
+        }),
+        replicaRow({ component: "migrate" }),
+        replicaRow({
+          component: "server",
+          count: 3,
+          source: "OVERRIDE",
+          override: 3,
+        }),
+        replicaRow({ component: "worker", count: 2, source: "DRIVER_DEFAULT" }),
+      ],
+      { components: { server: { replicas: 3 } } },
+    );
+
+    const value = (component: string) =>
+      within(replicaLine(component)).getByTestId("component-replicas-value");
+    expect(value("server")).toHaveTextContent(/^3 \(override\)$/);
+    expect(value("worker")).toHaveTextContent(/^2 \(driver default\)$/);
+    expect(value("migrate")).toHaveTextContent(/^set by the chart$/);
+    expect(value("database")).toHaveTextContent(
+      /^1 \(driver default, singleton\)$/,
+    );
+    expect(replicaLine("server")).toHaveAttribute("data-source", "OVERRIDE");
+    expect(replicaLine("server")).toHaveTextContent(/^replicas/);
+    expect(
+      within(replicaLine("server")).getByTestId(
+        "component-replicas-applied-badge",
+      ),
+    ).toHaveTextContent(/^applied$/);
+    // No stored override, so nothing to mark applied or not.
+    expect(
+      within(replicaLine("worker")).queryByTestId(
+        "component-replicas-applied-badge",
+      ),
+    ).toBeNull();
+    const serverRow = screen
+      .getAllByTestId("component-override-row")
+      .find((r) => r.dataset.component === "server");
+    expect(serverRow).toHaveTextContent("replicas");
+    expect(serverRow).not.toHaveTextContent("override (empty)");
+  });
+
+  it("marks a stored override that does not apply as not applied", () => {
+    renderReplicaSummary([
+      replicaRow({
+        component: "database",
+        count: 1,
+        source: "DRIVER_DEFAULT",
+        override: 3,
+        singleton: true,
+        isApplicable: false,
+      }),
+    ]);
+
+    const line = replicaLine("database");
+    expect(line).toHaveAttribute("data-applicable", "false");
+    expect(
+      within(line).getByTestId("component-replicas-value"),
+    ).toHaveTextContent(/^1 \(driver default, singleton\)$/);
+    expect(line).toHaveTextContent("override 3");
+    expect(
+      within(line).getByTestId("component-replicas-applied-badge"),
+    ).toHaveTextContent(/^not applied$/);
+  });
+
+  it("shows a stopped component at 0 pods next to the count it returns to", () => {
+    renderReplicaSummary([
+      replicaRow({
+        component: "server",
+        count: 3,
+        source: "OVERRIDE",
+        override: 3,
+      }),
+      replicaRow({
+        component: "worker",
+        count: 3,
+        source: "OVERRIDE",
+        override: 3,
+      }),
+    ]);
+
+    const worker = replicaLine("worker");
+    expect(worker).toHaveAttribute("data-stopped", "true");
+    expect(
+      within(worker).getByTestId("component-replicas-value"),
+    ).toHaveTextContent(/^3 \(override\)$/);
+    expect(
+      within(worker).getByTestId("component-replicas-stopped"),
+    ).toHaveTextContent(/^stopped: 0 pods$/);
+    expect(replicaLine("server")).toHaveAttribute("data-stopped", "false");
+    expect(
+      within(replicaLine("server")).queryByTestId("component-replicas-stopped"),
+    ).toBeNull();
+  });
+
+  it("shows an orphaned replica override in its own row as not applied", () => {
+    renderReplicaSummary(
+      [
+        replicaRow({ component: "server" }),
+        replicaRow({
+          component: "legacy",
+          override: 3,
+          isOrphaned: true,
+          isApplicable: false,
+        }),
+      ],
+      { components: { legacy: { replicas: 3 } } },
+    );
+
+    const orphanRow = screen.getByTestId("component-override-orphan-row");
+    expect(orphanRow).toHaveAttribute("data-component", "legacy");
+    expect(orphanRow).toHaveTextContent(
+      "no longer declared by driver · replicas",
+    );
+    const line = replicaLine("legacy");
+    expect(orphanRow).toContainElement(line);
+    expect(
+      within(line).getByTestId("component-replicas-value"),
+    ).toHaveTextContent(/^3 \(override\)$/);
+    expect(
+      within(line).getByTestId("component-replicas-applied-badge"),
+    ).toHaveTextContent(/^not applied$/);
+    expect(line).toHaveAttribute("data-stopped", "false");
+  });
+
+  it("shows an orphaned replica override that only the read field reports", () => {
+    renderReplicaSummary([
+      replicaRow({
+        component: "legacy",
+        override: 2,
+        isOrphaned: true,
+        isApplicable: false,
+      }),
+    ]);
+
+    expect(screen.getByTestId("component-override-orphan-row")).toHaveAttribute(
+      "data-component",
+      "legacy",
+    );
+    expect(replicaLine("legacy")).toHaveAttribute("data-applicable", "false");
   });
 });
