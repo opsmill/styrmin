@@ -57,6 +57,30 @@ _SIMPLE_APP_CHART = _SIMPLE_APP_DIR / "src" / "helm"
 _SIMPLE_APP_TEMPLATE = _SIMPLE_APP_DIR / "values.j2.yml"
 _FQDN_SUFFIX = "apps.example.test"
 _CLASS_ANNOTATION = "kubernetes.io/ingress.class"
+_CHART_INGRESS = "styrmin-simple-app"
+_SUBCHART_INGRESS = "subchart-ui"
+
+# An Ingress as a subchart renders it: its own class and no annotations (spec A-002).
+_SUBCHART_INGRESS_MANIFEST = f"""\
+# Source: simple-app/charts/ui/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {_SUBCHART_INGRESS}
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: "ui.{_FQDN_SUFFIX}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {_SUBCHART_INGRESS}
+                port:
+                  number: 80
+"""
 
 # (spec.ingressClassName, kubernetes.io/ingress.class) of one Ingress; None means absent.
 IngressClass = tuple[str | None, str | None]
@@ -184,6 +208,17 @@ def _post_render(
     )
 
 
+def _simple_app_values(context: GlobalContext, chart_class: str) -> dict[str, Any]:
+    """Values of the migrated ``simple-app`` template, with the chart's own ``ingress.className``."""
+    values = _render_values(_SIMPLE_APP_TEMPLATE.read_text(), context)
+    values["ingress"]["className"] = chart_class
+    return values
+
+
+def _with_subchart_ingress(manifests: str) -> str:
+    return f"{manifests.rstrip()}\n---\n{_SUBCHART_INGRESS_MANIFEST}"
+
+
 def _ingresses(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [doc for doc in docs if doc.get("kind") == "Ingress"]
 
@@ -221,3 +256,54 @@ def test_migrated_simple_app_template_gets_the_class_of_its_mode(
 
     assert classes, "the simple-app chart rendered no Ingress"
     assert classes == dict.fromkeys(classes, expected)
+
+
+# ---------------------------------------------------------------------------
+# User Story 2: a chart that sets its own class
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "chart_class",
+    ["", "traefik", "nginx"],
+    ids=["chart-empty", "chart-traefik", "chart-nginx"],
+)
+@pytest.mark.parametrize(
+    ("dedicated", "ingress_class", "expected"),
+    [(True, "nginx", (None, "traefik")), (False, "traefik", ("traefik", "traefik"))],
+    ids=["dedicated", "shared"],
+)
+def test_chart_class_is_replaced_or_removed(
+    dedicated: bool,
+    ingress_class: str,
+    expected: IngressClass,
+    chart_class: str,
+    tmp_path: Path,
+) -> None:
+    """FR-001, FR-002, SC-003: whatever class the chart and a subchart render, every Ingress gets the class of its mode."""
+    # In dedicated mode the resolved class is nginx, so an annotation taken from it would show up.
+    context = _context(dedicated=dedicated, ingress_class=ingress_class)
+    values = _simple_app_values(context, chart_class)
+    manifests = _with_subchart_ingress(_helm_template(values, tmp_path))
+    # Both Ingresses carry the chart's class before the patches, so the check below cannot pass vacuously.
+    rendered = [doc for doc in yaml.safe_load_all(manifests) if doc]
+    assert _classes_by_ingress(rendered) == {
+        _CHART_INGRESS: (chart_class or None, None),
+        _SUBCHART_INGRESS: ("nginx", None),
+    }
+
+    classes = _classes_by_ingress(
+        _kustomize(manifests, _ingress_patches(context), tmp_path)
+    )
+
+    assert classes == dict.fromkeys([_CHART_INGRESS, _SUBCHART_INGRESS], expected)
+
+
+def test_no_class_resolved_keeps_the_chart_class(tmp_path: Path) -> None:
+    """FR-006: with no dedicated ingress controller and no class resolved, the chart's class stays."""
+    context = _context(dedicated=False, ingress_class=None)
+    values = _simple_app_values(context, "nginx")
+
+    classes = _classes_by_ingress(_post_render(values, context, tmp_path))
+
+    assert classes == {_CHART_INGRESS: ("nginx", None)}
