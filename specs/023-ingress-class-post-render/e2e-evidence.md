@@ -179,3 +179,17 @@ A `sleep infinity` process that the run script started and stopped by PID kept t
 | `backend/tests/e2e/test_deploy_generic_app.py::test_deploy_generic_app[api-chromium]` | `pytest-8f2f09fe-a876-4b14-92eb-89a1137ba553` | `PASSED12:25:02 info Removing vCluster container vcluster.cp.pytest-8f2f09fe-a876-4b14-92eb-89a1137ba553...` | `1 passed, 1 deselected, 1 warning in 121.47s (0:02:01)` |
 
 The three tests passed at `2026-10-15T12:20:41Z`, `12:22:57Z` and `12:25:02Z`. Each passed on the first attempt.
+
+## Ingress check added to the `late-container` apply test
+
+After review, [`test_apply_sets_env_vars_with_the_version_that_adds_their_container`](../../backend/tests/e2e/test_deployments_apply.py) checks that every Ingress that the `late-container` driver deploys has no `spec.ingressClassName` and has the `kubernetes.io/ingress.class: traefik` annotation. The `late-container` template still sets `className`, and the main E2E cluster has a dedicated ingress controller, so the test fails if Flux does not apply the removal patch. The test ran on top of HEAD `cae67c83d8581e1495c2d61730276f2e2266bd07` with the new check, with `STYRMIN_IMAGE_VER=e2e-471-review3`, after `docker compose build server`:
+
+```bash
+uv run pytest "backend/tests/e2e/test_deployments_apply.py::test_apply_sets_env_vars_with_the_version_that_adds_their_container" -k api-chromium -v -s --pdb
+```
+
+| Node ID | vCluster | Verbatim `PASSED` line | Summary line |
+|---------|----------|------------------------|--------------|
+| `backend/tests/e2e/test_deployments_apply.py::test_apply_sets_env_vars_with_the_version_that_adds_their_container[api-chromium]` | `pytest-b8f2b313-c1f5-4b40-8aa8-5c410b3304a9` | `PASSED13:21:51 info Removing vCluster container vcluster.cp.pytest-b8f2b313-c1f5-4b40-8aa8-5c410b3304a9...` | `1 passed, 1 deselected, 1 warning in 158.68s (0:02:38)` |
+
+The test passed at `2026-10-15T13:21:51Z`, on the first attempt.
