@@ -41,7 +41,7 @@ Technical approach (details in [research.md](research.md)):
 - A deployment whose driver declares no `replicas` or `singleton` and has no override renders the same patches as before (SC-006).
 - Every new error is raised before any task, flow run or ingress dispatch.
 
-**Scale/Scope**: About 20 backend files, 3 example drivers, 1 new E2E module, 5 frontend components, 7 documentation pages, 1 new ADR.
+**Scale/Scope**: About 20 backend files, 3 example drivers, 1 extended E2E module, 5 frontend components, 7 documentation pages, 1 new ADR.
 
 All items are resolved; [research.md](research.md) has no open "NEEDS CLARIFICATION".
 
@@ -126,7 +126,7 @@ backend/tests/
 │   ├── test_infrahub_replica_parameter_upgrade.py
 │   └── test_application_driver_version_propagation.py           # ComponentConfig.replicas/singleton
 └── e2e/
-    ├── test_deployment_replicas.py            # new, shard_configuration, dual-entrypoint
+    ├── test_deployment_image_override.py      # + test_scale_server_and_singleton_guard (dual-entrypoint)
     ├── drivers/{protocol,api_driver,ui_driver}.py               # set_component_replicas
     ├── pages/deployment_detail.py             # set_component_replicas
     └── helpers/workloads.py                   # read_workload_replicas
@@ -162,7 +162,7 @@ CONTEXT.md (drafted), changelog/202.added.md, changelog/202.changed.md
 User Story 1 is the first deliverable; the others build on its resolver and patch builder.
 
 1. **Foundation**: `ComponentConfigBlock.replicas` and its validator; `ArbitrarySectionModel.replicas`/`singleton` with the load check; `ComponentContext.replica_override` and its resolver wiring; `services/replicas/` resolver and errors. Unit tests first.
-2. **User Story 1 (P1)**: patch builder replacing the stop patch, unit and kustomize tests; write checks on create, update and version change; `ComponentConfigInput.replicas` and `Deployment.componentReplicas` with propagation tests; `simple-app` version 4; the E2E protocol method, page object, helper and `test_deployment_replicas.py`; edit drawer and create form fields.
+2. **User Story 1 (P1)**: patch builder replacing the stop patch, unit and kustomize tests; write checks on create, update and version change; `ComponentConfigInput.replicas` and `Deployment.componentReplicas` with propagation tests; `simple-app` version 4; the E2E protocol method, page object, helper and the new node in `test_deployment_image_override.py`; edit drawer and create form fields.
 3. **User Story 2 (P2)**: `ComponentConfig.replicas`/`singleton` read fields and propagation test; driver version page rows; driver format docs.
 4. **User Story 3 (P3)**: clearing (already covered by the input semantics) with tests; configuration view line; `styrminctl deployments get` column; SDK `_inapplicable_overrides`.
 5. **User Story 4 (P2)**: `drop_retired_parameters` and `RETIRED_PARAMETER_VALUE`; `infrahub` 5 and `infrahub-enterprise` 4; legacy fixture and the upgrade functional test; migration guide.

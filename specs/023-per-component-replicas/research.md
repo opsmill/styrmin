@@ -179,7 +179,7 @@ The existing wait limit is the HelmRelease `timeout` (`5m`, E2E value from `STYR
 
 ## D-012: E2E coverage
 
-**Decision**: A new module [`backend/tests/e2e/test_deployment_replicas.py`](../../backend/tests/e2e/test_deployment_replicas.py), marked `shard_configuration` and `ci`, with one module-scoped `simple-app` deployment and one dual-entrypoint test node `test_scale_server_and_singleton_guard`:
+**Decision**: Extend [`backend/tests/e2e/test_deployment_image_override.py`](../../backend/tests/e2e/test_deployment_image_override.py) (`shard_configuration`) with one dual-entrypoint `ci` test node, `test_scale_server_and_singleton_guard`, that reuses its module-scoped `simple-app` deployment `image_override_deployment` (PRD Testing Decisions: "this extends an existing test that already deploys `simple-app`"). A finalizer clears the `server` override so the module's image tests see one replica whatever the order and outcome. The steps:
 
 1. `scenario_driver.set_component_replicas(component="server", replicas=2)` (new protocol method: API through `_replace_component_slots(slots={"replicas": 2})`, UI through `DeploymentDetailPage.set_component_replicas`); wait for the update task to complete; then read the `styrmin-simple-app` `Deployment` **once** (no polling) and assert `updatedReplicas`, `readyReplicas`, `availableReplicas` and `status.replicas` all equal 2, and `componentReplicas` reports `2`/`OVERRIDE`. Reading once after the task, instead of waiting for the counts, is what proves that the task itself waited for the pods (SC-002, critique E7).
 2. Assert the `database` `StatefulSet` has 1 ready replica and `componentReplicas` reports `1`/`DRIVER_DEFAULT`/`singleton: true`. In the UI variant, assert the drawer shows `database` fixed at 1.
@@ -191,7 +191,8 @@ To have a singleton component, the `simple-app` example driver marks `database` 
 **Rationale**:
 
 - CI excludes the `api / configuration` cell, so an `api_only` test in this shard never runs in CI ([`ci.yml`](../../.github/workflows/ci.yml) matrix). A dual-entrypoint node runs in the `ui / configuration` cell in CI and in the `api` cell locally. The singleton rejection goes through the SDK client in both variants, so it runs in CI too.
-- A new module with its own light `simple-app` deployment instead of extending `test_deployment_image_override.py`: the test changes the pod count, and the image override tests read pod specs of the same workload. "Reuse before you boot" targets heavy stacks; `simple-app` is the light stack every module in this shard already deploys.
+- Reusing `image_override_deployment` follows "reuse before you boot" and the PRD; no new deployment is booted. The image override tests read the pod template of the same workload, which a replica change does not alter, and the test ends at the starting count (step 4 and the finalizer).
+- `test_deployment_container_overrides.py` was the other candidate; its fixture records the original `command`/`args` and its tests change the container spec, so the image override module, whose fixture is a plain `simple-app` deployment, is the simpler host.
 - The conformance test in `backend/tests/unit/test_e2e_driver_conformance.py` gets a keyword-only check for the new protocol method, as for `set_component_image`.
 
 **Not covered by E2E** (spec Clarifications, question 3): the `infrahub` driver upgrade (SC-004, SC-005) and the stop/start interaction (FR-005). D-014 lists their functional and unit tests.

@@ -49,9 +49,9 @@ cd frontend && pnpm lint
 ## 4. E2E (both variants, one per session)
 
 ```bash
-sleep infinity | uv run pytest "backend/tests/e2e/test_deployment_replicas.py" -m "ci and shard_configuration" \
+sleep infinity | uv run pytest "backend/tests/e2e/test_deployment_image_override.py" -m "ci and shard_configuration" \
   -k api-chromium -v -s --pdb 2>&1 | tee /tmp/replicas-api.log
-sleep infinity | uv run pytest "backend/tests/e2e/test_deployment_replicas.py" -m "ci and shard_configuration" \
+sleep infinity | uv run pytest "backend/tests/e2e/test_deployment_image_override.py" -m "ci and shard_configuration" \
   -k ui-chromium -v -s --pdb 2>&1 | tee /tmp/replicas-ui.log
 ```
 
