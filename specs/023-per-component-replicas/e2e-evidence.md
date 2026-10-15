@@ -185,3 +185,83 @@ backend/tests/e2e/test_deployment_image_override.py::test_override_then_clear[ui
 backend/tests/e2e/test_deployment_image_override.py::test_token_follows_upgrade_and_action_job[ui-chromium] PASSED
 ===== 13 passed, 8 skipped, 172 deselected, 1 warning in 691.23s (0:11:31) =====
 ```
+
+## Whole `shard_infrahub` shard at commit `13b0a739`
+
+Commit `d31921d8` moved the replica counts of the infrahub example drivers from parameters to driver defaults: `infrahub` version 5 and `infrahub-enterprise` version 4 declare `replicas: 1` on `server` and `replicas: 2` on `task-worker`, and mark `database`, `task-manager-db` and `cache` as singleton components. The values templates no longer set a count, so the post-render patch is the only source of the count. The `shard_infrahub` tests deploy these drivers from the working tree through the in-cluster git server, so each variant was run once. No task in `tasks.md` covers this run.
+
+The shard holds three tests. All three are `api_only`, and `test_infrahub_backup_and_restore_lifecycle` also carries `@pytest.mark.skip` because the community driver does not support backup and restore. The API variant therefore runs two tests, and the UI variant skips all three.
+
+```bash
+export STYRMIN_IMAGE_VER=replicas-c13-13b0a739
+export npm_config_ignore_workspace=true
+docker compose build server
+```
+
+Image: `registry.opsmill.io/opsmill/styrmin:replicas-c13-13b0a739`, built at 2026-10-15T12:31:57+00:00. The same image was used for both sessions. No code changed during this run.
+
+### API variant
+
+```bash
+sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_infrahub" -k api-chromium -v -s --pdb
+```
+
+- vCluster: `pytest-284a5e61-c49b-4248-a65a-19cb8b0e2866` (created and deleted by the session fixture)
+- Kubeconfig: `/tmp/pytest-of-root/pytest-1659/vcluster0/kubeconfig`, written at 12:32:24. The `.lock` file of `pytest-1659` held the PID of this session's pytest process, and the kubeconfig's context names the vCluster above.
+- Session: 2026-10-15T12:32:04+00:00 to 2026-10-15T12:38:19+00:00 (the summary line follows the vCluster deletion at 12:38:19). Both tests passed by 2026-10-15T12:38:15+00:00, when the vCluster teardown started.
+
+With `-s`, the output of the session fixtures is printed between the node ID of `test_infrahub_enterprise_backup_and_restore_lifecycle` and its `PASSED`; the line below joins them.
+
+```text
+backend/tests/e2e/test_infrahub_backup_restore.py::test_infrahub_backup_and_restore_lifecycle[api-chromium] SKIPPED
+backend/tests/e2e/test_infrahub_backup_restore.py::test_infrahub_enterprise_backup_and_restore_lifecycle[api-chromium] PASSED
+backend/tests/e2e/test_infrahub_services.py::test_infrahub_task_manager_service_exposes_prefect_ui[api-chromium] PASSED
+===== 2 passed, 1 skipped, 190 deselected, 1 warning in 374.41s (0:06:14) ======
+```
+
+While the session ran, the workloads of the `infrahub-enterprise` deployment (namespace `styrmin-d818f281-7d01-4d59-8262-2b2ecd930f18`) were read with this session's kubeconfig at 2026-10-15T12:35:10+00:00:
+
+```text
+$ kubectl get deploy,statefulset -A -o custom-columns=NS:.metadata.namespace,KIND:.kind,NAME:.metadata.name,SPEC:.spec.replicas,READY:.status.readyReplicas
+KIND          NAME                                    SPEC   READY
+Deployment    styrmin-infrahub-infrahub-server        1      1
+Deployment    styrmin-infrahub-infrahub-task-worker   2      2
+Deployment    styrmin-task-manager                    1      1
+StatefulSet   styrmin-cache-master                    1      1
+StatefulSet   styrmin-database                        1      1
+StatefulSet   styrmin-message-queue                   1      1
+StatefulSet   styrmin-postgresql                      1      1
+```
+
+The `NS` column is left out above; every row is in the deployment namespace. The HelmRelease of the deployment held these `spec.replicas` post-render patches at 2026-10-15T12:35:54+00:00, and its values set no `replicas` for `infrahubServer` or `infrahubTaskWorker`:
+
+```text
+Deployment   infrahub/service=cache               spec.replicas=1
+StatefulSet  infrahub/service=cache               spec.replicas=1
+Deployment   infrahub/service=database            spec.replicas=1
+StatefulSet  infrahub/service=database            spec.replicas=1
+Deployment   service=infrahub-server              spec.replicas=1
+StatefulSet  service=infrahub-server              spec.replicas=1
+Deployment   infrahub/service=task-manager-db     spec.replicas=1
+StatefulSet  infrahub/service=task-manager-db     spec.replicas=1
+Deployment   service=infrahub-task-worker         spec.replicas=2
+StatefulSet  service=infrahub-task-worker         spec.replicas=2
+```
+
+`message-queue` and `task-manager` declare no count and are not singleton components, so they get no patch and keep the chart's count.
+
+### UI variant
+
+```bash
+sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_infrahub" -k ui-chromium -v -s --pdb
+```
+
+- vCluster: none. The conftest marks every `api_only` test as skipped in the UI variant before any fixture runs, so the session created no vCluster and no kubeconfig.
+- Session: 2026-10-15T12:39:00+00:00 to 2026-10-15T12:39:02+00:00
+
+```text
+backend/tests/e2e/test_infrahub_backup_restore.py::test_infrahub_backup_and_restore_lifecycle[ui-chromium] SKIPPED
+backend/tests/e2e/test_infrahub_backup_restore.py::test_infrahub_enterprise_backup_and_restore_lifecycle[ui-chromium] SKIPPED
+backend/tests/e2e/test_infrahub_services.py::test_infrahub_task_manager_service_exposes_prefect_ui[ui-chromium] SKIPPED
+================ 3 skipped, 190 deselected, 1 warning in 0.09s =================
+```
