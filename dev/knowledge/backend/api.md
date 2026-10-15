@@ -541,9 +541,13 @@ enum whose values carry descriptions.
 Writes raise, in this order:
 
 - `INVALID_REPLICA_COUNT` (metadata `component_name`, `requested_replicas` as submitted) from the
-  `ComponentConfigBlock` validator, for a `bool`, a non-integer or a value outside 1 to
-  2147483647. The GraphQL `Int` already rejects non-integers on the typed inputs; the JSON path
-  through `deploy(config:)` can carry any type.
+  `ComponentConfigBlock` validator. Every GraphQL write path types `replicas` as `Int`, so through
+  GraphQL only a count of 0 or less reaches the validator. GraphQL type validation rejects a
+  `bool`, a non-integer and a count above 2147483647 first, with the code `VALIDATION_ERROR` and
+  the message `Int cannot represent ...`, not `INVALID_REPLICA_COUNT`.
+  The SDK and the CLI build the input with Pydantic models that can convert a value before the
+  request is sent, for example `true` to 1 and `"3"` to 3. The validator still rejects a `bool`,
+  a non-integer or an out-of-range value on paths that do not go through GraphQL.
 - `UNKNOWN_COMPONENT_REPLICA_OVERRIDE` (metadata `component_name`, `known_components` sorted,
   `checked_against`) when an override is added or changed on a component that the driver version
   bound after the write does not declare. The stored value sent again passes.

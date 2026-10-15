@@ -283,7 +283,8 @@ version. See
 
 | What you see | Why | What to do |
 |--------------|-----|------------|
-| The write fails with `INVALID_REPLICA_COUNT` | The count is below 1, above 2147483647, or not a whole number | Fix the count. To run no pods, stop the component |
+| The write fails with `INVALID_REPLICA_COUNT` | The count is 0 or less | Fix the count. To run no pods, stop the component |
+| The write fails with `VALIDATION_ERROR` and the message `Int cannot represent ...` | The count is above 2147483647 or is not a whole number. The API reads every replica count as a GraphQL `Int` and rejects other values before it checks the count | Fix the count. The SDK and `styrminctl` can convert some values before they send the request, for example `true` to 1 and `"3"` to 3 |
 | The write fails with `UNKNOWN_COMPONENT_REPLICA_OVERRIDE` | The driver version does not declare that component | Check the component name against the components listed in the error |
 | The write fails with `SINGLETON_REPLICA_OVERRIDE` | The driver version marks the component as a singleton component | Set the override to 1 or clear it |
 | A driver version change fails with `RETIRED_PARAMETER_VALUE` | The target driver version no longer declares a parameter that the deployment sets to a value other than its default | Follow [Migrating Replica Parameters](../drivers/migrating-replica-parameters.md#deployments-with-a-changed-value) |
