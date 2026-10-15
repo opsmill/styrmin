@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-14
-**Source**: specs/022-post-render-container-overrides/ (spec, plan, research D-001 to D-012, contracts); [issue #457](https://github.com/opsmill/styrmin/issues/457)
+**Source**: specs/archive/022-post-render-container-overrides/ (spec, plan, research D-001 to D-012, contracts); [issue #457](https://github.com/opsmill/styrmin/issues/457)
 **Supersedes**: [ADR-045](0045-container-override-no-layering-and-omit-marker.md) §2 (the empty-list
 marker and the chart `{{- with }}` guard) and §5 (the `null` clear marker for charts without that
 guard). Both described how a driver template passed `command` and `args` to the chart, and no
@@ -102,7 +102,7 @@ A cleared override needs no marker. The patches are built again on every render;
 value the field is not in the merge patch, or no patch is built when nothing else applies, so the
 chart's own `command` and `args` reach the pod. The change to `spec.postRenderers` reaches the
 HelmRelease because the operator replaces each spec key it writes on update (ADR-057 §6). The E2E
-run recorded in `specs/022-post-render-container-overrides/e2e-evidence.md` read the container
+run recorded in `specs/archive/022-post-render-container-overrides/e2e-evidence.md` read the container
 after a clear and found the values captured before any override was set; the operator's change
 detection needed no fix (research D-012).
 
@@ -123,6 +123,13 @@ The stubs raise whatever the context holds, so a driver version that calls them 
 render also when no override is set. The operator records `Failed to create HelmRelease:
 <message>` and applies no HelmRelease, so the pods that run keep running. There is no deprecation
 period, because Styrmin is before version 1.0 and few third-party drivers exist (spec A-003).
+
+A driver version that calls a retired filter is also rejected when it is loaded (added after the PR
+review). `JinjaTemplateValidator` (`services/driver/validators.py`) walks the `Filter` nodes of the
+parsed `values.j2.yml`, also inside conditions and filter blocks, and raises
+`RetiredTemplateFilterError` with `retired_filter_load_message()`, which names the line of the call.
+This covers `component_env_vars` too. The render-time stubs stay registered for driver versions
+loaded before this check.
 
 ### 5. A component without a component container accepts no `command` or `args` (research D-005)
 
@@ -147,9 +154,11 @@ that the deployment is pinned to after the write.
 The block only documented which components accepted an override; the component container now
 answers that question. It is removed from the driver format, the database and the API:
 
-- `Specification` no longer has the field. It forbids unknown keys, so a driver file that still
-  contains the block fails to load like a file with any other unknown key under `spec`. The
-  validator, the loader call and `DriverContainerOverrideDocComponentMismatchError`
+- `Specification` no longer has the field. A driver file that still contains the block fails to
+  load: a `before` model validator raises a `removed_key` error that names the block and links
+  `CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL` (changed after the PR review from the generic
+  `extra_forbidden` error, which named neither). Other unknown keys under `spec` keep the generic
+  error. The old validator, its loader call and `DriverContainerOverrideDocComponentMismatchError`
   (`DRIVER_CONTAINER_OVERRIDE_DOC_COMPONENT_MISMATCH`) are deleted.
 - The Alembic revision `faf47e166160` drops `applicationdriverversion.container_overrides`. Its
   downgrade adds the column back, nullable and empty.

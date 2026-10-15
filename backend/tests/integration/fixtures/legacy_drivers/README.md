@@ -19,7 +19,7 @@ The SC-005 parity test (`backend/tests/integration/test_container_override_migra
 - with these legacy templates and a copy of the old filter code that the test module keeps;
 - with the migrated driver template and the post-render patches.
 
-The test then compares the component container's `command` and `args`. It shows that a deployment that moves to a migrated driver version runs with the same `command` and `args` as before. See SC-005 in `specs/022-post-render-container-overrides/spec.md` and D-011 in `specs/022-post-render-container-overrides/research.md`.
+The test then compares the component container's `command` and `args`. It shows that a deployment that moves to a migrated driver version runs with the same `command` and `args` as before. See SC-005 in `specs/archive/022-post-render-container-overrides/spec.md` and D-011 in `specs/archive/022-post-render-container-overrides/research.md`.
 
 ## Rules
 

@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-14
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: PRD "Container overrides applied by a post-render patch" — [opsmill/styrmin#457 (comment)](https://github.com/opsmill/styrmin/issues/457#issuecomment-6166451728). Seed issue: [#457](https://github.com/opsmill/styrmin/issues/457). Original feature: [#283](https://github.com/opsmill/styrmin/issues/283) ([`specs/archive/014-component-container-overrides`](../archive/014-component-container-overrides/spec.md)). Builds on [#385](https://github.com/opsmill/styrmin/issues/385) / [ADR-057](../../dev/adr/0057-post-render-component-overrides.md) (env vars by post-render) and [#20](https://github.com/opsmill/styrmin/issues/20) / [ADR-058](../../dev/adr/0058-image-overrides-and-component-container-guard.md) (image overrides by post-render).
 
