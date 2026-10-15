@@ -102,6 +102,7 @@ function makeDeployment(
     applicationInstance: { id: "inst-1", status: "running" },
     components: [],
     componentImageOverrides,
+    componentContainerOverrides: [],
     deployedServices: [],
   } as unknown as DeploymentShape;
 }

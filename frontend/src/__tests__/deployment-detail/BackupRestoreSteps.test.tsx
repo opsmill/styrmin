@@ -123,6 +123,7 @@ function makeDeployment(): NonNullable<GetDeploymentQuery["deployment"]> {
     applicationInstance: { id: "inst-1" },
     components: [],
     componentImageOverrides: [],
+    componentContainerOverrides: [],
     deployedServices: [],
   } as unknown as NonNullable<GetDeploymentQuery["deployment"]>;
 }

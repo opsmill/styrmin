@@ -380,6 +380,7 @@ describe("DeploymentDetailPage Overview", () => {
       applicationInstance: null,
       components: [],
       componentImageOverrides: [],
+      componentContainerOverrides: [],
       deployedServices: [],
     } as NonNullable<GetDeploymentQuery["deployment"]>;
   }
