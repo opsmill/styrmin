@@ -178,6 +178,9 @@ async def test_local_driver_reload_creates_new_row_on_content_change(
     assert first_hash is not None and len(first_hash) == 64
     assert first.source_commit_sha is None  # local source
 
+    # The loaded driver is listed.
+    assert first_driver_id in {str(driver.id) for driver in await client.drivers.list()}
+
     # GraphQL exposes exactly one row.
     raw = await client._transport.execute(  # type: ignore[attr-defined]
         load_query("get_application_driver_versions"),

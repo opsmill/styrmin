@@ -78,6 +78,7 @@ from .input_types import (
     UpdateGroupInput,
     UpdateUserInput,
 )
+from .list_application_drivers import ListApplicationDrivers
 from .list_backup_schedules import ListBackupSchedules
 from .list_backup_storage_locations import ListBackupStorageLocations
 from .list_backups import ListBackups
@@ -1928,6 +1929,30 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return GetUser.model_validate(data)
+
+    async def list_application_drivers(self, **kwargs: Any) -> ListApplicationDrivers:
+        query = gql("""
+            query ListApplicationDrivers {
+              applicationDrivers {
+                id
+                name
+                versions {
+                  id
+                  version
+                  supportedVersions
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {}
+        response = await self.execute(
+            query=query,
+            operation_name="ListApplicationDrivers",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return ListApplicationDrivers.model_validate(data)
 
     async def list_backup_storage_locations(
         self, **kwargs: Any
