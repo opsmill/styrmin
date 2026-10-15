@@ -82,10 +82,10 @@ class PrefectManager:
         fingerprint so older instances keep resolving to their original
         workflow.
 
-        The fingerprint also names the Prefect deployment
-        (``<workflow>@<fingerprint>``): Prefect upserts on ``(flow, name)``, so
-        a shared name would let a reload overwrite the earlier version's
-        deployment (#375).
+        The application and the fingerprint also name the Prefect deployment
+        (``<workflow> (<application>@<fingerprint>)``): Prefect upserts on
+        ``(flow, name)``, so a shared name would let another driver (#373) or
+        a reload of the same driver (#375) overwrite this deployment.
         """
         # Add tags to the workflow
         workflow.tags.append(f"application/{application}")
@@ -94,7 +94,9 @@ class PrefectManager:
         workflow.tags.append(f"mode/{mode}")
         if fingerprint:
             workflow.tags.append(f"fingerprint/{fingerprint}")
-            workflow.deployment_name = f"{workflow.name}@{fingerprint}"
+            workflow.deployment_name = f"{workflow.name} ({application}@{fingerprint})"
+        else:
+            workflow.deployment_name = f"{workflow.name} ({application})"
         async with get_client(sync_client=False) as client:
             await workflow.save(
                 client=client,

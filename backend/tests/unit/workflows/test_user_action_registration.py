@@ -4,9 +4,10 @@ Companion to ``test_git_source_commit_pinning.py`` (issue #375). Pinning
 the commit on the pull step is only half the story: Prefect upserts
 deployments on ``(flow, name)``, so a driver reloaded at a newer commit
 used to replace the earlier version's deployment — tags, pull step and
-all — under the shared ``User Action: <name>`` name. The fingerprint now
-also names the deployment, and lookups take the newest match so a
-commit-pinned re-registration outranks a pre-existing branch-tip one.
+all — under the shared ``User Action: <name>`` name, and so did another
+driver declaring the same action (#373). The application and the
+fingerprint now name the deployment, and lookups take the newest match so
+a commit-pinned re-registration outranks a pre-existing branch-tip one.
 """
 
 from __future__ import annotations
@@ -56,13 +57,17 @@ def client(mocker):
     return client
 
 
-async def _register(manager: PrefectManager, fingerprint: str | None) -> _Workflow:
+async def _register(
+    manager: PrefectManager,
+    fingerprint: str | None,
+    application: str = "lab-driver-a",
+) -> _Workflow:
     workflow = _Workflow(
         name="User Action: post_setup", module="actions", function="post_setup"
     )
     await manager.register_user_action(
         workflow=workflow,
-        application="lab-driver-a",
+        application=application,
         version=">=1.0.0",
         hook=HookKind.SETUP,
         mode="post",
@@ -80,8 +85,8 @@ async def test_two_driver_versions_register_distinct_deployments(
 
     names = [c.kwargs["name"] for c in client.create_deployment.await_args_list]
     assert names == [
-        "User Action: post_setup@555d155",
-        "User Action: post_setup@a1b2c3d",
+        "User Action: post_setup (lab-driver-a@555d155)",
+        "User Action: post_setup (lab-driver-a@a1b2c3d)",
     ]
     flows = [c.args for c in client.create_flow_from_name.await_args_list]
     assert flows == [("User Action: post_setup",)] * 2
@@ -91,14 +96,27 @@ async def test_two_driver_versions_register_distinct_deployments(
     assert "fingerprint/a1b2c3d" in tags[1]
 
 
-async def test_legacy_registration_without_fingerprint_keeps_its_name(
+async def test_two_drivers_register_distinct_deployments(
     manager: PrefectManager, client
 ) -> None:
-    workflow = await _register(manager, fingerprint=None)
+    """Same action and short fingerprint, two drivers → two deployment names."""
+    await _register(manager, fingerprint="555d155", application="lab-driver-a")
+    await _register(manager, fingerprint="555d155", application="lab-driver-b")
 
-    assert workflow.deployment_name is None
+    names = [c.kwargs["name"] for c in client.create_deployment.await_args_list]
+    assert names == [
+        "User Action: post_setup (lab-driver-a@555d155)",
+        "User Action: post_setup (lab-driver-b@555d155)",
+    ]
+
+
+async def test_legacy_registration_without_fingerprint_is_named_per_driver(
+    manager: PrefectManager, client
+) -> None:
+    await _register(manager, fingerprint=None)
+
     assert client.create_deployment.await_args.kwargs["name"] == (
-        "User Action: post_setup"
+        "User Action: post_setup (lab-driver-a)"
     )
     assert not any(
         tag.startswith("fingerprint/")
