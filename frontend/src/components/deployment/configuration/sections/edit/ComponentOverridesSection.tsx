@@ -288,6 +288,12 @@ export function ComponentOverridesSection({
                   argsCount,
                   Boolean(overrideRow?.image),
                 );
+                const notApplied =
+                  !component.container &&
+                  (envVarCount > 0 ||
+                    commandCount > 0 ||
+                    argsCount > 0 ||
+                    Boolean(overrideRow?.image));
 
                 return (
                   <Collapsible
@@ -315,6 +321,15 @@ export function ComponentOverridesSection({
                           >
                             override
                           </span>
+                        )}
+                        {notApplied && (
+                          <Badge
+                            data-testid={`component-override-not-applied-${componentName}`}
+                            variant="warning"
+                            className="px-1.5 py-0 text-[10px]"
+                          >
+                            not applied
+                          </Badge>
                         )}
                       </span>
                       <span className="text-[11px] text-muted-foreground">
@@ -402,6 +417,17 @@ function ComponentOverrideBody({
   // `form.Field` paths bind to; the index itself never appears in the
   // diff because `config-diff.ts` keys components by name.
   const existingIndex = rows.findIndex((r) => r?.name === componentName);
+
+  if (existingIndex < 0 && !hasContainer) {
+    return (
+      <p
+        className="text-xs italic text-muted-foreground"
+        data-testid={`component-override-no-container-${componentName}`}
+      >
+        {noContainerText("env var, image, command and args overrides")}
+      </p>
+    );
+  }
 
   if (existingIndex < 0) {
     return (
@@ -673,18 +699,37 @@ function ComponentOverrideBody({
         ))}
 
       {hasContainer && (
-        <div data-testid={`component-command-editor-${componentName}`}>
-          <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div
+          role="group"
+          aria-labelledby={`comp-${componentName}-command-label`}
+          aria-describedby={`comp-${componentName}-command-hint`}
+          data-testid={`component-command-editor-${componentName}`}
+        >
+          <Label
+            id={`comp-${componentName}-command-label`}
+            className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+          >
             Command
           </Label>
+          <p
+            id={`comp-${componentName}-command-hint`}
+            className="text-xs text-muted-foreground"
+          >
+            Replaces the whole <code className="font-mono">command</code> list
+            of the container, its entrypoint. Enter one list element per row.
+          </p>
           <form.Field name={`${blockPath}.command`} mode="array">
             {(commandField: any) => {
               const commandRows: string[] = commandField.state.value ?? [];
               return (
                 <div className="mt-2 space-y-2">
                   {commandRows.length === 0 && (
-                    <p className="text-xs italic text-muted-foreground">
-                      No command override.
+                    <p
+                      className="text-xs italic text-muted-foreground"
+                      data-testid={`comp-command-empty-${componentName}`}
+                    >
+                      No command override: the container keeps the command the
+                      chart renders.
                     </p>
                   )}
                   {commandRows.map((_row, index) => {
@@ -702,16 +747,29 @@ function ComponentOverrideBody({
                               initial={initialCommand[index]}
                               environment={envCommand[index]}
                             >
-                              <Input
-                                data-testid={`comp-command-${componentName}-${index}`}
-                                value={f.state.value ?? ""}
-                                onChange={(e: any) =>
-                                  f.handleChange(e.target.value)
-                                }
-                                onBlur={f.handleBlur}
-                                placeholder="/bin/sh"
-                                autoComplete="off"
-                              />
+                              <div className="space-y-1">
+                                <Input
+                                  data-testid={`comp-command-${componentName}-${index}`}
+                                  aria-label={`Command element ${index + 1} for ${componentName}`}
+                                  value={f.state.value ?? ""}
+                                  onChange={(e: any) =>
+                                    f.handleChange(e.target.value)
+                                  }
+                                  onBlur={f.handleBlur}
+                                  placeholder="/bin/sh"
+                                  autoComplete="off"
+                                  spellCheck={false}
+                                />
+                                {(f.state.value ?? "") === "" && (
+                                  <p
+                                    className="text-xs text-amber-700 dark:text-amber-400"
+                                    data-testid={`comp-command-empty-warning-${componentName}-${index}`}
+                                  >
+                                    This element is empty. The container
+                                    receives it as an empty string.
+                                  </p>
+                                )}
+                              </div>
                             </ChangedFieldFrame>
                           )}
                         </form.Field>
@@ -745,18 +803,37 @@ function ComponentOverrideBody({
       )}
 
       {hasContainer && (
-        <div data-testid={`component-args-editor-${componentName}`}>
-          <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div
+          role="group"
+          aria-labelledby={`comp-${componentName}-args-label`}
+          aria-describedby={`comp-${componentName}-args-hint`}
+          data-testid={`component-args-editor-${componentName}`}
+        >
+          <Label
+            id={`comp-${componentName}-args-label`}
+            className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+          >
             Args
           </Label>
+          <p
+            id={`comp-${componentName}-args-hint`}
+            className="text-xs text-muted-foreground"
+          >
+            Replaces the whole <code className="font-mono">args</code> list of
+            the container. Enter one list element per row.
+          </p>
           <form.Field name={`${blockPath}.args`} mode="array">
             {(argsField: any) => {
               const argsRows: string[] = argsField.state.value ?? [];
               return (
                 <div className="mt-2 space-y-2">
                   {argsRows.length === 0 && (
-                    <p className="text-xs italic text-muted-foreground">
-                      No args override.
+                    <p
+                      className="text-xs italic text-muted-foreground"
+                      data-testid={`comp-args-empty-${componentName}`}
+                    >
+                      No args override: the container keeps the args the chart
+                      renders.
                     </p>
                   )}
                   {argsRows.map((_row, index) => {
@@ -776,6 +853,8 @@ function ComponentOverrideBody({
                             >
                               <Input
                                 data-testid={`comp-args-${componentName}-${index}`}
+                                aria-label={`Args element ${index + 1} for ${componentName}`}
+                                spellCheck={false}
                                 value={f.state.value ?? ""}
                                 onChange={(e: any) =>
                                   f.handleChange(e.target.value)
@@ -923,14 +1002,12 @@ function ContainerlessContainerOverride({
         data-testid={`comp-${field}-readonly-${componentName}`}
       >
         <span className="flex min-w-0 flex-wrap items-center gap-2">
-          {values.map((value, index) => (
-            <code
-              key={`${field}-${index}`}
-              className="break-all font-mono text-xs text-amber-900 dark:text-amber-200"
-            >
-              {value}
-            </code>
-          ))}
+          <code
+            data-testid={`comp-${field}-readonly-value-${componentName}`}
+            className="break-all font-mono text-xs text-amber-900 dark:text-amber-200"
+          >
+            {JSON.stringify(values)}
+          </code>
           <Badge
             data-testid={`comp-${field}-not-applied-${componentName}`}
             variant="warning"

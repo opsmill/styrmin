@@ -161,14 +161,42 @@ describe("ComponentOverridesSection: components without a component container (F
     expect(screen.queryByTestId("comp-env-name-migrate-0")).toBeNull();
   });
 
-  it("explains the restriction before an override block exists", async () => {
-    renderSection();
+  it("explains the restriction instead of offering Add override", async () => {
+    const { components } = renderSection();
 
     await openComponent("migrate");
-    fireEvent.click(screen.getByTestId("component-override-add-migrate"));
 
-    await screen.findByTestId("comp-env-no-container-migrate");
-    expect(screen.queryByTestId("comp-env-add-migrate")).toBeNull();
+    expect(
+      screen.getByTestId("component-override-no-container-migrate"),
+    ).toHaveTextContent(
+      "The driver declares no container for this component, so env var, image, command and args overrides can't be applied to it.",
+    );
+    expect(screen.queryByTestId("component-override-add-migrate")).toBeNull();
+    expect(components()).toEqual([]);
+  });
+
+  it("marks the collapsed row not applied when it stores values", () => {
+    renderSection({
+      components: [
+        { name: "migrate", envVars: [], args: ["--all"] },
+        { name: "server", envVars: [], args: ["-v"] },
+      ],
+    });
+
+    expect(
+      screen.getByTestId("component-override-not-applied-migrate"),
+    ).toHaveTextContent(/^not applied$/);
+    expect(
+      screen.queryByTestId("component-override-not-applied-server"),
+    ).toBeNull();
+  });
+
+  it("does not mark an empty block not applied", () => {
+    renderSection({ components: [{ name: "migrate", envVars: [] }] });
+
+    expect(
+      screen.queryByTestId("component-override-not-applied-migrate"),
+    ).toBeNull();
   });
 
   it("shows stored env vars read-only, with a working remove control", async () => {
@@ -464,12 +492,12 @@ describe("ComponentOverridesSection: command and args without a component contai
 
     await openComponent("migrate");
 
-    const commandRow = screen.getByTestId("comp-command-readonly-migrate");
-    expect(commandRow).toHaveTextContent("/bin/sh");
-    expect(commandRow).toHaveTextContent("-c");
-    const argsRow = screen.getByTestId("comp-args-readonly-migrate");
-    expect(argsRow).toHaveTextContent("migrate");
-    expect(argsRow).toHaveTextContent("--all");
+    expect(
+      screen.getByTestId("comp-command-readonly-value-migrate"),
+    ).toHaveTextContent('["/bin/sh","-c"]');
+    expect(
+      screen.getByTestId("comp-args-readonly-value-migrate"),
+    ).toHaveTextContent('["migrate","--all"]');
     for (const field of ["command", "args"]) {
       expect(
         screen.getByTestId(`comp-${field}-not-applied-migrate`),
@@ -484,6 +512,28 @@ describe("ComponentOverridesSection: command and args without a component contai
     expect(screen.queryByTestId("comp-args-migrate-0")).toBeNull();
     expect(screen.queryByTestId("comp-command-add-migrate")).toBeNull();
     expect(screen.queryByTestId("comp-args-add-migrate")).toBeNull();
+  });
+
+  it("shows list boundaries and empty elements in read-only values", async () => {
+    renderSection({
+      components: [
+        {
+          name: "migrate",
+          envVars: [],
+          command: ["a b"],
+          args: ["a", "", "b"],
+        },
+      ],
+    });
+
+    await openComponent("migrate");
+
+    expect(
+      screen.getByTestId("comp-command-readonly-value-migrate"),
+    ).toHaveTextContent('["a b"]');
+    expect(
+      screen.getByTestId("comp-args-readonly-value-migrate"),
+    ).toHaveTextContent('["a","","b"]');
   });
 
   it("Remove clears the stored command, then args, on submit", async () => {
@@ -580,6 +630,79 @@ describe("ComponentOverridesSection: command and args without a component contai
     ]);
     await waitFor(() =>
       expect(screen.getByTestId("drawer-review-apply-button")).toBeEnabled(),
+    );
+  });
+});
+
+describe("ComponentOverridesSection: Command and Args editors", () => {
+  it("explains each editor and its empty state", async () => {
+    renderSection({ components: [{ name: "server", envVars: [] }] });
+
+    await openComponent("server");
+
+    expect(
+      screen.getByRole("group", { name: "Command" }),
+    ).toHaveAccessibleDescription(
+      "Replaces the whole command list of the container, its entrypoint. Enter one list element per row.",
+    );
+    expect(
+      screen.getByRole("group", { name: "Args" }),
+    ).toHaveAccessibleDescription(
+      "Replaces the whole args list of the container. Enter one list element per row.",
+    );
+    expect(screen.getByTestId("comp-command-empty-server")).toHaveTextContent(
+      "No command override: the container keeps the command the chart renders.",
+    );
+    expect(screen.getByTestId("comp-args-empty-server")).toHaveTextContent(
+      "No args override: the container keeps the args the chart renders.",
+    );
+  });
+
+  it("names each input for assistive technology", async () => {
+    renderSection({
+      components: [
+        {
+          name: "server",
+          envVars: [],
+          command: ["/bin/sh", "-c"],
+          args: ["-v"],
+        },
+      ],
+    });
+
+    await openComponent("server");
+
+    expect(
+      screen.getByRole("textbox", { name: "Command element 2 for server" }),
+    ).toHaveValue("-c");
+    expect(
+      screen.getByRole("textbox", { name: "Args element 1 for server" }),
+    ).toHaveValue("-v");
+  });
+
+  it("warns about an empty command element until it has a value", async () => {
+    renderSection({ components: [{ name: "server", envVars: [] }] });
+
+    await openComponent("server");
+    fireEvent.click(screen.getByTestId("comp-command-add-server"));
+    fireEvent.click(screen.getByTestId("comp-args-add-server"));
+
+    const warning = await screen.findByTestId(
+      "comp-command-empty-warning-server-0",
+    );
+    expect(warning).toHaveTextContent(
+      "This element is empty. The container receives it as an empty string.",
+    );
+    expect(screen.queryByTestId("comp-args-empty-warning-server-0")).toBeNull();
+
+    fireEvent.change(screen.getByTestId("comp-command-server-0"), {
+      target: { value: "/bin/sh" },
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("comp-command-empty-warning-server-0"),
+      ).toBeNull(),
     );
   });
 });
