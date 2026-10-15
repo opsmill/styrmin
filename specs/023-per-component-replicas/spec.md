@@ -145,13 +145,15 @@ The `infrahub` and `infrahub-enterprise` drivers ship a new version that retires
 - A singleton component whose chart renders more than one pod is patched to 1 (FR-007).
 - A deployment that stores an override greater than 1 moves to a driver version that marks the component as singleton: the version change is rejected, and the user can lower or clear the override in the same request (FR-008).
 - An override on a component that the target driver version removed is kept and not applied (FR-009).
+- A user adds or changes an override on a component that the driver version does not declare: Styrmin rejects it and names the component and the components the driver version declares. An override that was stored before the component was removed is kept (FR-009).
 - A label selector that matches several workloads: each matching `Deployment` and `StatefulSet` gets the count.
 - A label selector that matches no `Deployment` or `StatefulSet` (for example, a component that runs only as a `DaemonSet` or a `Job`): Styrmin builds no replica patch, and the reconciliation does not fail.
 - A scale-up that leaves pods `Pending` because the cluster lacks capacity: the update task fails when its existing wait limit runs out.
 - A rolling update of a singleton component can run 2 pods for a short time, because the chart's update strategy controls this. The documentation states this limit.
 - An update resubmits, unchanged, a stored override above 1 on a component that the bound driver version marks as singleton: Styrmin rejects it (FR-008). Unlike the component container check, which accepts stored values resubmitted unchanged, the singleton check does not, because the stored count breaks the singleton rule.
 - A stored retired parameter value that is a string or a different type from the current default (for example `"1"` instead of `1`): it does not equal the default, so the change is rejected and names the value.
-- A target driver version that no longer declares a parameter, and the current driver version also does not declare it (a stale value from an earlier change): no current default exists to compare with, so the change is rejected and names the parameter and its value.
+- A request that changes the driver version and still submits a retired parameter (for example a `styrminctl deployments apply` manifest written for the old version): the FR-010 rule applies to the submitted value as it does to a stored one, so a default value is dropped and any other value is rejected with the parameter and its value.
+- A parameter that neither the current nor the target driver version declares is rejected as an unknown parameter, as today.
 
 ## Requirements *(mandatory)*
 
