@@ -265,3 +265,64 @@ backend/tests/e2e/test_infrahub_backup_restore.py::test_infrahub_enterprise_back
 backend/tests/e2e/test_infrahub_services.py::test_infrahub_task_manager_service_exposes_prefect_ui[ui-chromium] SKIPPED
 ================ 3 skipped, 190 deselected, 1 warning in 0.09s =================
 ```
+
+## After review fixes
+
+Runs of the whole `test_deployment_image_override.py` module at commit `8dcc6dee`, which keeps the Replicas input of the edit drawer mounted while the user types and blocks Review & apply while a replica count is invalid. These runs also cover the context serialization changes of commits `bd687ada` and `6a6bf3a4`. One variant per pytest session.
+
+### Image build
+
+```bash
+export STYRMIN_IMAGE_VER=replicas-review-8dcc6dee
+export npm_config_ignore_workspace=true
+docker compose build server
+```
+
+Image: `registry.opsmill.io/opsmill/styrmin:replicas-review-8dcc6dee`. The build ran the frontend `pnpm build` step again, so the image holds the fixed drawer.
+
+### API variant
+
+```bash
+sleep infinity | uv run pytest backend/tests/e2e/test_deployment_image_override.py \
+  -m "ci and shard_configuration" -k api-chromium -v -s --pdb
+```
+
+- vCluster: `pytest-b6675a54-1e85-4c23-8029-3efeeedd354a` (Docker driver, created and deleted by the session fixture)
+- Kubeconfig: `/tmp/pytest-of-root/pytest-1675/vcluster0/kubeconfig`
+- Session start: 2026-10-15T13:55:11+00:00
+- Replica test passed: by 2026-10-15T13:58:29+00:00 (the time the next test's `PASSED` line was read)
+- Summary line read: 2026-10-15T14:02:37+00:00
+
+With `-s`, the session fixture's output is printed between the node ID and `PASSED`; the lines below join them.
+
+```text
+backend/tests/e2e/test_deployment_image_override.py::test_scale_server_and_singleton_guard[api-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_override_then_clear[api-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_override_with_version_change_reaches_upgrade_job[api-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_token_follows_upgrade_and_action_job[api-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_misnamed_container_never_added[api-chromium] PASSED
+============ 5 passed, 5 deselected, 1 warning in 440.92s (0:07:20) ============
+```
+
+### UI variant
+
+```bash
+sleep infinity | uv run pytest backend/tests/e2e/test_deployment_image_override.py \
+  -m "ci and shard_configuration" -k ui-chromium -v -s --pdb
+```
+
+- vCluster: `pytest-eeeca26e-cd77-410b-ba66-68f81eeda0ed` (Docker driver, created and deleted by the session fixture)
+- Kubeconfig: `/tmp/pytest-of-root/pytest-1676/vcluster0/kubeconfig`
+- Session start: 2026-10-15T14:02:50+00:00
+- Summary line read: 2026-10-15T14:09:36+00:00
+
+```text
+backend/tests/e2e/test_deployment_image_override.py::test_scale_server_and_singleton_guard[ui-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_override_then_clear[ui-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_override_with_version_change_reaches_upgrade_job[ui-chromium] SKIPPED
+backend/tests/e2e/test_deployment_image_override.py::test_token_follows_upgrade_and_action_job[ui-chromium] PASSED
+backend/tests/e2e/test_deployment_image_override.py::test_misnamed_container_never_added[ui-chromium] SKIPPED
+====== 3 passed, 2 skipped, 5 deselected, 1 warning in 399.05s (0:06:39) =======
+```
+
+The two skipped tests are marked `api_only`, as in the earlier UI runs above.
