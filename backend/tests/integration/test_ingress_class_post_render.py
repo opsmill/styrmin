@@ -285,7 +285,7 @@ def test_chart_class_is_replaced_or_removed(
     context = _context(dedicated=dedicated, ingress_class=ingress_class)
     values = _simple_app_values(context, chart_class)
     manifests = _with_subchart_ingress(_helm_template(values, tmp_path))
-    # Both Ingresses carry the chart's class before the patches, so the check below cannot pass vacuously.
+    # Before the patches, the subchart Ingress has nginx and the chart Ingress has chart_class, or no class if empty.
     rendered = [doc for doc in yaml.safe_load_all(manifests) if doc]
     assert _classes_by_ingress(rendered) == {
         _CHART_INGRESS: (chart_class or None, None),

@@ -5,7 +5,7 @@ and T022 (extensibility).
 """
 
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import yaml
@@ -573,6 +573,24 @@ class TestDedicatedIngressPatching:
         annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
         assert annotations["kubernetes.io/ingress.class"] == "traefik"
 
+    def test_dedicated_ingress_removes_class_when_no_class_resolved(
+        self, ingress_utility: IngressUtility
+    ) -> None:
+        """FR-002: the removal and the annotation do not depend on a resolved ``ingress_class``."""
+        ctx = _make_context(
+            dedicated_ingress=DedicatedIngressConfig(implementation="traefik"),
+            ingress_class=None,
+        )
+        patches = ingress_utility.build_app_post_rendering_patches(ctx, RELEASE_REF)
+
+        removal_patches = _removal_patches(patches)
+        assert len(removal_patches) == 1
+        assert removal_patches[0].target.render_value() == {"kind": "Ingress"}
+        assert [p for p in patches if hasattr(p.patch, "specs")] == []
+        annotation_patches = [p for p in patches if hasattr(p.patch, "annotations")]
+        annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
+        assert annotations["kubernetes.io/ingress.class"] == "traefik"
+
     def test_fallback_to_cluster_ingress_class(
         self, ingress_utility: IngressUtility
     ) -> None:
@@ -586,6 +604,44 @@ class TestDedicatedIngressPatching:
         annotation_patches = [p for p in patches if hasattr(p.patch, "annotations")]
         annotations = annotation_patches[0].patch.annotations  # type: ignore[attr-defined]
         assert annotations["kubernetes.io/ingress.class"] == "cluster-traefik"
+
+    def test_shared_ingress_renders_class_then_annotation_patches(
+        self, ingress_utility: IngressUtility
+    ) -> None:
+        """D-002: without a dedicated controller, the rendered patches and their order are the same as before 023.
+
+        A change here changes the HelmRelease of every deployment without a dedicated ingress controller.
+        """
+        ctx = _make_context(dedicated_ingress=None, ingress_class="cluster-traefik")
+        ctx.instance.deployment_id = UUID("00000000-0000-0000-0000-000000000001")
+        patches = ingress_utility.build_app_post_rendering_patches(ctx, RELEASE_REF)
+
+        assert [tp.render_value() for tp in patches] == [
+            {
+                "target": {"kind": "Ingress"},
+                "patch": "- op: add\n  path: /spec/ingressClassName\n  value: cluster-traefik\n",
+            },
+            {
+                "target": {"kind": "Ingress"},
+                "patch": (
+                    "- op: add\n"
+                    "  path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.entrypoints\n"
+                    "  value: web,websecure\n"
+                    "- op: add\n"
+                    "  path: /metadata/annotations/external-dns.alpha.kubernetes.io~1hostname\n"
+                    "  value: test-release-testapp.test.styrmin.com\n"
+                    "- op: add\n"
+                    "  path: /metadata/annotations/external-dns.alpha.kubernetes.io~1cloudflare-proxied\n"
+                    "  value: true\n"
+                    "- op: add\n"
+                    "  path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.middlewares\n"
+                    "  value: styrmin-00000000-0000-0000-0000-000000000001-acl@kubernetescrd\n"
+                    "- op: add\n"
+                    "  path: /metadata/annotations/kubernetes.io~1ingress.class\n"
+                    "  value: cluster-traefik\n"
+                ),
+            },
+        ]
 
     def test_no_ingress_class_patch_when_neither_set(
         self, ingress_utility: IngressUtility
