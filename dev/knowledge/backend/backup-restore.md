@@ -65,9 +65,15 @@ class BackupStrategy(ABC):
 
 `kind: neo4j` uses Neo4j Enterprise commands (`neo4j-admin database backup`, `STOP DATABASE`, `neo4j-admin database restore`). Neo4j Community has none of them and cannot stop a database without stopping the JVM, which is the container's main process. `kind: neo4j-community` ([ADR-070](../../adr/0070-neo4j-community-backup-pauses-neo4j-during-volume-copy.md), [#263](https://github.com/opsmill/styrmin/issues/263)) backs up the running database's files instead:
 
-1. The pre-backup hook (`neo4j_community_backup_hooks()` in `hooks.py`) reads the JVM process ID from `/var/lib/neo4j/run/neo4j.pid`, starts a watchdog subshell, and sends `SIGSTOP` to the JVM.
+1. The pre-backup hook (`neo4j_community_backup_hooks()` in `hooks.py`) reads the JVM process ID from `/var/lib/neo4j/run/neo4j.pid`, writes it with the process start time (field 22 of `/proc/<pid>/stat`) to the pause record `/tmp/styrmin-neo4j-pause`, starts a watchdog subshell, and sends `SIGSTOP` to the JVM as its last command.
 2. Velero's file-system backup copies the annotated volume. The copy holds the files as they were at the pause, which Neo4j recovers from like a killed process.
-3. The post-backup hook stops the watchdog and sends `SIGCONT`. Velero 1.18 runs post hooks only after every PodVolumeBackup of the pod is completed, failed or canceled (`handleItemBlockPostHooks` in Velero's `pkg/backup/backup.go`).
+3. The post-backup hook reads and removes the pause record, sends `SIGCONT`, and stops the watchdog. Velero 1.18 runs post hooks only after every PodVolumeBackup of the pod is completed, failed or canceled (`handleItemBlockPostHooks` in Velero's `pkg/backup/backup.go`).
+
+The post hook exits 1, so the backup ends `PartiallyFailed`, unless the recorded process was still in state `T` with the recorded start time when the hook ran and `SIGCONT` succeeded. Its stderr names the case:
+
+- No pause record: Neo4j restarted, which wipes `/tmp`, or another backup's post hook removed it.
+- The watchdog fired: it sends `SIGCONT` after `NEO4J_MAX_PAUSE_SECONDS` (3600, the default backup timeout) and touches a marker file.
+- The process was not paused: Neo4j restarted, or another backup resumed it.
 
 The watchdog sends `SIGCONT` after `NEO4J_MAX_PAUSE_SECONDS` (3600, the default backup timeout) and records that it did. The post hook then exits 1, so the backup ends `PartiallyFailed` instead of storing a copy taken after Neo4j resumed. The watchdog is needed because Velero skips post hooks when its wait for the PodVolumeBackups fails, and skips them for a pod whose pre hook failed; both hooks use `onError: Fail`, and the pre hook sends `SIGSTOP` last so that nothing after it can fail. The next pause stops a watchdog left by an earlier backup, so it cannot resume Neo4j in the middle of another backup.
 

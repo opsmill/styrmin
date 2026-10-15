@@ -483,6 +483,87 @@ class TestNeo4jCommunityPauseScripts:
         assert result.returncode == 0, result.stderr
         _wait_for_state(pid, "S")
 
+    def test_pause_script_sends_sigstop_last(self, tmp_path: Path) -> None:
+        """Nothing after SIGSTOP can fail the pre hook and leave Neo4j paused without a post hook."""
+        pause, _ = self._scripts(tmp_path / "neo4j.pid", tmp_path, max_pause_seconds=1)
+        assert pause.strip().splitlines()[-1] == 'kill -STOP "$pid"'
+
+    def test_resume_fails_when_neo4j_was_resumed_during_the_copy(
+        self, neo4j_process: tuple[int, Path], tmp_path: Path
+    ) -> None:
+        pid, pid_file = neo4j_process
+        pause, resume = self._scripts(pid_file, tmp_path, max_pause_seconds=300)
+
+        subprocess.run(["/bin/sh", "-c", pause], check=True, timeout=10)
+        _wait_for_state(pid, "T")
+        subprocess.run(["kill", "-CONT", str(pid)], check=True)
+        _wait_for_state(pid, "S")
+
+        result = subprocess.run(
+            ["/bin/sh", "-c", resume], capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 1
+        assert "was not paused" in result.stderr
+        assert not (tmp_path / "styrmin-neo4j-watchdog.pid").exists()
+
+    def test_resume_fails_without_a_pause_record(
+        self, neo4j_process: tuple[int, Path], tmp_path: Path
+    ) -> None:
+        """A container restart wipes /tmp, so the post hook finds no pause record."""
+        pid, pid_file = neo4j_process
+        _, resume = self._scripts(pid_file, tmp_path, max_pause_seconds=300)
+
+        result = subprocess.run(
+            ["/bin/sh", "-c", resume], capture_output=True, text=True, timeout=10
+        )
+        assert result.returncode == 1
+        assert "no pause record" in result.stderr
+        assert _process_state(pid) == "S"
+
+    def test_resume_fails_when_neo4j_restarted(
+        self, neo4j_process: tuple[int, Path], tmp_path: Path
+    ) -> None:
+        """The paused process is gone and another one wrote the PID file."""
+        pid, pid_file = neo4j_process
+        pause, resume = self._scripts(pid_file, tmp_path, max_pause_seconds=300)
+        subprocess.run(["/bin/sh", "-c", pause], check=True, timeout=10)
+        _wait_for_state(pid, "T")
+
+        restarted = subprocess.Popen(["sleep", "300"])
+        try:
+            subprocess.run(["kill", "-KILL", str(pid)], check=True)
+            pid_file.write_text(f"{restarted.pid}\n")
+            result = subprocess.run(
+                ["/bin/sh", "-c", resume], capture_output=True, text=True, timeout=10
+            )
+        finally:
+            restarted.kill()
+            restarted.wait()
+        assert result.returncode == 1
+        assert "was not paused" in result.stderr
+
+    def test_overlapping_backups_fail_the_one_that_ends_last(
+        self, neo4j_process: tuple[int, Path], tmp_path: Path
+    ) -> None:
+        """The first resume ends the pause, so the other backup copied a running Neo4j."""
+        pid, pid_file = neo4j_process
+        pause, resume = self._scripts(pid_file, tmp_path, max_pause_seconds=300)
+
+        subprocess.run(["/bin/sh", "-c", pause], check=True, timeout=10)
+        subprocess.run(["/bin/sh", "-c", pause], check=True, timeout=10)
+        _wait_for_state(pid, "T")
+
+        first = subprocess.run(
+            ["/bin/sh", "-c", resume], capture_output=True, text=True, timeout=10
+        )
+        assert first.returncode == 0, first.stderr
+        _wait_for_state(pid, "S")
+        second = subprocess.run(
+            ["/bin/sh", "-c", resume], capture_output=True, text=True, timeout=10
+        )
+        assert second.returncode == 1
+        assert "no pause record" in second.stderr
+
 
 class TestMariadbBackupStrategy:
     def test_get_hooks_returns_mariadb_hooks(self) -> None:

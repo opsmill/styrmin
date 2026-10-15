@@ -549,6 +549,37 @@ class TestValidateDriverBackupConfigsForSpec:
         spec = _spec({"db": _component({"enabled": True, "kind": "neo4j"})})
         validate_driver_backup_configs_for_spec(spec)
 
+    def test_neo4j_community_with_volume_passes(self) -> None:
+        spec = _spec(
+            {
+                "db": _component(
+                    {"enabled": True, "kind": "neo4j-community", "volume": "graph"}
+                )
+            }
+        )
+        validate_driver_backup_configs_for_spec(spec)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("volumes", ["data"]),
+            ("database_name", "neo4j"),
+            ("credentials_secret", "neo4j-auth"),
+        ],
+    )
+    def test_neo4j_community_rejects_fields_it_ignores(
+        self, field: str, value: object
+    ) -> None:
+        spec = _spec(
+            {
+                "db": _component(
+                    {"enabled": True, "kind": "neo4j-community", field: value}
+                )
+            }
+        )
+        with pytest.raises(ValidationError, match=f"does not use \\['{field}'\\]"):
+            validate_driver_backup_configs_for_spec(spec)
+
     def test_disabled_backup_ignored(self) -> None:
         spec = _spec({"server": _component({"enabled": False})})
         validate_driver_backup_configs_for_spec(spec)

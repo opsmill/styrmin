@@ -91,6 +91,8 @@ What to expect from a `neo4j-community` backup:
   finishes. The pause grows with the size of the volume.
 - If the backup takes longer than one hour, Styrmin resumes Neo4j anyway and
   the backup is marked failed, because the copy is no longer consistent.
+- The backup is also marked failed when Neo4j restarts during the backup,
+  or when another backup of the same pod resumes it first.
 - A restore lays the volume down before Neo4j starts. Neo4j replays its
   transaction logs when it starts, so the restored database contains whole
   transactions only.
@@ -101,7 +103,9 @@ What to expect from a `neo4j-community` backup:
   that provisions CSI volumes, or the backup completes without the database.
 
 The `volume` field defaults to `data`, the name the Neo4j Helm chart gives
-its data volume. See
+its data volume. The strategy reads no other field: a driver that sets
+`volumes`, `database_name` or `credentials_secret` on a `neo4j-community`
+component fails to load. See
 [ADR-070](https://github.com/opsmill/styrmin/blob/develop/dev/adr/0070-neo4j-community-backup-pauses-neo4j-during-volume-copy.md)
 for why Styrmin pauses Neo4j instead of dumping it.
 

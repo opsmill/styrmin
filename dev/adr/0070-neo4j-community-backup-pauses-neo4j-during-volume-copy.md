@@ -30,15 +30,19 @@ Decision drivers:
 
 Add a `neo4j-community` backup kind (`Neo4jCommunityBackupStrategy`):
 
-1. The pre-backup hook reads the JVM process ID from `/var/lib/neo4j/run/neo4j.pid`, starts a
-   watchdog that resumes the JVM after 3600 s (the default backup timeout), and pauses the
-   JVM with `SIGSTOP`.
+1. The pre-backup hook reads the JVM process ID from `/var/lib/neo4j/run/neo4j.pid` and
+   records it with the process start time, starts a watchdog that resumes the JVM after
+   3600 s (the default backup timeout), and pauses the JVM with `SIGSTOP`. `SIGSTOP` is the
+   hook's last command, so no later command can fail the hook while Neo4j is paused.
 2. Velero copies the component's `data` volume (or the volume named in `backup.volume`)
    with file-system backup. The copy holds the files as they were at the pause, the same
    state a killed process leaves.
 3. The post-backup hook stops the watchdog and resumes the JVM with `SIGCONT`. Velero 1.18
-   runs post hooks only after the pod's PodVolumeBackups finish. If the watchdog already
-   resumed Neo4j, the hook exits non-zero and the backup ends `PartiallyFailed`.
+   runs post hooks only after the pod's PodVolumeBackups finish. The hook exits non-zero,
+   and the backup ends `PartiallyFailed`, unless the recorded process was still paused
+   when the hook ran and `SIGCONT` reached it. The process is no longer paused when the
+   watchdog resumed it, when Neo4j restarted (a restart also wipes the record in `/tmp`),
+   or when another backup of the same pod resumed it first.
 4. The restore has no hook. Velero restores the volume before the Neo4j container starts,
    and Neo4j replays its transaction logs on startup.
 
@@ -74,7 +78,11 @@ only, and passed `neo4j-admin database check`.
   requests wait or time out for the length of the backup. The pause grows with the volume
   size and the upload speed to the backup storage location.
 - Bad: a backup that takes longer than 3600 s is resumed by the watchdog and fails. The
-  limit is a constant (`NEO4J_MAX_PAUSE_SECONDS`), not a setting.
+  limit is a constant (`NEO4J_MAX_PAUSE_SECONDS`), not a setting. When Velero skips the
+  post hook, for example because Velero restarted, Neo4j stays paused until the watchdog
+  fires.
+- Bad: two backups that overlap on the same pod share one pause. The first post hook
+  resumes Neo4j, so the backup that ends last fails.
 - Bad: the strategy depends on the official image (process ID file path, `sh`, `kill`, `sleep`)
   and on Velero running post hooks after pod volume backups finish. A Velero release that
   changes that order would produce inconsistent backups without any error.
@@ -86,4 +94,5 @@ only, and passed `neo4j-admin database check`.
 
 Confirmation: `test_strategies.py::TestNeo4jCommunityPauseScripts` runs the rendered hook
 scripts against a stand-in process, and `test_infrahub_backup_and_restore_lifecycle`
-backs up and restores the community Infrahub stack end to end.
+backs up and restores the community Infrahub stack end to end and checks that Velero ran
+every hook without a failure.
