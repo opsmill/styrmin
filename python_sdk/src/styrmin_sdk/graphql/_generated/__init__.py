@@ -137,6 +137,7 @@ from .get_deployment_component_image_overrides_full import (
 from .get_deployment_override_applicability import (
     GetDeploymentOverrideApplicability,
     GetDeploymentOverrideApplicabilityDeployment,
+    GetDeploymentOverrideApplicabilityDeploymentComponentContainerOverrides,
     GetDeploymentOverrideApplicabilityDeploymentComponentEnvVars,
     GetDeploymentOverrideApplicabilityDeploymentComponentImageOverrides,
 )
@@ -180,12 +181,6 @@ from .get_deployment_timeline_context_diff import (
     GetDeploymentTimelineContextDiffDeploymentTimelineContextDiff,
     GetDeploymentTimelineContextDiffDeploymentTimelineContextDiffChanges,
     GetDeploymentTimelineContextDiffDeploymentTimelineTask,
-)
-from .get_driver_container_override_docs import (
-    GetDriverContainerOverrideDocs,
-    GetDriverContainerOverrideDocsApplicationDriver,
-    GetDriverContainerOverrideDocsApplicationDriverVersions,
-    GetDriverContainerOverrideDocsApplicationDriverVersionsContainerOverrides,
 )
 from .get_driver_env_var_docs import (
     GetDriverEnvVarDocs,
@@ -522,6 +517,7 @@ __all__ = [
     "GetDeploymentDeploymentDeployedServices",
     "GetDeploymentOverrideApplicability",
     "GetDeploymentOverrideApplicabilityDeployment",
+    "GetDeploymentOverrideApplicabilityDeploymentComponentContainerOverrides",
     "GetDeploymentOverrideApplicabilityDeploymentComponentEnvVars",
     "GetDeploymentOverrideApplicabilityDeploymentComponentImageOverrides",
     "GetDeploymentPodStatuses",
@@ -553,10 +549,6 @@ __all__ = [
     "GetDeploymentTimelineDeploymentTimelineTaskStepsErrors",
     "GetDeploymentTimelineDeploymentTimelineTaskStepsStartedTasks",
     "GetDeploymentTimelineDeploymentTimelineTaskStepsSupersededBy",
-    "GetDriverContainerOverrideDocs",
-    "GetDriverContainerOverrideDocsApplicationDriver",
-    "GetDriverContainerOverrideDocsApplicationDriverVersions",
-    "GetDriverContainerOverrideDocsApplicationDriverVersionsContainerOverrides",
     "GetDriverEnvVarDocs",
     "GetDriverEnvVarDocsApplicationDriver",
     "GetDriverEnvVarDocsApplicationDriverVersions",

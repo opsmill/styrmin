@@ -286,14 +286,9 @@ async def generate_context_from_deployment(
             deployment_config=deployment.config,
         )
 
-        # Resolve container command/args overrides per component
-        # (014-component-container-overrides / US1). Reads per-component
-        # ``command``/``args`` blocks from
-        # ``DeploymentConfig.components[<name>]`` and assigns the resolved
-        # value (component-scope only, NO layering — research.md D2) to each
-        # ``ComponentContext.container_override``. Orphan blocks are computed
-        # by the resolver but never attached here (they surface only on the
-        # GraphQL read path; the renderer skips them).
+        # Attach each live component's ``command``/``args`` (component scope only) to
+        # ``ComponentContext.container_override``; orphaned blocks are not attached here,
+        # only the GraphQL read path returns them.
         _populate_component_container_overrides(
             context=context,
             deployment_config=deployment.config,
@@ -484,10 +479,10 @@ def _populate_component_container_overrides(
     Orphan entries (stored blocks whose component the driver no longer
     declares) are produced by the resolver for the read surface but are NOT
     attached to any component context here — there is no live
-    ``ComponentContext`` to attach them to, and the renderer must never inject
-    an orphaned override into a pod (FR-005). Components whose resolved
-    ``command`` and ``args`` are both ``None`` get ``None`` so the render
-    filters fall through to the chart default.
+    ``ComponentContext`` to attach them to, and the post-render patch builder
+    must never apply an orphaned override (FR-005). Components whose resolved
+    ``command`` and ``args`` are both ``None`` get ``None``, so the patch builder
+    writes neither and the chart's values apply.
     """
     if context.components is None or len(context.components.root) == 0:
         return

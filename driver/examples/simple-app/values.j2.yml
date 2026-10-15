@@ -4,11 +4,6 @@ image:
   repository: simple-app
   tag: "{{ app.version }}"
 
-# User command/args overrides for `server`, emitted unconditionally (`[]` when unset).
-# The chart skips an empty list, so the image ENTRYPOINT/CMD apply.
-command: {{ components | component_command("server") | tojson }}
-args: {{ components | component_args("server") | tojson }}
-
 ingress:
   enabled: true
   className: "{{ instance.config.ingress_class }}"

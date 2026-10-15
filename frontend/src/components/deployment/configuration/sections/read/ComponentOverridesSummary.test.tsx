@@ -1,6 +1,7 @@
 /**
  * Read-only Component Overrides summary: per-component image overrides
- * (018-component-image-overrides, User Story 1 scenario 3).
+ * (018-component-image-overrides, User Story 1 scenario 3) and `command`/`args`
+ * overrides (022-post-render-container-overrides).
  */
 import { describe, expect, it } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -12,6 +13,7 @@ import { ComponentOverridesSummary } from "./ComponentOverridesSummary";
 type Deployment = NonNullable<GetDeploymentQuery["deployment"]>;
 type DeploymentComponent = Deployment["components"][number];
 type ImageOverride = Deployment["componentImageOverrides"][number];
+type ContainerOverride = Deployment["componentContainerOverrides"][number];
 
 const COMPONENTS: DeploymentComponent[] = [
   { id: "c-server", name: "server", enabled: true, container: "server" },
@@ -188,5 +190,126 @@ describe("ComponentOverridesSummary: image overrides", () => {
       />,
     );
     expect(screen.queryByTestId("component-image-override")).toBeNull();
+  });
+});
+
+function containerOverride(
+  partial: Partial<ContainerOverride>,
+): ContainerOverride {
+  return {
+    component: "server",
+    command: null,
+    args: null,
+    isOrphaned: false,
+    isApplicable: true,
+    ...partial,
+  };
+}
+
+function renderContainerSummary(
+  containerOverrides: ContainerOverride[],
+  deploymentConfig: Record<string, unknown> = {},
+) {
+  return render(
+    <ComponentOverridesSummary
+      deploymentConfig={deploymentConfig}
+      environmentConfig={{}}
+      clusterConfig={{}}
+      components={COMPONENTS}
+      containerOverrides={containerOverrides}
+    />,
+  );
+}
+
+function containerLine(component: string, field: string): HTMLElement {
+  const line = screen
+    .getAllByTestId("component-container-override")
+    .find(
+      (r) => r.dataset.component === component && r.dataset.field === field,
+    );
+  if (!line) throw new Error(`no ${field} line for ${component}`);
+  return line;
+}
+
+describe("ComponentOverridesSummary: command and args overrides", () => {
+  it("shows each list as JSON with an applied badge", () => {
+    renderContainerSummary(
+      [containerOverride({ command: ["a b"], args: ["a", "", "b"] })],
+      { components: { server: { command: ["a b"], args: ["a", "", "b"] } } },
+    );
+
+    const command = containerLine("server", "command");
+    expect(
+      within(command).getByTestId("component-container-override-value"),
+    ).toHaveTextContent('["a b"]');
+    expect(
+      within(command).getByTestId("component-container-override-applied-badge"),
+    ).toHaveTextContent(/^applied$/);
+    expect(
+      within(containerLine("server", "args")).getByTestId(
+        "component-container-override-value",
+      ),
+    ).toHaveTextContent('["a","","b"]');
+    const serverRow = screen
+      .getAllByTestId("component-override-row")
+      .find((r) => r.dataset.component === "server");
+    expect(serverRow).toHaveTextContent("command · args");
+  });
+
+  it("marks values on a component without a container not applied", () => {
+    renderContainerSummary(
+      [
+        containerOverride({
+          component: "migrate",
+          args: ["--all"],
+          isApplicable: false,
+        }),
+      ],
+      { components: { migrate: { args: ["--all"] } } },
+    );
+
+    const line = containerLine("migrate", "args");
+    expect(line).toHaveAttribute("data-applicable", "false");
+    expect(
+      within(line).getByTestId("component-container-override-applied-badge"),
+    ).toHaveTextContent(/^not applied$/);
+    expect(
+      screen
+        .getAllByTestId("component-container-override")
+        .filter((r) => r.dataset.field === "command"),
+    ).toHaveLength(0);
+  });
+
+  it("shows an orphaned command as not applied", () => {
+    renderContainerSummary(
+      [
+        containerOverride({
+          component: "legacy",
+          command: ["/bin/legacy"],
+          isOrphaned: true,
+          isApplicable: false,
+        }),
+      ],
+      { components: { legacy: { command: ["/bin/legacy"] } } },
+    );
+
+    const orphanRow = screen.getByTestId("component-override-orphan-row");
+    expect(orphanRow).toHaveAttribute("data-component", "legacy");
+    expect(orphanRow).toHaveTextContent(
+      "no longer declared by driver · command",
+    );
+    expect(orphanRow).toContainElement(containerLine("legacy", "command"));
+  });
+
+  it("shows an orphaned block that stores only env vars", () => {
+    renderContainerSummary([], {
+      components: { legacy: { env_vars: { LOG_LEVEL: "debug" } } },
+    });
+
+    const orphanRow = screen.getByTestId("component-override-orphan-row");
+    expect(orphanRow).toHaveAttribute("data-component", "legacy");
+    expect(orphanRow).toHaveTextContent(
+      "no longer declared by driver · env_vars: 1 key",
+    );
   });
 });

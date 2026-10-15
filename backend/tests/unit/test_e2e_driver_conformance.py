@@ -360,6 +360,26 @@ def test_set_component_image_is_declared_keyword_only() -> None:
         )
 
 
+def test_set_component_container_override_is_declared_keyword_only() -> None:
+    """Pins the command and args setter (022) the container override E2E drives
+    on both entrypoints, keyword-only on the protocol and on each driver."""
+    assert "set_component_container_override" in _protocol_methods()
+    assert _is_async(ScenarioDriver, "set_component_container_override")
+    for cls in (ScenarioDriver, ApiScenarioDriver, UiScenarioDriver):
+        signature = inspect.signature(cls.set_component_container_override)
+        params = list(signature.parameters.values())[1:]
+        assert [p.name for p in params] == [
+            "deployment_id",
+            "component",
+            "command",
+            "args",
+        ]
+        assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in params), (
+            f"{cls.__name__}.set_component_container_override: parameters must be "
+            "keyword-only"
+        )
+
+
 def test_protocol_method_signatures_match() -> None:
     """Each driver's method parameter names, defaults, and return type must match.
 

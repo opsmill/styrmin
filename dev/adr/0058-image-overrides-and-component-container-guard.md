@@ -8,6 +8,9 @@ post-render override into the declared component container.
 **Narrows**: ADR-057's consequence "a wrong container name fails the release, but only once env
 vars are set". A wrong name now fails the reconcile with `COMPONENT_CONTAINER_NOT_FOUND` whenever
 any override (env vars or image) targets it, and Styrmin never adds a container (§3, §4).
+**Extended by**: [ADR-069](0069-container-command-args-by-post-render.md) — `command` and `args`
+overrides use the same merge patch (renamed `ContainerMergePatch`) and guard, so they also fail a
+wrong container name with `COMPONENT_CONTAINER_NOT_FOUND`. See ADR-069.
 **Related**: [ADR-035](0035-post-render-injection-toggles-and-kind-list.md) (the post-render patch
 pipeline), [ADR-029](0029-config-additions-via-baseconfigsection-no-migration.md) (config additions
 ride the existing JSON columns), [ADR-045](0045-container-override-no-layering-and-omit-marker.md)

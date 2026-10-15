@@ -76,6 +76,7 @@ The dual-entrypoint design is the reason every E2E scenario runs **twice by defa
 A test that calls **any** dual-entrypoint method on `scenario_driver`
 (`create_deployment` / `update_deployment` / `update_environment_via_form` /
 `set_environment_backup_ttl` / `set_component_env_vars` / `set_component_image` /
+`set_component_container_override` /
 `upgrade_deployment` / `pinned_image_components` / `create_backup` /
 `list_backups` / `start_components` / `stop_components` / `run_job` /
 `create_environment_backup` / `get_environment_backup` / `wait_for_environment_backup` /

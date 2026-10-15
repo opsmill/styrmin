@@ -662,8 +662,8 @@ carries another template expression, or becomes invalid once
 a component the driver version does not declare fails with
 `UNKNOWN_COMPONENT_IMAGE_OVERRIDE`.
 
-Adding or changing per-component `env_vars` or `image` on a component whose
-driver version declares no component container fails with
+Adding or changing per-component `env_vars`, `image`, `command` or `args` on a
+component whose driver version declares no component container fails with
 `COMPONENT_CONTAINER_NOT_DECLARED`. A manifest has no driver version field:
 `apply` writes `spec.config` together with the version change, and runs these
 checks against `spec.version` and the newest loaded driver version that
@@ -676,18 +676,23 @@ the deployment.
 Component config on a component that this driver version does not declare is
 rejected even when it is unchanged. When a driver version removes or renames a
 component, remove its block from the manifest in the same change that moves
-`spec.version`. Unchanged `env_vars` or `image` on a component that the driver
-version declares without a component container are accepted, stored and not
-applied, and `apply` prints a warning on stderr:
+`spec.version`. Unchanged `env_vars`, `image`, `command` or `args` on a
+component that the driver version declares without a component container are
+accepted, stored and not applied. `apply` prints a warning on stderr for each
+such component. The warning names the kinds of override and the two ways to fix
+it:
 
 ```text
 updated my-app
-warning: my-app: env vars and image overrides on worker are stored but not applied (no component container in the driver version)
+warning: my-app: env var and args overrides are stored on worker but not applied: the driver version declares no component container for worker. Remove them from the manifest, or load a driver version that declares components.worker.container and apply again
 0 created, 1 updated, 0 unchanged, 0 failed
 ```
 
-The SDK returns these components as `ApplyOutcome.inapplicable_components`.
-See [Migrating env var wiring](../drivers/migrating-env-vars.md).
+The SDK returns these components as `ApplyOutcome.inapplicable_components`, and
+the kinds of override per component (`env_vars`, `image`, `command`, `args`) as
+`ApplyOutcome.inapplicable_overrides`.
+See [Migrating env var wiring](../drivers/migrating-env-vars.md) and
+[Migrating container overrides](../drivers/migrating-container-overrides.md).
 
 When a manifest changes an existing deployment's application version,
 `styrminctl deployments apply` prints a warning on stderr for each

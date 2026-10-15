@@ -8,6 +8,75 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### Override `command` and `args` on any component with a component container
+
+Styrmin now applies the container `command` and `args` overrides users
+set on a deployment after the Helm chart renders, to each component's
+declared **component container**, as it already does for env vars and
+image overrides. Drivers no longer pass these overrides to the chart in
+`values.j2.yml` ([#457](https://github.com/opsmill/styrmin/issues/457)).
+See [Migrating container overrides](./drivers/migrating-container-overrides.md).
+
+#### What's new
+
+- A `command` or `args` override reaches the component container whether
+  or not the chart exposes it as a value. The `server` and `task-worker`
+  components of the `infrahub` and `infrahub-enterprise` drivers now
+  accept `command`.
+- An override replaces the whole `command` or `args` list, and a field
+  without an override keeps the chart's value. Clearing an override
+  brings back the chart's `command` and `args`.
+- Adding or changing `command` or `args` on a component without a
+  component container is rejected with `COMPONENT_CONTAINER_NOT_DECLARED`.
+  The deployment's Configuration editor hides the Command and Args
+  editors for such a component, shows stored values read-only, marked
+  **not applied**, with a remove button, and offers no **Add override**.
+  `ComponentContainerOverrides.isApplicable` in the API reports whether
+  a stored override applies.
+- The **Component Overrides** card on the Configuration tab lists the
+  stored `command` and `args` of each component, with an **applied** or
+  **not applied** badge, and lists every block stored on a component the
+  driver no longer declares.
+- In the Configuration editor, a change to only the `command` or `args`
+  of a component now enables **Review & apply**.
+- `styrminctl deployments apply` warns once per component about the
+  overrides it stores but the driver version does not apply, names their
+  kinds and says how to fix it. The SDK lists the kinds per component in
+  `ApplyOutcome.inapplicable_overrides`.
+- The example drivers no longer call the retired filters: `simple-app`
+  version 3, `infrahub` version 4 and `infrahub-enterprise` version 3.
+
+#### Migration
+
+- Before you upgrade Styrmin, list the stored `command` and `args` of
+  your deployments with `styrminctl deployments get` and remove the
+  values you do not want with `styrminctl deployments update --config`
+  or `styrminctl deployments apply`. After the upgrade, Styrmin applies
+  them to every component with a component container on the next render
+  of the deployment, which an env var edit on its environment or a
+  cluster config update can also start. Values that a driver template
+  did not pass to the chart, such as `command` on the infrahub `server`
+  or any value on the `slurpit`, `semaphore`, `infrahub-mcp` and
+  `db-test` drivers, reach the pods for the first time. The
+  Configuration editor of earlier releases cannot submit a change that
+  only removes `command` or `args`. See
+  [Before you upgrade Styrmin](./drivers/migrating-container-overrides.md#before-you-upgrade-styrmin).
+- The `component_command` and `component_args` template filters are
+  retired. Loading a driver version whose `values.j2.yml` calls either
+  one, or the earlier retired `component_env_vars`, fails with
+  `RETIRED_TEMPLATE_FILTER`. A deployment pinned to a driver version
+  loaded earlier that still calls them fails on its next change, also
+  when it has no override set; its pods keep running. Load the migrated
+  drivers and move each deployment onto them.
+- `spec.container_overrides` is removed from `driver.styrmin.yml`: a
+  driver file that still contains it fails to load, with an error that
+  links the migration guide. The API no longer has
+  `ApplicationDriverVersion.containerOverrides` or the
+  `DriverContainerOverrideDoc` type, and the SDK no longer has
+  `get_driver_container_override_docs`.
+- Container overrides now reach only the component container, not chart
+  Jobs, init containers, or other containers in the pod.
+
 ### Change a cluster's config without recreating it
 
 An administrator can now change any value of a cluster's config, such

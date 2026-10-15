@@ -17,11 +17,6 @@ infrahubServer:
     env:
       PREFECT_API_URL: "http://styrmin-task-manager:4200/api"
       INFRAHUB_WORKFLOW_ADDRESS: styrmin-task-manager
-{%- if components | component_args("server") %}
-    args: {{ components | component_args("server") | tojson }}
-{%- else %}
-    args: null
-{%- endif %}
   persistence:
     accessMode: ReadWriteOnce
     enabled: true
@@ -33,11 +28,6 @@ infrahubTaskWorker:
     env:
       PREFECT_API_URL: "http://styrmin-task-manager:4200/api"
       INFRAHUB_WORKFLOW_ADDRESS: styrmin-task-manager
-{%- if components | component_args("task-worker") %}
-    args: {{ components | component_args("task-worker") | tojson }}
-{%- else %}
-    args: null
-{%- endif %}
   replicas: "{{ parameters.replicas_task_worker }}"
 nats:
   enabled: false
@@ -92,16 +82,6 @@ prefect-server:
     {%- set tm_default_port = 80 if tm_scheme == "http" else 443 %}
     uiConfig:
       prefectUiApiUrl: "{{ tm_scheme }}://{{ services['task-manager'].human_readable_fqdn }}{% if tm_port and tm_port != tm_default_port %}:{{ tm_port }}{% endif %}/api"
-  {%- if components | component_command("task-manager") %}
-    command: {{ components | component_command("task-manager") | tojson }}
-  {%- else %}
-    command: null
-  {%- endif %}
-  {%- if components | component_args("task-manager") %}
-    args: {{ components | component_args("task-manager") | tojson }}
-  {%- else %}
-    args: null
-  {%- endif %}
   postgresql:
     # Propagate the styrmin identifier label to every resource the bitnami
     # postgresql subchart renders (StatefulSet metadata.labels included), so

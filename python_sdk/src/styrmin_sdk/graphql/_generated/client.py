@@ -51,7 +51,6 @@ from .get_deployment_services import GetDeploymentServices
 from .get_deployment_status import GetDeploymentStatus
 from .get_deployment_timeline import GetDeploymentTimeline
 from .get_deployment_timeline_context_diff import GetDeploymentTimelineContextDiff
-from .get_driver_container_override_docs import GetDriverContainerOverrideDocs
 from .get_driver_env_var_docs import GetDriverEnvVarDocs
 from .get_environment import GetEnvironment
 from .get_environment_backup import GetEnvironmentBackup
@@ -1081,6 +1080,7 @@ class Client(AsyncBaseClient):
                   command
                   args
                   isOrphaned
+                  isApplicable
                 }
               }
             }
@@ -1164,6 +1164,10 @@ class Client(AsyncBaseClient):
                   isApplicable
                 }
                 componentImageOverrides {
+                  component
+                  isApplicable
+                }
+                componentContainerOverrides {
                   component
                   isApplicable
                 }
@@ -1416,40 +1420,6 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return GetDeploymentTimelineContextDiff.model_validate(data)
-
-    async def get_driver_container_override_docs(
-        self, application_driver_id: UUID, **kwargs: Any
-    ) -> GetDriverContainerOverrideDocs:
-        query = gql("""
-            query GetDriverContainerOverrideDocs($applicationDriverId: UUID!) {
-              applicationDriver(applicationDriverId: $applicationDriverId) {
-                id
-                name
-                versions {
-                  id
-                  version
-                  contentHash
-                  sourceCommitSha
-                  containerOverrides {
-                    component
-                    description
-                    container
-                    command
-                    args
-                  }
-                }
-              }
-            }
-            """)
-        variables: dict[str, object] = {"applicationDriverId": application_driver_id}
-        response = await self.execute(
-            query=query,
-            operation_name="GetDriverContainerOverrideDocs",
-            variables=variables,
-            **kwargs,
-        )
-        data = self.get_data(response)
-        return GetDriverContainerOverrideDocs.model_validate(data)
 
     async def get_driver_env_var_docs(
         self, application_driver_id: UUID, **kwargs: Any

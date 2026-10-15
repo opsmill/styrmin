@@ -57,6 +57,13 @@ query GetDeployment($deploymentId: UUID!) {
       isOrphaned
       isApplicable
     }
+    componentContainerOverrides {
+      component
+      command
+      args
+      isOrphaned
+      isApplicable
+    }
     deployedServices {
       id
       driverServiceName

@@ -10,7 +10,9 @@ the GraphQL boundary and the DB. This module covers:
 * the create path through the ``deploy`` mutation's ``config`` JSON (FR-002 —
   overrides submitted at create time are handled identically);
 * clear semantics (US3), independence (US2), rejection (US4), and orphan
-  visibility (US5) are added by their respective phases below.
+  visibility (US5) are added by their respective phases below;
+* ``isApplicable`` (022): true on a component with a component container, false
+  on a component without one and on an orphaned block.
 
 The single propagation file is created here (US1) and extended in place by
 US2–US6 per ``tasks.md``.
@@ -27,7 +29,7 @@ from __future__ import annotations
 
 from typing import Any
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
@@ -36,6 +38,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import (
     ApplicationDriver,
+    ApplicationDriverVersion,
     Component,
     ComponentConfig,
     Deployment,
@@ -60,6 +63,13 @@ def _arm_prefect(prefect_manager_mock: Any) -> None:
     prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
 
 
+def _component_config(name: str, container: str | None) -> dict[str, Any]:
+    return {
+        "identifier": {"label": {"app.kubernetes.io/name": f"{name}-app"}},
+        "container": container,
+    }
+
+
 async def _seed_deployment_with_components(
     session: AsyncSession,
     *,
@@ -67,16 +77,14 @@ async def _seed_deployment_with_components(
 ) -> Deployment:
     """Seed a deployment whose driver declares ``component_names`` and whose
     Component rows mirror those names (the deployment-side driver-component map
-    the resolver and write-side validation use). Mirrors the helper in
-    ``test_env_vars_propagation.py``.
+    the resolver and write-side validation use). Every component declares the
+    component container ``<name>-app``, which ``command``/``args`` writes need (022).
     """
     adv = await seed_application_driver_version(session)
     for name in component_names:
         cc = ComponentConfig(
             name=name,
-            config={
-                "identifier": {"label": {"app.kubernetes.io/name": f"{name}-app"}},
-            },
+            config=_component_config(name, f"{name}-app"),
             application_driver_version_id=adv.id,
         )
         session.add(cc)
@@ -85,15 +93,41 @@ async def _seed_deployment_with_components(
     for name in component_names:
         comp = Component(
             name=name,
-            config={
-                "identifier": {"label": {"app.kubernetes.io/name": f"{name}-app"}},
-            },
+            config=_component_config(name, f"{name}-app"),
             enabled=True,
             deployment_id=deployment.id,
         )
         session.add(comp)
     await session.commit()
     return deployment
+
+
+async def _seed_target_driver_version(
+    session: AsyncSession, deployment_id: UUID, containers: dict[str, str | None]
+) -> UUID:
+    """Add version 2.0.0 of the deployment's driver declaring ``containers``."""
+    deployment = await session.get(Deployment, deployment_id)
+    assert deployment is not None
+    current = await session.get(
+        ApplicationDriverVersion, deployment.application_driver_version_id
+    )
+    assert current is not None
+    driver = await session.get(ApplicationDriver, current.application_driver_id)
+    assert driver is not None
+    target = await seed_application_driver_version(
+        session, driver=driver, version="2.0.0"
+    )
+    target_id = target.id
+    for name, container in containers.items():
+        session.add(
+            ComponentConfig(
+                name=name,
+                config=_component_config(name, container),
+                application_driver_version_id=target_id,
+            )
+        )
+    await session.commit()
+    return target_id
 
 
 async def _update(
@@ -189,6 +223,7 @@ async def test_update_deployment_args_round_trip(
     assert rows["server"]["args"] == args
     assert rows["server"]["command"] is None
     assert rows["server"]["isOrphaned"] is False
+    assert rows["server"]["isApplicable"] is True
     # ``db`` has no override → omitted from the tidy read surface.
     assert "db" not in rows
 
@@ -223,7 +258,7 @@ async def test_deploy_create_persists_command_args(
     adv = await seed_application_driver_version(session, version="1.0.0")
     cc = ComponentConfig(
         name="server",
-        config={"identifier": {"label": {"app.kubernetes.io/name": "server-app"}}},
+        config=_component_config("server", "server-app"),
         application_driver_version_id=adv.id,
     )
     session.add(cc)
@@ -600,6 +635,7 @@ async def test_orphan_block_surfaced_after_upgrade(
     rows = await _read_overrides(client, str(deployment.id))
     assert "server" in rows
     assert rows["server"]["isOrphaned"] is True
+    assert rows["server"]["isApplicable"] is False
     assert rows["server"]["command"] == ["legacy"]
     assert rows["server"]["args"] == ["--old"]
 
@@ -628,57 +664,65 @@ async def test_orphan_block_removed_via_update(
 
 
 # ---------------------------------------------------------------------------
-# US6 — driver doc-only declaration propagation
+# 022 US3 — isApplicable for a component that loses its component container
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_driver_container_override_docs_projected(
-    client: AsyncClient, session: AsyncSession
+async def test_override_stranded_by_driver_version_change_is_not_applicable(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
 ) -> None:
-    """A driver version whose ``container_overrides`` JSON column is set surfaces
-    through ``ApplicationDriverVersion.containerOverrides`` exactly (US6 Sc.1,
-    contracts/graphql-deltas.md §Propagation #3)."""
-    adv = await seed_application_driver_version(session)
-    adv.container_overrides = [
-        {
-            "component": "server",
-            "description": "Override the server entrypoint/args.",
-            "container": "simple-app",
-            "command": True,
-            "args": True,
-        }
-    ]
-    session.add(adv)
-    await session.commit()
-
-    data = await gql(
-        client,
-        "get_driver_container_override_docs",
-        {"applicationDriverId": str(adv.application_driver_id)},
+    """A driver version that drops ``server``'s component container keeps the stored
+    ``command``/``args`` and reads them back with ``isApplicable: false`` and
+    ``isOrphaned: false``; ``db`` keeps its container and stays applicable (FR-007)."""
+    _arm_prefect(prefect_manager_mock)
+    deployment = await _seed_deployment_with_components(
+        session, component_names=["server", "db"]
     )
-    versions = data["applicationDriver"]["versions"]
-    assert len(versions) >= 1
-    docs = versions[0]["containerOverrides"]
-    assert len(docs) == 1
-    doc = docs[0]
-    assert doc["component"] == "server"
-    assert doc["container"] == "simple-app"
-    assert doc["command"] is True
-    assert doc["args"] is True
-    assert "entrypoint" in doc["description"].lower()
-
-
-@pytest.mark.asyncio
-async def test_driver_container_overrides_empty_when_unset(
-    client: AsyncClient, session: AsyncSession
-) -> None:
-    """A driver version without the block surfaces an empty list."""
-    adv = await seed_application_driver_version(session)
-    data = await gql(
+    deployment_id = deployment.id
+    command = ["uvicorn", "simple_app.main:app"]
+    args = ["--port", "8000"]
+    await _update(
         client,
-        "get_driver_container_override_docs",
-        {"applicationDriverId": str(adv.application_driver_id)},
+        str(deployment_id),
+        [
+            {"name": "server", "command": command, "args": args},
+            {"name": "db", "args": ["--max-connections", "50"]},
+        ],
     )
-    versions = data["applicationDriver"]["versions"]
-    assert versions[0]["containerOverrides"] == []
+    before = await _read_overrides(client, str(deployment_id))
+    assert before["server"]["isApplicable"] is True
+    assert before["db"]["isApplicable"] is True
+    target_id = await _seed_target_driver_version(
+        session, deployment_id, {"server": None, "db": "db-app"}
+    )
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment_version"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "version": "1.0.0",
+                "driverVersionId": str(target_id),
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert "errors" not in response.json(), response.json()
+    session.expire_all()
+    stored = (
+        await session.exec(select(Deployment).where(Deployment.id == deployment_id))
+    ).one()
+    assert stored.application_driver_version_id == target_id
+    assert stored.config["components"]["server"] == {"command": command, "args": args}
+    rows = await _read_overrides(client, str(deployment_id))
+    assert rows["server"]["command"] == command
+    assert rows["server"]["args"] == args
+    assert rows["server"]["isOrphaned"] is False
+    assert rows["server"]["isApplicable"] is False
+    assert rows["db"]["isOrphaned"] is False
+    assert rows["db"]["isApplicable"] is True

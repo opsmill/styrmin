@@ -57,6 +57,11 @@ logger.debug("Context resolved: cluster={} env={}", cluster.name, env.name)
 
 Use brace-style placeholders `{}` (not f-strings or `%`-formatting) in log messages for structured logging.
 
+<!-- Extracted from specs/022-post-render-container-overrides on 2026-10-15 -->
+
+Log whether a user-supplied override is set, not its value. Container `args` often carry flags
+such as `--password=...`, so the patch builder logs `command_set` and `args_set` as booleans.
+
 ## Service Layer
 
 Services are **module-level async functions**, not classes:
@@ -318,6 +323,18 @@ metadata, and a `default_message` that tells **both** audiences what to do (user
 deployment's driver version; driver authors: what replaces the call) and includes the URL. The
 typed code does not survive the StyrminDeployment CR → operator hop, so the message string must
 be enough on its own.
+
+<!-- Extracted from specs/022-post-render-container-overrides on 2026-10-15 -->
+
+- Also reject the retired filter when a driver version is loaded, so that a new driver version
+  that calls it fails at the API instead of at the next render. `JinjaTemplateValidator` walks the
+  `Filter` nodes of the parsed template and raises the same typed error with the line of the call.
+  Keep the render-time stub for driver versions loaded before the load check existed.
+- When you remove a key from a driver format model that forbids unknown keys
+  (`extra="forbid"`), add a `before` model validator that raises a `PydanticCustomError` naming
+  the removed key and linking the migration guide. The generic `extra_forbidden` error names
+  neither. Reference: `Specification.reject_removed_container_overrides` in
+  `services/driver/models/resources/driver.py`.
 
 ### Validate config writes by delta when a driver change can strand stored values
 
@@ -642,7 +659,7 @@ No defaulting at render time, no defaulting at Pydantic-model time, no defaultin
 
 <!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
 
-A new per-component override of the pod spec (env vars and image overrides today) is a
+A new per-component override of the pod spec (env var, image, command and args overrides today) is a
 Kustomize post-render patch, not a Helm values key. Helm replaces lists, so writing a chart's
 list-shaped key from the values template drops every entry the chart ships.
 
@@ -671,8 +688,19 @@ list-shaped key from the values template drops every entry the chart ships.
 - JSON-pointer-escape every user-controlled name used in a patch path: `~` to `~0` first, then
   `/` to `~1` (RFC 6901). Component names are free-form strings; unescaped, a `/` splits the path.
 
+<!-- Extracted from specs/022-post-render-container-overrides on 2026-10-15 -->
+
+- The `yaml.dump` rule also applies to strategic-merge patches. `ContainerMergePatch` carries
+  user strings in `env`, `command` and `args`; a value that contains a newline and
+  `- op: remove` must stay one string.
+- A strategic merge replaces the whole of a list that has no `patchMergeKey` in the Kubernetes
+  schema (`command`, `args`). Write such a field into the patch only when an override is set, so
+  a field without an override keeps the value the chart renders. Do not write an empty list or
+  `null` as a "use the chart's value" marker.
+
 See [ADR-057](../../adr/0057-post-render-component-overrides.md),
-[ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md), and
+[ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md),
+[ADR-069](../../adr/0069-container-command-args-by-post-render.md), and
 `services/component_container/patch_builder.py`.
 
 ### Custom-resource updates: replace the spec keys you write, merge the rest

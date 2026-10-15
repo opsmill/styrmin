@@ -512,13 +512,16 @@ class ComponentConfigBlock(BaseModel):
     The ``env_vars`` dict is validated against the same caps as the
     deployment-scope dict via :func:`validate_env_vars_dict` with
     ``scope="component"``. ``command`` and ``args`` are two independent,
-    optional, nullable slots — ``None`` means "unset" (chart default flows
-    through); each is validated through
+    optional, nullable slots — ``None`` means "unset" (the chart's value
+    applies); each is validated through
     :func:`validate_container_override` (non-empty list-of-string, empty-string
     elements accepted, ``[]`` rejected). ``image`` is one full image reference,
     optionally containing ``{{ app.version }}``; ``None`` means "chart image".
     It is validated through :func:`validate_stored_reference`, which
     substitutes a placeholder version because the real one is unknown here.
+
+    All four reach the pod only through post-render patches to the component
+    container, and only when the driver declares one (ADR-057, ADR-058, ADR-069).
     """
 
     model_config = ConfigDict(extra="forbid")

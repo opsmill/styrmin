@@ -69,18 +69,24 @@ scale) act on the Component as a unit.
 
 **Component container** — The one container in a Component's pod
 that the Application Driver names (`components.<name>.container`) to
-receive the env vars and **Image override** users set on a Deployment.
-Styrmin applies them after the Helm chart renders: env vars merge in by
-name, so the chart's own env entries survive. A declared name the chart
-does not render fails the deployment with `COMPONENT_CONTAINER_NOT_FOUND`
-once an env var or image override targets the component; Styrmin never
-adds a container. See [Creating a
+receive the overrides users set on a Deployment: env vars, the **Image
+override**, and container `command` and `args`. Styrmin applies them
+after the Helm chart renders: env vars merge in by name, so the chart's
+own env entries survive, and a `command` or `args` override replaces
+that whole list. A component without one accepts none of these
+component-scope overrides (`COMPONENT_CONTAINER_NOT_DECLARED`). A
+declared name the chart does not render fails the deployment with
+`COMPONENT_CONTAINER_NOT_FOUND` once any override targets the
+component; Styrmin never adds a container. See [Creating a
 Driver](../drivers/creating-a-driver.md#the-component-container).
 
 **Component overrides** — The mechanism by which a Deployment
 overrides the Application Driver Version's default Component config:
-per-component env vars, **Image override**, and container
-`command`/`args`. First-class to the deployment-config feature.
+per-component env vars, **Image override**, and container `command` and
+`args`. Styrmin applies all of them after the Helm chart renders, to the
+**Component container**; the driver's values template does not pass
+them to the chart. See [Migrating container
+overrides](../drivers/migrating-container-overrides.md).
 
 **Constituent backup / constituent restore** — An ordinary
 per-deployment backup (or restore) that belongs to an **Environment

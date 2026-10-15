@@ -20,30 +20,10 @@ from .job_logs import read_job_output_tail
 
 
 def _prune_none(value: Any) -> Any:
-    """Recursively drop dict keys whose value is ``None`` (lists are recursed
-    but their elements are kept).
+    """Recursively drop dict keys whose value is ``None``; list elements are kept.
 
-    Used on the **create** path of :func:`upsert_custom_resource`. The two
-    apply paths treat a ``null`` differently:
-
-    - **create** (``POST``) stores the body verbatim, so a ``key: null`` lands
-      in the object as a literal null;
-    - **update** (``application/merge-patch+json``) interprets ``key: null`` as
-      "delete this member" (RFC 7386).
-
-    Driver value templates exploit the merge-patch semantics to *clear* an
-    override: they emit ``args: null`` when the operator has no override set, so
-    the update path removes the key and the chart's own default flows through.
-    But on the first reconcile (create) that same ``null`` would persist
-    literally — and an upstream chart that consumes the value unconditionally
-    (e.g. infrahub's server ``args``, which the chart ``toYaml``s with no
-    ``with`` guard) would render ``null`` and blank the field. Stripping ``None``
-    on create makes a rendered ``null`` behave as "absent" (chart default
-    applies), while the merge-patch path keeps the ``null`` so clearing still
-    deletes the key. See ADR-045 §5.
-
-    The ``replace_spec_keys_on_update`` path also prunes nested ``None``, since
-    replacing a spec key removes its omitted nested keys without a ``null``.
+    A values template may render ``key: null``; pruning the create body makes it read as absent,
+    as ``replace_spec_keys_on_update`` does on update.
     """
     if isinstance(value, dict):
         return {k: _prune_none(v) for k, v in value.items() if v is not None}
@@ -180,12 +160,8 @@ async def upsert_custom_resource(
     # Declare the kubernetes client object
     custom_obj_api = kubeclient.CustomObjectsApi(client)
 
-    # On create, a ``null`` would be stored verbatim; on the merge-patch update
-    # below it deletes the key. Drivers emit ``null`` to clear an override, so
-    # callers that carry such values prune ``None`` from the *create* body. The
-    # HelmRelease apply also sets ``replace_spec_keys_on_update``, whose JSON
-    # Patch prunes nested ``None`` and removes a top-level spec key set to
-    # ``None``, so a null marker reads as absent on both paths.
+    # A create stores a rendered ``null`` verbatim, so prune it; the update's JSON Patch
+    # (``replace_spec_keys_on_update``) prunes it too, so ``null`` reads as absent on both paths.
     create_body = _prune_none(body) if prune_none_on_create else body
 
     try:

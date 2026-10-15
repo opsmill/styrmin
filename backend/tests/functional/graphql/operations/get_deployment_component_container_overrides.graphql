@@ -6,6 +6,7 @@ query GetDeploymentComponentContainerOverrides($deploymentId: UUID!) {
             command
             args
             isOrphaned
+            isApplicable
         }
     }
 }

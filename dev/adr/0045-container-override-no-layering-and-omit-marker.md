@@ -7,6 +7,7 @@
 
 
 **Status**: Accepted — superseded in part by [ADR-057](0057-post-render-component-overrides.md)
+and [ADR-069](0069-container-command-args-by-post-render.md)
 **Date**: 2026-05-29
 **Source**: specs/archive/014-component-container-overrides/ (spec, plan, research)
 
@@ -16,7 +17,15 @@
 > the always-present key no longer applies (an omitted key no longer lingers; the `[]` marker
 > stays harmless), and §5's `null` marker is pruned on both create and update. The
 > `component_env_vars` filter §2 cites as precedent was retired by ADR-057. `command`/`args`
-> still flow through the values template.
+> still flowed through the values template until ADR-069.
+
+> **Superseded in part by [ADR-069](0069-container-command-args-by-post-render.md)** (2026-10-14,
+> 022-post-render-container-overrides). Styrmin applies `command` and `args` by a post-render patch
+> to the component container, together with env vars and image overrides. The
+> `component_command` and `component_args` filters are retired (`RETIRED_TEMPLATE_FILTER`), and
+> `spec.container_overrides` is removed from the driver specification file. §2 (empty-list marker)
+> and §5 (`null` clear marker) no longer describe how `command` and `args` reach pods. §1, §3 and
+> §4 still hold. The driver consumption guide that §5 and the Consequences linked to was deleted.
 **Relationship**: A faithful port of the deployment env-vars precedent (008/010,
 [ADR-013](0013-driver-env-var-consumption.md)) with two deliberate
 divergences recorded here. Reuses [ADR-029](0029-config-additions-via-baseconfigsection-no-migration.md)
@@ -187,9 +196,9 @@ the §2 always-present key and fall back to the chart's documented default list
 (`(… | component_args(…)) or [<default>]`). That also clears correctly but
 duplicates the chart default in the template (drift risk on a chart-version
 bump). The `null`-marker keeps clearing correct with no duplication, at the cost
-of the create-path prune. Both are documented in the
-[driver consumption guide](../guides/driver-container-override-consumption.md);
-the infrahub examples use the `null`-marker.
+of the create-path prune. Both were documented in the driver consumption guide
+(`dev/guides/driver-container-override-consumption.md`, deleted with ADR-069);
+the infrahub examples used the `null`-marker until ADR-069.
 
 ## Consequences
 
@@ -198,8 +207,8 @@ the infrahub examples use the `null`-marker.
 - **Drivers gain a precise, safe opt-in.** The chart's `{{- with }}` guard
   (which skips the empty-list marker) is the one thing a driver author must
   remember; the simple-app reference and the
-  [driver consumption guide](../guides/driver-container-override-consumption.md)
-  document the canonical shape.
+  driver consumption guide documented the canonical shape (both changed by ADR-069:
+  the guide was deleted and the template no longer passes `command` or `args`).
 - **Env-vars behaviour is unchanged.** The parallel `services/container_overrides/`
   module and the distinct error codes keep the env-vars feature byte-identical
   (SC-004); the no-regression run asserts it.

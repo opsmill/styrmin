@@ -51,7 +51,7 @@ spec:
       version: <string>    # Helm chart version
   components:              # Optional component definitions
     <component-name>:
-      container: <string>  # Optional component container: receives user env vars and image overrides by post-render
+      container: <string>  # Optional component container: receives user env var, image, command and args overrides by post-render
       identifier:
         label:
           <key>: <value>   # Kubernetes label selector

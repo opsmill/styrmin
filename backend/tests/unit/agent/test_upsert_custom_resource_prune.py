@@ -1,10 +1,8 @@
-"""Unit tests for the create-path ``null`` pruning in ``upsert_custom_resource``
-(014-component-container-overrides, ADR-045 §5).
+"""Unit tests for the create-path ``null`` pruning in ``upsert_custom_resource``.
 
-Driver value templates emit ``key: null`` to clear an override. On the
-merge-patch *update* path that ``null`` deletes the key (RFC 7386) so the chart
-default flows through; on the *create* ``POST`` the same ``null`` would be
-stored verbatim, so the caller passes ``prune_none_on_create=True`` to strip it.
+A values template may render ``key: null``. The *create* ``POST`` would store it
+verbatim, so the caller passes ``prune_none_on_create=True`` to strip it; the
+merge-patch *update* path keeps the ``null``, which deletes the key (RFC 7386).
 These tests pin both halves of that contract plus the recursive prune helper.
 """
 

@@ -1,43 +1,43 @@
 """End-to-end coverage for component-scope container ``command``/``args``
-overrides (014-component-container-overrides).
+overrides applied by post-render (022-post-render-container-overrides, #457).
 
 Drives the full user-facing path: ``updateDeployment(input: { components: [{
 name, command, args }] })`` (SDK / GraphQL) → server reconciler → FluxCD
-HelmRelease → rendered pod spec on the vcluster. Asserts by reading the
+HelmRelease ``spec.postRenderers`` strategic merge patch on the component
+container → rendered pod spec on the vcluster. Asserts by reading the
 resulting workload (``apps/v1.Deployment``) back from the vcluster API server
 and inspecting the simple-app container's ``command``/``args``.
 
-The reference driver (``driver/examples/simple-app``) wires the override:
-``driver.styrmin.yml`` declares ``container_overrides`` on ``server`` (doc-only)
-and ``values.j2.yml`` emits the ``component_command``/``component_args`` filters
-unconditionally (empty-list marker, ADR-045); the chart guards each with
-``{{- with .Values.command/args }}`` so an empty list is skipped and the image
-ENTRYPOINT (``uvicorn simple_app.main:app``) + CMD (``--host 0.0.0.0 --port
-8000``) take over. An ``args``-only override therefore stays runnable.
+The reference driver (``driver/examples/simple-app``) declares the component
+container (``components.server.container: simple-app``) and has no template
+code for these overrides: no ``component_command``/``component_args`` filter
+calls and no ``spec.container_overrides`` block. The chart renders neither
+field, so the image ENTRYPOINT (``uvicorn simple_app.main:app``) and CMD
+(``--host 0.0.0.0 --port 8000``) apply; the deployment fixture captures that
+chart spec as the baseline before any override is set.
 
 Scenarios:
 
-* US1 — set ``args`` on ``server``; observe it on the rendered container.
-* US2 — set ``command`` alongside ``args``; both land, independently.
-* US3 — clear the override; assert it is gone from the read surface (FR-007
-  Sc.3 / FR-013, the observable clearing contract). See the test docstring for
-  the reconcile-on-clear note.
+* US1 — set ``args`` on ``server``; observe exactly that list on the rendered
+  container, with the chart's ``command`` kept.
+* US2 — set ``command`` alongside ``args``; both land. Then change ``command``
+  and observe the new value after the reconcile.
+* US3 — set ``command`` and ``args`` through
+  ``scenario_driver.set_component_container_override`` (the SDK, or the Command
+  and Args editors of the Settings edit drawer), then clear both; the
+  container's ``command`` and ``args`` return to the baseline (FR-003, SC-003)
+  and the read surface drops the override.
 * US4 — invalid overrides are rejected at the mutation boundary with a precise
   typed code and no redeploy; an empty-string element is accepted.
-* US6 — the driver's doc-only ``container_overrides`` declaration surfaces on
-  the materialised ``ApplicationDriverVersion``.
 
-Marker landscape: every scenario is ``api_only``. This feature ships the
-frontend Command/Args editor
-(``components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx``),
-which is covered by the frontend Vitest suite. The deployment-detail
-Configuration form is not driven by ``UiScenarioDriver.update_deployment``
-(which only drives the ``scheduling`` sub-tree today, exactly as for the
-env-vars E2E), so the ``[ui-chromium]`` variant would re-run the same SDK call
-without exercising additional coverage. The orphan-across-upgrade scenario
-(US5) is exercised by the propagation + resolver unit tests and is skipped here
-pending a renamed-component driver fixture (same gap the env-vars US5 E2E
-records).
+Marker landscape: US3 runs under both variants, so ``[ui-chromium]`` sets and
+clears ``command`` and ``args`` in the editor and submits through **Review &
+apply**. US1, US2 and US4 are ``api_only``: they write the whole config through
+``update_deployment``, whose UI driver only drives the ``scheduling`` sub-tree,
+or call the GraphQL mutation directly. The editor parts that need a component
+without a component container (hidden editors, "not applied" rows) are covered
+by the frontend Vitest suite, because every example driver component declares
+a container.
 """
 
 from __future__ import annotations
@@ -53,6 +53,7 @@ from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.helpers.workloads import (
     _wait_for_pod_template,
     container_command_args,
+    container_spec,
 )
 
 pytestmark = [
@@ -61,6 +62,7 @@ pytestmark = [
 
 RECONCILE_TIMEOUT_SECONDS = 480.0
 SERVER_SELECTOR = "app.kubernetes.io/name=simple-app"
+SERVER_CONTAINER = "simple-app"
 
 
 # ---------------------------------------------------------------------------
@@ -80,11 +82,7 @@ async def container_overrides_environment(
         cluster_id=cluster_id,
         config={},
     )
-    yield {
-        "environment_id": str(env.id),
-        "client": client,
-        "driver_id": styrmin_resources["driver_id"],
-    }
+    yield {"environment_id": str(env.id), "client": client}
 
 
 @pytest.fixture(scope="module")
@@ -102,10 +100,23 @@ async def container_overrides_deployment(
         name="container-overrides-a",
     )
     deployment = await driver.wait_for_deployment_running(deployment_id=deployment.id)
+    namespace = f"styrmin-{deployment.id}"
+    # The chart's own command/args, captured before any override (FR-003 baseline).
+    workload = await _server_container(
+        vcluster,
+        namespace,
+        lambda d: container_spec(d, SERVER_CONTAINER) is not None,
+        f"server workload with container {SERVER_CONTAINER!r}",
+    )
+    baseline_command, baseline_args = container_command_args(
+        workload, container_name=SERVER_CONTAINER
+    )
     return {
         "deployment_id": str(deployment.id),
-        "namespace": f"styrmin-{deployment.id}",
+        "namespace": namespace,
         "kubeconfig_path": vcluster["kubeconfig_path"],
+        "baseline_command": baseline_command,
+        "baseline_args": baseline_args,
     }
 
 
@@ -150,9 +161,8 @@ async def _server_container(vcluster: dict, namespace: str, predicate: Any, desc
 @pytest.mark.api_only(
     reason=(
         "Sets args via scenario_driver.update_deployment; the UI driver only "
-        "drives the 'scheduling' sub-tree today (the Command/Args editor is "
-        "covered by the frontend Vitest suite), so [ui-chromium] would just "
-        "re-run the same SDK call."
+        "drives the 'scheduling' sub-tree today, so [ui-chromium] would just "
+        "re-run the same SDK call. US3 drives the Command and Args editors."
     )
 )
 @pytest.mark.ci
@@ -181,13 +191,15 @@ async def test_us1_override_args_on_server(
     dep = await _server_container(
         vcluster,
         namespace,
-        lambda d: container_command_args(d, container_name="simple-app")[1] == args,
+        lambda d: container_command_args(d, container_name=SERVER_CONTAINER)[1] == args,
         f"server container args == {args}",
     )
-    command, observed_args = container_command_args(dep, container_name="simple-app")
+    command, observed_args = container_command_args(
+        dep, container_name=SERVER_CONTAINER
+    )
     assert observed_args == args
-    # No command override → the field is absent (image ENTRYPOINT applies).
-    assert command is None
+    # An args-only override keeps the chart's command.
+    assert command == container_overrides_deployment["baseline_command"]
 
     rows = await _read_overrides(client, deployment_id)
     assert rows["server"]["args"] == args
@@ -203,7 +215,7 @@ async def test_us1_override_args_on_server(
 @pytest.mark.api_only(
     reason=(
         "Sets command+args via scenario_driver.update_deployment; UI driver "
-        "drives scheduling only (Command/Args editor covered by Vitest)."
+        "drives scheduling only. US3 drives the Command and Args editors."
     )
 )
 @pytest.mark.ci
@@ -215,7 +227,8 @@ async def test_us2_command_independent_of_args(
     _co_driver_bound: None,
 ) -> None:
     """Set ``command`` while carrying ``args`` forward; both land on the
-    container as independent slots, and the server stays runnable."""
+    container as independent slots, and the server stays runnable. Changing
+    ``command`` afterwards lands after the next reconcile."""
     client: StyrminClient = container_overrides_environment["client"]
     deployment_id = container_overrides_deployment["deployment_id"]
     namespace = container_overrides_deployment["namespace"]
@@ -233,11 +246,13 @@ async def test_us2_command_independent_of_args(
     dep = await _server_container(
         vcluster,
         namespace,
-        lambda d: container_command_args(d, container_name="simple-app")[0] == command,
+        lambda d: (
+            container_command_args(d, container_name=SERVER_CONTAINER)[0] == command
+        ),
         f"server container command == {command}",
     )
     observed_command, observed_args = container_command_args(
-        dep, container_name="simple-app"
+        dep, container_name=SERVER_CONTAINER
     )
     assert observed_command == command
     assert observed_args == args
@@ -246,67 +261,104 @@ async def test_us2_command_independent_of_args(
     assert rows["server"]["command"] == command
     assert rows["server"]["args"] == args
 
+    # Change command only; the next reconcile replaces it and keeps args.
+    changed_command = ["python", "-m", "uvicorn", "simple_app.main:app"]
+    await scenario_driver.update_deployment(
+        deployment_id=deployment_id,
+        config={"components": {"server": {"command": changed_command, "args": args}}},
+    )
+    await scenario_driver.wait_for_deployment_running(
+        deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+    )
+
+    dep = await _server_container(
+        vcluster,
+        namespace,
+        lambda d: (
+            container_command_args(d, container_name=SERVER_CONTAINER)[0]
+            == changed_command
+        ),
+        f"server container command == {changed_command}",
+    )
+    observed_command, observed_args = container_command_args(
+        dep, container_name=SERVER_CONTAINER
+    )
+    assert observed_command == changed_command
+    assert observed_args == args
+
+    rows = await _read_overrides(client, deployment_id)
+    assert rows["server"]["command"] == changed_command
+    assert rows["server"]["args"] == args
+
 
 # ---------------------------------------------------------------------------
 # US3 — clear an override and fall back to the chart default
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.api_only(
-    reason=(
-        "Clears the override via scenario_driver.update_deployment; UI driver "
-        "drives scheduling only (Command/Args editor covered by Vitest)."
-    )
-)
 @pytest.mark.ci
-async def test_us3_clear_override_falls_back_to_chart_default(
+async def test_us3_set_and_clear_command_and_args(
     container_overrides_environment: dict,
     container_overrides_deployment: dict,
+    vcluster: dict,
     scenario_driver: ScenarioDriver,
     _co_driver_bound: None,
 ) -> None:
-    """Clear the override (full-replacement, omit both slots) and assert the
-    override is gone from the read surface — the spec's observable clearing
-    contract (FR-007 Sc.3 / FR-013: cleared fields are absent from subsequent
-    reads).
+    """Set ``command`` and ``args``, then clear both, through the SDK or the
+    Command and Args editors. The container gets both lists, then returns to the
+    chart's values captured before any override was set (FR-003, SC-003), and the
+    override is gone from the read surface.
 
-    The clear persists to ``Deployment.config`` (proven here via the read
-    surface) and the render omits the override (``command: []`` / ``args: []``,
-    chart-skipped by ``{{- with }}`` → image/chart default). Those layers are
-    unit- and propagation-tested. NOTE: at the rendered-pod level, the
-    operator's reconcile does not re-roll the workload when an override is
-    *cleared* within the reconcile window (SETTING an override redeploys — see
-    US1/US2 — but value-removal does not), so this scenario asserts the
-    authoritative platform-level contract rather than polling the pod spec.
-    This reconcile-on-clear characteristic is general to values-driven config
-    (not specific to container overrides) and is flagged for follow-up."""
+    A clear removes the ``command``/``args`` patch from the HelmRelease
+    ``spec.postRenderers``, so helm-controller re-renders the workload without it.
+    """
     client: StyrminClient = container_overrides_environment["client"]
     deployment_id = container_overrides_deployment["deployment_id"]
+    namespace = container_overrides_deployment["namespace"]
+    baseline = (
+        container_overrides_deployment["baseline_command"],
+        container_overrides_deployment["baseline_args"],
+    )
+    command = ["uvicorn", "simple_app.main:app"]
+    args = ["--host", "0.0.0.0", "--port", "8000"]
 
-    # First set an override so the clear has something observable to remove.
-    await scenario_driver.update_deployment(
-        deployment_id=deployment_id,
-        config={
-            "components": {"server": {"args": ["--host", "0.0.0.0", "--port", "8000"]}}
-        },
+    await scenario_driver.set_component_container_override(
+        deployment_id=deployment_id, component="server", command=command, args=args
     )
     await scenario_driver.wait_for_deployment_running(
         deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
     )
-    assert "server" in await _read_overrides(client, deployment_id)
+    await _server_container(
+        vcluster,
+        namespace,
+        lambda d: (
+            container_command_args(d, container_name=SERVER_CONTAINER)
+            == (command, args)
+        ),
+        f"server container (command, args) == {(command, args)}",
+    )
+    rows = await _read_overrides(client, deployment_id)
+    assert rows["server"]["command"] == command
+    assert rows["server"]["args"] == args
+    assert rows["server"]["isApplicable"] is True
 
-    # Clear: submit the component block with neither slot → full-replacement
-    # clear (omit = clear, never []).
-    await scenario_driver.update_deployment(
-        deployment_id=deployment_id,
-        config={"components": {"server": {}}},
+    await scenario_driver.set_component_container_override(
+        deployment_id=deployment_id, component="server", command=None, args=None
     )
     await scenario_driver.wait_for_deployment_running(
         deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
     )
 
-    # Authoritative platform-level signal: the override is cleared from the
-    # read surface — the operator-facing contract for "fell back to default".
+    dep = await _server_container(
+        vcluster,
+        namespace,
+        lambda d: (
+            container_command_args(d, container_name=SERVER_CONTAINER) == baseline
+        ),
+        f"server container (command, args) == baseline {baseline}",
+    )
+    assert container_command_args(dep, container_name=SERVER_CONTAINER) == baseline
+
     rows = await _read_overrides(client, deployment_id)
     assert "server" not in rows, rows
 
@@ -373,46 +425,3 @@ async def test_us4_invalid_overrides_rejected(
     await scenario_driver.wait_for_deployment_running(
         deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
     )
-
-
-# ---------------------------------------------------------------------------
-# US6 — driver author declares an overridable component (doc-only surface)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.api_only(
-    reason=(
-        "Pure GraphQL read of ApplicationDriverVersion.containerOverrides; no "
-        "UI surface to drive. [ui-chromium] would re-run the same SDK call."
-    )
-)
-@pytest.mark.ci
-async def test_us6_driver_declares_overridable_component(
-    container_overrides_environment: dict,
-    container_overrides_deployment: dict,  # noqa: ARG001 — driver already materialised
-) -> None:
-    """The simple-app driver's doc-only ``container_overrides`` declaration
-    surfaces on the materialised ``ApplicationDriverVersion`` (US6 Sc.1).
-
-    The same driver is *wired* (``values.j2.yml`` consumes the filters), so the
-    override applies — proven by US1/US2/US3 above. The declared-but-unwired
-    silent no-op (US6 Sc.3) requires a separate unwired driver fixture and is
-    covered at the validation layer; it is not exercised here.
-    """
-    client: StyrminClient = container_overrides_environment["client"]
-    driver_id = container_overrides_environment["driver_id"]
-
-    raw = await client._transport.execute(
-        load_query("get_driver_container_override_docs"),
-        {"applicationDriverId": str(driver_id)},
-    )
-    assert "errors" not in raw, raw
-    versions = raw["data"]["applicationDriver"]["versions"]
-    assert len(versions) >= 1
-    docs = versions[0]["containerOverrides"]
-    by_component = {d["component"]: d for d in docs}
-    assert "server" in by_component, docs
-    server = by_component["server"]
-    assert server["command"] is True
-    assert server["args"] is True
-    assert server["container"] == "simple-app"

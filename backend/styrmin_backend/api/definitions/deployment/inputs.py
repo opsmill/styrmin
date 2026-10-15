@@ -83,7 +83,7 @@ class ComponentConfigInput:
             "updateDeployment, the target one on updateDeploymentVersion. "
             "Must match a known "
             "component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. "
-            "Env vars on a component that declares no component container "
+            "Overrides on a component that declares no component container "
             "raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``)."
         )
     )
@@ -103,18 +103,23 @@ class ComponentConfigInput:
         default=None,
         description=(
             "Container entrypoint override for this component, scoped to this "
-            "deployment. A non-empty list of strings; an empty list raises "
+            "deployment, applied to the component container the driver "
+            "declares. A non-empty list of strings; an empty list raises "
             "``INVALID_CONTAINER_COMMAND``. Under full-replacement semantics "
             "``null``/omitting it CLEARS the override (the chart/image default "
             "flows through) — clearing is never an empty list. Passed through "
-            "verbatim — no templating."
+            "verbatim — no templating. Adding or changing it on a component "
+            "that declares no component container raises "
+            "``COMPONENT_CONTAINER_NOT_DECLARED``; removing it or re-submitting "
+            "the stored list unchanged is accepted."
         ),
     )
     args: list[str] | None = strawberry.field(
         default=None,
         description=(
             "Container args override for this component. Same shape and rules "
-            "as ``command``, raising ``INVALID_CONTAINER_ARGS``."
+            "as ``command``, raising ``INVALID_CONTAINER_ARGS`` or "
+            "``COMPONENT_CONTAINER_NOT_DECLARED``."
         ),
     )
     image: str | None = strawberry.field(

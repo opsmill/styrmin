@@ -1061,7 +1061,12 @@ def test_deployments_apply_warns_about_overrides_the_driver_version_cannot_apply
     tmp_path: Path,
 ) -> None:
     manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
-    outcome = _outcome("my-app", "updated").model_copy(update={"inapplicable_components": ["worker"]})
+    outcome = _outcome("my-app", "updated").model_copy(
+        update={
+            "inapplicable_components": ["migrate", "worker"],
+            "inapplicable_overrides": {"migrate": ["image"], "worker": ["env_vars", "command", "args"]},
+        }
+    )
     mock_client.deployments.apply_files = AsyncMock(return_value=[outcome])
 
     with pytest.raises(SystemExit) as exc:
@@ -1070,8 +1075,12 @@ def test_deployments_apply_warns_about_overrides_the_driver_version_cannot_apply
 
     captured = capsys.readouterr()
     assert captured.err.splitlines() == [
-        "warning: my-app: env vars and image overrides on worker are stored but not applied "
-        "(no component container in the driver version)"
+        "warning: my-app: image override is stored on migrate but not applied: the driver version "
+        "declares no component container for migrate. Remove it from the manifest, or load a "
+        "driver version that declares components.migrate.container and apply again",
+        "warning: my-app: env var, command and args overrides are stored on worker but not applied: "
+        "the driver version declares no component container for worker. Remove them from the "
+        "manifest, or load a driver version that declares components.worker.container and apply again",
     ]
     assert captured.out.splitlines() == ["updated my-app", "0 created, 1 updated, 0 unchanged, 0 failed"]
 

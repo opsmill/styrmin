@@ -334,6 +334,27 @@ class UiScenarioDriver:
                 component=component, image=image
             )
 
+    async def set_component_container_override(
+        self,
+        *,
+        deployment_id: str,
+        component: str,
+        command: list[str] | None,
+        args: list[str] | None,
+    ) -> None:
+        environment_id = self._require_environment_context(deployment_id=deployment_id)
+        self._deployment_id = deployment_id
+        async with _ui_errors(
+            f"setting command and args on component {component!r} of deployment "
+            f"{deployment_id}"
+        ):
+            await self._deployment_detail.goto(
+                environment_id=environment_id, deployment_id=deployment_id
+            )
+            await self._deployment_detail.set_component_container_override(
+                component=component, command=command, args=args
+            )
+
     async def pinned_image_components(
         self, *, deployment_id: str, target_version: str
     ) -> list[str]:

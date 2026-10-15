@@ -4,6 +4,11 @@ from types import NoneType
 import pytest
 
 from styrmin_backend.services.driver.exceptions import ValidationError
+from styrmin_backend.services.exceptions import (
+    CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL,
+    ENV_VARS_MIGRATION_GUIDE_URL,
+    RetiredTemplateFilterError,
+)
 from styrmin_backend.services.driver.models.resources.actions import (
     ActionDefinition,
     HookKind,
@@ -78,6 +83,52 @@ def test_jinja_template_validator_with_invalid_template():
     validator = JinjaTemplateValidator()
     with pytest.raises(ValidationError):
         validator.validate(data=data)
+
+
+@pytest.mark.parametrize(
+    ("filter_name", "guide"),
+    [
+        ("component_command", CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL),
+        ("component_args", CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL),
+        ("component_env_vars", ENV_VARS_MIGRATION_GUIDE_URL),
+    ],
+)
+def test_jinja_template_validator_rejects_retired_filters(filter_name, guide):
+    """A retired filter fails at driver load, not only when the operator renders."""
+    data = (
+        f"replicas: 1\nvalue: {{{{ components | {filter_name}('server') | tojson }}}}\n"
+    )
+
+    with pytest.raises(RetiredTemplateFilterError) as exc_info:
+        JinjaTemplateValidator().validate(data=data)
+
+    error = exc_info.value
+    assert error.error_code == "RETIRED_TEMPLATE_FILTER"
+    assert error.error_metadata == {"filter": filter_name, "migration_guide": guide}
+    assert f"values.j2.yml line 2 calls the '{filter_name}' template filter" in str(
+        error
+    )
+    assert guide in str(error)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        "{% if components | component_args('server') %}args: []{% endif %}",
+        "{% filter component_command %}server{% endfilter %}",
+        "{% set a = components | default({}) | component_args('server') %}",
+    ],
+)
+def test_jinja_template_validator_rejects_retired_filters_anywhere(data):
+    """Also inside a condition, a filter block or a chain, where rendering may never reach them."""
+    with pytest.raises(RetiredTemplateFilterError):
+        JinjaTemplateValidator().validate(data=data)
+
+
+def test_jinja_template_validator_accepts_container_override_data():
+    """Reading ``container_override`` as data is not a retired filter call."""
+    data = "a: {{ components.server.container_override | tojson }}"
+    JinjaTemplateValidator().validate(data=data)
 
 
 def test_user_actions_validations():

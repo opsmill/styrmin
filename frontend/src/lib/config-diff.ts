@@ -571,6 +571,17 @@ function diffComponents(
         b.image || null,
         a.image || null,
       );
+      // Command and args (014); an empty list means "no override".
+      for (const field of ["command", "args"] as const) {
+        diffScalar(
+          entries,
+          "componentOverrides",
+          `components[${name}].${field}`,
+          `Component "${name}" ${field}`,
+          b[field]?.length ? b[field] : null,
+          a[field]?.length ? a[field] : null,
+        );
+      }
     } else if (!b && a) {
       entries.push({
         section: "componentOverrides",

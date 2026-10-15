@@ -83,8 +83,8 @@ The **Component Overrides** card on the Configuration tab shows, per
 component, the stored reference, the resolved reference when the token
 makes them differ, and an **applied** or **not applied** badge.
 
-A component without a component container has no **Image** field. If it
-still carries an override (for example after a driver upgrade dropped
+A component without a component container has no **Add override** button
+and no **Image** field. If it still carries an override (for example after a driver upgrade dropped
 the container), the override is shown read-only, marked **not
 applied**, with a button to remove it.
 

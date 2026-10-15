@@ -75,8 +75,14 @@ styrmin_backend/services/
 │   ├── validator.py               # write-time checks: unknown component, reference at the app version
 │   └── exceptions.py              # InvalidImageReferenceError, UnknownComponentImageOverrideError
 │
-├── component_container/           # Post-render patches into each component container (018)
-│   ├── patch_builder.py           # env merge + JSON6902 guard (and image) per Deployment/StatefulSet
+├── container_overrides/           # Per-component command/args overrides (014; applied by post-render since 022)
+│   ├── validator.py               # non-empty list of strings, size caps, [] rejected
+│   ├── resolver.py                # stored blocks → live entries and orphans, no layering
+│   └── exceptions.py              # InvalidContainerCommandError, InvalidContainerArgsError, etc.
+│
+├── component_container/           # Post-render patches into each component container (018, 022)
+│   ├── overrides.py               # override_applies, applicable_overrides: the overrides that apply in a context
+│   ├── patch_builder.py           # merge patch (env, command, args) + JSON6902 guard (and image) per Deployment/StatefulSet
 │   └── exceptions.py              # guard-failure parser, ComponentContainerNotFoundError
 │
 └── utilities/                     # Infrastructure utilities (ingress, etc.)
@@ -686,9 +692,25 @@ ServiceError (base)
 ├── DuplicateEnvVarNameError
 ├── EnvVarSizeLimitExceededError
 ├── UnknownComponentEnvVarError
-├── ComponentContainerNotDeclaredError      # services/env_vars/exceptions.py
-└── RetiredTemplateFilterError              # services/exceptions.py
+├── ComponentContainerNotDeclaredError      # services/env_vars/exceptions.py; override env_vars, image, command or args
+├── InvalidContainerCommandError            # services/container_overrides/exceptions.py
+├── InvalidContainerArgsError
+├── UnknownComponentContainerOverrideError
+├── ContainerOverrideSizeLimitExceededError
+└── RetiredTemplateFilterError              # services/exceptions.py; component_env_vars, component_command, component_args
 ```
+
+`RetiredTemplateFilterError` (`RETIRED_TEMPLATE_FILTER`) builds its message and its `migration_guide`
+metadata from the filter name: `component_env_vars` links the env var migration guide, and
+`component_command` and `component_args` link `CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL`. At driver
+load, `JinjaTemplateValidator` walks the parsed template's `Filter` nodes and raises the same error
+with `retired_filter_load_message()`, which names the line of the call, so a driver version that
+calls a retired filter is not loaded; the render-time filters stay registered for driver versions
+loaded earlier. A `driver.styrmin.yml` with `spec.container_overrides` fails in a `before` model
+validator on `Specification` with a `removed_key` error that links the same guide. Spec 022
+removed `DriverContainerOverrideDocComponentMismatchError`
+(`DRIVER_CONTAINER_OVERRIDE_DOC_COMPONENT_MISMATCH`) together with `spec.container_overrides`
+([ADR-069](../../adr/0069-container-command-args-by-post-render.md)).
 
 <!-- Extracted from specs/001-env-backup-restore on 2026-10-13 (the first four Environment* errors) and specs/010-environment-clone on 2026-10-13 (the clone errors) -->
 

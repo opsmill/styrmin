@@ -726,18 +726,22 @@ class RuntimeClassPatch(Patch):
 
 
 @dataclass
-class ContainerEnvPatch(Patch):
-    """Strategic-merge YAML patch merging env entries into one named container.
+class ContainerMergePatch(Patch):
+    """Strategic-merge YAML patch setting env, ``command`` and ``args`` on one named container.
 
     Containers merge by ``name`` and env entries by env ``name``, so chart
     entries the patch does not name survive. Every entry carries
     ``valueFrom: null`` so a same-name chart ``valueFrom`` is replaced by the
-    literal ``value`` (017-post-render-env-vars research D-001). With no env
-    entries the patch only names the container, which moves it to
-    ``containers[0]`` for :class:`ComponentContainerPatch` (018 research D-001).
+    literal ``value`` (017-post-render-env-vars research D-001). ``command``
+    and ``args`` have no merge key, so a set list replaces the chart's list and
+    an unset one (``None``) is left out, keeping the chart's value (022 research
+    D-001). With nothing set the patch only names the container, which moves it
+    to ``containers[0]`` for :class:`ComponentContainerPatch` (018 research D-001).
 
     Example:
-        >>> patch = ContainerEnvPatch(container="app", env={"LOG_LEVEL": "debug"})
+        >>> patch = ContainerMergePatch(
+        ...     container="app", env={"LOG_LEVEL": "debug"}, args=["--port", "8000"]
+        ... )
         >>> print(patch.render_value())
         apiVersion: apps/v1
         kind: Deployment
@@ -752,11 +756,16 @@ class ContainerEnvPatch(Patch):
                 - name: LOG_LEVEL
                   value: debug
                   valueFrom: null
+                args:
+                - --port
+                - '8000'
         <BLANKLINE>
     """
 
     container: str
     env: dict[str, str] = field(default_factory=dict)
+    command: list[str] | None = None
+    args: list[str] | None = None
     kind: str = "Deployment"
     api_version: str = "apps/v1"
     name: str = "any"
@@ -770,6 +779,10 @@ class ContainerEnvPatch(Patch):
                 {"name": key, "value": value, "valueFrom": None}
                 for key, value in self.env.items()
             ]
+        if self.command is not None:
+            container["command"] = list(self.command)
+        if self.args is not None:
+            container["args"] = list(self.args)
         leaf = {"containers": [container]}
         doc: dict[str, Any] = {
             "apiVersion": self.api_version,
@@ -789,7 +802,7 @@ def _escape_json_pointer(token: str) -> str:
 class ComponentContainerPatch(Patch):
     """JSON6902 patch guarding the component container and optionally setting its image.
 
-    Applied after a :class:`ContainerEnvPatch` naming the container, which moves it to
+    Applied after a :class:`ContainerMergePatch` naming the container, which moves it to
     ``containers[0]`` or, when the name is missing, adds an image-less container there. The ops
     move ``containers/0`` to a guard key naming the component and the container, remove its
     ``image`` (which fails the render when the container was added), set the override or restore

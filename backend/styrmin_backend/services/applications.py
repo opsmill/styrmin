@@ -268,16 +268,6 @@ async def load_application_driver_from_object(
             if driver_object.driver_spec.spec.env_vars
             else None
         )
-        # 014 / US6: persist doc-only container-override declarations. Each
-        # entry shape matches :class:`DriverContainerOverrideDoc`.
-        container_overrides_payload = (
-            [
-                doc.model_dump(mode="json")
-                for doc in driver_object.driver_spec.spec.container_overrides
-            ]
-            if driver_object.driver_spec.spec.container_overrides
-            else None
-        )
         # Spec 013 — the ``get_by_identity`` fast-path above resolves the
         # common case where the row already exists. Two concurrent loads
         # of the same content can still both miss the lookup and race
@@ -297,7 +287,6 @@ async def load_application_driver_from_object(
                     parameters=parameters,
                     services=services,
                     env_vars=env_vars_payload,
-                    container_overrides=container_overrides_payload,
                     **_driver_info_columns(driver_object.driver_spec.spec.info),
                     helm_chart_id=helm_chart.id,
                     source_type=source_type,

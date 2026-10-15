@@ -11,7 +11,8 @@ nameOverride: ""
 fullnameOverride: ""
 
 # Server container command/args; the deployment template skips an empty list, so the
-# image ENTRYPOINT/CMD apply. The driver's values.j2.yml always sets both (`[]` when unset).
+# image ENTRYPOINT/CMD apply. A user's command/args override sets the container's list
+# after the chart renders.
 command: []
 args: []
 

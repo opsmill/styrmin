@@ -313,9 +313,9 @@ Every action receives the context of the instance it runs for: the upgrade remed
 the new instance (`diff.instance`) to the pre, core and post hooks. Since ADR-065, one
 `updateDeploymentVersion` call can write an image override or env vars with the version, and
 the upgrade action then starts while the workload still runs the previous instance. The
-primitives therefore take the component-container overrides from the context, through the
-helpers in `services/component_container/overrides.py` that the patch builder also uses
-(#431):
+primitives therefore take the component-container overrides from the context, through
+`applicable_overrides` in `services/component_container/overrides.py`, which the patch builder
+also uses (#431, ADR-069):
 
 - `get_component_images` returns the applicable image override as element 0, with
   `{{ app.version }}` set to `context.app.version`. The other images still come from the pod
@@ -325,7 +325,12 @@ helpers in `services/component_container/overrides.py` that the patch builder al
   is replaced by a literal `value`, and a new name is appended.
 
 An override applies when the component declares a component container and the override is not
-orphaned, as for the post-render patches. An env var removed in the same call is still in the
+orphaned (`override_applies`), as for the post-render patches. The primitives use only the `env`
+and `image` of the result: `command` and `args` overrides do not reach action Jobs. Because
+`execute_commands(env_from_component=...)` calls `applicable_overrides`, it also resolves the
+image override, and raises `InvalidImageReferenceError` when the reference is invalid at the
+context's application version. Such a reference is already rejected on write and before an
+application version change (ADR-058 §5). An env var removed in the same call is still in the
 workload's env and reaches the Job, because the action cannot tell an injected env var from a
 chart one. A component whose workload does not exist yet still fails the lookup.
 
@@ -443,7 +448,7 @@ If no upgrade core hook is defined for the application version, `_handle_upgrade
 | [workflows/catalogue.py](backend/styrmin_backend/workflows/catalogue.py) | Workflow registry (UPGRADE_INSTANCE definition) |
 | [actions/primitives.py](backend/styrmin_backend/actions/primitives.py) | `stop_components`, `start_components`, `execute_commands`, `get_component_images`, `get_component_labels`, `upgrade_deployment_version` |
 | [agent/service/kubernetes/primitives.py](backend/styrmin_backend/agent/service/kubernetes/primitives.py) | Kubernetes side of `get_component_images` (component container image first) and `get_component_env` (component container env); `run_job` and `run_kubernetes_job` raise `JobFailedError` with the end of the output |
-| [services/component_container/overrides.py](backend/styrmin_backend/services/component_container/overrides.py) | `applicable_env`, `applicable_image`: the overrides that apply in a context, shared by the patch builder and the action primitives |
+| [services/component_container/overrides.py](backend/styrmin_backend/services/component_container/overrides.py) | `override_applies`, `applicable_overrides` (`ApplicableOverrides`): the env vars, image, `command` and `args` that apply in a context, shared by the patch builder and the action primitives |
 | [agent/service/kubernetes/job_logs.py](backend/styrmin_backend/agent/service/kubernetes/job_logs.py) | `read_job_output_tail`: the end of a failed Job's output |
 | [agent/steps/reporter.py](backend/styrmin_backend/agent/steps/reporter.py) | `StepReporter`: hook-step output and steps recorded through `recordStep` |
 | [agent/tasks/utils.py](backend/styrmin_backend/agent/tasks/utils.py) | `run_driver_action_or_fail` (`STYRMIN_TOKEN`, `STYRMIN_TASK_ID`, `STYRMIN_STEP_ID`) |

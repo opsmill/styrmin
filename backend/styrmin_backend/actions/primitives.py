@@ -35,8 +35,7 @@ from styrmin_backend.agent.steps.reporter import StepReporter, uuid_from_env
 from styrmin_backend.agent.tasks.utils import STEP_ID_ENV
 from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.services.component_container.overrides import (
-    applicable_env,
-    applicable_image,
+    applicable_overrides,
 )
 
 _GRAPHQL_DIR = Path(__file__).resolve().parent
@@ -250,7 +249,7 @@ async def get_component_images(component: str, context: GlobalContext) -> list[s
     )
     # The context is the instance this action runs for: an override set with the
     # version change may not have reached the workload yet (#431).
-    override = applicable_image(component, component_ctx, context.app.version)
+    override = applicable_overrides(component, component_ctx, context.app.version).image
     if override is None:
         return images
     return [override, *images[1:]]
@@ -302,7 +301,10 @@ async def execute_commands(
             label_selector=label_selector,
             container=component_ctx.config.container,
         )
-        env = _with_env_vars(env, applicable_env(component_ctx))
+        overrides = applicable_overrides(
+            env_from_component, component_ctx, context.app.version
+        )
+        env = _with_env_vars(env, overrides.env)
 
         if env:
             container_spec["env"] = env

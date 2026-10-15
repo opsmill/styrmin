@@ -285,18 +285,29 @@ def _print_pinned_image_warning(outcome: ApplyOutcome) -> None:
     )
 
 
+_OVERRIDE_KIND_LABELS = {"env_vars": "env var", "image": "image", "command": "command", "args": "args"}
+
+
+def _join_words(words: list[str]) -> str:
+    return words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}"
+
+
 def _print_inapplicable_warning(outcome: ApplyOutcome) -> None:
-    """Warn on stderr about overrides stored but not applied; never changes the exit code."""
-    components = outcome.inapplicable_components
-    if not components:
+    """Warn on stderr, per component, about overrides stored but not applied; never changes the exit code."""
+    if not outcome.inapplicable_overrides:
         return
     sys.stdout.flush()
-    print(
-        f"warning: {outcome.name}: env vars and image overrides on {', '.join(components)} "
-        "are stored but not applied (no component container in the driver version)",
-        file=sys.stderr,
-        flush=True,
-    )
+    for component, kinds in outcome.inapplicable_overrides.items():
+        overrides = f"{_join_words([_OVERRIDE_KIND_LABELS[kind] for kind in kinds])} override"
+        stored, pronoun = (f"{overrides} is", "it") if len(kinds) == 1 else (f"{overrides}s are", "them")
+        print(
+            f"warning: {outcome.name}: {stored} stored on {component} but not applied: the driver "
+            f"version declares no component container for {component}. Remove {pronoun} from the "
+            f"manifest, or load a driver version that declares components.{component}.container "
+            "and apply again",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def _print_warnings(outcome: ApplyOutcome) -> None:

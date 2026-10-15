@@ -4,7 +4,7 @@ kind: ApplicationDriver
 metadata:
   name: infrahub-enterprise
 spec:
-  version: "2"
+  version: "3"
   supported_versions: ">=1.5,<2.0"
   info:
     icon: https://docs.infrahub.app/img/infrahub-logo.svg
@@ -40,37 +40,6 @@ spec:
       label: "Enable analytics"
       kind: boolean
       default: true
-
-  # Doc-only declaration that the `server` and `task-worker` containers expose
-  # an overridable `args` (014). Informational only — the actual wiring lives
-  # in values.j2.yml. `command` is intentionally NOT advertised: the infrahub
-  # chart's pod templates have no `command` field, so only `args` is overridable.
-  container_overrides:
-    - component: server
-      container: infrahub-server
-      args: true
-      description: >-
-        Override the API server container args (e.g. gunicorn worker count or
-        logger class) for one deployment without forking the driver. `command`
-        is not overridable — the chart wires only `args`.
-    - component: task-worker
-      container: infrahub-task-worker
-      args: true
-      description: >-
-        Override the task worker container args (e.g. the Prefect pool or
-        worker flags) for one deployment without forking the driver. `command`
-        is not overridable — the chart wires only `args`.
-    - component: task-manager
-      container: prefect-server
-      command: true
-      args: true
-      description: >-
-        Override the task manager (Prefect server) container command and/or
-        args for one deployment without forking the driver. When unset, the
-        values template omits both keys (renders null, pruned on create /
-        deleted on update) so the infrahub chart's own Prefect command/args
-        defaults flow through — emitting an empty list instead would clobber
-        them and force the prefect-server subchart's broken entrypoint fallback.
 
   components:
     server:

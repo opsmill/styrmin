@@ -82,13 +82,12 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
+
+from styrmin_backend.services.exceptions import CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL
 
 from ._shared import Kind
 from .actions import ActionDefinition
-from .container_overrides import (
-    DriverContainerOverrideDoc,
-    validate_container_override_doc_components_unique,
-)
 from .env_vars import DriverEnvVarDoc, validate_env_var_doc_names_unique
 from .parameters import DriverParameterDefinition, validate_parameter_names_unique
 from .services import ServiceDefinition, validate_service_names_unique
@@ -274,7 +273,21 @@ class Specification(BaseModel):
     services: list[ServiceDefinition] | None = None
     actions: list[ActionDefinition] = Field(default_factory=list)
     env_vars: list[DriverEnvVarDoc] | None = None
-    container_overrides: list[DriverContainerOverrideDoc] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_container_overrides(cls, data: Any) -> Any:
+        # Named here so the error links the migration guide instead of the generic extra_forbidden.
+        if isinstance(data, dict) and "container_overrides" in data:
+            raise PydanticCustomError(
+                "removed_key",
+                "spec.container_overrides was removed: Styrmin now applies container command "
+                "and args overrides to each component's declared component container. Delete "
+                "the block and declare components.<name>.container instead. Migration guide: "
+                "{guide}",
+                {"guide": CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL},
+            )
+        return data
 
     @field_validator("services", mode="after")
     @classmethod
@@ -305,16 +318,6 @@ class Specification(BaseModel):
         # ``validate_parameter_names`` — uniqueness across the list.
         if value is not None:
             validate_env_var_doc_names_unique(value)
-        return value
-
-    @field_validator("container_overrides", mode="after")
-    @classmethod
-    def validate_container_override_doc_components(
-        cls, value: list[DriverContainerOverrideDoc] | None
-    ) -> list[DriverContainerOverrideDoc] | None:
-        # 014 / US6: at most one container_overrides block per component.
-        if value is not None:
-            validate_container_override_doc_components_unique(value)
         return value
 
     @field_validator("supported_versions", mode="after")

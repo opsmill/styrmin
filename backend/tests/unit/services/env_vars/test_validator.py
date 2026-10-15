@@ -10,7 +10,7 @@ keep the failure surface narrow.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from loguru import logger
@@ -359,6 +359,27 @@ class TestComponentContainerNotDeclaredError:
             "Image override targets component 'database', which declares no component "
             "container in the driver version. Components that accept overrides: "
             "['server']"
+        )
+
+    @pytest.mark.parametrize("override", ["command", "args"])
+    def test_command_and_args_message_and_metadata(
+        self, override: Literal["command", "args"]
+    ) -> None:
+        error = ComponentContainerNotDeclaredError(
+            component_name="database",
+            components_with_container=["server", "api"],
+            override=override,
+            checked_against="driver acme version 3 (application version 2.0.0)",
+        )
+        assert error.error_metadata == {
+            "component_name": "database",
+            "components_with_container": ["api", "server"],
+            "override": override,
+        }
+        assert str(error) == (
+            f"Container {override} override targets component 'database', which "
+            "declares no component container in driver acme version 3 (application "
+            "version 2.0.0). Components that accept overrides: ['api', 'server']"
         )
 
     def test_explicit_message_wins(self) -> None:

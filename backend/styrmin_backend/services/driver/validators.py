@@ -1,8 +1,9 @@
 import ast
 from abc import abstractmethod
-from typing import Any
+from typing import Any, cast, get_args
 
 import jinja2
+from jinja2 import nodes
 
 from styrmin_backend.services.driver.exceptions import (
     ValidationError,
@@ -19,12 +20,16 @@ from styrmin_backend.services.driver.models.resources.env_vars import (
     DriverEnvVarLevel,
 )
 from styrmin_backend.services.driver.models.structure.resource import Role
-from styrmin_backend.services.container_overrides.exceptions import (
-    DriverContainerOverrideDocComponentMismatchError,
-)
 from styrmin_backend.services.env_vars.exceptions import (
     DriverEnvVarDocComponentMismatchError,
 )
+from styrmin_backend.services.exceptions import (
+    RetiredTemplateFilter,
+    RetiredTemplateFilterError,
+    retired_filter_load_message,
+)
+
+_RETIRED_FILTERS: frozenset[str] = frozenset(get_args(RetiredTemplateFilter))
 
 
 class Validator:
@@ -54,6 +59,8 @@ class JinjaTemplateValidator(Validator):
 
         Raises:
             ValidationError: If the template is invalid
+            RetiredTemplateFilterError: If the template calls a retired filter, which
+                would otherwise fail only when the operator renders it.
         """
         from styrmin_backend.agent.service.kubernetes.resources.builders.application import (
             get_jinja_environment,
@@ -61,9 +68,17 @@ class JinjaTemplateValidator(Validator):
 
         try:
             env = get_jinja_environment()
-            env.from_string(data)
+            template_ast = env.parse(data)
+            env.from_string(template_ast)
         except jinja2.exceptions.TemplateSyntaxError as err:
             raise ValidationError(str(err)) from err
+
+        for node in template_ast.find_all(nodes.Filter):
+            if node.name in _RETIRED_FILTERS:
+                name = cast(RetiredTemplateFilter, node.name)
+                raise RetiredTemplateFilterError(
+                    retired_filter_load_message(name, node.lineno), filter_name=name
+                )
 
 
 class UserActionsValidator(Validator):
@@ -321,36 +336,6 @@ def validate_driver_env_var_docs(specification: Specification) -> None:
                     component_name=component_name,
                     known_components=known_sorted,
                 )
-
-
-def validate_driver_container_override_docs(specification: Specification) -> None:
-    """Cross-validate ``spec.container_overrides`` against the driver's components.
-
-    014 / US6: every ``component`` referenced by a ``container_overrides`` doc
-    MUST exist in ``Specification.components.root``. The Pydantic field
-    validators on :class:`DriverContainerOverrideDoc` / ``Specification``
-    already enforce per-entry shape and component uniqueness; this function
-    runs the cross-field rule that needs the parent ``Specification``
-    (mirrors :func:`validate_driver_env_var_docs`).
-
-    Raises:
-        DriverContainerOverrideDocComponentMismatchError: when a ``component``
-            reference does not resolve to a declared component.
-    """
-    if not specification.container_overrides:
-        return
-
-    declared_components: set[str] = set()
-    if specification.components is not None:
-        declared_components = set(specification.components.root.keys())
-
-    known_sorted = sorted(declared_components)
-    for doc in specification.container_overrides:
-        if doc.component not in declared_components:
-            raise DriverContainerOverrideDocComponentMismatchError(
-                component_name=doc.component,
-                known_components=known_sorted,
-            )
 
 
 def build_user_actions_validator(

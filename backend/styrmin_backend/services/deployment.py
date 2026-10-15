@@ -1,5 +1,4 @@
 from datetime import UTC, datetime
-from typing import Literal
 from uuid import UUID, uuid4
 
 from loguru import logger
@@ -40,6 +39,7 @@ from styrmin_backend.services.container_overrides.validator import (
 )
 from styrmin_backend.services.env_vars.exceptions import (
     ComponentContainerNotDeclaredError,
+    ComponentContainerSlot,
     UnknownComponentEnvVarError,
 )
 from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
@@ -152,16 +152,17 @@ def _containers_by_component(
     return containers
 
 
-ComponentContainerSlot = Literal["env_vars", "image"]
-
-
 def _slot_adds_or_changes(
     slot: ComponentContainerSlot, submitted_block: object, stored_block: object
 ) -> bool:
-    """Return whether ``submitted_block`` adds or changes ``slot`` relative to ``stored_block``."""
+    """Return whether ``submitted_block`` adds or changes ``slot`` relative to ``stored_block``.
+
+    ``image``, ``command`` and ``args`` are whole values: any submitted value other than the
+    stored one is a change. Env vars compare key by key, so removing keys is not a change.
+    """
     submitted = submitted_block.get(slot) if isinstance(submitted_block, dict) else None
     stored = stored_block.get(slot) if isinstance(stored_block, dict) else None
-    if slot == "image":
+    if slot != "env_vars":
         return submitted is not None and submitted != stored
     if not isinstance(submitted, dict) or not submitted:
         return False
@@ -176,15 +177,21 @@ def _validate_component_container_targets(
     submitted_config: dict | None,
     stored_config: dict | None,
     containers_by_component: dict[str, str | None],
-    slots: tuple[ComponentContainerSlot, ...] = ("env_vars", "image"),
+    slots: tuple[ComponentContainerSlot, ...] = (
+        "env_vars",
+        "image",
+        "command",
+        "args",
+    ),
     checked_against: str = "",
 ) -> None:
     """Reject added or changed component-container overrides on containerless components.
 
-    ``containers_by_component`` comes from the driver version the deployment is
-    pinned to after the write. Removals and unchanged re-submissions pass so
-    values stored before a driver upgrade can still be cleaned up (017 FR-003,
-    018 FR-005). Unknown components are left to the per-slot target checks.
+    Covers env vars, the image and the container ``command``/``args``, which all reach the pod
+    through the component container (022 FR-007). ``containers_by_component`` comes from the
+    driver version the deployment is pinned to after the write. Removals and unchanged
+    re-submissions pass so values stored before a driver upgrade can still be cleaned up
+    (017 FR-003, 018 FR-005). Unknown components are left to the per-slot target checks.
     """
     submitted_components = (submitted_config or {}).get("components")
     if not isinstance(submitted_components, dict):

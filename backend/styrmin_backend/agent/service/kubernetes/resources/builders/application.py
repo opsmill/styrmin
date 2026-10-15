@@ -25,6 +25,7 @@ from styrmin_backend.services.component_container.patch_builder import (
     build_component_container_patches,
 )
 from styrmin_backend.services.exceptions import (
+    CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL,
     RetiredTemplateFilterError,
     SchedulingPatchRenderingError,
 )
@@ -81,60 +82,26 @@ def component_env_vars(*args: object, **kwargs: object) -> NoReturn:  # noqa: AR
     raise RetiredTemplateFilterError
 
 
-def _resolved_container_override(components: object, name: str) -> dict | None:
-    """Return the resolved ``container_override`` dict for component ``name``.
+def component_command(*args: object, **kwargs: object) -> NoReturn:  # noqa: ARG001
+    """Retired filter: Styrmin applies ``command`` by post-render patch (022 FR-005).
 
-    Defensive read against the ``model_dump(exclude_none=True)`` rendering
-    context: returns ``None`` when ``components`` is not a dict, the component
-    is absent, or it has no resolved ``container_override`` block.
+    Stays registered so a driver still calling it gets the typed error.
     """
-    if not isinstance(components, dict):
-        return None
-    component = components.get(name)
-    if not isinstance(component, dict):
-        return None
-    override = component.get("container_override")
-    if not isinstance(override, dict):
-        return None
-    return override
+    raise RetiredTemplateFilterError(
+        filter_name="component_command",
+        migration_guide=CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL,
+    )
 
 
-def component_command(components: object, name: str) -> list[str]:
-    """Resolved ``command`` override for component ``name``, or ``[]`` when unset.
+def component_args(*args: object, **kwargs: object) -> NoReturn:  # noqa: ARG001
+    """Retired filter: Styrmin applies ``args`` by post-render patch (022 FR-005).
 
-    Empty-list marker contract (ADR-045): returns the resolved non-empty list
-    when the user has set a ``command`` override, or **``[]``** when unset
-    (component absent, no override block, or the ``command`` slot unset). The
-    driver template emits it unconditionally
-    (``command: {{ components | component_command("server") | tojson }}``); the
-    chart guards with ``{{- with .Values.command }}``, and an empty list is
-    falsy so the chart skips the key and the image/chart default applies
-    (FR-007/US2 Sc.2, FR-009). The HelmRelease ``spec`` is replaced on update
-    (ADR-057), so clearing also works when the key is omitted.
+    Stays registered so a driver still calling it gets the typed error.
     """
-    override = _resolved_container_override(components, name)
-    if override is None:
-        return []
-    command = override.get("command")
-    if not isinstance(command, list):
-        return []
-    return command
-
-
-def component_args(components: object, name: str) -> list[str]:
-    """Resolved ``args`` override for component ``name``, or ``[]`` when unset.
-
-    Same empty-list-marker contract as :func:`component_command` for the
-    ``args`` slot — returns the resolved list or ``[]``, consumed under a chart
-    ``with`` guard.
-    """
-    override = _resolved_container_override(components, name)
-    if override is None:
-        return []
-    args = override.get("args")
-    if not isinstance(args, list):
-        return []
-    return args
+    raise RetiredTemplateFilterError(
+        filter_name="component_args",
+        migration_guide=CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL,
+    )
 
 
 def _validate_renders(patches: list[TargetPatch]) -> list[TargetPatch]:
@@ -456,8 +423,8 @@ class ApplicationHelmReleaseBuilder:
         return patches
 
     def build_component_container_post_rendering_patches(self) -> list[TargetPatch]:
-        """Build Kustomize patches applying env vars and image overrides to each
-        component's component container, with the missing-container guard (018)."""
+        """Build Kustomize patches applying env var, image, command and args overrides
+        to each component's component container, with the missing-container guard."""
         return build_component_container_patches(self.context)
 
     def build_backup_annotation_patches(self) -> list[TargetPatch]:
