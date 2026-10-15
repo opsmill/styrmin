@@ -1,0 +1,14 @@
+query GetDeploymentComponentReplicas($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        componentReplicas {
+            component
+            count
+            source
+            override
+            singleton
+            isOrphaned
+            isApplicable
+        }
+    }
+}

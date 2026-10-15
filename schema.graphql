@@ -240,6 +240,11 @@ input ComponentConfigInput {
   Image reference for this component's component container, scoped to this deployment. A full reference with an explicit tag or digest; every ``{{ app.version }}`` token is replaced with the deployment's application version at render time, and a literal tag pins the image. Under full-replacement semantics ``null``/omitting it CLEARS the override (the chart image applies). Raises ``UNKNOWN_COMPONENT_IMAGE_OVERRIDE``, ``INVALID_IMAGE_REFERENCE``, or ``COMPONENT_CONTAINER_NOT_DECLARED`` (adding or changing it on a component without a component container; removing it is always accepted).
   """
   image: String = null
+
+  """
+  Replica count for this component, scoped to this deployment: an integer of 1 or more, applied to `spec.replicas` of every Deployment and StatefulSet that matches the component's label selector. Needs no component container. Under full-replacement semantics `null`/omitting it CLEARS the override, and the component returns to the driver default or to the chart's count. A value below 1 raises `INVALID_REPLICA_COUNT` (stop the component instead); a value above 1 on a singleton component raises `SINGLETON_REPLICA_OVERRIDE`; adding or changing it on a component the driver version does not declare raises `UNKNOWN_COMPONENT_REPLICA_OVERRIDE`.
+  """
+  replicas: Int = null
 }
 
 """
@@ -316,6 +321,34 @@ type ComponentImageOverride {
   """
   False when the override cannot reach a container: the component is orphaned (`isOrphaned`) or the driver declares no component container for it. The stored reference is kept but not rendered.
   """
+  isApplicable: Boolean!
+}
+
+"""
+The replica count of one component of a deployment and where it comes from. One row per component the bound driver version declares, plus one per orphaned replica override.
+"""
+type ComponentReplicas {
+  """Name of the component."""
+  component: String!
+
+  """
+  The count Styrmin applies while the component runs. Null when the source is CHART or the row is orphaned. A stopped component runs 0 pods whatever this is; see Deployment.components[].enabled.
+  """
+  count: Int
+
+  """Where `count` comes from."""
+  source: ReplicaSource!
+
+  """The stored replica override, applied or not. Null when none is stored."""
+  override: Int
+
+  """The bound driver version marks the component singleton: true."""
+  singleton: Boolean!
+
+  """The bound driver version no longer declares the component."""
+  isOrphaned: Boolean!
+
+  """False only when a stored override is not applied (orphaned component)."""
   isApplicable: Boolean!
 }
 
@@ -429,6 +462,11 @@ type Deployment {
   Per-component image overrides: live components by name, then orphaned blocks (``isOrphaned=true``) by name. Components without an override are omitted.
   """
   componentImageOverrides: [ComponentImageOverride!]!
+
+  """
+  One row per component the bound driver version declares, plus one per orphaned replica override, sorted by component name.
+  """
+  componentReplicas: [ComponentReplicas!]!
   crdStatus: DeploymentStatusType
   createdBy: User!
 
@@ -1134,6 +1172,22 @@ input RecordStepInput {
   When the event happened, in the writer's clock. Defaults to the server's time.
   """
   occurredAt: DateTime = null
+}
+
+"""Where a component's replica count comes from."""
+enum ReplicaSource {
+  """The user's replica override on this deployment."""
+  OVERRIDE
+
+  """
+  components.<name>.replicas in the driver version, or 1 for a singleton component.
+  """
+  DRIVER_DEFAULT
+
+  """
+  No replica patch: the chart's own count applies. Styrmin does not read it.
+  """
+  CHART
 }
 
 type ReportDeploymentStatusesResponse {

@@ -69,9 +69,13 @@ from styrmin_backend.services.reconciliation import (
     apply_state,
     generate_instance_from_deployment,
 )
+from styrmin_backend.services.replicas.validator import validate_replica_overrides
 from deepdiff import DeepDiff
 
 from styrmin_backend.domain.models import Instance
+from styrmin_backend.services.driver.models.resources.driver import (
+    parse_stored_component_declaration,
+)
 from styrmin_backend.services.driver.models.resources.services import (
     ServiceDefinition,
 )
@@ -337,6 +341,30 @@ def _checked_against(
     )
 
 
+def _validate_replica_overrides(
+    config: dict | None,
+    *,
+    stored_config: dict | None,
+    driver_name: str,
+    driver_version: ApplicationDriverVersion,
+    checked_against: str,
+) -> None:
+    """Check replica overrides against the component declarations of ``driver_version`` (023)."""
+    label = f"driver {driver_name} version {driver_version.version}"
+    declarations = {
+        cc.name: parse_stored_component_declaration(
+            cc.config, driver_version=label, component=cc.name
+        )
+        for cc in driver_version.component_configs or []
+    }
+    validate_replica_overrides(
+        config,
+        components=declarations,
+        stored_config=stored_config,
+        checked_against=checked_against,
+    )
+
+
 def _validate_config_write(
     deployment_config: dict,
     *,
@@ -367,6 +395,14 @@ def _validate_config_write(
         validate_deployment_config(context=deployment_config)
     except InvalidDeploymentContextError as e:
         raise InvalidContextError(str(e)) from e
+    # After the config is parsed, so a count below 1 reports INVALID_REPLICA_COUNT first.
+    _validate_replica_overrides(
+        deployment_config,
+        stored_config=stored_config,
+        driver_name=driver_name,
+        driver_version=driver_version,
+        checked_against=checked_against,
+    )
     _validate_component_container_targets(
         deployment_config,
         stored_config,
@@ -511,6 +547,9 @@ async def update_deployment(
 
     Raises:
         InvalidContextError: If the context is invalid.
+        InvalidReplicaCountError, UnknownComponentReplicaOverrideError,
+        SingletonReplicaOverrideError: If a replica override is not an integer
+            of 1 or more, or the pinned driver version cannot apply it.
         DeploymentNameValidationError: If the provided name is invalid.
         DeploymentNameConflictError: If the provided name is already in use.
 
@@ -811,6 +850,9 @@ async def update_deployment_version(
         UnknownComponentEnvVarError, UnknownComponentContainerOverrideError,
         ComponentContainerNotDeclaredError: If ``deployment_config`` targets a
             component the target driver version cannot apply it to.
+        InvalidReplicaCountError, UnknownComponentReplicaOverrideError,
+        SingletonReplicaOverrideError: If a submitted replica override is invalid,
+            or a submitted or stored one breaks the target driver version's rules.
         DeploymentNameValidationError, DeploymentNameConflictError: If
             ``deployment_name`` is invalid or used by another deployment.
         InvalidServiceOverrideError, ServiceNameConflictError: If a service
@@ -902,6 +944,17 @@ async def update_deployment_version(
                 application_version=version,
             )
             effective_config = deployment_config
+        else:
+            # Stored replica overrides must hold in the target driver version (023 D-006).
+            _validate_replica_overrides(
+                deployment.config,
+                stored_config=deployment.config,
+                driver_name=application_driver.name,
+                driver_version=target_driver_version,
+                checked_against=_checked_against(
+                    application_driver.name, target_driver_version, version
+                ),
+            )
         # Overrides applicable in the target driver version must still resolve at the
         # target application version (018 FR-009).
         _validate_image_overrides_for_version(
@@ -1404,6 +1457,9 @@ async def deploy_application(
 
     Raises:
         InvalidContextError: If the context is invalid.
+        InvalidReplicaCountError, UnknownComponentReplicaOverrideError,
+        SingletonReplicaOverrideError: If a replica override is not an integer
+            of 1 or more, or the driver version cannot apply it.
         DeploymentNameValidationError: If the provided name is invalid.
         DeploymentNameConflictError: If the provided name is already in use.
         DriverVersionNotFoundError: If the pinned driver version does not exist.
@@ -1526,6 +1582,14 @@ async def deploy_application(
             validate_deployment_config(context=deployment_config)
         except InvalidDeploymentContextError as e:
             raise InvalidContextError(str(e)) from e
+
+        _validate_replica_overrides(
+            deployment_config,
+            stored_config=None,
+            driver_name=driver_name,
+            driver_version=application_driver_version,
+            checked_against=checked_against,
+        )
 
         # A new deployment has no stored values: every block is an addition.
         _validate_component_container_targets(
