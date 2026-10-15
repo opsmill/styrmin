@@ -193,6 +193,27 @@ no column of its own: it rides the existing JSON, read through `ComponentConfig.
 `Component.container` ([ADR-057](../../adr/0057-post-render-component-overrides.md) §1). Rows
 stored before 017 carry no `container` key and count as containerless.
 
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-15 -->
+
+The declaration can also carry `replicas` (the driver default replica count, a `StrictInt` from 1
+to 2147483647) and `singleton` (a `StrictBool`, default `false`). `ReplicaDeclaration`
+(`context/models/components.py`) types both keys and is the base of the driver-load
+`ArbitrarySectionModel` (`services/driver/models/resources/driver.py`) and of the context
+`ArbitrarySectionModel`:
+
+- `singleton: true` with `replicas` greater than 1 fails the driver load with the field path
+  `spec.components.<name>`.
+- `model_dump()` leaves out `replicas` when it is `None` and `singleton` when it is `false`, so a
+  declaration that uses neither key is stored and serialised as before 023.
+- `parse_stored_component_declaration(raw, driver_version=..., component=...)` reads a stored
+  declaration. A row stored before 023 can hold an untyped `replicas` or `singleton` that the
+  typed fields reject; the function then drops both keys and logs a warning that names the driver
+  version and the component. Any other validation error is raised.
+
+No column and no Alembic revision: the keys ride the existing JSON. They are read through
+`ComponentConfig.replicas` and `ComponentConfig.singleton` in GraphQL, which default to `null` and
+`false` ([ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md)).
+
 ### Helm Models
 
 #### HelmRepository
@@ -628,12 +649,26 @@ GlobalContext
 │   ├── name: str
 │   ├── version: str
 │   └── helm: HelmInfo
-├── ComponentsContext
+├── ComponentsContext            (dict of ComponentContext, declared components only)
+│   └── ComponentContext
+│       ├── config: ArbitrarySectionModel (the driver declaration, incl. replicas and singleton)
+│       ├── name: str
+│       ├── enabled: bool
+│       ├── scheduling, env_vars, container_override, image_override
+│       └── replica_override: int | None (DeploymentConfig.components[<name>].replicas)
 ├── utilities: list[UtilityContext]
 ├── parameters: dict[str, Any]
 ├── services: dict[str, Any]
 └── deployed_services: list[dict[str, Any]]
 ```
+
+`ComponentContext.replica_override` (023) is filled by `resolve_global_context`
+(`context/resolvers.py`) from `DeploymentConfig.components[<name>].replicas`, for declared
+components only, so an orphaned override never reaches the context. The same resolver parses each
+stored declaration with `parse_stored_component_declaration`. `ComponentContext` has
+`extra="forbid"`, so an agent from before 023 rejects a context that carries `replica_override`;
+the context written into the `StyrminDeployment` resource is dumped with `exclude_none=True`, so
+the key is present only when an override is set.
 
 ### Configuration Models
 
@@ -685,6 +720,27 @@ class DeploymentConfig(ClusterConfig, EnvironmentConfig):
 class ResolvedConfig(DeploymentConfig):
     # Merged configuration the renderer actually reads from
 ```
+
+#### ComponentConfigBlock
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-15 -->
+
+`DeploymentConfig.components` maps each component name to a `ComponentConfigBlock`
+(`context/models/config.py`, `extra="forbid"`), the per-component overrides of a deployment:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `env_vars` | `dict[str, str] \| None` | Component-scope env vars (008); merged into the component container by post-render |
+| `command` | `list[str] \| None` | Container `command` override (014, 022) |
+| `args` | `list[str] \| None` | Container `args` override (014, 022) |
+| `image` | `str \| None` | Image override (018) |
+| `replicas` | `int \| None` | Replica override (023): 1 to `MAX_REPLICA_COUNT` (2147483647); `None` means no override |
+
+A `mode="before"` validator on `replicas`, and a check in `DeploymentConfig.components` that names
+the component from the dict key, raise `InvalidReplicaCountError` (`INVALID_REPLICA_COUNT`) for a
+`bool`, a non-integer or a value out of range, before Pydantic converts the type. Configs stored
+before 023 have no `replicas` key and read as `None`; no Alembic revision
+([ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md)).
 
 #### DedicatedIngressConfig
 

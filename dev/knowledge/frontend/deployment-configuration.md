@@ -35,6 +35,7 @@ frontend/src/components/deployment/configuration/
 ├── ChangedFieldFrame.tsx       # per-field "changed, was X" affordance
 ├── InheritanceBadge.tsx        # inherited / overridden badge
 ├── ParameterField.tsx          # shared driver-parameter renderer (also used by create)
+├── ReplicasField.tsx           # per-component replica count field (also used by create)
 ├── conflictMerge.ts            # scoped equality helper for the reload-merge path
 ├── DeploymentContextDialog.tsx # resolved-context viewer
 └── sections/
@@ -48,7 +49,8 @@ frontend/src/lib/
 ├── config-impact.ts            # rule evaluation → ImpactSummary
 ├── config-inheritance.ts       # per-section inherited / overridden state
 ├── effective-config.ts         # merged view of environment + deployment values
-└── deployment-input.ts         # persisted config ↔ UpdateDeploymentInput transform (ADR-015)
+├── deployment-input.ts         # persisted config ↔ UpdateDeploymentInput transform (ADR-015)
+└── replicas.ts                 # replica field check, placeholder and driver default
 ```
 
 ### The eight sections
@@ -286,6 +288,60 @@ Deployment- and environment-scope editors carry no such hint: those scopes skip
 containerless components silently. Surfacing that in the UI is a deferred
 follow-up (ADR-057 consequences); the API exposes it as
 `ComponentEnvVars.isApplicable`.
+
+### Replica overrides need no component container
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-15 -->
+
+A replica override patches the component's workloads, not a container
+([ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md)), so the
+**Replicas** field shows on every component, with or without a container.
+`ReplicasField.tsx` (`components/deployment/configuration/`) renders it in the
+drawer and in the create form:
+
+- A number input (`comp-replicas-<component>`, `aria-label="Replicas for
+  <component>"`). Empty means no override. The placeholder names the count that
+  applies without one, from `replicaPlaceholder` in `lib/replicas.ts`:
+  `2 (driver default)` or `set by the chart`. `replicaDefault` takes the driver
+  default from the `componentReplicas` row when its source is `DRIVER_DEFAULT`,
+  and otherwise from the driver version's `componentConfigs[].replicas`, because
+  the row's count is the override when the override is the source.
+- `replicaFieldError` shows "Must be 1 or more. To run no pods, stop the
+  component." below 1, and also rejects a non-integer and a value above
+  2147483647 (`comp-replicas-error-<component>`). `componentOverridesSchema`
+  runs the same check.
+- A singleton component (`componentReplicas[].singleton`) gets a read-only input
+  with the value `1 (singleton)`. A stored override above 1 on it renders in
+  `SingletonReplicaOverride` (`comp-replicas-readonly-<component>`) with a
+  **not applied** badge and a remove button (`Remove replica override for
+  <component>`) that sets `replicas` to `null`, because the backend rejects
+  resubmitting it. The collapsed row then shows the **not applied** badge too.
+
+In the drawer, a component without a stored block shows the field above
+**Add override**; typing a count creates the block. Clearing the field submits
+`replicas: null` when a value is stored, and leaves the field `undefined`
+otherwise, so typing and clearing is not a change. The submit boundary
+(`componentsFormToInput`) turns an empty field into `null`, and `diffComponents`
+compares `components[<name>].replicas` with `null` and `undefined` as equal.
+`get_deployment.graphql` selects `componentReplicas` and
+`componentConfigs { replicas }` of the pinned driver version. The
+`FutureExtensionPlaceholder` line lists CPU and memory only.
+
+The create form (`DeployFormPage.tsx`) has a **Component replicas** section
+(`component-replicas-section`) that lists the components of the selected driver
+version from `componentConfigs { name replicas singleton }`, with the same
+field. It sends `config.components` with only the components that have a value,
+and blocks the submit with an error naming the components whose count is
+invalid.
+
+The read summary (`ComponentOverridesSummary.tsx`) gets `componentReplicas` from
+`ConfigurationTab.tsx` and shows a replica line (`component-replicas`, with
+`data-source`, `data-applicable` and `data-stopped`) under every declared
+component: `3 (override)`, `2 (driver default)`, `1 (driver default, singleton)`
+or `set by the chart`; `override N` and a **not applied** badge when a stored
+override does not apply; an **applied** badge when it does; and
+`stopped: 0 pods` when `components[].enabled` is `false`. An orphaned override
+shows as `N (override)` with a **not applied** badge in its orphan row.
 
 ### Testing
 

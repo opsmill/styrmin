@@ -1,7 +1,9 @@
 # ADR-057: Post-Render Component Overrides into a Declared Component Container
 
 **Status**: Accepted — narrowed by [ADR-058](0058-image-overrides-and-component-container-guard.md);
-the `styrminctl apply` gap resolved by [ADR-065](0065-apply-writes-config-with-the-version.md)
+the `styrminctl apply` gap resolved by [ADR-065](0065-apply-writes-config-with-the-version.md);
+the component state patch of §2 replaced by the component replica patch of
+[ADR-070](0070-replica-overrides-and-retired-parameters.md)
 **Date**: 2026-10-02
 **Source**: specs/archive/017-post-render-env-vars/ (spec, plan, research D-001 – D-011, critique)
 
@@ -82,8 +84,10 @@ kyaml (the strategic-merge engine in Flux's Kustomize post-renderer) merges cont
 Resolution is unchanged: per-key deepest-wins, environment → deployment → component.
 Components without a component container are skipped silently for deployment- and
 environment-scope env vars. Disabled components still get patches; their replica count is
-governed by the component state patch. Patches are regenerated on every render, so clearing
-an env var needs no marker.
+governed by the component replica patch, which writes `spec.replicas: 0` for a stopped
+component and the resolved replica count for a running one
+([ADR-070](0070-replica-overrides-and-retired-parameters.md) §4). Patches are regenerated on
+every render, so clearing an env var needs no marker.
 
 ### 3. Env patches go last, and the ordering is observed, not guaranteed
 

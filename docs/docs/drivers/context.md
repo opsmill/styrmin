@@ -138,9 +138,10 @@ Per-component configuration. A driver declares its components in
 end up at runtime: the component's definition under
 `components.<name>.config` (including its declared `container`), its
 resolved env vars under `components.<name>.env_vars.config`, its
-image override under `components.<name>.image_override`, and its
+image override under `components.<name>.image_override`, its
 container `command` and `args` override under
-`components.<name>.container_override`.
+`components.<name>.container_override`, and its replica override under
+`components.<name>.replica_override`.
 
 May be `None` if the driver has no per-component configuration.
 
@@ -185,6 +186,18 @@ a field the user did not set is absent. Don't write them into a chart
 `command` or `args` key: Styrmin already applies them, and when no
 override is set the chart key would no longer hold the chart's own
 value.
+
+#### Replica overrides are read-only data
+
+Styrmin sets each component's replica count on its `Deployment` and
+`StatefulSet` workloads after the chart renders (see
+[Replica overrides](../concepts-and-architecture/replica-overrides.md)),
+so templates do not pass a count to the chart.
+`components.<name>.replica_override` is present only when the user set
+one. The driver's own `replicas` and `singleton` are under
+`components.<name>.config`, each only when the driver sets it. Don't
+write either into a chart replica key: Styrmin sets `spec.replicas`
+after the chart renders, which replaces any count the chart renders.
 
 #### `parameters`
 

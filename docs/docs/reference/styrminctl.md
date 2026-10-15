@@ -579,6 +579,31 @@ wait can end with `wait timeout` instead of the failed step. Read the steps
 with `styrminctl tasks get <task-id>`; `styrminctl tasks list` shows the
 type and deployment of each task.
 
+### `deployments get` — the Components table
+
+`styrminctl deployments get <deployment-id>` prints the deployment's
+fields, then a "Components" table with the columns `id`, `name`,
+`enabled` and `replicas`. The `replicas` column shows the count that
+Styrmin applies to the component and where it comes from (see
+[Replica overrides](../concepts-and-architecture/replica-overrides.md#order-of-precedence)):
+
+| Component | `replicas` cell |
+|-----------|-----------------|
+| A replica override of 3 applies | `3 (override)` |
+| A driver default of 2, no override | `2 (driver default)` |
+| A singleton component without an override | `1 (driver default, singleton)` |
+| A singleton component with an override of 1 | `1 (override, singleton)` |
+| Neither an override nor a driver default | `chart` |
+| A stored override of 3 that does not apply on a declared component | the cell followed by `, override 3 not applied` |
+| A stopped component | the cell followed by `, stopped: 0 pods`, for example `3 (override), stopped: 0 pods` |
+
+A replica override on a component that the deployment's driver version
+no longer declares gets its own row, with `-` in the `id` and `enabled`
+columns and the cell `3 (override, not applied: no longer declared)`.
+
+`chart` carries no number, because Styrmin does not read the count that
+the chart renders.
+
 ### `deployments update-version`
 
 `styrminctl deployments update-version <deployment-id> <version>` moves a
@@ -592,6 +617,14 @@ the version and checked against the target driver version, and one task
 reconciles both. `--config` needs a Styrmin server with
 [#388](https://github.com/opsmill/styrmin/issues/388);
 `update-version` without `--config` works with older servers too.
+
+When the command changes the deployment's driver version and the target
+driver version no longer declares a parameter that the deployment sets,
+Styrmin drops the value if it equals the parameter's default in the
+current driver version. Any other value fails the command with
+`RETIRED_PARAMETER_VALUE` before any task starts. `deployments apply`
+follows the same rule. See
+[Migrating Replica Parameters](../drivers/migrating-replica-parameters.md).
 
 ### `tasks get` — a task's steps
 
@@ -642,8 +675,9 @@ spec:
           - name: LOG_LEVEL
             value: debug
         image: "registry.example/acme/app-patched:{{ app.version }}"
+        replicas: 3
   parameters:
-    replicas: 2
+    storage_size: 10
 ```
 
 `spec.parameters` stays a `{name: value}` map.
@@ -662,6 +696,18 @@ carries another template expression, or becomes invalid once
 a component the driver version does not declare fails with
 `UNKNOWN_COMPONENT_IMAGE_OVERRIDE`.
 
+`components[].replicas` is the component's
+[replica override](../concepts-and-architecture/replica-overrides.md): a
+whole number from 1 to 2147483647 that Styrmin sets on `spec.replicas` of
+the component's `Deployment` and `StatefulSet` workloads. It needs no
+component container. Removing the key clears the override on the next
+apply, with the same `components: []` exception as for `image`; the
+component then runs the driver default or the chart's count. A count below
+1 fails with `INVALID_REPLICA_COUNT`, a count above 1 on a singleton
+component fails with `SINGLETON_REPLICA_OVERRIDE`, and a new or changed
+count on a component the driver version does not declare fails with
+`UNKNOWN_COMPONENT_REPLICA_OVERRIDE`.
+
 Adding or changing per-component `env_vars`, `image`, `command` or `args` on a
 component whose driver version declares no component container fails with
 `COMPONENT_CONTAINER_NOT_DECLARED`. A manifest has no driver version field:
@@ -674,13 +720,14 @@ version and application version it checked. A rejected apply changes nothing on
 the deployment.
 
 Component config on a component that this driver version does not declare is
-rejected even when it is unchanged. When a driver version removes or renames a
-component, remove its block from the manifest in the same change that moves
-`spec.version`. Unchanged `env_vars`, `image`, `command` or `args` on a
-component that the driver version declares without a component container are
-accepted, stored and not applied. `apply` prints a warning on stderr for each
-such component. The warning names the kinds of override and the two ways to fix
-it:
+rejected even when it is unchanged, with one exception: a block that holds
+only `replicas`, sent with the stored value unchanged, is accepted, stored and
+not applied. When a driver version removes or renames a component, remove its
+block from the manifest in the same change that moves `spec.version`. Unchanged
+`env_vars`, `image`, `command` or `args` on a component that the driver version
+declares without a component container are accepted, stored and not applied.
+`apply` prints a warning on stderr for each such component. The warning names
+the kinds of override and the two ways to fix it:
 
 ```text
 updated my-app
@@ -688,9 +735,16 @@ warning: my-app: env var and args overrides are stored on worker but not applied
 0 created, 1 updated, 0 unchanged, 0 failed
 ```
 
+A replica override needs no component container, so it gets its own warning,
+which names the component that the driver version does not declare:
+
+```text
+warning: my-app: replica override is stored on legacy but not applied: the driver version does not declare legacy. Remove it from the manifest, or load a driver version that declares components.legacy and apply again
+```
+
 The SDK returns these components as `ApplyOutcome.inapplicable_components`, and
-the kinds of override per component (`env_vars`, `image`, `command`, `args`) as
-`ApplyOutcome.inapplicable_overrides`.
+the kinds of override per component (`env_vars`, `image`, `command`, `args`,
+`replicas`) as `ApplyOutcome.inapplicable_overrides`.
 See [Migrating env var wiring](../drivers/migrating-env-vars.md) and
 [Migrating container overrides](../drivers/migrating-container-overrides.md).
 
@@ -715,9 +769,9 @@ version.
 
 :::note Overrides in the apply that changes the version
 
-Every component override (`env_vars`, `command`, `args`, `image`) is checked
-against the target driver version, so all of them can go in the apply that
-changes `spec.version`. The driver's upgrade action can start before the new
+Every component override (`env_vars`, `command`, `args`, `image`, `replicas`)
+is checked against the target driver version, so all of them can go in the
+apply that changes `spec.version`. The driver's upgrade action can start before the new
 values reach the component's workload, so the action primitives take the
 `image` override and the `env_vars` from the new configuration: a Job that the
 action builds from the component's image and env runs with them. One

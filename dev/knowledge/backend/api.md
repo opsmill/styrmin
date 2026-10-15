@@ -394,6 +394,7 @@ type Deployment {
   resolvedScheduling: [ResolvedComponentScheduling!]!
   envVars: [EnvVar!]!                          # see specs/008-deployment-env-vars
   componentEnvVars: [ComponentEnvVars!]!       # per-component effective dicts (incl. orphan flag)
+  componentReplicas: [ComponentReplicas!]!     # replica count and its source per component (023)
   crdStatus: DeploymentStatusType
 }
 ```
@@ -499,6 +500,74 @@ validation, and the SDK no longer has `get_driver_container_override_docs`. The 
 `isApplicable` from `componentEnvVars`, `componentImageOverrides` and
 `componentContainerOverrides`, so it warns about a submitted `command` or `args` that does not
 apply.
+
+#### Replica override fields
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-15 -->
+
+A replica override patches `spec.replicas` of the component's `Deployment` and `StatefulSet`
+workloads, not the component container, so it needs no component container
+([ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md)):
+
+```graphql
+input ComponentConfigInput {     # UpdateDeploymentInput.components, deploy config
+  replicas: Int                  # 1 to 2147483647; null/omitted clears it (full replacement)
+}
+enum ReplicaSource { OVERRIDE DRIVER_DEFAULT CHART }
+type ComponentReplicas {         # Deployment.componentReplicas
+  component: String!
+  count: Int                     # null when source is CHART or the row is orphaned
+  source: ReplicaSource!         # CHART for an orphaned row
+  override: Int                  # the stored override, applied or not
+  singleton: Boolean!            # false for an orphaned row
+  isOrphaned: Boolean!
+  isApplicable: Boolean!         # false only when a stored override is not applied
+}
+type ComponentConfig {           # ApplicationDriverVersion.componentConfigs
+  replicas: Int                  # config["replicas"] when it is an int, else null
+  singleton: Boolean!            # config["singleton"] is True
+}
+```
+
+`componentReplicas` has one row per component of the deployment's `Component` rows (the bound
+driver version's components) plus one row per orphaned override, sorted by component name. The
+resolver parses each stored declaration with `parse_stored_component_declaration` and computes
+`count` and `source` with `resolve_replicas` (`services/replicas/resolver.py`), the function the
+patch builder uses. `count` ignores the stopped state: a stopped component reports the count it
+returns to, and `Deployment.components[].enabled` is `false`. `ReplicaSource` is a plain Strawberry
+enum whose values carry descriptions.
+
+Writes raise, in this order:
+
+- `INVALID_REPLICA_COUNT` (metadata `component_name`, `requested_replicas` as submitted) from the
+  `ComponentConfigBlock` validator, for a `bool`, a non-integer or a value outside 1 to
+  2147483647. The GraphQL `Int` already rejects non-integers on the typed inputs; the JSON path
+  through `deploy(config:)` can carry any type.
+- `UNKNOWN_COMPONENT_REPLICA_OVERRIDE` (metadata `component_name`, `known_components` sorted,
+  `checked_against`) when an override is added or changed on a component that the driver version
+  bound after the write does not declare. The stored value sent again passes.
+- `SINGLETON_REPLICA_OVERRIDE` (metadata `component_name`, `requested_replicas`,
+  `checked_against`) for an override above 1 on a component marked `singleton: true`, also when
+  it equals the stored value. `updateDeploymentVersion` without `input` checks the stored overrides
+  against the target driver version.
+
+`COMPONENT_CONTAINER_NOT_DECLARED` never fires for `replicas`. The apply check
+(`get_deployment_override_applicability.graphql`) selects `componentReplicas { component
+isApplicable }`, and the SDK lists the kind `replicas` in `ApplyOutcome.inapplicable_overrides`.
+The SDK exports `ComponentReplicas` and `ReplicaSource` from `styrmin_sdk.models`.
+
+#### Retired parameters on a driver version change
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-15 -->
+
+When `updateDeploymentVersion` changes the driver version, a parameter that the current driver
+version declares and the target does not is dropped from the merged parameter map when its value
+equals the current default with the same type. Any other value raises `RETIRED_PARAMETER_VALUE`
+(metadata `parameter_name`, `value`, `default`, `checked_against`; the first parameter by name when
+several differ) before any task starts. The message prints the value and the default as JSON and
+links `https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters`. A key that neither
+version declares still fails with `OPERATION_FAILED` "Unknown parameter". See
+[services.md](services.md#retired-parameters-servicesparametersretiredpy).
 
 #### Environment-config update + fanout
 
@@ -852,6 +921,7 @@ GraphQL enums in the schema:
 - `StepKind` — `PLAN`, `HOOK`, `RESOURCE_WRITE`, `OPERATOR_PHASE`, `COMMAND`, `RESTORE`, `BACKUP_COMPONENT`.
 - `StepEvent` — `STARTED`, `SUCCEEDED`, `FAILED`, `OUTPUT` (input only, on `RecordStepInput`).
 - `TaskResult` — `RUNNING`, `FAILED`, `SUCCEEDED`, `SUPERSEDED`.
+- `ReplicaSource` — `OVERRIDE`, `DRIVER_DEFAULT`, `CHART` (on `ComponentReplicas.source`, derived on every read). <!-- Extracted from specs/023-per-component-replicas on 2026-10-15 -->
 
 ### Status strings
 

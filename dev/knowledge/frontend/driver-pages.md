@@ -87,6 +87,24 @@ the generic icon, and the browser requests no logo. The stored URLs are kept.
   - shows the host it goes to, read with `new URL(url).host`, or the whole URL when it cannot be
     parsed.
 
+## Components tab (`driver-detail/tabs/ComponentsTab.tsx`)
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-15 -->
+
+The Components tab of the driver detail page shows one card per component of the selected
+version. Besides the identifier labels and the other declared keys, each card has three rows read
+from `componentConfigs` in `get_driver.graphql`:
+
+- **Container** (`componentConfigs[].container`), or "None declared".
+- **Replicas** (`driver-component-replicas`): the driver default (`componentConfigs[].replicas`),
+  or "not set" with a tooltip saying that the chart's count applies unless a deployment overrides
+  it.
+- **Singleton** (`driver-component-singleton`): "yes" or "no" (`componentConfigs[].singleton`).
+
+`flattenDecl` skips `identifier`, `container`, `replicas` and `singleton` (`OWN_ROW_KEYS`), so the
+three values are not listed twice. See
+[ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md).
+
 ## Load warnings (`LoadDriverDrawer.tsx`)
 
 When a load returns `loadWarnings`, the drawer shows a notification of type `warning` with
@@ -102,6 +120,7 @@ closes on its own.
 | Description | `data-testid="driver-description"` (list group header and detail page) |
 | Links list | `data-testid="driver-links"`; each host as `data-testid="driver-link-host"` |
 | Driver group | `data-testid="driver-group"`, `data-driver-name` |
+| Component replicas and singleton rows | `data-testid="driver-component-replicas"`, `data-testid="driver-component-singleton"` |
 
 `backend/tests/e2e/test_ui_smoke.py::test_driver_logo_description_and_links_render` reads these
 attributes. See [e2e-testing.md](../backend/e2e-testing.md#serving-external-urls-to-the-ui-browser)
@@ -110,8 +129,8 @@ for how it serves the logo without internet access.
 ## Tests
 
 Vitest tests live in `frontend/src/__tests__/drivers/` (`DriverLogo.test.tsx`,
-`DriverListPage.test.tsx`, `driverList.test.ts`, `LoadDriverDrawer.test.tsx`) and
-`frontend/src/__tests__/driver-detail/DriverDetailPage.test.tsx`.
+`DriverListPage.test.tsx`, `driverList.test.ts`, `LoadDriverDrawer.test.tsx`,
+`ComponentsTab.test.tsx`) and `frontend/src/__tests__/driver-detail/DriverDetailPage.test.tsx`.
 
 ## Key Files
 
@@ -123,3 +142,4 @@ Vitest tests live in `frontend/src/__tests__/drivers/` (`DriverLogo.test.tsx`,
 | [frontend/src/pages/drivers/lib/driverList.ts](../../../frontend/src/pages/drivers/lib/driverList.ts) | Filter and latest-version helpers |
 | [frontend/src/pages/drivers/LoadDriverDrawer.tsx](../../../frontend/src/pages/drivers/LoadDriverDrawer.tsx) | Load driver drawer and the load-warning notification |
 | [frontend/src/components/ClampedText.tsx](../../../frontend/src/components/ClampedText.tsx) | Clamped description with "Show more" |
+| [frontend/src/pages/drivers/driver-detail/tabs/ComponentsTab.tsx](../../../frontend/src/pages/drivers/driver-detail/tabs/ComponentsTab.tsx) | Components tab: container, replicas and singleton per component |

@@ -243,6 +243,59 @@ if your driver used the removed `component_env_vars` filter, and
 [Migrating container overrides](./migrating-container-overrides.md) if
 it used the retired `component_command` or `component_args` filter.
 
+#### Replica counts: `replicas` and `singleton`
+
+Two optional fields set how many pods (replicas) a component runs:
+
+```yaml
+spec:
+  components:
+    server:
+      container: my-app
+      replicas: 2
+      identifier:
+        label:
+          app.kubernetes.io/name: my-app
+    database:
+      container: postgresql
+      singleton: true
+      identifier:
+        label:
+          app.kubernetes.io/name: postgresql
+```
+
+- **`replicas`** is the component's driver default: a whole number from 1
+  to 2147483647. Styrmin sets it on `spec.replicas` of every `Deployment`
+  and `StatefulSet` that the component's label selector matches, after the
+  chart renders. Without `replicas`, Styrmin does not change the count, and
+  the chart's count applies.
+- **`singleton: true`** fixes the component's count at 1. Without
+  `replicas`, Styrmin sets the count to 1, also when the chart renders
+  more pods. Use it for a component that a second pod would break, such as
+  a database that runs as a single primary. The flag limits the replica
+  count, not the number of pods during a rolling update.
+
+Users can set a [replica override](../concepts-and-architecture/replica-overrides.md)
+on any component of a deployment, with or without these fields: the
+override comes first, then `replicas`, then the chart's count. A
+replica override greater than 1 on a singleton component is rejected. The
+component needs no `container` for this, and `values.j2.yml` does not
+pass a count to the chart, so do not add a parameter for a replica count.
+
+The driver fails to load when it sets `singleton: true` with `replicas`
+greater than 1, when `replicas` is below 1, above 2147483647, a string, a
+float or a boolean, or when `singleton` is not a boolean. The error names
+the field:
+
+```text
+- spec.components.database: Value error, a singleton component runs exactly 1 replica; `singleton: true` cannot be combined with `replicas: 3`
+- spec.components.server.replicas: Input should be a valid integer (found '2')
+```
+
+`singleton: true` with `replicas: 1` loads. If your driver passes a replica
+count parameter to the chart, see
+[Migrating Replica Parameters](./migrating-replica-parameters.md#if-you-write-drivers).
+
 ### Step 4: Configure backups
 
 Per component, decide *how* it should be backed up. The choices come
@@ -456,7 +509,9 @@ for the full hook/mode model.
 
 Hardcode where you can; expose a parameter when the value genuinely
 varies per deployment. Each parameter the driver declares shows up in
-the UI when a user creates a deployment.
+the UI when a user creates a deployment. A replica count is not a
+parameter: declare it as `replicas` on the component (see
+[Replica counts](#replica-counts-replicas-and-singleton)).
 
 ```yaml
 spec:
@@ -468,6 +523,13 @@ spec:
 ```
 
 Values land in `{{ parameters.storage_size }}` in the template.
+
+When a later version of your driver removes a parameter, a deployment
+that changes to that version drops the parameter's value if it equals the
+parameter's default in the deployment's current driver version. Any other
+value rejects the change with `RETIRED_PARAMETER_VALUE`, which names the
+parameter and the value. See
+[Migrating Replica Parameters](./migrating-replica-parameters.md#the-rule-for-parameters-a-new-driver-version-no-longer-declares).
 
 ### Step 9: Load and test
 
@@ -509,6 +571,9 @@ Before you call the driver done:
       or a `command` or `args` override declares a `container` that
       exists in every workload its label selects, and `values.j2.yml`
       wires none of these overrides.
+- [ ] Every component that must run a single pod sets
+      `singleton: true`, and every component whose count the chart does
+      not set the way you want sets `replicas`.
 - [ ] Every stateful component has a `backup` block with the right
       strategy.
 - [ ] Every externally reachable service is declared under
