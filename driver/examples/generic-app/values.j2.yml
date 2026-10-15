@@ -1,0 +1,166 @@
+---
+# Helm values for bjw-s app-template 5.x, rendered by Styrmin from the deployment's context.
+# Environment variables and the image override are not wired here: Styrmin applies them to the
+# component container (`app`, see driver.styrmin.yml) after the chart renders.
+{%- set probe_spec %}
+              {%- if parameters.health_path %}
+              httpGet:
+                path: "{{ parameters.health_path }}"
+                port: 8080
+              {%- else %}
+              tcpSocket:
+                port: 8080
+              {%- endif %}
+{%- endset %}
+{#- This deployment's own human-readable host. `services` holds every service of the environment,
+    keyed by driver service name, so two deployments of this driver would read each other's entry;
+    `deployed_services` records the owning deployment. Same rule as Styrmin's
+    compute_human_readable_fqdn: <resolved name>-<environment>, sanitized, prefix cut to fit 63. #}
+{%- set own = namespace(name="") %}
+{%- for s in deployed_services if s.deployment_id == (instance.deployment_id | string) and s.component == "app" %}
+{%- set own.name = s.resolved_name %}
+{%- endfor %}
+{%- set env_label = environment.name | to_fqdn_label %}
+{%- set room = 62 - (env_label | length) %}
+{%- set host_label = ((own.name | to_fqdn_label)[:room] | trim("-")) if room > 0 else "" %}
+{%- set readable_fqdn = (host_label ~ "-" ~ env_label ~ "." ~ instance.config.fqdn_suffix) if host_label and instance.config.fqdn_suffix else "" %}
+global:
+  fullnameOverride: styrmin-app
+
+{%- if parameters.fs_group | int > 0 %}
+# A volume is created owned by root: an image that runs as another user needs its group on the volume.
+defaultPodOptions:
+  securityContext:
+    fsGroup: {{ parameters.fs_group | int }}
+    fsGroupChangePolicy: OnRootMismatch
+{%- endif %}
+
+controllers:
+  main:
+    replicas: 1
+    # A ReadWriteOnce volume can only be mounted by one pod at a time, so the old pod must stop first.
+    strategy: {{ "Recreate" if parameters.storage_size | int > 0 else "RollingUpdate" }}
+    # The component identifier declared in driver.styrmin.yml, on the Deployment itself and on its
+    # pods: Styrmin's stop, scheduling and component-label patches select the workload by its own labels.
+    labels:
+      styrmin/component: app
+    pod:
+      labels:
+        styrmin/component: app
+    containers:
+      app:
+        image:
+          repository: "{{ parameters.image_repository }}"
+          tag: "{{ parameters.image_tag or app.version }}"
+          pullPolicy: "{{ parameters.image_pull_policy }}"
+        probes:
+          startup:
+            enabled: true
+            custom: true
+            spec:{{ probe_spec }}
+              periodSeconds: 5
+              failureThreshold: 60
+          liveness:
+            enabled: true
+            custom: true
+            spec:{{ probe_spec }}
+              periodSeconds: 20
+              failureThreshold: 3
+          readiness:
+            enabled: true
+            custom: true
+            spec:{{ probe_spec }}
+              periodSeconds: 10
+              failureThreshold: 3
+
+service:
+  main:
+    controller: main
+    ports:
+      http:
+        port: 8080
+
+ingress:
+  main:
+    # Empty with a dedicated ingress: Styrmin removes the class from the context and annotates the Ingress itself.
+    className: "{{ instance.config.ingress_class }}"
+    # A host is emitted only when known: an empty host would make a catch-all rule.
+    hosts:
+{%- for host in [services['app'].primary_fqdn, readable_fqdn] if host %}
+      - host: "{{ host }}"
+        paths:
+          - path: /
+            pathType: Prefix
+            service:
+              identifier: main
+              port: http
+{%- endfor %}
+
+{%- if parameters.storage_size | int > 0 %}
+persistence:
+  data:
+    type: persistentVolumeClaim
+    accessMode: ReadWriteOnce
+    size: "{{ parameters.storage_size }}Gi"
+    storageClass: "{{ instance.config.standard_storage.storage_class }}"
+    globalMounts:
+      - path: "{{ parameters.storage_path }}"
+{%- endif %}
+
+# Styrmin's environment policies deny all egress except for its own Infrahub, Prefect and
+# Traefik pods (opsmill/styrmin#284), and all ingress except from the environment's ingress
+# controller. So the driver declares what this app needs: from the other applications of its
+# environment, and to DNS, those same applications and, when allowed, the public internet
+# (IPv4 and IPv6, like Styrmin's own egress policy: never the private ranges).
+networkpolicies:
+  ingress:
+    controller: main
+    policyTypes:
+      - Ingress
+    rules:
+      ingress:
+        - from:
+            - namespaceSelector:
+                matchLabels:
+                  styrmin/environment_id: "{{ labels.environment_id }}"
+  egress:
+    controller: main
+    policyTypes:
+      - Egress
+    rules:
+      egress:
+        - to:
+            - namespaceSelector: {}
+              podSelector:
+                matchExpressions:
+                  - key: k8s-app
+                    operator: In
+                    values: [kube-dns, coredns]
+          ports:
+            - port: 53
+              protocol: UDP
+            - port: 53
+              protocol: TCP
+        - to:
+            - namespaceSelector:
+                matchLabels:
+                  styrmin/environment_id: "{{ labels.environment_id }}"
+{%- if parameters.allow_internet %}
+        - to:
+            - ipBlock:
+                cidr: 0.0.0.0/0
+                except:
+                  - 10.0.0.0/8
+                  - 172.16.0.0/12
+                  - 192.168.0.0/16
+                  - 100.64.0.0/10
+        - to:
+            - ipBlock:
+                cidr: ::/0
+                except:
+                  - ::1/128
+                  - fc00::/7
+                  - fe80::/10
+                  - 64:ff9b::/96
+                  - 2001:db8::/32
+{%- endif %}

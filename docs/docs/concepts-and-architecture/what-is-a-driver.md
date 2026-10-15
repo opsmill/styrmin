@@ -161,6 +161,7 @@ The reference repository ships a set of example drivers under
 | Driver | Purpose |
 |--------|---------|
 | [`infrahub`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/infrahub) | OpsMill's Infrahub deployment driver — full-featured reference. |
+| [`generic-app`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/generic-app) | Any single-container HTTP application, such as a Streamlit app: see [the generic-app driver](../drivers/generic-app.md). |
 | [`semaphore`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/semaphore) | Semaphore CI deployment driver. |
 | [`slurpit`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/slurpit) | Slurpit network discovery driver. |
 
