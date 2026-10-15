@@ -83,9 +83,9 @@ that sets `""` and a deployment that sets `nginx` resolve to `nginx`.
 
 ## Consequences
 
-- Driver templates do not need to set the Ingress class. The `simple-app`, `semaphore` and `slurpit`
-  example drivers dropped the class line and kept their `spec.version`; reloading one creates a new
-  driver version with a new provenance fingerprint.
+- Driver templates do not need to set the Ingress class. The `simple-app`, `semaphore`, `slurpit`
+  and `generic-app` example drivers dropped the class line and kept their `spec.version`;
+  reloading one creates a new driver version with a new provenance fingerprint.
 - A chart that sets its own class, by default or with a fixed value, deploys with a dedicated
   ingress controller: its Ingresses have no `spec.ingressClassName` and the annotation `traefik`.
 - A driver version whose template still sets the class keeps deploying in both modes. Styrmin

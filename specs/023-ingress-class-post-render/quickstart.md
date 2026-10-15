@@ -42,7 +42,7 @@ The migrated `simple-app/values.j2.yml` gives the same Ingress as the case `clas
 ## 3. Example drivers and documentation contain no Ingress class value (SC-001)
 
 ```bash
-grep -n "ingress_class\|className" driver/examples/{simple-app,semaphore,slurpit}/values.j2.yml \
+grep -n "ingress_class\|className" driver/examples/{simple-app,semaphore,slurpit,generic-app}/values.j2.yml \
   | grep -v storage_class
 grep -n "ingress_class\|className" docs/docs/drivers/creating-a-driver.md docs/docs/drivers/context.md
 ```
