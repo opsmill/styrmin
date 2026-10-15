@@ -161,3 +161,21 @@ Shared run conditions:
   ```text
   ============ 1 passed, 1 deselected, 1 warning in 137.56s (0:02:17) ============
   ```
+
+## Runs after the rebase onto `develop`
+
+The branch was rebased onto `origin/develop` at `fd17ffb7`. The rebase brought in changes to the dedicated ingress controller (#424) and the new `generic-app` example driver (#468). Commit `bd3b411a` then dropped the class line from `generic-app`. All three tests below ran at HEAD `bd3b411ad3513bd9b004e7a15ac95f253936fb56` with `STYRMIN_IMAGE_VER=e2e-471-bd3b411a`, after `docker compose build server`. Each test ran in its own pytest session with this command, where `<node>` is the node ID without the `[api-chromium]` suffix:
+
+```bash
+uv run pytest "<node>" -k api-chromium -v -s --pdb
+```
+
+A `sleep infinity` process that the run script started and stopped by PID kept the standard input of pdb open. The fixture deleted each vCluster at the end of its session.
+
+| Node ID | vCluster | Verbatim `PASSED` line | Summary line |
+|---------|----------|------------------------|--------------|
+| `backend/tests/e2e/test_cluster_update.py::test_cluster_update_redeploys_and_moves_dedicated_ingress[api-chromium]` | `pytest-1596de6d-ecb5-494c-b319-598924eaaffc` | `PASSED12:20:41 info Removing vCluster container vcluster.cp.pytest-1596de6d-ecb5-494c-b319-598924eaaffc...` | `1 passed, 1 deselected, 1 warning in 231.98s (0:03:51)` |
+| `backend/tests/e2e/test_ingress_controller.py::test_traffic_routes_through_dedicated_ingress[api-chromium]` | `pytest-75f808e4-0807-4e7a-b12a-5cc0992763c2` | `PASSED12:22:57 info Removing vCluster container vcluster.cp.pytest-75f808e4-0807-4e7a-b12a-5cc0992763c2...` | `1 passed, 1 deselected, 1 warning in 134.03s (0:02:14)` |
+| `backend/tests/e2e/test_deploy_generic_app.py::test_deploy_generic_app[api-chromium]` | `pytest-8f2f09fe-a876-4b14-92eb-89a1137ba553` | `PASSED12:25:02 info Removing vCluster container vcluster.cp.pytest-8f2f09fe-a876-4b14-92eb-89a1137ba553...` | `1 passed, 1 deselected, 1 warning in 121.47s (0:02:01)` |
+
+The three tests passed at `2026-10-15T12:20:41Z`, `12:22:57Z` and `12:25:02Z`. Each passed on the first attempt.
