@@ -4,7 +4,7 @@ kind: ApplicationDriver
 metadata:
   name: infrahub-enterprise
 spec:
-  version: "3"
+  version: "4"
   supported_versions: ">=1.5,<2.0"
   info:
     icon: https://docs.infrahub.app/img/infrahub-logo.svg
@@ -24,14 +24,6 @@ spec:
       version: 4.19.2
 
   parameters:
-    - name: replicas_server
-      label: "Number of server replicas"
-      kind: integer
-      default: 1
-    - name: replicas_task_worker
-      label: "Number of task worker replicas"
-      kind: integer
-      default: 2
     - name: database_storage_size
       label: "Database storage size (Gi)"
       kind: integer
@@ -44,6 +36,7 @@ spec:
   components:
     server:
       container: infrahub-server
+      replicas: 1
       cpu: 4
       identifier:
         label:
@@ -58,12 +51,14 @@ spec:
 
     task-worker:
       container: infrahub-task-worker
+      replicas: 2
       identifier:
         label:
           service: infrahub-task-worker
 
     database:
       container: neo4j
+      singleton: true
       identifier:
         label:
           infrahub/service: database
@@ -73,6 +68,7 @@ spec:
 
     cache:
       container: redis
+      singleton: true
       identifier:
         label:
           infrahub/service: cache
@@ -91,6 +87,7 @@ spec:
 
     task-manager-db:
       container: postgresql
+      singleton: true
       identifier:
         label:
           infrahub/service: task-manager-db

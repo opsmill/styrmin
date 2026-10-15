@@ -753,3 +753,58 @@ async def test_driver_defaults_report_without_an_override(
         for component, count in (("server", 2), ("database", 1))
         for kind in REPLICA_PATCH_KINDS
     )
+
+
+# ---------------------------------------------------------------------------
+# T041 — an override on a component the target driver version drops (FR-009)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_version_change_keeps_override_on_a_dropped_component(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """The target driver version no longer declares ``cache``: the change succeeds, the
+    ``cache`` override of 2 stays stored, is reported as orphaned and not applicable, and the
+    rendered replica patches leave ``cache`` out."""
+    _arm_prefect(prefect_manager_mock)
+    deployment_id, _ = await _seed_deployment(session, {**DECLARATIONS, "cache": {}})
+    updated = await _post_update(
+        client, deployment_id, [{"name": "cache", "replicas": 2}]
+    )
+    assert "errors" not in updated, updated
+    target_id = await _seed_target_driver_version(session, deployment_id, DECLARATIONS)
+
+    payload = await _post_update_version(client, deployment_id, target_id, None)
+
+    assert "errors" not in payload, payload
+    stored = await _stored_row(session, deployment_id)
+    assert stored.application_driver_version_id == target_id
+    assert stored.config == {"components": {"cache": {"replicas": 2}}}
+    assert await _task_count(session, deployment_id) == 2
+    assert await _read_rows(client, deployment_id) == [
+        {
+            "component": "cache",
+            "count": None,
+            "source": "CHART",
+            "override": 2,
+            "singleton": False,
+            "isOrphaned": True,
+            "isApplicable": False,
+        },
+        DATABASE_ROW,
+        _row("server", None, "CHART"),
+        WORKER_ROW,
+    ]
+
+    context = await generate_context_from_deployment_id(
+        deployment_id, SqlModelUnitOfWork(session=session)
+    )
+    patched = {
+        tp.target.label_selector for tp in build_component_replica_patches(context)
+    }
+    # ``database`` (singleton) and ``worker`` (driver default) keep their patches.
+    assert patched == {
+        "app.kubernetes.io/name=database-app",
+        "app.kubernetes.io/name=worker-app",
+    }
