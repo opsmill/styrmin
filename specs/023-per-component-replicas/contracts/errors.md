@@ -13,9 +13,9 @@ Each error is a `ServiceError` subclass with `error_code`, `default_message` and
 | `component_name` | the component |
 | `requested_replicas` | the submitted value, as given |
 
-Trigger: a value below 1, a `bool`, or a value that is not an integer (a JSON `config` map can carry any type; the GraphQL `Int` input already rejects non-integers).
+Trigger: a value below 1 or above 2147483647 (Kubernetes `int32`), a `bool`, or a value that is not an integer (a JSON `config` map can carry any type; the GraphQL `Int` input already rejects non-integers).
 
-Message: "Replica count for component '`<name>`' must be an integer of 1 or more, got `<value>`. To run no pods, stop the component instead."
+Message: "Replica count for component '`<name>`' must be an integer from 1 to 2147483647, got `<value>`. To run no pods, stop the component instead."
 
 ## `UNKNOWN_COMPONENT_REPLICA_OVERRIDE` (new)
 
@@ -67,7 +67,7 @@ Message (FR-010a): "Parameter '`<name>`' is not declared by `<target>`, and this
 | Trigger | Field path in the message |
 |---------|---------------------------|
 | `singleton: true` with `replicas` greater than 1 | `spec.components.<name>` |
-| `replicas` below 1, a string, a float or a `bool` | `spec.components.<name>.replicas` |
+| `replicas` below 1 or above 2147483647, a string, a float or a `bool` | `spec.components.<name>.replicas` |
 | `singleton` not a `bool` | `spec.components.<name>.singleton` |
 
 No driver version row is stored.

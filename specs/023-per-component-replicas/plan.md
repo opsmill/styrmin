@@ -16,7 +16,7 @@ Technical approach (details in [research.md](research.md)):
 - Three write checks on every write path, including the check against the target driver version (D-005, D-006), and the rule that drops a retired parameter value equal to the current default and rejects any other value (D-007).
 - No change to readiness: helm-controller's kstatus wait and the direct-apply polling already compare each workload with its post-rendered `spec.replicas` (D-008).
 - GraphQL `ComponentConfigInput.replicas`, `Deployment.componentReplicas`, `ComponentConfig.replicas`/`singleton` (D-009); SDK, `styrminctl` and frontend surfaces (D-010, D-011).
-- New example driver versions: `infrahub` 5, `infrahub-enterprise` 4, `simple-app` 4 (D-013); a dual-entrypoint E2E in `shard_configuration` (D-012).
+- New example driver versions: `infrahub` 5 and `infrahub-enterprise` 4 (with `database`, `task-manager-db` and `cache` as singleton components), `simple-app` 4 (D-013); a dual-entrypoint E2E in `shard_configuration` that reads the workload once after each task to prove the task waited (D-012).
 
 ## Technical Context
 
@@ -59,6 +59,8 @@ All items are resolved; [research.md](research.md) has no open "NEEDS CLARIFICAT
 | VI. Format and lint | Pass | `uv run invoke format lint` and frontend lint in the tasks |
 | VII. Documentation accuracy | Pass | Concept page, driver format pages, infrahub migration note, glossary, `styrminctl` reference, ADR-070, `dev/knowledge`, CONTEXT.md and changelog fragments in the same change (D-015) |
 | Governance gates | Pass | GraphQL schema change is in the PRD (Governance Gates Crossed). No database schema change, no new dependency, no CI or auth change |
+
+**Post-critique re-check** ([critiques/critique-2026-10-15.md](critiques/critique-2026-10-15.md)): Pass. E1 (serialisation) and E7 (E2E proves SC-002) were applied to research D-002 and D-012; P2 extends FR-011 to `task-manager-db` and `cache`.
 
 **Post-design re-check**: Pass. Phase 1 added no dependency and no layer shortcut. It added one error code beyond the PRD's three (`UNKNOWN_COMPONENT_REPLICA_OVERRIDE`), which applies the existing unknown-component rule to the new slot (D-005).
 
@@ -127,7 +129,7 @@ backend/tests/
     ├── test_deployment_replicas.py            # new, shard_configuration, dual-entrypoint
     ├── drivers/{protocol,api_driver,ui_driver}.py               # set_component_replicas
     ├── pages/deployment_detail.py             # set_component_replicas
-    └── helpers/workloads.py                   # wait_for_workload_replicas
+    └── helpers/workloads.py                   # read_workload_replicas
 
 python_sdk/src/styrmin_sdk/
 ├── graphql/get_deployment.graphql (+ driver operations)         # select new fields; regenerate _generated/
@@ -172,6 +174,7 @@ User Story 1 is the first deliverable; the others build on its resolver and patc
 | Risk | Mitigation |
 |------|------------|
 | A third-party driver version already declares an undocumented `components.<name>.replicas` key, which starts to apply after the upgrade (D-002) | Changelog `changed` fragment and the driver format docs state it; driver authors can remove the key |
+| The new typed fields add `replicas: null, singleton: false` to every serialised declaration, so the first update after a Styrmin upgrade would start a HelmRelease upgrade that changes nothing (critique E1) | The model serialises the two keys only when set; a unit test compares the dump with the dump before the change (D-002) |
 | A driver version stored before the change holds an untyped `replicas` or `singleton` value that the typed model rejects, which would fail the render | `parse_stored_component_declaration` drops the two keys with a warning when they are invalid (D-002); a unit test covers it |
 | An older operator reads a context with the new `ComponentContext.replica_override` field (`extra="forbid"`) | Same upgrade order as image overrides (018): the agent chart and server are released together; the changelog notes it |
 | helm-controller's wait does not treat a scale-down as in progress | The E2E asserts `status.replicas` returns to 1 after the task completes (D-008) |

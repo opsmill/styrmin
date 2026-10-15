@@ -12,7 +12,7 @@ Location: [`context/models/config.py`](../../backend/styrmin_backend/context/mod
 
 | Field | Type | Default | Rule |
 |-------|------|---------|------|
-| `replicas` | `int \| None` | `None` | An integer of 1 or more. `bool`, strings, floats and values below 1 raise `INVALID_REPLICA_COUNT` before type conversion. `None` means no override. |
+| `replicas` | `int \| None` | `None` | An integer from 1 to 2147483647 (Kubernetes `int32`). `bool`, strings, floats and values out of range raise `INVALID_REPLICA_COUNT` before type conversion. `None` means no override. |
 
 Write-time rules against the driver version the deployment is bound to after the write (research D-005, D-006):
 
@@ -25,10 +25,10 @@ Location: [`ArbitrarySectionModel`](../../backend/styrmin_backend/services/drive
 
 | Field | Type | Default | Rule |
 |-------|------|---------|------|
-| `replicas` | `StrictInt \| None` | `None` | 1 or more. |
+| `replicas` | `StrictInt \| None` | `None` | 1 to 2147483647. |
 | `singleton` | `StrictBool` | `false` | `singleton: true` with `replicas` greater than 1 fails the driver load (`DriverLoadingError`, field path `spec.components.<name>`). |
 
-Driver versions loaded before the change have neither key; they read as `None` and `false`.
+Driver versions loaded before the change have neither key; they read as `None` and `false`. The model serialises `replicas` only when set and `singleton` only when `true`, so a declaration that uses neither key dumps to the same dict as before the change (research D-002).
 
 ### Parameter values (existing, new rule on driver version change)
 
