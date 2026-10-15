@@ -140,3 +140,30 @@ async def wait_for_ready_container_image(
         f"Timed out waiting for a ready {container_name!r} container running "
         f"{image} in namespace {namespace} (selector={label_selector!r}): {last_seen}"
     )
+
+
+async def read_workload_replicas(
+    apps_api: kubeclient.AppsV1Api, *, namespace: str, kind: str, name: str
+) -> dict[str, int]:
+    """Read a ``Deployment`` or ``StatefulSet`` once and return its replica counts.
+
+    Keys: ``spec``, ``status``, ``updated``, ``ready``, ``available``; a status
+    field the API omits (it does when the count is 0) reads as 0.
+    """
+    readers = {
+        "Deployment": apps_api.read_namespaced_deployment,
+        "StatefulSet": apps_api.read_namespaced_stateful_set,
+    }
+    if kind not in readers:
+        raise ValueError(
+            f"unsupported workload kind {kind!r}; expected one of {sorted(readers)}"
+        )
+    workload = await readers[kind](name, namespace)
+    status = workload.status
+    return {
+        "spec": workload.spec.replicas or 0,
+        "status": status.replicas or 0,
+        "updated": status.updated_replicas or 0,
+        "ready": status.ready_replicas or 0,
+        "available": status.available_replicas or 0,
+    }

@@ -360,6 +360,20 @@ def test_set_component_image_is_declared_keyword_only() -> None:
         )
 
 
+def test_set_component_replicas_is_declared_keyword_only() -> None:
+    """Pins the component replica setter (023) the replica E2E drives on both
+    entrypoints, keyword-only on the protocol and on each driver."""
+    assert "set_component_replicas" in _protocol_methods()
+    assert _is_async(ScenarioDriver, "set_component_replicas")
+    for cls in (ScenarioDriver, ApiScenarioDriver, UiScenarioDriver):
+        signature = inspect.signature(cls.set_component_replicas)
+        params = list(signature.parameters.values())[1:]
+        assert [p.name for p in params] == ["deployment_id", "component", "replicas"]
+        assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in params), (
+            f"{cls.__name__}.set_component_replicas: parameters must be keyword-only"
+        )
+
+
 def test_set_component_container_override_is_declared_keyword_only() -> None:
     """Pins the command and args setter (022) the container override E2E drives
     on both entrypoints, keyword-only on the protocol and on each driver."""

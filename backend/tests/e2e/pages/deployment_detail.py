@@ -519,6 +519,58 @@ class DeploymentDetailPage:
             await self._remove_component_block_if_empty(block, component)
         await self._apply_config_drawer(drawer, what="component image")
 
+    async def set_component_replicas(
+        self, *, component: str, replicas: int | None
+    ) -> None:
+        """Fill (or clear, for ``None``) ``component``'s Replicas field in the
+        Settings edit drawer, then apply through the diff dialog.
+
+        A block left with no override is removed. Closes the drawer without
+        submitting when the field already matches. Raises
+        ``ScenarioActionError`` when the field is read-only (singleton).
+        """
+        drawer, block = await self._open_component_override_block(component)
+        replicas_input = block.locator(f"[data-testid=comp-replicas-{component}]")
+        await expect(replicas_input).to_be_visible()
+        if await replicas_input.get_attribute("readonly") is not None:
+            await self._close_config_drawer(drawer)
+            raise ScenarioActionError(
+                f"the Replicas field of {component!r} is read-only: "
+                f"{await replicas_input.input_value()!r}"
+            )
+
+        desired = "" if replicas is None else str(replicas)
+        if await replicas_input.input_value() == desired:
+            await self._close_config_drawer(drawer)
+            return
+
+        # Typing into a component without a block creates the block and re-renders the field.
+        await replicas_input.fill(desired)
+        await expect(replicas_input).to_have_value(desired)
+        await replicas_input.press("Tab")
+        error = block.locator(f"[data-testid=comp-replicas-error-{component}]")
+        if await error.count() > 0:
+            raise ScenarioActionError(
+                f"replicas {desired!r} rejected inline: {await error.inner_text()}"
+            )
+
+        if not desired:
+            await self._remove_component_block_if_empty(block, component)
+        await self._apply_config_drawer(drawer, what="component replicas")
+
+    async def read_component_replicas_field(self, *, component: str) -> dict[str, Any]:
+        """Open the Settings edit drawer, read ``component``'s Replicas field
+        (``value``, ``read_only``) and close the drawer without changes."""
+        drawer, block = await self._open_component_override_block(component)
+        replicas_input = block.locator(f"[data-testid=comp-replicas-{component}]")
+        await expect(replicas_input).to_be_visible()
+        field = {
+            "value": await replicas_input.input_value(),
+            "read_only": await replicas_input.get_attribute("readonly") is not None,
+        }
+        await self._close_config_drawer(drawer)
+        return field
+
     async def set_component_container_override(
         self, *, component: str, command: list[str] | None, args: list[str] | None
     ) -> None:
@@ -618,7 +670,14 @@ class DeploymentDetailPage:
         has_image = await image_input.count() > 0 and bool(
             await image_input.input_value()
         )
-        if await remaining.count() == 0 and not has_image:
+        # A singleton's read-only "1 (singleton)" field is not an override.
+        replicas_input = block.locator(
+            f"[data-testid=comp-replicas-{component}]:not([readonly])"
+        )
+        has_replicas = await replicas_input.count() > 0 and bool(
+            await replicas_input.input_value()
+        )
+        if await remaining.count() == 0 and not has_image and not has_replicas:
             await block.locator(
                 f"[data-testid=component-override-remove-{component}]"
             ).click()

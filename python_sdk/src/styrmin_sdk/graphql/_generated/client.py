@@ -44,6 +44,7 @@ from .get_deployment_component_env_vars_full import GetDeploymentComponentEnvVar
 from .get_deployment_component_image_overrides_full import (
     GetDeploymentComponentImageOverridesFull,
 )
+from .get_deployment_component_replicas_full import GetDeploymentComponentReplicasFull
 from .get_deployment_override_applicability import GetDeploymentOverrideApplicability
 from .get_deployment_pod_statuses import GetDeploymentPodStatuses
 from .get_deployment_resolved_scheduling import GetDeploymentResolvedScheduling
@@ -1151,6 +1152,35 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return GetDeploymentComponentImageOverridesFull.model_validate(data)
+
+    async def get_deployment_component_replicas_full(
+        self, deployment_id: UUID, **kwargs: Any
+    ) -> GetDeploymentComponentReplicasFull:
+        query = gql("""
+            query GetDeploymentComponentReplicasFull($deploymentId: UUID!) {
+              deployment(deploymentId: $deploymentId) {
+                id
+                componentReplicas {
+                  component
+                  count
+                  source
+                  override
+                  singleton
+                  isOrphaned
+                  isApplicable
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {"deploymentId": deployment_id}
+        response = await self.execute(
+            query=query,
+            operation_name="GetDeploymentComponentReplicasFull",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return GetDeploymentComponentReplicasFull.model_validate(data)
 
     async def get_deployment_override_applicability(
         self, deployment_id: UUID, **kwargs: Any
