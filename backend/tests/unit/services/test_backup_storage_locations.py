@@ -1,3 +1,4 @@
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -14,10 +15,12 @@ from styrmin_backend.services.backup_storage_locations import (
 )
 from styrmin_backend.services.exceptions import (
     BackupStorageLocationAlreadyExistsError,
+    BackupStorageLocationCleanupError,
     BackupStorageLocationInUseError,
     BackupStorageLocationNotFoundError,
     EnvironmentNotFoundError,
 )
+from styrmin_backend.workflows.models import PrefectAction
 from tests.unit.services.fakes import (
     FakeBackupStorageLocationRepository,
     FakeUnitOfWork,
@@ -184,12 +187,44 @@ async def test_delete_backup_storage_location(
     uow: FakeUnitOfWork,
     fake_backup_storage_location: BackupStorageLocation,
     fake_backup_storage_location_repository: FakeBackupStorageLocationRepository,
+    prefect_manager_mock,
 ):
+    prefect_manager_mock.run_action = AsyncMock()
+
     await delete_backup_storage_location(
         backup_storage_location_id=fake_backup_storage_location.id, uow=uow
     )
+
     assert uow.committed
     assert len(fake_backup_storage_location_repository.models) == 0
+    # Issue #475: the location is also removed from the cluster.
+    prefect_manager_mock.run_action.assert_awaited_once_with(
+        action=PrefectAction.SYNC_BSL_DELETE,
+        parameters={"bsl_name": "test-bsl", "namespace": "styrmin"},
+    )
+
+
+async def test_delete_backup_storage_location_is_refused_when_cleanup_fails(
+    uow: FakeUnitOfWork,
+    fake_backup_storage_location: BackupStorageLocation,
+    fake_backup_storage_location_repository: FakeBackupStorageLocationRepository,
+    prefect_manager_mock,
+):
+    """Issue #475: a cleanup that cannot be submitted keeps the location.
+
+    Once the row is gone nothing records that the Velero object and credentials
+    Secret exist, so the delete is refused and can be retried.
+    """
+    prefect_manager_mock.run_action = AsyncMock(side_effect=RuntimeError("down"))
+
+    with pytest.raises(BackupStorageLocationCleanupError) as exc_info:
+        await delete_backup_storage_location(
+            backup_storage_location_id=fake_backup_storage_location.id, uow=uow
+        )
+
+    assert exc_info.value.error_metadata == {"backup_storage_location_name": "test-bsl"}
+    assert not uow.committed
+    assert len(fake_backup_storage_location_repository.models) == 1
 
 
 async def test_delete_backup_storage_location_not_found(uow: FakeUnitOfWork):

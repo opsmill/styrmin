@@ -112,6 +112,8 @@ from styrmin_backend.services.backup_storage_locations import (
     assign_backup_storage_location as assign_bsl_service,
     create_backup_storage_location as create_bsl_service,
     delete_backup_storage_location as delete_bsl_service,
+    get_bsl_id_to_remove_from_cluster,
+    request_bsl_cluster_cleanup,
     unassign_backup_storage_location as unassign_bsl_service,
     update_backup_storage_location as update_bsl_service,
 )
@@ -710,14 +712,7 @@ class Mutation:
                                 if e.cluster_id == cluster_id
                             ]
                             if not old_remaining:
-                                prefect_manager = get_manager()
-                                await prefect_manager.run_action(
-                                    action=PrefectAction.SYNC_BSL_DELETE,
-                                    parameters={
-                                        "bsl_id": str(old_bsl_id),
-                                        "namespace": "styrmin",
-                                    },
-                                )
+                                await request_bsl_cluster_cleanup(old_bsl_id)
         except Exception as exc:
             logger.warning(
                 f"Failed to dispatch BSL sync workflow for environment {environment_id}",
@@ -737,39 +732,16 @@ class Mutation:
     ) -> Environment | None:
         uow = info.context["uow"]
 
-        # Capture current BSL info before unassigning
-        bsl_id: UUID | None = None
-        cluster_id: UUID | None = None
-        is_last_on_cluster = False
-        async with uow:
-            env = await uow.environments.get(environment_id)
-            if env and env.backup_storage_location_id:
-                cluster_id = env.cluster_id
-                bsl = await uow.backup_storage_locations.get(
-                    env.backup_storage_location_id
-                )
-                if bsl:
-                    bsl_id = bsl.id
-                    other_envs_on_cluster = [
-                        e
-                        for e in bsl.environments
-                        if e.cluster_id == cluster_id and e.id != environment_id
-                    ]
-                    is_last_on_cluster = len(other_envs_on_cluster) == 0
+        # Capture the BSL to remove from the cluster before unassigning: it is
+        # set only when this is the last environment of the cluster using it
+        bsl_id = await get_bsl_id_to_remove_from_cluster(environment_id, uow)
 
         await unassign_bsl_service(environment_id=environment_id, uow=uow)
 
         # Delete BSL from cluster if this was the last environment referencing it
-        if is_last_on_cluster and bsl_id:
+        if bsl_id:
             try:
-                prefect_manager = get_manager()
-                await prefect_manager.run_action(
-                    action=PrefectAction.SYNC_BSL_DELETE,
-                    parameters={
-                        "bsl_id": str(bsl_id),
-                        "namespace": "styrmin",
-                    },
-                )
+                await request_bsl_cluster_cleanup(bsl_id)
             except Exception as exc:
                 logger.warning(
                     f"Failed to dispatch BSL delete workflow for environment {environment_id}",

@@ -5,15 +5,25 @@ from __future__ import annotations
 from typing import Sequence
 from uuid import UUID
 
+from fast_depends import Depends, inject
+
 from styrmin_backend.db.models import BackupStorageLocation
 from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.exceptions import (
     BackupStorageLocationAlreadyExistsError,
+    BackupStorageLocationCleanupError,
     BackupStorageLocationInUseError,
     BackupStorageLocationNotFoundError,
     EnvironmentNotFoundError,
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
+from styrmin_backend.workflows.dependency import get_manager
+from styrmin_backend.workflows.manager import PrefectManager
+from styrmin_backend.workflows.models import PrefectAction
+
+# Namespace of the Velero object and credentials Secret that Styrmin creates
+# for a backup storage location.
+BSL_CLUSTER_NAMESPACE = "styrmin"
 
 
 async def create_backup_storage_location(
@@ -118,10 +128,69 @@ async def update_backup_storage_location(
         return updated
 
 
+@inject(cast_result=False)  # type: ignore[arg-type]
+async def request_bsl_cluster_cleanup(
+    bsl_id: UUID,
+    prefect_manager: PrefectManager = Depends(get_manager),
+) -> None:
+    """Submit the workflow that removes a location's objects from the cluster.
+
+    The workflow deletes the Velero ``BackupStorageLocation``
+    (``styrmin-bsl-<name>``) and its credentials Secret. It is submitted and
+    not awaited to completion: a run that fails inside the cluster is visible
+    in the workflow service, not here.
+
+    Raises:
+        Exception: Whatever the workflow manager raises when the submission
+            fails. Callers decide whether that blocks their operation.
+    """
+    await prefect_manager.run_action(
+        action=PrefectAction.SYNC_BSL_DELETE,
+        parameters={"bsl_id": str(bsl_id), "namespace": BSL_CLUSTER_NAMESPACE},
+    )
+
+
+async def get_bsl_id_to_remove_from_cluster(
+    environment_id: UUID, uow: UnitOfWork
+) -> UUID | None:
+    """Id of the location to remove from the cluster once an environment stops using it.
+
+    Returns ``None`` when the environment has no location, or when another
+    environment of the same cluster still uses it. Call it *before* the
+    environment's assignment or row changes, because it reads the current
+    assignment.
+    """
+    async with uow:
+        environment = await uow.environments.get(environment_id)
+        if environment is None or environment.backup_storage_location_id is None:
+            return None
+        bsl = await uow.backup_storage_locations.get(
+            environment.backup_storage_location_id
+        )
+        if bsl is None:
+            return None
+        other_environments_on_cluster = [
+            other
+            for other in bsl.environments
+            if other.cluster_id == environment.cluster_id and other.id != environment_id
+        ]
+        if other_environments_on_cluster:
+            return None
+        return bsl.id
+
+
 async def delete_backup_storage_location(
     backup_storage_location_id: UUID, uow: UnitOfWork
 ) -> None:
-    """Delete a backup storage location. Raises if in use by environments."""
+    """Delete a backup storage location and remove it from the cluster.
+
+    Raises:
+        BackupStorageLocationNotFoundError: The location does not exist.
+        BackupStorageLocationInUseError: Environments still use the location.
+        BackupStorageLocationCleanupError: The cluster cleanup could not be
+            submitted. The location is kept, because once its row is gone
+            nothing records that the cluster objects exist.
+    """
     async with uow:
         bsl = await uow.backup_storage_locations.get(backup_storage_location_id)
         if bsl is None:
@@ -132,6 +201,11 @@ async def delete_backup_storage_location(
         if bsl.environments:
             env_names = [env.name for env in bsl.environments]
             raise BackupStorageLocationInUseError(environment_names=env_names)
+
+        try:
+            await request_bsl_cluster_cleanup(bsl.id)
+        except Exception as exc:
+            raise BackupStorageLocationCleanupError(bsl.name) from exc
 
         await uow.backup_storage_locations.delete(bsl)
         await uow.commit()

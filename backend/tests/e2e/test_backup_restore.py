@@ -69,6 +69,16 @@ CLEANUP_WAIT_TIMEOUT_SECONDS = 180.0
 # fanout then skips it and no Task ever appears, so stop waiting after this.
 NOOP_FANOUT_GRACE_SECONDS = 15.0
 
+# Namespace of the Velero object and credentials Secret Styrmin keeps per
+# backup storage location. The cleanup is a submitted workflow, so the objects
+# leave the cluster shortly after the delete returns, not with it.
+BSL_CLUSTER_NAMESPACE = "styrmin"
+BSL_CLUSTER_CLEANUP_TIMEOUT_SECONDS = 60.0
+# How long to watch a location that must *stay* in the cluster. A cleanup
+# wrongly submitted would remove it within seconds, so this only needs to
+# outlast the workflow's start-up.
+BSL_CLUSTER_KEEP_GRACE_SECONDS = 20.0
+
 # One coordinated environment backup: N constituent per-instance Velero backups
 # dispatched concurrently after the parent commits. Calibrated off the sibling
 # per-instance budgets in this shard rather than guessed — 180s for one
@@ -3271,3 +3281,223 @@ async def test_environment_clone_lifecycle(
                 deployment_id=primary_deployment_id,
                 timeout=CLEANUP_WAIT_TIMEOUT_SECONDS,
             )
+
+
+async def bsl_cluster_objects_present(
+    kubeconfig_path: str, bsl_name: str
+) -> tuple[bool, bool]:
+    """Whether a location's Velero object and credentials Secret are in the cluster.
+
+    Returns ``(velero_object_present, secret_present)`` for the objects Styrmin
+    names ``styrmin-bsl-<name>`` and ``styrmin-bsl-<name>-credentials``.
+    """
+    from kubernetes_asyncio import client as kubeclient
+    from kubernetes_asyncio import config as k8s_config
+    from kubernetes_asyncio.client import ApiException, CoreV1Api, CustomObjectsApi
+
+    velero_name = f"styrmin-bsl-{bsl_name}"
+    await k8s_config.load_config(config_file=kubeconfig_path)
+    api_client = kubeclient.ApiClient()
+
+    async def exists(read: Any) -> bool:
+        try:
+            await read
+        except ApiException as exc:
+            if exc.status == 404:
+                return False
+            raise
+        return True
+
+    try:
+        velero_object_present = await exists(
+            CustomObjectsApi(api_client).get_namespaced_custom_object(
+                group="velero.io",
+                version="v1",
+                namespace=BSL_CLUSTER_NAMESPACE,
+                plural="backupstoragelocations",
+                name=velero_name,
+            )
+        )
+        secret_present = await exists(
+            CoreV1Api(api_client).read_namespaced_secret(
+                name=f"{velero_name}-credentials", namespace=BSL_CLUSTER_NAMESPACE
+            )
+        )
+    finally:
+        await api_client.close()
+    return velero_object_present, secret_present
+
+
+async def wait_for_bsl_cluster_objects(
+    kubeconfig_path: str, bsl_name: str, *, present: bool, timeout: float
+) -> None:
+    """Wait until both of a location's cluster objects are present, or both gone."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    seen: tuple[bool, bool] = (not present, not present)
+    while loop.time() < deadline:
+        seen = await bsl_cluster_objects_present(kubeconfig_path, bsl_name)
+        if seen == (present, present):
+            return
+        await asyncio.sleep(2)
+    raise AssertionError(
+        f"Expected both cluster objects of BSL {bsl_name!r} to be "
+        f"{'present' if present else 'gone'} within {timeout}s; "
+        f"(velero object present, secret present) = {seen}"
+    )
+
+
+async def create_leaked_bsl_cluster_objects(
+    kubeconfig_path: str, bsl_name: str, bsl_id: str
+) -> None:
+    """Create the objects Styrmin 0.1.48 and earlier left behind for a deleted environment."""
+    from kubernetes_asyncio import client as kubeclient
+    from kubernetes_asyncio import config as k8s_config
+    from kubernetes_asyncio.client import CoreV1Api, CustomObjectsApi
+
+    velero_name = f"styrmin-bsl-{bsl_name}"
+    secret_name = f"{velero_name}-credentials"
+    labels = {"styrmin.io/managed": "true", "styrmin.io/bsl-id": bsl_id}
+    await k8s_config.load_config(config_file=kubeconfig_path)
+    api_client = kubeclient.ApiClient()
+    try:
+        await CoreV1Api(api_client).create_namespaced_secret(
+            namespace=BSL_CLUSTER_NAMESPACE,
+            body={
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "metadata": {
+                    "name": secret_name,
+                    "namespace": BSL_CLUSTER_NAMESPACE,
+                    "labels": labels,
+                },
+                "type": "Opaque",
+                "stringData": {"cloud": "[default]\n"},
+            },
+        )
+        await CustomObjectsApi(api_client).create_namespaced_custom_object(
+            group="velero.io",
+            version="v1",
+            namespace=BSL_CLUSTER_NAMESPACE,
+            plural="backupstoragelocations",
+            body={
+                "apiVersion": "velero.io/v1",
+                "kind": "BackupStorageLocation",
+                "metadata": {
+                    "name": velero_name,
+                    "namespace": BSL_CLUSTER_NAMESPACE,
+                    "labels": labels,
+                },
+                "spec": {
+                    "provider": "aws",
+                    "objectStorage": {"bucket": "velero"},
+                    "config": {
+                        "region": "garage",
+                        "s3ForcePathStyle": "true",
+                        "s3Url": "http://garage.styrmin.svc:3900",
+                    },
+                    "credential": {"name": secret_name, "key": "cloud"},
+                },
+            },
+        )
+    finally:
+        await api_client.close()
+
+
+@pytest.mark.ci
+@pytest.mark.shard_backup
+@pytest.mark.api_only(
+    reason="Every action is a raw SDK or Kubernetes call and no dual-entrypoint "
+    "driver method is invoked: the assertions are on the Velero object and the "
+    "Secret in the cluster, which the UI cannot show. A [ui-chromium] variant "
+    "would replay the same GraphQL calls and repeat the same cluster checks."
+)
+async def test_bsl_cluster_objects_are_removed_with_last_environment_and_with_bsl(
+    styrmin_resources: dict,
+    velero_ready: None,  # noqa: ARG001 — the BackupStorageLocation CRD must exist
+    vcluster: dict,
+) -> None:
+    """Issue #475: a backup storage location does not outlive what used it.
+
+    Two environments share one location. Deleting the first leaves the
+    location's Velero object and credentials Secret in the cluster, because the
+    second still uses it. Deleting the second removes both. Objects an earlier
+    Styrmin version left behind for a location that no environment uses any
+    more are removed when that location is deleted.
+    """
+    from uuid import uuid4
+
+    client: StyrminClient = styrmin_resources["client"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    suffix = uuid4().hex[:8]
+    bsl_name = f"bsl-475-{suffix}"
+
+    bsl = await client.backup_storage_locations.create(
+        name=bsl_name,
+        endpoint="http://garage.styrmin.svc:3900",
+        bucket="velero",
+        region="garage",
+        access_key_id="GKdeadbeefdeadbeefdeadbeef",
+        secret_access_key="deadbeef" * 8,
+    )
+    environment_ids: list[str] = []
+    bsl_deleted = False
+    try:
+        for label in ("a", "b"):
+            environment = await client.environments.create(
+                name=f"bsl-475-{label}-{suffix}",
+                cluster_id=styrmin_resources["cluster_id"],
+                config={},
+            )
+            environment_ids.append(str(environment.id))
+            await client.backup_storage_locations.assign(
+                environment_id=environment.id, bsl_id=bsl.id
+            )
+
+        await wait_for_bsl_cluster_objects(
+            kubeconfig_path,
+            bsl_name,
+            present=True,
+            timeout=BSL_CLUSTER_CLEANUP_TIMEOUT_SECONDS,
+        )
+
+        # Deleting one of two environments sharing the location keeps it.
+        await client.environments.delete(environment_id=environment_ids[0])
+        await asyncio.sleep(BSL_CLUSTER_KEEP_GRACE_SECONDS)
+        assert await bsl_cluster_objects_present(kubeconfig_path, bsl_name) == (
+            True,
+            True,
+        ), "BSL objects must stay while another environment still uses the BSL"
+
+        # Deleting the last environment using it removes the objects.
+        await client.environments.delete(environment_id=environment_ids[1])
+        environment_ids.clear()
+        await wait_for_bsl_cluster_objects(
+            kubeconfig_path,
+            bsl_name,
+            present=False,
+            timeout=BSL_CLUSTER_CLEANUP_TIMEOUT_SECONDS,
+        )
+
+        # Objects left by an earlier version go when the location is deleted.
+        await create_leaked_bsl_cluster_objects(kubeconfig_path, bsl_name, str(bsl.id))
+        assert await bsl_cluster_objects_present(kubeconfig_path, bsl_name) == (
+            True,
+            True,
+        )
+        await client.backup_storage_locations.delete(bsl.id)
+        bsl_deleted = True
+        await wait_for_bsl_cluster_objects(
+            kubeconfig_path,
+            bsl_name,
+            present=False,
+            timeout=BSL_CLUSTER_CLEANUP_TIMEOUT_SECONDS,
+        )
+    finally:
+        # The cluster is session-shared: leave no environment or location behind.
+        for environment_id in environment_ids:
+            with suppress(Exception):
+                await client.environments.delete(environment_id=environment_id)
+        if not bsl_deleted:
+            with suppress(Exception):
+                await client.backup_storage_locations.delete(bsl.id)

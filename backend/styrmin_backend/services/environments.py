@@ -17,6 +17,10 @@ from styrmin_backend.services.backup.environment import (
     delete_environment_backups_for_environment,
     guard_no_clone_occupying_environment,
 )
+from styrmin_backend.services.backup_storage_locations import (
+    get_bsl_id_to_remove_from_cluster,
+    request_bsl_cluster_cleanup,
+)
 from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.cluster_config_fanout import fan_out_environment_config
 from styrmin_backend.services.clusters import resolve_cluster
@@ -484,6 +488,13 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
 
     4. **The environment row goes.**
 
+    5. **The backup storage location leaves the cluster.** When this was the
+       last environment of its cluster using the location, the workflow that
+       removes the location's Velero object and credentials Secret is
+       submitted after the row is gone. It is best-effort, like the teardown
+       in step 3: a submission that fails is logged and does not undo the
+       delete. Deleting the location itself is the safety net.
+
     Raises:
         EnvironmentNotFoundError: When ``environment_id`` does not exist.
     """
@@ -494,6 +505,10 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
         detach_clones_from_created_environment,
         resolve_clones_of_deleted_source_environment,
     )
+
+    # Read before anything changes: it depends on this environment's current
+    # assignment, and the row it is read from is deleted below.
+    bsl_id_to_remove = await get_bsl_id_to_remove_from_cluster(environment_id, uow)
 
     async with uow:
         environment = await uow.environments.get(environment_id)
@@ -558,6 +573,19 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
             return
         await uow.environments.delete(environment)
         await uow.commit()
+
+    if bsl_id_to_remove is not None:
+        try:
+            await request_bsl_cluster_cleanup(bsl_id_to_remove)
+        except Exception as exc:
+            logger.warning(
+                "environment_delete_bsl_cleanup_failed environment_id={} "
+                "bsl_id={} error={} the location's cluster objects may remain "
+                "until the location is deleted",
+                environment_id,
+                bsl_id_to_remove,
+                exc,
+            )
 
     logger.info(
         "environment_deleted environment_id={} environment_backups_deleted={} "

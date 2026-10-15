@@ -647,6 +647,34 @@ class BackupStorageLocationInUseError(ServiceError):
         return {"environment_names": self.environment_names}
 
 
+class BackupStorageLocationCleanupError(ServiceError):
+    """The cleanup of a backup storage location could not be submitted.
+
+    Deleting a location removes its Velero object and credentials Secret from
+    the cluster first. When that cleanup cannot be submitted, the delete is
+    refused and the location is kept, because once its row is gone nothing
+    records that the cluster objects exist.
+    """
+
+    error_code = "OPERATION_FAILED"
+    default_message = (
+        "Could not remove the backup storage location from the cluster; "
+        "it was not deleted"
+    )
+
+    def __init__(self, name: str, message: str = "") -> None:
+        self.name = name
+        super().__init__(
+            message
+            or f"Could not remove backup storage location '{name}' from the "
+            "cluster; it was not deleted. Try again."
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {"backup_storage_location_name": self.name}
+
+
 class InvalidSchedulingConfigError(ServiceError):
     """The scheduling configuration payload failed validation.
 
