@@ -1,1 +1,0 @@
-Fixed environment clones that could delete the source deployment's PostgreSQL StatefulSet and Services: the restored Helm release storage is now pointed at the clone's namespace before the clone's HelmRelease is created.

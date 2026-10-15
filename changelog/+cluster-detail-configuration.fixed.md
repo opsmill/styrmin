@@ -1,1 +1,0 @@
-Fixed the cluster detail page so it shows every cluster setting: the dedicated ingress with its service settings and defaults, the external URL and DNS settings, storage, runtime and scheduling, backup retention, and the cluster capabilities.

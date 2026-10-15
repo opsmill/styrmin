@@ -1,1 +1,0 @@
-Fixed the simple-app example driver image, which failed at start with an ImportError when it was built after SQLAlchemy 2.1 was released, because SQLAlchemy 2.1 no longer installs greenlet by default.

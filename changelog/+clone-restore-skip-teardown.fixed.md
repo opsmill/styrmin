@@ -1,1 +1,0 @@
-Fixed environment clones that sometimes ended as Failed after a clean restore: discarding the restored copy of the source deployment could remove the clone's NetworkPolicies, Secrets and Services while the restore was re-applying them.

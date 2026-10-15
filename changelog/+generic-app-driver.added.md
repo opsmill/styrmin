@@ -1,1 +1,0 @@
-Added the bundled generic-app driver, which deploys any single-container HTTP application (for example a Streamlit app, or Semaphore with SQLite) with its image, environment variables, command and optional volume set per deployment.
