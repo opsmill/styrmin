@@ -199,6 +199,21 @@ async def test_driver_detail_inspects_versions_via_tabs(
         f"Components tab must render zero <pre> JSON blocks; found {pre_count}"
     )
 
+    # 6. 023: simple-app declares no default replica count; ``database`` is a singleton.
+    for name, replicas, singleton in (
+        ("server", "not set", "no"),
+        ("database", "not set", "yes"),
+    ):
+        row = page.locator(
+            f"[data-testid=driver-component-row][data-component-name={name}]"
+        )
+        await expect(
+            row.locator("[data-testid=driver-component-replicas] > span").last
+        ).to_have_text(replicas)
+        await expect(
+            row.locator("[data-testid=driver-component-singleton] > span").last
+        ).to_have_text(singleton)
+
 
 # ---- spec 020: driver logo, description and links ----
 # `spec.info.description` of driver/examples/simple-app/driver.styrmin.yml.
