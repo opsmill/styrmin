@@ -10,7 +10,6 @@ from styrmin_backend.agent.service.kubernetes.resources.blocks.metadata import (
 )
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     LabelPatch,
-    SpecPatch,
     Target,
     TargetPatch,
     TemplateLabelPatch,
@@ -23,6 +22,9 @@ from styrmin_backend.services.driver.models.resources.backup import (
 )
 from styrmin_backend.services.component_container.patch_builder import (
     build_component_container_patches,
+)
+from styrmin_backend.services.replicas.patch_builder import (
+    build_component_replica_patches,
 )
 from styrmin_backend.services.exceptions import (
     CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL,
@@ -284,37 +286,6 @@ class ApplicationHelmReleaseBuilder:
                 f"The chart values are not valid YAML: {e!s}"
             ) from e
 
-    def build_components_state_post_rendering_patches(
-        self, context: GlobalContext
-    ) -> list[TargetPatch]:
-        """Build the component state post rendering patches.
-
-        Args:
-            context (GlobalContext): The global context.
-
-        Returns:
-            list[TargetPatch]: The component state post rendering patches.
-        """
-        target_patches: list[TargetPatch] = []
-        if context.components is None:
-            return target_patches
-
-        for component, component_definition in context.components.items():
-            if component_definition.enabled is False:
-                for kind in ["Deployment", "StatefulSet"]:
-                    target_patches.append(
-                        TargetPatch(
-                            target=Target(
-                                label_selector=component_definition.config.identifier.label.label_selectable(),
-                                kind=kind,
-                            ),
-                            patch=SpecPatch(
-                                specs={"replicas": 0},
-                            ),
-                        )
-                    )
-        return target_patches
-
     def build_target_for_label_patches(
         self, labels: dict[str, str], label_prefix: str = "styrmin"
     ) -> list[TargetPatch]:
@@ -511,9 +482,8 @@ class ApplicationHelmReleaseBuilder:
             self.build_target_for_component_labels(label_prefix=self.label_prefix)
         )
 
-        target_patches.extend(
-            self.build_components_state_post_rendering_patches(self.context)
-        )
+        # Replica patches: 0 for a stopped component, else the resolved count (023 D-004).
+        target_patches.extend(build_component_replica_patches(self.context))
 
         # Add backup volume annotation patches
         target_patches.extend(self.build_backup_annotation_patches())
