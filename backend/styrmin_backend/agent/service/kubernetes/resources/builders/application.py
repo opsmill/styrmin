@@ -257,9 +257,9 @@ class ApplicationHelmReleaseBuilder:
             ``dev/guides/driver-env-var-consumption.md``).
 
             ``ingress_class`` is template data in both modes, with or without
-            a dedicated ingress controller. Driver templates do not set the
-            Ingress class, because Styrmin sets it, or removes it with a
-            dedicated ingress controller, after the chart renders (see
+            a dedicated ingress controller. Driver templates do not need to
+            set the Ingress class, because Styrmin sets it, or removes it
+            with a dedicated ingress controller, after the chart renders (see
             ``IngressUtility.build_app_post_rendering_patches``).
         """
         # Turn the context model into a dict

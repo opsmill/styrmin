@@ -33,8 +33,11 @@ ingress controller:
   `spec.ingressClassName`, so a chart that rendered `nginx` gave an Ingress that could not be
   created.
 - When `spec.ingressClassName` is set, Traefik ignores the annotation and serves the Ingress only
-  when an IngressClass of that name exists. The dedicated ingress controller creates no
-  IngressClass, so a chart that rendered `traefik` gave an Ingress that the controller ignored.
+  when it has read an IngressClass of that name. The dedicated ingress controller reads no
+  IngressClass (`providers.kubernetesIngress.disableIngressClassLookup: true` in
+  `services/ingress_controller/templates/chart_values.j2.yaml`), so it ignores every Ingress that
+  sets `spec.ingressClassName`, and a chart that rendered `traefik` gave an Ingress that the
+  controller ignored.
 
 ## Decision
 
@@ -74,11 +77,13 @@ utility adds no class patch and no `kubernetes.io/ingress.class` annotation, as 
 and the annotation that the chart rendered stay. `_apply_cluster_defaults` (`services/clusters.py`)
 sets `traefik` when the cluster config has no `ingress_class` key, so the resolved value is empty
 only when the cluster was created with `ingress_class: null` and no environment or deployment sets
-a class, or when one of the three levels sets an empty string.
+a class, or when the deepest of the three levels that sets `ingress_class` sets an empty string.
+`_resolve_instance_config` (`context/resolvers.py`) skips only `null` values, so an environment
+that sets `""` and a deployment that sets `nginx` resolve to `nginx`.
 
 ## Consequences
 
-- Driver templates do not set the Ingress class. The `simple-app`, `semaphore` and `slurpit`
+- Driver templates do not need to set the Ingress class. The `simple-app`, `semaphore` and `slurpit`
   example drivers dropped the class line and kept their `spec.version`; reloading one creates a new
   driver version with a new provenance fingerprint.
 - A chart that sets its own class, by default or with a fixed value, deploys with a dedicated

@@ -63,7 +63,7 @@ when no application uses it any more:
 
 - after you delete the last application in the environment
 - after `dedicated_ingress` is turned off for the environment and every
-  application has been redeployed to the cluster's shared ingress class
+  application has been redeployed to the shared ingress class
   (see the next sections)
 
 While the removal runs and `dedicated_ingress` is still set for the
@@ -81,8 +81,9 @@ own ingress controller:
   ingress controller and its applications are served through it. Any
   `dedicated_ingress` object turns it on, including an empty one (`{}`).
 - When neither the environment nor the cluster sets `dedicated_ingress`,
-  the applications' Ingress resources use the cluster's `ingress_class`
-  (`traefik` by default), and the shared ingress controller of the
+  the applications' Ingress resources use the resolved `ingress_class`:
+  the deployment's value, else the environment's, else the cluster's
+  (`traefik` by default). The shared ingress controller of the
   Kubernetes cluster for that class serves them.
 
 An environment that does not set `dedicated_ingress` takes the
@@ -96,16 +97,19 @@ driver's values template does not set it:
 - With a dedicated ingress controller, Styrmin removes
   `spec.ingressClassName` and sets the `kubernetes.io/ingress.class`
   annotation to `traefik`, the controller implementation. The dedicated
-  ingress controller creates no IngressClass, so it does not serve an
-  Ingress that sets `spec.ingressClassName`.
+  ingress controller serves an Ingress by this annotation. It does not
+  read IngressClass resources, so it does not serve an Ingress that sets
+  `spec.ingressClassName`, whatever the value.
 - Without one, Styrmin sets `spec.ingressClassName` and the
   `kubernetes.io/ingress.class` annotation to the resolved
-  `ingress_class` (the deployment's value, else the environment's, else
-  the cluster's), whatever class the chart sets.
-- When the resolved `ingress_class` is empty, Styrmin does not change
-  the class that the chart sets. This happens only when the cluster was
-  created with `ingress_class: null` and neither the environment nor the
-  deployment sets a class, or when one of them sets an empty string.
+  `ingress_class`, whatever class the chart sets.
+- Without a dedicated ingress controller and with an empty resolved
+  `ingress_class`, Styrmin does not change the class that the chart
+  sets. The resolved value is empty only when the cluster was created
+  with `ingress_class: null` and neither the environment nor the
+  deployment sets a class, or when the deepest level that sets
+  `ingress_class` (the deployment, else the environment, else the
+  cluster) sets an empty string.
 
 The next two sections describe how Styrmin changes the ingress of an
 environment when `dedicated_ingress` changes on the cluster or on the
@@ -136,7 +140,7 @@ When the update turns `dedicated_ingress` on or changes its values:
 
 When the update turns `dedicated_ingress` off:
 
-1. Styrmin redeploys the applications to the cluster's `ingress_class`
+1. Styrmin redeploys the applications to their resolved `ingress_class`
    at once.
 2. Styrmin removes the controller once every application has been
    redeployed without the dedicated ingress, no application is

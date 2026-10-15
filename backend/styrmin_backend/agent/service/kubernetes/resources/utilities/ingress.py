@@ -46,7 +46,7 @@ class IngressUtility(Utility):
                 context.instance.config.external_dns_endpoints_type
             )
         if context.instance.config.dedicated_ingress is not None:
-            # The dedicated controller matches on the annotation, so the class the chart rendered is removed.
+            # The dedicated controller reads no IngressClass, so it ignores any Ingress that sets spec.ingressClassName.
             annotations["kubernetes.io/ingress.class"] = (
                 context.instance.config.dedicated_ingress.implementation
             )
