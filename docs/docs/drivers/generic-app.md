@@ -136,7 +136,9 @@ pod does not have.
 - **Other applications of the environment.** An application can call the other
   applications of its environment, and they can call it, by service name. A
   name resolves only after the application it names has started and Styrmin has
-  created its service alias, which can take a minute or two.
+  created its service alias, which can take a minute or two. When you delete a
+  deployment, Styrmin deletes its service aliases, so its name stops resolving in
+  the other applications of the environment.
 - **Other environments.** An application cannot reach, and cannot be reached
   from, the applications of another environment.
 - **The internet.** An application reaches public IPv4 and IPv6 addresses when
