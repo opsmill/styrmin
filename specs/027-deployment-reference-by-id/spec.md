@@ -31,7 +31,7 @@ This feature changes what Styrmin stores:
 
 [ADR-073](../../dev/adr/0073-kubernetes-objects-named-and-found-by-record-id.md) sets the same rule for the Kubernetes objects of a record: find them by the record's id, never by a name a user can change. PR #504 instead rewrote the name in the environment's terms on every rename. An environment restore then brought back the old name from the backup ([`environment.py`](../../backend/styrmin_backend/services/backup/environment.py)). With ids this does not happen, because a restore creates and deletes no deployment.
 
-Terms that name a deployment are written through GraphQL, the SDK and `styrminctl` manifests. The UI cannot show or edit a deployment reference ([`AffinityTermEditor.tsx`](../../frontend/src/components/deployment/configuration/sections/edit/scheduling/AffinityTermEditor.tsx)). It sends back the reference it read when the configuration form is saved ([`schedulingSanitize.ts`](../../frontend/src/components/deployment/configuration/sections/edit/schedulingSanitize.ts)).
+Terms that name a deployment are written through GraphQL, the SDK and `styrminctl` manifests. The UI cannot show or edit a deployment reference ([`AffinityTermEditor.tsx`](../../frontend/src/components/deployment/configuration/sections/edit/scheduling/AffinityTermEditor.tsx)). It sends back the reference it read when the configuration form is saved (`normalizeDeploymentRef` in [`deployment-input.ts`](../../frontend/src/lib/deployment-input.ts)). The PRD cites `schedulingSanitize.ts`, which no file imports (research R-011).
 
 ## Clarifications
 
