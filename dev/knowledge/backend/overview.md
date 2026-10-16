@@ -270,4 +270,8 @@ Read configuration through `config.SETTINGS`, not `os.environ`. `AgentSettings` 
 
 <!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
 
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-16 -->
+
+`Settings.max_replica_count` (`STYRMIN_MAX_REPLICA_COUNT`, default 20, from 1 to 2147483647; Helm value `styrmin.maxReplicaCount` in `helm/styrmin/templates/configmap.yaml`) is the highest replica override a user can set on a component. `_validate_replica_overrides` in `services/deployment.py` reads it through `config.SETTINGS.max_replica_count` and passes it to `validate_replica_overrides`, which rejects an added or changed override above it with `REPLICA_COUNT_ABOVE_MAXIMUM`. A stored count sent again unchanged is kept, so lowering the setting does not block other writes. Driver defaults are not limited. Only the server reads the setting: the context models check only the Kubernetes `int32` range (`MAX_REPLICA_COUNT`), because the agent parses stored contexts without the server's settings ([ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md) §5).
+
 The agent process is a separate entrypoint (`entrypoint/combined.py`) that runs the kopf operator, the Prefect worker, and the status reporter together — see [`../agent/overview.md`](../agent/overview.md).

@@ -188,6 +188,33 @@ def generate_release_reference(context: GlobalContext) -> str:
     """Generate HelmRelease name from context"""
 ```
 
+### Readiness polls of the Helm release flows
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-16 -->
+
+The agent flows `create_helm_release` and `update_helm_release` (`agent/tasks/application.py`,
+registered in `workflows/catalogue.py`) apply the HelmRelease directly instead of through the
+operator. After the apply, they run three Prefect tasks from `agent/tasks/shared.py` in order:
+
+1. `poll_helm_release_status`: waits until FluxCD has observed the HelmRelease's current generation
+   and its `Ready` condition is `True`. It returns a `Failed` state when the condition is `False`
+   or the HelmRelease does not exist.
+2. `poll_kubernetes_deployments_status`: for each `Deployment` in the namespace.
+3. `poll_kubernetes_stateful_sets_status`: for each `StatefulSet` in the namespace.
+
+Each workload poll raises, so Prefect retries it (`STYRMIN_AGENT_POLL_*`), until all of these hold
+against `spec.replicas` (1 when the field is not set):
+
+- `status.observedGeneration` is at least `metadata.generation`;
+- `status.replicas` is not above `spec.replicas`, so a scale-down, a stopped component and a
+  rolling update complete only after the extra pods are gone;
+- the updated and ready counts, and for a `Deployment` the available count, reach `spec.replicas`.
+
+The second check was added after the PR #483 review (item 20). Before it, a scale-down passed as
+soon as the remaining pods were ready. The replica count that the polls wait for is the
+post-rendered one, so it includes the replica override or driver default
+([ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md) §4).
+
 ## Key files
 
 | File | Purpose |

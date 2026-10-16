@@ -18,7 +18,7 @@ The retired-parameter upgrade tests (`backend/tests/functional/graphql/test_infr
 - a deployment that kept the default parameter values moves to the new driver version, and each component keeps its replica count (SC-004);
 - a deployment with a changed parameter value is rejected with an error that names the parameter and its value (SC-005).
 
-See SC-004 and SC-005 in `specs/023-per-component-replicas/spec.md`, and D-013 and D-014 in `specs/023-per-component-replicas/research.md`.
+See SC-004 and SC-005 in `specs/archive/023-per-component-replicas/spec.md`, and D-013 and D-014 in `specs/archive/023-per-component-replicas/research.md`.
 
 ## Rules
 

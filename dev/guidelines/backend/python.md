@@ -368,6 +368,25 @@ for env vars and container overrides. References:
 `services/image_overrides/validator.py::prevalidate_image_overrides` (`stored_config`) and
 `services/deployment.py::_validate_image_overrides_for_version`.
 
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-16 -->
+
+Two kinds of check do not follow the delta rule in the same way:
+
+- **A rule that the bound driver version sets on the component checks unchanged stored values
+  too.** `SINGLETON_REPLICA_OVERRIDE` rejects a stored override above 1 on a component that the
+  driver version bound after the write marks `singleton: true`, also when the write sends it
+  again unchanged. The stored value breaks the rule of the driver version that the deployment will
+  be bound to, so accepting it would render a count that the driver forbids. A version change to
+  such a driver version is rejected until the same request lowers or clears the override.
+- **A limit from a server setting checks only added or changed values.** `REPLICA_COUNT_ABOVE_MAXIMUM`
+  (`STYRMIN_MAX_REPLICA_COUNT`) accepts a stored count sent again unchanged, so an operator who
+  lowers the setting does not block every other edit of the deployments above it. Put such a check
+  in the service layer, not in a context model validator, because the agent parses stored contexts
+  without the server's settings. The context model checks only limits that hold everywhere, such as
+  the Kubernetes `int32` range.
+
+Reference: `services/replicas/validator.py::validate_replica_overrides`.
+
 <!-- Extracted from specs/016-backup-retention-ttl on 2026-08-04 -->
 
 ### Never add new logic inside a swallow-and-proceed block
@@ -428,6 +447,33 @@ spec 011/US3 for the regression that motivated the rule).
 correctly rejects `True`/`False`. Coercing wrong-typed values via `str(value)`
 is **forbidden**: an operator who passes `1` may have meant `"1"` or may
 have intended an integer; a typed error tells them which.
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-16 -->
+
+**Integers.** `bool` *is* a subclass of `int`, and Pydantic's lax mode turns `"3"` and `3.0`
+into `3`. To reject them with a typed error, check the value in a `mode="before"` validator,
+before Pydantic converts it:
+
+```python
+def _check_replica_count(value: Any, component_name: str | None) -> Any:
+    if value is None or (
+        isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= MAX_REPLICA_COUNT
+    ):
+        return value
+    raise InvalidReplicaCountError(component_name=component_name, requested_replicas=value)
+```
+
+- In a model that gives a load error with the field path instead of a typed `ServiceError` (the
+  driver specification models), use `StrictInt` and `StrictBool` with `Field(ge=..., le=...)`.
+- A client that builds a Pydantic input from user JSON (the SDK and `styrminctl`) runs the same
+  check before `model_validate`, because the generated input model would convert `true` to `1`
+  before the server sees it. Reference: `styrmin_sdk.resources.deployments.check_replica_counts`.
+- Bound an integer that ends in a Kubernetes field by the field's type (`int32` for
+  `spec.replicas`: `MAX_REPLICA_COUNT = 2_147_483_647`), so a value that Kubernetes would reject
+  fails at write time, not when helm-controller applies the release.
+- To compare a stored value with a default, compare the type as well:
+  `type(value) is type(default) and value == default`. `1 == True` and `1 == 1.0` are true in
+  Python. Reference: `services/parameters/retired.py::drop_retired_parameters`.
 
 ### Validate URLs that a browser loads or opens
 
@@ -640,6 +686,57 @@ Reference: `_read_results` and `_merge_results` in `workflows/templates/clone.py
 - Provide `@classmethod create()` factory methods
 - Use `@property` for computed fields
 
+### Add a typed field to a stored model without changing its dump at the default
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-16 -->
+
+When a Pydantic model is stored as JSON, written into a custom resource, or compared with a stored
+copy, a new field must not appear in `model_dump()` while it holds its default. Leave the key out
+with a `model_serializer(mode="wrap")`:
+
+```python
+@model_serializer(mode="wrap")
+def _omit_replica_defaults(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+    data = handler(self)
+    if data.get("replicas", 0) is None:
+        del data["replicas"]
+    if data.get("singleton") is False:
+        del data["singleton"]
+    return data
+```
+
+Without it, every dump gains `replicas: null, singleton: false` after the upgrade. The context
+written into the `StyrminDeployment` resource then differs from the stored instance only by these
+keys, so the first update of every deployment starts a HelmRelease upgrade that changes nothing.
+Add a unit test that a model without the new keys dumps to the same dict as before the change.
+
+Reference: `ReplicaDeclaration` in `context/models/components.py`;
+`backend/tests/unit/services/driver/test_component_replicas.py::test_dump_without_the_keys_equals_the_dump_before_the_change`.
+
+### Check driver data strictly at load, and drop only the invalid key on read
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-16 -->
+
+A typed field on the driver specification model rejects a bad value when the driver version is
+loaded: the load fails with a `DriverLoadingError` that names the field path, and nothing is
+stored. Rows stored before the field was typed may hold a value that the new type rejects. A read
+of such a row must not fail the deployment:
+
+- Parse a stored declaration so that an invalid key reads as unset. Drop only that key, and log a
+  warning that names the key, its value, the component and the driver version.
+- When two keys conflict, decide in a fixed order which one is dropped, and choose the order that
+  gives the safer result. `singleton: true` with `replicas: 3` drops `replicas`, so the component
+  runs one pod.
+- A check or a read field that needs only some keys parses only those keys, so a problem in
+  another key does not fail it.
+- Never use the tolerant parser on the load path. New driver versions are always checked
+  strictly.
+
+References: `split_replica_keys`, `parse_stored_replica_declaration` and
+`validate_ignoring_invalid_replica_keys` in `context/models/components.py`. For JSON entries that a
+GraphQL type projects, see
+[Show one unreadable JSON entry as degraded](#show-one-unreadable-json-entry-as-degraded-instead-of-failing-the-query).
+
 ## Rendering Kubernetes manifests
 
 ### No runtime defaults for optional emitted annotations
@@ -698,10 +795,26 @@ list-shaped key from the values template drops every entry the chart ships.
   a field without an override keeps the value the chart renders. Do not write an empty list or
   `null` as a "use the chart's value" marker.
 
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-16 -->
+
+- A per-component override of the workload spec, such as the replica count, is also a
+  post-render patch. It targets the `Deployment` or `StatefulSet` by kind and label selector, not
+  a container, so it needs no component container.
+- Write each workload field from exactly one patch per kind per component. Two patches that write
+  the same scalar path (`/spec/replicas`) give a result that depends on the order of the kustomize
+  list, which is kyaml behaviour and not a documented contract. When two features set the same
+  field, merge them into one builder: `build_component_replica_patches` writes 0 for a stopped
+  component and the resolved count for a running one.
+- Use a JSON6902 `add` for a scalar that the chart may or may not render. RFC 6902 `add` replaces
+  an existing member and creates a missing one.
+- Emit no patch when no source sets the value, so the chart's value applies. Never patch a
+  fallback value such as `1`: it would change every chart that renders another value.
+
 See [ADR-057](../../adr/0057-post-render-component-overrides.md),
 [ADR-058](../../adr/0058-image-overrides-and-component-container-guard.md),
-[ADR-069](../../adr/0069-container-command-args-by-post-render.md), and
-`services/component_container/patch_builder.py`.
+[ADR-069](../../adr/0069-container-command-args-by-post-render.md),
+[ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md),
+`services/component_container/patch_builder.py` and `services/replicas/patch_builder.py`.
 
 ### Custom-resource updates: replace the spec keys you write, merge the rest
 
@@ -1034,3 +1147,13 @@ def my_task(context: Context) -> None:  # noqa: ARG001
   The unit job ignores `tests/e2e/`, and the CI E2E jobs select tests by the `ci` and shard
   markers, so a test placed there without those markers runs in no CI job. Example:
   `backend/tests/unit/test_e2e_driver_conformance.py`.
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-16 -->
+
+- **To prove that a task waits for a rollout, read the workload once after the task completes.**
+  Do not poll for the counts. A test that waits for the counts passes when the task returned
+  before the pods were ready, so it does not test the wait. Assert `spec.replicas`,
+  `status.replicas` and the updated, ready and available counts in one read; after a scale-down,
+  `status.replicas` shows whether the extra pods are gone. Example:
+  `backend/tests/e2e/test_deployment_image_override.py::test_scale_server_and_singleton_guard` with
+  `read_workload_replicas` from `backend/tests/e2e/helpers/workloads.py`.

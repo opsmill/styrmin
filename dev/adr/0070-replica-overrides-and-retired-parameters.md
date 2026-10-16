@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-15
-**Source**: specs/023-per-component-replicas/ (spec, plan, research D-001 to D-015, data-model, contracts); [issue #202](https://github.com/opsmill/styrmin/issues/202)
+**Source**: specs/archive/023-per-component-replicas/ (spec, plan, research D-001 to D-015, data-model, contracts); [issue #202](https://github.com/opsmill/styrmin/issues/202)
 **Extends**: [ADR-057](0057-post-render-component-overrides.md) §2. The component state patch that
 set `spec.replicas: 0` on a stopped component is replaced by the component replica patch, which
 writes the stopped state and the replica count in one patch at the same place in
@@ -136,6 +136,12 @@ The update task waits as it did before the change: the operator marks the rollou
 FluxCD reports the HelmRelease `Ready` for its current generation. The E2E reads the workload once
 after each update task completes, for 1 to 2 pods and for 2 to 1, and finds `spec.replicas`,
 `status.replicas` and the updated, ready and available counts equal to the requested count.
+
+The agent's direct-apply flows poll each `Deployment` and `StatefulSet` after the HelmRelease is
+ready. Before this change, the polls compared only the updated, ready and available counts with
+`spec.replicas`, so a scale-down passed while the extra pods still ran. The polls now also wait
+while `status.replicas` is above `spec.replicas`, so a scale-down, a stopped component and a
+rolling update complete only after the extra pods are gone (PR #483 review, item 20).
 
 ### 5. Write checks against the driver version bound after the write (research D-005, D-006)
 

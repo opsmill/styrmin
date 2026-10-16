@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-15
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: PRD "Per-component replica counts" — [opsmill/styrmin#202 (comment)](https://github.com/opsmill/styrmin/issues/202#issuecomment-6187621046). Seed issue: [#202](https://github.com/opsmill/styrmin/issues/202). Builds on [ADR-029](../../dev/adr/0029-config-additions-via-baseconfigsection-no-migration.md) (config additions without a migration), [ADR-057](../../dev/adr/0057-post-render-component-overrides.md) (post-render component overrides), [ADR-058](../../dev/adr/0058-image-overrides-and-component-container-guard.md) (image overrides and the check before a version change) and [ADR-069](../../dev/adr/0069-container-command-args-by-post-render.md) (container `command` and `args` by post-render).
 
