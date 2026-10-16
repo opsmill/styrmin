@@ -1,6 +1,6 @@
 # Pull Request Notes: helm-controller Runs with Helm v4 Defaults
 
-Notes for the pull request description of spec 024 ([#435](https://github.com/opsmill/styrmin/issues/435)). The repository has no `.github/PULL_REQUEST_TEMPLATE.md`, so the sections below follow the points that tasks.md T034 lists. Links to files on the branch use the branch name `fac/helm-v4-end3k`.
+Notes for the pull request description of spec 025 ([#435](https://github.com/opsmill/styrmin/issues/435)). The repository has no `.github/PULL_REQUEST_TEMPLATE.md`, so the sections below follow the points that tasks.md T034 lists. Links to files on the branch use the branch name `fac/helm-v4-end3k`.
 
 Suggested title: `feat(agent): run helm-controller with Helm v4 defaults (#435)`
 
@@ -38,8 +38,8 @@ The GraphQL API, SDK, CLI, frontend, database schema and error types do not chan
 
 ## Evidence
 
-- [e2e-evidence.md](https://github.com/opsmill/styrmin/blob/fac/helm-v4-end3k/specs/024-helm-v4-defaults/e2e-evidence.md): four local E2E sessions with their commands, times, vclusters and `PASSED` lines; FluxCD's state during a rollback; the check that the operator's rules need no change; the walk-through of quickstart.md §1 to §5.
-- [agent-upgrade-check.md](https://github.com/opsmill/styrmin/blob/fac/helm-v4-end3k/specs/024-helm-v4-defaults/agent-upgrade-check.md): the manual check of an agent chart upgrade from the chart with the gate to this branch's chart on a disposable vcluster.
+- [e2e-evidence.md](https://github.com/opsmill/styrmin/blob/fac/helm-v4-end3k/specs/025-helm-v4-defaults/e2e-evidence.md): four local E2E sessions with their commands, times, vclusters and `PASSED` lines; FluxCD's state during a rollback; the check that the operator's rules need no change; the walk-through of quickstart.md §1 to §5.
+- [agent-upgrade-check.md](https://github.com/opsmill/styrmin/blob/fac/helm-v4-end3k/specs/025-helm-v4-defaults/agent-upgrade-check.md): the manual check of an agent chart upgrade from the chart with the gate to this branch's chart on a disposable vcluster.
 
 ## Checks run
 

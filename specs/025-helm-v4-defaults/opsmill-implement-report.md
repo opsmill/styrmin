@@ -1,12 +1,31 @@
-# Implementation report: 024 helm-controller runs with Helm v4 defaults (#435)
+# Implementation report: 025 helm-controller runs with Helm v4 defaults (#435)
 
 - Status: DONE
-- Spec directory: `/root/emdash/worktrees/styrmin-55123dec/fac-helm-v4-end3k/specs/024-helm-v4-defaults`
+- Spec directory: `/root/emdash/worktrees/styrmin-55123dec/fac-helm-v4-end3k/specs/025-helm-v4-defaults`
 - Branch: `fac/helm-v4-end3k`
 - Base commit: `5a2cb5db`
 - Head commit before this report: `76e981c4`
 - Wall-clock time: 2026-10-16T08:24:54Z to 2026-10-16T12:05Z, about 3 h 40 min
 - Tasks: 34 of 34 ticked `[X]` in `tasks.md`
+
+## Rebase onto develop
+
+After this report was written, the branch was rebased onto `origin/develop` at `32144e67`, and the spec directory moved from `specs/024-helm-v4-defaults` to `specs/025-helm-v4-defaults`, because develop's `specs/archive/024-ingress-class-post-render` took number 024. The commit SHAs in this report and in the evidence files are the ones from before the rebase:
+
+| Before the rebase | After the rebase |
+|-------------------|------------------|
+| `2a7881c3` | `69944272` |
+| `8a5d3b61` | `bf9ee45e` |
+| `f752856a` | `0bd5d42a` |
+| `fe06e502` | `fc73c6ce` |
+| `d6193096` | `ced0f828` |
+| `edea76e4` | `721da734` |
+| `45310b26` | `c6ac3c35` |
+| `81c37c51` | `a99c875a` |
+| `8affc418` | `57377797` |
+| `5bb88fcf` | `5c22be89` |
+| `76e981c4` | `920b1f0a` |
+| `04c7efe3` | `c8938cda` |
 
 ## 1. Chunk ledger
 
