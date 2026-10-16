@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from uuid import UUID
 
 from sqlalchemy import asc
@@ -31,6 +31,11 @@ class ApplicationInstanceRepository(BaseRepository[ApplicationInstance], ABC):
     @abstractmethod
     async def get_by_ids(self, ids: Sequence[UUID]) -> list[ApplicationInstance]:
         """Get the application instances with these ids, in no particular order."""
+        raise NotImplementedError("Method not implemented yet.")
+
+    @abstractmethod
+    async def find_used_names(self, names: Collection[str]) -> set[str]:
+        """Return the names among ``names`` that an instance already has."""
         raise NotImplementedError("Method not implemented yet.")
 
 
@@ -68,3 +73,13 @@ class SQLModelApplicationInstanceRepository(
         statement = select(self.model_class).where(col(self.model_class.id).in_(ids))
         result = await self.session.exec(statement)
         return list(result.all())
+
+    async def find_used_names(self, names: Collection[str]) -> set[str]:
+        """Return the names among ``names`` that an instance already has."""
+        if not names:
+            return set()
+        statement = select(self.model_class.name).where(
+            col(self.model_class.name).in_(names)
+        )
+        result = await self.session.exec(statement)
+        return set(result.all())

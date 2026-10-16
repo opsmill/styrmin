@@ -200,6 +200,15 @@ class UnknownTaskStateError(ServiceError):
     default_message = "The task state is unknown"
 
 
+class InstanceNameUnavailableError(ServiceError):
+    """Every generated name for a new instance is already in use."""
+
+    error_code = "OPERATION_FAILED"
+    default_message = (
+        "Could not find an unused name for the new instance. Retry the operation."
+    )
+
+
 class DeploymentNotFoundError(ServiceError):
     """The deployment was not found."""
 

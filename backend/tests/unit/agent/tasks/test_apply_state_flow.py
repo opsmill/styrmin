@@ -245,6 +245,7 @@ def test_the_instance_sequence_survives_the_flow_parameter_round_trip() -> None:
 
     deployment_id = uuid4()
     instance = Instance.create(
+        name="test-instance",
         application_version="1.0.0",
         deployment_id=deployment_id,
         application_driver_version_id=uuid4(),

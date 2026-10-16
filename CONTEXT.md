@@ -195,7 +195,7 @@ _Avoid_: "kubectl apply" (intentionally similar UX but not the same semantics â€
 ### Instances â€” current (realised) state
 
 **Instance** (`ApplicationInstance`):
-A frozen snapshot of what was actually deployed at a point in time, generated from a **deployment** at **reconciliation** time. Carries a serialised `GlobalContext` in its `context` field. A **deployment** owns at most one **active instance** at a time. Each instance carries an **instance sequence**.
+A frozen snapshot of what was actually deployed at a point in time, generated from a **deployment** at **reconciliation** time. Carries a serialised `GlobalContext` in its `context` field. A **deployment** owns at most one **active instance** at a time. Each instance carries an **instance sequence**. Its name is a generated two-word name, such as `hairy-toad`, that no other instance of any deployment has: Styrmin generates ten names and keeps the first one that no stored instance has ([#499](https://github.com/opsmill/styrmin/issues/499)).
 _Avoid_: "application instance" in prose (fine in code), "release", "rollout", "version".
 
 **Instance sequence**:

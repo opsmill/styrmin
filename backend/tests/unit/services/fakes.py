@@ -254,6 +254,9 @@ class FakeApplicationInstanceRepository(
     async def get_by_ids(self, ids: Sequence[UUID]) -> list[ApplicationInstance]:
         return [m for m in self.models if m.id in ids]
 
+    async def find_used_names(self, names: Collection[str]) -> set[str]:
+        return {m.name for m in self.models if m.name in names}
+
 
 class FakeApplicationDriverRepository(
     FakeRepository[ApplicationDriver], ApplicationDriverRepository

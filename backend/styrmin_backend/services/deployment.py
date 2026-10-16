@@ -698,14 +698,13 @@ async def update_deployment(
         deployment.set_status(DeploymentState.PENDING)
         logger.info("New instance set as active: instance_id={}", new_instance.id)
 
+        await uow.deployments.save(deployment=deployment)
         task = await apply_state(
             deployment=deployment,
             current_instance=current_instance,
             uow=uow,
             task_type=TaskType.UPDATE_INSTANCE,
         )
-
-        await uow.deployments.save(deployment=deployment)
         await uow.tasks.save(task=task)
         await uow.commit()
 
@@ -1130,6 +1129,8 @@ async def update_deployment_version(
         deployment.set_active_instance(instance=new_instance)
         logger.info("New instance set as active: instance_id={}", new_instance.id)
 
+        await uow.deployments.save(deployment=deployment)
+
         # Get the task from the reconciliation workflow
         task = await apply_state(
             deployment=deployment,
@@ -1140,8 +1141,6 @@ async def update_deployment_version(
             ),
             started_by_step_id=started_by_step_id,
         )
-
-        await uow.deployments.save(deployment=deployment)
         await uow.tasks.save(task=task)
         await uow.commit()
 
@@ -1267,14 +1266,13 @@ async def redeploy_for_environment_update(
     deployment.set_active_instance(instance=new_instance)
     deployment.set_status(DeploymentState.DEPLOYING)
 
+    await uow.deployments.save(deployment=deployment)
     task = await apply_state(
         deployment=deployment,
         current_instance=current_instance,
         uow=uow,
         task_type=TaskType.UPDATE_INSTANCE,
     )
-
-    await uow.deployments.save(deployment=deployment)
     await uow.tasks.save(task=task)
 
     return task
@@ -1404,6 +1402,7 @@ async def create_ingress_controller(
     )
     ingress_deployment.set_active_instance(instance=instance)
 
+    await uow.deployments.save(ingress_deployment)
     ingress_task = await apply_state(
         deployment=ingress_deployment,
         current_instance=current_instance,
@@ -1414,8 +1413,6 @@ async def create_ingress_controller(
             else TaskType.UPDATE_INSTANCE
         ),
     )
-
-    await uow.deployments.save(ingress_deployment)
     await uow.tasks.save(ingress_task)
     return ingress_deployment
 
@@ -1738,6 +1735,9 @@ async def deploy_application(
             )
             return None
 
+        # Save again to persist active_application_instance_id
+        await uow.deployments.save(deployment=deployment)
+
         # Get the task from the reconciliation workflow
         task = await apply_state(
             deployment=deployment,
@@ -1745,9 +1745,6 @@ async def deploy_application(
             uow=uow,
             task_type=TaskType.CREATE_INSTANCE,
         )
-
-        # Save again to persist active_application_instance_id
-        await uow.deployments.save(deployment=deployment)
 
         await uow.tasks.save(task=task)
 

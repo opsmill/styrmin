@@ -9,11 +9,28 @@ from styrmin_backend.domain.models import (
     Task,
     TaskType,
 )
+from styrmin_backend.domain.utils import generate_instance_name
 from styrmin_backend.services.context import generate_context_from_deployment
+from styrmin_backend.services.exceptions import InstanceNameUnavailableError
 from styrmin_backend.services.unit_of_work import UnitOfWork
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.manager import PrefectManager
 from styrmin_backend.workflows.models import PrefectAction
+
+
+# Instance names must be unique across all deployments, and a two-word name has
+# about 370,000 values, so one random draw can hit a name already in use (#499).
+_INSTANCE_NAME_CANDIDATES = 10
+
+
+async def _pick_instance_name(uow: UnitOfWork) -> str:
+    """Return a generated instance name that no stored instance has."""
+    candidates = [generate_instance_name() for _ in range(_INSTANCE_NAME_CANDIDATES)]
+    used = await uow.application_instances.find_used_names(candidates)
+    for name in candidates:
+        if name not in used:
+            return name
+    raise InstanceNameUnavailableError()
 
 
 async def generate_instance_from_deployment(
@@ -33,6 +50,7 @@ async def generate_instance_from_deployment(
     )
 
     instance = Instance.create(
+        name=await _pick_instance_name(uow),
         application_version=deployment.application_version,
         deployment_id=deployment.id,
         application_driver_version_id=deployment.application_driver_version_id,
@@ -68,6 +86,10 @@ async def apply_state(
     The task records the new instance so operator reports find it (D4), and
     ``started_by_step_id``, the hook step that started it (D12). The caller
     checks that step with ``check_starting_step`` before it changes anything.
+
+    The caller saves the deployment, and with it the new instance, before this
+    call: the flow run starts here, and a database error raised after it does
+    not stop the flow run (#499).
     """
     new_instance = deployment.active_instance
     assert new_instance is not None, "Deployment must have an active instance"

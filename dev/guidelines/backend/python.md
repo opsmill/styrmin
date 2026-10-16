@@ -96,6 +96,10 @@ Order a service function as: load, validate everything, then the steps with side
 the database. Reference: `services/deployment.py::update_deployment_version`, which resolves the
 target driver version and re-checks image overrides before `_ensure_ingress_controller`.
 
+Save the deployment with its new instance before `apply_state`. `uow.deployments.save` flushes the
+rows, so the database rejects a conflict, such as an instance name already in use, before the flow
+run starts. Save the task that `apply_state` returns after it ([#499](https://github.com/opsmill/styrmin/issues/499)).
+
 ### Calculate a status that several writers change; do not store it
 
 <!-- Extracted from specs/019-task-steps on 2026-10-08 -->
