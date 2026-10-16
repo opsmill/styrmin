@@ -1,6 +1,6 @@
 # ADR-033: Scheduling merge — affinity accumulate with per-kind `replace:true`; topology-spread keyed by `(topologyKey, whenUnsatisfiable)`
 
-**Status**: Accepted — amended 2026-10-16 (#482): a cluster config rejects `scheduling` instead of ignoring it
+**Status**: Accepted — amended 2026-10-16 (#482): a cluster config refuses `scheduling` instead of ignoring it
 **Date**: 2026-05-17
 **Source**: specs/archive/001-pod-scheduling-config/research.md (Decisions 2, 4, 5)
 
@@ -29,13 +29,21 @@ Amended 2026-10-16 ([#482](https://github.com/opsmill/styrmin/issues/482)): the 
 cluster `scheduling` value and the cluster page showed it as "Scheduling defaults", although no
 pod got it. The convention is now enforced instead of ignored:
 
-- `ClusterConfig` rejects any `scheduling` value other than `null`, so `createCluster` refuses
-  it. The field stays on `BaseConfigSection`, so the class hierarchy that this ADR kept does not
-  change. `DeploymentConfig` and `ResolvedConfig` inherit from `ClusterConfig` and still take the
-  field.
+- `ClusterConfig` rejects the `scheduling` key whatever its value, `null` and `{}` included, so
+  `createCluster` refuses it as `updateCluster` does. The field stays on `BaseConfigSection`, so
+  the class hierarchy that this ADR kept does not change. `DeploymentConfig` and `ResolvedConfig`
+  inherit from `ClusterConfig` and still take the field.
 - `UpdateClusterInput` has no `scheduling` field.
 - Revision `eac41bb71a65` deletes the stored cluster values, and `ClusterContext` drops the key
   when it loads a context stored before the change.
+
+#482 left two options open: refuse the value, or keep accepting it and say on the cluster page and
+in the API that it has no effect. Refusing it was chosen for two reasons:
+
+- A label on the cluster page does not reach API, `styrminctl` and SDK clients, which would still
+  save a value that no pod gets.
+- #472 had the same problem for `node_selector`, and PR #481 removed that field instead of
+  labeling it.
 
 ### Affinity merge — accumulate by default, `replace:true` per kind
 
@@ -55,7 +63,7 @@ Topology-spread constraints are unioned across levels with the compound key `(to
 - An environment-wide safety rule layers cleanly with a per-deployment affinity tweak by default. Operators don't have to copy environment rules into every deployment to keep them in force.
 - The `replace: true` escape hatch exists for genuine "this deployment is special, throw out the parent rules for *this* kind" cases. Per-kind scoping means a narrow override of one affinity kind doesn't accidentally clobber the others.
 - The topology-spread compound key matches how the Kubernetes scheduler itself treats these constraints (each `(topologyKey, whenUnsatisfiable)` pair is an independent rule). The mental model is the same between operator config and scheduler behaviour.
-- Cluster-level scheduling stays as an explicit no-op, which makes the ownership boundary clear: cluster admins manage node taints/labels via Kubernetes-native means; platform operators manage scheduling defaults via Environment/Deployment/Component scheduling config.
+- A cluster config refuses `scheduling` (amended 2026-10-16, #482), which makes the ownership boundary clear: cluster admins manage node taints/labels via Kubernetes-native means; platform operators manage scheduling defaults via Environment/Deployment/Component scheduling config.
 - The merge implementation is uniform: a single resolver walks the three levels in order, maintains separate accumulators per affinity-kind and per topology-spread key, and respects the per-kind `replace` flag. New scheduling fields with list-like merge semantics can follow the same recipe.
 
 ## Alternatives Considered

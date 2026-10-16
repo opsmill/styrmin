@@ -137,9 +137,10 @@ Error: Unknown config key(s): fqdn_sufix, dedicated_ingress.servce
 ```
 
 A cluster config does not take `scheduling`, because no pod gets a
-cluster's scheduling value. `clusters update` refuses the key as
-unknown, and `clusters create` and the `createCluster` mutation refuse
-it with `VALIDATION_ERROR`. Set `scheduling` on the environment or the
+cluster's scheduling value. The key is refused whatever its value,
+including `null` and `{}`: `clusters update` refuses it as unknown, and
+`clusters create` and the `createCluster` mutation refuse it with
+`VALIDATION_ERROR`. Set `scheduling` on the environment or the
 deployment instead.
 
 To start from the stored config, run

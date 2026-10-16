@@ -18,14 +18,16 @@ from tests.unit.counterpart_crd_fixtures import make_context
 TOLERATION = {"tolerations": [{"key": "dedicated", "operator": "Exists"}]}
 
 
-@pytest.mark.parametrize("scheduling", [TOLERATION, {}], ids=["toleration", "empty"])
-def test_cluster_config_rejects_scheduling(scheduling: dict) -> None:
+@pytest.mark.parametrize(
+    "scheduling", [TOLERATION, {}, None], ids=["toleration", "empty", "null"]
+)
+def test_cluster_config_rejects_scheduling(scheduling: dict | None) -> None:
     with pytest.raises(ValidationError, match="environment or the deployment"):
         ClusterConfig.model_validate({"scheduling": scheduling})
 
 
-def test_cluster_config_accepts_null_scheduling() -> None:
-    assert ClusterConfig.model_validate({"scheduling": None}).scheduling is None
+def test_cluster_config_without_scheduling_is_valid() -> None:
+    assert ClusterConfig.model_validate({}).scheduling is None
 
 
 @pytest.mark.parametrize("model", [DeploymentConfig, ResolvedConfig])

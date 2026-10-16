@@ -93,6 +93,9 @@ describe("ClusterConfiguration", () => {
 
     const runtime = section("Runtime");
     expect(runtime).toHaveTextContent("gvisor");
+    expect(
+      within(runtime).getByTestId("cluster-scheduling-hint"),
+    ).toHaveTextContent("Scheduling is set on each environment or deployment");
 
     expect(section("Backups")).toHaveTextContent("168h");
   });

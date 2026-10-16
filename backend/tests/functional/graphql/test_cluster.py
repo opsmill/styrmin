@@ -285,22 +285,26 @@ async def test_create_cluster_rejects_camel_case_backup_ttl(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "scheduling",
+    [{"tolerations": [{"key": "dedicated", "operator": "Exists"}]}, {}, None],
+    ids=["toleration", "empty", "null"],
+)
 async def test_create_cluster_rejects_scheduling(
-    client: AsyncClient, session: AsyncSession
+    client: AsyncClient, session: AsyncSession, scheduling: dict | None
 ) -> None:
-    """No pod gets a cluster's scheduling value, so a cluster config with one is refused (#482)."""
+    """A cluster config that holds the scheduling key is refused whatever its value (#482).
+
+    No pod gets a cluster's scheduling value. A stored ``null`` would come back from
+    ``clusters get --json``, which ``clusters update`` refuses as an unknown key.
+    """
     response = await client.post(
         "/graphql",
         json={
             "query": load_query("create_cluster"),
             "variables": {
                 "name": "scheduling-cluster",
-                "config": {
-                    **VALID_CLUSTER_CONFIG,
-                    "scheduling": {
-                        "tolerations": [{"key": "dedicated", "operator": "Exists"}]
-                    },
-                },
+                "config": {**VALID_CLUSTER_CONFIG, "scheduling": scheduling},
             },
         },
     )
