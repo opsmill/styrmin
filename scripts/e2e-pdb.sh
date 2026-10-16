@@ -10,8 +10,16 @@ if [ "$#" -eq 0 ]; then
     exit 2
 fi
 
-log=${E2E_PDB_LOG:-/tmp/pdb.log}
-echo "e2e-pdb: pid=$$ log=$log (stop with: kill $$)" >&2
+# A log per run, so concurrent runs on one host never share one. BSD mktemp
+# needs the X's at the end of the template.
+log=${E2E_PDB_LOG:-}
+[ -n "$log" ] || log=$(mktemp "${TMPDIR:-/tmp}/e2e-pdb-log.XXXXXX") || exit 2
+start="e2e-pdb: pid=$$ log=$log (stop with: kill $$)"
+if ! printf '%s\n' "$start" > "$log"; then
+    echo "e2e-pdb: cannot write the log file $log; pytest was not started" >&2
+    exit 2
+fi
+echo "$start" >&2
 
 holder="" pytest_pid="" sig=""
 dir=$(mktemp -d "${TMPDIR:-/tmp}/e2e-pdb.XXXXXX") || exit 1
@@ -41,7 +49,7 @@ wrapper=$$
 holder=$!
 disown "$holder"  # no "Terminated" job notice when it is killed
 
-uv run pytest "$@" -v -s --pdb < "$fifo" 2>&1 | tee -i "$log" &
+uv run pytest "$@" -v -s --pdb < "$fifo" 2>&1 | tee -a -i "$log" &
 pipe=$!
 pytest_pid=$(jobs -p %%)
 [ -z "$sig" ] || stop "$sig"  # a signal that came before both jobs started
@@ -52,4 +60,6 @@ while :; do
     rc=$?
     kill -0 "$pipe" 2>/dev/null || break
 done
-exit "${sig:-$rc}"
+rc=${sig:-$rc}
+echo "e2e-pdb: exit=$rc log=$log" >&2
+exit "$rc"

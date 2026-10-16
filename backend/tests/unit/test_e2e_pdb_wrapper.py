@@ -4,13 +4,15 @@ AGENTS.md ("Debugging E2E Tests") documents ``kill <pid>`` as the way to stop a
 run that is paused in pdb. A stand-in ``uv`` on PATH runs real pytest and pdb on
 a probe test whose session fixture records its teardown, which is where the E2E
 fixtures delete the vcluster. The tests check the exit status, that teardown runs
-after ``kill <pid>`` and after a SIGKILL to the wrapper, and that no FIFO
-directory or process from the run is left behind.
+after ``kill <pid>`` and after a SIGKILL to the wrapper, that no FIFO directory or
+process from the run is left behind, that each run writes its own log, and that
+an unwritable log stops the wrapper before pytest starts.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -97,17 +99,21 @@ def start(tmp_path: Path) -> Iterator[Start]:
     (tmp_path / "test_probe.py").write_text(PROBE_TEST)
     started: list[subprocess.Popen[bytes]] = []
 
-    def _start(*args: str, mode: str = "fail") -> subprocess.Popen[bytes]:
+    def _start(
+        *args: str, mode: str = "fail", log: Path | None = tmp_path / "pdb.log"
+    ) -> subprocess.Popen[bytes]:
         env = {
             **os.environ,
             "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
             "TMPDIR": str(tmp_path / "tmp"),
-            "E2E_PDB_LOG": str(tmp_path / "pdb.log"),
+            "E2E_PDB_LOG": str(log),
             "PROBE_MARK": str(tmp_path / "mark"),
             "PROBE_MODE": mode,
             "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
         }
         env.pop("PYTEST_ADDOPTS", None)
+        if log is None:
+            env.pop("E2E_PDB_LOG")
         with (tmp_path / "stderr").open("wb") as stderr:
             proc = subprocess.Popen(  # noqa: S603
                 [str(SCRIPT), *args],
@@ -158,6 +164,8 @@ def test_sigterm_ends_paused_run_with_teardown(start: Start, tmp_path: Path) -> 
     assert f"(stop with: kill {proc.pid})" in first_line
     proc.send_signal(signal.SIGTERM)
     assert proc.wait(timeout=TIMEOUT) == 143
+    last_line = _read(tmp_path / "stderr").splitlines()[-1]
+    assert last_line == f"e2e-pdb: exit=143 log={tmp_path / 'pdb.log'}"
     _assert_run_cleaned_up(proc, tmp_path)
 
 
@@ -175,3 +183,31 @@ def test_no_arguments_prints_usage(start: Start, tmp_path: Path) -> None:
     assert proc.wait(timeout=TIMEOUT) == 2
     assert "usage: e2e-pdb.sh <pytest-node-id>" in _read(tmp_path / "stderr")
     assert not list((tmp_path / "tmp").glob("e2e-pdb.*"))
+
+
+def test_unwritable_log_stops_before_pytest(start: Start, tmp_path: Path) -> None:
+    log = tmp_path / "missing" / "pdb.log"
+    proc = start("test_probe.py", mode="pass", log=log)
+    assert proc.wait(timeout=TIMEOUT) == 2
+    assert f"cannot write the log file {log}" in _read(tmp_path / "stderr")
+    assert not (tmp_path / "mark").exists()
+    assert not list((tmp_path / "tmp").glob("e2e-pdb.*"))
+
+
+def test_each_run_writes_its_own_log(start: Start, tmp_path: Path) -> None:
+    logs = []
+    for _ in range(2):
+        proc = start("test_probe.py", mode="pass", log=None)
+        assert proc.wait(timeout=TIMEOUT) == 0
+        first_line, *_, last_line = _read(tmp_path / "stderr").splitlines()
+        match = re.fullmatch(
+            r"e2e-pdb: pid=\d+ log=(.+) \(stop with: kill \d+\)", first_line
+        )
+        assert match
+        log = Path(match.group(1))
+        assert log.parent == tmp_path / "tmp"
+        assert log.read_text().startswith(f"{first_line}\n")
+        assert "1 passed" in log.read_text()
+        assert last_line == f"e2e-pdb: exit=0 log={log}"
+        logs.append(log)
+    assert logs[0] != logs[1]
