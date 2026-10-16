@@ -147,7 +147,7 @@ async def test_update_bsl_credentials_dispatches_sync(
 
 @pytest.mark.asyncio
 async def test_delete_bsl_removes_row(
-    client: AsyncClient, session: AsyncSession
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
 ) -> None:
     bsl = await seed_backup_storage_location(session)
 
@@ -210,6 +210,8 @@ def workflow_manager(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """The manager the BSL mutations get from ``get_manager()``, which they call directly."""
     manager = MagicMock()
     manager.run_action = AsyncMock()
+    manager.save_bsl_credentials = AsyncMock()
+    manager.delete_bsl_credentials = AsyncMock()
     monkeypatch.setattr(
         "styrmin_backend.api.schema.mutation.get_manager", lambda: manager
     )
@@ -249,6 +251,33 @@ async def test_assign_bsl_creates_cluster_objects_by_location_id(
     [created] = _dispatched(workflow_manager, PrefectAction.SYNC_BSL_CREATE)
     assert created["bsl_id"] == str(bsl_id)
     assert "bsl_name" not in created
+
+
+@pytest.mark.asyncio
+async def test_assign_bsl_saves_keys_outside_the_flow_parameters(
+    client: AsyncClient, session: AsyncSession, workflow_manager: MagicMock
+) -> None:
+    """#497: Prefect stores flow-run parameters, so the keys go to a Secret block."""
+    bsl = await seed_backup_storage_location(session)
+    env = await seed_environment(session)
+    bsl_id, env_id = bsl.id, env.id
+    keys = (bsl.access_key_id, bsl.secret_access_key)
+
+    await gql(
+        client,
+        "assign_backup_storage_location",
+        {"environmentId": str(env_id), "backupStorageLocationId": str(bsl_id)},
+    )
+
+    workflow_manager.save_bsl_credentials.assert_awaited_once_with(bsl_id, *keys)
+    [created] = _dispatched(workflow_manager, PrefectAction.SYNC_BSL_CREATE)
+    assert created == {
+        "bsl_id": str(bsl_id),
+        "namespace": "styrmin",
+        "bucket": bsl.bucket,
+        "region": bsl.region,
+        "endpoint": bsl.endpoint,
+    }
 
 
 @pytest.mark.asyncio
@@ -337,13 +366,52 @@ async def test_credentials_update_starts_one_run_whatever_the_cluster_count(
     )
 
     assert _dispatched(workflow_manager, PrefectAction.SYNC_BSL_UPDATE_CREDENTIALS) == [
-        {
-            "bsl_id": str(bsl_id),
-            "namespace": "styrmin",
-            "access_key_id": "NEW-KEY",
-            "secret_access_key": "NEW-SECRET",
-        }
+        {"bsl_id": str(bsl_id), "namespace": "styrmin"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_credentials_update_saves_new_keys_outside_the_flow_parameters(
+    client: AsyncClient, session: AsyncSession, workflow_manager: MagicMock
+) -> None:
+    """#497: the flow loads the new keys from the location's Secret block."""
+    bsl = await seed_backup_storage_location(session)
+    await seed_environment(session, bsl=bsl)
+    bsl_id = bsl.id
+
+    await gql(
+        client,
+        "update_backup_storage_location",
+        {
+            "backupStorageLocationId": str(bsl_id),
+            "accessKeyId": "NEW-KEY",
+            "secretAccessKey": "NEW-SECRET",
+        },
+    )
+
+    workflow_manager.save_bsl_credentials.assert_awaited_once_with(
+        bsl_id, "NEW-KEY", "NEW-SECRET"
+    )
+    assert _dispatched(workflow_manager, PrefectAction.SYNC_BSL_UPDATE_CREDENTIALS) == [
+        {"bsl_id": str(bsl_id), "namespace": "styrmin"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_bsl_deletes_its_saved_keys(
+    client: AsyncClient, session: AsyncSession, workflow_manager: MagicMock
+) -> None:
+    bsl = await seed_backup_storage_location(session)
+    bsl_id = bsl.id
+
+    await gql(
+        client,
+        "delete_backup_storage_location",
+        {"backupStorageLocationId": str(bsl_id)},
+    )
+
+    workflow_manager.delete_bsl_credentials.assert_awaited_once_with(bsl_id)
+    assert await session.get(BackupStorageLocation, bsl_id) is None
 
 
 @pytest.mark.asyncio

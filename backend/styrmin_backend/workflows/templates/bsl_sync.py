@@ -2,7 +2,9 @@
 
 Manages the lifecycle of Velero BackupStorageLocation CRDs and their
 credential Secrets on Kubernetes clusters. The flows identify a location by its
-id, never by its name, which an administrator can change.
+id, never by its name, which an administrator can change. They load the
+location's S3 keys from its Prefect Secret block, never from flow-run
+parameters (#497).
 
 INTERNAL flows (styrmin-work-pool): DB lookups, dispatching USER flows.
 USER flows (user-work-pool / K8s Job): K8s operations only.
@@ -16,6 +18,7 @@ from prefect.logging import get_run_logger
 from styrmin_backend.agent.service.kubernetes.velero.resources import (
     VeleroBackupStorageLocation,
 )
+from styrmin_backend.workflows.bsl_credentials import load_bsl_credentials
 
 
 @task(task_run_name="Create Velero BSL: {bsl_id}")
@@ -25,8 +28,6 @@ async def create_velero_bsl_task(
     bucket: str,
     region: str,
     endpoint: str,
-    access_key_id: str,
-    secret_access_key: str,
 ) -> None:
     """Create the Velero BSL CRD and credential Secret on the cluster.
 
@@ -58,10 +59,11 @@ async def create_velero_bsl_task(
             region=region,
             endpoint=endpoint,
         )
+        credentials = await load_bsl_credentials(bsl_id)
         await velero_client.create_bsl(
             bsl=bsl,
-            access_key_id=access_key_id,
-            secret_access_key=secret_access_key,
+            access_key_id=credentials.access_key_id,
+            secret_access_key=credentials.secret_access_key,
         )
         logger.info(f"Created Velero BSL '{bsl.name}' on cluster")
     finally:
@@ -98,8 +100,6 @@ async def delete_velero_bsl_task(
 async def update_velero_bsl_credentials_task(
     bsl_id: str,
     namespace: str,
-    access_key_id: str,
-    secret_access_key: str,
 ) -> None:
     """Update the credential Secret for a Velero BSL on the cluster."""
     from styrmin_backend.agent.service.kubernetes.velero.client import VeleroClient
@@ -113,11 +113,12 @@ async def update_velero_bsl_credentials_task(
 
     try:
         velero_client = VeleroClient(api_client)
+        credentials = await load_bsl_credentials(bsl_id)
         await velero_client.update_bsl_secret(
             bsl_id=bsl_id,
             namespace=namespace,
-            access_key_id=access_key_id,
-            secret_access_key=secret_access_key,
+            access_key_id=credentials.access_key_id,
+            secret_access_key=credentials.secret_access_key,
         )
         logger.info(f"Updated credentials for the Velero BSL of location {bsl_id}")
     finally:
@@ -131,8 +132,6 @@ async def sync_bsl_create_flow(
     bucket: str,
     region: str,
     endpoint: str,
-    access_key_id: str,
-    secret_access_key: str,
 ) -> None:
     """Create a Velero BSL and credentials on the cluster."""
     await create_velero_bsl_task(
@@ -141,8 +140,6 @@ async def sync_bsl_create_flow(
         bucket=bucket,
         region=region,
         endpoint=endpoint,
-        access_key_id=access_key_id,
-        secret_access_key=secret_access_key,
     )
 
 
@@ -159,13 +156,6 @@ async def sync_bsl_delete_flow(
 async def sync_bsl_update_credentials_flow(
     bsl_id: str,
     namespace: str,
-    access_key_id: str,
-    secret_access_key: str,
 ) -> None:
     """Update credentials for a Velero BSL on the cluster."""
-    await update_velero_bsl_credentials_task(
-        bsl_id=bsl_id,
-        namespace=namespace,
-        access_key_id=access_key_id,
-        secret_access_key=secret_access_key,
-    )
+    await update_velero_bsl_credentials_task(bsl_id=bsl_id, namespace=namespace)
