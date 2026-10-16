@@ -372,7 +372,7 @@ The catalogue registers the CRD variant. Execution order:
                                             NetworkPolicies, Secrets,
                                             HelmRelease, Services,
                                             Middlewares in ordered phases
-5. Apply cross-namespace service aliases (if any)
+5. Apply cross-namespace service aliases and delete stale ones (if any)
 6. Run post-hook (if exists)            ──> User's post_setup function
 ```
 
@@ -423,7 +423,7 @@ Execution order:
 3. Run pre-hook (if exists)              ──> User's pre-upgrade function
 4. Run core upgrade hook                 ──> User's upgrade function
                                               (e.g. stop, migrate, start)
-5. Apply cross-namespace service aliases (if any)
+5. Apply cross-namespace service aliases and delete stale ones (if any)
 6. Run post-hook (if exists)             ──> User's post-upgrade function
 ```
 

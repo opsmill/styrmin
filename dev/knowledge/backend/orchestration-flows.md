@@ -213,8 +213,9 @@ Execution order, with the step that each part records:
                                               Secrets -> HelmRelease ->
                                               Services, Middlewares)
 6. Apply cross-namespace ExternalName     step resource:service-aliases
-   service aliases (if any, and only      (only when there are aliases)
-   when step 5 wrote the CRD)
+   service aliases and delete the stale   (only when there are aliases
+   ones (if any, and only when step 5     to apply or to delete)
+   wrote the CRD)
 7. Run post-hook (if posthook is not None) step hook:setup:post
 ```
 
@@ -246,8 +247,8 @@ Execution order:
    higher sequence                            the new HelmRelease and
                                               utility resources
 5. Apply cross-namespace service aliases   step resource:service-aliases
-   (if any, and only when step 4 wrote
-   the CRD)
+   and delete the stale ones (if any, and
+   only when step 4 wrote the CRD)
 ```
 
 Called via `Remediation(type=UPDATE_INSTANCE, flow_id=<UPDATE_INSTANCE deployment>, parameters={instance})`. No hooks are involved in updates.
@@ -283,8 +284,8 @@ Execution order:
 3. Run pre-hook (if prehook is not None)                   step hook:upgrade:pre
 4. Run core upgrade hook (driver's upgrade function —      step hook:upgrade:core
    e.g. stop, migrate, start)
-5. Apply cross-namespace service aliases (if any, and      step resource:service-aliases
-   only when step 1 wrote the CRD)
+5. Apply cross-namespace service aliases and delete the   step resource:service-aliases
+   stale ones (if any, and only when step 1 wrote the CRD)
 6. Run post-hook (if posthook is not None)                 step hook:upgrade:post
 ```
 
@@ -298,6 +299,16 @@ The CRD spec is written *before* the hooks run because driver upgrade hooks freq
 - Passes `target_version` to all hooks so driver code knows what version it's upgrading to.
 - Writes the CRD spec at the very start so hook-driven nested CRD updates layer correctly.
 
+## Service aliases
+
+Each deployment has its own namespace, so the applications of an environment cannot resolve each other's short service names. `agent/tasks/service_aliases.py` builds an `ExternalName` Service, an alias, that points a short name to the service in its owner's namespace. Each of the three CRD flows writes two sets: the aliases of the other deployments' services in its own namespace, and the aliases of its own services in the namespaces of the other deployments that have services.
+
+- An alias is named after the service's resolved name, which a service-name override sets, because that name is what the peers resolve. It carries the labels `styrmin.io/service-alias: "true"` and `styrmin.io/deployment-id: <id of the deployment that owns the service>` ([ADR-073](../../adr/0073-kubernetes-objects-named-and-found-by-record-id.md)).
+- Before it applies the aliases, the flow lists the aliases of every namespace (`styrmin.io/service-alias=true`) and selects the stale ones of its deployment: those whose name is not one of the deployment's current resolved names. An alias without the `styrmin.io/deployment-id` label, which versions before [#491](https://github.com/opsmill/styrmin/issues/491) created, belongs to the deployment whose namespace its `externalName` points into.
+- The flow selects stale aliases by name, not by namespace, because another deployment's flow also writes this deployment's aliases into its own namespace, which this flow does not write to.
+- The flow deletes each stale alias with a `resourceVersion` precondition. When another deployment's flow rewrote the alias since the list, for example because that deployment took the freed name, the delete fails with 409 and the flow keeps the alias.
+- Deleting a deployment does not delete its aliases in the other namespaces yet. The operator's teardown acts only in the deployment's own namespace ([#503](https://github.com/opsmill/styrmin/issues/503)).
+
 ## Remediation-flow steps
 
 The three CRD flows record their steps with `StepReporter.from_env()`. Keys, names and kinds come from `domain/steps.py`:
@@ -309,7 +320,7 @@ The three CRD flows record their steps with `StepReporter.from_env()`. Keys, nam
 | `resource:styrmindeployment` | Write the StyrminDeployment resource | `RESOURCE_WRITE` | all three CRD flows |
 | `hook:upgrade:pre` | Run the upgrade pre-hook | `HOOK` | `upgrade_instance_crd`, when the driver has an upgrade pre-hook |
 | `hook:upgrade:core` | Run the upgrade hook | `HOOK` | `upgrade_instance_crd` |
-| `resource:service-aliases` | Create service aliases | `RESOURCE_WRITE` | all three CRD flows, only when the context has aliases and the flow wrote the StyrminDeployment |
+| `resource:service-aliases` | Create and delete service aliases | `RESOURCE_WRITE` | all three CRD flows, only when the flow wrote the StyrminDeployment and has aliases to apply or stale aliases to delete |
 | `hook:setup:post` | Run the setup post-hook | `HOOK` | `create_instance_crd`, when the driver has a setup post-hook |
 | `hook:upgrade:post` | Run the upgrade post-hook | `HOOK` | `upgrade_instance_crd`, when the driver has an upgrade post-hook |
 

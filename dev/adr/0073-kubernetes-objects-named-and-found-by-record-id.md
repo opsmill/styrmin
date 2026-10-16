@@ -82,11 +82,17 @@ and `AGENTS.md`.
 
 ## More information
 
-- Known case that does not follow the decision yet: the ExternalName alias Services that
-  `agent/tasks/service_aliases.py` creates from service names, including service-name overrides,
-  carry no label with the owning deployment's id, and no code deletes them. After an override
-  changes, the alias with the old name stays in the other deployments' namespaces
-  ([#491](https://github.com/opsmill/styrmin/issues/491)).
+- The ExternalName alias Services that `agent/tasks/service_aliases.py` creates are named after
+  the service's resolved name, which a service-name override sets, and carry the
+  `styrmin.io/deployment-id` label of the deployment that owns the service. A deployment's flow
+  deletes its aliases whose name it no longer uses, so an alias with an old override name does
+  not stay in the other deployments' namespaces
+  ([#491](https://github.com/opsmill/styrmin/issues/491)). Aliases that earlier versions created
+  have no such label; the flow finds their owner from the namespace that `spec.externalName`
+  points into, which is built from the deployment's id.
+- Known case that does not follow the decision yet: deleting a deployment leaves its aliases in the
+  other deployments' namespaces, because the operator's teardown acts only in the deployment's own
+  namespace ([#503](https://github.com/opsmill/styrmin/issues/503)).
 - The open feature request [#5](https://github.com/opsmill/styrmin/issues/5) asks for namespace
   names built from the environment and deployment names, renamed on each rename. That is option 1
   of this record; implementing it needs a record that supersedes this one.

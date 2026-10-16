@@ -171,4 +171,6 @@ await client.deployments.create(
 
 The override also sets the service's readable address, here `ansible-demo`
 followed by the cluster's domain suffix, and the name the other applications of
-the environment call it by.
+the environment call it by. When you change the override of a running
+deployment, the other applications call it by the new name, and the old name
+stops resolving for them.
