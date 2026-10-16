@@ -84,6 +84,11 @@ environment:
 Environment-level overlay on top of the cluster. The same fields can
 appear at both levels; the environment's value wins where they overlap.
 
+When the environment has a backup storage location,
+`capabilities.backup.velero.storage_location` is the name of the
+location's Velero `BackupStorageLocation` object,
+`styrmin-bsl-<location id>`. Renaming the location does not change it.
+
 #### `deployment`
 
 ```text

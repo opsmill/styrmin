@@ -417,6 +417,12 @@ unassign removes them. Styrmin does not rename them, because a Velero restore ne
 
 The flows take the location's id (`bsl_id`) and never its name.
 
+The environment capability `backup.velero.storage_location` is the same id-based name,
+`styrmin-bsl-<location id>` (`compute_environment_capabilities` in `services/capabilities.py`), so
+a rename does not change it and `update_backup_storage_location` does not recompute the
+capabilities of the location's environments. Before #509 the capability held the location's name,
+which no Velero object had. Revision `859c9d31dc11` rewrote the stored values.
+
 A change to a location's access key or secret key starts one `sync-bsl-update-credentials` run
 when at least one environment has the location (`update_backup_storage_location` in
 `api/schema/mutation.py`). No run names a cluster, and neither do the `sync-bsl-create` and
