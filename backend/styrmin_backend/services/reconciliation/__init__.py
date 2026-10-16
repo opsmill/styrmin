@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from uuid import UUID
 
 from fast_depends import Depends, inject
@@ -37,16 +38,22 @@ async def generate_instance_from_deployment(
     deployment: Deployment,
     uow: UnitOfWork,
     release_reference: str | None = None,
+    upcoming_deployments: Mapping[UUID, str] | None = None,
 ) -> Instance:
     """Generate an instance from a deployment.
 
-    ``release_reference`` is forwarded to
+    ``release_reference`` and ``upcoming_deployments`` are forwarded to
     :func:`~styrmin_backend.services.context.generate_context_from_deployment`;
-    only an environment clone's counterpart passes it (it adopts the source
-    deployment's Helm release name — 010 research D2).
+    only an environment clone's counterpart passes ``release_reference`` (it
+    adopts the source deployment's Helm release name — 010 research D2).
+    ``upcoming_deployments`` gives the deployments that the current operation
+    creates, so that an affinity term that names one of them resolves.
     """
     context = await generate_context_from_deployment(
-        deployment=deployment, uow=uow, release_reference=release_reference
+        deployment=deployment,
+        uow=uow,
+        release_reference=release_reference,
+        upcoming_deployments=upcoming_deployments,
     )
 
     instance = Instance.create(

@@ -2,12 +2,13 @@
 
 Covers T030b (component-name validation) and T034 (deployment-reference
 resolution happy path + unresolvable → ``UnresolvableAffinityReferenceError``).
-Further coverage (runtime-class existence, quantity syntax) lands in
-later user-story phases.
+The resolver reads ids only (027): a name, a tombstoned deployment and an id
+of another environment are refused, and an upcoming id resolves without a lookup.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -18,6 +19,7 @@ from styrmin_backend.context.models.config import (
     DeploymentReference,
     LabelSelector,
     SchedulingConfig,
+    WeightedAffinityTerm,
 )
 from styrmin_backend.context.resolvers import _resolve_scheduling_config
 from styrmin_backend.domain.models import (
@@ -35,7 +37,11 @@ from styrmin_backend.services.scheduling.validator import (
 
 
 def _make_deployment(
-    *, id: UUID | None = None, name: str, environment_id: UUID
+    *,
+    id: UUID | None = None,
+    name: str,
+    environment_id: UUID,
+    deleted: bool = False,
 ) -> Deployment:
     return Deployment(
         id=id or uuid4(),
@@ -44,7 +50,8 @@ def _make_deployment(
         config=None,
         application_driver_version_id=uuid4(),
         environment_id=environment_id,
-        status=DeploymentState.PENDING,
+        status=DeploymentState.DELETED if deleted else DeploymentState.PENDING,
+        deleted_at=datetime.now(UTC) if deleted else None,
         created_by_user_id=uuid4(),
     )
 
@@ -126,18 +133,19 @@ class TestResolveDeploymentReferenceById:
         assert selector.match_expressions is None
 
     @pytest.mark.anyio
-    async def test_resolves_by_name(self, uow) -> None:  # type: ignore[no-untyped-def]
-        env_id = uuid4()
-        target = _make_deployment(name="api", environment_id=env_id)
-        await uow.deployments.save(target)
+    async def test_resolves_upcoming_id_without_lookup(self, uow) -> None:  # type: ignore[no-untyped-def]
+        upcoming_id = uuid4()
 
         selector = await resolve_deployment_reference(
             uow,
-            environment_id=env_id,
-            ref=DeploymentReference(deployment_name="api"),
+            environment_id=uuid4(),
+            ref=DeploymentReference(deployment_id=upcoming_id, components=["server"]),
+            upcoming_deployments={upcoming_id: "counterpart"},
         )
 
-        assert selector.match_labels == {"styrmin/deployment_id": str(target.id)}
+        assert selector.match_labels == {"styrmin/deployment_id": str(upcoming_id)}
+        assert selector.match_expressions is not None
+        assert selector.match_expressions[0].values == ["server"]
 
     @pytest.mark.anyio
     async def test_narrows_by_components(self, uow) -> None:  # type: ignore[no-untyped-def]
@@ -192,18 +200,76 @@ class TestResolveDeploymentReferenceUnresolvable:
         assert exc.value.error_metadata["deployment_name"] == "nope"
 
     @pytest.mark.anyio
+    async def test_name_of_existing_deployment_raises(self, uow) -> None:  # type: ignore[no-untyped-def]
+        """A name is refused even when a deployment has it: stored references give ids only."""
+        env_id = uuid4()
+        target = _make_deployment(name="api", environment_id=env_id)
+        await uow.deployments.save(target)
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await resolve_deployment_reference(
+                uow,
+                environment_id=env_id,
+                ref=DeploymentReference(deployment_name="api"),
+                path="scheduling.pod_affinity.required[0]",
+            )
+
+        assert exc.value.error_metadata == {
+            "deployment_name": "api",
+            "path": "scheduling.pod_affinity.required[0]",
+        }
+
+    @pytest.mark.anyio
+    async def test_name_of_upcoming_deployment_raises(self, uow) -> None:  # type: ignore[no-untyped-def]
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await resolve_deployment_reference(
+                uow,
+                environment_id=uuid4(),
+                ref=DeploymentReference(deployment_name="counterpart"),
+                upcoming_deployments={uuid4(): "counterpart"},
+            )
+        assert exc.value.error_metadata["deployment_name"] == "counterpart"
+
+    @pytest.mark.anyio
+    async def test_tombstoned_id_raises_with_last_name(self, uow) -> None:  # type: ignore[no-untyped-def]
+        env_id = uuid4()
+        target = _make_deployment(name="postgres", environment_id=env_id, deleted=True)
+        await uow.deployments.save(target)
+        path = "deployment.config.scheduling.pod_affinity.required[0]"
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await resolve_deployment_reference(
+                uow,
+                environment_id=env_id,
+                ref=DeploymentReference(deployment_id=target.id),
+                path=path,
+            )
+
+        assert exc.value.error_metadata == {
+            "deployment_id": str(target.id),
+            "deployment_name": "postgres",
+            "path": path,
+            "deleted": True,
+        }
+        assert str(exc.value) == (
+            f"Affinity term at {path} names deployment 'postgres' ({target.id}),"
+            " which was deleted"
+        )
+
+    @pytest.mark.anyio
     async def test_different_environment_raises(self, uow) -> None:  # type: ignore[no-untyped-def]
         env_a = uuid4()
         env_b = uuid4()
         target = _make_deployment(name="api", environment_id=env_a)
         await uow.deployments.save(target)
 
-        with pytest.raises(UnresolvableAffinityReferenceError):
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
             await resolve_deployment_reference(
                 uow,
                 environment_id=env_b,
                 ref=DeploymentReference(deployment_id=target.id),
             )
+        assert exc.value.error_metadata == {"deployment_id": str(target.id)}
 
 
 class TestExpandDeploymentReferences:
@@ -259,6 +325,88 @@ class TestExpandDeploymentReferences:
         term = expanded.pod_affinity.required[0]
         assert term.label_selector is not None
         assert term.label_selector.match_labels == {"app": "web"}
+
+    @pytest.mark.anyio
+    async def test_default_path_prefix_is_scheduling(self, uow) -> None:  # type: ignore[no-untyped-def]
+        config = SchedulingConfig(
+            pod_affinity=AffinityBlock(
+                required=[
+                    AffinityTerm(
+                        topology_key="kubernetes.io/hostname",
+                        deployment_ref=DeploymentReference(deployment_id=uuid4()),
+                    )
+                ]
+            )
+        )
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await expand_deployment_references(uow, uuid4(), config)
+
+        assert exc.value.error_metadata["path"] == "scheduling.pod_affinity.required[0]"
+
+    @pytest.mark.anyio
+    async def test_path_prefix_names_the_level(self, uow) -> None:  # type: ignore[no-untyped-def]
+        env_id = uuid4()
+        live = _make_deployment(name="api", environment_id=env_id)
+        await uow.deployments.save(live)
+        missing_id = uuid4()
+        config = SchedulingConfig(
+            pod_anti_affinity=AffinityBlock(
+                preferred=[
+                    WeightedAffinityTerm(
+                        weight=10,
+                        term=AffinityTerm(
+                            topology_key="kubernetes.io/hostname",
+                            deployment_ref=DeploymentReference(deployment_id=live.id),
+                        ),
+                    ),
+                    WeightedAffinityTerm(
+                        weight=20,
+                        term=AffinityTerm(
+                            topology_key="kubernetes.io/hostname",
+                            deployment_ref=DeploymentReference(
+                                deployment_id=missing_id
+                            ),
+                        ),
+                    ),
+                ]
+            )
+        )
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await expand_deployment_references(
+                uow, env_id, config, path_prefix="environment.config.scheduling"
+            )
+
+        assert exc.value.error_metadata == {
+            "deployment_id": str(missing_id),
+            "path": "environment.config.scheduling.pod_anti_affinity.preferred[1].term",
+        }
+
+    @pytest.mark.anyio
+    async def test_upcoming_ids_expand_without_lookup(self, uow) -> None:  # type: ignore[no-untyped-def]
+        upcoming_id = uuid4()
+        config = SchedulingConfig(
+            pod_affinity=AffinityBlock(
+                required=[
+                    AffinityTerm(
+                        topology_key="kubernetes.io/hostname",
+                        deployment_ref=DeploymentReference(deployment_id=upcoming_id),
+                    )
+                ]
+            )
+        )
+
+        expanded = await expand_deployment_references(
+            uow, uuid4(), config, upcoming_deployments={upcoming_id: "counterpart"}
+        )
+
+        assert expanded.pod_affinity is not None
+        term = expanded.pod_affinity.required[0]
+        assert term.label_selector is not None
+        assert term.label_selector.match_labels == {
+            "styrmin/deployment_id": str(upcoming_id)
+        }
 
 
 class TestRuntimeClassValidation:

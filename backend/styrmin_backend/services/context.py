@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from uuid import UUID
 
 from loguru import logger
@@ -114,7 +115,10 @@ def _resolve_release_reference(
 
 
 async def generate_context_from_deployment(
-    deployment: Deployment, uow: UnitOfWork, release_reference: str | None = None
+    deployment: Deployment,
+    uow: UnitOfWork,
+    release_reference: str | None = None,
+    upcoming_deployments: Mapping[UUID, str] | None = None,
 ) -> GlobalContext:
     """Build the resolved :class:`GlobalContext` for a deployment.
 
@@ -125,6 +129,9 @@ async def generate_context_from_deployment(
             it (see :func:`_resolve_release_reference`). Only the environment
             clone path passes it, for a counterpart that adopts the source's
             release; every other caller omits it.
+        upcoming_deployments: Ids and names of the deployments that the current
+            operation creates; an affinity term that names one of these ids
+            resolves without a lookup.
     """
     # FIXME: Fix the context generation
     logger.debug("Generating context for deployment: {}", deployment.id)
@@ -273,6 +280,7 @@ async def generate_context_from_deployment(
             environment_config=environment.config,
             deployment_config=deployment.config,
             deployment_components=deployment.components or [],
+            upcoming_deployments=upcoming_deployments,
         )
 
         # Resolve env vars per component (008-deployment-env-vars / US3).
@@ -313,13 +321,16 @@ async def _populate_component_scheduling(
     environment_config: dict | None,
     deployment_config: dict | None,
     deployment_components: list,
+    upcoming_deployments: Mapping[UUID, str] | None = None,
 ) -> None:
     """Populate ``ComponentContext.scheduling`` for each component.
 
-    Reads ``scheduling`` from each level's raw JSON config, merges them via
-    :func:`_resolve_scheduling_config`, expands affinity ``deployment_ref``
-    terms, and stores the resulting :class:`ResolvedComponentScheduling` on
-    the matching :class:`ComponentContext`. Deployment-level ``runtime_class``
+    Reads ``scheduling`` from each level's raw JSON config, expands each
+    level's affinity ``deployment_ref`` terms (so an error path names the
+    level that holds the term), merges the levels via
+    :func:`_resolve_scheduling_config`, and stores the resulting
+    :class:`ResolvedComponentScheduling` on the matching
+    :class:`ComponentContext`. Deployment-level ``runtime_class``
     values are passed through without cluster-side validation — an unknown
     name surfaces later as a Pending pod with a scheduler error rather than
     a pre-rollout rejection.
@@ -341,8 +352,32 @@ async def _populate_component_scheduling(
             path=f"component[{component.name}].config.scheduling",
         )
 
+    if not context.components.root:
+        return
+
+    env_scheduling = await _expand_scheduling(
+        uow,
+        environment_id,
+        env_scheduling,
+        path_prefix="environment.config.scheduling",
+        upcoming_deployments=upcoming_deployments,
+    )
+    dep_scheduling = await _expand_scheduling(
+        uow,
+        environment_id,
+        dep_scheduling,
+        path_prefix="deployment.config.scheduling",
+        upcoming_deployments=upcoming_deployments,
+    )
+
     for name, component_ctx in context.components.root.items():
-        comp_scheduling = component_scheduling_by_name.get(name)
+        comp_scheduling = await _expand_scheduling(
+            uow,
+            environment_id,
+            component_scheduling_by_name.get(name),
+            path_prefix=f"component[{name}].config.scheduling",
+            upcoming_deployments=upcoming_deployments,
+        )
         if (
             env_scheduling is None
             and dep_scheduling is None
@@ -354,14 +389,29 @@ async def _populate_component_scheduling(
             dep=dep_scheduling,
             comp=comp_scheduling,
         )
-        resolved = await expand_deployment_references(
-            uow=uow,
-            environment_id=environment_id,
-            config=resolved,
-        )
         component_ctx.scheduling = ResolvedComponentScheduling(
             config=resolved, provenance=provenance
         )
+
+
+async def _expand_scheduling(
+    uow: UnitOfWork,
+    environment_id: UUID,
+    scheduling: SchedulingConfig | None,
+    *,
+    path_prefix: str,
+    upcoming_deployments: Mapping[UUID, str] | None = None,
+) -> SchedulingConfig | None:
+    """Expand the affinity ``deployment_ref`` terms of one config level, if it has scheduling."""
+    if scheduling is None:
+        return None
+    return await expand_deployment_references(
+        uow,
+        environment_id,
+        scheduling,
+        path_prefix=path_prefix,
+        upcoming_deployments=upcoming_deployments,
+    )
 
 
 def _populate_component_env_vars(
