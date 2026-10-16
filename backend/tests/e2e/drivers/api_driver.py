@@ -19,6 +19,7 @@ from styrmin_sdk.graphql._generated import (
     GetDeploymentTimelineDeploymentTimelineTaskSteps,
     GetRestoreRestoreSteps,
 )
+from styrmin_sdk.models import ComponentConfigInput, DeploymentConfigInput
 
 from tests.e2e.drivers.errors import (
     ResourceNotFound,
@@ -370,7 +371,18 @@ class ApiScenarioDriver:
         name: str | None = None,
         service_name_overrides: list[dict[str, str]] | None = None,
         parameters: dict[str, Any] | None = None,
+        component_replicas: dict[str, int] | None = None,
     ) -> DeploymentRef:
+        config = (
+            DeploymentConfigInput(
+                components=[
+                    ComponentConfigInput(name=component, replicas=replicas)
+                    for component, replicas in component_replicas.items()
+                ]
+            )
+            if component_replicas
+            else None
+        )
         try:
             task = await self._client.deployments.create(
                 driver=driver,
@@ -379,6 +391,7 @@ class ApiScenarioDriver:
                 name=name,
                 parameters=parameters,
                 service_name_overrides=service_name_overrides,
+                config=config,
             )
         except StyrminError as exc:
             raise _normalise(exc) from exc
@@ -467,11 +480,7 @@ class ApiScenarioDriver:
         # Imported locally so importing the api_driver doesn't pull the
         # full SDK input-types graph at module-load time (the test suite
         # imports this driver from many fixtures).
-        from styrmin_sdk.models import (
-            ComponentConfigInput,
-            EnvVarInput,
-            UpdateDeploymentInput,
-        )
+        from styrmin_sdk.models import EnvVarInput, UpdateDeploymentInput
 
         prepared: dict[str, Any] = _translate_scheduling_enums(dict(config))
 

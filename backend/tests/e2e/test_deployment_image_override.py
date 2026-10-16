@@ -20,6 +20,8 @@ and reads each workload once after the update task completes, so the counts
 prove that the task waited for the pods. It also checks that the singleton
 ``database`` stays at 1 and that an override of 2 on it is rejected. A
 finalizer clears the ``server`` override, so the image tests start at 1 replica.
+The second deployment, used by the upgrade test, is created with a ``server``
+replica override of 2, so the create path of the override is covered too.
 
 The override images are the simple-app builds re-tagged by the session fixture
 ``simple_app_override_images`` under ``registry.example/acme/simple-app-patched``;
@@ -75,6 +77,7 @@ SERVER_WORKLOAD = "styrmin-simple-app"
 GUARD_FAILURE_TIMEOUT_SECONDS = 120.0
 # The bitnami subchart's ``fullnameOverride`` in the simple-app values template.
 DATABASE_WORKLOAD = "styrmin-postgresql"
+CREATE_SERVER_REPLICAS = 2
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +128,9 @@ async def image_override_upgrade_deployment(
     simple_app_override_images: dict[str, str],  # noqa: ARG001 — builds and tags
 ) -> dict:
     """A deployment of its own at 0.1.0 for the upgrade test; it renames its
-    service because service names are unique per environment."""
+    service because service names are unique per environment. It is created
+    with a ``server`` replica override of 2, from the Deploy form in the ui
+    variant, for ``test_create_with_replica_override``."""
     driver, _ = session_scenario_driver
     deployment = await driver.create_deployment(
         driver="simple-app",
@@ -135,6 +140,7 @@ async def image_override_upgrade_deployment(
         service_name_overrides=[
             {"driverServiceName": "simple-app", "overrideName": "simple-app-b"}
         ],
+        component_replicas={"server": CREATE_SERVER_REPLICAS},
     )
     deployment = await driver.wait_for_deployment_running(deployment_id=deployment.id)
     return {
@@ -469,6 +475,33 @@ async def test_scale_server_and_singleton_guard(
     assert rows["server"]["source"] == "CHART", rows
     assert rows["server"]["override"] is None, rows
     assert await _stored_replicas(client, deployment_id, "server") is None
+
+
+@pytest.mark.ci
+async def test_create_with_replica_override(
+    image_override_environment: dict,
+    image_override_upgrade_deployment: dict,
+    vcluster: dict,
+) -> None:
+    """023 US1: a replica override given when the deployment is created, from
+    the Deploy form or the deploy mutation, is stored and runs 2 ``server``
+    pods once the deploy task completes. The workload is read once, without
+    polling, so the count proves that the deploy task waited for the pods."""
+    client: StyrminClient = image_override_environment["client"]
+    deployment_id = image_override_upgrade_deployment["deployment_id"]
+    namespace = image_override_upgrade_deployment["namespace"]
+    apps = kubeclient.AppsV1Api(vcluster["api"])
+
+    await _wait_for_new_task_succeeded(client, deployment_id, known=set())
+    assert await read_workload_replicas(
+        apps, namespace=namespace, kind="Deployment", name=SERVER_WORKLOAD
+    ) == _all_counts(CREATE_SERVER_REPLICAS)
+    assert await _stored_replicas(client, deployment_id, "server") == (
+        CREATE_SERVER_REPLICAS
+    )
+    rows = await _read_component_replicas(client, deployment_id)
+    assert rows["server"]["source"] == "OVERRIDE", rows
+    assert rows["server"]["count"] == CREATE_SERVER_REPLICAS, rows
 
 
 # ---------------------------------------------------------------------------

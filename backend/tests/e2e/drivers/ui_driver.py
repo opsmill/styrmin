@@ -213,6 +213,7 @@ class UiScenarioDriver:
         name: str | None = None,
         service_name_overrides: list[dict[str, str]] | None = None,
         parameters: dict[str, Any] | None = None,
+        component_replicas: dict[str, int] | None = None,
     ) -> DeploymentRef:
         self._environment_id = environment_id
         # Deploy form requires a deployment name; scenarios that don't care
@@ -228,6 +229,7 @@ class UiScenarioDriver:
                 name=effective_name,
                 parameters=parameters,
                 service_name_overrides=service_name_overrides,
+                component_replicas=component_replicas,
             )
             deployment = await self._deploy_form.submit()
             self._deployment_id = deployment.id
