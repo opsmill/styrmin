@@ -6,6 +6,7 @@ from styrmin_backend.context.exceptions import (
     InvalidEnvironmentContextError,
 )
 from styrmin_backend.context.models.config import (
+    BaseConfigSection,
     ClusterConfig,
     DeploymentConfig,
     EnvironmentConfig,
@@ -60,6 +61,28 @@ def format_config_validation_error(error: ValidationError) -> str:
     return "; ".join(entries) or _FALLBACK_MESSAGE
 
 
+def _required_node_affinity_term_errors(config: BaseConfigSection) -> str | None:
+    """Name each required node affinity term that has no expression.
+
+    Such a term renders as no node selector term or an empty one, so the pods run on
+    any node or on none (#496). Only a save rejects it: stored configs still load.
+    """
+    node_affinity = config.scheduling.node_affinity if config.scheduling else None
+    if node_affinity is None:
+        return None
+    entries = [
+        f"scheduling.node_affinity.required.{index}: a required node affinity term "
+        "must set at least one entry in label_selector.match_expressions or "
+        "label_selector.match_labels"
+        for index, term in enumerate(node_affinity.required)
+        if term.label_selector is None
+        or not (
+            term.label_selector.match_expressions or term.label_selector.match_labels
+        )
+    ]
+    return "; ".join(entries) or None
+
+
 def validate_cluster_config(context: dict) -> None:
     """Validate the cluster context.
 
@@ -85,9 +108,11 @@ def validate_environment_config(context: dict) -> None:
     """
 
     try:
-        EnvironmentConfig(**context)
+        config = EnvironmentConfig(**context)
     except ValidationError as e:
         raise InvalidEnvironmentContextError(format_config_validation_error(e)) from e
+    if message := _required_node_affinity_term_errors(config):
+        raise InvalidEnvironmentContextError(message)
 
 
 def validate_deployment_config(context: dict) -> None:
@@ -98,6 +123,8 @@ def validate_deployment_config(context: dict) -> None:
     """
 
     try:
-        DeploymentConfig(**context)
+        config = DeploymentConfig(**context)
     except ValidationError as e:
         raise InvalidDeploymentContextError(format_config_validation_error(e)) from e
+    if message := _required_node_affinity_term_errors(config):
+        raise InvalidDeploymentContextError(message)

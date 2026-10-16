@@ -439,6 +439,35 @@ async def test_update_environment_invalid_env_var_name_surfaces_typed_error(
         )
 
 
+async def test_update_environment_rejects_required_node_term_without_expressions(
+    uow: FakeUnitOfWork,
+    fake_cluster: Cluster,
+):
+    """#496: the error names the term, and the stored config is unchanged."""
+    environment = await create_environment(
+        name="staging", cluster_id=fake_cluster.id, uow=uow
+    )
+    uow.committed = False
+
+    with pytest.raises(
+        InvalidContextError, match=r"scheduling\.node_affinity\.required\.0"
+    ):
+        await update_environment(
+            environment_id=environment.id,
+            uow=uow,
+            config={
+                "scheduling": {
+                    "node_affinity": {
+                        "required": [{"topology_key": "", "label_selector": {}}]
+                    }
+                }
+            },
+            acting_user_id=ACTING_USER_ID,
+        )
+    assert not uow.committed
+    assert environment.config == {}
+
+
 # --- Phase 2 (T013) `_deployment_already_at_config` tests -----------------
 
 
