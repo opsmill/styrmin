@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 import kopf
 
@@ -1112,16 +1113,102 @@ async def kopf_styrmin_deployment_timer(
 # --- Ordered deletion (US3 + spec 008) ---
 
 
+async def _delete_service_aliases(
+    *,
+    deployment_id: str,
+    namespace: str,
+    deletion_requested: bool,
+    logger: Any,
+) -> None:
+    """Delete the aliases of the deployment's services in all namespaces (#503).
+
+    Runs only when *namespace* is ``styrmin-<deployment_id>``. Without a deletion request
+    it runs only while the namespace is not being deleted, so a restore's namespace
+    deletion deletes no alias. Best-effort: errors are logged, never raised.
+    """
+    from styrmin_backend.agent.service.kubernetes.primitives import (
+        delete_service,
+        get_namespace,
+        list_services_in_all_namespaces,
+    )
+    from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
+    from styrmin_backend.agent.tasks.service_aliases import (
+        SERVICE_ALIAS_LABEL,
+        is_alias_of_deployment,
+    )
+
+    try:
+        own_namespace = get_kubernetes_reference(UUID(deployment_id))
+    except ValueError:
+        own_namespace = None
+    if namespace != own_namespace:
+        logger.warning(
+            "Namespace %s is not the namespace of deployment %r; keeping its service aliases",
+            namespace,
+            deployment_id,
+        )
+        return
+
+    if not deletion_requested:
+        try:
+            namespace_object = await get_namespace(name=namespace)
+        except Exception:
+            logger.exception(
+                "Failed to read namespace %s; keeping its service aliases", namespace
+            )
+            return
+        if namespace_object is None or (
+            namespace_object.status is not None
+            and namespace_object.status.phase == "Terminating"
+        ):
+            logger.info(
+                "Namespace %s is being deleted without a deletion request; "
+                "keeping its service aliases",
+                namespace,
+            )
+            return
+
+    try:
+        listed = await list_services_in_all_namespaces(
+            label_selector=f"{SERVICE_ALIAS_LABEL}=true"
+        )
+    except Exception:
+        logger.exception("Failed to list the service aliases of %s", deployment_id)
+        return
+
+    deleted = 0
+    for alias in listed.items:
+        if not is_alias_of_deployment(alias, deployment_id, namespace):
+            continue
+        try:
+            # False means the alias was already gone, which counts as deleted.
+            await delete_service(
+                name=alias.metadata.name, namespace=alias.metadata.namespace
+            )
+        except Exception:
+            logger.exception(
+                "Failed to delete service alias %s/%s",
+                alias.metadata.namespace,
+                alias.metadata.name,
+            )
+            continue
+        deleted += 1
+    logger.info("Deleted %d service aliases of %s", deleted, deployment_id)
+
+
 async def _teardown_owned_resources(
     *,
     namespace: str,
     release_reference: str,
+    deployment_id: str,
+    deletion_requested: bool,
     name: str,
     logger: Any,
 ) -> None:
     """Reverse-order teardown of resources owned by a StyrminDeployment.
 
-    Order: Services/Middlewares -> HelmRelease -> NetworkPolicies/Secrets.
+    Order: Service aliases in all namespaces -> Services/Middlewares -> HelmRelease ->
+    NetworkPolicies/Secrets.
     Errors are logged and swallowed — teardown is best-effort and
     finalisers / 404s should not block the lifecycle.
 
@@ -1135,8 +1222,19 @@ async def _teardown_owned_resources(
         list_managed_resources,
     )
 
-    # Step 1: Services and Middlewares.
-    logger.info("Teardown step 1: Services / Middlewares for %s/%s", namespace, name)
+    # Step 1: aliases of the deployment's services in the other namespaces.
+    logger.info(
+        "Teardown step 1: service aliases of %s in all namespaces", deployment_id
+    )
+    await _delete_service_aliases(
+        deployment_id=deployment_id,
+        namespace=namespace,
+        deletion_requested=deletion_requested,
+        logger=logger,
+    )
+
+    # Step 2: Services and Middlewares.
+    logger.info("Teardown step 2: Services / Middlewares for %s/%s", namespace, name)
     for kind in ("Service",):
         resources = await list_managed_resources(
             namespace=namespace, release_reference=release_reference, kind=kind
@@ -1151,8 +1249,8 @@ async def _teardown_owned_resources(
                     resource.get("metadata", {}).get("name"),
                 )
 
-    # Step 2: HelmRelease.
-    logger.info("Teardown step 2: HelmRelease for %s/%s", namespace, name)
+    # Step 3: HelmRelease.
+    logger.info("Teardown step 3: HelmRelease for %s/%s", namespace, name)
     from kubernetes_asyncio import client as kubeclient
     from styrmin_backend.operator.kubernetes import get_kubernetes_client
 
@@ -1170,8 +1268,8 @@ async def _teardown_owned_resources(
     except Exception:
         logger.warning("HelmRelease %s not found or already deleted", release_reference)
 
-    # Step 3: NetworkPolicies and Secrets.
-    logger.info("Teardown step 3: NetworkPolicies / Secrets for %s/%s", namespace, name)
+    # Step 4: NetworkPolicies and Secrets.
+    logger.info("Teardown step 4: NetworkPolicies / Secrets for %s/%s", namespace, name)
     for kind in ("NetworkPolicy", "Secret"):
         resources = await list_managed_resources(
             namespace=namespace, release_reference=release_reference, kind=kind
@@ -1294,7 +1392,12 @@ async def kopf_on_styrmin_deployment_deletion_requested(
     patch.status["displayState"] = DisplayState.DELETING.value
 
     await _teardown_owned_resources(
-        namespace=ns, release_reference=release_ref, name=name, logger=logger
+        namespace=ns,
+        release_reference=release_ref,
+        deployment_id=spec.get("deploymentId", ""),
+        deletion_requested=bool(spec.get("deletionRequested", False)),
+        name=name,
+        logger=logger,
     )
     await _request_namespace_deletion(namespace=ns, logger=logger)
 
@@ -1360,7 +1463,12 @@ async def kopf_on_styrmin_deployment_delete(
         set_phase(patch.status, DeploymentPhase.DELETING, _DELETING_MESSAGE)
 
     await _teardown_owned_resources(
-        namespace=ns, release_reference=release_ref, name=name, logger=logger
+        namespace=ns,
+        release_reference=release_ref,
+        deployment_id=spec.get("deploymentId", ""),
+        deletion_requested=bool(spec.get("deletionRequested", False)),
+        name=name,
+        logger=logger,
     )
 
     logger.info("Cleanup complete for StyrminDeployment %s/%s", ns, name)
