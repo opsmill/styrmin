@@ -50,6 +50,47 @@ async def test_create_backup_storage_location(
     assert uow.committed
 
 
+async def test_create_backup_storage_location_renamed_after_commit(
+    uow: FakeUnitOfWork,
+    fake_backup_storage_location_repository: FakeBackupStorageLocationRepository,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """#510: a rename right after the commit does not lose the new location."""
+    commit = uow.commit
+
+    async def _commit_then_rename() -> None:
+        await commit()
+        for bsl in fake_backup_storage_location_repository.models:
+            if bsl.name == "a":
+                bsl.name = "b"
+        fake_backup_storage_location_repository.models.append(
+            BackupStorageLocation(
+                name="a",
+                endpoint="https://other.example.com",
+                bucket="other",
+                region="us-east-1",
+                access_key_id="AKID",
+                secret_access_key="SECRET",
+            )
+        )
+
+    monkeypatch.setattr(uow, "commit", _commit_then_rename)
+
+    bsl = await create_backup_storage_location(
+        name="a",
+        endpoint="https://s3.example.com",
+        bucket="my-bucket",
+        region="us-east-1",
+        access_key_id="AKID",
+        secret_access_key="SECRET",
+        uow=uow,
+    )
+
+    assert bsl is fake_backup_storage_location_repository.models[0]
+    assert bsl.name == "b"
+    assert bsl.endpoint == "https://s3.example.com"
+
+
 async def test_create_backup_storage_location_duplicate_name(
     uow: FakeUnitOfWork,
     fake_backup_storage_location: BackupStorageLocation,
