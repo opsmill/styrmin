@@ -86,9 +86,9 @@ The same update is available as the `updateCluster` GraphQL mutation
 Python SDK, and from the **Edit** button on the cluster detail page,
 which the page shows only to administrators. The edit dialog lists the
 changed values and the deployments that will be redeployed before it
-saves. It keeps the values it does not show: scheduling, the node
-selector, the database size, the backup retention, and the dedicated
-ingress service annotations and load balancer IP. When you turn the
+saves. It keeps the values it does not show: scheduling, the database
+size, the backup retention, and the dedicated ingress service
+annotations and load balancer IP. When you turn the
 dedicated ingress off, the annotations and the load balancer IP are
 removed with it.
 
