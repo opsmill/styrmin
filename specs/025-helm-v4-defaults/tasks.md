@@ -1,11 +1,11 @@
 ---
 
-description: "Tasks for 024: helm-controller runs with Helm v4 defaults"
+description: "Tasks for 025: helm-controller runs with Helm v4 defaults"
 ---
 
 # Tasks: helm-controller Runs with Helm v4 Defaults
 
-**Input**: Design documents from `specs/024-helm-v4-defaults/`
+**Input**: Design documents from `specs/025-helm-v4-defaults/`
 
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/behaviour.md](contracts/behaviour.md), [quickstart.md](quickstart.md)
 
@@ -24,7 +24,7 @@ description: "Tasks for 024: helm-controller runs with Helm v4 defaults"
 - Build the server image once before the first session: `docker compose build server`.
 - One CI shard per pytest session (`-m "ci and shard_<name>"`), and `api-chromium` and `ui-chromium` in separate sessions.
 - Run with `--pdb`. From a non-interactive shell, prefix the command with `sleep infinity |` and stop the run by PID, not with `pkill -f`.
-- Record each passing run in `specs/024-helm-v4-defaults/e2e-evidence.md`: pytest node IDs, the exact command, ISO 8601 start and end times, the vcluster name and kubeconfig path, and the verbatim `PASSED` lines (Constitution §V).
+- Record each passing run in `specs/025-helm-v4-defaults/e2e-evidence.md`: pytest node IDs, the exact command, ISO 8601 start and end times, the vcluster name and kubeconfig path, and the verbatim `PASSED` lines (Constitution §V).
 
 ---
 
@@ -60,9 +60,9 @@ description: "Tasks for 024: helm-controller runs with Helm v4 defaults"
 
 **Independent Test**: the E2E shards that cover a successful install, the rollback with `ImagePullBackOff`, and the component-container guard pass against the agent chart without the gate.
 
-- [X] T011 [US1] Run `shard_task_steps`, API variant: `sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_task_steps" -k "api-chromium" -v -s --pdb 2>&1 | tee /tmp/e2e-task-steps.log`. `test_helmrelease_failure_shows_fluxcd_reason` must pass: the failed "Install or upgrade the HelmRelease" step has FluxCD's reason and the pods' `ImagePullBackOff` or `ErrImagePull` (SC-002). While the session runs or from the log, record FluxCD's state after the rollback of that test (`kubectl get helmrelease -n styrmin-<id> -o yaml`: `status.history`, the `Ready` and `Released` conditions) to answer whether v1.6.5 still reports the rollback of a post-renderers change as `Ready` (operator knowledge page, "Rollback reported Ready"). Record the evidence in `specs/024-helm-v4-defaults/e2e-evidence.md`
-- [X] T012 [US1] Run `shard_configuration`, API variant, which CI excludes: `sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_configuration" -k "api-chromium" -v -s --pdb`. `test_deployment_image_override.py::test_misnamed_container_never_added` must pass with `COMPONENT_CONTAINER_NOT_FOUND`, and the image and container override tests must pass. Record the evidence in `specs/024-helm-v4-defaults/e2e-evidence.md`
-- [X] T013 [US1] If T011 or T012 shows a result that differs from the Helm v3 behaviour described in `dev/knowledge/agent/operator.md` ("What the timer writes in `CreatingHelmRelease`"), change the operator rule in `backend/styrmin_backend/operator/reconciler.py` or `backend/styrmin_backend/operator/handlers/styrmin_deployment.py`, add a unit test with the recorded FluxCD state to `backend/tests/unit/test_styrmin_deployment_helmrelease_generation.py`, and re-run the failing shard. If no result differs, record "no operator change needed" in `specs/024-helm-v4-defaults/e2e-evidence.md` (FR-002)
+- [X] T011 [US1] Run `shard_task_steps`, API variant: `sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_task_steps" -k "api-chromium" -v -s --pdb 2>&1 | tee /tmp/e2e-task-steps.log`. `test_helmrelease_failure_shows_fluxcd_reason` must pass: the failed "Install or upgrade the HelmRelease" step has FluxCD's reason and the pods' `ImagePullBackOff` or `ErrImagePull` (SC-002). While the session runs or from the log, record FluxCD's state after the rollback of that test (`kubectl get helmrelease -n styrmin-<id> -o yaml`: `status.history`, the `Ready` and `Released` conditions) to answer whether v1.6.5 still reports the rollback of a post-renderers change as `Ready` (operator knowledge page, "Rollback reported Ready"). Record the evidence in `specs/025-helm-v4-defaults/e2e-evidence.md`
+- [X] T012 [US1] Run `shard_configuration`, API variant, which CI excludes: `sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_configuration" -k "api-chromium" -v -s --pdb`. `test_deployment_image_override.py::test_misnamed_container_never_added` must pass with `COMPONENT_CONTAINER_NOT_FOUND`, and the image and container override tests must pass. Record the evidence in `specs/025-helm-v4-defaults/e2e-evidence.md`
+- [X] T013 [US1] If T011 or T012 shows a result that differs from the Helm v3 behaviour described in `dev/knowledge/agent/operator.md` ("What the timer writes in `CreatingHelmRelease`"), change the operator rule in `backend/styrmin_backend/operator/reconciler.py` or `backend/styrmin_backend/operator/handlers/styrmin_deployment.py`, add a unit test with the recorded FluxCD state to `backend/tests/unit/test_styrmin_deployment_helmrelease_generation.py`, and re-run the failing shard. If no result differs, record "no operator change needed" in `specs/025-helm-v4-defaults/e2e-evidence.md` (FR-002)
 
 **Checkpoint**: SC-001, SC-002 and SC-005 have local PASS evidence; the full suite runs in CI on the pull request.
 
@@ -89,8 +89,8 @@ description: "Tasks for 024: helm-controller runs with Helm v4 defaults"
   - poll until `status.succeeded == 1` (timeout 120 s), which shows the pod was scheduled with those settings and ran;
   - read the ConfigMap `<fullname>-pre-upgrade-hook` (find it by name prefix `styrmin-simple-app-pre-upgrade-hook` or by listing ConfigMaps with the `helm.sh/hook` annotation) and assert its `metadata.labels` include the same `styrmin/` keys (FR-013, SC-006);
   - extend the module and test docstrings: the vcluster has one node, so SC-004 is checked by the hook pod's scheduling fields and completion
-- [X] T021 [US2] Run `uv run pytest backend/tests/unit/test_simple_app_hook_job.py -v`, then `shard_compute`, API variant: `sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_compute" -k "api-chromium" -v -s --pdb`. `test_scheduling_end_to_end[api-chromium]` and the other `shard_compute` tests must pass. Record the evidence in `specs/024-helm-v4-defaults/e2e-evidence.md`
-- [X] T022 [US2] Run `shard_compute`, UI variant, in its own session (`-k "ui-chromium"`), because the module's fixtures changed and the shard holds dual-variant tests. Record the evidence in `specs/024-helm-v4-defaults/e2e-evidence.md`
+- [X] T021 [US2] Run `uv run pytest backend/tests/unit/test_simple_app_hook_job.py -v`, then `shard_compute`, API variant: `sleep infinity | uv run pytest backend/tests/e2e -m "ci and shard_compute" -k "api-chromium" -v -s --pdb`. `test_scheduling_end_to_end[api-chromium]` and the other `shard_compute` tests must pass. Record the evidence in `specs/025-helm-v4-defaults/e2e-evidence.md`
+- [X] T022 [US2] Run `shard_compute`, UI variant, in its own session (`-k "ui-chromium"`), because the module's fixtures changed and the shard holds dual-variant tests. Record the evidence in `specs/025-helm-v4-defaults/e2e-evidence.md`
 
 **Checkpoint**: FR-003, FR-005, FR-013, SC-004 and SC-006 have local PASS evidence.
 
@@ -102,7 +102,7 @@ description: "Tasks for 024: helm-controller runs with Helm v4 defaults"
 
 **Independent Test**: the manual check in [quickstart.md](quickstart.md) §4.
 
-- [X] T023 [US3] Run the manual check of `specs/024-helm-v4-defaults/quickstart.md` §4 on a disposable cluster (for example `vcluster create helm-v4-check --driver docker`): install Styrmin with the agent chart from `develop` (gate on), create a `simple-app` deployment, record the release Secrets and pod start times, upgrade the chart to this branch, force a HelmRelease reconcile, record them again, then change the deployment and check the task result, `Running`, and that the workload's `metadata.managedFields` show client-side apply. Write the commands, outputs and the conclusion to `specs/024-helm-v4-defaults/agent-upgrade-check.md`, for the pull request description. Delete the cluster afterwards. If no cluster can be created, write the steps and "not run" with the reason, and flag it in the pull request (contract C-006)
+- [X] T023 [US3] Run the manual check of `specs/025-helm-v4-defaults/quickstart.md` §4 on a disposable cluster (for example `vcluster create helm-v4-check --driver docker`): install Styrmin with the agent chart from `develop` (gate on), create a `simple-app` deployment, record the release Secrets and pod start times, upgrade the chart to this branch, force a HelmRelease reconcile, record them again, then change the deployment and check the task result, `Running`, and that the workload's `metadata.managedFields` show client-side apply. Write the commands, outputs and the conclusion to `specs/025-helm-v4-defaults/agent-upgrade-check.md`, for the pull request description. Delete the cluster afterwards. If no cluster can be created, write the steps and "not run" with the reason, and flag it in the pull request (contract C-006)
 
 **Checkpoint**: SC-003 is checked, or its gap is recorded for the reviewer.
 
@@ -133,7 +133,7 @@ description: "Tasks for 024: helm-controller runs with Helm v4 defaults"
 
 - [X] T031 Run `uv run invoke format lint`, `uv run invoke test`, `uv run pytest backend/tests/integration -q` and the docs build (`cd docs && pnpm install && pnpm build`, in a Node 22 container if the host Node is older); fix failures
 - [X] T032 Check that no reference to the gate remains outside the specs and the history: `grep -rn "UseHelm3Defaults" --include=*.py --include=*.yaml --include=*.yml --include=*.md . | grep -v "specs/\|CHANGELOG.md\|dev/adr/0072"` (ADR-072, see T028) returns only text that describes the old behaviour on purpose
-- [X] T033 Walk through `specs/024-helm-v4-defaults/quickstart.md` §1 to §5 and confirm each expected result; note any that differ in `specs/024-helm-v4-defaults/e2e-evidence.md`
+- [X] T033 Walk through `specs/025-helm-v4-defaults/quickstart.md` §1 to §5 and confirm each expected result; note any that differ in `specs/025-helm-v4-defaults/e2e-evidence.md`
 - [X] T034 Prepare the pull request notes: link `e2e-evidence.md` and `agent-upgrade-check.md`; state that the `api` cell of `shard_configuration` was run locally because CI excludes it; ask the maintainer to confirm that `Stalled` and the readiness timeout keep unit-test coverage only (spec Clarifications, critique P3)
 
 ---

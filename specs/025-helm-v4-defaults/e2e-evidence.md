@@ -1,6 +1,6 @@
 # E2E Evidence: helm-controller with Helm v4 Defaults
 
-This file records the local E2E runs for spec 024 ([#435](https://github.com/opsmill/styrmin/issues/435)), with the details that Constitution §V asks for: the pytest node IDs, the exact command, the start and end times, the vcluster and its kubeconfig path, and the `PASSED` lines as pytest printed them. Each run has its own section; add later runs at the end of the file.
+This file records the local E2E runs for spec 025 ([#435](https://github.com/opsmill/styrmin/issues/435)), with the details that Constitution §V asks for: the pytest node IDs, the exact command, the start and end times, the vcluster and its kubeconfig path, and the `PASSED` lines as pytest printed them. Each run has its own section; add later runs at the end of the file.
 
 - Branch: `fac/helm-v4-end3k`
 - Commit tested: `f752856a` ("feat(agent): run helm-controller with Helm v4 defaults (#435)"), so the agent chart runs helm-controller v1.6.5 without `--feature-gates=UseHelm3Defaults=true`, and the every-resource label patch is the strategic merge of commit `8a5d3b61`.

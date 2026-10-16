@@ -2,7 +2,7 @@
 
 **Branch**: `fac/helm-v4-end3k` | **Date**: 2026-10-16 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `specs/024-helm-v4-defaults/spec.md` (PRD: [#435 comment](https://github.com/opsmill/styrmin/issues/435#issuecomment-6210811102))
+**Input**: Feature specification from `specs/025-helm-v4-defaults/spec.md` (PRD: [#435 comment](https://github.com/opsmill/styrmin/issues/435#issuecomment-6210811102))
 
 ## Summary
 
@@ -160,7 +160,7 @@ Post-design re-check (after Phase 1): unchanged. The `hook-job` test driver live
 ### Documentation (this feature)
 
 ```text
-specs/024-helm-v4-defaults/
+specs/025-helm-v4-defaults/
 ├── plan.md              # This file
 ├── research.md          # Phase 0 output
 ├── data-model.md        # Phase 1 output

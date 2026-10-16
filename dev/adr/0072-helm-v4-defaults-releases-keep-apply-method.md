@@ -2,10 +2,10 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Source**: [specs/024-helm-v4-defaults/](../../specs/024-helm-v4-defaults/) (spec, plan D-001 to D-006,
-[research R-001 to R-008](../../specs/024-helm-v4-defaults/research.md), and the evidence files
-[e2e-evidence.md](../../specs/024-helm-v4-defaults/e2e-evidence.md) and
-[agent-upgrade-check.md](../../specs/024-helm-v4-defaults/agent-upgrade-check.md));
+**Source**: [specs/025-helm-v4-defaults/](../../specs/025-helm-v4-defaults/) (spec, plan D-001 to D-006,
+[research R-001 to R-008](../../specs/025-helm-v4-defaults/research.md), and the evidence files
+[e2e-evidence.md](../../specs/025-helm-v4-defaults/e2e-evidence.md) and
+[agent-upgrade-check.md](../../specs/025-helm-v4-defaults/agent-upgrade-check.md));
 [issue #435](https://github.com/opsmill/styrmin/issues/435)
 **Reverses**: the `--feature-gates=UseHelm3Defaults=true` argument that
 [PR #434](https://github.com/opsmill/styrmin/pull/434) added to helm-controller when it moved the agent

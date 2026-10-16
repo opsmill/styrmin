@@ -1,6 +1,6 @@
 # Agent Chart Upgrade Check: Removing the UseHelm3Defaults Gate
 
-This file records the manual check of [quickstart.md](quickstart.md) §4 for spec 024 ([#435](https://github.com/opsmill/styrmin/issues/435)), for the pull request description. It checks contract C-006 ([contracts/behaviour.md](contracts/behaviour.md)), requirement FR-004 and success criterion SC-003 ([spec.md](spec.md)).
+This file records the manual check of [quickstart.md](quickstart.md) §4 for spec 025 ([#435](https://github.com/opsmill/styrmin/issues/435)), for the pull request description. It checks contract C-006 ([contracts/behaviour.md](contracts/behaviour.md)), requirement FR-004 and success criterion SC-003 ([spec.md](spec.md)).
 
 ## Result
 
