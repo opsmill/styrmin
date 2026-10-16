@@ -63,7 +63,8 @@ A field added to `BaseConfigSection` therefore always needs GraphQL schema work:
 on each of the three inputs, a regenerated `schema.graphql` and regenerated SDK types. The
 frontend's `clusterConfigToInput` (`frontend/src/lib/cluster-input.ts`) maps each cluster
 field by hand, so it needs the field too; a field missing there is removed from the cluster
-config on every save from the edit dialog. Decision step 3 ("no changes to `schema.graphql`
+config on every save from the edit dialog. The compiler and
+`test_full_config_sets_every_cluster_config_field` report a field missing there (#454). Decision step 3 ("no changes to `schema.graphql`
 and the SDK Pydantic types") no longer holds. No database migration is needed, as before.
 `createCluster` and `createEnvironment` still take `config: JSON`; `deploy` takes the typed
 `DeploymentConfigInput`.

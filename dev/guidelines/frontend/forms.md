@@ -172,7 +172,9 @@ Reference: `mergeFormValuesIntoConfig` in
 `frontend/src/components/cluster/ClusterConfigFields.helpers.ts`, used by the cluster edit
 dialog. The converted input then goes through `clusterConfigToInput`
 (`frontend/src/lib/cluster-input.ts`), which maps each field by hand: add each new `ClusterConfig`
-field there too, or every save from the dialog removes it.
+field there too, or every save from the dialog removes it. Also add the field under both `config`
+and `input` in `frontend/src/lib/cluster-input.full-config.json`. The compiler and the tests that
+read this file report a field that is missing in either place.
 
 ### Dialog Forms
 

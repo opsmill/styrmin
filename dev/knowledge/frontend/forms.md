@@ -180,10 +180,15 @@ the stored config, because `updateCluster` replaces the whole config:
   does not change the controller.
 
 `clusterConfigToInput` (`lib/cluster-input.ts`) converts the stored config to
-`UpdateClusterInput`: camelCase keys and GraphQL enum names. It maps each field by hand. Every
-field of the generated `UpdateClusterInput` type is optional, so the compiler does not report a
-field that the function leaves out. Such a field would be removed by every save from the Edit
-dialog.
+`UpdateClusterInput`: camelCase keys and GraphQL enum names. It maps each field by hand. A field
+left out would be removed by every save from the Edit dialog, so two checks report one (#454):
+
+- The function must name every key of `UpdateClusterInput` and of its nested inputs, so the
+  compiler reports a key that it leaves out.
+- `lib/cluster-input.full-config.json` holds a stored config that sets every field and the input
+  it converts to. The backend test `test_full_config_sets_every_cluster_config_field` fails when
+  the stored config does not set every `ClusterConfig` field. `lib/cluster-input.test.ts` fails
+  when `clusterConfigToInput` does not convert the stored config to the input.
 
 <!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
 
