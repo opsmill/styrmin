@@ -830,6 +830,8 @@ See [ADR-032](../adr/0032-resourcespec-first-class-plus-extended-map.md) for the
 
 **Affinity-by-deployment-reference**: scheduling rules that reference another deployment by platform-id are expanded at resolve time into a `labelSelector` against the `styrmin/deployment_id` pod label that the `TemplateLabelPatch` pipeline stamps on every platform-managed pod-template-bearing resource. See [ADR-034](../adr/0034-affinity-by-deployment-reference-via-label.md).
 
+**Required node affinity terms need an expression on save**: `validate_environment_config` and `validate_deployment_config` in `context/validators.py` reject a required `node_affinity` term whose `label_selector` is missing or has no `match_expressions` and no `match_labels` entry. The error names each such term as `scheduling.node_affinity.required.<index>` ([#496](https://github.com/opsmill/styrmin/issues/496)). The models still parse these terms, so stored configs load and deploy: the post-render patch writes no `nodeSelectorTerm` for a missing or empty `label_selector`, and an empty `nodeSelectorTerm`, which matches no node, for an empty `match_expressions` or `match_labels`. Preferred node affinity terms and pod affinity terms are not checked.
+
 ### HelmInfo
 
 `HelmInfo` is composed of two nested objects rather than three plain strings:
