@@ -1,0 +1,6 @@
+query GetDeploymentConfig($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        config
+    }
+}

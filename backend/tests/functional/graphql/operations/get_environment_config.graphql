@@ -1,0 +1,6 @@
+query GetEnvironmentConfig($environmentId: UUID!) {
+    environment(environmentId: $environmentId) {
+        id
+        config
+    }
+}
