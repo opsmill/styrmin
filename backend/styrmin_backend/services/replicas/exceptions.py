@@ -48,6 +48,46 @@ class InvalidReplicaCountError(ServiceError):
         }
 
 
+class ReplicaCountAboveMaximumError(ServiceError):
+    """A write adds or changes a replica override to a count above the server's maximum.
+
+    The maximum is the server setting ``STYRMIN_MAX_REPLICA_COUNT``. Not raised for the stored
+    value sent again, so lowering the setting does not block other changes to a deployment.
+    """
+
+    error_code = "REPLICA_COUNT_ABOVE_MAXIMUM"
+    default_message = "The replica count is above the server's maximum"
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        component_name: str = "",
+        requested_replicas: int = 0,
+        max_replica_count: int = 0,
+    ) -> None:
+        self.component_name = component_name
+        self.requested_replicas = requested_replicas
+        self.max_replica_count = max_replica_count
+        super().__init__(
+            message
+            or (
+                f"Replica count for component {component_name!r} is {requested_replicas}, "
+                f"above the maximum of {max_replica_count} that this Styrmin server allows. "
+                "An administrator can raise the maximum with the server setting "
+                "STYRMIN_MAX_REPLICA_COUNT."
+            )
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {
+            "component_name": self.component_name,
+            "requested_replicas": self.requested_replicas,
+            "max_replica_count": self.max_replica_count,
+        }
+
+
 class UnknownComponentReplicaOverrideError(ServiceError):
     """A write adds or changes a replica override on a component the driver version does not declare.
 

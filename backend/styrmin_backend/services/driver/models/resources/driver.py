@@ -84,10 +84,7 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
-from styrmin_backend.context.models.components import (
-    ReplicaDeclaration,
-    validate_ignoring_invalid_replica_keys,
-)
+from styrmin_backend.context.models.components import ReplicaDeclaration
 from styrmin_backend.services.exceptions import CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL
 
 from ._shared import Kind
@@ -265,23 +262,6 @@ class ArbitrarySectionModel(ReplicaDeclaration):
                 "alphanumeric"
             )
         return value
-
-
-def parse_stored_component_declaration(
-    raw: dict[str, Any], *, driver_version: str | None, component: str
-) -> ArbitrarySectionModel:
-    """Parse a component declaration stored by an earlier driver load.
-
-    Invalid ``replicas`` and ``singleton`` values are dropped with a warning, as on a stored
-    deployment context (:func:`validate_ignoring_invalid_replica_keys`). The driver load path
-    stays strict.
-    """
-    return validate_ignoring_invalid_replica_keys(
-        ArbitrarySectionModel.model_validate,
-        raw,
-        component=component,
-        driver_version=driver_version,
-    )
 
 
 class Components(RootModel):

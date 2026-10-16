@@ -223,11 +223,11 @@ type ComponentConfig {
 }
 
 """
-Per-component override block for a deployment: env vars, the container ``command``/``args``, and the component container's ``image``. Future per-component knobs (e.g. replicas) slot into this same input without a schema renumber.
+Per-component override block for a deployment: env vars, the container ``command``/``args``, the component container's ``image``, and the component's ``replicas`` count.
 """
 input ComponentConfigInput {
   """
-  The component name as declared by the application-driver version the deployment is bound to after the write: the pinned one on updateDeployment, the target one on updateDeploymentVersion. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. Overrides on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``).
+  The component name as declared by the application-driver version the deployment is bound to after the write: the pinned one on updateDeployment, the target one on updateDeploymentVersion. Must match a known component: an unknown one raises the error of the override it carries, such as ``UNKNOWN_COMPONENT_ENV_VAR`` or ``UNKNOWN_COMPONENT_REPLICA_OVERRIDE``. Overrides on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``).
   """
   name: String!
 
@@ -252,7 +252,7 @@ input ComponentConfigInput {
   image: String = null
 
   """
-  Replica count for this component, scoped to this deployment: an integer of 1 or more, applied to `spec.replicas` of every Deployment and StatefulSet that matches the component's label selector. Needs no component container. Under full-replacement semantics `null`/omitting it CLEARS the override, and the component returns to the driver default or to the chart's count. A value below 1 raises `INVALID_REPLICA_COUNT` (stop the component instead); a value above 1 on a singleton component raises `SINGLETON_REPLICA_OVERRIDE`; adding or changing it on a component the driver version does not declare raises `UNKNOWN_COMPONENT_REPLICA_OVERRIDE`.
+  Replica count for this component, scoped to this deployment: an integer of 1 or more, applied to `spec.replicas` of every Deployment and StatefulSet that matches the component's label selector. Needs no component container. Under full-replacement semantics `null`/omitting it CLEARS the override, and the component returns to the driver default or to the chart's count. A value below 1 raises `INVALID_REPLICA_COUNT` (stop the component instead); a value above 1 on a singleton component raises `SINGLETON_REPLICA_OVERRIDE`; adding or changing it on a component the driver version does not declare raises `UNKNOWN_COMPONENT_REPLICA_OVERRIDE`; adding or changing it to a value above the server setting `STYRMIN_MAX_REPLICA_COUNT` raises `REPLICA_COUNT_ABOVE_MAXIMUM`.
   """
   replicas: Int = null
 }
@@ -358,7 +358,9 @@ type ComponentReplicas {
   """The bound driver version no longer declares the component."""
   isOrphaned: Boolean!
 
-  """False only when a stored override is not applied (orphaned component)."""
+  """
+  False when a stored override is not applied: the component is orphaned, or the override is above 1 on a singleton component.
+  """
   isApplicable: Boolean!
 }
 

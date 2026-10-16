@@ -210,6 +210,12 @@ styrmin:
   # fail.
   sessionCookieSecure: true
 
+  # -- Highest replica count a user can set on a component of a deployment
+  # (STYRMIN_MAX_REPLICA_COUNT). A higher count is rejected before any task
+  # starts. Driver defaults are not limited. On a shared cluster, also limit
+  # each deployment namespace with a ResourceQuota.
+  maxReplicaCount: 20
+
   # URL configuration
   url:
     # -- API URL for Kubernetes jobs (must be resolvable from K8s pods)

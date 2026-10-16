@@ -7,6 +7,7 @@ metadata:
 data:
   # General settings
   STYRMIN_LOG_LEVEL: {{ .Values.styrmin.logLevel | quote }}
+  STYRMIN_MAX_REPLICA_COUNT: {{ .Values.styrmin.maxReplicaCount | quote }}
 
   # URL configuration
   STYRMIN_URL_API: {{ include "styrmin.apiUrl" . | quote }}

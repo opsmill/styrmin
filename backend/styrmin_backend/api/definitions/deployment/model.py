@@ -261,7 +261,8 @@ class ComponentReplicas:
     )
     is_applicable: bool = strawberry.field(
         description=(
-            "False only when a stored override is not applied (orphaned component)."
+            "False when a stored override is not applied: the component is "
+            "orphaned, or the override is above 1 on a singleton component."
         )
     )
 
@@ -801,30 +802,20 @@ class Deployment:
             "per orphaned replica override, sorted by component name."
         )
     )
-    async def component_replicas(
-        self, info: strawberry.Info
-    ) -> list[ComponentReplicas]:
-        from styrmin_backend.services.driver.models.resources.driver import (
-            parse_stored_component_declaration,
+    def component_replicas(self) -> list[ComponentReplicas]:
+        from styrmin_backend.context.models.components import (
+            driver_version_label,
+            parse_stored_replica_declaration,
         )
         from styrmin_backend.services.replicas.resolver import resolve_replicas
 
-        uow = info.context["uow"]
-        async with uow:
-            deployment = await uow.deployments.find(self.id)
-            if deployment is None:
-                logger.warning(
-                    "component_replicas: deployment {} not found (likely deleted "
-                    "between parent query and sub-field resolution)",
-                    self.id,
-                )
-                return []
-            dep_config_raw = deployment.config
-            # The Component rows mirror the bound driver version's declarations.
-            declared = {c.name: c.config for c in deployment.components or []}
-            driver_version = (
-                f"driver version {deployment.application_driver_version_id}"
-            )
+        # The parent resolver loaded the deployment; the Component rows mirror the
+        # bound driver version's declarations.
+        dep_config_raw = self.instance.config
+        declared = {c.name: c.config for c in self.instance.components or []}
+        driver_version = driver_version_label(
+            self.instance.application_driver_version_id
+        )
 
         dep_cfg = (
             DeploymentConfig.model_validate(dep_config_raw) if dep_config_raw else None
@@ -851,8 +842,8 @@ class Deployment:
                     )
                 )
                 continue
-            declaration = parse_stored_component_declaration(
-                declared[name], driver_version=driver_version, component=name
+            declaration = parse_stored_replica_declaration(
+                declared[name], component=name, driver_version=driver_version
             )
             resolved = resolve_replicas(
                 declared_replicas=declaration.replicas,

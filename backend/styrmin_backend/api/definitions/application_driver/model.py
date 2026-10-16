@@ -20,11 +20,12 @@ from styrmin_backend.db.models import ApplicationDriver as ApplicationDriverMode
 from styrmin_backend.db.models import (
     ApplicationDriverVersion as ApplicationDriverVersionModel,
 )
-from styrmin_backend.domain.models import ComponentConfig as DomainComponentConfig
-from styrmin_backend.services.driver.models.resources.driver import (
-    ArbitrarySectionModel,
-    parse_stored_component_declaration,
+from styrmin_backend.context.models.components import (
+    ReplicaDeclaration,
+    driver_version_label,
+    parse_stored_replica_declaration,
 )
+from styrmin_backend.domain.models import ComponentConfig as DomainComponentConfig
 from styrmin_backend.services.driver.models.resources.env_vars import (
     DriverEnvVarLevel as DriverEnvVarLevelPydantic,
 )
@@ -93,6 +94,8 @@ class ComponentConfig:
     config: JSON | None = None
     # Names the driver version in the warning about ignored replica keys.
     driver_version: strawberry.Private[str | None] = None
+    # Parsed on first use, so ``replicas`` and ``singleton`` warn once about an invalid key.
+    parsed_replicas: strawberry.Private[ReplicaDeclaration | None] = None
 
     @strawberry.field(
         description=(
@@ -129,13 +132,15 @@ class ComponentConfig:
         declaration = self._replica_declaration()
         return declaration.singleton if declaration is not None else False
 
-    def _replica_declaration(self) -> ArbitrarySectionModel | None:
+    def _replica_declaration(self) -> ReplicaDeclaration | None:
         # Invalid stored keys read as unset, as in ``componentReplicas`` and the patch builder.
         if not isinstance(self.config, dict):
             return None
-        return parse_stored_component_declaration(
-            self.config, driver_version=self.driver_version, component=self.name
-        )
+        if self.parsed_replicas is None:
+            self.parsed_replicas = parse_stored_replica_declaration(
+                self.config, component=self.name, driver_version=self.driver_version
+            )
+        return self.parsed_replicas
 
     @classmethod
     def from_instance(
@@ -274,7 +279,7 @@ class ApplicationDriverVersion:
     def component_configs(self) -> list[ComponentConfig]:
         return [
             ComponentConfig.from_instance(  # type: ignore[arg-type]
-                component, driver_version=f"driver version {self.id}"
+                component, driver_version=driver_version_label(self.id)
             )
             for component in self.instance.component_configs
         ]

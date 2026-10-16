@@ -324,6 +324,16 @@ class Settings(BaseSettings):
             "a random password is generated and logged once at WARN level. See ADR-016."
         ),
     )
+    max_replica_count: int = Field(
+        default=20,
+        ge=1,
+        le=2_147_483_647,
+        description=(
+            "Highest replica count a user can set on a component of a deployment. "
+            "A higher count is rejected with REPLICA_COUNT_ABOVE_MAXIMUM; a stored "
+            "count sent again unchanged is kept. Driver defaults are not limited."
+        ),
+    )
     session_cookie_secure: bool = Field(
         default=True,
         alias="STYRMIN_SESSION_COOKIE_SECURE",
@@ -416,6 +426,10 @@ class ConfiguredSettings:  # pylint: disable=too-many-public-methods
     @property
     def log_level(self) -> str:
         return self.active_settings.log_level
+
+    @property
+    def max_replica_count(self) -> int:
+        return self.active_settings.max_replica_count
 
     @property
     def database(self) -> DatabaseSettings:

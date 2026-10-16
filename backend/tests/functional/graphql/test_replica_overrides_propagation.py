@@ -22,6 +22,7 @@ from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from styrmin_backend import config as styrmin_config
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import SpecPatch
 from styrmin_backend.db.models import (
     ApplicationDriver,
@@ -460,6 +461,83 @@ async def test_update_deployment_rejects_count_below_one(
     await _assert_rejected_without_task(
         session, prefect_manager_mock, deployment_id, snapshot
     )
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_rejects_count_above_the_maximum(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(styrmin_config.SETTINGS.active_settings, "max_replica_count", 5)
+    _arm_prefect(prefect_manager_mock)
+    deployment_id, _ = await _seed_deployment(
+        session, config={"components": {"server": {"replicas": 2}}}
+    )
+    snapshot = await _row_snapshot(session, deployment_id)
+
+    payload = await _post_update(
+        client, deployment_id, [{"name": "server", "replicas": 6}]
+    )
+
+    message = _assert_error(
+        payload,
+        "REPLICA_COUNT_ABOVE_MAXIMUM",
+        component_name="server",
+        requested_replicas=6,
+        max_replica_count=5,
+    )
+    assert "STYRMIN_MAX_REPLICA_COUNT" in message
+    await _assert_rejected_without_task(
+        session, prefect_manager_mock, deployment_id, snapshot
+    )
+
+
+@pytest.mark.asyncio
+async def test_deploy_rejects_count_above_the_default_maximum(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    driver_name, environment_id = await _seed_deploy_driver(session)
+
+    name, payload = await _post_deploy(
+        client, driver_name, environment_id, [{"name": "server", "replicas": 21}]
+    )
+
+    _assert_error(
+        payload,
+        "REPLICA_COUNT_ABOVE_MAXIMUM",
+        component_name="server",
+        requested_replicas=21,
+        max_replica_count=20,
+    )
+    await _assert_deploy_rejected_without_task(session, prefect_manager_mock, name)
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_keeps_a_stored_count_above_a_lowered_maximum(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An administrator lowers the maximum below a stored count: sending the stored count
+    again with another change is accepted, so the deployment stays editable."""
+    _arm_prefect(prefect_manager_mock)
+    deployment_id, _ = await _seed_deployment(
+        session, config={"components": {"server": {"replicas": 8}}}
+    )
+    monkeypatch.setattr(styrmin_config.SETTINGS.active_settings, "max_replica_count", 5)
+
+    payload = await _post_update(
+        client,
+        deployment_id,
+        [{"name": "server", "replicas": 8, "envVars": [{"name": "A", "value": "1"}]}],
+    )
+
+    assert "errors" not in payload, payload
+    assert (await _stored_components(session, deployment_id))["server"]["replicas"] == 8
 
 
 @pytest.mark.asyncio
@@ -923,7 +1001,8 @@ async def test_invalid_stored_replica_keys_do_not_make_the_deployment_unreadable
 ) -> None:
     """The driver version, the Component rows and the active instance context hold invalid
     ``replicas``/``singleton`` keys: ``componentReplicas``, ``ComponentConfig.replicas`` and the
-    replica patches ignore them alike and use the chart's count."""
+    replica patches ignore the invalid key alike. ``server`` uses the chart's count; ``database``
+    keeps ``singleton: true`` and drops the count that contradicts it, so it runs 1 pod."""
     deployment_id, _ = await _seed_deployment(session, INVALID_DECLARATIONS)
     context = await generate_context_from_deployment_id(
         deployment_id, SqlModelUnitOfWork(session=session)
@@ -943,7 +1022,7 @@ async def test_invalid_stored_replica_keys_do_not_make_the_deployment_unreadable
     assert adv is not None
 
     assert await _read_rows(client, deployment_id) == [
-        _row("database", None, "CHART"),
+        DATABASE_ROW,
         _row("server", None, "CHART"),
         WORKER_ROW,
     ]
@@ -957,7 +1036,8 @@ async def test_invalid_stored_replica_keys_do_not_make_the_deployment_unreadable
     ]
     assert {
         c["name"]: (c["replicas"], c["singleton"]) for c in version["componentConfigs"]
-    } == {"server": (None, False), "worker": (2, False), "database": (None, False)}
+    } == {"server": (None, False), "worker": (2, False), "database": (None, True)}
     assert await _patch_counts(session, deployment_id) == {
-        "app.kubernetes.io/name=worker-app": {2}
+        "app.kubernetes.io/name=worker-app": {2},
+        "app.kubernetes.io/name=database-app": {1},
     }
