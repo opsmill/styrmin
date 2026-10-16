@@ -33,7 +33,7 @@ async def create_backup_storage_location(
                 f"A backup storage location with name '{name}' already exists."
             )
 
-        await uow.backup_storage_locations.create(
+        bsl = await uow.backup_storage_locations.create(
             BackupStorageLocation(
                 name=name,
                 endpoint=endpoint,
@@ -43,8 +43,10 @@ async def create_backup_storage_location(
                 secret_access_key=secret_access_key,
             )
         )
+        # Read back by id: the name can change once the location is committed (#510).
+        backup_storage_location_id = bsl.id
         await uow.commit()
-        created = await uow.backup_storage_locations.get_by_name(name)
+        created = await uow.backup_storage_locations.get(backup_storage_location_id)
         assert created is not None, "BSL should be created successfully"
         return created
 
