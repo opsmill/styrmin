@@ -108,7 +108,12 @@ class DeploymentReferenceInput:
 
 @strawberry.input(description="Single affinity term mirroring ``AffinityTerm``.")
 class AffinityTermInput:
-    topology_key: str
+    topology_key: str = strawberry.field(
+        description=(
+            "Node label that defines the topology domain for pod affinity and "
+            "pod anti-affinity. Node affinity ignores it, so pass an empty string."
+        )
+    )
     namespaces: list[str] | None = None
     namespace_selector: LabelSelectorInput | None = None
     label_selector: LabelSelectorInput | None = None
@@ -189,7 +194,15 @@ class PostRenderInjectionInput:
 class SchedulingInput:
     pod_affinity: AffinityBlockInput | None = None
     pod_anti_affinity: AffinityBlockInput | None = None
-    node_affinity: AffinityBlockInput | None = None
+    node_affinity: AffinityBlockInput | None = strawberry.field(
+        default=None,
+        description=(
+            "Places pods on nodes by node label. Each term's labelSelector "
+            "matches node labels, and its topologyKey is ignored. A pod goes "
+            "to a node that matches at least one required term, and preferred "
+            "terms are weighted. A cluster's value is ignored."
+        ),
+    )
     topology_spread_constraints: list[TopologySpreadConstraintInput] | None = None
     resources: ResourceRequirementsInput | None = None
     tolerations: list[TolerationInput] | None = None

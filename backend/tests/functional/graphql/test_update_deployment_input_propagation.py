@@ -150,6 +150,16 @@ _SCHEDULING_POD_AFFINITY_ROW: dict[str, Any] = {
         }
     }
 }
+# The replacement for a removed node selector, as the node affinity docs page shows it (#472).
+_SCHEDULING_NODE_AFFINITY_ROW: dict[str, Any] = {
+    "scheduling": {
+        "nodeAffinity": {
+            "required": [
+                {"topologyKey": "", "labelSelector": {"matchLabels": {"pool": "apps"}}}
+            ]
+        }
+    }
+}
 _SCHEDULING_RUNTIME_CLASS_ROW: dict[str, Any] = {"scheduling": {"runtimeClass": "kata"}}
 _SCHEDULING_INJECT_ROW: dict[str, Any] = {
     "scheduling": {"inject": {"podAffinity": False, "resources": True}}
@@ -318,6 +328,7 @@ _PROPAGATION_ROWS: list[tuple[str, dict[str, Any], str, Any]] = [
     ("db_size", _DB_SIZE_ROW, "config", {"db_size": "20Gi"}),
     # Row 20
     ("runtime_class", _RUNTIME_CLASS_ROW, "config", {"runtime_class": "kata"}),
+    # Row 21 (nodeSelector) was removed with the field (#472).
     # Row 22
     (
         "standard_storage",
@@ -338,6 +349,24 @@ _PROPAGATION_ROWS: list[tuple[str, dict[str, Any], str, Any]] = [
         _BACKUP_TTL_ROW,
         "config",
         {"backup_ttl": "8760h"},
+    ),
+    # Row 25 — node affinity, which replaces the removed nodeSelector (#472)
+    (
+        "scheduling_node_affinity",
+        _SCHEDULING_NODE_AFFINITY_ROW,
+        "config",
+        {
+            "scheduling": {
+                "node_affinity": {
+                    "required": [
+                        {
+                            "topology_key": "",
+                            "label_selector": {"match_labels": {"pool": "apps"}},
+                        }
+                    ]
+                }
+            }
+        },
     ),
 ]
 

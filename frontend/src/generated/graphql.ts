@@ -47,6 +47,7 @@ export type AffinityTermInput = {
   mismatchLabelKeys?: InputMaybe<Array<Scalars['String']['input']>>;
   namespaceSelector?: InputMaybe<LabelSelectorInput>;
   namespaces?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Node label that defines the topology domain for pod affinity and pod anti-affinity. Node affinity ignores it, so pass an empty string. */
   topologyKey: Scalars['String']['input'];
 };
 
@@ -1442,6 +1443,7 @@ export type Role =
 /** Hierarchical pod scheduling & resource configuration section. */
 export type SchedulingInput = {
   inject?: InputMaybe<PostRenderInjectionInput>;
+  /** Places pods on nodes by node label. Each term's labelSelector matches node labels, and its topologyKey is ignored. A pod goes to a node that matches at least one required term, and preferred terms are weighted. A cluster's value is ignored. */
   nodeAffinity?: InputMaybe<AffinityBlockInput>;
   podAffinity?: InputMaybe<AffinityBlockInput>;
   podAntiAffinity?: InputMaybe<AffinityBlockInput>;
