@@ -8,6 +8,73 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### FluxCD installs and upgrades deployments with Helm v4's defaults
+
+The agent now runs FluxCD's helm-controller with the defaults of Helm
+v4, without the `UseHelm3Defaults` feature gate that kept Helm v3's
+client-side apply and health checks
+([#435](https://github.com/opsmill/styrmin/issues/435)). See
+[The HelmRelease](./concepts-and-architecture/operator-and-crds.md#the-helmrelease--styrmins-other-crd).
+
+#### What's new
+
+- A deployment created after the agent upgrade is installed with
+  server-side apply. helm-controller is the field manager and forces
+  field ownership conflicts, so at each upgrade a field that the chart
+  sets returns to the chart's value, also when `kubectl` or a driver
+  action changed it. The upgrade does not fail.
+- Installs and upgrades wait for the chart's resources with kstatus.
+  The wait ends before the HelmRelease timeout when kstatus reports a
+  resource as failed, for example a `Job` that failed or a `Deployment`
+  past its `progressDeadlineSeconds`. When pods cannot pull their image,
+  FluxCD still waits the full timeout, and the failed step still names
+  the pods' reason, such as `ImagePullBackOff`.
+- Helm hooks of a driver's chart, the resources annotated
+  `helm.sh/hook`, receive Styrmin's post-render patches as the chart's
+  other resources do (see
+  [Step 1 of Creating a driver](./drivers/creating-a-driver.md#step-1-analyse-the-helm-chart)):
+  - Styrmin's labels reach every hook.
+  - The deployment's scheduling settings reach hook `Job`, `CronJob`,
+    `Deployment`, `StatefulSet`, `DaemonSet` and `ReplicaSet` resources
+    whose own `metadata.labels` carry a component's first identifier
+    label, or every hook of these kinds when the driver declares no
+    components.
+  - Env var, image and container overrides, and the component-container
+    guard, reach a hook only when it is a `Deployment` or `StatefulSet`
+    that matches a component.
+- A chart resource without `metadata.labels`, such as a Helm hook, no
+  longer fails the install or upgrade. Styrmin adds its labels to it.
+
+#### Migration
+
+- Deployments created before the agent upgrade keep client-side apply
+  on their later upgrades and rollbacks, because each upgrade and
+  rollback uses the apply method of the release's previous install or
+  upgrade. From their next upgrade, FluxCD waits for their resources
+  with kstatus and their Helm hooks receive the post-render patches.
+- A Helm hook `Job` that must run with the deployment's scheduling
+  settings needs a component's first identifier label in its own
+  `metadata.labels`, not only on its pod template.
+- A Helm hook `Deployment` or `StatefulSet` that matches a component but
+  does not render the component container fails the install or upgrade
+  with `COMPONENT_CONTAINER_NOT_FOUND` once an override applies to that
+  component, as a template would.
+- With a `progressDeadlineSeconds` below 270 seconds on a chart
+  `Deployment`, FluxCD fails a change and rolls the release back before
+  Styrmin reads why the pods are not ready, so the failed step shows
+  FluxCD's `ProgressDeadlineExceeded` failure instead of the pods'
+  reason.
+- A driver action that changes a resource of the chart directly, for
+  example with `kubectl patch`, does not keep a field that the chart
+  sets on a deployment installed with server-side apply: the field
+  returns to the chart's value at the next upgrade. `stop_components`
+  and `start_components` change the component's state through Styrmin,
+  which applies it in its next render, so their effect lasts.
+- To go back to Helm v3's behaviour, downgrade the agent chart to a
+  release that runs helm-controller with the `UseHelm3Defaults` gate.
+  Deployments created while the gate was off keep server-side apply on
+  their later upgrades and rollbacks.
+
 ### Set the replica count of each component
 
 A user can now set how many pods each component of a deployment runs,
