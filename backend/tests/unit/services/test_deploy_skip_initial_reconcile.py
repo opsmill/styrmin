@@ -19,6 +19,7 @@ resolver.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from uuid import UUID, uuid4
 
 import pytest
@@ -124,7 +125,11 @@ def stub_reconcile(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     calls["release_reference"] = []
 
     async def _generate(
-        *, deployment: Deployment, uow: object, release_reference: str | None = None
+        *,
+        deployment: Deployment,
+        uow: object,
+        release_reference: str | None = None,
+        upcoming_deployments: Mapping[UUID, str] | None = None,
     ) -> Instance:
         calls["generate"].append(deployment.id)
         calls["release_reference"].append(release_reference)

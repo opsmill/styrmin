@@ -1,3 +1,4 @@
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Literal, overload
 from uuid import UUID, uuid4
@@ -35,7 +36,11 @@ from styrmin_backend.context.models.config import (
     DedicatedIngressConfig,
     EnvironmentConfig,
 )
-from styrmin_backend.db.models import ApplicationDriver, ApplicationDriverVersion
+from styrmin_backend.db.models import (
+    ApplicationDriver,
+    ApplicationDriverVersion,
+    ComponentConfig,
+)
 from styrmin_backend.operator.config import CRD_GROUP, CRD_PLURAL, CRD_VERSION
 from styrmin_backend.services.container_overrides.exceptions import (
     UnknownComponentContainerOverrideError,
@@ -80,6 +85,7 @@ from styrmin_backend.services.replicas.validator import (
     has_replica_overrides,
     validate_replica_overrides,
 )
+from styrmin_backend.services.scheduling.references import bind_deployment_references
 from deepdiff import DeepDiff
 
 from styrmin_backend.domain.models import Instance
@@ -560,6 +566,8 @@ async def update_deployment(
             of 1 or more, or the pinned driver version cannot apply it.
         DeploymentNameValidationError: If the provided name is invalid.
         DeploymentNameConflictError: If the provided name is already in use.
+        UnresolvableAffinityReferenceError: If an affinity term in the config
+            names a deployment that is not a live deployment of the environment.
 
     Returns:
         Task | None: The task created for the deployment update, or ``None``
@@ -612,6 +620,16 @@ async def update_deployment(
 
         if deployment_config is not None:
             deployment.config = deployment_config
+
+        # After the rename, so a term resolves the new name (FR-007), and before
+        # anything is saved or dispatched, so a refused term saves nothing (FR-002).
+        deployment.config = await bind_deployment_references(
+            uow,
+            deployment.environment_id,
+            deployment.config,
+            path_prefix="deployment.config",
+            upcoming_deployments={deployment.id: deployment.name},
+        )
 
         await _ensure_ingress_controller(
             environment_id=deployment.environment_id,
@@ -864,6 +882,9 @@ async def update_deployment_version(
             target no longer declares holds a value other than its current default.
         DeploymentNameValidationError, DeploymentNameConflictError: If
             ``deployment_name`` is invalid or used by another deployment.
+        UnresolvableAffinityReferenceError: If an affinity term in the config, or
+            in a component config of a new driver version, names a deployment
+            that is not a live deployment of the environment.
         InvalidServiceOverrideError, ServiceNameConflictError: If a service
             name override names no service of the target driver version, or
             its name is in use in the environment.
@@ -973,6 +994,15 @@ async def update_deployment_version(
             if deployment_name is not None
             else deployment.name
         )
+        # Before the no-op comparison below, which compares stored (bound) configs.
+        upcoming = {deployment.id: new_name}
+        effective_config = await bind_deployment_references(
+            uow,
+            deployment.environment_id,
+            effective_config,
+            path_prefix="deployment.config",
+            upcoming_deployments=upcoming,
+        )
         values_to_validate = (
             deployment_parameters
             if deployment_parameters is not None
@@ -1010,6 +1040,16 @@ async def update_deployment_version(
             uow=uow,
         )
         reconcile_services = driver_changed or service_names_change
+        component_configs = (
+            await _bind_component_configs(
+                uow,
+                deployment.environment_id,
+                target_driver_version.component_configs,
+                upcoming,
+            )
+            if driver_changed
+            else {}
+        )
 
         # After validation: creating the ingress deployment dispatches its flow run immediately.
         await _ensure_ingress_controller(
@@ -1030,7 +1070,7 @@ async def update_deployment_version(
                 [
                     Component.create(
                         name=component_config.name,
-                        config=component_config.config,
+                        config=component_configs[component_config.name],
                         enabled=components_state.get(component_config.name, True),
                     )
                     for component_config in target_driver_version.component_configs
@@ -1309,6 +1349,25 @@ async def _resolve_dedicated_ingress(
     )
 
 
+async def _bind_component_configs(
+    uow: UnitOfWork,
+    environment_id: UUID,
+    component_configs: Iterable[ComponentConfig],
+    upcoming_deployments: Mapping[UUID, str],
+) -> dict[str, dict]:
+    """Bind the deployment references of the component configs a driver version gives, by component name."""
+    return {
+        component.name: await bind_deployment_references(
+            uow,
+            environment_id,
+            component.config,
+            path_prefix=f"component[{component.name}].config",
+            upcoming_deployments=upcoming_deployments,
+        )
+        for component in component_configs
+    }
+
+
 async def _ensure_ingress_controller(
     environment_id: UUID,
     uow: UnitOfWork,
@@ -1432,6 +1491,8 @@ async def deploy_application(
     driver_version_id: UUID | None = ...,
     skip_initial_reconcile: Literal[False] = ...,
     release_reference: str | None = ...,
+    deployment_id: UUID | None = ...,
+    upcoming_deployments: Mapping[UUID, str] | None = ...,
 ) -> Task: ...
 
 
@@ -1450,6 +1511,8 @@ async def deploy_application(
     *,
     skip_initial_reconcile: Literal[True],
     release_reference: str | None = ...,
+    deployment_id: UUID | None = ...,
+    upcoming_deployments: Mapping[UUID, str] | None = ...,
 ) -> UUID: ...
 
 
@@ -1466,6 +1529,8 @@ async def deploy_application(
     driver_version_id: UUID | None = None,
     skip_initial_reconcile: bool = False,
     release_reference: str | None = None,
+    deployment_id: UUID | None = None,
+    upcoming_deployments: Mapping[UUID, str] | None = None,
 ) -> Task | UUID:
     """Instantiate an application in the given environment.
 
@@ -1510,6 +1575,11 @@ async def deploy_application(
             than an install that would fail Helm's ownership check (research
             D2). The value sticks for the deployment's whole life — see
             ``services.context._resolve_release_reference``.
+        deployment_id: The id to give the new deployment, when the caller chose
+            it in advance (an environment clone's counterpart); a new id otherwise.
+        upcoming_deployments: The other deployments that the caller's operation
+            is about to create, by id, with their names. An affinity term may name
+            them and the new deployment itself.
 
     Raises:
         InvalidContextError: If the context is invalid.
@@ -1518,6 +1588,9 @@ async def deploy_application(
             of 1 or more, or the driver version cannot apply it.
         DeploymentNameValidationError: If the provided name is invalid.
         DeploymentNameConflictError: If the provided name is already in use.
+        UnresolvableAffinityReferenceError: If an affinity term in the config, or
+            in a component config of the driver version, names a deployment that
+            is not a live deployment of the environment.
         DriverVersionNotFoundError: If the pinned driver version does not exist.
         InvalidVersionError: If no driver version (or the pinned one) supports
             the resolved version, or the pin belongs to a different driver.
@@ -1663,23 +1736,6 @@ async def deploy_application(
                 f"Environment {environment_id} could not be found"
             )
 
-        # Ensure dedicated ingress controller is deployed if configured (FR-009).
-        # The internal ingress deployment is system-managed; we attribute it to
-        # the user who triggered the first deploy in the environment so the FK
-        # to ``user`` is satisfied and the audit trail still resolves.
-        await _ensure_ingress_controller(
-            environment_id=environment_id,
-            uow=uow,
-            created_by_user_id=created_by_user_id,
-        )
-
-        # Validate and resolve parameter values against driver definitions
-        definitions = parse_parameter_definitions(application_driver_version.parameters)
-        resolved_parameters = validate_parameter_values(
-            definitions=definitions,
-            values=deployment_parameters,
-        )
-
         # Resolve deployment name. Uniqueness scope is per-environment
         # and ignores tombstoned deployments (so operators can reuse
         # the name of a previously-deleted deployment in the same env).
@@ -1705,6 +1761,41 @@ async def deploy_application(
             )
             resolved_name = generate_deployment_name(driver_name, existing_names)
 
+        # A term may name the new deployment itself (FR-007). Bound before the
+        # ingress controller is dispatched, so a refused term starts nothing.
+        new_id = deployment_id or uuid4()
+        upcoming = {**(upcoming_deployments or {}), new_id: resolved_name}
+        deployment_config = await bind_deployment_references(
+            uow,
+            environment_id,
+            deployment_config,
+            path_prefix="deployment.config",
+            upcoming_deployments=upcoming,
+        )
+        component_configs = await _bind_component_configs(
+            uow,
+            environment_id,
+            application_driver_version.component_configs,
+            upcoming,
+        )
+
+        # Ensure dedicated ingress controller is deployed if configured (FR-009).
+        # The internal ingress deployment is system-managed; we attribute it to
+        # the user who triggered the first deploy in the environment so the FK
+        # to ``user`` is satisfied and the audit trail still resolves.
+        await _ensure_ingress_controller(
+            environment_id=environment_id,
+            uow=uow,
+            created_by_user_id=created_by_user_id,
+        )
+
+        # Validate and resolve parameter values against driver definitions
+        definitions = parse_parameter_definitions(application_driver_version.parameters)
+        resolved_parameters = validate_parameter_values(
+            definitions=definitions,
+            values=deployment_parameters,
+        )
+
         # Create the deployment
         deployment = Deployment.create(
             application_version=version,
@@ -1714,6 +1805,7 @@ async def deploy_application(
             config=deployment_config,
             parameters=resolved_parameters,
             name=resolved_name,
+            id=new_id,
         )
 
         if skip_initial_reconcile:
@@ -1725,7 +1817,9 @@ async def deploy_application(
         for component in application_driver_version.component_configs:
             deployment.add_component(
                 component=Component.create(
-                    name=component.name, config=component.config, enabled=True
+                    name=component.name,
+                    config=component_configs[component.name],
+                    enabled=True,
                 ),
             )
 
@@ -1753,6 +1847,7 @@ async def deploy_application(
             deployment=deployment,
             uow=uow,
             release_reference=release_reference,
+            upcoming_deployments=upcoming,
         )
         # Set the new instance as the active one
         deployment.set_active_instance(instance=instance)
