@@ -374,7 +374,6 @@ class UpdateClusterInput(BaseModel):
     fast_storage: Optional["FastStorageInput"] = Field(
         alias="fastStorage", default=None
     )
-    scheduling: Optional["SchedulingInput"] = None
     db_size: Optional[str] = Field(alias="dbSize", default=None)
     backup_ttl: Optional[str] = Field(alias="backupTtl", default=None)
 

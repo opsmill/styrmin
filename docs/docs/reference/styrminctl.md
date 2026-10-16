@@ -86,8 +86,8 @@ The same update is available as the `updateCluster` GraphQL mutation
 Python SDK, and from the **Edit** button on the cluster detail page,
 which the page shows only to administrators. The edit dialog lists the
 changed values and the deployments that will be redeployed before it
-saves. It keeps the values it does not show: scheduling, the database
-size, the backup retention, and the dedicated ingress service
+saves. It keeps the values it does not show: the database size, the
+backup retention, and the dedicated ingress service
 annotations and load balancer IP. When you turn the
 dedicated ingress off, the annotations and the load balancer IP are
 removed with it.
@@ -136,6 +136,12 @@ value:
 Error: Unknown config key(s): fqdn_sufix, dedicated_ingress.servce
 ```
 
+A cluster config does not take `scheduling`, because no pod gets a
+cluster's scheduling value. `clusters update` refuses the key as
+unknown, and `clusters create` and the `createCluster` mutation refuse
+it with `VALIDATION_ERROR`. Set `scheduling` on the environment or the
+deployment instead.
+
 To start from the stored config, run
 `styrminctl clusters get <name> --json`. It prints only the config, as
 JSON, and `clusters update` accepts that JSON as it is, including
@@ -181,8 +187,6 @@ driver version. As a result:
 - Deleted deployments and deployments that are being deleted are not
   redeployed. A deployment with a restore in progress is skipped; submit
   the config again after the restore has ended.
-- The cluster's `scheduling` value is saved, but no deployment's config
-  reads it, so a change to it redeploys nothing.
 - When `dedicated_ingress` changes, the applications of an environment
   that takes the cluster's value move onto the environment's ingress
   controller only once the controller is ready, and the controller is

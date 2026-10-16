@@ -448,6 +448,12 @@ class BaseConfigSection(BaseModel):
         return validate_backup_ttl(v)
 
 
+CLUSTER_SCHEDULING_REJECTED = (
+    "a cluster does not take scheduling, because no pod gets a cluster's "
+    "scheduling value; set scheduling on the environment or the deployment"
+)
+
+
 class ClusterConfig(BaseConfigSection):
     """The Cluster context.
 
@@ -458,6 +464,9 @@ class ClusterConfig(BaseConfigSection):
             turns it on with the default values.
         standard_storage (StandardStorage | None): The standard storage.
         fast_storage (FastStorage | None): The fast storage.
+
+    ``scheduling`` must stay unset on a cluster: no pod gets a cluster's
+    scheduling value (ADR-033, #482).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -466,6 +475,16 @@ class ClusterConfig(BaseConfigSection):
     dedicated_ingress: DedicatedIngressConfig | None = None
     standard_storage: StandardStorage | None = None
     fast_storage: FastStorage | None = None
+
+    @field_validator("scheduling")
+    @classmethod
+    def _reject_cluster_scheduling(
+        cls, v: SchedulingConfig | None
+    ) -> SchedulingConfig | None:
+        # DeploymentConfig inherits this class and takes scheduling.
+        if v is not None and cls is ClusterConfig:
+            raise ValueError(CLUSTER_SCHEDULING_REJECTED)
+        return v
 
 
 class EnvironmentConfig(BaseConfigSection):

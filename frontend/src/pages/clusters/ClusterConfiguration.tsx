@@ -26,7 +26,6 @@ const KNOWN_KEYS = new Set([
   "fast_storage",
   "db_size",
   "runtime_class",
-  "scheduling",
   "backup_ttl",
 ]);
 
@@ -202,32 +201,15 @@ function StorageSection({ config }: { config: JsonObject }) {
   );
 }
 
-function RuntimeSchedulingSection({ config }: { config: JsonObject }) {
-  const scheduling = asObject(config.scheduling);
-  const hasScheduling = scheduling && Object.keys(scheduling).length > 0;
+function RuntimeSection({ config }: { config: JsonObject }) {
   return (
-    <ConfigSummaryCard title="Runtime and scheduling">
+    <ConfigSummaryCard title="Runtime">
       <Rows>
         <Row
           label={LABELS.runtime_class}
           value={withDefault(config.runtime_class, DEFAULT_RUNTIME_CLASS)}
         />
       </Rows>
-      <div className="mt-3">
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-          {LABELS.scheduling}
-        </p>
-        {hasScheduling ? (
-          <pre
-            className="mt-1 overflow-x-auto rounded-md bg-muted/50 p-3 font-mono text-xs"
-            data-testid="cluster-scheduling"
-          >
-            {JSON.stringify(scheduling, null, 2)}
-          </pre>
-        ) : (
-          <EmptyMessage>Not set</EmptyMessage>
-        )}
-      </div>
     </ConfigSummaryCard>
   );
 }
@@ -331,7 +313,7 @@ export function ClusterConfiguration({
       <NetworkingSection config={cfg} />
       <DedicatedIngressSection config={cfg} />
       <StorageSection config={cfg} />
-      <RuntimeSchedulingSection config={cfg} />
+      <RuntimeSection config={cfg} />
       <BackupSection config={cfg} />
       <CapabilitiesSection capabilities={capabilities} />
       <OtherSettingsSection config={cfg} />

@@ -354,7 +354,6 @@ export const CLUSTER_CONFIG_LABELS = {
   fast_storage: "Fast storage",
   fast_storage_class: "Fast storage class",
   db_size: "Database size",
-  scheduling: "Scheduling defaults",
   backup_ttl: "Backup retention",
 } as const;
 
@@ -409,7 +408,6 @@ const SHOWN_KEYS = new Set([
   "standard_storage",
   "fast_storage",
   "db_size",
-  "scheduling",
   "backup_ttl",
 ]);
 
@@ -441,7 +439,6 @@ function describedValues(config: StoredConfig): Array<[string, string]> {
     ],
     [L.fast_storage_class, asRecord(config.fast_storage)?.storage_class],
     [L.db_size, config.db_size],
-    [L.scheduling, config.scheduling],
     [L.backup_ttl, config.backup_ttl],
   ];
   for (const [key, value] of Object.entries(config)) {

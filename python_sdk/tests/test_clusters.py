@@ -211,12 +211,6 @@ async def test_update_cluster_accepts_the_config_that_get_returns(
     stored = {
         "external_url_scheme": "http",
         "external_dns_endpoints_type": "NodeExternalIP",
-        "scheduling": {
-            "tolerations": [{"key": "dedicated", "operator": "Exists", "effect": "NoSchedule"}],
-            "topology_spread_constraints": [
-                {"max_skew": 1, "topology_key": "zone", "when_unsatisfiable": "DoNotSchedule"}
-            ],
-        },
     }
 
     await client.clusters.update({**stored, "fqdn_suffix": "new.example.com"}, cluster_name="test-cluster")
@@ -226,8 +220,6 @@ async def test_update_cluster_accepts_the_config_that_get_returns(
     assert sent["externalUrlScheme"] == "HTTP"
     assert sent["externalDnsEndpointsType"] == "NODE_EXTERNAL_IP"
     assert sent["fqdnSuffix"] == "new.example.com"
-    assert sent["scheduling"]["tolerations"] == [{"key": "dedicated", "operator": "EXISTS", "effect": "NO_SCHEDULE"}]
-    assert sent["scheduling"]["topologySpreadConstraints"][0]["whenUnsatisfiable"] == "DO_NOT_SCHEDULE"
 
 
 @pytest.mark.parametrize(
@@ -236,9 +228,9 @@ async def test_update_cluster_accepts_the_config_that_get_returns(
         ({"ingress_class": "nginx", "fqdn_sufix": "apps.example.com"}, "fqdn_sufix"),
         ({"dedicated_ingres": {}}, "dedicated_ingres"),
         ({"dedicated_ingress": {"servce": {"type": "LoadBalancer"}}}, "dedicated_ingress.servce"),
-        ({"scheduling": {"tolerations": [{"key": "x", "operatr": "Exists"}]}}, "scheduling.tolerations[0].operatr"),
+        ({"scheduling": {"tolerations": [{"key": "x", "operator": "Exists"}]}}, "scheduling"),
     ],
-    ids=["top_level", "dedicated_ingress_typo", "nested", "inside_list"],
+    ids=["top_level", "dedicated_ingress_typo", "nested", "cluster_scheduling"],
 )
 async def test_update_cluster_refuses_unknown_keys_before_any_request(
     client: StyrminClient, mock_transport: AsyncMock, config: dict[str, Any], key_path: str

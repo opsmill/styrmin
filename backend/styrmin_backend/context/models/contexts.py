@@ -38,6 +38,20 @@ class ClusterContext(BaseModel):
     config: ClusterConfig
     capabilities: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_rejected_scheduling(cls, data: Any) -> Any:  # noqa: ANN401
+        # Contexts stored before #482 can hold the cluster's scheduling value, which no pod got.
+        if not isinstance(data, dict) or not isinstance(data.get("config"), dict):
+            return data
+        config = data["config"]
+        if "scheduling" not in config:
+            return data
+        return {
+            **data,
+            "config": {k: v for k, v in config.items() if k != "scheduling"},
+        }
+
 
 class EnvironmentContext(BaseModel):
     """Environment context.

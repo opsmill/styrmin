@@ -258,9 +258,9 @@ export function EditClusterDialog({ cluster }: { cluster: EditableCluster }) {
           <DialogTitle>Edit Cluster Configuration</DialogTitle>
           <DialogDescription>
             Review the changed values and the deployments to redeploy before
-            saving. Scheduling, the database size and the backup retention are
-            kept as they are, and so are the dedicated ingress service
-            annotations and load balancer IP while dedicated ingress stays on.
+            saving. The database size and the backup retention are kept as they
+            are, and so are the dedicated ingress service annotations and load
+            balancer IP while dedicated ingress stays on.
           </DialogDescription>
         </DialogHeader>
         {open && (

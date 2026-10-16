@@ -285,6 +285,38 @@ async def test_create_cluster_rejects_camel_case_backup_ttl(
 
 
 @pytest.mark.asyncio
+async def test_create_cluster_rejects_scheduling(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """No pod gets a cluster's scheduling value, so a cluster config with one is refused (#482)."""
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("create_cluster"),
+            "variables": {
+                "name": "scheduling-cluster",
+                "config": {
+                    **VALID_CLUSTER_CONFIG,
+                    "scheduling": {
+                        "tolerations": [{"key": "dedicated", "operator": "Exists"}]
+                    },
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    error = payload["errors"][0]
+    assert error["extensions"]["code"] == "VALIDATION_ERROR", payload
+    assert "scheduling" in error["message"], payload
+    assert "the environment or the deployment" in error["message"], payload
+
+    session.expire_all()
+    assert (await session.exec(select(Cluster))).all() == []
+
+
+@pytest.mark.asyncio
 async def test_cluster_by_unknown_id_returns_null(client: AsyncClient) -> None:
     """An unknown id must project as null with a NOT_FOUND extension — uses the
     raw ``client.post`` because ``gql`` is reserved for clean-success calls."""

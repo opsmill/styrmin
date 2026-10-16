@@ -1643,7 +1643,6 @@ export type UpdateClusterInput = {
   fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
   ingressClass?: InputMaybe<Scalars['String']['input']>;
   runtimeClass?: InputMaybe<Scalars['String']['input']>;
-  scheduling?: InputMaybe<SchedulingInput>;
   standardStorage?: InputMaybe<StandardStorageInput>;
 };
 

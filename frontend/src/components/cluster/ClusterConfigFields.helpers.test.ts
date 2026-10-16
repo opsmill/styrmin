@@ -45,19 +45,9 @@ describe("mergeFormValuesIntoConfig(stored, configToFormValues(stored))", () => 
       },
     ],
     [
-      "a scheduling value that refers to another deployment",
+      "the values the form does not show",
       {
         ingress_class: "traefik",
-        scheduling: {
-          pod_affinity: {
-            required: [
-              {
-                topology_key: "kubernetes.io/hostname",
-                deployment_ref: { deployment_name: "db", components: ["db"] },
-              },
-            ],
-          },
-        },
         db_size: "10Gi",
         backup_ttl: "720h",
       },
@@ -117,8 +107,14 @@ describe("clusterConfigChanges", () => {
   it("finds no change between equal configs", () => {
     expect(
       clusterConfigChanges(
-        { ingress_class: "traefik", scheduling: { runtime_class: "kata" } },
-        { scheduling: { runtime_class: "kata" }, ingress_class: "traefik" },
+        {
+          ingress_class: "traefik",
+          standard_storage: { storage_class: "ebs-gp3" },
+        },
+        {
+          standard_storage: { storage_class: "ebs-gp3" },
+          ingress_class: "traefik",
+        },
       ),
     ).toEqual([]);
   });
