@@ -43,11 +43,14 @@ fifo=$dir/stdin
 mkfifo "$fifo" || exit 1
 
 # A signal ends pdb's input and interrupts a running test, so pytest runs its
-# finalizers (the vcluster delete) before it exits.
+# finalizers (the vcluster delete) before it exits. At the pdb prompt end of
+# input is enough, and a SIGINT there can go off later, during teardown.
 stop() {
     sig=$1
     [ -n "$holder" ] && kill "$holder" 2>/dev/null
-    [ -n "$pytest_pid" ] && kill -INT "$pytest_pid" 2>/dev/null
+    if [ -n "$pytest_pid" ] && [ "$(tail -c 6 "$log")" != "(Pdb) " ]; then
+        kill -INT "$pytest_pid" 2>/dev/null
+    fi
 }
 trap 'stop 130' INT
 trap 'stop 143' TERM

@@ -181,6 +181,8 @@ def test_sigterm_ends_paused_run_with_teardown(start: Start, tmp_path: Path) -> 
     assert proc.wait(timeout=TIMEOUT) == 143
     last_line = _read(tmp_path / "stderr").splitlines()[-1]
     assert last_line == f"e2e-pdb: exit=143 log={tmp_path / 'pdb.log'}"
+    # At the prompt only end of input is sent; a SIGINT there can go off during teardown.
+    assert "KeyboardInterrupt" not in _read(tmp_path / "pdb.log")
     _assert_run_cleaned_up(proc, tmp_path)
 
 
