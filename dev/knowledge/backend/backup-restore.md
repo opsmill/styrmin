@@ -229,11 +229,11 @@ Detail in [Environment-Level Backup & Restore](#environment-level-backup--restor
 
 | Function | Description |
 |----------|-------------|
-| `create_environment_backup(environment_id, uow, name, deployment_ids, prefect_manager)` | Capture config + declared state and create every constituent backup in **one transaction**, then dispatch one `EXECUTE_BACKUP` per committed constituent. `deployment_ids` narrows the capture: `None` captures every eligible deployment, `[]` captures none (a config-only snapshot), and an id that is unknown or not eligible is not captured and raises nothing. The `createEnvironmentBackup` mutation does not expose it; the environment clone is the only caller that passes it (`services/backup/environment.py:605-660`) |
-| `register_environment_backup(environment, uow, name, deployment_ids)` | Writes the whole capture (parent row, constituent `Backup` rows, constituent errors) into the caller's open transaction. Does not run the concurrency guard, commit or dispatch. Returns a `CaptureRegistration`: the parent row, the backups waiting for dispatch, the errors, and `evaluated`. `create_environment_backup` and the clone both call it (`services/backup/environment.py:438-560`) |
-| `dispatch_constituent_backups(pending_dispatch, prefect_manager, environment_backup_id)` | Starts one `EXECUTE_BACKUP` per registered constituent, after the commit. Returns `(dispatched, dispatch_failed)` (`services/backup/environment.py:563-601`) |
-| `guard_no_clone_occupying_environment(environment_id, uow)` | The clone part of the concurrency guard on its own, so `update_environment` can apply it without the backup and restore parts (`services/backup/environment.py:363-386`) |
-| `restore_environment_backup(environment_backup_id, uow, prefect_manager)` | Revert captured config and create every constituent restore in **one transaction** (skips classified up front), then run the exclusion-aware config fan-out and dispatch `EXECUTE_RESTORE` per constituent |
+| `create_environment_backup(environment_id, uow, name, deployment_ids, prefect_manager)` | Capture config + declared state and create every constituent backup in **one transaction**, then dispatch one `EXECUTE_BACKUP` per committed constituent. `deployment_ids` narrows the capture: `None` captures every eligible deployment, `[]` captures none (a config-only snapshot), and an id that is unknown or not eligible is not captured and raises nothing. The `createEnvironmentBackup` mutation does not expose it; the environment clone is the only caller that passes it (`services/backup/environment.py:610-665`) |
+| `register_environment_backup(environment, uow, name, deployment_ids)` | Writes the whole capture (parent row, constituent `Backup` rows, constituent errors) into the caller's open transaction. Does not run the concurrency guard, commit or dispatch. Returns a `CaptureRegistration`: the parent row, the backups waiting for dispatch, the errors, and `evaluated`. `create_environment_backup` and the clone both call it (`services/backup/environment.py:443-565`) |
+| `dispatch_constituent_backups(pending_dispatch, prefect_manager, environment_backup_id)` | Starts one `EXECUTE_BACKUP` per registered constituent, after the commit. Returns `(dispatched, dispatch_failed)` (`services/backup/environment.py:568-606`) |
+| `guard_no_clone_occupying_environment(environment_id, uow)` | The clone part of the concurrency guard on its own, so `update_environment` can apply it without the backup and restore parts (`services/backup/environment.py:368-391`) |
+| `restore_environment_backup(environment_backup_id, uow, acting_user_id, prefect_manager)` | Revert captured config and create every constituent restore in **one transaction** (skips classified up front), then apply the reverted config with `fan_out_environment_config`, which also acts on the dedicated ingress controller and skips the `RESTORING` deployments, and dispatch `EXECUTE_RESTORE` per constituent |
 | `get_environment_backup` / `get_environment_backups(environment_id, ...)` | Read one snapshot / an environment's snapshots (newest first) |
 | `get_environment_restore` / `get_environment_restores(environment_backup_id, ...)` | Read one restore / a snapshot's restores (newest first) |
 | `delete_environment_backup(environment_backup_id, uow)` | Cascade-delete constituents, their restores, the snapshot's environment restores, and the parent, after detaching the clones built from it. No guard on the snapshot's own status. Refused with `EnvironmentBackupInUseByCloneError` (`IN_USE`) while an environment clone is still capturing into the snapshot (see [Cascade delete](#cascade-delete)) |
@@ -597,13 +597,13 @@ wait for one to finish before it starts the next. The same is true of the
 constituent restores. Nothing stops an application's components or holds its
 writes while the backups run, so a snapshot is close to consistent across
 applications, not exact. Restores have no order between applications
-(`services/backup/environment.py:563-601` and `:1091-1127`).
+(`services/backup/environment.py:568-606` and `:1090-1126`).
 
 Structured audit lines mirror ADR-0012's `env_config_fanout_dispatched`:
 
 ```text
 env_backup_fanout_dispatched environment_id=… environment_backup_id=… evaluated=… dispatched=… conflict=… dispatch_failed=…
-env_restore_fanout_dispatched environment_id=… environment_backup_id=… environment_restore_id=… evaluated=… restored=… skipped=… config_redeployed=… config_redeploy_failed=… dispatch_failed=…
+env_restore_fanout_dispatched environment_id=… environment_backup_id=… environment_restore_id=… evaluated=… restored=… skipped=… config_redeployed=… config_redeploy_failed=… dispatch_failed=… config_fanout_failed=… config_evaluated=… config_skipped_noop=… config_skipped_restoring=… config_skipped_waiting_for_ingress=… config_evaluation_failed=… config_dispatch_failed=… config_ingress_controllers_created=… config_ingress_controllers_redeployed=… config_ingress_controllers_removed=… config_ingress_controller_failed=… config_ingress_controller_removal_failed=…
 ```
 
 The two lines count differently:
@@ -615,11 +615,15 @@ The two lines count differently:
   (`len(deployment_snapshots)`).
 - `dispatch_failed` on a restore adds two kinds of failure: constituent
   restores whose `EXECUTE_RESTORE` could not be started, and deployments whose
-  config redeploy raised. `config_redeploy_failed` counts the second kind alone.
-- `config_redeployed` counts every deployment for which
-  `redeploy_for_environment_update` returned without raising, including one
-  that the function skipped because it was `RESTORING` (see
-  [Restore ordering](#restore-ordering)).
+  config redeploy failed. `config_redeploy_failed` counts the second kind
+  alone: the deployments that the config fan-out failed to evaluate or to
+  redeploy (`config_evaluation_failed` plus `config_dispatch_failed`).
+- `config_redeployed` counts the redeploys that the config fan-out started
+  (see [Restore ordering](#restore-ordering)). The other `config_*` counts are
+  the fan-out's own counts, with the names that `env_config_fanout_dispatched`
+  uses. `config_fanout_failed=1` means the fan-out failed as a whole, for
+  example on a captured config that no longer validates; the counts are then
+  0 and `env_restore_config_fanout_error` is logged with the traceback.
 
 <!-- Extracted from specs/001-env-backup-restore on 2026-10-13 -->
 
@@ -658,7 +662,7 @@ plain JSON (the `Backup.component_statuses` / `metadata_` precedent):
 
 The environment clone added two `DeploymentSnapshot` fields, so that a
 counterpart deployment can be built from the snapshot alone, without reading
-the source deployment again (`services/backup/environment.py:128-165` and
+the source deployment again (`services/backup/environment.py:133-170` and
 `:298-323`):
 
 - `service_name_overrides: dict[str, str] | None` maps a driver service name to
@@ -735,7 +739,7 @@ revert the environment's config. For example, when every constituent of a
 snapshot has expired, every `Backup` row still reads `COMPLETED`, so the
 snapshot derives `COMPLETED` and can be restored; the restore reverts the
 config, skips every constituent as `backup expired`, and derives `FAILED`
-(`services/backup/environment.py:188-233`).
+(`services/backup/environment.py:193-238`).
 
 <!-- Extracted from specs/001-env-backup-restore on 2026-10-13 -->
 
@@ -820,7 +824,7 @@ deployment".
 
 `_guard_no_environment_operation_in_progress` raises
 `EnvironmentOperationInProgressError` (`ALREADY_IN_PROGRESS`) when one of three
-things holds for the environment (`services/backup/environment.py:327-386`):
+things holds for the environment (`services/backup/environment.py:332-391`):
 
 - an environment backup is in flight;
 - an environment restore is in flight;
@@ -856,7 +860,7 @@ Two consequences worth knowing:
   clone is still capturing into; see [Cascade delete](#cascade-delete).
   A constituent backup whose dispatch fails stays `PENDING` this way, with no
   `error_message`: the reason is written only to the `env_backup_dispatch_error`
-  log line (`services/backup/environment.py:587-599`). A constituent restore
+  log line (`services/backup/environment.py:592-604`). A constituent restore
   whose dispatch fails does not: the fan-out marks it `FAILED` and its
   deployment `FAILED` (`settle_undispatched_restore`).
 - **Two racing create calls can both pass the check.** Accepted: the
@@ -881,13 +885,18 @@ order:
    capabilities, create one constituent restore per usable constituent
    (`create_restore(..., environment_restore_id=…)`), and **commit all of it
    once, before any dispatch**.
-4. **Exclusion-aware config fan-out**: `redeploy_for_environment_update` for
-   every eligible deployment *not* receiving a constituent restore.
+4. **Config fan-out**: the reverted config is applied with
+   `fan_out_environment_config`, the fan-out of `update_environment`, in its
+   own transaction (#467). It creates, redeploys or removes the environment's
+   dedicated ingress controller, and the applications that move onto the
+   controller wait until it is `RUNNING` (ADR-066 decisions 2 and 3). The
+   deployments receiving a constituent restore are `RESTORING` since step 3,
+   so the fan-out skips them.
 5. **Dispatch** one `EXECUTE_RESTORE` per created constituent restore. A
    dispatch failure marks that restore and its deployment `FAILED` and the
    loop continues.
 
-Why the exclusion in step 4 is load-bearing: a deployment receiving a Velero
+Why skipping the restored deployments in step 4 is load-bearing: a deployment receiving a Velero
 data restore is being returned to its backup-time state, and its restored
 in-cluster resources already correspond to the captured config (both came from
 the same near-consistent snapshot). Redeploying it via the config fan-out
@@ -907,35 +916,41 @@ Two implementation details that are easy to get wrong:
   `skipped_constituents` inside the step-3 transaction, so they are durable
   before anything is dispatched.
 
-How the step-4 fan-out differs from the fan-out of `update_environment`
-(`services/backup/environment.py:960-1089`, `services/environments.py:325-387`):
+How the step-4 fan-out compares with the one of `update_environment`
+(`services/backup/environment.py:1186-1223`, `services/environments.py:295-433`):
 
-- **The exclusion set is every constituent classified as usable**, including
-  one that became a late skip in step 3. A late skip means the deployment
-  started its own restore, so redeploying it would race that restore.
-- **Deployments skipped as `DEPLOYMENT_BUSY` are not excluded.** They are passed
-  to `redeploy_for_environment_update`, which returns `None` without changing a
-  `RESTORING` deployment. The restore still counts them in `config_redeployed`;
-  `update_environment` counts the same case as `skipped_restoring`.
-- **There is no check for an unchanged config.** Every eligible deployment that
-  is not excluded is redeployed, even when the reverted config equals its
-  current one. `update_environment` skips those with
-  `_deployment_already_at_config`.
-- **All redeploys run in one `async with uow` block with one commit**, and each
-  redeploy runs in its own savepoint (`uow.session.begin_nested()`), as in the
-  config fan-outs. A failed redeploy rolls back only its savepoint, is logged as
-  `env_restore_fanout_dispatch_error` (with `environment_restore_id`,
-  `deployment_id`, and the error's `error_code` and `path` when it has them),
-  is counted in `config_redeploy_failed` and `dispatch_failed`, and the
-  restore returns normally. The restore also logs
-  `metric=env_restore_fanout_deployments_total` lines with the outcomes
+- **The same function runs.** `_fan_out_restored_config` calls
+  `fan_out_environment_config` with `_deployment_already_at_config` against the
+  reverted config, so a deployment already at that config is not redeployed,
+  a `DELETING` deployment is left to its teardown, and a deployment without an
+  active instance is redeployed.
+- **A controller that the restore creates is attributed to the administrator
+  who restores the snapshot.** `restoreEnvironmentBackup` passes the calling
+  user as `acting_user_id`.
+- **The deployments that are not restored are found by their state.** A
+  deployment that receives a constituent restore, or that started its own
+  restore (a `DEPLOYMENT_BUSY` skip), is `RESTORING` and counted in
+  `config_skipped_restoring`. A deployment whose constituent restore could not
+  be created for another reason (a late `BACKUP_DELETED` skip or an unexpected
+  error) gets the config fan-out.
+- **Each redeploy, controller action and removal check runs in its own
+  savepoint, inside a savepoint of the fan-out's own transaction.** A failed
+  redeploy rolls back only its savepoint. The fan-out logs it as
+  `env_config_fanout_dispatch_error` with the traceback, and the restore logs it
+  again as `env_restore_fanout_dispatch_error` with `environment_restore_id`,
+  `deployment_id`, and the error's `error_code` and `path` when it has them,
+  read from `FanOutDeployment.error`. It is counted in `config_redeploy_failed`
+  and `dispatch_failed`, and the restore returns normally. The restore also
+  logs `metric=env_restore_fanout_deployments_total` lines with the outcomes
   `config_redeployed` and `config_redeploy_failed`, as `update_environment`
-  logs `env_config_fanout_deployments_total`. Before [#508](https://github.com/opsmill/styrmin/issues/508)
-  there was no savepoint: a failed redeploy rolled back the whole transaction,
-  which dropped the redeploys written before it, and the restore then returned
-  `INTERNAL_ERROR` although the config revert was committed. The failure is not
-  recorded on the `EnvironmentRestore` record, so `restore-get` and the UI do not
-  show it ([#520](https://github.com/opsmill/styrmin/issues/520)).
+  logs `env_config_fanout_deployments_total`. When the fan-out fails as a
+  whole, the constituent restores are still dispatched. Before
+  [#508](https://github.com/opsmill/styrmin/issues/508) there was no savepoint:
+  a failed redeploy rolled back the whole transaction, which dropped the
+  redeploys written before it, and the restore then returned `INTERNAL_ERROR`
+  although the config revert was committed. The failure is not recorded on the
+  `EnvironmentRestore` record, so `restore-get` and the UI do not show it
+  ([#520](https://github.com/opsmill/styrmin/issues/520)).
 - **The captured config is written back without validation.** The restore does
   not call `validate_environment_config` or run the env-var checks that
   `update_environment` runs before it writes, and it does not bind the
@@ -943,9 +958,27 @@ How the step-4 fan-out differs from the fan-out of `update_environment`
   deleted since the backup is written back as captured; the redeploys of the
   deployments it applies to then fail with the deleted deployment's last name
   and `deleted: true` ([ADR-075](../../adr/0075-deployment-references-stored-by-id.md)).
-- **A restore never creates or deletes deployments.** A deployment created
-  after the backup is not in the snapshot, so it is part of the fan-out: it
-  receives the reverted config and keeps its data.
+  A captured config that no longer validates makes the fan-out fail as a whole.
+- **A restore creates or deletes no application deployment.** A deployment
+  created after the backup is not in the snapshot, so it is part of the
+  fan-out: it receives the reverted config and keeps its data. Only the
+  dedicated ingress controller, an internal deployment, is created or removed
+  to match the reverted config.
+
+What happens to a restored deployment and the controller afterwards follows
+from ADR-063: the restore keeps the deployment's active instance, which was
+rendered with the config of before the restore, while the namespace runs the
+backup-time objects.
+
+- **The backup turns `dedicated_ingress` off.** The removal check reads the
+  active instances, so the restored deployment keeps the controller until it
+  is redeployed for another reason.
+- **The controller is created or redeployed.** When it reaches `RUNNING`, the
+  status reporter's continuation compares each application's active instance
+  with its resolved config. A restored deployment whose restore has already
+  ended, and whose active instance differs from the reverted config, is then
+  redeployed at its current application version. One that is still
+  `RESTORING` is skipped and not redeployed later.
 
 <!-- Extracted from specs/001-env-backup-restore on 2026-10-13 -->
 
@@ -966,7 +999,7 @@ How the step-4 fan-out differs from the fan-out of `update_environment`
 Plus one escape hatch outside the enum: `restore could not be created: <exc>`,
 appended as a late skip when `create_restore` fails for any other reason.
 
-Two details of where the reasons come from (`services/backup/environment.py:796-859`
+Two details of where the reasons come from (`services/backup/environment.py:801-864`
 and `:1011-1022`):
 
 - `DEPLOYMENT_BUSY` is read from the loaded `deployment.status == RESTORING`, not
@@ -999,7 +1032,7 @@ clones built from the snapshot are detached
 (`detach_clones_from_environment_backup` sets their `environment_backup_id` to
 null and records an `environment_backup_deleted` entry), then the parent. A
 constituent that vanished in the meantime is a no-op, not an error
-(`services/backup/environment.py:1264-1313`).
+(`services/backup/environment.py:1309-1358`).
 
 **There is deliberately no guard on the snapshot's own status** — deleting a
 snapshot whose constituents are still in flight is the documented escape hatch

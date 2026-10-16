@@ -580,13 +580,18 @@ deployment it came from.
 
 Two things it deliberately does **not** do:
 
-- **It never creates or deletes deployments.** Restoring is a config-and-
+- **It never creates or deletes your deployments.** Restoring is a config-and-
   data operation, not a topology one. A deployment you deleted since the
   backup is not recreated; a deployment you added since is not removed.
+  Only the environment's dedicated ingress controller is created, redeployed
+  or removed to match the restored `dedicated_ingress`, as on an environment
+  update (see
+  [Changing the dedicated ingress of an environment](./ingress-and-networking.md#changing-the-dedicated-ingress-of-an-environment)).
 - **It never touches data it has no backup for.** A deployment created
   after the snapshot keeps its data untouched. It does still pick up the
   reverted environment config, through the same config propagation any
   environment edit triggers — that is the intended outcome, not a leak.
+  A deployment that is already at the reverted config is not redeployed.
 
 Every constituent that is **not** restored is reported with its
 deployment name and a reason. There are no silent skips — if a
