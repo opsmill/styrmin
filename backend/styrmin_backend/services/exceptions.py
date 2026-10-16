@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any, Literal
+from uuid import UUID
 
 
 class ServiceError(Exception):
@@ -665,7 +667,8 @@ class UnresolvableAffinityReferenceError(ServiceError):
     """A deployment_ref in an affinity term cannot be resolved in the environment.
 
     Raised when an affinity term's ``deployment_ref`` points at a
-    deployment that doesn't exist (or lives in a different environment).
+    deployment that doesn't exist, lives in a different environment, or is
+    tombstoned (``deleted=True``, with the deployment's last name).
     Surfacing the specific identifier and the term's ``path`` lets the
     operator fix the typo/stale reference before Kubernetes sees an
     always-unsatisfied affinity rule.
@@ -680,14 +683,26 @@ class UnresolvableAffinityReferenceError(ServiceError):
         deployment_id: str | None = None,
         deployment_name: str | None = None,
         path: str | None = None,
+        *,
+        deleted: bool = False,
     ) -> None:
         self.deployment_id = deployment_id
         self.deployment_name = deployment_name
         self.path = path
-        identifier = deployment_id or deployment_name or "<unspecified>"
-        super().__init__(
-            message or f"Affinity deployment reference cannot be resolved: {identifier}"
+        self.deleted = deleted
+        super().__init__(message or self._build_message())
+
+    def _build_message(self) -> str:
+        if not self.deleted:
+            identifier = self.deployment_id or self.deployment_name or "<unspecified>"
+            return f"Affinity deployment reference cannot be resolved: {identifier}"
+        location = f" at {self.path}" if self.path is not None else ""
+        name = (
+            repr(self.deployment_name)
+            if self.deployment_name is not None
+            else "<unknown>"
         )
+        return f"Affinity term{location} names deployment {name} ({self.deployment_id}), which was deleted"
 
     @property
     def error_metadata(self) -> dict[str, Any]:
@@ -698,7 +713,52 @@ class UnresolvableAffinityReferenceError(ServiceError):
             meta["deployment_name"] = self.deployment_name
         if self.path is not None:
             meta["path"] = self.path
+        if self.deleted:
+            meta["deleted"] = True
         return meta
+
+
+@dataclass
+class UnclonedReference:
+    """A deployment that affinity terms of a clone name but the clone does not copy."""
+
+    deployment_id: UUID
+    deployment_name: str | None
+    paths: list[str] = field(default_factory=list)
+
+
+class UnclonedDeploymentReferenceError(ServiceError):
+    """A clone request copies an affinity term whose deployment it leaves out.
+
+    Raised by ``cloneEnvironment`` before any record or backup is created. Each
+    entry gives the named deployment (last name when tombstoned) and the path of
+    every term that names it.
+    """
+
+    error_code = "VALIDATION_ERROR"
+    default_message = "An affinity term names a deployment that the clone does not copy"
+
+    def __init__(self, deployments: list[UnclonedReference], message: str = "") -> None:
+        self.deployments = deployments
+        names = ", ".join(
+            d.deployment_name or str(d.deployment_id) for d in deployments
+        )
+        super().__init__(
+            message or (f"{self.default_message}: {names}" if names else "")
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {
+            "deployments": [
+                {
+                    "deployment_id": str(d.deployment_id),
+                    "deployment_name": d.deployment_name,
+                    "paths": list(d.paths),
+                }
+                for d in self.deployments
+            ]
+        }
 
 
 class ValidationError(ServiceError):

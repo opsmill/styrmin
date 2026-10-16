@@ -26,6 +26,7 @@ class InvalidContextError(ContextError):
 # raise them under a consistent import path (FR-003, FR-005, FR-001d).
 from styrmin_backend.services.exceptions import (  # noqa: E402
     InvalidSchedulingConfigError,
+    UnclonedDeploymentReferenceError,
     UnknownComponentInConfigError,
     UnresolvableAffinityReferenceError,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "InvalidDeploymentContextError",
     "InvalidEnvironmentContextError",
     "InvalidSchedulingConfigError",
+    "UnclonedDeploymentReferenceError",
     "UnknownComponentInConfigError",
     "UnresolvableAffinityReferenceError",
 ]
