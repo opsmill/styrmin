@@ -179,6 +179,12 @@ stayed until the last application of the environment was deleted.
 > the removal check at the end of the update, like the cluster fan-out. No dry run is added to
 > `updateEnvironment`, and its result type is unchanged.
 
+> Amended 2026-10-16 ([#467](https://github.com/opsmill/styrmin/issues/467)): an environment
+> restore applies the reverted config with the same `fan_out_environment_config` and the same
+> comparison as `update_environment`, so it acts on the controller in the same order. A controller
+> that it creates is attributed to the administrator who restores the snapshot. See the amendment
+> of [ADR-055](0055-environment-backup-parent-records.md) decision 4.
+
 ### 4. A typed `UpdateClusterInput`, while `createCluster` keeps its JSON argument
 
 `updateCluster(input: UpdateClusterInput!, clusterId: UUID, clusterName: String, dryRun: Boolean! = false): UpdateClusterResult!`

@@ -226,6 +226,17 @@ after the config revert per ADR-027.
    deployments **not** receiving a constituent restore.
 5. Dispatch one `EXECUTE_RESTORE` per created constituent restore.
 
+> Amended 2026-10-16 ([#467](https://github.com/opsmill/styrmin/issues/467)): step 4 now runs
+> `fan_out_environment_config`, the fan-out of `update_environment` (ADR-066 decisions 2 and 3),
+> in its own transaction. It also creates, redeploys or removes the environment's dedicated
+> ingress controller, attributed to the administrator who restores the snapshot, and the
+> applications that move onto the controller wait until it is `RUNNING`. The deployments receiving
+> a constituent restore are `RESTORING` since step 3, and the fan-out skips `RESTORING`
+> deployments, so the exclusion below still holds. A deployment already at the reverted config is
+> no longer redeployed. "Restore never creates or deletes deployments" below now means
+> application deployments: the controller is an internal deployment that follows the reverted
+> config.
+
 Steps 2, 3 and step 5's row creation share one transaction for the same reason
 `createEnvironmentBackup`'s capture does (decision 2): a cancellation between
 the parent's commit and the constituent rows would otherwise publish a restore
@@ -436,6 +447,11 @@ environment's config through the back door. No new roles or permission concepts
   `RESTORING` check is now what protects a deployment that classification skipped as
   `deployment busy`: that deployment is not in the exclusion set, so it reaches the
   fan-out, which leaves it unchanged.
+
+  Amended 2026-10-18 ([#467](https://github.com/opsmill/styrmin/issues/467)): step 4
+  now loads the deployments again after the step-3 commit and has no exclusion set.
+  The `RESTORING` state that `create_restore` sets is what keeps the restored
+  deployments, and the `deployment busy` ones, out of the fan-out.
 - **Delegating the config revert to `update_environment`**: rejected. Its
   `config is None` no-op guard would make a captured `None` config
   unrestorable, and silently so.
