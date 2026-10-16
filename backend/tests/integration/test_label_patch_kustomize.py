@@ -1,4 +1,4 @@
-"""Styrmin's label patches through real ``kubectl kustomize`` (024 contract C-004a, #435).
+"""Styrmin's label patches through real ``kubectl kustomize`` (025 contract C-004a, #435).
 
 With Helm v4 defaults, Helm hooks reach the post-renderers too, and a chart hook often has no
 ``metadata.labels``. The patches from ``build_target_for_label_patches`` must add Styrmin's labels
