@@ -119,6 +119,11 @@ the chart's other resources:
   component container fails the install or upgrade with
   `COMPONENT_CONTAINER_NOT_FOUND`, as a template would (see
   [The component container](#the-component-container)).
+- **The component's replica count** (replica override, driver default,
+  or 0 pods while the component is stopped) reaches a hook `Deployment`
+  or `StatefulSet` whose own `metadata.labels` carry the component's
+  identifier label (see
+  [Replica overrides](../concepts-and-architecture/replica-overrides.md)).
 
 **Output of this step:** a short list of components, with notes on what
 each one is and how it should be backed up, and a list of the chart's
