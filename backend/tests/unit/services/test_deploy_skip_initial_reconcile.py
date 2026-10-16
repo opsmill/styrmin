@@ -4,7 +4,8 @@ Two changes, both scoped to ``services/deployment.py``:
 
 * ``deploy_application(skip_initial_reconcile=True)`` creates the deployment,
   its services and its active instance but dispatches **no** reconciliation,
-  and starts the deployment in ``RESTORING`` rather than ``PENDING``.
+  starts the deployment in ``RESTORING`` rather than ``PENDING``, and returns
+  the deployment's id instead of a Task.
 * ``redeploy_for_environment_update`` refuses to redeploy a ``RESTORING``
   deployment, because a restore is about to delete and recreate that
   namespace wholesale.
@@ -221,16 +222,15 @@ class TestDeployApplicationSkipInitialReconcile:
             skip_initial_reconcile=True,
         )
 
-        # No Task is dispatched, and the caller is told so explicitly.
-        assert result is None
+        # No Task is dispatched.
         assert stub_reconcile["apply_state"] == []
         assert uow.tasks.models == []
 
-        stored = await uow.deployments.get_by_name(
-            "counterpart",
-            environment.id,  # type: ignore[union-attr]
-        )
+        # The caller gets the deployment's id, so it never looks the
+        # deployment up by a name a user can change (#493).
+        stored = await uow.deployments.find(result)
         assert stored is not None
+        assert stored.name == "counterpart"
         # RESTORING, not PENDING: the existing restoring-deployment guards
         # protect the counterpart until its cross-target restore lands (D8).
         assert stored.status == DeploymentState.RESTORING
