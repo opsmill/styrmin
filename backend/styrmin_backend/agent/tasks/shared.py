@@ -196,6 +196,7 @@ async def poll_kubernetes_deployments_status(namespace: str) -> None:
         )
 
         observed_generation = deployment.status.observed_generation or 0
+        replicas = deployment.status.replicas or 0
         updated_replicas = deployment.status.updated_replicas or 0
         ready_replicas = deployment.status.ready_replicas or 0
         available_replicas = deployment.status.available_replicas or 0
@@ -204,6 +205,11 @@ async def poll_kubernetes_deployments_status(namespace: str) -> None:
             raise Exception(
                 f"Deployment {name}: rollout not yet observed by controller "
                 f"(observed={observed_generation}, current={generation})"
+            )
+        # After a scale-down or a rollout, the extra pods must be gone too.
+        if replicas > spec_replicas:
+            raise Exception(
+                f"Deployment {name}: waiting for extra replicas to stop ({replicas}/{spec_replicas})"
             )
         if updated_replicas < spec_replicas:
             raise Exception(
@@ -242,6 +248,7 @@ async def poll_kubernetes_stateful_sets_status(namespace: str) -> None:
         )
 
         observed_generation = stateful_set.status.observed_generation or 0
+        replicas = stateful_set.status.replicas or 0
         updated_replicas = stateful_set.status.updated_replicas or 0
         ready_replicas = stateful_set.status.ready_replicas or 0
 
@@ -249,6 +256,10 @@ async def poll_kubernetes_stateful_sets_status(namespace: str) -> None:
             raise Exception(
                 f"StatefulSet {name}: rollout not yet observed by controller "
                 f"(observed={observed_generation}, current={generation})"
+            )
+        if replicas > spec_replicas:
+            raise Exception(
+                f"StatefulSet {name}: waiting for extra replicas to stop ({replicas}/{spec_replicas})"
             )
         if updated_replicas < spec_replicas:
             raise Exception(
