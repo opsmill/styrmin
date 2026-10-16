@@ -58,8 +58,9 @@ manages: Styrmin installs it with its own driver model, and you do not
 install or manage it. In an environment that has `dedicated_ingress`
 set and no controller yet, Styrmin installs it when you deploy, update
 or upgrade an application in the environment, or when you update the
-cluster config and the environment has applications. Styrmin removes it
-when no application uses it any more:
+cluster or environment config, or restore an environment backup, and the
+environment has applications. Styrmin removes it when no application uses
+it any more:
 
 - after you delete the last application in the environment
 - after `dedicated_ingress` is turned off for the environment and every
@@ -253,6 +254,16 @@ Styrmin retries a controller that could not be started, and redeploys a
 controller whose values differ from the environment's value, for example
 after an environment update made with an earlier Styrmin release, which
 changed only the applications.
+
+When you restore an environment backup whose `dedicated_ingress`
+differs from the environment's current value, Styrmin changes the
+controller in the same way, with the backed-up value, and attributes a
+controller that it creates to you. A deployment that receives a restore
+of its own backup is not redeployed: its namespace comes back with the
+Ingress of the backup. When the backup turns `dedicated_ingress` off,
+such a deployment keeps the controller until Styrmin redeploys it for
+another reason, for example when you update the deployment. See
+[Restoring an environment](./backups-and-restores.md#restoring-an-environment).
 
 The **Configuration** tab of the environment page does not edit
 `dedicated_ingress`. While the environment sets it, including an empty
