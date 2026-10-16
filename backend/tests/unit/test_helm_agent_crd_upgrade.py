@@ -113,10 +113,20 @@ def test_fixture_controllers_run_the_chart_images(controller: str) -> None:
 
 
 def test_helm_controller_runs_with_helm_v4_defaults() -> None:
-    args = _controller_container(
-        CHART_DIR / "templates" / "helm-controller" / "deployment.yaml"
-    )["args"]
+    template = CHART_DIR / "templates" / "helm-controller" / "deployment.yaml"
+    args = _controller_container(template)["args"]
 
     assert args
     assert not [arg for arg in args if "UseHelm3Defaults" in arg]
     assert not [arg for arg in args if arg.startswith("--feature-gates")]
+    # Also catch a gate added through a templated line, which the parse above drops.
+    chart_text = "\n".join(
+        path.read_text()
+        for path in [
+            template,
+            CHART_DIR / "values.yaml",
+            REPO_ROOT / "helm" / "styrmin" / "values.yaml",
+        ]
+    )
+    assert "UseHelm3Defaults" not in chart_text
+    assert "feature-gates" not in chart_text
