@@ -1,6 +1,6 @@
 # ADR-033: Scheduling merge — affinity accumulate with per-kind `replace:true`; topology-spread keyed by `(topologyKey, whenUnsatisfiable)`
 
-**Status**: Accepted — amended 2026-10-16 (#482): a cluster config refuses `scheduling` instead of ignoring it
+**Status**: Accepted — amended 2026-10-16 (#482): a cluster config refuses `scheduling` instead of ignoring it; amended 2026-10-16 (#486): the required node affinity terms of different levels are combined, so a node must match a term of every level
 **Date**: 2026-05-17
 **Source**: specs/archive/001-pod-scheduling-config/research.md (Decisions 2, 4, 5)
 
