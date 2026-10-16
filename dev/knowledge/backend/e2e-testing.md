@@ -67,12 +67,12 @@ The E2E vCluster runs no shared ingress controller: no Traefik or NGINX runs bes
 ingress controllers. `test_cluster_update.py` therefore checks that an application uses the
 shared ingress class through the Ingress resource's `spec.ingressClassName`, not over HTTP.
 
-<!-- Extracted from specs/023-ingress-class-post-render on 2026-10-16 -->
+<!-- Extracted from specs/024-ingress-class-post-render on 2026-10-16 -->
 
 The E2E fixture drivers `late-container` and `failing-actions`
 (`backend/tests/e2e/fixtures/drivers/`) keep `className: "{{ instance.config.ingress_class }}"`
 in their `values.j2.yml` on purpose, although the example drivers dropped that line
-([ADR-070](../../adr/0070-ingress-class-set-by-post-render.md)). The session cluster has a
+([ADR-071](../../adr/0071-ingress-class-set-by-post-render.md)). The session cluster has a
 dedicated ingress controller, so the CI tests that deploy these drivers render a template that
 still sets the class, which Styrmin must then remove after the chart renders.
 `test_apply_sets_env_vars_with_the_version_that_adds_their_container` (`test_deployments_apply.py`)

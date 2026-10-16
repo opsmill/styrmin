@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | Feature | 023 Ingress class set only after the chart renders (#471) |
-| Spec directory | `specs/023-ingress-class-post-render/` |
+| Spec directory | `specs/024-ingress-class-post-render/` |
 | Base commit | `d0080947bebd2eba0779954ec6b83205c8a60bea` |
 | Head commit (before this report) | `426eadf7` |
 | Wall-clock time | About 1 h 15 min (2026-10-15T09:11:42Z to 10:27Z) |
@@ -120,16 +120,16 @@ The review covered `d0080947..437c0a4a` with five reviewers, run one after the o
 |----------|------|---------|--------|
 | Medium | `docs/docs/concepts-and-architecture/ingress-and-networking.md` | Existing text said Ingresses use the cluster's `ingress_class`; the new text said the resolved value | Fixed, `1e6efea3` |
 | Medium | `backend/tests/unit/agent/test_utility_resources.py` | No test pinned the shared-mode patch list, so a reordered or added shared-mode patch passed every test | Fixed, `5ebee846` |
-| Low | `dev/adr/0070-ingress-class-set-by-post-render.md`, `ingress-and-networking.md`, `ingress.py:49` | Wrong reason why the dedicated controller ignores `spec.ingressClassName`: it runs with `disableIngressClassLookup: true` and reads no IngressClass | Fixed, `1e6efea3` |
+| Low | `dev/adr/0071-ingress-class-set-by-post-render.md`, `ingress-and-networking.md`, `ingress.py:49` | Wrong reason why the dedicated controller ignores `spec.ingressClassName`: it runs with `disableIngressClassLookup: true` and reads no IngressClass | Fixed, `1e6efea3` |
 | Low | `changelog/471.changed.md` | Described shared-mode behavior, which was already the case, as new | Fixed, `1e6efea3` |
 | Low | `CONTEXT.md`, `dev/knowledge/backend/data-models.md` | Left out the case where no class is resolved and the chart's class stays | Fixed, `1e6efea3` |
-| Low | `ingress-and-networking.md`, ADR-070 | "When one of them sets an empty string" was too broad; only the deepest value set counts | Fixed, `1e6efea3` |
+| Low | `ingress-and-networking.md`, ADR-071 | "When one of them sets an empty string" was too broad; only the deepest value set counts | Fixed, `1e6efea3` |
 | Low | `dev/knowledge/backend/data-models.md` | Said the agent removes the field; the Flux helm-controller applies the patch that the agent writes | Fixed, `1e6efea3` |
 | Low | `docs/docs/drivers/context.md`, `docs/docs/drivers/creating-a-driver.md` | The lead "No Ingress class." read as "the Ingress has no class" | Fixed, `1e6efea3` |
-| Low | `application.py` docstring, `data-models.md`, `CONTEXT.md`, ADR-070 | "Driver templates do not set the class" was stated as a fact | Fixed, `1e6efea3` |
+| Low | `application.py` docstring, `data-models.md`, `CONTEXT.md`, ADR-071 | "Driver templates do not set the class" was stated as a fact | Fixed, `1e6efea3` |
 | Low | `backend/tests/integration/test_ingress_class_post_render.py` | A comment said both Ingresses carry the chart's class, which is false for the empty chart class | Fixed, `5ebee846` |
 | Low | `backend/tests/unit/agent/test_utility_resources.py` | No dedicated-mode test had no resolved class | Fixed, `5ebee846` |
-| Low | `specs/023-ingress-class-post-render/spec.md` (Testing Approach) | The `late-container` and `failing-actions` E2E tests cannot detect a missing removal patch, because the main E2E cluster resolves `traefik`; only the integration test detects it | Deferred |
+| Low | `specs/024-ingress-class-post-render/spec.md` (Testing Approach) | The `late-container` and `failing-actions` E2E tests cannot detect a missing removal patch, because the main E2E cluster resolves `traefik`; only the integration test detects it | Deferred |
 | Low | `backend/tests/integration/test_ingress_class_post_render.py` | No test checks that `semaphore` and `slurpit` keep no class line, or that the example drivers keep their `spec.version` | Deferred |
 | Low | `backend/styrmin_backend/.../blocks/patches.py:749` | `_operation="remove"` names the JSON6902 operation that research D-001 rejected; the `Patch` base class requires the field and nothing reads it | Deferred |
 | Low | `backend/styrmin_backend/.../blocks/patches.py:745-747` | `api_version`, `kind` and `name` are constructor arguments that do not change which resources the patch applies to | Deferred |

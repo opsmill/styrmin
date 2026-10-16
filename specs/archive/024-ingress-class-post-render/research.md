@@ -94,7 +94,7 @@ spec:
 
 **Alternatives considered**: a new E2E test that deploys a driver whose chart sets its own class. Rejected in the idea review of #471: the integration test checks the same Ingress shape that the second E2E test reaches over HTTP.
 
-## D-007: Documentation and ADR-070
+## D-007: Documentation and ADR-071
 
 **Decision**: In the same change:
 
@@ -102,7 +102,7 @@ spec:
 - [`dev/knowledge/backend/data-models.md`](../../dev/knowledge/backend/data-models.md), section `DedicatedIngressConfig`: replace "removes `ingress_class` from the values-template context" with the post-render behavior of both modes.
 - [`docs/docs/drivers/creating-a-driver.md`](../../docs/docs/drivers/creating-a-driver.md) and [`docs/docs/drivers/context.md`](../../docs/docs/drivers/context.md): drop the `className` line from the examples and add a "No Ingress class" bullet to the patterns lists, next to "No env var wiring".
 - [`docs/docs/concepts-and-architecture/ingress-and-networking.md`](../../docs/docs/concepts-and-architecture/ingress-and-networking.md), section "Dedicated ingress controller or shared ingress class": state the class each mode gives an application's Ingress.
-- `dev/adr/0070-ingress-class-set-by-post-render.md` (MADR, next free number after ADR-069): the three decisions from the PRD (D-001, D-004, D-003 here), with ADR-057 and ADR-069 as related records. Consequences include the dependency on the `kubernetes.io/ingress.class` annotation in dedicated mode (D-001, `DefaultIngressClass` admission plugin).
+- `dev/adr/0071-ingress-class-set-by-post-render.md` (MADR, next free number after ADR-069): the three decisions from the PRD (D-001, D-004, D-003 here), with ADR-057 and ADR-069 as related records. Consequences include the dependency on the `kubernetes.io/ingress.class` annotation in dedicated mode (D-001, `DefaultIngressClass` admission plugin).
 - `changelog/471.changed.md`, created with `uv run towncrier create`. It says three things to driver authors: driver templates no longer need to set the Ingress class, because Styrmin sets it, or removes it with a dedicated ingress controller, after the chart renders; with a dedicated ingress controller, Styrmin now removes a class that the chart sets on its own, so such a chart deploys there; and templates now read the resolved `ingress_class` with a dedicated ingress controller too, where it was empty before.
 
 **Rationale**: Constitution §VII and the PRD's documentation list. `docs/docs/installation/vcluster-local.md` sets `className: traefik` for the Styrmin server's own Ingress in the Styrmin Helm chart, which is out of scope, so it does not change. [`driver/DRIVERS.md`](../../driver/DRIVERS.md) lists `ingress_class` as context data, which stays true (D-004).

@@ -2,7 +2,7 @@
 
 **Branch**: `fac/ingress-class-post-render-tb7qv` | **Date**: 2026-10-15 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `specs/023-ingress-class-post-render/spec.md` (PRD: [#471 comment](https://github.com/opsmill/styrmin/issues/471#issuecomment-6187650614))
+**Input**: Feature specification from `specs/024-ingress-class-post-render/spec.md` (PRD: [#471 comment](https://github.com/opsmill/styrmin/issues/471#issuecomment-6187650614))
 
 ## Summary
 
@@ -15,7 +15,7 @@ Technical approach (details in [research.md](research.md)):
 - The values template renderer stops removing `ingress_class` from the template data (D-004).
 - The three example drivers drop the class line and keep their `spec.version` (D-005).
 - Unit tests, one new integration test on real `helm template` and `kubectl kustomize`, and local runs of two existing E2E tests (D-006).
-- Documentation, `CONTEXT.md`, ADR-070 and a changelog fragment in the same change (D-007). The fragment tells driver authors they can drop the class line, that a chart's own class is removed with a dedicated ingress controller, and that templates now read `ingress_class` in that mode too.
+- Documentation, `CONTEXT.md`, ADR-071 and a changelog fragment in the same change (D-007). The fragment tells driver authors they can drop the class line, that a chart's own class is removed with a dedicated ingress controller, and that templates now read `ingress_class` in that mode too.
 
 ## Technical Context
 
@@ -56,7 +56,7 @@ All items are resolved; [research.md](research.md) has no open "NEEDS CLARIFICAT
 | IV. Type safety and typed errors | Pass | The new patch block is a typed dataclass like the other blocks. No new error type; no union-based error handling. |
 | V. Test-first development | Pass, with an approved E2E skip | No new E2E test: approved in the idea review of #471 and recorded in the PRD's governance gates, because two existing CI tests in `shard_compute` cover the changed path once `simple-app` drops its class line. Both are run locally with evidence. The integration test covers the case that no E2E test deploys (a chart that sets its own class). |
 | VI. Format and lint | Pass | `uv run invoke format lint` is a task before each commit. |
-| VII. Documentation accuracy | Pass | `creating-a-driver.md`, `context.md`, `ingress-and-networking.md`, `data-models.md`, `CONTEXT.md`, the renderer docstring, ADR-070 and the changelog fragment are tasks in the same change. |
+| VII. Documentation accuracy | Pass | `creating-a-driver.md`, `context.md`, `ingress-and-networking.md`, `data-models.md`, `CONTEXT.md`, the renderer docstring, ADR-071 and the changelog fragment are tasks in the same change. |
 
 **Governance gates** (AGENTS.md "Ask First"): no database or migration change, no GraphQL change, no new dependency, no CI/CD change, no authentication change. Skipping new E2E coverage is approved (PRD, "Governance gates"). Documentation ships in the same change.
 
@@ -67,7 +67,7 @@ All items are resolved; [research.md](research.md) has no open "NEEDS CLARIFICAT
 ### Documentation (this feature)
 
 ```text
-specs/023-ingress-class-post-render/
+specs/024-ingress-class-post-render/
 ├── plan.md              # This file
 ├── research.md          # Phase 0 output: D-001 to D-007
 ├── data-model.md        # Phase 1 output: the class rule and the patch blocks per mode
@@ -104,7 +104,7 @@ docs/docs/
 └── concepts-and-architecture/ingress-and-networking.md   # class per mode
 
 dev/
-├── adr/0070-ingress-class-set-by-post-render.md   # new
+├── adr/0071-ingress-class-set-by-post-render.md   # new
 └── knowledge/backend/data-models.md               # DedicatedIngressConfig section
 
 backend/tests/e2e/fixtures/drivers/{late-container,failing-actions}/values.j2.yml
@@ -123,7 +123,7 @@ changelog/471.changed.md               # new towncrier fragment
 3. Remove the `ingress_class` removal from `render_value_template`, update its docstring, add the template-data unit test (D-004).
 4. Add the integration test; it must pass before the example drivers change, because it renders the chart with the class set (FR-005) and with it empty (FR-004).
 5. Drop the class line from the three example drivers (D-005).
-6. Documentation, `CONTEXT.md`, ADR-070, changelog fragment (D-007).
+6. Documentation, `CONTEXT.md`, ADR-071, changelog fragment (D-007).
 7. `uv run invoke format lint`, `uv run invoke test`, then the two E2E tests locally with evidence in `e2e-evidence.md` (D-006).
 
 ## Risks

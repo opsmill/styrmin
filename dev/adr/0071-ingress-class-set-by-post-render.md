@@ -1,8 +1,8 @@
-# ADR-070: Ingress Class Set by Post-Render
+# ADR-071: Ingress Class Set by Post-Render
 
 **Status**: Accepted
 **Date**: 2026-10-15
-**Source**: specs/archive/023-ingress-class-post-render/ (spec, plan, research D-001 to D-007, contracts);
+**Source**: specs/archive/024-ingress-class-post-render/ (spec, plan, research D-001 to D-007, contracts);
 [issue #471](https://github.com/opsmill/styrmin/issues/471)
 **Related**: [ADR-057](0057-post-render-component-overrides.md) (env vars applied by post-render),
 [ADR-069](0069-container-command-args-by-post-render.md) (container `command` and `args` applied by

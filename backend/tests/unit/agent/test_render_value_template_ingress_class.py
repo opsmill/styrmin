@@ -1,6 +1,6 @@
 """Unit tests for ``ingress_class`` in the data of
 ``ApplicationHelmReleaseBuilder.render_value_template``
-(023-ingress-class-post-render, T007, FR-003, research D-004).
+(024-ingress-class-post-render, T007, FR-003, research D-004).
 
 FR-003: driver templates read the resolved ``ingress_class`` of every config
 section with or without a dedicated ingress controller.
