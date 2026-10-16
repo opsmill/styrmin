@@ -36,6 +36,9 @@ iteration = 0
 max_iterations = 5
 test_resolved = false
 investigation_log = []   # Append to this after every iteration
+run_pid = none           # PID of this iteration's wrapper (Phase 1)
+run_log = none           # Log path of this iteration's run (Phase 1)
+cluster_name = none      # pytest-<uuid> vcluster of this iteration's run (Phase 3)
 ```
 
 ---
@@ -91,12 +94,13 @@ scripts/e2e-pdb.sh <test_node_id> --tb=long
 
 The wrapper keeps pdb's stdin from hitting EOF on failure, which would otherwise exit pytest and tear the cluster down before Phase 2 can look at it. When the wrapper is stopped with `kill <pid>`, pytest leaves pdb and runs its session teardown, which deletes the vcluster, and the wrapper removes its FIFO. Do **not** substitute `sleep infinity | uv run pytest …`: `sleep` never writes, so it never takes SIGPIPE when pytest exits and the command hangs forever even on a pass. See `AGENTS.md` (Debugging E2E Tests) for the full rationale.
 
-**Record the PID and the log path of this run.** The wrapper's first line, printed to stderr and written as the first line of the log, names both, for example `e2e-pdb: pid=12345 log=/tmp/e2e-pdb-log.a1B2c3 (stop with: kill 12345)`. Each run writes a new log file, so read the log of this run, never a fixed path such as `/tmp/pdb.log`, which can hold another session's output.
+**Record the PID and the log path of this run** as `run_pid` and `run_log`. The wrapper's first line, printed to stderr and written as the first line of the log, names both, for example `e2e-pdb: pid=12345 log=/tmp/e2e-pdb-log.a1B2c3 (stop with: kill 12345)`. Each run writes a new log file, so read the log of this run, never a fixed path such as `/tmp/pdb.log`, which can hold another session's output.
 
 **Capture the full output.** Parse this run's log for:
 
 - `PASSED` / `FAILED` / `ERROR`.
 - The traceback if failed.
+- Whether pytest is paused in pdb. A paused run shows a line with `entering PDB` between two rows of `>` characters, for example `>>>>>>>>>>>>>>>>>>>> entering PDB >>>>>>>>>>>>>>>>>>>>` (the row length depends on the terminal width), followed by a `(Pdb)` prompt at the end of the log. A test that is still running shows neither. A finished run has the wrapper's last line on stderr, `e2e-pdb: exit=<status> log=<path>`; that line is not written to the log.
 - The active kubeconfig path. If the test is paused in pdb, find it with:
 
   ```bash
@@ -105,7 +109,7 @@ The wrapper keeps pdb's stdin from hitting EOF on failure, which would otherwise
 
 **If the test passed:** set `test_resolved = true`, go to Phase 4.
 
-**If the test failed and pytest is paused in pdb:** keep the pytest process running, record the failure in `investigation_log`, and proceed to Phase 2 from a separate shell. Do not kill pytest until after diagnostics are collected.
+**If the test failed and pytest is paused in pdb:** keep the run going, record the failure in `investigation_log`, and proceed to Phase 2 from a separate shell. Do not stop the run until after diagnostics are collected.
 
 ---
 
@@ -202,11 +206,14 @@ investigation_log.append({
 
 Apply the minimal fix. Don't refactor, don't improve, don't clean up — just fix the failing test or the code it exercises. If the fix involves backend Python code, the Styrmin server inside the cluster will NOT auto-reload — a rebuild and redeploy may be needed. Try fixes that don't require that first (test code changes, timing adjustments, fixture issues).
 
-1. **Stop the paused pytest run after diagnostics are complete.** Kill the whole pytest process group so teardown can proceed or, if necessary, force-stop the run:
+1. **Stop this run after diagnostics are complete.** Send `kill` to the wrapper PID recorded in Phase 1, not to pytest or `uv`, then wait until that PID has exited:
 
    ```bash
-   pkill -f "pytest .*backend/tests/e2e"
+   kill <run_pid>
+   while kill -0 <run_pid> 2>/dev/null; do sleep 2; done
    ```
+
+   This makes pytest leave pdb and run its session teardown, which deletes the test vcluster. Never use `pkill` or another pattern-based kill: the pattern also matches other worktrees' E2E runs and the calling shell's own command line (see `AGENTS.md`, Debugging E2E Tests).
 
 2. **Apply the fix.** Edit the relevant file(s).
 
@@ -218,17 +225,25 @@ Apply the minimal fix. Don't refactor, don't improve, don't clean up — just fi
 
    Fix any lint errors before proceeding.
 
-4. **Ensure the test cluster is gone.** The next iteration should create a fresh one. This is mandatory — never leave a stale cluster running between iterations.
+4. **Check that this run's test cluster is gone.** The next iteration must create a fresh one, so never leave a stale cluster running between iterations. The teardown in step 1 normally deletes it. The `vcluster` fixture in `backend/tests/conftest.py` names the cluster `pytest-<uuid>` and does not capture the output of `vcluster create`, so the name is in this run's log. Take `cluster_name` from that log, never from `vcluster list`:
+
+   ```bash
+   grep -oE 'pytest-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}' <run_log> | head -1
+   ```
+
+   Check whether that cluster is still listed:
+
+   ```bash
+   vcluster list --driver=docker 2>/dev/null | grep <cluster_name>
+   ```
+
+   Only if it is still listed, delete that one cluster:
 
    ```bash
    vcluster delete <cluster_name> --driver=docker
    ```
 
-   Verify it is gone:
-
-   ```bash
-   vcluster list 2>/dev/null
-   ```
+   Leave every other `pytest-*` cluster alone: it can belong to another session's run.
 
 5. **If backend code was changed** (`backend/styrmin_backend/`), rebuild the Docker image so the next test run picks up the changes:
 
@@ -244,21 +259,22 @@ Apply the minimal fix. Don't refactor, don't improve, don't clean up — just fi
 
 ## Phase 4: Final Cleanup and Summary Report
 
-**Before writing the summary**, ensure no paused pytest process or test cluster is still running:
+**Before writing the summary**, make sure the last run is stopped and its test cluster is gone:
 
-```bash
-pkill -f "pytest .*backend/tests/e2e" 2>/dev/null || true
-```
+- If the wrapper PID of the last run is still running (`kill -0 <run_pid>` succeeds), stop it as in Phase 3 step 1.
+- Take `cluster_name` from the last run's log as in Phase 3 step 4, and check whether that cluster is still listed:
 
-```bash
-vcluster list 2>/dev/null | grep pytest
-```
+  ```bash
+  vcluster list --driver=docker 2>/dev/null | grep <cluster_name>
+  ```
 
-If any `pytest-*` cluster exists, delete it:
+  If it is, delete only that cluster:
 
-```bash
-vcluster delete <cluster_name> --driver=docker
-```
+  ```bash
+  vcluster delete <cluster_name> --driver=docker
+  ```
+
+  Do not delete other `pytest-*` clusters: they can belong to other sessions.
 
 **Always produce this report, whether the test passed or not.**
 
@@ -308,4 +324,4 @@ vcluster delete <cluster_name> --driver=docker
 - **One fix per iteration.** Don't stack multiple speculative fixes. Apply one targeted change and re-run.
 - **Record everything.** The summary is the most valuable output of this skill. A human or future agent should be able to read it and understand exactly what happened.
 - **Don't fight the test framework.** If the test expects a specific behavior and the code doesn't provide it, fix the code. If the test has a wrong assertion, fix the test. But be sure which one is wrong before changing either.
-- **Always clean up the run.** Kill paused pytest after investigation, delete any leftover test cluster before retrying, and clean up after the final iteration regardless of outcome. There must never be a test cluster left running when the skill finishes.
+- **Always clean up the run.** Stop the paused run with `kill <run_pid>` after investigation, check that its test cluster is gone before retrying, and clean up after the final iteration regardless of outcome. No test cluster that this skill's runs created may be left running when the skill finishes.
