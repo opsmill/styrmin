@@ -17,7 +17,7 @@ The Velero `BackupStorageLocation` and the credentials Secret of a backup storag
 named after the location's name (`styrmin-bsl-<name>`), and every later step rebuilt the name
 from the location's current name.
 
-An operator can rename a location. After a rename, the objects kept the old name and nothing
+An administrator can rename a location. After a rename, the objects kept the old name and nothing
 rebuilt it: backups named a Velero location that did not exist, a credentials update patched a
 Secret that did not exist, and an unassign deleted nothing, which left the Secret with the S3 keys
 in the cluster (#488). No rule said which of the two naming schemes new code must follow.
@@ -36,8 +36,8 @@ in the cluster (#488). No rule said which of the two naming schemes new code mus
    delete the old ones.
 2. Name objects after the record's name, and store each object's name on the record when it is
    created.
-3. Name objects after the record's id, put the id on each object as a label, and select by that
-   label to update or delete.
+3. Name objects after the record's id, put the id on each object as a label, and find each object
+   by that label or by its id-based name to update or delete it.
 
 ## Decision
 
@@ -45,11 +45,13 @@ We chose option 3. For every Kubernetes object that Styrmin creates for a record
 
 - the name is built from the record's id;
 - the object carries a label with the id, such as `styrmin.io/bsl-id`;
-- updates and deletes select the object by that label, never by a name built from the record;
+- updates and deletes find the object by that label or by a name built only from the id, never by
+  a name built from a field a user can change. While objects that an earlier version named
+  differently can still exist, they select by the label, which also finds those objects;
 - flows that act on cluster objects take the record's id, not its name.
 
 When the name is what the user asked for, such as a service-name override, which names the
-Service, the name stays, and updates and deletes still select the object by an id label.
+Service, the name stays, and updates and deletes select the object by an id label.
 
 Option 1 fails the third driver: Kubernetes object names cannot be changed, so a rename means a
 new object, and Velero backups that name the old `BackupStorageLocation` could no longer be
@@ -64,9 +66,9 @@ value leaves the objects behind, as in #488.
   a naming change needs no migration of existing objects.
 - Good, because names built from a UUID are always valid Kubernetes names. Record names are not
   checked against Kubernetes name rules, so a name with capitals or spaces could not become one.
-- Bad, because an operator who runs `kubectl get` sees ids, not names, and must look the id up in
+- Bad, because an administrator who runs `kubectl get` sees ids, not names, and must look the id up in
   Styrmin or select by label.
-- Bad, because every update and delete costs a list call with a label selector, and the service
+- Bad, because an update or delete that selects by label costs a list call, and the service
   account needs `list` on the object type.
 - Bad, because objects that versions before #488 named after the location's name stay under that
   name until the location is unassigned. Code must keep selecting by label, not by the id-based
@@ -75,7 +77,7 @@ value leaves the objects behind, as in #488.
 ## Confirmation
 
 Nothing automated. Enforced at review, with the rule in
-[`dev/guidelines/backend/python.md`](../guidelines/backend/python.md#name-a-kubernetes-object-after-its-records-id-and-find-it-by-an-id-label)
+[`dev/guidelines/backend/python.md`](../guidelines/backend/python.md#name-a-kubernetes-object-after-its-records-id-and-find-it-by-the-id)
 and `AGENTS.md`.
 
 ## More information
