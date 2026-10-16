@@ -17,7 +17,7 @@ exact path the original error report exercised.
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
@@ -27,7 +27,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from styrmin_backend.db.models import Deployment
 
 from ._queries import load_query
-from .seeds import seed_application_driver_version, seed_environment
+from .conftest import gql
+from .seeds import seed_application_driver_version, seed_deployment, seed_environment
 
 
 async def _deploy(
@@ -162,3 +163,63 @@ async def test_deploy_parameters_list_propagates(
 
     deployment = await _created_deployment(session)
     assert deployment.parameters == {"replicas": 3}
+
+
+@pytest.mark.asyncio
+async def test_deploy_deployment_ref_name_is_stored_as_the_id(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+) -> None:
+    """``deploymentRef.deploymentName`` reaches ``Deployment.config`` as the named
+    deployment's id, with no name, and the ``config`` read returns the same (027 FR-001)."""
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+
+    adv = await seed_application_driver_version(
+        session, driver_name="deploy-ref-driver"
+    )
+    env = await seed_environment(session)
+    named = await seed_deployment(session, environment=env, adv=adv, name="db")
+
+    payload = await _deploy(
+        client,
+        driver="deploy-ref-driver",
+        environment_id=env.id,
+        config={
+            "scheduling": {
+                "podAffinity": {
+                    "required": [
+                        {
+                            "topologyKey": "kubernetes.io/hostname",
+                            "deploymentRef": {"deploymentName": "db"},
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    assert "errors" not in payload, payload
+    deployment_id = UUID(payload["data"]["deploy"]["deploymentId"])
+
+    expected = {
+        "scheduling": {
+            "pod_affinity": {
+                "required": [
+                    {
+                        "topology_key": "kubernetes.io/hostname",
+                        "deployment_ref": {"deployment_id": str(named.id)},
+                    }
+                ]
+            }
+        }
+    }
+    session.expire_all()
+    db_row = await session.get(Deployment, deployment_id)
+    assert db_row is not None
+    assert db_row.config == expected
+    data = await gql(
+        client, "get_deployment_config", {"deploymentId": str(deployment_id)}
+    )
+    assert data["deployment"]["config"] == expected

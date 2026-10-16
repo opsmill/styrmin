@@ -28,7 +28,11 @@ from styrmin_backend.db.models import (
 
 from ._queries import load_query
 from .conftest import gql
-from .seeds import seed_application_driver_version, seed_environment
+from .seeds import (
+    seed_application_driver_version,
+    seed_deployment,
+    seed_environment,
+)
 
 
 _SERVICES = [
@@ -465,3 +469,72 @@ async def test_name_parameters_and_service_names_are_written_with_the_version(
         svc["resolved_name"] for svc in instance.context.get("deployed_services") or []
     }
     assert resolved_names == {"simple-app-v2"}
+
+
+@pytest.mark.asyncio
+async def test_deployment_ref_name_is_stored_as_the_id(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """``deploymentRef.deploymentName`` given with a version reaches ``Deployment.config``
+    and the new instance as the named deployment's id, and the ``config`` read
+    returns the stored form (027 FR-001)."""
+    _arm_prefect(prefect_manager_mock)
+    driver_name, v1_id, v2_id = await _seed_driver(session)
+    environment = await seed_environment(session)
+    environment_id = environment.id
+    named = await seed_deployment(session, environment=environment, name="db")
+    named_id, named_name = named.id, named.name
+    deployment_id = await _deploy(
+        client,
+        session,
+        driver_name=driver_name,
+        driver_version_id=v1_id,
+        environment_id=environment_id,
+    )
+
+    payload = await _update_version(
+        client,
+        deployment_id,
+        v2_id,
+        {
+            "scheduling": {
+                "podAffinity": {
+                    "required": [
+                        {
+                            "topologyKey": "kubernetes.io/hostname",
+                            "deploymentRef": {"deploymentName": named_name},
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    assert "errors" not in payload, payload
+    expected = {
+        "scheduling": {
+            "pod_affinity": {
+                "required": [
+                    {
+                        "topology_key": "kubernetes.io/hostname",
+                        "deployment_ref": {"deployment_id": str(named_id)},
+                    }
+                ]
+            }
+        }
+    }
+    stored = await _stored(session, deployment_id)
+    assert stored.config == expected
+    instance = await session.get(
+        ApplicationInstance, stored.active_application_instance_id
+    )
+    assert instance is not None
+    [term] = instance.context["deployment"]["config"]["scheduling"]["pod_affinity"][
+        "required"
+    ]
+    assert term["deployment_ref"]["deployment_id"] == str(named_id)
+    assert term["deployment_ref"].get("deployment_name") is None
+    data = await gql(
+        client, "get_deployment_config", {"deploymentId": str(deployment_id)}
+    )
+    assert data["deployment"]["config"] == expected

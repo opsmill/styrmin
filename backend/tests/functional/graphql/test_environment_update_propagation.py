@@ -734,6 +734,71 @@ async def test_update_environment_input_scheduling_round_trip(
 
 
 @pytest.mark.asyncio
+async def test_update_environment_deployment_ref_name_is_stored_as_the_id(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """``deploymentRef.deploymentName`` reaches ``Environment.config`` as the named
+    deployment's id, with no name, and the ``config`` read returns the same (027 FR-001).
+    The fan-out redeploy of the named deployment resolves the stored id."""
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+    environment = await seed_environment(session)
+    named = await seed_deployment(session, environment=environment, name="db")
+    environment_id, named_id = environment.id, named.id
+
+    payload = await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(environment_id),
+            "input": {
+                "scheduling": {
+                    "podAntiAffinity": {
+                        "preferred": [
+                            {
+                                "weight": 100,
+                                "term": {
+                                    "topologyKey": "kubernetes.io/hostname",
+                                    "deploymentRef": {"deploymentName": "db"},
+                                },
+                            }
+                        ]
+                    }
+                }
+            },
+        },
+    )
+
+    expected = {
+        "scheduling": {
+            "pod_anti_affinity": {
+                "preferred": [
+                    {
+                        "weight": 100,
+                        "term": {
+                            "topology_key": "kubernetes.io/hostname",
+                            "deployment_ref": {"deployment_id": str(named_id)},
+                        },
+                    }
+                ]
+            }
+        }
+    }
+    assert payload["updateEnvironment"]["config"] == expected
+    session.expire_all()
+    db_row = await session.get(Environment, environment_id)
+    assert db_row is not None
+    assert db_row.config == expected
+    data = await gql(
+        client, "get_environment_config", {"environmentId": str(environment_id)}
+    )
+    assert data["environment"]["config"] == expected
+    tasks = await session.exec(select(Task).where(Task.deployment_id == named_id))
+    assert len(list(tasks.all())) == 1
+
+
+@pytest.mark.asyncio
 async def test_update_environment_input_dedicated_ingress_service_nested(
     client: AsyncClient, session: AsyncSession
 ) -> None:

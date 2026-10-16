@@ -30,9 +30,11 @@ from styrmin_backend.db.models import (
 )
 
 from ._queries import load_query
+from .conftest import gql
 from .seeds import (
     seed_application_driver_version,
     seed_deployment,
+    seed_environment,
 )
 
 
@@ -1039,3 +1041,74 @@ async def test_seed_helper_yields_fresh_deployment_id(
     # uuid4 sanity: drift to a deterministic id generator would silently
     # break the matrix; pin the uuid version here.
     assert str(uuid4()) != str(a.id)
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_deployment_ref_name_is_stored_as_the_id(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+) -> None:
+    """``deploymentRef.deploymentName`` reaches ``Deployment.config`` as the named
+    deployment's id, with no name, and the ``config`` read returns the same (027 FR-001)."""
+    flow_info = type("FlowInfo", (), {"id": uuid4()})()
+    prefect_manager_mock.run_action = AsyncMock(return_value=flow_info)
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session)
+    named = await seed_deployment(session, environment=environment, adv=adv, name="db")
+    deployment = await seed_deployment(session, environment=environment, adv=adv)
+    named_id, deployment_id = named.id, deployment.id
+
+    await gql(
+        client,
+        "update_deployment",
+        {
+            "deploymentId": str(deployment_id),
+            "input": {
+                "scheduling": {
+                    "podAntiAffinity": {
+                        "preferred": [
+                            {
+                                "weight": 100,
+                                "term": {
+                                    "topologyKey": "kubernetes.io/hostname",
+                                    "deploymentRef": {
+                                        "deploymentName": "db",
+                                        "components": ["primary"],
+                                    },
+                                },
+                            }
+                        ]
+                    }
+                }
+            },
+        },
+    )
+
+    expected = {
+        "scheduling": {
+            "pod_anti_affinity": {
+                "preferred": [
+                    {
+                        "weight": 100,
+                        "term": {
+                            "topology_key": "kubernetes.io/hostname",
+                            "deployment_ref": {
+                                "deployment_id": str(named_id),
+                                "components": ["primary"],
+                            },
+                        },
+                    }
+                ]
+            }
+        }
+    }
+    session.expire_all()
+    db_row = await session.get(Deployment, deployment_id)
+    assert db_row is not None
+    assert db_row.config == expected
+    data = await gql(
+        client, "get_deployment_config", {"deploymentId": str(deployment_id)}
+    )
+    assert data["deployment"]["config"] == expected
