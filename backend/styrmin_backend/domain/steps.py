@@ -37,7 +37,9 @@ STYRMIN_DEPLOYMENT_WRITE = StepDefinition(
     StepKind.RESOURCE_WRITE,
 )
 SERVICE_ALIASES = StepDefinition(
-    "resource:service-aliases", "Create service aliases", StepKind.RESOURCE_WRITE
+    "resource:service-aliases",
+    "Create and delete service aliases",
+    StepKind.RESOURCE_WRITE,
 )
 COMMAND = StepDefinition("command", "Run the job's command", StepKind.COMMAND)
 DELETE_REQUEST = StepDefinition(

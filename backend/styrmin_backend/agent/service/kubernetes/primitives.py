@@ -6,10 +6,13 @@ from fast_depends import Depends, inject
 from fastapi import status
 from kubernetes_asyncio import client as kubeclient
 from kubernetes_asyncio.client import (
+    V1DeleteOptions,
     V1DeploymentList,
     V1Job,
     V1PodList,
     V1PodTemplateSpec,
+    V1Preconditions,
+    V1ServiceList,
     V1StatefulSetList,
 )
 from kubernetes_asyncio.client.api_client import ApiClient, ApiException
@@ -424,6 +427,39 @@ async def list_pods(
     """List all pods in a namespace."""
     core_api = kubeclient.CoreV1Api(client)
     return await core_api.list_namespaced_pod(namespace=namespace)
+
+
+@inject
+async def list_services_in_all_namespaces(
+    label_selector: str, client: ApiClient = Depends(get_api_client)
+) -> V1ServiceList:
+    """List the Services of every namespace that match ``label_selector``."""
+    core_api = kubeclient.CoreV1Api(client)
+    return await core_api.list_service_for_all_namespaces(label_selector=label_selector)
+
+
+@inject
+async def delete_service(
+    name: str,
+    namespace: str,
+    resource_version: str | None = None,
+    client: ApiClient = Depends(get_api_client),
+) -> bool:
+    """Delete a Service; False when it is gone or changed since ``resource_version``."""
+    core_api = kubeclient.CoreV1Api(client)
+    try:
+        await core_api.delete_namespaced_service(
+            name=name,
+            namespace=namespace,
+            body=V1DeleteOptions(
+                preconditions=V1Preconditions(resource_version=resource_version)
+            ),
+        )
+    except ApiException as exc:
+        if exc.status in (status.HTTP_404_NOT_FOUND, status.HTTP_409_CONFLICT):
+            return False
+        raise
+    return True
 
 
 @inject

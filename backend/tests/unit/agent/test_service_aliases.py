@@ -2,10 +2,14 @@
 
 from uuid import UUID, uuid4
 
+from kubernetes_asyncio.client import V1ObjectMeta, V1Service, V1ServiceSpec
+
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.agent.tasks.service_aliases import (
+    StaleAlias,
     build_external_name_service,
     compute_service_aliases,
+    select_stale_aliases,
 )
 from styrmin_backend.context.models.contexts import (
     ApplicationContext,
@@ -66,6 +70,7 @@ class TestBuildExternalNameService:
             resolved_name="intent",
             target_namespace="styrmin-aaa",
             owner_namespace="styrmin-bbb",
+            deployment_id="aaa",
         )
         assert manifest["apiVersion"] == "v1"
         assert manifest["kind"] == "Service"
@@ -81,10 +86,12 @@ class TestBuildExternalNameService:
             resolved_name="web",
             target_namespace="styrmin-aaa",
             owner_namespace="styrmin-bbb",
+            deployment_id="aaa",
         )
         labels = manifest["metadata"]["labels"]
         assert labels["app.kubernetes.io/managed-by"] == "styrmin"
         assert labels["styrmin.io/service-alias"] == "true"
+        assert labels["styrmin.io/deployment-id"] == "aaa"
 
 
 class TestComputeServiceAliases:
@@ -125,6 +132,25 @@ class TestComputeServiceAliases:
         }
         assert ("executor", ns_a) in names_and_namespaces
         assert ("intent", ns_b) in names_and_namespaces
+
+    def test_aliases_carry_the_id_of_the_service_owner(self) -> None:
+        """#491: each alias names the deployment whose service it resolves to."""
+        dep_a = uuid4()
+        dep_b = uuid4()
+        context = _make_context(
+            deployment_id=dep_a,
+            deployed_services=[
+                _service("intent", dep_a),
+                _service("executor", dep_b),
+            ],
+        )
+
+        owners = {
+            a["metadata"]["name"]: a["metadata"]["labels"]["styrmin.io/deployment-id"]
+            for a in compute_service_aliases(context)
+        }
+
+        assert owners == {"intent": str(dep_a), "executor": str(dep_b)}
 
     def test_single_deployment_no_aliases(self) -> None:
         """A single deployment alone should produce no aliases."""
@@ -292,3 +318,100 @@ class TestComputeServiceAliases:
         )
         aliases = compute_service_aliases(context)
         assert aliases == []
+
+
+def _service(resolved_name: str, deployment_id: UUID) -> dict:
+    return {
+        "resolved_name": resolved_name,
+        "port": 8000,
+        "kind": "http",
+        "deployment_id": str(deployment_id),
+    }
+
+
+def _live_alias(
+    name: str,
+    namespace: str,
+    target_namespace: str,
+    owner: UUID | None,
+    resource_version: str = "1",
+) -> V1Service:
+    labels = {"styrmin.io/service-alias": "true"}
+    if owner is not None:
+        labels["styrmin.io/deployment-id"] = str(owner)
+    return V1Service(
+        metadata=V1ObjectMeta(
+            name=name,
+            namespace=namespace,
+            labels=labels,
+            resource_version=resource_version,
+        ),
+        spec=V1ServiceSpec(
+            type="ExternalName",
+            external_name=f"{name}.{target_namespace}.svc.cluster.local",
+        ),
+    )
+
+
+class TestSelectStaleAliases:
+    def test_alias_of_an_old_override_is_stale(self) -> None:
+        """#491: the alias named after the old override is deleted, the new one kept."""
+        dep_a, dep_b = uuid4(), uuid4()
+        ns_a, ns_b = get_kubernetes_reference(dep_a), get_kubernetes_reference(dep_b)
+        context = _make_context(
+            deployment_id=dep_a,
+            deployed_services=[_service("after", dep_a), _service("peer", dep_b)],
+        )
+        live = [
+            _live_alias("before", ns_b, ns_a, dep_a, resource_version="41"),
+            _live_alias("after", ns_b, ns_a, dep_a),
+            _live_alias("peer", ns_a, ns_b, dep_b),
+        ]
+
+        assert select_stale_aliases(context, live) == [
+            StaleAlias(namespace=ns_b, name="before", resource_version="41")
+        ]
+
+    def test_aliases_of_other_deployments_are_kept(self) -> None:
+        """A peer's alias with a name this deployment does not use is not this flow's to delete."""
+        dep_a, dep_b = uuid4(), uuid4()
+        ns_a, ns_b = get_kubernetes_reference(dep_a), get_kubernetes_reference(dep_b)
+        context = _make_context(
+            deployment_id=dep_a, deployed_services=[_service("intent", dep_a)]
+        )
+        live = [_live_alias("executor", ns_a, ns_b, dep_b)]
+
+        assert select_stale_aliases(context, live) == []
+
+    def test_current_name_kept_in_namespaces_this_flow_does_not_write(self) -> None:
+        """A peer without services writes this deployment's aliases itself; they stay."""
+        dep_a, dep_c = uuid4(), uuid4()
+        ns_a, ns_c = get_kubernetes_reference(dep_a), get_kubernetes_reference(dep_c)
+        context = _make_context(
+            deployment_id=dep_a, deployed_services=[_service("intent", dep_a)]
+        )
+        live = [_live_alias("intent", ns_c, ns_a, dep_a)]
+
+        assert select_stale_aliases(context, live) == []
+
+    def test_unlabelled_alias_found_by_its_target_namespace(self) -> None:
+        """Aliases created before the id label point into the owner's namespace."""
+        dep_a, dep_b = uuid4(), uuid4()
+        ns_a, ns_b = get_kubernetes_reference(dep_a), get_kubernetes_reference(dep_b)
+        context = _make_context(
+            deployment_id=dep_a, deployed_services=[_service("after", dep_a)]
+        )
+        live = [
+            _live_alias("before", ns_b, ns_a, owner=None),
+            _live_alias("peer", ns_a, ns_b, owner=None),
+        ]
+
+        assert [a.name for a in select_stale_aliases(context, live)] == ["before"]
+
+    def test_all_aliases_stale_when_the_deployment_has_no_services(self) -> None:
+        dep_a, dep_b = uuid4(), uuid4()
+        ns_a, ns_b = get_kubernetes_reference(dep_a), get_kubernetes_reference(dep_b)
+        context = _make_context(deployment_id=dep_a, deployed_services=[])
+        live = [_live_alias("intent", ns_b, ns_a, dep_a)]
+
+        assert [a.name for a in select_stale_aliases(context, live)] == ["intent"]
