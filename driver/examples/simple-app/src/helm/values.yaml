@@ -25,6 +25,12 @@ chartDefaultMarker: "marker"
 # to simulate a deployment rendered before that change.
 extraEnv: []
 
+# A pre-upgrade Helm hook Job and an unlabelled hook ConfigMap. Only the `hook-job`
+# E2E test driver turns them on, to check that Helm hooks receive Styrmin's
+# post-render patches (#435).
+preUpgradeHookJob:
+  enabled: false
+
 podAnnotations: {}
 podLabels: {}
 

@@ -25,6 +25,13 @@ Covers the E2E tasks from ``specs/001-pod-scheduling-config/tasks.md``:
     T092 — US4 runtime class at deployment scope
     T107 — consolidated quickstart scenario
     T109 — update → reconciliation within SLO
+
+The scheduling deployment uses the ``hook-job`` test driver, the simple-app
+chart with its pre-upgrade Helm hooks on, so the scheduling update also checks
+that a Helm hook Job receives the scheduling settings and Styrmin's labels, and
+that a hook ConfigMap without labels receives Styrmin's labels (#435). The
+vcluster has one node, so the hook pod's placement is checked by its
+scheduling fields and its completion, not by the node it ran on.
 """
 
 from __future__ import annotations
@@ -59,6 +66,10 @@ pytestmark = [
 # 480s, the platform is not meeting its reconciliation SLO.
 RECONCILE_TIMEOUT_SECONDS = 480.0
 RECONCILE_POLL_INTERVAL = 3.0
+
+# The pre-upgrade Helm hook Job of the hook-job test driver (#435).
+HOOK_JOB_LABEL_SELECTOR = "app.kubernetes.io/component=pre-upgrade-hook"
+HOOK_JOB_TIMEOUT_SECONDS = 120.0
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +112,30 @@ async def _wait_for_pod_template(
         f"Timed out waiting for {description} in namespace {namespace} "
         f"(selector={label_selector!r}): {last_seen}"
     )
+
+
+async def _wait_for_job_succeeded(
+    vcluster: dict,
+    *,
+    namespace: str,
+    name: str,
+    timeout: float = HOOK_JOB_TIMEOUT_SECONDS,
+) -> Any:
+    """Poll the Job *name* until ``status.succeeded == 1``; fail at once if it failed."""
+    batch = kubeclient.BatchV1Api(vcluster["api"])
+    deadline = time.time() + timeout
+    while True:
+        job = await batch.read_namespaced_job_status(name=name, namespace=namespace)
+        if (job.status.succeeded or 0) == 1:
+            return job
+        assert not job.status.failed, (
+            f"Job {namespace}/{name} failed: {job.status.conditions}"
+        )
+        if time.time() >= deadline:
+            raise TimeoutError(
+                f"Job {namespace}/{name} did not succeed within {timeout}s: {job.status}"
+            )
+        await asyncio.sleep(RECONCILE_POLL_INTERVAL)
 
 
 async def _update_scheduling_and_wait(
@@ -179,17 +214,23 @@ async def scheduling_environment(
 async def scheduling_deployment(
     scheduling_environment: dict,
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    git_server: dict[str, str],
     simple_app_image: str,  # noqa: ARG001 — builds the image
     vcluster: dict,
 ) -> dict:
-    """Fresh simple-app deployment dedicated to the scheduling test suite.
+    """Fresh ``hook-job`` deployment dedicated to the scheduling test suite.
+
+    The ``hook-job`` test driver runs the simple-app chart with its
+    pre-upgrade Helm hooks on: a Job that carries the server component's
+    identifier label and a ConfigMap without labels (#435).
 
     Module-scoped so the deployment is created once and reused across
     the consolidated test and the cross-deployment anti-affinity test.
     """
     driver, _ = session_scenario_driver
+    await driver.load_driver_version(git_url=git_server["hook-job"], ref="master")
     deployment = await driver.create_deployment(
-        driver="simple-app",
+        driver="hook-job",
         version="0.1.0",
         environment_id=scheduling_environment["environment_id"],
         name="scheduling-a",
@@ -286,6 +327,13 @@ async def test_scheduling_end_to_end(
     at the unit + integration tiers. The cross-deployment anti-affinity
     case is still separate because it requires coordinating mutations
     across two deployments and stays ``api_only``.
+
+    The update is a Helm upgrade, so it runs the chart's pre-upgrade Helm
+    hooks (#435): the hook Job must carry the same scheduling settings and
+    Styrmin's labels, including the ``server`` component label, and must
+    complete; the hook ConfigMap, which has no labels in the chart, must
+    carry Styrmin's labels. The vcluster has one node, so SC-004 of spec 024
+    is checked by the hook pod's scheduling fields and its completion.
     """
     client: StyrminClient = scheduling_environment["client"]
     deployment_id = scheduling_deployment["deployment_id"]
@@ -309,8 +357,7 @@ async def test_scheduling_end_to_end(
         if e.status != 409:
             raise
 
-    def _all_features_landed(dep: Any) -> bool:
-        spec = dep.spec.template.spec
+    def _missing_features(spec: Any) -> list[str]:
         tols = spec.tolerations or []
         has_toleration = any(
             t.key == "dedicated" and t.value == "batch" and t.effect == "NoSchedule"
@@ -341,15 +388,19 @@ async def test_scheduling_end_to_end(
 
         has_runtime_class = spec.runtime_class_name == "kata-e2e"
 
-        return (
-            has_toleration
-            and has_spread
-            and has_node_affinity
-            and has_pod_affinity
-            and has_requests
-            and has_limits
-            and has_runtime_class
-        )
+        checks = {
+            "toleration dedicated=batch:NoSchedule": has_toleration,
+            "topology spread on kubernetes.io/hostname": has_spread,
+            "preferred node affinity": has_node_affinity,
+            "pod affinity": has_pod_affinity,
+            "requests.memory 192Mi": has_requests,
+            "limits.cpu 500m": has_limits,
+            "runtime class kata-e2e": has_runtime_class,
+        }
+        return [name for name, landed in checks.items() if not landed]
+
+    def _all_features_landed(dep: Any) -> bool:
+        return not _missing_features(dep.spec.template.spec)
 
     scheduling = {
         "resources": {
@@ -414,15 +465,68 @@ async def test_scheduling_end_to_end(
         "runtime_class": "kata-e2e",
     }
 
-    await _update_scheduling_and_wait(
+    namespace = scheduling_deployment["namespace"]
+    server_deployment = await _update_scheduling_and_wait(
         scenario_driver,
         deployment_id,
         scheduling=scheduling,
         vcluster=vcluster,
-        namespace=scheduling_deployment["namespace"],
+        namespace=namespace,
         label_selector="app.kubernetes.io/name=simple-app",
         predicate=_all_features_landed,
         description="all scheduling features composed on the rendered pod template",
+    )
+
+    # #435: Helm hooks receive Styrmin's post-render patches. Helm runs the
+    # pre-upgrade hooks before it applies the upgrade, and before-hook-creation
+    # keeps the Job of the last upgrade, so this Job ran with the update above.
+    styrmin_labels = {
+        key: value
+        for key, value in (server_deployment.metadata.labels or {}).items()
+        if key.startswith("styrmin/")
+    }
+    assert styrmin_labels.get("styrmin/component") == "server", styrmin_labels
+
+    batch = kubeclient.BatchV1Api(vcluster["api"])
+    hook_jobs = (
+        await batch.list_namespaced_job(
+            namespace=namespace, label_selector=HOOK_JOB_LABEL_SELECTOR
+        )
+    ).items
+    assert len(hook_jobs) == 1, [job.metadata.name for job in hook_jobs]
+    hook_job = hook_jobs[0]
+    missing = _missing_features(hook_job.spec.template.spec)
+    assert not missing, (
+        f"hook Job {hook_job.metadata.name} lacks scheduling settings: {missing}"
+    )
+    hook_job_labels = hook_job.metadata.labels or {}
+    assert {key: hook_job_labels.get(key) for key in styrmin_labels} == (
+        styrmin_labels
+    ), f"hook Job labels {hook_job_labels} lack Styrmin's labels {styrmin_labels}"
+    await _wait_for_job_succeeded(
+        vcluster, namespace=namespace, name=hook_job.metadata.name
+    )
+
+    # The chart's hook ConfigMap has no labels; it gets Styrmin's labels, but
+    # not the component label, because no component identifier matches it.
+    hook_config_map = await kubeclient.CoreV1Api(
+        vcluster["api"]
+    ).read_namespaced_config_map(name=hook_job.metadata.name, namespace=namespace)
+    assert (hook_config_map.metadata.annotations or {}).get(
+        "helm.sh/hook"
+    ) == "pre-upgrade"
+    config_map_labels = hook_config_map.metadata.labels or {}
+    expected_config_map_labels = {
+        key: value
+        for key, value in styrmin_labels.items()
+        if key != "styrmin/component"
+    }
+    assert expected_config_map_labels, styrmin_labels
+    assert {key: config_map_labels.get(key) for key in expected_config_map_labels} == (
+        expected_config_map_labels
+    ), (
+        f"hook ConfigMap labels {config_map_labels} lack Styrmin's labels "
+        f"{expected_config_map_labels}"
     )
 
     # US5: resolvedScheduling must expose per-component merged config with

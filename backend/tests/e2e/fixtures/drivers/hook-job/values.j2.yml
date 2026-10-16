@@ -1,0 +1,57 @@
+fullnameOverride: styrmin-simple-app
+
+image:
+  repository: simple-app
+  tag: "{{ app.version }}"
+
+ingress:
+  enabled: true
+  className: "{{ instance.config.ingress_class }}"
+  hosts:
+    - host: "{{ services['simple-app'].primary_fqdn }}"
+      paths:
+        - path: /
+          pathType: Prefix
+
+database:
+  host: styrmin-postgresql
+
+# The chart's pre-upgrade Helm hook Job and unlabelled hook ConfigMap (#435).
+preUpgradeHookJob:
+  enabled: true
+
+postgresql:
+  enabled: true
+  fullnameOverride: styrmin-postgresql
+  auth:
+    username: simple-app
+    password: simple-app-password
+    database: simple_app
+  primary:
+    livenessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+    readinessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+    # SIGTERM is a "smart" shutdown that waits for clients, and simple-app never
+    # closes its pool; preStop does a fast shutdown instead (disconnects clients,
+    # checkpoints). The grace period is only a backstop.
+    lifecycleHooks:
+      preStop:
+        exec:
+          command: ["/opt/bitnami/postgresql/bin/pg_ctl", "stop", "-m", "fast", "--no-wait"]
+    terminationGracePeriodSeconds: 10
+    persistence:
+      enabled: true
+      size: 1Gi
+    extraVolumes:
+      - name: backup
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: backup
+        mountPath: /backup

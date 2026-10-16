@@ -1,0 +1,46 @@
+{{- if .Values.preUpgradeHookJob.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "simple-app.fullname" . }}-pre-upgrade-hook
+  labels:
+    {{- include "simple-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pre-upgrade-hook
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      # No app.kubernetes.io/name, so the Service and pod affinity rules do not select this pod.
+      labels:
+        app.kubernetes.io/component: pre-upgrade-hook
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: hook
+          image: {{ include "simple-app.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command: ["python", "-c", "print('pre-upgrade hook')"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+---
+# No labels key, to check that Styrmin's labels reach a resource without labels (#435).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "simple-app.fullname" . }}-pre-upgrade-hook
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "-1"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  hook: pre-upgrade
+{{- end }}
