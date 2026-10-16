@@ -10,6 +10,7 @@ from styrmin_backend.agent.service.kubernetes.resources.blocks.metadata import (
 )
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     LabelPatch,
+    MetadataLabelsMergePatch,
     Target,
     TargetPatch,
     TemplateLabelPatch,
@@ -290,7 +291,7 @@ class ApplicationHelmReleaseBuilder:
         return [
             TargetPatch(
                 target=Target(name=".*"),
-                patch=LabelPatch(
+                patch=MetadataLabelsMergePatch(
                     labels=labels,
                     label_prefix=label_prefix,
                 ),

@@ -1,9 +1,13 @@
 from dataclasses import dataclass
 
+import pytest
+import yaml
+
 from styrmin_backend.agent.service.kubernetes.resources.blocks.metadata import Name
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     AnnotationPatch,
     LabelPatch,
+    MetadataLabelsMergePatch,
     Patch,
     SpecPatch,
     Target,
@@ -205,6 +209,62 @@ def test_label_patch_with_slash_in_key_and_prefix():
 
     assert patch.render_value() == expected_render_value
     assert patch.render() == {"patch": expected_render_value}
+
+
+def _merged_labels(patch: MetadataLabelsMergePatch) -> dict[str, str]:
+    doc = yaml.safe_load(patch.render_value())
+    assert {k: v for k, v in doc.items() if k != "metadata"} == {
+        "apiVersion": "v1",
+        "kind": "any",
+    }
+    assert doc["metadata"]["name"] == "any"
+    return doc["metadata"]["labels"]
+
+
+def test_metadata_labels_merge_patch_without_prefix():
+    patch = MetadataLabelsMergePatch(labels={"key": "value"})
+
+    assert patch.render_value() == (
+        "apiVersion: v1\nkind: any\nmetadata:\n  name: any\n  labels:\n    key: value\n"
+    )
+    assert patch.render() == {"patch": patch.render_value()}
+
+
+def test_metadata_labels_merge_patch_with_prefix():
+    patch = MetadataLabelsMergePatch(
+        labels={"deployment-id": "abc", "instance-id": "def"}, label_prefix="styrmin"
+    )
+
+    assert _merged_labels(patch) == {
+        "styrmin/deployment-id": "abc",
+        "styrmin/instance-id": "def",
+    }
+
+
+def test_metadata_labels_merge_patch_strips_slashes_from_the_prefix():
+    patch = MetadataLabelsMergePatch(labels={"key": "value"}, label_prefix="/styrmin/")
+
+    assert _merged_labels(patch) == {"styrmin/key": "value"}
+
+
+def test_metadata_labels_merge_patch_keeps_a_key_with_a_slash():
+    patch = MetadataLabelsMergePatch(labels={"app.kubernetes.io/name": "server"})
+
+    assert _merged_labels(patch) == {"app.kubernetes.io/name": "server"}
+
+
+@pytest.mark.parametrize("value", ["123", "true", "null", "1.0", "", "yes"])
+def test_metadata_labels_merge_patch_value_stays_a_string(value: str):
+    patch = MetadataLabelsMergePatch(labels={"key": value}, label_prefix="styrmin")
+
+    assert _merged_labels(patch) == {"styrmin/key": value}
+
+
+def test_metadata_labels_merge_patch_newline_value_stays_one_value():
+    value = "x\n  injected: label\nkind: Secret"
+    patch = MetadataLabelsMergePatch(labels={"key": value})
+
+    assert _merged_labels(patch) == {"key": value}
 
 
 def test_template_label_patch_without_prefix():

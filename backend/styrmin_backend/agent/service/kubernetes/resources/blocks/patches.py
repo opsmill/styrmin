@@ -260,6 +260,57 @@ class LabelPatch(Patch):
 
 
 @dataclass
+class MetadataLabelsMergePatch(Patch):
+    """Strategic-merge patch that adds labels to ``metadata.labels`` of a resource.
+
+    Unlike :class:`LabelPatch`, whose JSON patch ``add`` needs the parent map to exist,
+    the merge creates ``metadata.labels`` when a resource has none (for example a chart's
+    Helm hook) and keeps the labels it already has (#435). ``kind: any`` and
+    ``name: any`` are placeholders: with a ``target`` selector, kustomize applies the
+    patch to every matching resource whatever its kind and name.
+
+    Attributes:
+        labels (dict[str, str]): The labels to add. Values are rendered as strings.
+        label_prefix (str): An optional prefix joined to each key with ``/``.
+
+    Example:
+        >>> patch = MetadataLabelsMergePatch(labels={"deployment-id": "abc"}, label_prefix="styrmin")
+        >>> print(patch.render_value())
+        apiVersion: v1
+        kind: any
+        metadata:
+          name: any
+          labels:
+            styrmin/deployment-id: abc
+        <BLANKLINE>
+    """
+
+    labels: dict[str, str]
+    label_prefix: str = ""
+    _path: str = field(init=False, default="/metadata/labels")
+    _operation: str = field(init=False, default="add")
+
+    def _render_label_key(self, key: str) -> str:
+        if self.label_prefix:
+            return f"{self.label_prefix.strip('/')}/{key}"
+        return key
+
+    def render_value(self) -> str:
+        doc: dict[str, Any] = {
+            "apiVersion": "v1",
+            "kind": "any",
+            "metadata": {
+                "name": "any",
+                "labels": {
+                    self._render_label_key(key): str(value)
+                    for key, value in self.labels.items()
+                },
+            },
+        }
+        return yaml.dump(doc, default_flow_style=False, sort_keys=False)
+
+
+@dataclass
 class TemplateLabelPatch(LabelPatch):
     """
     Represents a patch for adding labels to a resource's template.
