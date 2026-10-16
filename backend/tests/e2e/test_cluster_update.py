@@ -4,7 +4,8 @@
 scenarios 1 and 2 and User Story 2 scenarios 1 and 2. It updates the session
 cluster's config through the SDK in four phases, on two new environments with
 one ``simple-app`` each: A takes every cluster value, B sets ``ingress_class:
-traefik``.
+traefik``. Before phase 3, A gets a second ``simple-app``, C, that sets its own
+``dedicated_ingress`` (#453).
 
 ``test_edit_cluster_config_from_detail_page`` covers User Story 3 scenario 1:
 it changes only the FQDN suffix in the Edit dialog of the cluster detail page.
@@ -27,6 +28,11 @@ import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Ingress as AsyncIngress
 from styrmin_sdk import StyrminClient
+from styrmin_sdk.graphql._generated.input_types import (
+    DedicatedIngressInput,
+    DeploymentConfigInput,
+    IngressServiceConfigInput,
+)
 from styrmin_sdk.models import IngressControllerAction
 
 from tests.e2e.conftest import _portforward, _wait_for_http
@@ -134,8 +140,9 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
        B, which sets ``ingress_class: traefik``, gets no task.
     3. The original config: A's controller is created, A's application is
        redeployed only after the controller task ended, and the application
-       answers over HTTP through A's controller.
-    4. The same config again: no new task on either application.
+       answers over HTTP through A's controller. C, which sets its own
+       ``dedicated_ingress``, is redeployed at once (#453).
+    4. The same config again: no new task on any application.
 
     The vCluster has no shared ingress controller: no Traefik or NGINX runs
     besides the dedicated ones. So the shared-class check is on the Ingress
@@ -242,12 +249,33 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
         await _wait_for_shared_ingress_class(kr8s_api, app_a, "nginx")
         assert await new_tasks(client, app_b, known_b) == []
 
+        # C keeps its own dedicated_ingress, so phase 3 does not move it onto A's controller (#453).
+        task = await client.deployments.create(
+            driver="simple-app",
+            version="0.1.0",
+            environment_id=env_a,
+            service_name_overrides=[
+                {"driverServiceName": "simple-app", "overrideName": "simple-app-c"}
+            ],
+            config=DeploymentConfigInput(
+                dedicated_ingress=DedicatedIngressInput(
+                    service=IngressServiceConfigInput(type="NodePort")
+                )
+            ),
+        )
+        app_c = str(task.deployment_id)
+        await wait_for_deployment_status(client, app_c, "running")
+
         # Phase 3: the original config creates A's controller before A's application moves.
         await wait_for_cluster_settled(client, cluster_id)
         known_a = await task_ids(client, app_a)
+        known_c = await task_ids(client, app_c)
         result = await client.clusters.update(original, cluster_id=cluster_id)
         _assert_no_failure(result)
         assert app_a in _deployment_ids(result.waiting_for_ingress), result
+        assert app_c in _deployment_ids(result.redeployed), result
+        assert app_c not in _deployment_ids(result.waiting_for_ingress), result
+        redeploy_c = single_redeploy(await new_tasks(client, app_c, known_c), "C")
         assert (env_a, IngressControllerAction.CREATE) in {
             (str(controller.environment_id), controller.action)
             for controller in result.ingress_controllers
@@ -276,6 +304,8 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
         )
         await wait_for_task_end(client, app_a, redeploy_a.id)
         await wait_for_deployment_status(client, app_a, "running")
+        await wait_for_task_end(client, app_c, redeploy_c.id)
+        await wait_for_deployment_status(client, app_c, "running")
 
         service = await traefik_service(kr8s_api, env_a)
         async with _portforward(service, remote_port=8000) as local_port:
@@ -290,12 +320,14 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
         await wait_for_cluster_settled(client, cluster_id)
         known_a = await task_ids(client, app_a)
         known_b = await task_ids(client, app_b)
+        known_c = await task_ids(client, app_c)
         result = await client.clusters.update(original, cluster_id=cluster_id)
         _assert_no_failure(result)
-        assert not {app_a, app_b} & _deployment_ids(result.redeployed), result
+        assert not {app_a, app_b, app_c} & _deployment_ids(result.redeployed), result
         await wait_for_cluster_settled(client, cluster_id)
         assert await new_tasks(client, app_a, known_a) == []
         assert await new_tasks(client, app_b, known_b) == []
+        assert await new_tasks(client, app_c, known_c) == []
     finally:
         try:
             await _restore(client, cluster_id, original)

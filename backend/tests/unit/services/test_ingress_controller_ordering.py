@@ -51,6 +51,13 @@ INGRESS_ON_CHANGED = {
     "dedicated_ingress": {"service": {"annotations": {"example.com/pool": "edge"}}},
 }
 INGRESS_OFF = dict(CLUSTER_CONFIG)
+ENV_LOAD_BALANCER = {"dedicated_ingress": {"service": {"type": "LoadBalancer"}}}
+ENV_NODE_PORT = {
+    "dedicated_ingress": {"service": {"type": "NodePort", "node_port": 30443}}
+}
+NODE_PORT_INGRESS = DedicatedIngressConfig(
+    service=IngressServiceConfig(type="NodePort", node_port=30443)
+)
 
 
 @pytest.fixture(autouse=True)
@@ -185,6 +192,30 @@ class TestControllerActions:
         assert [entry.deployment_id for entry in counts.waiting_for_ingress] == [app.id]
         assert counts.skipped_waiting_for_ingress == 1
         assert counts.dispatched == 0
+
+    async def test_application_with_its_own_dedicated_ingress_does_not_wait_for_the_controller(
+        self, graph
+    ):
+        """#453: it keeps its own value, so it does not move onto the controller."""
+        graph.cluster.config = dict(INGRESS_ON)
+        app = await deploy(graph, graph.env_a, "app-a")
+        own = await deploy(graph, graph.env_a, "own", config=dict(ENV_NODE_PORT))
+        controller = await deploy_controller(graph, graph.env_a)
+
+        counts = await _fan_out(
+            graph, {**INGRESS_ON_CHANGED, "fqdn_suffix": "new.example.com"}
+        )
+
+        assert task_deployment_ids(update_tasks(graph)) == [controller.id, own.id]
+        assert _rendered_dedicated_ingress(own) == NODE_PORT_INGRESS
+        assert own.active_instance is not None
+        assert own.active_instance.context.instance.config.fqdn_suffix == (
+            "new.example.com"
+        )
+        assert tasks_of(graph, app) == []
+        assert [entry.deployment_id for entry in counts.redeployed] == [own.id]
+        assert [entry.deployment_id for entry in counts.waiting_for_ingress] == [app.id]
+        assert counts.ingress_controllers_redeployed == 1
 
     async def test_applications_move_once_the_controller_runs_with_the_new_values(
         self, graph
@@ -546,14 +577,6 @@ class TestControllerRemovalRule:
 # Environment config update (#424)
 # ---------------------------------------------------------------------------
 
-ENV_LOAD_BALANCER = {"dedicated_ingress": {"service": {"type": "LoadBalancer"}}}
-ENV_NODE_PORT = {
-    "dedicated_ingress": {"service": {"type": "NodePort", "node_port": 30443}}
-}
-NODE_PORT_INGRESS = DedicatedIngressConfig(
-    service=IngressServiceConfig(type="NodePort", node_port=30443)
-)
-
 
 async def _update_environment(
     graph: SimpleNamespace, config: dict, acting_user_id=USER_ID
@@ -656,6 +679,33 @@ class TestEnvironmentUpdate:
         assert task_deployment_ids(update_tasks(graph)) == [app.id]
         assert tasks_of(graph, controller) == []
         assert controller.status == DeploymentState.RUNNING
+
+    @pytest.mark.parametrize(
+        "controller_status",
+        [DeploymentState.RUNNING, DeploymentState.DEPLOYING, DeploymentState.FAILED],
+        ids=["running", "deploying", "failed"],
+    )
+    async def test_application_with_its_own_dedicated_ingress_is_redeployed_whatever_the_controller_state(
+        self, graph, controller_status
+    ):
+        """#453: no application moves onto the controller, so none waits and a FAILED one is left alone."""
+        graph.env_a.config = dict(ENV_LOAD_BALANCER)
+        app = await deploy(graph, graph.env_a, "app-a")
+        own = await deploy(graph, graph.env_a, "own", config=dict(ENV_NODE_PORT))
+        controller = await deploy_controller(
+            graph, graph.env_a, status=controller_status
+        )
+
+        await _update_environment(
+            graph, {**ENV_LOAD_BALANCER, "env_vars": {"FOO": "bar"}}
+        )
+
+        assert sorted(task_deployment_ids(update_tasks(graph))) == sorted(
+            [app.id, own.id]
+        )
+        assert _rendered_dedicated_ingress(own) == NODE_PORT_INGRESS
+        assert tasks_of(graph, controller) == []
+        assert controller.status == controller_status
 
     async def test_resubmission_redeploys_a_controller_left_with_the_previous_values(
         self, graph
