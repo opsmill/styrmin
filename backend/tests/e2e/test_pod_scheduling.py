@@ -332,7 +332,7 @@ async def test_scheduling_end_to_end(
     hooks (#435): the hook Job must carry the same scheduling settings and
     Styrmin's labels, including the ``server`` component label, and must
     complete; the hook ConfigMap, which has no labels in the chart, must
-    carry Styrmin's labels. The vcluster has one node, so SC-004 of spec 024
+    carry Styrmin's labels. The vcluster has one node, so SC-004 of spec 025
     is checked by the hook pod's scheduling fields and its completion.
     """
     client: StyrminClient = scheduling_environment["client"]
