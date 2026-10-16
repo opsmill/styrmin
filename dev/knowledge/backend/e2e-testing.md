@@ -67,6 +67,25 @@ The E2E vCluster runs no shared ingress controller: no Traefik or NGINX runs bes
 ingress controllers. `test_cluster_update.py` therefore checks that an application uses the
 shared ingress class through the Ingress resource's `spec.ingressClassName`, not over HTTP.
 
+<!-- Extracted from specs/023-ingress-class-post-render on 2026-10-16 -->
+
+The E2E fixture drivers `late-container` and `failing-actions`
+(`backend/tests/e2e/fixtures/drivers/`) keep `className: "{{ instance.config.ingress_class }}"`
+in their `values.j2.yml` on purpose, although the example drivers dropped that line
+([ADR-070](../../adr/0070-ingress-class-set-by-post-render.md)). The session cluster has a
+dedicated ingress controller, so the CI tests that deploy these drivers render a template that
+still sets the class, which Styrmin must then remove after the chart renders.
+`test_apply_sets_env_vars_with_the_version_that_adds_their_container` (`test_deployments_apply.py`)
+checks that every Ingress that `late-container` deploys has no `spec.ingressClassName` and has the
+annotation `kubernetes.io/ingress.class: traefik`, so it fails when Flux does not apply the removal
+patch. Do not remove the class line from these fixtures. The integration fixture
+`backend/tests/integration/fixtures/legacy_drivers/simple-app/values.j2.yml` also keeps the line,
+for another reason: it is a byte-identical copy of the template from before
+[#457](https://github.com/opsmill/styrmin/issues/457), and its README forbids edits.
+`test_cluster_update_redeploys_and_moves_dedicated_ingress` and
+`test_traffic_routes_through_dedicated_ingress` deploy the `simple-app` example driver, which no
+longer sets the class.
+
 The dual-entrypoint design is the reason every E2E scenario runs **twice by default** in CI — once as `[api-chromium]` (driver = SDK) and once as `[ui-chromium]` (driver = Playwright). Use `api_only` / `ui_only` to opt out of one variant when the same code path would be exercised redundantly. See `backend/tests/AGENTS.md` for the full rationale.
 
 <!-- Extracted from specs/011-env-config-input-hardening on 2026-05-10 -->

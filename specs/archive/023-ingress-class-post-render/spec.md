@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-15
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: PRD "Ingress class set only after the chart renders" — [opsmill/styrmin#471 (comment)](https://github.com/opsmill/styrmin/issues/471#issuecomment-6187650614). Seed issue: [#471](https://github.com/opsmill/styrmin/issues/471). Builds on [ADR-057](../../dev/adr/0057-post-render-component-overrides.md) (env vars applied by post-render) and [ADR-069](../../dev/adr/0069-container-command-args-by-post-render.md) (container `command` and `args` applied by post-render).
 
