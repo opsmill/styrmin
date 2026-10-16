@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Literal, overload
 from uuid import UUID, uuid4
 
 from loguru import logger
@@ -1417,6 +1418,41 @@ async def create_ingress_controller(
     return ingress_deployment
 
 
+@overload
+async def deploy_application(
+    driver_name: str,
+    version: str | None,
+    environment_id: UUID,
+    uow: UnitOfWork,
+    created_by_user_id: UUID,
+    deployment_config: dict | None = ...,
+    deployment_parameters: dict | None = ...,
+    deployment_name: str | None = ...,
+    service_name_overrides: dict[str, str] | None = ...,
+    driver_version_id: UUID | None = ...,
+    skip_initial_reconcile: Literal[False] = ...,
+    release_reference: str | None = ...,
+) -> Task: ...
+
+
+@overload
+async def deploy_application(
+    driver_name: str,
+    version: str | None,
+    environment_id: UUID,
+    uow: UnitOfWork,
+    created_by_user_id: UUID,
+    deployment_config: dict | None = ...,
+    deployment_parameters: dict | None = ...,
+    deployment_name: str | None = ...,
+    service_name_overrides: dict[str, str] | None = ...,
+    driver_version_id: UUID | None = ...,
+    *,
+    skip_initial_reconcile: Literal[True],
+    release_reference: str | None = ...,
+) -> UUID: ...
+
+
 async def deploy_application(
     driver_name: str,
     version: str | None,
@@ -1430,7 +1466,7 @@ async def deploy_application(
     driver_version_id: UUID | None = None,
     skip_initial_reconcile: bool = False,
     release_reference: str | None = None,
-) -> Task | None:
+) -> Task | UUID:
     """Instantiate an application in the given environment.
 
     Args:
@@ -1461,9 +1497,9 @@ async def deploy_application(
             ``create_services_for_deployment`` and
             ``generate_instance_from_deployment`` — because the counterpart's
             service rows and instance context are what the restore's recovery
-            step builds its CR body from. Returns ``None`` in this mode, since
-            no Task is dispatched. The ``RESTORING`` state also makes the
-            existing restoring-deployment mutation guards protect the
+            step builds its CR body from. Returns the deployment's id in this
+            mode, since no Task is dispatched. The ``RESTORING`` state also
+            makes the existing restoring-deployment mutation guards protect the
             counterpart until its restore lands (research D8).
         release_reference: Pin the deployment's Helm release name instead of
             deriving ``styrmin-<deployment id>``. Only the clone flow passes
@@ -1487,8 +1523,10 @@ async def deploy_application(
             the resolved version, or the pin belongs to a different driver.
 
     Returns:
-        Task: the task created for the application instantiation, or ``None``
-        when ``skip_initial_reconcile`` is set (no reconciliation dispatched).
+        Task: the task created for the application instantiation, or the
+        created deployment's id when ``skip_initial_reconcile`` is set. The
+        clone finds its counterpart by this id, because a user can rename the
+        deployment as soon as it is committed (#493).
     """
 
     if deployment_config is None:
@@ -1733,7 +1771,7 @@ async def deploy_application(
                 environment_id,
                 instance.id,
             )
-            return None
+            return deployment.id
 
         # Save again to persist active_application_instance_id
         await uow.deployments.save(deployment=deployment)

@@ -948,7 +948,7 @@ def flow_harness(monkeypatch: pytest.MonkeyPatch, scenario: _Scenario):
             created_by_user_id=kwargs["created_by_user_id"],
         )
         await scenario.uow.deployments.save(counterpart)
-        return None
+        return counterpart.id
 
     async def _create_restore(**kwargs: Any):
         calls["restore"].append(kwargs)
@@ -1102,6 +1102,50 @@ async def test_counterpart_adopts_the_captured_release_reference(
         SOURCE_RELEASE_REFERENCE
     }
     assert all(call["skip_initial_reconcile"] for call in flow_harness["deploy"])
+
+
+@pytest.mark.asyncio
+async def test_counterpart_renamed_right_after_creation_is_still_cloned(
+    scenario: _Scenario,
+    prefect_manager_mock,
+    flow_harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#493: the clone keeps the counterpart's id, so a rename cannot lose it."""
+    created: dict[str, UUID] = {}
+    create_counterpart = clone_flow.deploy_application
+
+    async def _create_then_rename(**kwargs: Any) -> UUID:
+        counterpart_id = await create_counterpart(**kwargs)
+        async with scenario.uow:
+            counterpart = await scenario.uow.deployments.find(counterpart_id)
+            assert counterpart is not None
+            counterpart.name = f"renamed-{counterpart.name}"
+            await scenario.uow.deployments.save(counterpart)
+        created[kwargs["deployment_name"]] = counterpart_id
+        return counterpart_id
+
+    monkeypatch.setattr(clone_flow, "deploy_application", _create_then_rename)
+
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    entries = _results(refreshed)
+    assert {name: entry["outcome"] for name, entry in entries.items()} == {
+        "postgres-main": "cloned",
+        "api": "cloned",
+    }
+    assert {
+        name: UUID(entry["counterpart_deployment_id"])
+        for name, entry in entries.items()
+    } == created
+    assert {call["target_deployment_id"] for call in flow_harness["restore"]} == set(
+        created.values()
+    )
 
 
 @pytest.mark.asyncio

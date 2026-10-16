@@ -398,13 +398,11 @@ async def _create_counterpart(
     and the Helm release name it adopts so its restore's data lands under an
     identity Helm already agrees with (research D2).
 
-    ``deploy_application`` returns ``None`` here (no reconcile is dispatched),
-    so the counterpart is looked up by name — deployment names are unique per
-    environment and the snapshot carries the source's.
+    The counterpart is identified by the id ``deploy_application`` returns,
+    not by its name: a user can rename it as soon as it is committed (#493).
 
     Raises:
-        RuntimeError: When the captured driver version no longer resolves, or
-            the created deployment cannot be read back.
+        RuntimeError: When the captured driver version no longer resolves.
     """
     snapshot = constituent.snapshot
     async with get_unit_of_work() as uow:
@@ -417,7 +415,7 @@ async def _create_counterpart(
     )
 
     async with get_unit_of_work() as uow:
-        await deploy_application(
+        return await deploy_application(
             driver_name=snapshot.driver_name,
             version=snapshot.application_version,
             environment_id=created_environment_id,
@@ -434,17 +432,6 @@ async def _create_counterpart(
                 or f"{_NAMESPACE_PREFIX}{snapshot.deployment_id}"
             ),
         )
-
-    async with get_unit_of_work() as uow:
-        counterpart = await uow.deployments.get_by_name(
-            snapshot.deployment_name, created_environment_id
-        )
-    if counterpart is None:
-        raise RuntimeError(
-            f"counterpart deployment {snapshot.deployment_name!r} could not be "
-            "read back after creation"
-        )
-    return counterpart.id
 
 
 class _CounterpartError(Exception):
