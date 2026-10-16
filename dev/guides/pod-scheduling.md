@@ -23,7 +23,7 @@ value to the shallower one (FR-020).
 | Feature | Field | Merge rule |
 |--|--|--|
 | Pod affinity / anti-affinity | `pod_affinity`, `pod_anti_affinity` | required + preferred accumulate; `replace: true` per kind resets shallower terms |
-| Node affinity | `node_affinity` | same as pod affinity; `topology_key` ignored |
+| Node affinity | `node_affinity` | as pod affinity, except that required terms of different levels are combined: one term per combination of one term from each level, so a node must match a term of every level; `topology_key` ignored ([ADR-033](../adr/0033-scheduling-merge-semantics.md)) |
 | Topology spread | `topology_spread_constraints` | union keyed by `(topology_key, when_unsatisfiable)`; deepest wins per key |
 | Resources | `resources.requests.*`, `resources.limits.*`, `extended` map | per-field deepest wins |
 | Tolerations | `tolerations` | union with stable dedup on the full tuple |
