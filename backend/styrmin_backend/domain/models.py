@@ -154,6 +154,7 @@ class Deployment(BaseModel):
         parameters: dict | None = None,
         name: str | None = None,
         internal: bool = False,
+        id: UUID | None = None,
     ) -> Deployment:
         """Create a new Deployment instance.
 
@@ -163,6 +164,8 @@ class Deployment(BaseModel):
                   (e.g., via auto-generation in the service layer).
             created_by_user_id: The id of the user creating the deployment.
                   Used for attribution (Deployment.createdBy in the schema).
+            id: The id to give the deployment, when the caller chose it in
+                  advance (an environment clone's counterpart); a new id otherwise.
         """
         if not name or not name.strip():
             raise ValueError(
@@ -172,7 +175,7 @@ class Deployment(BaseModel):
         resolved_name = validate_deployment_name(name)
 
         return cls(
-            id=uuid4(),
+            id=id or uuid4(),
             name=resolved_name,
             application_version=application_version,
             config=config or {},

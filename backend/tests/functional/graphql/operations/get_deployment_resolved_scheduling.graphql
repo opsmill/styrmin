@@ -1,0 +1,10 @@
+query GetDeploymentResolvedScheduling($deploymentId: UUID!) {
+  deployment(deploymentId: $deploymentId) {
+    id
+    resolvedScheduling {
+      componentName
+      config
+      provenance
+    }
+  }
+}

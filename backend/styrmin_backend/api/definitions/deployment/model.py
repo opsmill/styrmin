@@ -470,9 +470,9 @@ class Deployment:
         is logged and returns an empty list.
         """
         from styrmin_backend.context.resolvers import _resolve_scheduling_config
-        from styrmin_backend.services.context import _extract_scheduling
-        from styrmin_backend.services.scheduling.validator import (
-            expand_deployment_references,
+        from styrmin_backend.services.context import (
+            _expand_scheduling,
+            _extract_scheduling,
         )
 
         uow = info.context["uow"]
@@ -496,6 +496,21 @@ class Deployment:
         dep_scheduling = _extract_scheduling(
             dep_config, path=f"deployment[{self.id}].config.scheduling"
         )
+        if not components:
+            return []
+        # Each level is expanded before the merge, so an error path names the level.
+        env_scheduling = await _expand_scheduling(
+            uow,
+            deployment.environment_id,
+            env_scheduling,
+            path_prefix="environment.config.scheduling",
+        )
+        dep_scheduling = await _expand_scheduling(
+            uow,
+            deployment.environment_id,
+            dep_scheduling,
+            path_prefix="deployment.config.scheduling",
+        )
 
         results: list[ResolvedComponentScheduling] = []
         for component in components:
@@ -503,15 +518,16 @@ class Deployment:
                 component.config,
                 path=f"component[{component.name}].config.scheduling",
             )
+            comp_scheduling = await _expand_scheduling(
+                uow,
+                deployment.environment_id,
+                comp_scheduling,
+                path_prefix=f"component[{component.name}].config.scheduling",
+            )
             resolved, provenance = _resolve_scheduling_config(
                 env=env_scheduling,
                 dep=dep_scheduling,
                 comp=comp_scheduling,
-            )
-            resolved = await expand_deployment_references(
-                uow=uow,
-                environment_id=deployment.environment_id,
-                config=resolved,
             )
             results.append(
                 ResolvedComponentScheduling(

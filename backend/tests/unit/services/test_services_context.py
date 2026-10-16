@@ -1,7 +1,8 @@
 """Unit tests for services context building (T024)."""
 
 import inspect
-from uuid import uuid4
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -28,12 +29,14 @@ from styrmin_backend.context.models.contexts import (
 )
 from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryInfo
 from styrmin_backend.context.models.services import ServiceReference
+from styrmin_backend.domain.models import Deployment, DeploymentState
 from styrmin_backend.services import context as context_service
 from styrmin_backend.services.context import (
     _populate_component_container_overrides,
     _populate_component_image_overrides,
     _populate_component_scheduling,
 )
+from styrmin_backend.services.exceptions import UnresolvableAffinityReferenceError
 
 
 class TestServiceReference:
@@ -215,6 +218,176 @@ class TestPopulateComponentScheduling:
         assert scheduling.config.resources is not None
         assert scheduling.provenance["runtime_class"] == "environment"
         assert scheduling.provenance["resources.requests.cpu"] == "deployment"
+
+
+def _anti_affinity_config(*deployment_ids: UUID) -> dict:
+    """A config whose preferred pod anti-affinity terms name ``deployment_ids`` in order."""
+    return {
+        "scheduling": {
+            "pod_anti_affinity": {
+                "preferred": [
+                    {
+                        "weight": 10,
+                        "term": {
+                            "topology_key": "kubernetes.io/hostname",
+                            "deployment_ref": {"deployment_id": str(deployment_id)},
+                        },
+                    }
+                    for deployment_id in deployment_ids
+                ]
+            }
+        }
+    }
+
+
+async def _save_deployment(
+    uow, *, name: str, environment_id: UUID, deleted: bool = False
+) -> Deployment:  # type: ignore[no-untyped-def]
+    deployment = Deployment(
+        id=uuid4(),
+        name=name,
+        application_version="1.0.0",
+        config=None,
+        application_driver_version_id=uuid4(),
+        environment_id=environment_id,
+        status=DeploymentState.DELETED if deleted else DeploymentState.RUNNING,
+        deleted_at=datetime.now(UTC) if deleted else None,
+        created_by_user_id=uuid4(),
+    )
+    await uow.deployments.save(deployment)
+    return deployment
+
+
+class TestPopulateComponentSchedulingReferencePaths:
+    """027: each level's deployment references are expanded before the merge,
+    so an error path names the level and the index in that level's own list.
+    """
+
+    @pytest.mark.anyio
+    async def test_environment_level_term_gives_environment_path(self, uow) -> None:  # type: ignore[no-untyped-def]
+        env_id = uuid4()
+        missing_id = uuid4()
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await _populate_component_scheduling(
+                context=_make_context_with_component("server"),
+                uow=uow,
+                environment_id=env_id,
+                environment_config=_anti_affinity_config(missing_id),
+                deployment_config=None,
+                deployment_components=[_FakeDeploymentComponent("server", None)],
+            )
+
+        assert exc.value.error_metadata == {
+            "deployment_id": str(missing_id),
+            "path": "environment.config.scheduling.pod_anti_affinity.preferred[0].term",
+        }
+
+    @pytest.mark.anyio
+    async def test_deployment_level_term_gives_index_in_its_own_list(self, uow) -> None:  # type: ignore[no-untyped-def]
+        env_id = uuid4()
+        live = await _save_deployment(uow, name="api", environment_id=env_id)
+        tombstoned = await _save_deployment(
+            uow, name="postgres", environment_id=env_id, deleted=True
+        )
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await _populate_component_scheduling(
+                context=_make_context_with_component("server"),
+                uow=uow,
+                environment_id=env_id,
+                environment_config=_anti_affinity_config(live.id),
+                deployment_config=_anti_affinity_config(tombstoned.id),
+                deployment_components=[_FakeDeploymentComponent("server", None)],
+            )
+
+        assert exc.value.error_metadata == {
+            "deployment_id": str(tombstoned.id),
+            "deployment_name": "postgres",
+            "path": "deployment.config.scheduling.pod_anti_affinity.preferred[0].term",
+            "deleted": True,
+        }
+
+    @pytest.mark.anyio
+    async def test_component_level_term_gives_component_path(self, uow) -> None:  # type: ignore[no-untyped-def]
+        missing_id = uuid4()
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await _populate_component_scheduling(
+                context=_make_context_with_component("server"),
+                uow=uow,
+                environment_id=uuid4(),
+                environment_config=None,
+                deployment_config=None,
+                deployment_components=[
+                    _FakeDeploymentComponent(
+                        "server", config=_anti_affinity_config(missing_id)
+                    )
+                ],
+            )
+
+        assert exc.value.error_metadata["path"] == (
+            "component[server].config.scheduling.pod_anti_affinity.preferred[0].term"
+        )
+
+    @pytest.mark.anyio
+    async def test_expanded_levels_merge_in_level_order(self, uow) -> None:  # type: ignore[no-untyped-def]
+        env_id = uuid4()
+        env_target = await _save_deployment(uow, name="api", environment_id=env_id)
+        dep_target = await _save_deployment(uow, name="cache", environment_id=env_id)
+        context = _make_context_with_component("server")
+
+        await _populate_component_scheduling(
+            context=context,
+            uow=uow,
+            environment_id=env_id,
+            environment_config=_anti_affinity_config(env_target.id),
+            deployment_config=_anti_affinity_config(dep_target.id),
+            deployment_components=[_FakeDeploymentComponent("server", None)],
+        )
+
+        assert context.components is not None
+        scheduling = context.components.root["server"].scheduling
+        assert scheduling is not None
+        block = scheduling.config.pod_anti_affinity
+        assert block is not None
+        assert [weighted.term.deployment_ref for weighted in block.preferred] == [
+            None,
+            None,
+        ]
+        assert [
+            weighted.term.label_selector.match_labels
+            for weighted in block.preferred
+            if weighted.term.label_selector is not None
+        ] == [
+            {"styrmin/deployment_id": str(env_target.id)},
+            {"styrmin/deployment_id": str(dep_target.id)},
+        ]
+        assert scheduling.provenance["pod_anti_affinity"] == "deployment"
+
+    @pytest.mark.anyio
+    async def test_upcoming_deployment_resolves_without_a_row(self, uow) -> None:  # type: ignore[no-untyped-def]
+        upcoming_id = uuid4()
+        context = _make_context_with_component("server")
+
+        await _populate_component_scheduling(
+            context=context,
+            uow=uow,
+            environment_id=uuid4(),
+            environment_config=None,
+            deployment_config=_anti_affinity_config(upcoming_id),
+            deployment_components=[_FakeDeploymentComponent("server", None)],
+            upcoming_deployments={upcoming_id: "counterpart"},
+        )
+
+        assert context.components is not None
+        scheduling = context.components.root["server"].scheduling
+        assert scheduling is not None
+        block = scheduling.config.pod_anti_affinity
+        assert block is not None
+        selector = block.preferred[0].term.label_selector
+        assert selector is not None
+        assert selector.match_labels == {"styrmin/deployment_id": str(upcoming_id)}
 
 
 class TestPopulateComponentContainerOverrides:

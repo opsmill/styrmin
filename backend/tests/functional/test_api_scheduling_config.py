@@ -47,6 +47,7 @@ class TestSchedulingPayloadValidation:
         )
 
     def test_accepts_anti_affinity_with_deployment_ref(self) -> None:
+        """The shape check accepts a name; the write that stores the config replaces it with the id."""
         validate_deployment_config(
             {
                 "scheduling": {
