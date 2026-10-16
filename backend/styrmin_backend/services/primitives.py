@@ -147,6 +147,8 @@ async def stop_components(
         # Set the new instance as the active one
         deployment.set_active_instance(instance=instance)
 
+        await uow.deployments.save(deployment=deployment)
+
         # Get the task from the reconciliation workflow
         task = await apply_state(
             deployment=deployment,
@@ -155,8 +157,6 @@ async def stop_components(
             task_type=TaskType.STOP_COMPONENTS,
             started_by_step_id=started_by_step_id,
         )
-
-        await uow.deployments.save(deployment=deployment)
 
         await uow.tasks.save(task=task)
 
@@ -217,6 +217,8 @@ async def start_components(
         # Set the new instance as the active one
         deployment.set_active_instance(instance=instance)
 
+        await uow.deployments.save(deployment=deployment)
+
         # Get the task from the reconciliation workflow
         task = await apply_state(
             deployment=deployment,
@@ -225,8 +227,6 @@ async def start_components(
             task_type=TaskType.START_COMPONENTS,
             started_by_step_id=started_by_step_id,
         )
-
-        await uow.deployments.save(deployment=deployment)
 
         await uow.tasks.save(task=task)
 

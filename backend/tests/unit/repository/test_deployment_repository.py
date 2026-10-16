@@ -2,6 +2,7 @@ import asyncio
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -38,6 +39,9 @@ from styrmin_backend.domain.models import (
     DeploymentState as DeploymentStateEntity,
     Instance as InstanceEntity,
     InstanceStatus as InstanceStatusEntity,
+)
+from styrmin_backend.repository.application_instance import (
+    SQLModelApplicationInstanceRepository,
 )
 from styrmin_backend.repository.deployment import SQLModelDeploymentRepository
 
@@ -333,6 +337,48 @@ async def test_save_numbers_each_new_instance_of_a_deployment(
     assert await _sequences(session, deployment.id) == (2, {first.id: 1, second.id: 2})
 
 
+# ---------------------------------------------------------------------------
+# Instance names (#499)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_find_used_names_returns_only_names_of_stored_instances(
+    session: AsyncSession, prerequisites
+):
+    deployment = _new_deployment(prerequisites)
+    stored = deployment.active_instance
+    assert stored is not None
+    await SQLModelDeploymentRepository(session).save(deployment)
+
+    used = await SQLModelApplicationInstanceRepository(session).find_used_names(
+        [stored.name, "calm-otter"]
+    )
+
+    assert used == {stored.name}
+
+
+@pytest.mark.asyncio
+async def test_save_rejects_a_new_instance_with_a_name_in_use(
+    session: AsyncSession, prerequisites
+):
+    """The save flushes, so the conflict raises before the caller starts a flow run."""
+    repo = SQLModelDeploymentRepository(session)
+    first = _new_deployment(prerequisites)
+    assert first.active_instance is not None
+    await repo.save(first)
+
+    second = _new_deployment(prerequisites)
+    assert second.active_instance is not None
+    second.set_active_instance(
+        second.active_instance.model_copy(update={"name": first.active_instance.name})
+    )
+
+    with pytest.raises(IntegrityError):
+        await repo.save(second)
+    await session.rollback()
+
+
 @pytest.mark.asyncio
 async def test_a_second_new_instance_waits_for_the_first_and_gets_the_next_sequence(
     postgres_url: str,
@@ -542,8 +588,6 @@ async def test_partial_unique_index_blocks_active_collisions(
     """The DB-level partial index must reject two active deployments
     sharing (environment_id, name). This is the authoritative gate
     against races between concurrent service-layer checks."""
-    from sqlalchemy.exc import IntegrityError
-
     repo = SQLModelDeploymentRepository(session)
     adv = prerequisites["app_driver_version"]
     env = prerequisites["environment"]

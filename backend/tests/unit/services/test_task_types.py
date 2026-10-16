@@ -1,5 +1,8 @@
 """Reconcile tasks carry the type their caller means (019 research D19, FR-019).
 
+Each caller also saves the new instance before ``apply_state`` starts the flow
+run, so a failed save leaves no flow run behind (#499).
+
 The real ``apply_state`` service function runs against a mocked Prefect
 manager; only the context resolver is stubbed, so each test observes the
 task the caller actually stores.
@@ -13,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from styrmin_backend.context.models.config import (
     ClusterConfig,
@@ -204,6 +208,36 @@ def _seed_deployment(graph: SimpleNamespace) -> tuple[Deployment, Instance]:
     return deployment, previous
 
 
+def _record_saves_and_flow_runs(
+    uow: FakeUnitOfWork, prefect: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> list[tuple[str, UUID | None]]:
+    """Record, in order, the active instance of each deployment save and of each flow run."""
+    events: list[tuple[str, UUID | None]] = []
+    save = uow.deployments.save
+
+    async def _save(deployment: Deployment) -> None:
+        instance = deployment.active_instance
+        events.append(("save", instance.id if instance else None))
+        await save(deployment)
+
+    async def _run_action(action: object, parameters: dict) -> MagicMock:  # noqa: ARG001
+        events.append(("flow run", parameters["new_instance_id"]))
+        return MagicMock(id=uuid4())
+
+    monkeypatch.setattr(uow.deployments, "save", _save)
+    prefect.run_action = AsyncMock(side_effect=_run_action)
+    return events
+
+
+def _assert_instance_saved_before_its_flow_run(
+    events: list[tuple[str, UUID | None]],
+) -> None:
+    flow_runs = [index for index, (kind, _) in enumerate(events) if kind == "flow run"]
+    assert flow_runs
+    for index in flow_runs:
+        assert ("save", events[index][1]) in events[:index]
+
+
 async def _assert_rolls_out_new_instance(
     uow: FakeUnitOfWork, task: Task, deployment_id: UUID, expected: TaskType
 ) -> UUID:
@@ -289,6 +323,15 @@ async def _start(uow: FakeUnitOfWork, deployment: Deployment) -> Task | None:
     )
 
 
+_CALLERS = [
+    pytest.param(_update, id="update_deployment"),
+    pytest.param(_update_version, id="update_deployment_version"),
+    pytest.param(_redeploy, id="redeploy_for_environment_update"),
+    pytest.param(_stop, id="stop_components"),
+    pytest.param(_start, id="start_components"),
+]
+
+
 @pytest.mark.parametrize(
     ("caller", "expected"),
     [
@@ -316,6 +359,82 @@ async def test_caller_creates_its_task_type(
         uow, task, deployment.id, expected
     )
     assert instance_id != previous.id
+
+
+@pytest.mark.parametrize("caller", _CALLERS)
+async def test_caller_saves_the_new_instance_before_the_flow_run_starts(
+    graph: SimpleNamespace,
+    prefect: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caller: Caller,
+) -> None:
+    deployment, _ = _seed_deployment(graph)
+    uow = _make_uow(graph, deployments=[deployment])
+    events = _record_saves_and_flow_runs(uow, prefect, monkeypatch)
+
+    await caller(uow, deployment)
+
+    _assert_instance_saved_before_its_flow_run(events)
+
+
+@pytest.mark.parametrize("caller", _CALLERS)
+async def test_failed_instance_save_starts_no_flow_run(
+    graph: SimpleNamespace,
+    prefect: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caller: Caller,
+) -> None:
+    deployment, previous = _seed_deployment(graph)
+    uow = _make_uow(graph, deployments=[deployment])
+    save = uow.deployments.save
+
+    async def _save(deployment: Deployment) -> None:
+        instance = deployment.active_instance
+        if instance is not None and instance.id != previous.id:
+            raise IntegrityError("INSERT INTO applicationinstance", {}, Exception())
+        await save(deployment)
+
+    monkeypatch.setattr(uow.deployments, "save", _save)
+
+    with pytest.raises(IntegrityError):
+        await caller(uow, deployment)
+
+    prefect.run_action.assert_not_called()
+
+
+async def test_deploy_application_saves_the_instance_before_the_flow_run_starts(
+    graph: SimpleNamespace, prefect: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    uow = _make_uow(graph)
+    events = _record_saves_and_flow_runs(uow, prefect, monkeypatch)
+
+    await deploy_application(
+        driver_name=DRIVER_NAME,
+        version="1.0.0",
+        environment_id=graph.environment.id,
+        uow=uow,
+        created_by_user_id=uuid4(),
+        deployment_name="fresh",
+    )
+
+    _assert_instance_saved_before_its_flow_run(events)
+
+
+async def test_new_ingress_controller_saves_the_instance_before_the_flow_run_starts(
+    graph: SimpleNamespace, prefect: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    graph.environment.config = {
+        "dedicated_ingress": {"implementation": "traefik", "type": "ingress"}
+    }
+    ingress_driver = _driver(INTERNAL_DRIVER_NAME, graph.chart)
+    uow = _make_uow(graph, drivers=[graph.driver, ingress_driver])
+    events = _record_saves_and_flow_runs(uow, prefect, monkeypatch)
+
+    await _ensure_ingress_controller(
+        environment_id=graph.environment.id, uow=uow, created_by_user_id=uuid4()
+    )
+
+    _assert_instance_saved_before_its_flow_run(events)
 
 
 async def test_deploy_application_creates_a_create_instance_task(

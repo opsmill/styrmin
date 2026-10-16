@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from styrmin_backend.context.models.contexts import GlobalContext
-from styrmin_backend.domain.utils import generate_unique_name, validate_deployment_name
+from styrmin_backend.domain.utils import validate_deployment_name
 
 # FIXME: Add domain model for application driver and application driver version
 
@@ -38,6 +38,7 @@ class Instance(BaseModel):
     @classmethod
     def create(
         cls,
+        name: str,
         application_version: str,
         deployment_id: UUID,
         application_driver_version_id: UUID,
@@ -46,7 +47,7 @@ class Instance(BaseModel):
         """Create a new Instance instance."""
         return cls(
             id=uuid4(),
-            name=generate_unique_name(),
+            name=name,
             application_version=application_version,
             status=InstanceStatus.PENDING,
             deployment_id=deployment_id,

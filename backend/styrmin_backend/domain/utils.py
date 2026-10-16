@@ -6,8 +6,8 @@ DEPLOYMENT_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 DEPLOYMENT_NAME_MAX_LENGTH = 63
 
 
-def generate_unique_name() -> str:
-    """Generate a unique instance name using a slug."""
+def generate_instance_name() -> str:
+    """Generate a random two-word instance name; another instance may already have it."""
     return generate_slug(2)
 
 
