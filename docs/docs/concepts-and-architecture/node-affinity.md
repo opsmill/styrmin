@@ -47,6 +47,18 @@ value.
     `DOES_NOT_EXIST`.
   - A node must match every label in one term. To require two labels,
     put both in the same term, not in two terms.
+- A `required` term must have at least one `matchExpressions` or
+  `matchLabels` entry. Saving an environment or a deployment config with
+  a `required` term without one fails, and the error names the term, for
+  example `scheduling.node_affinity.required.0` for the first term. In
+  the web UI, this happens when you click **Add required term** and add
+  no expression, or remove the last expression of a term.
+- A config saved before this check still deploys. Styrmin adds nothing
+  to the pods for a term with an empty `labelSelector`, and a term with
+  an empty `matchExpressions` or `matchLabels` list matches no node. When
+  this term is the only `required` term, the pods can run on any node in
+  the first case and stay `Pending` in the second. Fix the term the next
+  time you save the config.
 - The API requires a `topologyKey` on every term, but node affinity
   ignores it. Set it to an empty string.
 
