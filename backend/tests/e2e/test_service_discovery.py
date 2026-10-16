@@ -4,6 +4,8 @@ Deploy simple-app twice with service name overrides 'intent' and 'executor'.
 Call executor's /probe?target=intent endpoint and verify DNS resolution and
 HTTP connectivity between the two instances. Renaming 'executor' must create
 its new Service and replace its alias in the 'intent' namespace (#237, #491).
+Deleting 'intent' must delete its alias in the 'executor' namespace (#503).
+That test runs last, because the other tests use 'intent'.
 """
 
 import asyncio
@@ -182,6 +184,69 @@ async def test_service_rename_creates_new_kubernetes_service(
         f"Aliases of the renamed service in {peer_namespace}: {sorted(aliases)}. "
         "The alias with the old name 'executor' must be deleted (#491)."
     )
+
+
+@pytest.mark.api_only(
+    reason="Deletes through the SDK and checks Services with kr8s; the "
+    "[ui-chromium] variant would re-run the same SDK call.",
+)
+@pytest.mark.ci
+async def test_deleted_deployment_leaves_no_alias(
+    styrmin_resources: dict,
+    discovery_deployments: dict[str, str],
+    vcluster: dict,
+) -> None:
+    """#503: deleting a deployment deletes its aliases in its peers' namespaces."""
+    client: StyrminClient = styrmin_resources["client"]
+    intent_id = discovery_deployments["intent"]
+    intent_namespace = f"styrmin-{intent_id}"
+    executor_namespace = f"styrmin-{discovery_deployments['executor']}"
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
+
+    # The alias must exist first, or the test would pass without the fix.
+    aliases = await _wait_for_alias_names(
+        kr8s_api, executor_namespace, intent_id, {"intent"}
+    )
+    assert aliases == {"intent"}, (
+        f"Aliases of intent in {executor_namespace} before the deletion: "
+        f"{sorted(aliases)}"
+    )
+
+    await client.deployments.delete(intent_id)
+    await _wait_for_deleted(client, intent_id)
+
+    remaining = [
+        f"{svc.name} (externalName={svc.spec.get('externalName')})"
+        async for svc in AsyncService.list(namespace=executor_namespace, api=kr8s_api)
+        if isinstance(svc, AsyncService)
+        and (
+            svc.labels.get("styrmin.io/deployment-id") == intent_id
+            or (svc.spec.get("externalName") or "").split(".")[1:2]
+            == [intent_namespace]
+        )
+    ]
+    assert not remaining, (
+        f"Services of {executor_namespace} that still point to the deleted "
+        f"deployment {intent_id}: {remaining}. Deleting a deployment must "
+        "delete its service aliases (#503)."
+    )
+
+
+async def _wait_for_deleted(
+    client: StyrminClient, deployment_id: str, timeout: float = 300.0
+) -> None:
+    """Poll the deployment every 5 seconds until its status is ``deleted``."""
+    deadline = time.time() + timeout
+    while True:
+        status = (await client.deployments.get(deployment_id)).status
+        if status == "deleted":
+            return
+        if time.time() >= deadline:
+            raise AssertionError(
+                f"Deployment {deployment_id} not deleted after {timeout}s; "
+                f"last status: {status!r}"
+            )
+        await asyncio.sleep(5)
 
 
 async def _wait_for_alias_names(
