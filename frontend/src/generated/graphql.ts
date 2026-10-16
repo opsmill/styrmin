@@ -433,10 +433,12 @@ export type DeploymentPodStatusReport = {
   pods: Array<PodStatusInput>;
 };
 
-/** Reference to another deployment in the same environment. */
+/** Reference to another deployment in the same environment. Styrmin stores the id of the named deployment; a name given here is replaced with that id when the config is written. */
 export type DeploymentReferenceInput = {
   components?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Id of a deployment in the same environment. */
   deploymentId?: InputMaybe<Scalars['String']['input']>;
+  /** Name of a deployment in the same environment. Styrmin stores the id of that deployment instead of the name when the config is written. */
   deploymentName?: InputMaybe<Scalars['String']['input']>;
 };
 

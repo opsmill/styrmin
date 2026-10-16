@@ -151,10 +151,12 @@ class DeploymentPodStatusReport(BaseModel):
 
 
 class DeploymentReferenceInput(BaseModel):
-    """Reference to another deployment in the same environment."""
+    """Reference to another deployment in the same environment. Styrmin stores the id of the named deployment; a name given here is replaced with that id when the config is written."""
 
     deployment_id: Optional[str] = Field(alias="deploymentId", default=None)
+    "Id of a deployment in the same environment."
     deployment_name: Optional[str] = Field(alias="deploymentName", default=None)
+    "Name of a deployment in the same environment. Styrmin stores the id of that deployment instead of the name when the config is written."
     components: Optional[list[str]] = None
 
 
