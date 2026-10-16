@@ -13,7 +13,7 @@ Not decided: whether `Stalled` and the operator's readiness timeout keep unit-te
 ## What changes for operators
 
 - A deployment created after the agent upgrade is installed with server-side apply. helm-controller is the field manager and forces field ownership conflicts, so at each upgrade a field that the chart sets returns to the chart's value, also when `kubectl` or a driver action changed it. The upgrade does not fail.
-- A deployment created before the agent upgrade keeps client-side apply on its later upgrades and rollbacks, because each upgrade and rollback uses the apply method of the release's previous install or upgrade.
+- A deployment created before the agent upgrade keeps client-side apply on its later upgrades and rollbacks, because an upgrade uses the apply method recorded in the release's newest revision, and a rollback uses the method of the revision it returns to.
 - Installs and upgrades wait for the chart's resources with kstatus. When pods cannot pull their image, FluxCD still waits the full HelmRelease timeout, and the failed step still names the pods' reason, such as `ImagePullBackOff`.
 - To go back to Helm v3's behaviour, downgrade the agent chart to a release that runs helm-controller with the gate. Deployments created while the gate was off keep server-side apply on their later upgrades and rollbacks.
 
@@ -24,7 +24,7 @@ Not decided: whether `Stalled` and the operator's readiness timeout keep unit-te
   - The deployment's scheduling settings reach hook `Job`, `CronJob`, `Deployment`, `StatefulSet`, `DaemonSet` and `ReplicaSet` resources whose own `metadata.labels` carry a component's first identifier label, or every hook of these kinds when the driver declares no components.
   - Env var, image and container overrides, and the component-container guard, reach a hook only when it is a `Deployment` or `StatefulSet` that matches a component.
 - A chart `Deployment` with `progressDeadlineSeconds` below 270 seconds makes FluxCD fail a change and roll the release back before Styrmin reads why the pods are not ready, so the failed step shows FluxCD's `ProgressDeadlineExceeded` failure instead of the pods' reason.
-- On a deployment installed with server-side apply, a field of a chart resource that a driver action changes directly returns to the chart's value at the next upgrade.
+- On a deployment installed with server-side apply, a field that the chart sets and that a driver action changes directly returns to the chart's value at the next upgrade.
 
 The pages that state this: [Operator and CRDs](https://github.com/opsmill/styrmin/blob/fac/helm-v4-end3k/docs/docs/concepts-and-architecture/operator-and-crds.md), [Creating a driver](https://github.com/opsmill/styrmin/blob/fac/helm-v4-end3k/docs/docs/drivers/creating-a-driver.md) (Step 1, "The component container", Step 7), and the docs-site [changelog](https://github.com/opsmill/styrmin/blob/fac/helm-v4-end3k/docs/docs/changelog.md). The decisions are in [ADR-072](https://github.com/opsmill/styrmin/blob/fac/helm-v4-end3k/dev/adr/0072-helm-v4-defaults-releases-keep-apply-method.md). The towncrier fragment is [`changelog/435.changed.md`](https://github.com/opsmill/styrmin/blob/fac/helm-v4-end3k/changelog/435.changed.md).
 

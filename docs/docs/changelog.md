@@ -48,9 +48,9 @@ client-side apply and health checks
 #### Migration
 
 - Deployments created before the agent upgrade keep client-side apply
-  on their later upgrades and rollbacks, because each upgrade and
-  rollback uses the apply method of the release's previous install or
-  upgrade. From their next upgrade, FluxCD waits for their resources
+  on their later upgrades and rollbacks, because an upgrade uses the
+  apply method recorded in the release's newest revision, and a rollback
+  uses the method of the revision it returns to. From their next upgrade, FluxCD waits for their resources
   with kstatus and their Helm hooks receive the post-render patches.
 - A Helm hook `Job` that must run with the deployment's scheduling
   settings needs a component's first identifier label in its own
