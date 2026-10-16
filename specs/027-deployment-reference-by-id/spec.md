@@ -10,7 +10,7 @@
 
 ## Context
 
-An affinity term in the `pod_affinity` or `pod_anti_affinity` block of a `scheduling` config can name another deployment of the same environment with a deployment reference. The reference gives either `deployment_id` or `deployment_name` ([`config.py`](../../backend/styrmin_backend/context/models/config.py), `DeploymentReference`). Terms can be written in three configs: the environment's, the deployment's, and a component's (under the deployment's `components`).
+An affinity term in the `pod_affinity` or `pod_anti_affinity` block of a `scheduling` config can name another deployment of the same environment with a deployment reference. The reference gives either `deployment_id` or `deployment_name` ([`config.py`](../../backend/styrmin_backend/context/models/config.py), `DeploymentReference`). Operators write terms in two configs: the environment's and the deployment's. A component's terms come from the component definitions of the deployment's driver version, which `deploy` and `updateDeploymentVersion` copy to the deployment's components ([`deployment.py`](../../backend/styrmin_backend/services/deployment.py)). Operators cannot write a component's scheduling: the per-component block of a deployment config has no `scheduling` field ([`config.py`](../../backend/styrmin_backend/context/models/config.py), `ComponentConfigBlock`).
 
 Today Styrmin stores a name as written and looks it up each time it builds an instance for a deployment that the term applies to ([`validator.py`](../../backend/styrmin_backend/services/scheduling/validator.py)). The lookup gives the label selector `styrmin/deployment_id=<id>`. After the named deployment is renamed, the lookup finds no deployment and raises `UnresolvableAffinityReferenceError`. From the code at [66065158](https://github.com/opsmill/styrmin/tree/66065158e678ba77f961ada307673dab39a6597c), as the PRD records:
 
@@ -47,11 +47,22 @@ The PRD's decisions were confirmed one at a time by the author of [#508](https:/
 - Q: Does `createEnvironment` accept a term that names a deployment? → A: No. A new environment has no deployment yet, so every such term names a missing deployment and is refused.
 - Q: Which E2E tests cover the change? → A: Two existing tests are extended, and no new heavy test is added: `test_pod_anti_affinity_cross_deployment_via_graphql` (`shard_compute`, `api_only`) and `test_environment_clone_lifecycle` (`shard_env_backup`). The planning phase decides whether `test_environment_clone_lifecycle` already clones two deployments or needs a second one.
 
+### Session 2026-10-16 (planning research, [research.md](research.md))
+
+- Q: The PRD names the clone mutation `createEnvironmentClone`. → A: The mutation is `cloneEnvironment` ([`mutation.py`](../../backend/styrmin_backend/api/schema/mutation.py)). The spec uses that name.
+- Q: Can an operator write a term in a component's config? → A: No. A component's scheduling comes from the driver version's component definitions and is copied by `deploy` and `updateDeploymentVersion`. The requirements for "the component's config" apply to those copies, which are bound when they are copied (R-005).
+- Q: Does `test_environment_clone_lifecycle` already clone two deployments? → A: No. It creates a second deployment and leaves it out of the selection. The extension selects both and gives the second one a term that names the first (R-013).
+- Q: Which deployments count as copied for FR-005? → A: The selected deployments that are eligible. A selected deployment that the clone skips is not copied, so a term that names it is refused (R-007).
+- Q: Can a clone's `config_override` hold terms? → A: Yes. It is an `UpdateEnvironmentInput`. Its names are resolved against the source environment, and its terms are checked and pointed at the counterparts like the captured ones (R-007).
+- Q: How does the clone give the copied terms the counterparts' ids when the environment is created before the counterparts? → A: The clone flow gives each counterpart its id before it creates the environment, rewrites every copied term with those ids, and the writes accept the ids of the counterparts that the clone is about to create (R-008).
+- Q: Does the environment restore need a change for FR-006? → A: One. Its redeploy loop runs without a savepoint, so one failing redeploy drops the redeploys already written. Each redeploy gets its own savepoint (R-009).
+- Q: Which error does the clone check raise? → A: A new `UnclonedDeploymentReferenceError` with code `VALIDATION_ERROR` (R-010).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Rename a deployment that affinity terms name (Priority: P1)
 
-An operator renames deployment A. The terms that name A, in the environment's config, in a deployment's config or in a component's config, keep placing pods relative to A. Every later update of the other deployments and every config fan-out redeploy succeeds, and the rename restarts no pod of the deployments whose terms name A.
+An operator renames deployment A. The terms that name A, in the environment's config, in a deployment's config or in a component's config copied from a driver version, keep placing pods relative to A. Every later update of the other deployments and every config fan-out redeploy succeeds, and the rename restarts no pod of the deployments whose terms name A.
 
 **Why this priority**: This is the failure reported in [#492](https://github.com/opsmill/styrmin/issues/492). Today a rename blocks every later update of the deployments whose terms name the renamed deployment, and can block the rename itself.
 
@@ -73,14 +84,15 @@ An operator writes a manifest or a GraphQL request whose terms name deployments 
 
 **Why this priority**: Operators write manifests by hand. Requiring ids would make every manifest depend on values that differ in each environment.
 
-**Independent Test**: Write `deployment_name: A` in the environment's, a deployment's and a component's config, read each config back, and get `deployment_id: <A's id>`.
+**Independent Test**: Write `deployment_name: A` in the environment's and a deployment's config, read each config back, and get `deployment_id: <A's id>`.
 
 **Acceptance Scenarios**:
 
 1. **Given** deployment A in environment E, **When** the operator writes a term with `deployment_name: A` in E's config with `updateEnvironment`, **Then** reading E's config gives the term with `deployment_id: <A's id>` and no `deployment_name`.
-2. **Given** deployment A in E, **When** the operator writes the same term in B's config or in a component's config of B with `deploy`, `updateDeployment` or `updateDeploymentVersion`, **Then** reading B's config gives `deployment_id: <A's id>`.
-3. **Given** a new deployment A whose own config has a term that names A, **When** the operator runs `deploy` for A, **Then** the stored term gives A's new id.
-4. **Given** a request that renames B to B2 and adds a term in B's config that names B2, **When** the request is applied, **Then** the term resolves against the new name and stores B's id.
+2. **Given** deployment A in E, **When** the operator writes the same term in B's config with `deploy`, `updateDeployment` or `updateDeploymentVersion`, **Then** reading B's config gives `deployment_id: <A's id>`.
+3. **Given** a driver version whose component definition has a term with `deployment_name: A`, **When** the operator deploys B with that driver version, or moves B to it with `updateDeploymentVersion`, **Then** B's component config stores `deployment_id: <A's id>`.
+4. **Given** a new deployment A whose own config has a term that names A, **When** the operator runs `deploy` for A, **Then** the stored term gives A's new id.
+5. **Given** a request that renames B to B2 and adds a term in B's config that names B2, **When** the request is applied, **Then** the term resolves against the new name and stores B's id.
 
 ---
 
@@ -143,10 +155,10 @@ An operator requests a clone whose selection leaves out a deployment that a term
 
 **Acceptance Scenarios**:
 
-1. **Given** a term in B's config that names A, **When** the operator requests a clone of E that selects B and not A, **Then** `createEnvironmentClone` is refused with a typed error that lists A and the path of B's term.
+1. **Given** a term in B's config that names A, **When** the operator requests a clone of E that selects B and not A, **Then** `cloneEnvironment` is refused with a typed error that lists A and the path of B's term, and no clone record or backup is created.
 2. **Given** a term in E's config that names A, **When** the operator requests a clone that leaves out A, **Then** the request is refused with A and the path of E's term.
 3. **Given** scenario 2, **When** the operator clears or replaces E's `scheduling` with `cleared_config_fields` or `config_override` in the same request, **Then** the request is accepted.
-4. **Given** a term in B's config that names A, both selected, **When** the capture of A fails during the clone, **Then** B's counterpart is attributed `failed` with a reason that names A, and the clone ends `PARTIAL`.
+4. **Given** a term in B's config that names A, A, B and C selected, **When** the capture of A fails during the clone, **Then** B's counterpart is attributed `failed` with a reason that names A, C is cloned, and the clone ends `PARTIAL`.
 5. **Given** a term in E's config that names A, A selected, **When** the capture of A fails, **Then** the clone is attributed `FAILED`.
 
 ---
@@ -195,28 +207,31 @@ An operator re-applies an unchanged manifest whose terms give names, or writes b
 
 ### Functional Requirements
 
-- **FR-001**: When a term gives a name, Styrmin MUST store the id of the non-tombstoned deployment in the same environment that has that name at the time of the write. This applies to the environment's, the deployment's and the component's config, in `deploy`, `updateDeployment`, `updateDeploymentVersion`, `createEnvironment` and `updateEnvironment`.
-  - Verify: write `deployment_name: A` at each level, read the config back, and get `deployment_id: <A's id>`.
+- **FR-001**: When a term gives a name, Styrmin MUST store the id of the non-tombstoned deployment in the same environment that has that name at the time of the write. This applies to the environment's config in `createEnvironment` and `updateEnvironment`, to the deployment's config in `deploy`, `updateDeployment` and `updateDeploymentVersion`, and to the component configs that `deploy` and `updateDeploymentVersion` copy from the driver version.
+  - Verify: write `deployment_name: A` in the environment's and the deployment's config, and deploy a driver version whose component definition names A; read each config back and get `deployment_id: <A's id>`.
 - **FR-002**: Styrmin MUST refuse a write in which a term names, by name or by id, a deployment that is not a non-tombstoned deployment of the same environment. The write returns `UnresolvableAffinityReferenceError` with the term's path and saves nothing.
-  - Today, terms in a deployment's or a component's config are already looked up during the request.
+  - Today, terms in a deployment's or a component's config are already looked up during the request, but `updateDeployment` saves the request's config before the lookup, so a refused term leaves the config saved. After the change, the lookup runs before anything is saved.
   - For an environment's config, the refusal is new. Today `createEnvironment` and `updateEnvironment` check only the shape of the config ([`environments.py`](../../backend/styrmin_backend/services/environments.py)). After the change, `createEnvironment` cannot accept a term that names a deployment, because the environment has no deployment yet.
   - Verify: `updateEnvironment` with a term that names a missing deployment is refused, and the environment's config is unchanged.
 - **FR-003**: Every stored deployment reference MUST give an id, never a name. Styrmin looks up a name only during a write.
-  - Verify: after writes with names at all three levels, no stored config holds `deployment_name`.
+  - Verify: after writes with names in the environment's, the deployment's and a driver component's config, no stored config holds `deployment_name`.
 - **FR-004**: When a term gives the id of a tombstoned deployment, Styrmin MUST refuse with `UnresolvableAffinityReferenceError` and give the term's path and the deployment's last name.
   - Today such a term resolves without an error, because the lookup by id also returns tombstoned deployments ([`repository/deployment.py`](../../backend/styrmin_backend/repository/deployment.py)). The term then gives a selector that matches no pod.
   - Verify: delete A, update B, and get an error that gives A's last name.
-- **FR-005**: `createEnvironmentClone` MUST refuse a selection that leaves out a deployment named by a term in the source environment's config or in a selected deployment's config, including its components' configs. The error lists each left-out deployment and the path of each term that names it.
+- **FR-005**: `cloneEnvironment` MUST refuse a request in which a term names a deployment that the clone does not copy. The terms checked are those of the new environment's config (the source environment's config after `cleared_config_fields` and `config_override` are applied, including terms in the override), of each copied deployment's config and of its components' configs. A deployment is copied when it is selected and eligible; a selected deployment that is skipped (no active instance, internal, tombstoned) is not copied. The request is refused before any clone record or backup is created, and the error lists each deployment that is not copied and the path of each term that names it.
   - The operator can add the named deployment to the selection, leave out the deployment whose term names it, or, for a term in the environment's config, clear or replace `scheduling` with `cleared_config_fields` or `config_override` ([`services/backup/clone.py`](../../backend/styrmin_backend/services/backup/clone.py)).
-  - When the capture of a named deployment fails, the counterpart whose term names it is attributed `failed` with a reason that names the deployment, and the clone ends `PARTIAL`. When a term in the environment's config names that deployment, the clone is attributed `FAILED`.
+  - A name in `config_override` is resolved against the source environment; a name that matches no deployment there is refused with `UnresolvableAffinityReferenceError`.
+  - When the capture of a named deployment fails, the counterpart whose term names it is attributed `failed` with a reason that names the deployment, and the clone's status follows the existing rule: `PARTIAL` when another counterpart is cloned, `FAILED` when none is. When a term in the new environment's config names that deployment, the clone is attributed `FAILED` and no environment is created.
   - Verify: clone E with only B selected, and get the refusal.
 - **FR-006**: Restoring an environment backup MUST put back the captured environment config unchanged, as it does today. A term that names a deployment deleted since the backup does not make the restore fail. It fails at the next reconcile with the error of FR-004.
+  - When the restore redeploys the environment's other deployments and one redeploy fails because of such a term, the redeploys of the other deployments MUST still be saved.
   - Verify: back up E, delete A, and restore E. The restore succeeds, and B's next update fails with an error that gives A's last name.
 - **FR-007**: In `deploy`, `updateDeployment` and `updateDeploymentVersion`, Styrmin MUST resolve the names in the request's terms after it applies the request's own changes:
   - a term in a new deployment's config that names that deployment stores the new deployment's id
   - a term in a renaming request resolves against the new name
   - Verify: `deploy` A with a term that names A, and the stored term gives A's id.
 - **FR-008**: An environment clone MUST replace each id of a source deployment in the copied terms, in the environment's, the counterparts' and their components' configs, with the id of that deployment's counterpart, whatever the order in which the snapshots come. This includes terms that name each other (A names B and B names A).
+  - A component's terms come from the driver version, not from the snapshot, so they are bound again in the new environment when the counterpart is created, and a name in them gives the counterpart with that name.
   - Verify: run the User Story 5 scenario with A's snapshot before B's and after B's, and with mutual terms.
 - **FR-009**: Reading a config MUST return each term with the stored id. Writing back a config exactly as it was read MUST be accepted and MUST start no reconcile ([ADR-054](../../dev/adr/0054-backend-authoritative-noop-detection.md)). Re-applying an unchanged request whose terms give names MUST also start no reconcile.
   - Verify: read B's config, write it back with `updateDeployment`, and get a null `Task`.
@@ -225,9 +240,11 @@ An operator re-applies an unchanged manifest whose terms give names, or writes b
 - **FR-011**: The descriptions of the GraphQL deployment reference input MUST say that a name is replaced with the id of the named deployment when the config is written. `schema.graphql` and the SDK types are regenerated. No GraphQL field is added or removed.
 - **FR-012**: Documentation MUST be updated in the same change (Constitution §VII):
   - [`dev/guides/pod-scheduling.md`](../../dev/guides/pod-scheduling.md), section on `deployment_ref`
-  - two new [`CONTEXT.md`](../../CONTEXT.md) entries: affinity term and deployment reference
+  - two new [`CONTEXT.md`](../../CONTEXT.md) entries, affinity term and deployment reference, and the environment clone entry
   - changelog fragments `492.fixed.md` and `508.changed.md`
-  - a short ADR, "Deployment references stored by id", related to ADR-073, that records the alternative rejected in PR #504 and the effect on delete and re-create
+  - a short ADR, "Deployment references stored by id" (ADR-075), related to ADR-073, that records the alternative rejected in PR #504 and the effect on delete and re-create
+  - [`dev/knowledge/backend/backup-restore.md`](../../dev/knowledge/backend/backup-restore.md), the clone flow and the clone request check
+  - the clone section of [`backups-and-restores.md`](../../docs/docs/concepts-and-architecture/backups-and-restores.md), which lists the reasons a clone request is refused, so it gains the refusal of FR-005
 
 ### Key Entities *(include if feature involves data)*
 
