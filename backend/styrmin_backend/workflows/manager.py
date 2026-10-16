@@ -20,6 +20,11 @@ from prefect.cache_policies import NO_CACHE
 from styrmin_backend import config
 from styrmin_backend.services.driver.models.resources.actions import HookKind
 from styrmin_backend.services.workflow.worker import StyrminWorkflowExecutor
+from styrmin_backend.workflows.bsl_credentials import (
+    BslCredentials,
+    delete_bsl_credentials,
+    save_bsl_credentials,
+)
 from styrmin_backend.workflows.catalogue import PrefectCatalogue
 from styrmin_backend.workflows.constants import WorkflowType
 from styrmin_backend.workflows.models import (
@@ -146,6 +151,21 @@ class PrefectManager:
         await GitHubCredentials(token=token).save(
             name=f"{namespace}-github-token", overwrite=True
         )
+
+    async def save_bsl_credentials(
+        self, bsl_id: UUID, access_key_id: str, secret_access_key: str
+    ) -> None:
+        """Save the S3 keys of a backup storage location for the sync-bsl flows."""
+        await save_bsl_credentials(
+            str(bsl_id),
+            BslCredentials(
+                access_key_id=access_key_id, secret_access_key=secret_access_key
+            ),
+        )
+
+    async def delete_bsl_credentials(self, bsl_id: UUID) -> None:
+        """Delete the saved S3 keys of a backup storage location."""
+        await delete_bsl_credentials(str(bsl_id))
 
     @task(
         name="task-manager-setup-worker-pools",

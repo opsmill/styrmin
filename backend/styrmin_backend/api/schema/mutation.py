@@ -613,14 +613,12 @@ class Mutation:
         if credentials_changed and bsl.environments:
             try:
                 prefect_manager = get_manager()
+                await prefect_manager.save_bsl_credentials(
+                    bsl.id, bsl.access_key_id, bsl.secret_access_key
+                )
                 await prefect_manager.run_action(
                     action=PrefectAction.SYNC_BSL_UPDATE_CREDENTIALS,
-                    parameters={
-                        "bsl_id": str(bsl.id),
-                        "namespace": "styrmin",
-                        "access_key_id": bsl.access_key_id,
-                        "secret_access_key": bsl.secret_access_key,
-                    },
+                    parameters={"bsl_id": str(bsl.id), "namespace": "styrmin"},
                 )
             except Exception as exc:
                 logger.warning(
@@ -640,6 +638,13 @@ class Mutation:
         await delete_bsl_service(
             backup_storage_location_id=backup_storage_location_id, uow=uow
         )
+        try:
+            await get_manager().delete_bsl_credentials(backup_storage_location_id)
+        except Exception as exc:
+            logger.warning(
+                f"Failed to delete the saved credentials of BSL {backup_storage_location_id}",
+                exc_info=exc,
+            )
         return "Backup storage location deleted"
 
     @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
@@ -680,6 +685,9 @@ class Mutation:
                     ]
                     if not other_envs_on_cluster:
                         prefect_manager = get_manager()
+                        await prefect_manager.save_bsl_credentials(
+                            bsl.id, bsl.access_key_id, bsl.secret_access_key
+                        )
                         await prefect_manager.run_action(
                             action=PrefectAction.SYNC_BSL_CREATE,
                             parameters={
@@ -688,8 +696,6 @@ class Mutation:
                                 "bucket": bsl.bucket,
                                 "region": bsl.region,
                                 "endpoint": bsl.endpoint,
-                                "access_key_id": bsl.access_key_id,
-                                "secret_access_key": bsl.secret_access_key,
                             },
                         )
 
