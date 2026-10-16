@@ -661,7 +661,6 @@ async def upgrade_instance(
         if aliases or stale_aliases:
             await apply_service_aliases(
                 aliases=aliases,
-                namespace_labels=namespace_labels,
                 stale_aliases=stale_aliases,
             )
 
@@ -755,7 +754,6 @@ async def update_instance(
         if aliases or stale_aliases:
             await apply_service_aliases(
                 aliases=aliases,
-                namespace_labels=namespace_labels,
                 stale_aliases=stale_aliases,
             )
 
@@ -848,7 +846,6 @@ async def create_instance(
         if aliases or stale_aliases:
             await apply_service_aliases(
                 aliases=aliases,
-                namespace_labels=namespace_labels,
                 stale_aliases=stale_aliases,
             )
 
@@ -1097,11 +1094,7 @@ async def _apply_service_aliases_step(
     if not aliases and not stale_aliases:
         return
     async with reporter.step(*steps.SERVICE_ALIASES):
-        await apply_service_aliases(
-            aliases=aliases,
-            namespace_labels=_build_namespace_labels(context),
-            stale_aliases=stale_aliases,
-        )
+        await apply_service_aliases(aliases=aliases, stale_aliases=stale_aliases)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────
