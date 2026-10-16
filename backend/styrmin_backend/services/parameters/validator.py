@@ -9,6 +9,13 @@ from styrmin_backend.services.driver.models.resources.parameters import (
     DriverParameterKind,
 )
 from styrmin_backend.services.exceptions import ServiceError
+from styrmin_backend.services.parameters.exceptions import RETIRED_PARAMETERS_GUIDE_URL
+
+# A newer driver version may have retired the parameter (023 FR-010).
+_UNKNOWN_PARAMETER_HINT = (
+    ". The driver version does not declare it: remove it from the request or the manifest. "
+    f"If a driver version change removed the parameter, see {RETIRED_PARAMETERS_GUIDE_URL}"
+)
 
 # Expected Python types for each parameter kind
 _KIND_TYPES: dict[DriverParameterKind, type] = {
@@ -52,7 +59,7 @@ def validate_parameter_values(
             unknown = sorted(values.keys())
             raise ServiceError(
                 f"Unknown parameter(s): {', '.join(repr(k) for k in unknown)}. "
-                "This driver does not define any parameters."
+                "This driver does not define any parameters." + _UNKNOWN_PARAMETER_HINT
             )
         return {}
 
@@ -65,7 +72,7 @@ def validate_parameter_values(
             errors.append(f"Unknown parameter: '{param_name}'")
 
     if errors:
-        raise ServiceError("; ".join(errors))
+        raise ServiceError("; ".join(errors) + _UNKNOWN_PARAMETER_HINT)
 
     # Validate provided values and apply defaults
     resolved: dict = {}
@@ -83,7 +90,7 @@ def validate_parameter_values(
             errors.append(f"Missing required parameter: '{defn.name}'")
 
     if errors:
-        raise ServiceError("; ".join(errors))
+        raise ServiceError("; ".join(errors) + _UNKNOWN_PARAMETER_HINT)
 
     return resolved
 
