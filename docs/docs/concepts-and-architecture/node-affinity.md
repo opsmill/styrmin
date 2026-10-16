@@ -57,8 +57,10 @@ value.
   to the pods for a term with an empty `labelSelector`, and a term with
   an empty `matchExpressions` or `matchLabels` list matches no node. When
   this term is the only `required` term, the pods can run on any node in
-  the first case and stay `Pending` in the second. Fix the term the next
-  time you save the config.
+  the first case and stay `Pending` in the second. When the environment
+  and the deployment both set `required` terms, Styrmin drops these
+  terms before it combines the two levels. Fix the term the next time
+  you save the config.
 - The API requires a `topologyKey` on every term, but node affinity
   ignores it. Set it to an empty string.
 
