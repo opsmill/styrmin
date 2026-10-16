@@ -1,6 +1,8 @@
 import type {
   DedicatedIngressInput,
+  FastStorageInput,
   IngressServiceConfigInput,
+  StandardStorageInput,
   UpdateClusterInput,
 } from "@/generated/graphql";
 import {
@@ -25,15 +27,21 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
 
-/** Drop keys whose value is `undefined`, so an absent stored value stays absent in the input. */
-function defined<T extends object>(input: T): T {
+/** Every key of `T`, each one required but allowed to be `undefined`. */
+type EveryKey<T> = { [K in keyof Required<T>]: T[K] | undefined };
+
+/**
+ * Drop keys whose value is `undefined`, so an absent stored value stays absent in the input.
+ * `input` must name every key of `T`, so the compiler reports a field that a mapping leaves out.
+ */
+function defined<T extends object>(input: EveryKey<T>): T {
   return Object.fromEntries(
     Object.entries(input).filter(([, value]) => value !== undefined),
   ) as T;
 }
 
 function serviceToInput(service: StoredConfig): IngressServiceConfigInput {
-  return defined({
+  return defined<IngressServiceConfigInput>({
     type: asString(service.type),
     annotations: asRecord(service.annotations),
     loadBalancerIp: asString(service.load_balancer_ip),
@@ -51,18 +59,22 @@ function dedicatedIngressToInput(
 ): DedicatedIngressInput | undefined {
   if (di === undefined) return undefined;
   const service = asRecord(di.service);
-  return defined({
+  return defined<DedicatedIngressInput>({
     implementation: asString(di.implementation),
     type: asString(di.type),
     service: service ? serviceToInput(service) : undefined,
   });
 }
 
+type StorageInput = StandardStorageInput & FastStorageInput;
+
 function storageToInput(
   storage: StoredConfig | undefined,
-): { storageClass: string } | undefined {
+): StorageInput | undefined {
   const storageClass = asString(storage?.storage_class);
-  return storageClass === undefined ? undefined : { storageClass };
+  return storageClass === undefined
+    ? undefined
+    : defined<StorageInput>({ storageClass });
 }
 
 /**
@@ -71,7 +83,7 @@ function storageToInput(
  * An absent value stays absent. Throws on an enum value it does not know.
  */
 export function clusterConfigToInput(config: StoredConfig): UpdateClusterInput {
-  return defined({
+  return defined<UpdateClusterInput>({
     ingressClass: asString(config.ingress_class),
     runtimeClass: asString(config.runtime_class),
     fqdnSuffix: asString(config.fqdn_suffix),
