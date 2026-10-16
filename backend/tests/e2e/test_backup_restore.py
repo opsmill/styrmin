@@ -395,12 +395,15 @@ async def assert_backup_size_matches_pod_volume_backups(
 async def assert_velero_backup_uses_bsl(
     kubeconfig_path: str,
     backup_name: str,
-    expected_bsl_name: str,
+    expected_bsl_id: str,
 ) -> None:
-    """Verify the Velero Backup CRD on the cluster targets the expected BSL."""
+    """Verify the Velero Backup CRD on the cluster targets the expected BSL.
+
+    The Velero object is named after the location's id, not its name (#488).
+    """
     velero_backup = await read_velero_backup(kubeconfig_path, backup_name)
     actual = velero_backup["spec"].get("storageLocation")
-    expected = f"styrmin-bsl-{expected_bsl_name}"
+    expected = f"styrmin-bsl-{expected_bsl_id}"
     assert actual == expected, f"Expected storageLocation '{expected}', got '{actual}'"
 
 
@@ -881,7 +884,7 @@ async def test_backup_and_restore_lifecycle(
         await assert_velero_backup_uses_bsl(
             kubeconfig_path=kubeconfig_path,
             backup_name=backup.name,
-            expected_bsl_name=styrmin_resources["bsl_name"],
+            expected_bsl_id=str(styrmin_resources["bsl_id"]),
         )
         await assert_velero_backup_ttl(
             kubeconfig_path=kubeconfig_path,
@@ -1872,6 +1875,205 @@ async def test_restore_of_removed_velero_backup_fails_velero_step(
     finally:
         with suppress(Exception):
             await client.environments.delete(environment_id=environment.id)
+
+
+BSL_OBJECTS_TIMEOUT_SECONDS = 180.0
+
+
+async def bsl_cluster_objects(
+    kubeconfig_path: str, bsl_id: str
+) -> tuple[set[str], dict[str, str]]:
+    """Velero BSL names and Secret credentials labelled with the location id, in ``styrmin``."""
+    import base64
+
+    from kubernetes_asyncio import client as kubeclient
+    from kubernetes_asyncio import config as k8s_config
+
+    selector = f"styrmin.io/bsl-id={bsl_id}"
+    await k8s_config.load_config(config_file=kubeconfig_path)
+    api_client = kubeclient.ApiClient()
+    try:
+        listed = await kubeclient.CustomObjectsApi(
+            api_client
+        ).list_namespaced_custom_object(
+            group="velero.io",
+            version="v1",
+            namespace="styrmin",
+            plural="backupstoragelocations",
+            label_selector=selector,
+        )
+        secrets = await kubeclient.CoreV1Api(api_client).list_namespaced_secret(
+            namespace="styrmin", label_selector=selector
+        )
+    finally:
+        await api_client.close()
+    return (
+        {item["metadata"]["name"] for item in listed["items"]},
+        {
+            secret.metadata.name: base64.b64decode(secret.data["cloud"]).decode()
+            for secret in secrets.items
+        },
+    )
+
+
+async def wait_for_bsl_cluster_objects(
+    kubeconfig_path: str,
+    bsl_id: str,
+    expected: Any,
+    description: str,
+) -> tuple[set[str], dict[str, str]]:
+    """Poll the location's cluster objects until ``expected(bsls, secrets)`` holds."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + BSL_OBJECTS_TIMEOUT_SECONDS
+    found = await bsl_cluster_objects(kubeconfig_path, bsl_id)
+    while not expected(*found):
+        assert loop.time() < deadline, (
+            f"{description} within {BSL_OBJECTS_TIMEOUT_SECONDS}s; found {found}"
+        )
+        await asyncio.sleep(3)
+        found = await bsl_cluster_objects(kubeconfig_path, bsl_id)
+    return found
+
+
+async def create_name_based_bsl_objects(
+    kubeconfig_path: str, bsl_id: str, bsl_name: str, bucket: str
+) -> None:
+    """Create the Velero BSL and Secret as Styrmin did before #488, named after the location name."""
+    from kubernetes_asyncio import client as kubeclient
+    from kubernetes_asyncio import config as k8s_config
+
+    name = f"styrmin-bsl-{bsl_name}"
+    labels = {"styrmin.io/managed": "true", "styrmin.io/bsl-id": bsl_id}
+    await k8s_config.load_config(config_file=kubeconfig_path)
+    api_client = kubeclient.ApiClient()
+    try:
+        await kubeclient.CoreV1Api(api_client).create_namespaced_secret(
+            namespace="styrmin",
+            body={
+                "apiVersion": "v1",
+                "kind": "Secret",
+                "metadata": {"name": f"{name}-credentials", "labels": labels},
+                "stringData": {"cloud": "[default]\naws_access_key_id = old\n"},
+            },
+        )
+        await kubeclient.CustomObjectsApi(api_client).create_namespaced_custom_object(
+            group="velero.io",
+            version="v1",
+            namespace="styrmin",
+            plural="backupstoragelocations",
+            body={
+                "apiVersion": "velero.io/v1",
+                "kind": "BackupStorageLocation",
+                "metadata": {"name": name, "labels": labels},
+                "spec": {
+                    "provider": "aws",
+                    "objectStorage": {"bucket": bucket},
+                    "config": {
+                        "region": "garage",
+                        "s3Url": "http://garage.styrmin.svc:3900",
+                    },
+                    "credential": {"name": f"{name}-credentials", "key": "cloud"},
+                },
+            },
+        )
+    finally:
+        await api_client.close()
+
+
+@pytest.mark.ci
+@pytest.mark.shard_backup
+@pytest.mark.api_only(
+    reason="Every action is an SDK or Kubernetes call and no dual-entrypoint "
+    "driver method is invoked; the assertions read cluster objects that the "
+    "UI does not show."
+)
+async def test_renamed_bsl_cluster_objects_follow_the_location_id(
+    styrmin_resources: dict,
+    velero_ready: None,  # noqa: ARG001 — the Velero CRDs must exist
+    vcluster: dict,
+) -> None:
+    """#488: a location's cluster objects are named and found by its id, not its name.
+
+    After a rename, a credentials update still reaches the Secret and an
+    unassign still removes the Velero object and the Secret. Objects that an
+    earlier Styrmin named after the location name, which carry the same id
+    label, are updated and removed too.
+    """
+    from uuid import uuid4
+
+    client: StyrminClient = styrmin_resources["client"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    suffix = uuid4().hex[:8]
+    # A bucket of its own keeps Velero's backup sync away from the shared one.
+    bucket = f"velero-rename-{suffix}"
+    environment = await client.environments.create(
+        name=f"bsl-rename-{suffix}",
+        cluster_id=styrmin_resources["cluster_id"],
+        config={},
+    )
+    bsl = await client.backup_storage_locations.create(
+        name=f"before-rename-{suffix}",
+        endpoint="http://garage.styrmin.svc:3900",
+        bucket=bucket,
+        region="garage",
+        access_key_id="GKbeforerenamebeforerename",
+        secret_access_key="before-rename-secret",
+    )
+    bsl_id = str(bsl.id)
+    id_name = f"styrmin-bsl-{bsl_id}"
+    try:
+        await client.backup_storage_locations.assign(
+            environment_id=environment.id, bsl_id=bsl_id
+        )
+        await wait_for_bsl_cluster_objects(
+            kubeconfig_path,
+            bsl_id,
+            lambda bsls, secrets: (
+                bsls == {id_name} and set(secrets) == {f"{id_name}-credentials"}
+            ),
+            "Assigning the location should create its objects named after its id",
+        )
+
+        await client.backup_storage_locations.update(
+            bsl_id, name=f"after-rename-{suffix}"
+        )
+        await create_name_based_bsl_objects(
+            kubeconfig_path, bsl_id, f"before-rename-{suffix}", bucket
+        )
+
+        await client.backup_storage_locations.update(
+            bsl_id,
+            access_key_id="GKafterrenameafterrename",
+            secret_access_key="after-rename-secret",
+        )
+        await wait_for_bsl_cluster_objects(
+            kubeconfig_path,
+            bsl_id,
+            lambda _bsls, secrets: (
+                len(secrets) == 2
+                and all(
+                    "GKafterrenameafterrename" in cloud for cloud in secrets.values()
+                )
+            ),
+            "A credentials update after a rename should reach every Secret of the location",
+        )
+
+        await client.backup_storage_locations.unassign(environment_id=environment.id)
+        await wait_for_bsl_cluster_objects(
+            kubeconfig_path,
+            bsl_id,
+            lambda bsls, secrets: not bsls and not secrets,
+            "Unassigning the renamed location should remove all its objects",
+        )
+    finally:
+        with suppress(Exception):
+            await client.backup_storage_locations.unassign(
+                environment_id=environment.id
+            )
+        with suppress(Exception):
+            await client.environments.delete(environment_id=environment.id)
+        with suppress(Exception):
+            await client.backup_storage_locations.delete(bsl_id)
 
 
 # ---------------------------------------------------------------------------

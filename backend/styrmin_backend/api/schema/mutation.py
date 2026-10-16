@@ -617,7 +617,7 @@ class Mutation:
                     await prefect_manager.run_action(
                         action=PrefectAction.SYNC_BSL_UPDATE_CREDENTIALS,
                         parameters={
-                            "bsl_name": bsl.name,
+                            "bsl_id": str(bsl.id),
                             "namespace": "styrmin",
                             "access_key_id": bsl.access_key_id,
                             "secret_access_key": bsl.secret_access_key,
@@ -654,17 +654,12 @@ class Mutation:
 
         # Capture previous BSL before reassignment
         old_bsl_id: UUID | None = None
-        old_bsl_name: str | None = None
         cluster_id: UUID | None = None
         async with uow:
             env = await uow.environments.get(environment_id)
             if env:
                 old_bsl_id = env.backup_storage_location_id
                 cluster_id = env.cluster_id
-                if old_bsl_id:
-                    old_bsl = await uow.backup_storage_locations.get(old_bsl_id)
-                    if old_bsl:
-                        old_bsl_name = old_bsl.name
 
         await assign_bsl_service(
             environment_id=environment_id,
@@ -690,7 +685,6 @@ class Mutation:
                             action=PrefectAction.SYNC_BSL_CREATE,
                             parameters={
                                 "bsl_id": str(bsl.id),
-                                "bsl_name": bsl.name,
                                 "namespace": "styrmin",
                                 "bucket": bsl.bucket,
                                 "region": bsl.region,
@@ -701,11 +695,7 @@ class Mutation:
                         )
 
                     # Handle reassignment: delete old BSL from cluster if it was the last reference
-                    if (
-                        old_bsl_id
-                        and old_bsl_id != backup_storage_location_id
-                        and old_bsl_name
-                    ):
+                    if old_bsl_id and old_bsl_id != backup_storage_location_id:
                         old_bsl = await uow.backup_storage_locations.get(old_bsl_id)
                         if old_bsl:
                             old_remaining = [
@@ -718,7 +708,7 @@ class Mutation:
                                 await prefect_manager.run_action(
                                     action=PrefectAction.SYNC_BSL_DELETE,
                                     parameters={
-                                        "bsl_name": old_bsl_name,
+                                        "bsl_id": str(old_bsl_id),
                                         "namespace": "styrmin",
                                     },
                                 )
@@ -742,7 +732,7 @@ class Mutation:
         uow = info.context["uow"]
 
         # Capture current BSL info before unassigning
-        bsl_name: str | None = None
+        bsl_id: UUID | None = None
         cluster_id: UUID | None = None
         is_last_on_cluster = False
         async with uow:
@@ -753,7 +743,7 @@ class Mutation:
                     env.backup_storage_location_id
                 )
                 if bsl:
-                    bsl_name = bsl.name
+                    bsl_id = bsl.id
                     other_envs_on_cluster = [
                         e
                         for e in bsl.environments
@@ -764,13 +754,13 @@ class Mutation:
         await unassign_bsl_service(environment_id=environment_id, uow=uow)
 
         # Delete BSL from cluster if this was the last environment referencing it
-        if is_last_on_cluster and bsl_name:
+        if is_last_on_cluster and bsl_id:
             try:
                 prefect_manager = get_manager()
                 await prefect_manager.run_action(
                     action=PrefectAction.SYNC_BSL_DELETE,
                     parameters={
-                        "bsl_name": bsl_name,
+                        "bsl_id": str(bsl_id),
                         "namespace": "styrmin",
                     },
                 )

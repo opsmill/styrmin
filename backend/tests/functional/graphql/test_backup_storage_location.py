@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
 import pytest
@@ -10,6 +10,7 @@ from httpx import AsyncClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import BackupStorageLocation, Environment
+from styrmin_backend.workflows.models import PrefectAction
 
 from ._queries import load_query
 from .conftest import gql
@@ -202,6 +203,116 @@ async def test_unassign_bsl_clears_link(
     refreshed = await session.get(Environment, env_id)
     assert refreshed is not None
     assert refreshed.backup_storage_location_id is None
+
+
+@pytest.fixture
+def workflow_manager(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """The manager the BSL mutations get from ``get_manager()``, which they call directly."""
+    manager = MagicMock()
+    manager.run_action = AsyncMock()
+    monkeypatch.setattr(
+        "styrmin_backend.api.schema.mutation.get_manager", lambda: manager
+    )
+    return manager
+
+
+def _dispatched(workflow_manager: MagicMock, action: PrefectAction) -> list[dict]:
+    return [
+        call.kwargs["parameters"]
+        for call in workflow_manager.run_action.await_args_list
+        if call.kwargs["action"] == action
+    ]
+
+
+async def _rename(client: AsyncClient, bsl_id: UUID, name: str) -> None:
+    await gql(
+        client,
+        "update_backup_storage_location",
+        {"backupStorageLocationId": str(bsl_id), "name": name},
+    )
+
+
+@pytest.mark.asyncio
+async def test_assign_bsl_creates_cluster_objects_by_location_id(
+    client: AsyncClient, session: AsyncSession, workflow_manager: MagicMock
+) -> None:
+    bsl = await seed_backup_storage_location(session)
+    env = await seed_environment(session)
+    bsl_id, env_id = bsl.id, env.id
+
+    await gql(
+        client,
+        "assign_backup_storage_location",
+        {"environmentId": str(env_id), "backupStorageLocationId": str(bsl_id)},
+    )
+
+    [created] = _dispatched(workflow_manager, PrefectAction.SYNC_BSL_CREATE)
+    assert created["bsl_id"] == str(bsl_id)
+    assert "bsl_name" not in created
+
+
+@pytest.mark.asyncio
+async def test_unassign_renamed_bsl_removes_cluster_objects_by_location_id(
+    client: AsyncClient, session: AsyncSession, workflow_manager: MagicMock
+) -> None:
+    """#488: a removal after a rename must still target the location's objects."""
+    bsl = await seed_backup_storage_location(session, name="before-rename")
+    env = await seed_environment(session, bsl=bsl)
+    bsl_id, env_id = bsl.id, env.id
+
+    await _rename(client, bsl_id, "after-rename")
+    await gql(
+        client, "unassign_backup_storage_location", {"environmentId": str(env_id)}
+    )
+
+    assert _dispatched(workflow_manager, PrefectAction.SYNC_BSL_DELETE) == [
+        {"bsl_id": str(bsl_id), "namespace": "styrmin"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reassign_renamed_bsl_removes_old_cluster_objects_by_location_id(
+    client: AsyncClient, session: AsyncSession, workflow_manager: MagicMock
+) -> None:
+    old_bsl = await seed_backup_storage_location(session, name="before-rename")
+    new_bsl = await seed_backup_storage_location(session)
+    env = await seed_environment(session, bsl=old_bsl)
+    old_bsl_id, new_bsl_id, env_id = old_bsl.id, new_bsl.id, env.id
+
+    await _rename(client, old_bsl_id, "after-rename")
+    await gql(
+        client,
+        "assign_backup_storage_location",
+        {"environmentId": str(env_id), "backupStorageLocationId": str(new_bsl_id)},
+    )
+
+    assert _dispatched(workflow_manager, PrefectAction.SYNC_BSL_DELETE) == [
+        {"bsl_id": str(old_bsl_id), "namespace": "styrmin"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_credentials_update_of_renamed_bsl_targets_location_id(
+    client: AsyncClient, session: AsyncSession, workflow_manager: MagicMock
+) -> None:
+    bsl = await seed_backup_storage_location(session, name="before-rename")
+    await seed_environment(session, bsl=bsl)
+    bsl_id = bsl.id
+
+    await gql(
+        client,
+        "update_backup_storage_location",
+        {
+            "backupStorageLocationId": str(bsl_id),
+            "name": "after-rename",
+            "accessKeyId": "NEW-KEY",
+            "secretAccessKey": "NEW-SECRET",
+        },
+    )
+
+    [updated] = _dispatched(workflow_manager, PrefectAction.SYNC_BSL_UPDATE_CREDENTIALS)
+    assert updated["bsl_id"] == str(bsl_id)
+    assert "bsl_name" not in updated
 
 
 @pytest.mark.asyncio

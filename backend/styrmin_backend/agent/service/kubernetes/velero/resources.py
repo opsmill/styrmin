@@ -85,24 +85,43 @@ class VeleroBackup:
         return result
 
 
+#: Label that ties a Velero BackupStorageLocation and its Secret to the location's id.
+BSL_ID_LABEL = "styrmin.io/bsl-id"
+
+
+def velero_bsl_name(bsl_id: str) -> str:
+    """Name of the Velero BackupStorageLocation for the backup storage location ``bsl_id``."""
+    return f"styrmin-bsl-{bsl_id}"
+
+
 @dataclass
 class VeleroBackupStorageLocation:
-    """Represents a Velero BackupStorageLocation CRD + credential Secret."""
+    """Represents a Velero BackupStorageLocation CRD + credential Secret.
 
-    name: str
+    Both objects are named after the location's id, never its name, so a rename
+    in Styrmin does not change which objects belong to the location.
+    """
+
+    bsl_id: str
     namespace: str
     bucket: str
     region: str
     endpoint: str
-    credential_secret_name: str
-    bsl_id: str
     labels: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def name(self) -> str:
+        return velero_bsl_name(self.bsl_id)
+
+    @property
+    def credential_secret_name(self) -> str:
+        return f"{self.name}-credentials"
 
     def render_bsl(self) -> dict[str, Any]:
         """Render the Velero BackupStorageLocation CRD manifest."""
         labels = {
             "styrmin.io/managed": "true",
-            "styrmin.io/bsl-id": self.bsl_id,
+            BSL_ID_LABEL: self.bsl_id,
             **self.labels,
         }
         return {
@@ -136,7 +155,7 @@ class VeleroBackupStorageLocation:
         """Render the credential Secret manifest."""
         labels = {
             "styrmin.io/managed": "true",
-            "styrmin.io/bsl-id": self.bsl_id,
+            BSL_ID_LABEL: self.bsl_id,
             **self.labels,
         }
         cloud_credentials = (
