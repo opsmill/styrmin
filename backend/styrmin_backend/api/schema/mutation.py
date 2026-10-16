@@ -607,22 +607,21 @@ class Mutation:
             secret_access_key=secret_access_key,
         )
 
-        # Sync credentials to all clusters where this BSL is deployed
+        # One run, not one per cluster: a USER flow run names no cluster and goes to
+        # the agent that polls the work pool, and Styrmin allows one cluster (ADR-039).
         credentials_changed = access_key_id is not None or secret_access_key is not None
         if credentials_changed and bsl.environments:
             try:
-                cluster_ids = {env.cluster_id for env in bsl.environments}
                 prefect_manager = get_manager()
-                for _cluster_id in cluster_ids:
-                    await prefect_manager.run_action(
-                        action=PrefectAction.SYNC_BSL_UPDATE_CREDENTIALS,
-                        parameters={
-                            "bsl_id": str(bsl.id),
-                            "namespace": "styrmin",
-                            "access_key_id": bsl.access_key_id,
-                            "secret_access_key": bsl.secret_access_key,
-                        },
-                    )
+                await prefect_manager.run_action(
+                    action=PrefectAction.SYNC_BSL_UPDATE_CREDENTIALS,
+                    parameters={
+                        "bsl_id": str(bsl.id),
+                        "namespace": "styrmin",
+                        "access_key_id": bsl.access_key_id,
+                        "secret_access_key": bsl.secret_access_key,
+                    },
+                )
             except Exception as exc:
                 logger.warning(
                     f"Failed to dispatch BSL credentials update workflow for BSL {backup_storage_location_id}",

@@ -316,6 +316,37 @@ async def test_credentials_update_of_renamed_bsl_targets_location_id(
 
 
 @pytest.mark.asyncio
+async def test_credentials_update_starts_one_run_whatever_the_cluster_count(
+    client: AsyncClient, session: AsyncSession, workflow_manager: MagicMock
+) -> None:
+    """#498: no run names a cluster, so one run per cluster would not reach each cluster."""
+    bsl = await seed_backup_storage_location(session)
+    # seed_environment seeds a new cluster for each environment.
+    await seed_environment(session, bsl=bsl)
+    await seed_environment(session, bsl=bsl)
+    bsl_id = bsl.id
+
+    await gql(
+        client,
+        "update_backup_storage_location",
+        {
+            "backupStorageLocationId": str(bsl_id),
+            "accessKeyId": "NEW-KEY",
+            "secretAccessKey": "NEW-SECRET",
+        },
+    )
+
+    assert _dispatched(workflow_manager, PrefectAction.SYNC_BSL_UPDATE_CREDENTIALS) == [
+        {
+            "bsl_id": str(bsl_id),
+            "namespace": "styrmin",
+            "access_key_id": "NEW-KEY",
+            "secret_access_key": "NEW-SECRET",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_list_bsls_projects_seeded(
     client: AsyncClient, session: AsyncSession
 ) -> None:
