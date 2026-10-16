@@ -153,6 +153,7 @@ def test_every_component_that_is_not_a_singleton_accepts_two_replicas(
             "components": declarations,
             "stored_config": None,
             "checked_against": f"example driver {driver_file.parent.name}",
+            "max_replica_count": 20,
         }
         if component.get("singleton") is True:
             with pytest.raises(SingletonReplicaOverrideError):

@@ -13,14 +13,15 @@ from typing import Any
 import pytest
 import yaml
 from loguru import logger
-from pydantic import ValidationError
-
+from styrmin_backend.context.models.components import (
+    driver_version_label,
+    parse_stored_replica_declaration,
+)
 from styrmin_backend.services.driver.exceptions import DriverLoadingError
 from styrmin_backend.services.driver.loaders import get_local_driver_loader
 from styrmin_backend.services.driver.models.resources.driver import (
     ArbitrarySectionModel,
     DriverSpec,
-    parse_stored_component_declaration,
 )
 
 _SERVER_LABEL = {"app.kubernetes.io/name": "simple-app"}
@@ -170,7 +171,7 @@ def test_dumped_declaration_round_trips(tmp_path: Path) -> None:
     assert ArbitrarySectionModel.model_validate(server.model_dump()) == server
 
 
-class TestParseStoredComponentDeclaration:
+class TestParseStoredReplicaDeclaration:
     @pytest.fixture
     def warnings(self) -> Any:
         messages: list[str] = []
@@ -179,70 +180,68 @@ class TestParseStoredComponentDeclaration:
         logger.remove(sink)
 
     def test_valid_declaration_parses_unchanged(self, warnings: list[str]) -> None:
-        raw = _server(replicas=2, container="simple-app")
-
-        declaration = parse_stored_component_declaration(
-            raw, driver_version="simple-app 4", component="server"
+        declaration = parse_stored_replica_declaration(
+            _server(replicas=2, container="simple-app"), component="server"
         )
 
         assert declaration.replicas == 2
-        assert declaration.container == "simple-app"
+        assert declaration.singleton is False
         assert warnings == []
 
-    def test_invalid_stored_replicas_is_dropped_with_a_warning(
+    def test_invalid_stored_replicas_is_dropped_and_named(
         self, warnings: list[str]
     ) -> None:
-        raw = _server(replicas="3", singleton=True, port=8000)
-
-        declaration = parse_stored_component_declaration(
-            raw, driver_version="simple-app 3", component="server"
+        declaration = parse_stored_replica_declaration(
+            _server(replicas="3", singleton=True, port=8000),
+            component="server",
+            driver_version=driver_version_label("adv-3"),
         )
 
         assert declaration.replicas is None
-        assert declaration.singleton is False
-        assert "replicas" not in declaration.model_dump()
-        assert declaration.model_dump()["port"] == 8000
+        # The valid key is kept: only the invalid one reads as unset.
+        assert declaration.singleton is True
         assert len(warnings) == 1
-        assert "simple-app 3" in warnings[0]
+        assert "replicas='3'" in warnings[0]
+        assert "singleton" not in warnings[0]
         assert "server" in warnings[0]
+        assert "driver version adv-3" in warnings[0]
 
     def test_invalid_stored_singleton_is_dropped_with_a_warning(
         self, warnings: list[str]
     ) -> None:
-        raw = _server(singleton="yes")
-
-        declaration = parse_stored_component_declaration(
-            raw, driver_version="simple-app 3", component="server"
+        declaration = parse_stored_replica_declaration(
+            _server(singleton="yes", replicas=2), component="server"
         )
 
         assert declaration.singleton is False
+        assert declaration.replicas == 2
         assert len(warnings) == 1
+        assert "singleton='yes'" in warnings[0]
 
-    def test_stored_contradiction_is_dropped_with_a_warning(
-        self, warnings: list[str]
-    ) -> None:
-        raw = _server(singleton=True, replicas=3)
-
-        declaration = parse_stored_component_declaration(
-            raw, driver_version="simple-app 3", component="server"
+    def test_stored_contradiction_keeps_singleton(self, warnings: list[str]) -> None:
+        declaration = parse_stored_replica_declaration(
+            _server(singleton=True, replicas=3), component="server"
         )
 
         assert declaration.replicas is None
-        assert declaration.singleton is False
+        assert declaration.singleton is True
         assert len(warnings) == 1
+        assert "replicas=3" in warnings[0]
 
-    def test_other_validation_errors_still_raise(self, warnings: list[str]) -> None:
-        with pytest.raises(ValidationError):
-            parse_stored_component_declaration(
-                {"replicas": "3"}, driver_version="simple-app 3", component="server"
-            )
+    def test_problems_outside_the_replica_keys_do_not_raise(
+        self, warnings: list[str]
+    ) -> None:
+        # No identifier and an invalid container name: only the replica keys are read.
+        declaration = parse_stored_replica_declaration(
+            {"replicas": 2, "container": "Bad_Name"}, component="server"
+        )
+
+        assert declaration.replicas == 2
         assert warnings == []
 
     def test_does_not_mutate_the_stored_dict(self, warnings: list[str]) -> None:
         raw = _server(replicas="3")
 
-        parse_stored_component_declaration(
-            raw, driver_version="simple-app 3", component="server"
-        )
+        parse_stored_replica_declaration(raw, component="server")
 
         assert raw["replicas"] == "3"

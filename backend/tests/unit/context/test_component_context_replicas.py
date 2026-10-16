@@ -15,7 +15,10 @@ import pytest
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from styrmin_backend.context.models.components import ComponentContext
+from styrmin_backend.context.models.components import (
+    ComponentContext,
+    driver_version_label,
+)
 from styrmin_backend.context.models.config import MAX_REPLICA_COUNT
 from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.context.models.input import ComponentInput, ContextInput
@@ -168,7 +171,7 @@ def test_invalid_stored_replicas_still_resolves(warnings: list[str]) -> None:
     context = resolve_global_context(
         context_input=_context_input(
             _component("server", replicas="3", port=8000),
-            driver_version="3",
+            driver_version=driver_version_label("adv-3"),
         )
     )
 
@@ -178,7 +181,8 @@ def test_invalid_stored_replicas_still_resolves(warnings: list[str]) -> None:
     assert server.config.singleton is False
     assert server.config["port"] == 8000
     assert len(warnings) == 1
-    assert "driver simple-app version 3" in warnings[0]
+    assert "driver version adv-3" in warnings[0]
+    assert "replicas='3'" in warnings[0]
     assert "server" in warnings[0]
 
 
@@ -192,9 +196,10 @@ def test_invalid_stored_singleton_still_resolves(warnings: list[str]) -> None:
     assert context.components is not None
     database = context.components["database"]
     assert database.config.singleton is False
-    assert database.config.replicas is None
+    # Only the invalid key is dropped; the valid count stays.
+    assert database.config.replicas == 3
     assert len(warnings) == 1
-    assert "driver simple-app" in warnings[0]
+    assert "singleton='yes'" in warnings[0]
     assert "database" in warnings[0]
 
 
@@ -308,16 +313,18 @@ def test_stored_context_with_invalid_replicas_validates_without_the_key(
     assert "server" in warnings[0]
 
 
-def test_stored_context_with_singleton_and_replicas_validates_without_both(
+def test_stored_context_with_singleton_and_replicas_keeps_singleton(
     warnings: list[str],
 ) -> None:
     restored = GlobalContext.model_validate(_stored_context(singleton=True, replicas=3))
 
     assert restored.components is not None
     server = restored.components["server"]
+    # The count is dropped, so the component runs 1 pod.
     assert server.config.replicas is None
-    assert server.config.singleton is False
+    assert server.config.singleton is True
     assert len(warnings) == 1
+    assert "replicas=3" in warnings[0]
     assert "server" in warnings[0]
 
 

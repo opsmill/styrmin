@@ -8,7 +8,12 @@ from packaging.version import InvalidVersion, Version
 from styrmin_backend.agent.service.kubernetes.exceptions import CustomResourceNotFound
 from styrmin_backend.agent.service.kubernetes.primitives import patch_custom_resource
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
+from styrmin_backend import config as styrmin_config
 from styrmin_backend.context.exceptions import InvalidDeploymentContextError
+from styrmin_backend.context.models.components import (
+    driver_version_label,
+    parse_stored_replica_declaration,
+)
 from styrmin_backend.context.validators import validate_deployment_config
 from styrmin_backend.domain import steps
 from styrmin_backend.domain.models import (
@@ -70,13 +75,13 @@ from styrmin_backend.services.reconciliation import (
     apply_state,
     generate_instance_from_deployment,
 )
-from styrmin_backend.services.replicas.validator import validate_replica_overrides
+from styrmin_backend.services.replicas.validator import (
+    has_replica_overrides,
+    validate_replica_overrides,
+)
 from deepdiff import DeepDiff
 
 from styrmin_backend.domain.models import Instance
-from styrmin_backend.services.driver.models.resources.driver import (
-    parse_stored_component_declaration,
-)
 from styrmin_backend.services.driver.models.resources.services import (
     ServiceDefinition,
 )
@@ -346,15 +351,16 @@ def _validate_replica_overrides(
     config: dict | None,
     *,
     stored_config: dict | None,
-    driver_name: str,
     driver_version: ApplicationDriverVersion,
     checked_against: str,
 ) -> None:
     """Check replica overrides against the component declarations of ``driver_version`` (023)."""
-    label = f"driver {driver_name} version {driver_version.version}"
+    if not has_replica_overrides(config):
+        return
+    label = driver_version_label(driver_version.id)
     declarations = {
-        cc.name: parse_stored_component_declaration(
-            cc.config, driver_version=label, component=cc.name
+        cc.name: parse_stored_replica_declaration(
+            cc.config, component=cc.name, driver_version=label
         )
         for cc in driver_version.component_configs or []
     }
@@ -363,6 +369,7 @@ def _validate_replica_overrides(
         components=declarations,
         stored_config=stored_config,
         checked_against=checked_against,
+        max_replica_count=styrmin_config.SETTINGS.max_replica_count,
     )
 
 
@@ -400,7 +407,6 @@ def _validate_config_write(
     _validate_replica_overrides(
         deployment_config,
         stored_config=stored_config,
-        driver_name=driver_name,
         driver_version=driver_version,
         checked_against=checked_against,
     )
@@ -952,7 +958,6 @@ async def update_deployment_version(
             _validate_replica_overrides(
                 deployment.config,
                 stored_config=deployment.config,
-                driver_name=application_driver.name,
                 driver_version=target_driver_version,
                 checked_against=_checked_against(
                     application_driver.name, target_driver_version, version
@@ -991,6 +996,7 @@ async def update_deployment_version(
                 checked_against=_checked_against(
                     application_driver.name, target_driver_version, version
                 ),
+                deployment_id=deployment.id,
             )
         resolved_parameters = validate_parameter_values(
             definitions=parse_parameter_definitions(target_driver_version.parameters),
@@ -1603,7 +1609,6 @@ async def deploy_application(
         _validate_replica_overrides(
             deployment_config,
             stored_config=None,
-            driver_name=driver_name,
             driver_version=application_driver_version,
             checked_against=checked_against,
         )

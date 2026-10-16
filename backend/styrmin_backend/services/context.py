@@ -8,6 +8,7 @@ from styrmin_backend.agent.service.kubernetes.utils import (
 )
 from styrmin_backend.context.models.components import (
     ResolvedComponentScheduling,
+    driver_version_label,
 )
 from styrmin_backend.context.models.config import (
     ComponentConfigBlock,
@@ -211,7 +212,7 @@ async def generate_context_from_deployment(
                     "deployment_id": deployment.id,
                 },
                 "parameters": deployment.parameters,
-                "driver_version": application_driver_version.version,
+                "driver_version": driver_version_label(application_driver_version.id),
             }
         )
 

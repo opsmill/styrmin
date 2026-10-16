@@ -560,7 +560,7 @@ def _resolve_component_context(
     component: ComponentInput,
     *,
     deployment_config: DeploymentConfig,
-    driver_version: str,
+    driver_version: str | None,
 ) -> ComponentContext:
     """Build one declared component's context, with its replica override (023)."""
     raw = component.model_dump()
@@ -574,9 +574,7 @@ def _resolve_component_context(
 def resolve_global_context(context_input: ContextInput) -> GlobalContext:
     # Create the components context
     if context_input.components:
-        driver_version = f"driver {context_input.application.name}"
-        if context_input.driver_version:
-            driver_version += f" version {context_input.driver_version}"
+        driver_version = context_input.driver_version or None
         try:
             components_context = ComponentsContext.model_validate(
                 {

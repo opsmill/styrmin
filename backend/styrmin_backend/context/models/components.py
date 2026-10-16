@@ -82,7 +82,57 @@ class ReplicaDeclaration(BaseModel):
         return data
 
 
-_REPLICA_KEYS = ("replicas", "singleton")
+# ``singleton`` first: when both keys conflict, the count is dropped and the component runs 1 pod.
+_REPLICA_KEYS = ("singleton", "replicas")
+
+
+def driver_version_label(driver_version_id: Any) -> str:
+    """Name a driver version in log messages."""
+    return f"driver version {driver_version_id}"
+
+
+def split_replica_keys(
+    declaration: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split the replica keys of a stored declaration into the valid ones and the invalid ones."""
+    kept: dict[str, Any] = {}
+    for key in _REPLICA_KEYS:
+        if key not in declaration:
+            continue
+        candidate: dict[str, Any] = {**kept, key: declaration[key]}
+        try:
+            ReplicaDeclaration.model_validate(candidate)
+        except ValidationError:
+            continue
+        kept = candidate
+    dropped: dict[str, Any] = {
+        k: declaration[k] for k in _REPLICA_KEYS if k in declaration and k not in kept
+    }
+    return kept, dropped
+
+
+def _warn_dropped_replica_keys(
+    dropped: Mapping[str, Any], *, component: str, driver_version: str | None
+) -> None:
+    keys = ", ".join(f"{key}={value!r}" for key, value in dropped.items())
+    logger.warning(
+        "Ignoring the invalid keys {} of component {}{}",
+        keys,
+        component,
+        f" in {driver_version}" if driver_version else "",
+    )
+
+
+def parse_stored_replica_declaration(
+    declaration: Mapping[str, Any], *, component: str, driver_version: str | None = None
+) -> ReplicaDeclaration:
+    """Parse the replica keys of a stored component declaration; an invalid key reads as unset."""
+    kept, dropped = split_replica_keys(declaration)
+    if dropped:
+        _warn_dropped_replica_keys(
+            dropped, component=component, driver_version=driver_version
+        )
+    return ReplicaDeclaration.model_validate(kept)
 
 
 def validate_ignoring_invalid_replica_keys[T](
@@ -95,31 +145,24 @@ def validate_ignoring_invalid_replica_keys[T](
     """Run ``validate`` on a stored component declaration, ignoring invalid replica keys (023).
 
     A driver version loaded before 023 may hold ``replicas`` or ``singleton`` values that the
-    typed keys reject. When dropping both keys makes ``validate`` pass, they are dropped with a
-    warning; any other error is raised unchanged. The driver load path does not call this.
+    typed keys reject. When dropping the invalid keys makes ``validate`` pass, they are dropped
+    with a warning; any other error is raised unchanged. The driver load path does not call this.
     """
     try:
         return validate(dict(declaration))
     except ValidationError as err:
-        if not any(key in declaration for key in _REPLICA_KEYS):
+        _, dropped = split_replica_keys(declaration)
+        if not dropped:
             raise
         try:
             result = validate(
-                {k: v for k, v in declaration.items() if k not in _REPLICA_KEYS}
+                {k: v for k, v in declaration.items() if k not in dropped}
             )
         except ValidationError:
             raise err from None
-    if driver_version:
-        logger.warning(
-            "Ignoring the invalid replicas and singleton keys of component {} in {}",
-            component,
-            driver_version,
-        )
-    else:
-        logger.warning(
-            "Ignoring the invalid replicas and singleton keys of component {}",
-            component,
-        )
+    _warn_dropped_replica_keys(
+        dropped, component=component, driver_version=driver_version
+    )
     return result
 
 

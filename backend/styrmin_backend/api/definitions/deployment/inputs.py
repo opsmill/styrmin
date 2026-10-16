@@ -70,9 +70,8 @@ class ParameterValueInput:
 @strawberry.input(
     description=(
         "Per-component override block for a deployment: env vars, the "
-        "container ``command``/``args``, and the component container's "
-        "``image``. Future per-component knobs (e.g. replicas) slot into "
-        "this same input without a schema renumber."
+        "container ``command``/``args``, the component container's "
+        "``image``, and the component's ``replicas`` count."
     )
 )
 class ComponentConfigInput:
@@ -81,8 +80,9 @@ class ComponentConfigInput:
             "The component name as declared by the application-driver version "
             "the deployment is bound to after the write: the pinned one on "
             "updateDeployment, the target one on updateDeploymentVersion. "
-            "Must match a known "
-            "component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. "
+            "Must match a known component: an unknown one raises the error "
+            "of the override it carries, such as ``UNKNOWN_COMPONENT_ENV_VAR`` "
+            "or ``UNKNOWN_COMPONENT_REPLICA_OVERRIDE``. "
             "Overrides on a component that declares no component container "
             "raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``)."
         )
@@ -150,7 +150,9 @@ class ComponentConfigInput:
             "instead); a value above 1 on a singleton component raises "
             "`SINGLETON_REPLICA_OVERRIDE`; adding or changing it on a component "
             "the driver version does not declare raises "
-            "`UNKNOWN_COMPONENT_REPLICA_OVERRIDE`."
+            "`UNKNOWN_COMPONENT_REPLICA_OVERRIDE`; adding or changing it to a "
+            "value above the server setting `STYRMIN_MAX_REPLICA_COUNT` raises "
+            "`REPLICA_COUNT_ABOVE_MAXIMUM`."
         ),
     )
 

@@ -13,9 +13,15 @@ from typing import Any
 
 from styrmin_backend.context.models.components import ReplicaDeclaration
 from styrmin_backend.services.replicas.exceptions import (
+    ReplicaCountAboveMaximumError,
     SingletonReplicaOverrideError,
     UnknownComponentReplicaOverrideError,
 )
+
+
+def has_replica_overrides(config: dict[str, Any] | None) -> bool:
+    """Whether any component block of ``config`` sets ``replicas``."""
+    return next(_replica_overrides(config), None) is not None
 
 
 def _replica_overrides(config: dict[str, Any] | None) -> Iterator[tuple[str, Any]]:
@@ -34,6 +40,7 @@ def validate_replica_overrides(
     components: Mapping[str, ReplicaDeclaration],
     stored_config: dict[str, Any] | None,
     checked_against: str,
+    max_replica_count: int,
 ) -> None:
     """Reject replica overrides the driver version cannot apply.
 
@@ -44,6 +51,8 @@ def validate_replica_overrides(
             or changed. The stored value sent again is kept, so an orphaned override survives.
         SingletonReplicaOverrideError: An override above 1 targets a singleton component, also
             when it equals the stored value.
+        ReplicaCountAboveMaximumError: An added or changed override is above
+            ``max_replica_count``.
     """
     stored = dict(_replica_overrides(stored_config))
     for name, replicas in _replica_overrides(config):
@@ -61,4 +70,11 @@ def validate_replica_overrides(
                 component_name=name,
                 requested_replicas=replicas,
                 checked_against=checked_against,
+            )
+        changed = name not in stored or stored[name] != replicas
+        if changed and isinstance(replicas, int) and replicas > max_replica_count:
+            raise ReplicaCountAboveMaximumError(
+                component_name=name,
+                requested_replicas=replicas,
+                max_replica_count=max_replica_count,
             )

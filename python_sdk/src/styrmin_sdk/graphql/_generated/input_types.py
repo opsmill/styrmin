@@ -51,10 +51,10 @@ class AffinityTermInput(BaseModel):
 
 
 class ComponentConfigInput(BaseModel):
-    """Per-component override block for a deployment: env vars, the container ``command``/``args``, and the component container's ``image``. Future per-component knobs (e.g. replicas) slot into this same input without a schema renumber."""
+    """Per-component override block for a deployment: env vars, the container ``command``/``args``, the component container's ``image``, and the component's ``replicas`` count."""
 
     name: str
-    "The component name as declared by the application-driver version the deployment is bound to after the write: the pinned one on updateDeployment, the target one on updateDeploymentVersion. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. Overrides on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``)."
+    "The component name as declared by the application-driver version the deployment is bound to after the write: the pinned one on updateDeployment, the target one on updateDeploymentVersion. Must match a known component: an unknown one raises the error of the override it carries, such as ``UNKNOWN_COMPONENT_ENV_VAR`` or ``UNKNOWN_COMPONENT_REPLICA_OVERRIDE``. Overrides on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``)."
     env_vars: Optional[list["EnvVarInput"]] = Field(alias="envVars", default=None)
     "Environment-variable overrides scoped to this component. Submitted as a list of ``{name, value}`` rows; duplicates within the list raise ``DUPLICATE_ENV_VAR_NAME`` with the component scope in the payload. Adding or changing a value on a component that declares no component container raises ``COMPONENT_CONTAINER_NOT_DECLARED``; removing values or re-submitting the stored ones unchanged is accepted."
     command: Optional[list[str]] = None
@@ -64,7 +64,7 @@ class ComponentConfigInput(BaseModel):
     image: Optional[str] = None
     "Image reference for this component's component container, scoped to this deployment. A full reference with an explicit tag or digest; every ``{{ app.version }}`` token is replaced with the deployment's application version at render time, and a literal tag pins the image. Under full-replacement semantics ``null``/omitting it CLEARS the override (the chart image applies). Raises ``UNKNOWN_COMPONENT_IMAGE_OVERRIDE``, ``INVALID_IMAGE_REFERENCE``, or ``COMPONENT_CONTAINER_NOT_DECLARED`` (adding or changing it on a component without a component container; removing it is always accepted)."
     replicas: Optional[int] = None
-    "Replica count for this component, scoped to this deployment: an integer of 1 or more, applied to `spec.replicas` of every Deployment and StatefulSet that matches the component's label selector. Needs no component container. Under full-replacement semantics `null`/omitting it CLEARS the override, and the component returns to the driver default or to the chart's count. A value below 1 raises `INVALID_REPLICA_COUNT` (stop the component instead); a value above 1 on a singleton component raises `SINGLETON_REPLICA_OVERRIDE`; adding or changing it on a component the driver version does not declare raises `UNKNOWN_COMPONENT_REPLICA_OVERRIDE`."
+    "Replica count for this component, scoped to this deployment: an integer of 1 or more, applied to `spec.replicas` of every Deployment and StatefulSet that matches the component's label selector. Needs no component container. Under full-replacement semantics `null`/omitting it CLEARS the override, and the component returns to the driver default or to the chart's count. A value below 1 raises `INVALID_REPLICA_COUNT` (stop the component instead); a value above 1 on a singleton component raises `SINGLETON_REPLICA_OVERRIDE`; adding or changing it on a component the driver version does not declare raises `UNKNOWN_COMPONENT_REPLICA_OVERRIDE`; adding or changing it to a value above the server setting `STYRMIN_MAX_REPLICA_COUNT` raises `REPLICA_COUNT_ABOVE_MAXIMUM`."
 
 
 class CrdConditionInput(BaseModel):

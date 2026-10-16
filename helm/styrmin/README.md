@@ -212,6 +212,7 @@ Sizing guidance is in [`dev/guidelines/helm.md`](../../dev/guidelines/helm.md).
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `styrmin.logLevel` | Log level (DEBUG, INFO, WARNING, ERROR) | `INFO` |
+| `styrmin.maxReplicaCount` | Highest replica count a user can set on a component of a deployment (`STYRMIN_MAX_REPLICA_COUNT`); driver defaults are not limited | `20` |
 | `styrmin.url.internalApi` | Internal API URL (auto-generated) | `""` |
 | `styrmin.url.internalApiK8s` | Internal API URL for K8s (auto-generated) | `""` |
 | `styrmin.kubernetes.defaultResourcePrefix` | Resource prefix | `styrmin` |
