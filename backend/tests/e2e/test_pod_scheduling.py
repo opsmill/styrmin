@@ -22,6 +22,7 @@ Covers the E2E tasks from ``specs/001-pod-scheduling-config/tasks.md``:
     T060 — US2 env+deployment resource hierarchy
     T069 — US5 ``Deployment.resolvedScheduling`` query
     T080 — US3 tolerations + topology spread + node affinity compose
+    #486 — required node affinity of the environment and the deployment ANDed
     T092 — US4 runtime class at deployment scope
     T107 — consolidated quickstart scenario
     T109 — update → reconciliation within SLO
@@ -295,6 +296,49 @@ def _scheduling_driver_bound(
     )
 
 
+@pytest.fixture
+async def _environment_requires_linux_nodes(
+    scheduling_environment: dict,
+) -> AsyncGenerator[None, None]:
+    """Set a required node affinity term on the environment for one test.
+
+    The single vcluster node matches it, so pods still schedule. The
+    environment config is cleared afterwards; the next update of a
+    deployment drops the term from its pods.
+    """
+    from styrmin_sdk.graphql._generated.input_types import (
+        AffinityBlockInput,
+        AffinityTermInput,
+        LabelSelectorInput,
+        SchedulingInput,
+        UpdateEnvironmentInput,
+    )
+
+    client: StyrminClient = scheduling_environment["client"]
+    environment_id = scheduling_environment["environment_id"]
+    await client.environments.update(
+        environment_id=environment_id,
+        input=UpdateEnvironmentInput(
+            scheduling=SchedulingInput(
+                node_affinity=AffinityBlockInput(
+                    required=[
+                        AffinityTermInput(
+                            topology_key="",
+                            label_selector=LabelSelectorInput(
+                                match_labels={"kubernetes.io/os": "linux"}
+                            ),
+                        )
+                    ]
+                )
+            )
+        ),
+    )
+    yield
+    await client.environments.update(
+        environment_id=environment_id, input=UpdateEnvironmentInput()
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -313,6 +357,7 @@ async def test_scheduling_end_to_end(
     vcluster: dict,
     scenario_driver: ScenarioDriver,
     _scheduling_driver_bound: None,
+    _environment_requires_linux_nodes: None,
 ) -> None:
     """Consolidated end-to-end verification for deployment-level scheduling.
 
@@ -322,6 +367,10 @@ async def test_scheduling_end_to_end(
     the rendered pod template after reconciliation. Also verifies the
     ``Deployment.resolvedScheduling`` GraphQL field mirrors the
     deployment-level config with ``provenance == "deployment"``.
+
+    The environment sets a required node affinity term too (#486): the pod
+    template must carry one ``nodeSelectorTerm`` holding the environment's
+    and the deployment's expressions, so a node has to match both.
 
     Replaces seven former per-feature tests; per-feature isolation lives
     at the unit + integration tiers. The cross-deployment anti-affinity
@@ -371,11 +420,27 @@ async def test_scheduling_end_to_end(
         )
 
         affinity = spec.affinity
+        node_affinity = affinity.node_affinity if affinity is not None else None
+        required_nodes = (
+            node_affinity.required_during_scheduling_ignored_during_execution
+            if node_affinity is not None
+            else None
+        )
         has_node_affinity = (
-            affinity is not None
-            and affinity.node_affinity is not None
-            and affinity.node_affinity.preferred_during_scheduling_ignored_during_execution
+            node_affinity is not None
+            and node_affinity.preferred_during_scheduling_ignored_during_execution
             is not None
+            and required_nodes is not None
+            and [
+                [(e.key, e.operator, e.values) for e in term.match_expressions or []]
+                for term in required_nodes.node_selector_terms
+            ]
+            == [
+                [
+                    ("kubernetes.io/os", "In", ["linux"]),
+                    ("kubernetes.io/hostname", "Exists", None),
+                ]
+            ]
         )
         has_pod_affinity = affinity is not None and affinity.pod_affinity is not None
 
@@ -423,10 +488,19 @@ async def test_scheduling_end_to_end(
             }
         ],
         "node_affinity": {
-            # ``preferred`` rather than ``required``: a required node-affinity
-            # no node satisfies would leave pods Pending, which makes
-            # helm-controller ``--wait`` time out and mark the release failed
-            # for the rest of the session.
+            # Every node has a hostname label. A required term that no node
+            # matches would leave pods Pending, so helm-controller ``--wait``
+            # would mark the release failed for the rest of the session.
+            "required": [
+                {
+                    "topology_key": "",
+                    "label_selector": {
+                        "match_expressions": [
+                            {"key": "kubernetes.io/hostname", "operator": "Exists"}
+                        ]
+                    },
+                }
+            ],
             "preferred": [
                 {
                     "weight": 1,
@@ -443,7 +517,7 @@ async def test_scheduling_end_to_end(
                         },
                     },
                 }
-            ]
+            ],
         },
         "pod_affinity": {
             # ``preferred`` rather than ``required``: a required pod-affinity
@@ -556,6 +630,23 @@ async def test_scheduling_end_to_end(
         )
         provenance = entry.provenance or {}
         assert provenance.get("resources.requests.memory") == "deployment"
+        node_affinity = (entry.config or {}).get("node_affinity") or {}
+        assert node_affinity.get("required") == [
+            {
+                "topology_key": "",
+                "label_selector": {
+                    "match_expressions": [
+                        {
+                            "key": "kubernetes.io/os",
+                            "operator": "In",
+                            "values": ["linux"],
+                        },
+                        {"key": "kubernetes.io/hostname", "operator": "Exists"},
+                    ]
+                },
+            }
+        ], f"component {entry.component_name} node_affinity = {node_affinity!r}"
+        assert provenance.get("node_affinity") == "deployment"
 
 
 @pytest.mark.ci
