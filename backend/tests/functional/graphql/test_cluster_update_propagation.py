@@ -6,12 +6,15 @@ through the database session. See ``specs/archive/021-cluster-config-update/cont
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
+from pydantic import BaseModel
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -29,57 +32,18 @@ from .seeds import (
     seed_user,
 )
 
-FULL_INPUT: dict[str, Any] = {
-    "ingressClass": "nginx",
-    "runtimeClass": "gvisor",
-    "fqdnSuffix": "apps.example.com",
-    "externalUrlScheme": "HTTP",
-    "externalUrlPort": 8443,
-    "externalDnsEndpointsType": "NODE_EXTERNAL_IP",
-    "dedicatedIngress": {
-        "implementation": "traefik",
-        "type": "ingress",
-        "service": {
-            "type": "NodePort",
-            "annotations": {"lb.example.com/reuse": "true"},
-            "loadBalancerIp": "10.0.0.10",
-            "externalTrafficPolicy": "Local",
-            "ipFamilies": ["IPv4"],
-            "ipFamilyPolicy": "SingleStack",
-            "nodePort": 30443,
-        },
-    },
-    "standardStorage": {"storageClass": "standard-rwo"},
-    "fastStorage": {"storageClass": "local-nvme"},
-    "dbSize": "10Gi",
-    "backupTtl": "720h",
-}
-
-FULL_CONFIG: dict[str, Any] = {
-    "ingress_class": "nginx",
-    "runtime_class": "gvisor",
-    "fqdn_suffix": "apps.example.com",
-    "external_url_scheme": "http",
-    "external_url_port": 8443,
-    "external_dns_endpoints_type": "NodeExternalIP",
-    "dedicated_ingress": {
-        "implementation": "traefik",
-        "type": "ingress",
-        "service": {
-            "type": "NodePort",
-            "annotations": {"lb.example.com/reuse": "true"},
-            "load_balancer_ip": "10.0.0.10",
-            "external_traffic_policy": "Local",
-            "ip_families": ["IPv4"],
-            "ip_family_policy": "SingleStack",
-            "node_port": 30443,
-        },
-    },
-    "standard_storage": {"storage_class": "standard-rwo"},
-    "fast_storage": {"storage_class": "local-nvme"},
-    "db_size": "10Gi",
-    "backup_ttl": "720h",
-}
+# The frontend test of ``clusterConfigToInput`` reads the same file, so a field set here
+# must also be mapped there (#454).
+FULL_CONFIG_PATH = (
+    Path(__file__).resolve().parents[4]
+    / "frontend"
+    / "src"
+    / "lib"
+    / "cluster-input.full-config.json"
+)
+_FULL = json.loads(FULL_CONFIG_PATH.read_text(encoding="utf-8"))
+FULL_INPUT: dict[str, Any] = _FULL["input"]
+FULL_CONFIG: dict[str, Any] = _FULL["config"]
 
 
 async def _post_update(
@@ -112,6 +76,27 @@ def test_update_cluster_input_covers_every_cluster_config_field() -> None:
         f.python_name for f in UpdateClusterInput.__strawberry_definition__.fields
     }
     assert input_fields == set(ClusterConfig.model_fields) - {"scheduling"}
+
+
+def _unset_fields(model: BaseModel, path: str = "") -> list[str]:
+    unset = []
+    for name in type(model).model_fields:
+        if name not in model.model_fields_set:
+            unset.append(f"{path}{name}")
+            continue
+        value = getattr(model, name)
+        if isinstance(value, BaseModel):
+            unset.extend(_unset_fields(value, f"{path}{name}."))
+    return unset
+
+
+def test_full_config_sets_every_cluster_config_field() -> None:
+    """``FULL_CONFIG`` sets every ``ClusterConfig`` field, nested fields included, except ``scheduling``."""
+    config = ClusterConfig.model_validate(FULL_CONFIG)
+    assert set(_unset_fields(config)) == {"scheduling"}, (
+        f"Add the field to {FULL_CONFIG_PATH.name}, under both 'config' and 'input', "
+        "and map it in clusterConfigToInput (frontend/src/lib/cluster-input.ts)."
+    )
 
 
 @pytest.mark.asyncio

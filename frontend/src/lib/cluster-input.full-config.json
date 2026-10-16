@@ -1,0 +1,64 @@
+{
+  "config": {
+    "ingress_class": "nginx",
+    "runtime_class": "gvisor",
+    "fqdn_suffix": "apps.example.com",
+    "external_url_scheme": "http",
+    "external_url_port": 8443,
+    "external_dns_endpoints_type": "NodeExternalIP",
+    "dedicated_ingress": {
+      "implementation": "traefik",
+      "type": "ingress",
+      "service": {
+        "type": "NodePort",
+        "annotations": {
+          "lb.example.com/reuse": "true"
+        },
+        "load_balancer_ip": "10.0.0.10",
+        "external_traffic_policy": "Local",
+        "ip_families": ["IPv4"],
+        "ip_family_policy": "SingleStack",
+        "node_port": 30443
+      }
+    },
+    "standard_storage": {
+      "storage_class": "standard-rwo"
+    },
+    "fast_storage": {
+      "storage_class": "local-nvme"
+    },
+    "db_size": "10Gi",
+    "backup_ttl": "720h"
+  },
+  "input": {
+    "ingressClass": "nginx",
+    "runtimeClass": "gvisor",
+    "fqdnSuffix": "apps.example.com",
+    "externalUrlScheme": "HTTP",
+    "externalUrlPort": 8443,
+    "externalDnsEndpointsType": "NODE_EXTERNAL_IP",
+    "dedicatedIngress": {
+      "implementation": "traefik",
+      "type": "ingress",
+      "service": {
+        "type": "NodePort",
+        "annotations": {
+          "lb.example.com/reuse": "true"
+        },
+        "loadBalancerIp": "10.0.0.10",
+        "externalTrafficPolicy": "Local",
+        "ipFamilies": ["IPv4"],
+        "ipFamilyPolicy": "SingleStack",
+        "nodePort": 30443
+      }
+    },
+    "standardStorage": {
+      "storageClass": "standard-rwo"
+    },
+    "fastStorage": {
+      "storageClass": "local-nvme"
+    },
+    "dbSize": "10Gi",
+    "backupTtl": "720h"
+  }
+}
