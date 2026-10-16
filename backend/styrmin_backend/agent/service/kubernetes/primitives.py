@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -9,9 +10,11 @@ from kubernetes_asyncio.client import (
     V1DeleteOptions,
     V1DeploymentList,
     V1Job,
+    V1Namespace,
     V1PodList,
     V1PodTemplateSpec,
     V1Preconditions,
+    V1Service,
     V1ServiceList,
     V1StatefulSetList,
 )
@@ -146,6 +149,51 @@ async def apply_kubernetes_namespace(
     except ApiException as exc:
         if exc.status != status.HTTP_409_CONFLICT:  # Namespace already exists
             pass
+
+
+@inject
+async def get_namespace(
+    name: str, client: ApiClient = Depends(get_api_client)
+) -> V1Namespace | None:
+    """Read a Namespace; None when it does not exist."""
+    core_api = kubeclient.CoreV1Api(client)
+    try:
+        return await core_api.read_namespace(name=name)
+    except ApiException as exc:
+        if exc.status == status.HTTP_404_NOT_FOUND:
+            return None
+        raise
+
+
+_NAMESPACE_TERMINATING_CAUSE = "NamespaceTerminating"
+_NAMESPACE_TERMINATING_MESSAGE = "because it is being terminated"
+
+
+def _status_cause_types(body: str) -> set[str]:
+    """The ``details.causes[*].type`` values of a Kubernetes Status body; empty if not one."""
+    try:
+        details = json.loads(body).get("details") or {}
+        return {cause.get("type") for cause in details.get("causes") or []}
+    except ValueError, AttributeError, TypeError:
+        return set()
+
+
+def is_namespace_gone_error(exc: ApiException) -> bool:
+    """True when a write failed because its namespace does not exist or is being deleted.
+
+    A 403 counts only with the NamespaceLifecycle plugin's cause or message, never an RBAC 403.
+    """
+    if exc.status == status.HTTP_404_NOT_FOUND:
+        return True
+    if exc.status != status.HTTP_403_FORBIDDEN:
+        return False
+    body = exc.body or ""
+    if isinstance(body, bytes):
+        body = body.decode(errors="replace")
+    return (
+        _NAMESPACE_TERMINATING_CAUSE in _status_cause_types(body)
+        or _NAMESPACE_TERMINATING_MESSAGE in body
+    )
 
 
 @inject
@@ -372,21 +420,7 @@ async def apply_kubernetes_resource(
             else:
                 raise
     elif kind == "Service":
-        core_api = kubeclient.CoreV1Api(client)
-        try:
-            await core_api.create_namespaced_service(
-                namespace=namespace,
-                body=resource,  # type: ignore[arg-type]
-            )
-        except ApiException as exc:
-            if exc.status == status.HTTP_409_CONFLICT:
-                await core_api.replace_namespaced_service(
-                    name=name,
-                    namespace=namespace,
-                    body=resource,  # type: ignore[arg-type]
-                )
-            else:
-                raise
+        await apply_service(resource=resource, namespace=namespace, client=client)
     elif "/" in api_version:
         # Custom resources (e.g., Traefik Middleware)
         group, version = api_version.rsplit("/", 1)
@@ -436,6 +470,29 @@ async def list_services_in_all_namespaces(
     """List the Services of every namespace that match ``label_selector``."""
     core_api = kubeclient.CoreV1Api(client)
     return await core_api.list_service_for_all_namespaces(label_selector=label_selector)
+
+
+@inject
+async def apply_service(
+    resource: dict,
+    namespace: str,
+    client: ApiClient = Depends(get_api_client),
+) -> V1Service:
+    """Create a Service, or replace the one with the same name; return the stored object."""
+    core_api = kubeclient.CoreV1Api(client)
+    try:
+        return await core_api.create_namespaced_service(
+            namespace=namespace,
+            body=resource,  # type: ignore[arg-type]
+        )
+    except ApiException as exc:
+        if exc.status != status.HTTP_409_CONFLICT:
+            raise
+    return await core_api.replace_namespaced_service(
+        name=resource["metadata"]["name"],
+        namespace=namespace,
+        body=resource,  # type: ignore[arg-type]
+    )
 
 
 @inject
