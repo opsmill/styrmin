@@ -283,6 +283,29 @@ deployment. That gives you a few useful properties:
 - **A BSL is shared infrastructure.** Setting it up once per environment
   is cheaper than setting it up per deployment.
 
+### What a BSL creates in the cluster
+
+When you assign a BSL to the first environment of a cluster, Styrmin
+creates two objects in the `styrmin` namespace:
+
+- a Velero `BackupStorageLocation` named `styrmin-bsl-<BSL id>`;
+- a Secret named `styrmin-bsl-<BSL id>-credentials`, which holds the
+  S3 access key and secret key.
+
+Both carry the label `styrmin.io/bsl-id=<BSL id>`. To list them:
+
+```bash
+kubectl get backupstoragelocations.velero.io,secrets -n styrmin \
+  -l styrmin.io/bsl-id=<BSL id>
+```
+
+The names come from the BSL's id, not its name, so you can rename a BSL
+at any time: backups, credential updates and the removal of the objects
+when you unassign the BSL keep working. Styrmin versions before this
+change named the objects after the BSL's name (`styrmin-bsl-<name>`).
+Styrmin finds those objects by the same label and keeps using them; it
+does not rename them.
+
 ### Retention: how long a backup lives
 
 Every Velero backup Styrmin creates carries a **TTL** — the duration

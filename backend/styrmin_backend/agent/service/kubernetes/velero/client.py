@@ -3,14 +3,17 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Any
 
 from loguru import logger
 
 from styrmin_backend.agent.service.kubernetes.velero.resources import (
+    BSL_ID_LABEL,
     VeleroBackup,
     VeleroBackupStorageLocation,
     VeleroRestore,
+    velero_bsl_name,
 )
 
 
@@ -227,44 +230,113 @@ class VeleroClient:
                 f"Failed to create Velero BSL {bsl.name}: {e}"
             ) from e
 
-    async def delete_bsl(self, name: str, secret_name: str, namespace: str) -> None:
-        """Delete a Velero BackupStorageLocation CRD and its credential Secret."""
-        from kubernetes_asyncio.client import CoreV1Api
+    async def get_bsl_name(self, bsl_id: str, namespace: str) -> str:
+        """Name of the Velero BackupStorageLocation of the location ``bsl_id``.
 
-        core_api = CoreV1Api(self._api_client)
-
-        # Delete BSL CRD
+        Found by label, so it also finds an object that an earlier Styrmin
+        version named after the location's name.
+        """
         try:
-            await self.custom_api.delete_namespaced_custom_object(
+            listed = await self.custom_api.list_namespaced_custom_object(
                 group=VELERO_API_GROUP,
                 version=VELERO_API_VERSION,
                 namespace=namespace,
                 plural=VELERO_BSL_PLURAL,
-                name=name,
+                label_selector=f"{BSL_ID_LABEL}={bsl_id}",
             )
-            logger.info(f"Deleted Velero BSL: {name}")
-        except Exception as e:
-            raise VeleroClientError(f"Failed to delete Velero BSL {name}: {e}") from e
-
-        # Delete credential Secret
-        try:
-            await core_api.delete_namespaced_secret(
-                name=secret_name, namespace=namespace
-            )
-            logger.info(f"Deleted BSL credential Secret: {secret_name}")
         except Exception as e:
             raise VeleroClientError(
-                f"Failed to delete BSL credential Secret {secret_name}: {e}"
+                f"Failed to list the Velero BSL of location {bsl_id}: {e}"
             ) from e
+        names = sorted(item["metadata"]["name"] for item in listed.get("items", []))
+        if not names:
+            raise VeleroClientError(
+                f"No Velero BSL labelled {BSL_ID_LABEL}={bsl_id} in namespace {namespace}"
+            )
+        return velero_bsl_name(bsl_id) if velero_bsl_name(bsl_id) in names else names[0]
+
+    async def delete_bsl(self, bsl_id: str, namespace: str) -> None:
+        """Delete the Velero BackupStorageLocations and credential Secrets of ``bsl_id``.
+
+        Both are selected by label, which also covers objects that an earlier
+        Styrmin version named after the location's name. Objects that are
+        already gone count as removed. A failure on the Velero objects does not
+        stop the Secrets, which hold the S3 keys, from being deleted.
+        """
+        from kubernetes_asyncio.client import ApiException, CoreV1Api
+
+        core_api = CoreV1Api(self._api_client)
+        selector = f"{BSL_ID_LABEL}={bsl_id}"
+        failures: list[str] = []
+
+        async def _delete(
+            kind: str, name: str, delete: Callable[[], Awaitable[Any]]
+        ) -> None:
+            try:
+                await delete()
+                logger.info(f"Deleted {kind}: {name}")
+            except ApiException as e:
+                if e.status != 404:
+                    failures.append(f"Failed to delete {kind} {name}: {e}")
+            except Exception as e:
+                failures.append(f"Failed to delete {kind} {name}: {e}")
+
+        try:
+            listed = await self.custom_api.list_namespaced_custom_object(
+                group=VELERO_API_GROUP,
+                version=VELERO_API_VERSION,
+                namespace=namespace,
+                plural=VELERO_BSL_PLURAL,
+                label_selector=selector,
+            )
+            for item in listed.get("items", []):
+                name = item["metadata"]["name"]
+                await _delete(
+                    "Velero BSL",
+                    name,
+                    partial(
+                        self.custom_api.delete_namespaced_custom_object,
+                        group=VELERO_API_GROUP,
+                        version=VELERO_API_VERSION,
+                        namespace=namespace,
+                        plural=VELERO_BSL_PLURAL,
+                        name=name,
+                    ),
+                )
+        except Exception as e:
+            failures.append(f"Failed to list the Velero BSL of location {bsl_id}: {e}")
+
+        try:
+            secrets = await core_api.list_namespaced_secret(
+                namespace=namespace, label_selector=selector
+            )
+            for secret in secrets.items:
+                name = secret.metadata.name
+                await _delete(
+                    "BSL credential Secret",
+                    name,
+                    partial(
+                        core_api.delete_namespaced_secret,
+                        name=name,
+                        namespace=namespace,
+                    ),
+                )
+        except Exception as e:
+            failures.append(
+                f"Failed to list the credential Secret of location {bsl_id}: {e}"
+            )
+
+        if failures:
+            raise VeleroClientError("; ".join(failures))
 
     async def update_bsl_secret(
         self,
-        secret_name: str,
+        bsl_id: str,
         namespace: str,
         access_key_id: str,
         secret_access_key: str,
     ) -> None:
-        """Update the credential Secret for a BSL."""
+        """Update the credential Secret of the location ``bsl_id``, found by label."""
         from kubernetes_asyncio.client import CoreV1Api
 
         core_api = CoreV1Api(self._api_client)
@@ -280,14 +352,29 @@ class VeleroClient:
             },
         }
         try:
-            await core_api.patch_namespaced_secret(
-                name=secret_name, namespace=namespace, body=body
+            secrets = await core_api.list_namespaced_secret(
+                namespace=namespace, label_selector=f"{BSL_ID_LABEL}={bsl_id}"
             )
-            logger.info(f"Updated BSL credential Secret: {secret_name}")
         except Exception as e:
             raise VeleroClientError(
-                f"Failed to update BSL credential Secret {secret_name}: {e}"
+                f"Failed to list the credential Secret of location {bsl_id}: {e}"
             ) from e
+        if not secrets.items:
+            raise VeleroClientError(
+                f"No credential Secret labelled {BSL_ID_LABEL}={bsl_id} "
+                f"in namespace {namespace}"
+            )
+        for secret in secrets.items:
+            secret_name = secret.metadata.name
+            try:
+                await core_api.patch_namespaced_secret(
+                    name=secret_name, namespace=namespace, body=body
+                )
+                logger.info(f"Updated BSL credential Secret: {secret_name}")
+            except Exception as e:
+                raise VeleroClientError(
+                    f"Failed to update BSL credential Secret {secret_name}: {e}"
+                ) from e
 
     async def list_pod_volume_backups(
         self, namespace: str, backup_name: str

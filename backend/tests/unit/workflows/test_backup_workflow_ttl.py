@@ -66,6 +66,8 @@ class WorkflowRun:
     status_calls: list[dict[str, Any]] = field(default_factory=list)
     #: ``build_velero_backup`` kwargs (the flow calls it at most once).
     velero_kwargs: dict[str, Any] | None = None
+    #: Parameters the flow passed to the Velero USER flow.
+    user_flow_parameters: dict[str, Any] | None = None
     #: Ordered trace of the two operations whose relative order is a contract.
     events: list[str] = field(default_factory=list)
     #: What the flow body raised, when the caller asked for it to be captured.
@@ -95,7 +97,7 @@ async def _run_backup_workflow(
     deployment_missing: bool = False,
     environment_missing: bool = False,
     cluster_missing: bool = False,
-    backup_storage_location_name: str | None = None,
+    backup_storage_location_id: UUID | None = None,
     velero_phase: str = "Completed",
     velero_expiration: str | None = VELERO_EXPIRATION,
     velero_volume_bytes: int | None = None,
@@ -119,7 +121,7 @@ async def _run_backup_workflow(
             ``deployment_read_error`` and the case the flow used to swallow.
         environment_missing: The environment lookup returns ``None``.
         cluster_missing: The cluster lookup returns ``None``.
-        backup_storage_location_name: Name of the environment's assigned BSL,
+        backup_storage_location_id: Id of the environment's assigned BSL,
             or None for "no BSL assigned".
         velero_phase: ``status.phase`` the USER flow reports back.
         velero_expiration: ``status.expiration`` the USER flow reports back.
@@ -152,11 +154,12 @@ async def _run_backup_workflow(
     environment = MagicMock()
     environment.config = environment_config
     environment.cluster_id = uuid4()
-    if backup_storage_location_name is None:
+    if backup_storage_location_id is None:
         environment.backup_storage_location = None
     else:
         environment.backup_storage_location = MagicMock()
-        environment.backup_storage_location.name = backup_storage_location_name
+        environment.backup_storage_location.id = backup_storage_location_id
+        environment.backup_storage_location.name = "primary"
 
     cluster = MagicMock()
     cluster.config = cluster_config
@@ -195,6 +198,10 @@ async def _run_backup_workflow(
         built.render.return_value = {"kind": "Backup"}
         return built
 
+    def _record_user_flow(**kwargs: Any) -> MagicMock:
+        run.user_flow_parameters = kwargs["parameters"]
+        return flow_run
+
     flow_run = MagicMock()
     flow_run.id = uuid4()
     flow_run.state = MagicMock()
@@ -222,7 +229,7 @@ async def _run_backup_workflow(
         patch(f"{MODULE}.get_backup", AsyncMock(return_value=backup)),
         patch(f"{MODULE}.update_backup_status", AsyncMock(side_effect=_record_status)),
         patch(f"{MODULE}.build_velero_backup", MagicMock(side_effect=_record_build)),
-        patch(f"{MODULE}.arun_deployment", AsyncMock(return_value=flow_run)),
+        patch(f"{MODULE}.arun_deployment", AsyncMock(side_effect=_record_user_flow)),
         patch(f"{MODULE}.Variable", variable),
         patch(f"{MODULE}.action_api_token", _fake_action_api_token),
         patch(f"{MODULE}.fail_open_steps", AsyncMock()),
@@ -438,15 +445,17 @@ async def test_cluster_read_failure_keeps_the_environment_bsl() -> None:
     assigned, its failure silently sends the backup to the cluster-default
     storage location — a regression in behaviour that predates this feature.
     """
+    bsl_id = uuid4()
     run = await _run_backup_workflow(
         environment_config={"backup_ttl": "2160h"},
         cluster_config={"backup_ttl": "720h"},
         cluster_read_error=RuntimeError("pool timeout"),
-        backup_storage_location_name="primary",
+        backup_storage_location_id=bsl_id,
     )
 
+    assert run.user_flow_parameters is not None
+    assert run.user_flow_parameters["bsl_id"] == str(bsl_id)
     assert run.velero_kwargs is not None
-    assert run.velero_kwargs["storage_location"] == "styrmin-bsl-primary"
     # The environment scope was read before the failure, so retention still
     # comes from it rather than the built-in default.
     assert run.velero_kwargs["ttl"] == "2160h"

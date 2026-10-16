@@ -330,8 +330,8 @@ Results are passed between workers via **Prefect Variables** (a cross-worker com
 
 **Backup:**
 
-1. `execute_backup_workflow` (INTERNAL) — marks backup IN_PROGRESS, resolves the retention TTL and records it (see [Retention TTL](#retention-ttl-servicesbackupttlpy)), builds Velero CRD, creates an action token, dispatches to USER flow with the token and `STYRMIN_BACKUP_ID`, updates status, `size_bytes` and `expires_at` from result
-2. `execute_velero_backup_flow` (USER) — creates Velero Backup CRD, polls completion, records one step per component, sums the PodVolumeBackup bytes on `Completed`, stores result (phase + `status.expiration` + `volume_bytes`) in Prefect Variable
+1. `execute_backup_workflow` (INTERNAL) — marks backup IN_PROGRESS, resolves the retention TTL and records it (see [Retention TTL](#retention-ttl-servicesbackupttlpy)), builds Velero CRD, creates an action token, dispatches to USER flow with the token, `STYRMIN_BACKUP_ID` and the id of the environment's backup storage location (`bsl_id`), updates status, `size_bytes` and `expires_at` from result
+2. `execute_velero_backup_flow` (USER) — when `bsl_id` is set, sets `spec.storageLocation` to the Velero BSL found by that id (see [Backup storage location objects](#backup-storage-location-objects)), creates Velero Backup CRD, polls completion, records one step per component, sums the PodVolumeBackup bytes on `Completed`, stores result (phase + `status.expiration` + `volume_bytes`) in Prefect Variable
 
 **Restore:**
 
@@ -380,6 +380,36 @@ A step is created when it starts, so a restore that fails while deleting the nam
 **Error message of the record.** When Velero does not complete a backup or restore, the USER flow passes Velero's `failureReason` through the Prefect Variable. When Velero gives none, as for `FailedValidation` and `PartiallyFailed`, it passes the text of the failed step instead (`failure_message`, for example "Velero restore failed validation: …"). The INTERNAL flow stores it as the `Backup` or `Restore` record's error message, and falls back to "Velero backup phase: <phase>" or "Velero restore phase: <phase>" when the Variable holds an empty reason.
 
 **RBAC.** The agent's role grants `get` and `list` on `podvolumebackups` in `velero.io` (`helm/agent/templates/roles.yaml`), for the backup component steps.
+
+## Backup storage location objects
+
+When the first environment of a cluster is assigned a backup storage location, the
+`sync-bsl-create` flow (`workflows/templates/bsl_sync.py`) creates two objects in the `styrmin`
+namespace:
+
+- a Velero `BackupStorageLocation` named `styrmin-bsl-<location id>`;
+- a Secret named `styrmin-bsl-<location id>-credentials` that holds the S3 access key and secret
+  key.
+
+Both carry the labels `styrmin.io/managed: "true"` and `styrmin.io/bsl-id: <location id>`. The
+names come from the location's id, never its name, because an operator can rename a location
+([ADR-073](../../adr/0073-kubernetes-objects-named-and-found-by-record-id.md), #488).
+
+Every later step selects the objects by the `styrmin.io/bsl-id` label, not by name
+(`VeleroClient` in `agent/service/kubernetes/velero/client.py`):
+
+| Step | Flow or caller | What it does |
+|------|----------------|--------------|
+| Credentials update | `sync-bsl-update-credentials` | Patches every Secret with the label. Fails when there is none. |
+| Unassign, or reassign to another location | `sync-bsl-delete` | Deletes every Velero BSL and every Secret with the label. An object that is already gone counts as removed, and a failure on the Velero object does not stop the Secret from being deleted. |
+| Backup | `execute_velero_backup_flow` | Uses the name of the Velero BSL with the label as `spec.storageLocation`. Prefers `styrmin-bsl-<location id>` when there are several. Fails before it creates the Velero Backup when there is none. |
+
+Versions before #488 named both objects after the location's name (`styrmin-bsl-<name>`) with the
+same labels. Selecting by label keeps those objects in use: backups still target them, and an
+unassign removes them. Styrmin does not rename them, because a Velero restore needs the
+`BackupStorageLocation` named in the backup's `spec.storageLocation`.
+
+The flows take the location's id (`bsl_id`) and never its name.
 
 ## Restore Lifecycle
 

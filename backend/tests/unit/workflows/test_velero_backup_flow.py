@@ -36,6 +36,7 @@ async def _run_flow(
     *,
     phase: str,
     pod_volume_backups: list[dict[str, Any]] | Exception | None = None,
+    bsl_id: str | None = None,
 ) -> FlowRun:
     velero_backup = {
         "metadata": {"name": "styrmin-backup-1"},
@@ -47,6 +48,7 @@ async def _run_flow(
     }
     velero_client = MagicMock()
     velero_client.create_backup_from_dict = AsyncMock()
+    velero_client.get_bsl_name = AsyncMock(return_value="styrmin-bsl-old-name")
     velero_client.poll_backup_status = AsyncMock(return_value=velero_backup)
     if isinstance(pod_volume_backups, Exception):
         velero_client.list_pod_volume_backups = AsyncMock(
@@ -73,9 +75,10 @@ async def _run_flow(
         patch(f"{MODULE}.Variable", variable),
     ):
         await execute_velero_backup_flow.fn(
-            crd_body={"kind": "Backup"},
+            crd_body={"kind": "Backup", "spec": {"ttl": "720h"}},
             velero_backup_name="styrmin-backup-1",
             velero_namespace="styrmin",
+            bsl_id=bsl_id,
         )
 
     variable.set.assert_awaited_once()
@@ -118,3 +121,20 @@ async def test_unreadable_size_warns_and_still_reports_the_completed_backup() ->
     assert run.payload["status"]["phase"] == "Completed"
     run.logger.warning.assert_called_once()
     assert "403 Forbidden" in run.logger.warning.call_args.args[0]
+
+
+async def test_backup_targets_the_velero_bsl_found_by_location_id() -> None:
+    """The location's Velero object is found by id, so a renamed location still resolves (#488)."""
+    run = await _run_flow(phase="Completed", bsl_id="bsl-1")
+
+    run.velero_client.get_bsl_name.assert_awaited_once_with("bsl-1", "styrmin")
+    created = run.velero_client.create_backup_from_dict.await_args.args[0]
+    assert created["spec"] == {"ttl": "720h", "storageLocation": "styrmin-bsl-old-name"}
+
+
+async def test_backup_without_location_uses_the_velero_default() -> None:
+    run = await _run_flow(phase="Completed")
+
+    run.velero_client.get_bsl_name.assert_not_awaited()
+    created = run.velero_client.create_backup_from_dict.await_args.args[0]
+    assert "storageLocation" not in created["spec"]

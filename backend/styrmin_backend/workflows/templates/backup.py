@@ -142,6 +142,7 @@ async def execute_velero_backup_flow(
     velero_namespace: str,
     timeout: int = 3600,
     components: list[str] | None = None,
+    bsl_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a Velero Backup CRD and poll until completion.
 
@@ -153,6 +154,8 @@ async def execute_velero_backup_flow(
         velero_namespace: Namespace where Velero resources live.
         timeout: Maximum seconds to wait for backup completion.
         components: The backup's components; each one is recorded as a step.
+        bsl_id: The environment's backup storage location; ``None`` uses
+            Velero's default location.
 
     Returns:
         The final Velero Backup resource dict from the K8s API.
@@ -184,6 +187,13 @@ async def execute_velero_backup_flow(
                 k8s_client.CoreV1Api(api_client)
             ).component_of,
         )
+        if bsl_id is not None:
+            # Looked up by the location's id, so a renamed location still resolves.
+            storage_location = await client.get_bsl_name(bsl_id, velero_namespace)
+            crd_body = {
+                **crd_body,
+                "spec": {**crd_body["spec"], "storageLocation": storage_location},
+            }
         await client.create_backup_from_dict(crd_body)
         logger.info(
             f"Created Velero Backup CRD {velero_backup_name} "
@@ -485,7 +495,7 @@ async def execute_backup_workflow(
 
         # Resolve BSL from deployment -> environment -> backup_storage_location,
         # and read the three scopes' config for retention resolution below.
-        storage_location: str | None = None
+        bsl_id: str | None = None
         deployment_config: dict[str, Any] | None = None
         environment_config: dict[str, Any] | None = None
         cluster_config: dict[str, Any] | None = None
@@ -517,12 +527,10 @@ async def execute_backup_workflow(
                         # silently divert the backup to the cluster-default BSL
                         # even though the environment's BSL was already known.
                         if env.backup_storage_location:
-                            storage_location = (
-                                f"styrmin-bsl-{env.backup_storage_location.name}"
-                            )
+                            bsl_id = str(env.backup_storage_location.id)
                             logger.info(
-                                f"Using BSL '{storage_location}' "
-                                f"for backup {backup_uuid}"
+                                f"Using BSL '{env.backup_storage_location.name}' "
+                                f"({bsl_id}) for backup {backup_uuid}"
                             )
                         cluster = await uow.clusters.get(env.cluster_id)
                         if cluster is None:
@@ -624,7 +632,6 @@ async def execute_backup_workflow(
             driver_name="styrmin",
             ttl=ttl,
             hooks=hooks,
-            storage_location=storage_location,
         )
         crd_body = velero_backup.render()
 
@@ -650,6 +657,7 @@ async def execute_backup_workflow(
                     "velero_namespace": velero_namespace,
                     "timeout": timeout,
                     "components": components,
+                    "bsl_id": bsl_id,
                 },
                 job_variables=action_job_variables(api_token, backup_id=backup_uuid),
                 poll_interval=config.SETTINGS.agent.poll_interval,

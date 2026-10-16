@@ -158,7 +158,7 @@ async def test_infrahub_backup_and_restore_lifecycle(
     await assert_velero_backup_uses_bsl(
         kubeconfig_path=kubeconfig_path,
         backup_name=backup.name,
-        expected_bsl_name=load_infrahub["bsl_name"],
+        expected_bsl_id=str(load_infrahub["bsl_id"]),
     )
 
     # 3. Delete the tag (modify data post-backup)
@@ -271,7 +271,7 @@ async def test_infrahub_enterprise_backup_and_restore_lifecycle(
     await assert_velero_backup_uses_bsl(
         kubeconfig_path=kubeconfig_path,
         backup_name=backup.name,
-        expected_bsl_name=load_infrahub_enterprise["bsl_name"],
+        expected_bsl_id=str(load_infrahub_enterprise["bsl_id"]),
     )
 
     # 3. Delete the tag (modify data post-backup)
