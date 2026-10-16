@@ -13,6 +13,7 @@ from styrmin_backend.db.models import (
     ApplicationDriverVersion,
     Cluster,
     Deployment as DeploymentModel,
+    DeploymentState as DeploymentStateModel,
     Environment,
     HelmChart,
     HelmRepository,
@@ -645,3 +646,30 @@ async def test_partial_unique_index_allows_tombstone_then_recreate(
     )
     await repo.save(fresh)
     await session.commit()  # would raise IntegrityError if the index was wrong
+
+
+@pytest.mark.asyncio
+async def test_update_config_writes_only_the_config(
+    session: AsyncSession, prerequisites
+):
+    """A rename rewrites the rules of other deployments without touching their other columns (#492)."""
+    repo = SQLModelDeploymentRepository(session)
+    deployment = _new_deployment(prerequisites)
+    await repo.save(deployment)
+    await session.commit()
+    instance_id = deployment.active_instance.id
+    # Written behind the repository's back, as the status reporter does.
+    row = await session.get(DeploymentModel, deployment.id)
+    assert row is not None
+    row.status = DeploymentStateModel.RUNNING
+    await session.commit()
+
+    await repo.update_config(deployment.id, {"env_vars": {"FOO": "bar"}})
+    await session.commit()
+
+    await session.refresh(row)
+    assert row.config == {"env_vars": {"FOO": "bar"}}
+    assert row.name == deployment.name
+    assert row.status == DeploymentStateModel.RUNNING
+    assert row.active_application_instance_id == instance_id
+    assert row.last_instance_sequence == 1

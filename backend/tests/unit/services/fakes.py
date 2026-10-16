@@ -763,6 +763,11 @@ class FakeDeploymentRepository(DeploymentRepository):
             and (include_deleted or d.deleted_at is None)
         ]
 
+    async def update_config(self, deployment_id: UUID, config: dict | None) -> None:
+        for d in self._deployments:
+            if d.id == deployment_id:
+                d.config = config
+
     async def delete_all_for_environment(self, environment_id: UUID) -> list[UUID]:
         """Drop every deployment of an environment, tombstones included.
 

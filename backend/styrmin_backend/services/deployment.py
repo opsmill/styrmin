@@ -79,6 +79,7 @@ from styrmin_backend.services.replicas.validator import (
     has_replica_overrides,
     validate_replica_overrides,
 )
+from styrmin_backend.services.scheduling.references import rename_affinity_references
 from deepdiff import DeepDiff
 
 from styrmin_backend.domain.models import Instance
@@ -606,11 +607,16 @@ async def update_deployment(
                 application_version=deployment.application_version,
             )
 
+        old_name = deployment.name
         if deployment_name is not None:
             deployment.name = await _validate_new_name(deployment, deployment_name, uow)
 
         if deployment_config is not None:
             deployment.config = deployment_config
+
+        if deployment.name != old_name:
+            # Rules that name the deployment keep naming it after the rename (#492).
+            await rename_affinity_references(uow, deployment, old_name=old_name)
 
         await _ensure_ingress_controller(
             environment_id=deployment.environment_id,
@@ -1070,6 +1076,11 @@ async def update_deployment_version(
             DeploymentState.DEPLOYING if is_upgrade else DeploymentState.PENDING
         )
 
+        if new_name != name_before:
+            await rename_affinity_references(uow, deployment, old_name=name_before)
+            # Saved before the instance is generated, so a rule giving the new name finds it (#492).
+            await uow.deployments.save(deployment=deployment)
+
         if reconcile_services:
             # Before instance generation, so the context carries the services and
             # names of the target driver version (#237).
@@ -1097,7 +1108,7 @@ async def update_deployment_version(
         # No-op detection (spec 014 / FR-002): the candidate resolves to the current
         # realised instance, so no instance is persisted and no reconcile dispatched.
         # A driver or service change always reaches the instance, so nothing above
-        # wrote to the database yet.
+        # wrote to the database yet, except a rename, which the branch below commits.
         if not reconcile_services and _update_is_noop(
             current_instance=current_instance, new_instance=new_instance
         ):

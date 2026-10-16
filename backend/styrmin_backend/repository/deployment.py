@@ -91,6 +91,12 @@ class DeploymentRepository(BaseRepository[DeploymentModel], ABC):
         )
 
     @abstractmethod
+    async def update_config(self, deployment_id: UUID, config: dict | None) -> None:
+        raise NotImplementedError(
+            "The update_config method must be implemented in the subclass."
+        )
+
+    @abstractmethod
     async def delete_all_for_environment(self, environment_id: UUID) -> list[UUID]:
         raise NotImplementedError(
             "The delete_all_for_environment method must be implemented in the subclass."
@@ -354,6 +360,14 @@ class SQLModelDeploymentRepository(
             statement = statement.where(self.model_class.deleted_at.is_(None))  # type: ignore[union-attr]
         result = await self.session.exec(statement)
         return [self._to_entity(entity) for entity in result.all()]
+
+    async def update_config(self, deployment_id: UUID, config: dict | None) -> None:
+        """Write only the deployment's config, leaving its other columns as they are."""
+        await self.session.exec(
+            update(self.model_class)
+            .where(col(self.model_class.id) == deployment_id)
+            .values(config=config)
+        )
 
     async def delete_all_for_environment(self, environment_id: UUID) -> list[UUID]:
         """Hard-delete every deployment of an environment, dependents first.
