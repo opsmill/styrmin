@@ -203,7 +203,7 @@ Manages environments within clusters.
 | `get_environment(environment_id, uow)` | Retrieve environment by ID |
 | `get_environments(uow)` | List all environments |
 | `update_environment(environment_id, uow, config, *, acting_user_id)` | Validate, bind the deployment references against the environment (a refused reference saves nothing), persist the env-config row, then fan out a redeploy Task to every live, non-internal deployment in the environment whose active instance is not already at the new config, and create or redeploy the environment's dedicated ingress controller for `acting_user_id`. See "Environment-config fanout" below + [ADR-012](../../adr/0012-environment-config-fanout.md). Raises `EnvironmentOperationInProgressError` while an environment clone occupies the environment (`guard_no_clone_occupying_environment`). Only the clone part of the environment-level guard applies: an environment backup or restore in progress does not block the update. The check runs before the `config is None` no-op path, so a no-op update is also refused while a clone occupies the environment. |
-| `delete_environment(environment_id, uow)` | Delete an environment and everything that depends on it, in four steps (see "Deleting an environment" below). |
+| `delete_environment(environment_id, uow)` | Delete an environment and everything that depends on it, in five steps (see "Deleting an environment" below). |
 
 <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 
@@ -211,7 +211,7 @@ Manages environments within clusters.
 
 <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 
-`delete_environment` runs four steps, in this order:
+`delete_environment` runs five steps, in this order:
 
 1. It settles the environment clone records in which the environment appears, in one transaction:
    - as the created environment, with `detach_clones_from_created_environment`;
@@ -221,6 +221,7 @@ Manages environments within clusters.
 2. It deletes the environment backups of the environment, with the same cascade as `delete_environment_backup` (`delete_environment_backups_for_environment`).
 3. It asks the cluster to tear down every remaining deployment of the environment with `request_cluster_teardown`, then deletes the deployment rows with `uow.deployments.delete_all_for_environment`. The teardown request is best effort: the rows are deleted even when the cluster did not answer, and the failures are logged as `environment_delete_teardown_incomplete`.
 4. It deletes the environment row. When a concurrent delete already removed it, the call returns without an error.
+5. It asks for the removal of the environment's backup storage location from the cluster, with `request_bsl_cluster_cleanup`, when this was the last environment of its cluster that used the location. Which location, if any, is decided by `get_bsl_name_to_remove_from_cluster` before step 1 changes anything, because it reads the environment's current assignment. The request submits the `sync-bsl-delete` workflow, which deletes the location's Velero object and its credentials Secret, and does not wait for it. A submission that fails is logged as `environment_delete_bsl_cleanup_failed` and does not undo the delete: the objects stay in the cluster until the location is deleted. A removal that finds an object already gone counts it as removed (`VeleroClient.delete_bsl`).
 
 The `environment_deleted` log line records the number of environment backups and deployments deleted, the teardown requests that succeeded and failed, and the clone records discarded, kept, deleted and failed.
 

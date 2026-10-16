@@ -3501,3 +3501,128 @@ async def test_bsl_cluster_objects_are_removed_with_last_environment_and_with_bs
         if not bsl_deleted:
             with suppress(Exception):
                 await client.backup_storage_locations.delete(bsl.id)
+
+
+async def wait_for_bsl_removal_runs(
+    kubeconfig_path: str, bsl_name: str, *, count: int, timeout: float
+) -> list[str]:
+    """Wait for ``count`` ``sync-bsl-delete`` runs for a location to finish.
+
+    Returns the final state name of each run the workflow service holds for the
+    location, so a caller can assert that none of them failed.
+    """
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
+    prefect_service = await AsyncService.get(
+        "prefect-server", namespace="styrmin", api=kr8s_api
+    )
+    async with _portforward(prefect_service, remote_port=4200) as port:
+        prefect_url = f"http://localhost:{port}/api"
+        await _wait_for_http(f"{prefect_url}/health", timeout=60.0)
+        async with PrefectClient(api=prefect_url) as prefect:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout
+            states: list[str] = []
+            while loop.time() < deadline:
+                runs = await prefect.read_flow_runs(
+                    flow_filter=FlowFilter(
+                        name=FlowFilterName(any_=["sync-bsl-delete"])
+                    )
+                )
+                mine = [
+                    run for run in runs if run.parameters.get("bsl_name") == bsl_name
+                ]
+                states = [run.state.name for run in mine if run.state]
+                if len(mine) >= count and all(
+                    run.state and run.state.is_final() for run in mine
+                ):
+                    return states
+                await asyncio.sleep(2)
+    raise AssertionError(
+        f"Expected {count} finished sync-bsl-delete runs for BSL {bsl_name!r} "
+        f"within {timeout}s; states seen: {states}"
+    )
+
+
+@pytest.mark.ci
+@pytest.mark.shard_backup
+@pytest.mark.api_only(
+    reason="Every action is a raw SDK or Kubernetes call and no dual-entrypoint "
+    "driver method is invoked: the assertions are on the cluster objects and on "
+    "the workflow runs, which the UI cannot show."
+)
+async def test_bsl_delete_after_its_last_environment_leaves_no_failed_removal_run(
+    styrmin_resources: dict,
+    velero_ready: None,  # noqa: ARG001 — the BackupStorageLocation CRD must exist
+    vcluster: dict,
+) -> None:
+    """Issue #475: deleting a location whose objects are already gone is not an error.
+
+    Deleting the last environment removes the location's Velero object and
+    credentials Secret. Deleting the location afterwards finds nothing left to
+    remove, which is the usual order. Both removal runs must end as completed.
+    """
+    from uuid import uuid4
+
+    client: StyrminClient = styrmin_resources["client"]
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    suffix = uuid4().hex[:8]
+    bsl_name = f"bsl-475-gone-{suffix}"
+
+    bsl = await client.backup_storage_locations.create(
+        name=bsl_name,
+        endpoint="http://garage.styrmin.svc:3900",
+        bucket="velero",
+        region="garage",
+        access_key_id="GKdeadbeefdeadbeefdeadbeef",
+        secret_access_key="deadbeef" * 8,
+    )
+    environment_id: str | None = None
+    bsl_deleted = False
+    try:
+        environment = await client.environments.create(
+            name=f"bsl-475-gone-{suffix}",
+            cluster_id=styrmin_resources["cluster_id"],
+            config={},
+        )
+        environment_id = str(environment.id)
+        await client.backup_storage_locations.assign(
+            environment_id=environment.id, bsl_id=bsl.id
+        )
+        await wait_for_bsl_cluster_objects(
+            kubeconfig_path,
+            bsl_name,
+            present=True,
+            timeout=BSL_CLUSTER_CLEANUP_TIMEOUT_SECONDS,
+        )
+
+        await client.environments.delete(environment_id=environment_id)
+        environment_id = None
+        await wait_for_bsl_cluster_objects(
+            kubeconfig_path,
+            bsl_name,
+            present=False,
+            timeout=BSL_CLUSTER_CLEANUP_TIMEOUT_SECONDS,
+        )
+
+        # Nothing is left in the cluster, so this removal finds nothing to delete.
+        await client.backup_storage_locations.delete(bsl.id)
+        bsl_deleted = True
+
+        states = await wait_for_bsl_removal_runs(
+            kubeconfig_path,
+            bsl_name,
+            count=2,
+            timeout=BSL_CLUSTER_CLEANUP_TIMEOUT_SECONDS,
+        )
+        assert states == ["Completed", "Completed"], (
+            "the removal after the last environment and the removal on location "
+            f"delete must both complete; got {states}"
+        )
+    finally:
+        # The cluster is session-shared: leave no environment or location behind.
+        if environment_id is not None:
+            with suppress(Exception):
+                await client.environments.delete(environment_id=environment_id)
+        if not bsl_deleted:
+            with suppress(Exception):
+                await client.backup_storage_locations.delete(bsl.id)
