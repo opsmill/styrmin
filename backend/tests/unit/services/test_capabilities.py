@@ -137,7 +137,7 @@ def test_cluster_capabilities_no_ingress_without_class_or_dedicated_ingress():
 
 
 def test_environment_capabilities_backup_from_bsl():
-    """T016: Backup capability derived from backup_storage_location."""
+    """T016, #509: the backup capability names the location's Velero object, built from its id."""
     bsl = BackupStorageLocation(
         id=uuid4(),
         name="main-backup",
@@ -160,7 +160,7 @@ def test_environment_capabilities_backup_from_bsl():
     assert result is not None
     assert "backup" in result
     assert "velero" in result["backup"]
-    assert result["backup"]["velero"]["storage_location"] == "main-backup"
+    assert result["backup"]["velero"]["storage_location"] == f"styrmin-bsl-{bsl.id}"
 
 
 def test_environment_capabilities_no_backup_without_bsl():

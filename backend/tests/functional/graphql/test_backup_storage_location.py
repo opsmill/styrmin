@@ -253,6 +253,34 @@ async def test_assign_bsl_creates_cluster_objects_by_location_id(
     assert "bsl_name" not in created
 
 
+@pytest.mark.usefixtures("workflow_manager")
+@pytest.mark.asyncio
+async def test_backup_capability_names_velero_object_and_survives_rename(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """#509: the capability is the Velero object's name, so a rename leaves it unchanged."""
+    bsl = await seed_backup_storage_location(session, name="before-rename")
+    env = await seed_environment(session)
+    bsl_id, env_id = bsl.id, env.id
+    expected = {"velero": {"storage_location": f"styrmin-bsl-{bsl_id}"}}
+
+    await gql(
+        client,
+        "assign_backup_storage_location",
+        {"environmentId": str(env_id), "backupStorageLocationId": str(bsl_id)},
+    )
+    session.expire_all()
+    assigned = await session.get(Environment, env_id)
+    assert assigned is not None and assigned.capabilities is not None
+    assert assigned.capabilities["backup"] == expected
+
+    await _rename(client, bsl_id, "after-rename")
+    session.expire_all()
+    renamed = await session.get(Environment, env_id)
+    assert renamed is not None and renamed.capabilities is not None
+    assert renamed.capabilities["backup"] == expected
+
+
 @pytest.mark.asyncio
 async def test_assign_bsl_saves_keys_outside_the_flow_parameters(
     client: AsyncClient, session: AsyncSession, workflow_manager: MagicMock

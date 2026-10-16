@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 from pydantic import ValidationError
 
+from styrmin_backend.agent.service.kubernetes.velero.resources import velero_bsl_name
 from styrmin_backend.context.models.capabilities import (
     BackupCapabilityDetail,
     Capabilities,
@@ -103,7 +104,9 @@ def compute_environment_capabilities(environment: Environment) -> dict[str, Any]
     if environment.backup_storage_location is not None:
         capabilities.backup = {
             "velero": BackupCapabilityDetail(
-                storage_location=environment.backup_storage_location.name,
+                storage_location=velero_bsl_name(
+                    str(environment.backup_storage_location.id)
+                ),
             ),
         }
 
