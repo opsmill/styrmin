@@ -1,0 +1,1 @@
+Changed when a deployment task waits for a `Deployment` or `StatefulSet` to be ready: the task now also waits until the workload runs no more pods than its replica count, so a scale-down, a stopped component or a rolling update completes only after the extra pods are gone.
