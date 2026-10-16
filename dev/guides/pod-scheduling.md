@@ -36,6 +36,20 @@ Instead of a raw `label_selector`, an affinity term may carry a
 `styrmin/deployment_id` label on every pod template. Narrow further with
 `components:` to pick specific components in the target deployment.
 
+A `deployment_ref` names its target by `deployment_id` or by
+`deployment_name`, never both. Styrmin stores the name as written and looks
+it up in the environment each time it reconciles a deployment that the rule
+applies to; a name that no deployment of the environment has raises
+`UnresolvableAffinityReferenceError`. When a deployment is renamed through
+`updateDeployment` or `updateDeploymentVersion`, Styrmin replaces the old
+name with the new one in the `pod_affinity` and `pod_anti_affinity` rules of
+the environment and of every deployment in it, in the same transaction as
+the rename (`services/scheduling/references.py`,
+[ADR-034](../adr/0034-affinity-by-deployment-reference-via-label.md),
+[#492](https://github.com/opsmill/styrmin/issues/492)). The rendered rules do
+not change, because they select the deployment's id. Rules in other
+environments are not changed: a rule resolves only in its own environment.
+
 ## Per-feature opt-out
 
 Every feature group can be opted out at the deployment or component

@@ -157,6 +157,8 @@ class UnitOfWork(ABC):
 
 `DeploymentRepository` exposes a `find_all_by_environment(environment_id, *, include_deleted=False)` accessor (added in 009-environment-update) that returns every non-tombstoned deployment in an environment, internal rows included; `include_deleted=True` adds the tombstoned rows. Callers wanting a narrower subset filter the result in-loop. The fanout in `update_environment` uses this accessor and applies the tombstoned/internal exclusion at iteration time so the per-deployment counters can distinguish "evaluated but excluded" from "evaluated and dispatched/skipped".
 
+`DeploymentRepository.update_config(deployment_id, config)` writes only the `config` column of one deployment, with an `UPDATE` statement, so the deployment's status and active instance stay as other transactions wrote them. A rename uses it to replace the old name in the affinity rules of the other deployments of the environment (`services/scheduling/references.py`, [#492](https://github.com/opsmill/styrmin/issues/492)).
+
 ### Usage Pattern
 
 ```python
