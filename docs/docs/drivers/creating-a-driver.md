@@ -55,7 +55,7 @@ helm install test-run <chart> -n test --dry-run --debug | less
 kubectl get all -n test
 ```
 
-You're looking for two things.
+You're looking for three things.
 
 **The workloads** — every `Deployment`, `StatefulSet`, `Job`, or
 `CronJob` the chart creates. Each of these is something Styrmin might
@@ -65,6 +65,16 @@ candidate **components**.
 For `my-app`, the chart produces two workloads: the FastAPI server
 (a `Deployment`) and a PostgreSQL primary (a `StatefulSet`). That's the
 list of candidate components.
+
+Note any `progressDeadlineSeconds` on a chart `Deployment`. FluxCD
+waits for the chart's resources with kstatus, which reports a
+`Deployment` as failed once its progress deadline passes, and FluxCD
+then fails the change and rolls the release back. With a deadline below
+270 seconds, the default readiness timeout of Styrmin's operator,
+FluxCD does this before Styrmin reads why the pods are not ready, so
+the failed step shows FluxCD's `ProgressDeadlineExceeded` failure
+instead of the pods' reason, such as `ImagePullBackOff`. Kubernetes'
+default deadline is 600 seconds.
 
 **The HA-shaped pieces** — workloads with replicas, persistent volumes,
 clustering, leader election, or any "this can't just be restarted in
@@ -82,8 +92,37 @@ For `my-app`: the FastAPI server is a single stateless workload
 (one component, no backup), and PostgreSQL is stateful (one component,
 needs a `postgres` backup strategy).
 
+**The Helm hooks** — resources annotated `helm.sh/hook`, which Helm
+creates at a set point of an install, upgrade, rollback, uninstall or
+test, for example a pre-upgrade migration `Job`. The `--dry-run` output
+lists them in its `HOOKS:` section, before the `MANIFEST:` section.
+Styrmin applies its post-render patches to Helm hooks as it does to
+the chart's other resources:
+
+- **Styrmin's labels** reach every hook, also a hook without
+  `metadata.labels`. A hook whose own `metadata.labels` carry a
+  component's first identifier label also gets that component's
+  `styrmin/component` label.
+- **The deployment's scheduling settings** (affinity, node affinity,
+  tolerations, topology spread, resources and runtime class) reach hook
+  `Job`, `CronJob`, `Deployment`, `StatefulSet`, `DaemonSet` and
+  `ReplicaSet` resources whose own `metadata.labels` carry a component's
+  first identifier label, with that component's settings. When the
+  driver declares no components, they reach every hook of these kinds.
+  A hook `Job` that should run on the deployment's nodes therefore needs
+  the component's label on the `Job` itself, not only on its pod
+  template.
+- **Env var, image and container overrides, and the
+  component-container guard** reach a hook only when it is a
+  `Deployment` or `StatefulSet` that matches a component. Once an
+  override applies to that component, a matching hook without the
+  component container fails the install or upgrade with
+  `COMPONENT_CONTAINER_NOT_FOUND`, as a template would (see
+  [The component container](#the-component-container)).
+
 **Output of this step:** a short list of components, with notes on what
-each one is and how it should be backed up.
+each one is and how it should be backed up, and a list of the chart's
+Helm hooks with the component each one matches, if any.
 
 ### Step 2: Write the driver spec
 
@@ -234,7 +273,8 @@ them.
   deployment- or environment-scope env vars skip it.
 
 Overrides reach only this container: not other containers in the pod,
-not init containers, and not chart `Job`s or `CronJob`s. Once any
+not init containers, and not chart `Job`s or `CronJob`s, including Helm
+hook `Job`s. Once any
 override applies, the component container moves to the first position
 in the pod, which changes the default container of `kubectl logs` for
 multi-container pods. In the container's env list, user entries come
@@ -514,6 +554,17 @@ Use the built-in primitives (`stop_components`, `start_components`,
 calling Kubernetes directly. They're idempotent, tested, and
 consistent across drivers.
 
+An action that changes a resource of the chart directly, for example
+with `kubectl patch`, does not keep that change on a deployment
+installed with server-side apply (see
+[The HelmRelease](../concepts-and-architecture/operator-and-crds.md#the-helmrelease--styrmins-other-crd)).
+At the next upgrade, a field that the chart sets returns to the
+chart's value, because helm-controller forces field ownership conflicts
+and takes the field back. The upgrade does not fail. A field that the
+chart does not set keeps the action's value. `stop_components` and
+`start_components` change the component's state through Styrmin, which
+applies it in its next render, so their effect lasts.
+
 `get_component_images` returns the image of every container in the
 component's pod template, with the component container's image first
 when the component declares one. Take `images[0]` rather than searching for an image name: when a user
@@ -596,6 +647,9 @@ Before you call the driver done:
 - [ ] Every component that must run a single pod sets
       `singleton: true`, and every component whose count the chart does
       not set the way you want sets `replicas`.
+- [ ] In a driver with components, each Helm hook `Job` that must run
+      with the deployment's scheduling settings carries a component's
+      first identifier label in its own `metadata.labels`.
 - [ ] Every stateful component has a `backup` block with the right
       strategy.
 - [ ] Every externally reachable service is declared under

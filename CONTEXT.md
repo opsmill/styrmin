@@ -152,7 +152,11 @@ _Avoid_: "task" (that is the database tracking record), "step" (running all acti
 
 **Hook**:
 A lifecycle slot at which **actions** run. Currently two: `setup` (during create) and `upgrade` (during upgrade). Each **hook** is composed of three **modes**.
-_Avoid_: "lifecycle event", "phase" (that is the operator's term), "stage".
+_Avoid_: "lifecycle event", "phase" (that is the operator's term), "stage", "Helm hook" (a chart resource annotated `helm.sh/hook` is a **Helm hook**, not a **hook**).
+
+**Helm hook**:
+A resource of an **application driver**'s Helm chart annotated `helm.sh/hook`, which Helm creates at a set point of an install, upgrade, rollback, uninstall or test, for example a pre-upgrade `Job`. helm-controller runs with Helm v4 defaults (`postRenderStrategy: combined`), so a Helm hook receives Styrmin's post-render patches as the chart's other resources do: Styrmin's labels always, the scheduling settings when it is a `Job`, `CronJob`, `Deployment`, `StatefulSet`, `DaemonSet` or `ReplicaSet` that carries a **component**'s identifier label (any of those kinds when the driver declares no components), and the **component container** patches only when it is a `Deployment` or `StatefulSet` that matches a **component** ([ADR-072](dev/adr/0072-helm-v4-defaults-releases-keep-apply-method.md)). Distinct from a Styrmin **hook**, which is a lifecycle slot for **actions**.
+_Avoid_: "hook" alone, "chart hook", "hook job" (a Helm hook can be any kind).
 
 **Mode**:
 The execution phase within a **hook**: `pre`, `core`, or `post`. Ordering inside a **mode** is unspecified; ordering across **modes** is strict.
@@ -381,6 +385,7 @@ contents". Use "shard" when talking about the CI matrix cell; use
 - **"Service"** — could mean **Styrmin service** (driver-declared, → `DeployedService`), the backend **service layer**, or Kubernetes' built-in `Service` object. Qualify when ambiguous.
 - **"Task"** — `Task` database row tracking an async operation, **not** Prefect's in-process `task` primitive. When referring to Prefect's primitive, write "Prefect task".
 - **"Hook"** vs **"mode"** — **hooks** (`setup`, `upgrade`) are lifecycle slots; **modes** (`pre`, `core`, `post`) divide a hook. Do not interchange.
+- **"Hook"** vs **"Helm hook"** — a **hook** is Styrmin's lifecycle slot for **actions**; a **Helm hook** is a chart resource annotated `helm.sh/hook`. Write "Helm hook" for the chart resource.
 - **"Status"** — three things: `Deployment.status` (a **deployment state** enum), `Instance.status` (an `InstanceStatus` enum), and `DeploymentStatus` (the observed-state row). Always qualify.
 - **"Context"** — when speaking domain, this means **GlobalContext**. In code, "context" also appears as Python `Context` (Invoke) and Strawberry `Info.context`. Qualify if a reader could confuse them.
 - **"Component"** vs **"Pod"** — a **component** is the driver-declared unit of an app (e.g. `server`). A pod is a Kubernetes runtime object. Lifecycle controls act on **components**; status observation surfaces **pods**.
