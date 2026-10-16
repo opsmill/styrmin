@@ -922,6 +922,26 @@ most deployments but not for a counterpart deployment
 ([ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md) decision 3,
 `operator/crd/builder.py`).
 
+### Name a Kubernetes object after its record's id, and find it by an id label
+
+A user can rename a backup storage location, a deployment, a group and other records. A cluster
+object named after such a name stays under the old name after a rename, so code that rebuilds the
+name from the record misses it ([#488](https://github.com/opsmill/styrmin/issues/488)). For every
+object that Styrmin creates for a record:
+
+- Build its name from the record's id, as `get_kubernetes_reference` does for a deployment
+  (`styrmin-<deployment id>`) and `velero_bsl_name` does for a backup storage location
+  (`styrmin-bsl-<location id>`).
+- Put the id on the object as a label, such as `styrmin.io/bsl-id`, and select by that label to
+  update or delete the object. Selecting by label also finds objects that an earlier version named
+  differently.
+- When the name is what the user asked for, such as a service-name override, which names the
+  Service, keep the name and still select by the id label to update or delete the object.
+
+Do not pass a record's name to a flow that acts on cluster objects. Pass the id.
+
+See [ADR-073](../../adr/0073-kubernetes-objects-named-and-found-by-record-id.md).
+
 ## GraphQL (Strawberry)
 
 - Types use `@strawberry.type` decorator
