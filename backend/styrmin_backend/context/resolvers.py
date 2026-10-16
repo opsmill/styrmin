@@ -1,3 +1,5 @@
+from collections.abc import Callable
+from itertools import product
 from typing import Literal
 from uuid import UUID
 
@@ -16,6 +18,8 @@ from styrmin_backend.context.models.config import (
     ClusterConfig,
     DeploymentConfig,
     EnvironmentConfig,
+    LabelSelector,
+    LabelSelectorRequirement,
     PostRenderInjection,
     ResolvedConfig,
     ResourceRequirements,
@@ -252,18 +256,70 @@ def effective_inject_flag(inject: PostRenderInjection | None, field_name: str) -
     return value if value is not None else True
 
 
+def _concatenate_terms(groups: list[list[AffinityTerm]]) -> list[AffinityTerm]:
+    """Join each level's required terms; the scheduler ANDs pod (anti-)affinity terms."""
+    return [term for group in groups for term in group]
+
+
+def _node_term_expressions(term: AffinityTerm) -> list[LabelSelectorRequirement]:
+    """Return a node term's ``matchExpressions``, with ``matchLabels`` as ``In`` expressions."""
+    selector = term.label_selector
+    if selector is None:
+        return []
+    expressions = list(selector.match_expressions or [])
+    expressions.extend(
+        LabelSelectorRequirement(key=key, operator="In", values=[value])
+        for key, value in (selector.match_labels or {}).items()
+    )
+    return expressions
+
+
+def _and_node_affinity_terms(groups: list[list[AffinityTerm]]) -> list[AffinityTerm]:
+    """Combine each level's required node terms so a node must match one term of every level.
+
+    Kubernetes ORs ``nodeSelectorTerms`` and ANDs the expressions of one term,
+    so the result has one term for each combination of one term per level.
+    Terms without expressions are dropped first, as the post-render patch does.
+    """
+    groups = [
+        kept
+        for group in groups
+        if (kept := [term for term in group if _node_term_expressions(term)])
+    ]
+    if len(groups) <= 1:
+        return groups[0] if groups else []
+    return [
+        AffinityTerm(
+            topology_key="",
+            label_selector=LabelSelector(
+                match_expressions=[
+                    expression
+                    for term in combination
+                    for expression in _node_term_expressions(term)
+                ]
+            ),
+        )
+        for combination in product(*groups)
+    ]
+
+
 def _merge_affinity_blocks(
     level_blocks: list[tuple[ProvenanceLevel, AffinityBlock | None]],
     provenance_key: str,
     provenance: dict[str, ProvenanceLevel],
+    combine_required: Callable[
+        [list[list[AffinityTerm]]], list[AffinityTerm]
+    ] = _concatenate_terms,
 ) -> AffinityBlock | None:
     """Accumulate affinity terms across levels with per-kind ``replace:true`` reset.
 
-    ``required`` terms from all levels are concatenated (ANDed by the
-    Kubernetes scheduler); ``preferred`` terms are merged into a single
-    weighted list. If any level sets ``replace: true`` the running
-    accumulator is discarded at that point; levels deeper than the one that
-    set ``replace: true`` continue to accumulate on top of the replacement
+    ``required`` terms of the levels are ANDed: ``combine_required`` receives
+    one list of terms per contributing level and returns the effective list
+    (concatenated for pod affinity kinds, combined per node for
+    ``node_affinity``). ``preferred`` terms are merged into a single weighted
+    list. If any level sets ``replace: true`` the running accumulator is
+    discarded at that point; levels deeper than the one that set
+    ``replace: true`` continue to accumulate on top of the replacement
     unless they also set ``replace: true``.
 
     Returns ``None`` when no level contributed any terms at all (including
@@ -272,7 +328,7 @@ def _merge_affinity_blocks(
     contributed — i.e. the deepest level with either ``replace: true`` or a
     non-empty ``required``/``preferred`` entry.
     """
-    required: list[AffinityTerm] = []
+    required_groups: list[list[AffinityTerm]] = []
     preferred: list[WeightedAffinityTerm] = []
     last_contributing: ProvenanceLevel | None = None
 
@@ -280,19 +336,22 @@ def _merge_affinity_blocks(
         if block is None:
             continue
         if block.replace:
-            required = []
+            required_groups = []
             preferred = []
             last_contributing = level
         if block.required or block.preferred:
             last_contributing = level
-        required.extend(block.required)
+        if block.required:
+            required_groups.append(list(block.required))
         preferred.extend(block.preferred)
 
     if last_contributing is None:
         return None
 
     provenance[provenance_key] = last_contributing
-    return AffinityBlock(required=required, preferred=preferred, replace=False)
+    return AffinityBlock(
+        required=combine_required(required_groups), preferred=preferred, replace=False
+    )
 
 
 def _merge_resource_spec(
@@ -457,7 +516,9 @@ def _resolve_scheduling_config(
     * ``pod_affinity`` / ``pod_anti_affinity`` / ``node_affinity`` —
       ``required`` and ``preferred`` terms accumulate across levels;
       ``replace: true`` at any level discards the running accumulator for
-      that affinity kind only (US1 / FR-010a).
+      that affinity kind only (US1 / FR-010a). Required ``node_affinity``
+      terms of different levels are combined so a node must match one term
+      of every level (#486).
     * ``tolerations`` — union across levels with stable tuple dedup on
       ``(key, operator, value, effect, toleration_seconds)`` (FR-009).
     * ``topology_spread_constraints`` — keyed union on
@@ -512,7 +573,10 @@ def _resolve_scheduling_config(
         _of("pod_anti_affinity"), "pod_anti_affinity", provenance
     )
     node_affinity = _merge_affinity_blocks(
-        _of("node_affinity"), "node_affinity", provenance
+        _of("node_affinity"),
+        "node_affinity",
+        provenance,
+        combine_required=_and_node_affinity_terms,
     )
 
     # Tolerations: union with stable tuple dedup (FR-009).
