@@ -42,6 +42,7 @@ from styrmin_backend.agent.tasks.extra import (
 from styrmin_backend.agent.tasks.service_aliases import (
     apply_service_aliases,
     compute_service_aliases,
+    find_stale_service_aliases,
 )
 from styrmin_backend.agent.tasks.shared import (
     render_helm_chart_specifications,
@@ -656,10 +657,12 @@ async def upgrade_instance(
 
         # Apply cross-namespace ExternalName service aliases for service discovery
         aliases = compute_service_aliases(context)
-        if aliases:
+        stale_aliases = await find_stale_service_aliases(context)
+        if aliases or stale_aliases:
             await apply_service_aliases(
                 aliases=aliases,
                 namespace_labels=namespace_labels,
+                stale_aliases=stale_aliases,
             )
 
         # Update Helm release to sync chart values with the new version
@@ -748,10 +751,12 @@ async def update_instance(
 
         # Apply cross-namespace ExternalName service aliases for service discovery
         aliases = compute_service_aliases(context)
-        if aliases:
+        stale_aliases = await find_stale_service_aliases(context)
+        if aliases or stale_aliases:
             await apply_service_aliases(
                 aliases=aliases,
                 namespace_labels=namespace_labels,
+                stale_aliases=stale_aliases,
             )
 
         # Render the helm release specifications
@@ -839,10 +844,12 @@ async def create_instance(
 
         # Apply cross-namespace ExternalName service aliases for service discovery
         aliases = compute_service_aliases(context)
-        if aliases:
+        stale_aliases = await find_stale_service_aliases(context)
+        if aliases or stale_aliases:
             await apply_service_aliases(
                 aliases=aliases,
                 namespace_labels=namespace_labels,
+                stale_aliases=stale_aliases,
             )
 
         if prehook:
@@ -1084,14 +1091,16 @@ async def upgrade_instance_crd(
 async def _apply_service_aliases_step(
     reporter: StepReporter, context: GlobalContext
 ) -> None:
-    """Apply cross-namespace ExternalName service aliases for service discovery, if any."""
+    """Apply cross-namespace ExternalName service aliases and delete stale ones, if any."""
     aliases = compute_service_aliases(context)
-    if not aliases:
+    stale_aliases = await find_stale_service_aliases(context)
+    if not aliases and not stale_aliases:
         return
     async with reporter.step(*steps.SERVICE_ALIASES):
         await apply_service_aliases(
             aliases=aliases,
             namespace_labels=_build_namespace_labels(context),
+            stale_aliases=stale_aliases,
         )
 
 

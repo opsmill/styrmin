@@ -23,6 +23,7 @@ from styrmin_backend.agent.tasks.orchestration import (
     update_instance_crd,
     upgrade_instance_crd,
 )
+from styrmin_backend.agent.tasks.service_aliases import StaleAlias
 from styrmin_backend.agent.tasks.utils import (
     BACKUP_ID_ENV,
     RESTORE_ID_ENV,
@@ -60,7 +61,10 @@ STEP_NAMES = {
         "Write the StyrminDeployment resource",
         "RESOURCE_WRITE",
     ),
-    "resource:service-aliases": ("Create service aliases", "RESOURCE_WRITE"),
+    "resource:service-aliases": (
+        "Create and delete service aliases",
+        "RESOURCE_WRITE",
+    ),
 }
 
 
@@ -76,6 +80,9 @@ class Cluster:
         self.namespaces: list[dict[str, Any]] = []
         self.k8s_events: list[dict[str, Any]] = []
         self.action_step_ids: dict[UUID, UUID | None] = {}
+        #: The aliases of old service names that the flow finds in the cluster.
+        self.stale_aliases: list[StaleAlias] = []
+        self.deleted_aliases: list[StaleAlias] = []
 
     async def namespace(self, **kwargs: Any) -> None:
         self.events.append(("namespace",))
@@ -92,8 +99,12 @@ class Cluster:
     async def status_reset(self, **_: Any) -> None:
         self.events.append(("status reset",))
 
-    async def aliases(self, **_: Any) -> None:
+    async def aliases(self, **kwargs: Any) -> None:
         self.events.append(("aliases",))
+        self.deleted_aliases.extend(kwargs.get("stale_aliases") or [])
+
+    async def find_stale(self, _context: GlobalContext) -> list[StaleAlias]:
+        return self.stale_aliases
 
     async def action(self, *, name: UUID, step_id: UUID | None = None, **_: Any):
         self.events.append(("action", name))
@@ -134,6 +145,7 @@ def cluster(monkeypatch: pytest.MonkeyPatch, events: list[Event]) -> Cluster:
         ("create_event", fake.k8s_event),
         ("patch_custom_resource_status", fake.status_reset),
         ("apply_service_aliases", fake.aliases),
+        ("find_stale_service_aliases", fake.find_stale),
         ("run_driver_action_or_fail", fake.action),
     ):
         monkeypatch.setattr(orchestration, name, AsyncMock(side_effect=mock))
@@ -322,6 +334,24 @@ async def test_update_without_aliases_records_the_resource_write(
     await update_instance_crd(instance=_instance())
 
     assert events == _step("resource:styrmindeployment", ("namespace",), ("crd",))
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("without_aliases")
+async def test_update_without_aliases_deletes_the_stale_aliases(
+    api: FakeStepApi, cluster: Cluster, events: list[Event]
+) -> None:
+    """#491: a deployment whose services have no alias left still deletes the old ones."""
+    stale = StaleAlias(namespace="styrmin-peer", name="old-name", resource_version="7")
+    cluster.stale_aliases = [stale]
+
+    await update_instance_crd(instance=_instance())
+
+    assert events == [
+        *_step("resource:styrmindeployment", ("namespace",), ("crd",)),
+        *_step("resource:service-aliases", ("aliases",)),
+    ]
+    assert cluster.deleted_aliases == [stale]
 
 
 @pytest.mark.asyncio
