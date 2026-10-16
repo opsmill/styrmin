@@ -66,12 +66,13 @@ type the keys the same way.
   before the change, so the stored declaration, the context in the `StyrminDeployment` resource and
   the instance that the no-op check compares do not change (critique E1).
 - Driver versions stored before the change may hold an untyped `replicas` or `singleton` extra
-  that the typed fields reject. `validate_ignoring_invalid_replica_keys` reads stored
-  declarations: when dropping both keys makes the declaration valid, it drops them and logs a
-  warning that names the component. `ComponentContext` runs it in a model validator, so every read
-  of a stored deployment context gets it; `parse_stored_component_declaration` runs it for the
-  write checks and the read fields. The driver load path does not use it, so new driver versions
-  are checked strictly.
+  that the typed fields reject. Reads of a stored declaration drop only the invalid key and log a
+  warning that names the key, its value and the component; when `singleton: true` and a
+  `replicas` above 1 are both stored, `replicas` is dropped, so the component runs 1 pod.
+  `ComponentContext` does this in a model validator (`validate_ignoring_invalid_replica_keys`), so
+  every read of a stored deployment context gets it. The write checks and the read fields read
+  only the replica keys (`parse_stored_replica_declaration`), so a problem in another key does
+  not fail them. The driver load path does neither, so new driver versions are checked strictly.
 
 GraphQL exposes the two keys as `ComponentConfig.replicas: Int` and `ComponentConfig.singleton:
 Boolean!`, which default to `null` and `false` for rows that do not have them.
@@ -138,7 +139,7 @@ after each update task completes, for 1 to 2 pods and for 2 to 1, and finds `spe
 
 ### 5. Write checks against the driver version bound after the write (research D-005, D-006)
 
-`validate_replica_overrides(config, components, stored_config, checked_against)`
+`validate_replica_overrides(config, components, stored_config, checked_against, max_replica_count)`
 (`services/replicas/validator.py`) runs from `_validate_config_write` in `services/deployment.py`
 (on `updateDeployment` with the bound driver version, and on `updateDeploymentVersion(input:)` with
 the target driver version) and from `deploy_application` with no stored config. It runs after the
@@ -153,6 +154,14 @@ flow run or ingress dispatch:
   `checked_against`): an override greater than 1 on a component that the driver version marks
   `singleton: true`, also when it equals the stored value, because the stored count breaks the rule
   of the driver version the deployment is bound to after the write. An override of 1 is accepted.
+- `REPLICA_COUNT_ABOVE_MAXIMUM` (metadata `component_name`, `requested_replicas`,
+  `max_replica_count`): a write adds or changes an override to a count above the server setting
+  `STYRMIN_MAX_REPLICA_COUNT`, default 20. Any user who can edit a deployment can set a count, and
+  Styrmin applies no `ResourceQuota`, so the setting keeps a typing error such as `3000` from
+  filling a shared cluster (PR #483 review). The stored value sent again is accepted, so lowering
+  the setting does not block other writes. The check is a service-layer check, not a context-model
+  check, because the agent parses stored contexts without the server's settings. Driver defaults
+  are not limited.
 
 `updateDeploymentVersion` without `input` runs the same check on the stored config against the
 target driver version. A version change to a driver version that marks a component as singleton is
@@ -226,6 +235,11 @@ components. `simple-app` version 4 marks `database` as singleton.
   limit runs out. Styrmin does not check this or the cluster's capacity.
 - The infrahub driver upgrade has no E2E test; functional tests load the old driver versions from
   `backend/tests/functional/fixtures/legacy_drivers/` and the new ones from `driver/examples/`.
+- An agent from an earlier release applies no replica patch, so it also ignores the driver
+  defaults: on such an agent, the components of `infrahub` 5 and `infrahub-enterprise` 4 run the
+  chart's count. This is one more reason to upgrade the agent chart with the server.
+- The SDK and `styrminctl` of this release select `Deployment.componentReplicas` in
+  `GetDeployment`, so their `deployments get` fails against an earlier server.
 
 ## Alternatives Considered
 
@@ -253,7 +267,8 @@ The spec leaves these out; no decision was taken on them:
 
 - detecting a `HorizontalPodAutoscaler` that a chart ships, and working with it;
 - replica defaults at environment or cluster level;
-- a separate scale action;
+- a separate scale action in the API (the SDK's `deployments.scale()` and
+  `styrminctl deployments scale` resend the stored blocks with one count changed);
 - making sure that only one pod of a singleton component runs during a rolling update;
 - checking cluster capacity before a scale-up;
 - an upgrade dialog that sends config with the version change.

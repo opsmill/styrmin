@@ -115,7 +115,10 @@ Paths are dotted, with **array entries keyed by stable identifier, never by
 position**: `envVars[LOG_LEVEL]`, `tolerations[1].effect`,
 `components[rate-limiter].resources.cpu.limit`, `scheduling.resources.cpu.request`.
 Reordering env vars is therefore not a change — the property a generic diff
-library cannot provide.
+library cannot provide. A component block that is added or removed is diffed
+field by field against an empty block (`components[server].replicas`,
+`components[server].envVars[LOG_LEVEL]`, ...), so a block that holds no override
+yields no entry and each override gets its own impact line.
 
 `impact-rules.ts` is an array of `{matcher, consequence, severity}`. Matchers glob
 over the dotted path (`*` = one segment, `**` = many) with an optional `value:X`
@@ -123,6 +126,12 @@ qualifier for value-sensitive rules, e.g.
 `scheduling.tolerations[*].effect value:NO_EXECUTE`. `config-impact.ts` evaluates
 them into an `ImpactSummary` with deduplicated consequences and a `topSeverity`;
 `topSeverity === "high"` flips the dialog into its disruptive treatment.
+A rule may also carry `describe(entry, context)`, which builds the consequence
+text from the entry, so each entry gets its own line: the `components[*].replicas`
+rule (`describeReplicaChange`) renders `server: 3 → 1 pod`, and uses
+`ImpactContext.replicaDefaults` (built by `ConfigDiffDialog` from
+`componentReplicas` and the driver version's `componentConfigs`) for the side
+without an override, or `the chart's count`.
 
 > **The rules are advisory and deliberately approximate.** They encode what we
 > believe restarts pods and nothing verifies them against real behaviour. They
@@ -319,8 +328,13 @@ drawer and in the create form:
 
 In the drawer, a component without a stored block shows the field above
 **Add override**; typing a count creates the block. Clearing the field submits
-`replicas: null` when a value is stored, and leaves the field `undefined`
-otherwise, so typing and clearing is not a change. The submit boundary
+`replicas: null` when a value is stored. When no block was stored and the block
+holds nothing else, clearing removes the block again, so typing and clearing is
+not a change and the row does not show `override (empty)`. When the pinned driver
+version declares an integer parameter named `replicas_<component>` (dashes as
+underscores, the infrahub 4 convention; `replicaParameterFor` in
+`lib/replicas.ts`), the field's hint names the parameter's label and says that
+the override applies when both are set. The submit boundary
 (`componentsFormToInput`) turns an empty field into `null`, and `diffComponents`
 compares `components[<name>].replicas` with `null` and `undefined` as equal.
 `get_deployment.graphql` selects `componentReplicas` and
@@ -330,9 +344,23 @@ compares `components[<name>].replicas` with `null` and `undefined` as equal.
 The create form (`DeployFormPage.tsx`) has a **Component replicas** section
 (`component-replicas-section`) that lists the components of the selected driver
 version from `componentConfigs { name replicas singleton }`, with the same
-field. It sends `config.components` with only the components that have a value,
-and blocks the submit with an error naming the components whose count is
-invalid.
+field, labelled with the component name (`ReplicasField`'s `label` prop; the
+drawer keeps the label **Replicas** under the component's heading). It sends
+`config.components` with only the components that have a value. While a count
+is invalid, **Deploy** is disabled and `deploy-blocked-reason` names the
+components to fix. The form sends `driverVersionId` of the selected version, so
+the server checks against the version whose fields the form shows, and it lists
+the versions of each driver newest first (`compareVersionsLatestFirst`, which
+needs `createdOn` in `list_application_drivers.graphql`), so its first option is
+the version a deploy without a pin would bind to.
+
+The **Upgrade Deployment** dialog renders its error with `UpgradeErrorAlert`
+(`components/deployment/`): URLs in the message are links (`MessageWithLinks`).
+For `RETIRED_PARAMETER_VALUE`, it reads `parameter_name`, `value` and `default`
+from the error's `extensions` (`GraphQLOperationError.extensions`), lists the
+steps on the Settings tab, names the component when the parameter is
+`replicas_<component>`, and has a button that closes the dialog and opens the
+Settings tab.
 
 The read summary (`ComponentOverridesSummary.tsx`) gets `componentReplicas` from
 `ConfigurationTab.tsx` and shows a replica line (`component-replicas`, with

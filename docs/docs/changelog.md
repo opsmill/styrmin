@@ -8,6 +8,72 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### Set the replica count of each component
+
+A user can now set how many pods each component of a deployment runs,
+with a **replica override**, without a driver parameter. Styrmin sets the
+count on `spec.replicas` of the component's `Deployment` and `StatefulSet`
+workloads after the Helm chart renders
+([#202](https://github.com/opsmill/styrmin/issues/202)). See
+[Replica overrides](./concepts-and-architecture/replica-overrides.md).
+
+#### What's new
+
+- Set, change and clear a count in the **Deploy** form, in the **Edit
+  configuration** drawer, with `ComponentConfigInput.replicas` in the API
+  and the SDK, with `components[].replicas` in a `styrminctl deployments
+  apply` manifest, and with the new `styrminctl deployments scale`
+  command, which keeps the other overrides of the deployment.
+- The count comes from the replica override, then from the driver
+  default (`components.<name>.replicas`), then from the chart. The
+  **Component Overrides** card, `styrminctl deployments get` and
+  `Deployment.componentReplicas` show each component's count and its
+  source.
+- A driver marks a component that must run a single pod with
+  `singleton: true`. A count above 1 on it is rejected with
+  `SINGLETON_REPLICA_OVERRIDE`.
+- The server setting `STYRMIN_MAX_REPLICA_COUNT` (Helm value
+  `styrmin.maxReplicaCount`, default 20) limits the count a user can set.
+  A higher count is rejected with `REPLICA_COUNT_ABOVE_MAXIMUM`.
+- The update task completes when the workloads run the new count of
+  ready pods, and no more.
+- The `infrahub` driver moves to version 5 and `infrahub-enterprise` to
+  version 4: `server` and `task-worker` have driver defaults of 1 and 2
+  pods, and `database`, `task-manager-db` and `cache` are singleton
+  components. `simple-app` version 4 marks `database` as singleton.
+- When a deployment changes driver version, a parameter that the target
+  version no longer declares is dropped if it holds its default, and
+  otherwise rejects the change with `RETIRED_PARAMETER_VALUE`. See
+  [Changing Driver Versions](./drivers/changing-driver-versions.md).
+
+#### Migration
+
+- **Upgrade the agent chart together with the server.** An agent from an
+  earlier release rejects a deployment context that carries a replica
+  override, and ignores `replicas` in a driver declaration: the
+  components of `infrahub` 5 and `infrahub-enterprise` 4 then run the
+  chart's count without any message.
+- **Upgrade the Python SDK and `styrminctl` after the server.** Their
+  `deployments get` fails against an earlier server.
+- **Clear every replica override before you roll Styrmin back** below
+  this release. Earlier releases reject the `replicas` key in a
+  deployment's config.
+- **Move infrahub deployments to the new driver versions.** The
+  `replicas_server` and `replicas_task_worker` parameters are removed. A
+  deployment that kept their defaults moves without a manual step. A
+  deployment with another value, including every deployment created from
+  the earlier `examples/deployments/infrahub.yml` manifest, which set
+  `replicas_task_worker: 1`, must carry the value over as a replica
+  override first. See
+  [Migrating Replica Parameters](./drivers/migrating-replica-parameters.md).
+- **If you maintain a driver,** load a version that marks each
+  single-primary component with `singleton: true` before you upgrade.
+  Users can set a replica override on any component as soon as the server
+  runs this release, also on a driver version loaded earlier.
+- **On a shared cluster,** keep `STYRMIN_MAX_REPLICA_COUNT` low and add a
+  `ResourceQuota` to each deployment namespace: the maximum applies per
+  component, not per deployment.
+
 ### Override `command` and `args` on any component with a component container
 
 Styrmin now applies the container `command` and `args` overrides users

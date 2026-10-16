@@ -326,3 +326,50 @@ backend/tests/e2e/test_deployment_image_override.py::test_misnamed_container_nev
 ```
 
 The two skipped tests are marked `api_only`, as in the earlier UI runs above.
+
+## After the PR #483 review
+
+Both runs used the image `registry.opsmill.io/opsmill/styrmin:pr483-review-1792138142`, built with `docker compose build server` before each session, from the uncommitted review changes on top of `e5daedf6`. A CSS-only change to the Deploy form label (`ReplicasField.tsx`) came after the runs; the E2E page object finds the fields by `aria-label`, which did not change.
+
+### API variant, whole `shard_configuration`
+
+```bash
+uv run pytest -v -s --pdb -m "ci and shard_configuration" -k api-chromium backend/tests/e2e
+```
+
+- vCluster: `pytest-c9c0db36-7582-45ab-96a8-f4f93b73e4dd` (Docker driver, created and deleted by the session fixture)
+- Session end: 2026-10-16T08:20:30+00:00
+
+```text
+test_deployment_container_overrides.py: test_us1 to test_us4 [api-chromium] PASSED
+test_deployment_image_override.py::test_scale_server_and_singleton_guard[api-chromium] PASSED
+test_deployment_image_override.py::test_create_with_replica_override[api-chromium] PASSED
+test_deployment_image_override.py::test_override_then_clear[api-chromium] PASSED
+test_deployment_image_override.py::test_override_with_version_change_reaches_upgrade_job[api-chromium] PASSED
+test_deployment_image_override.py::test_token_follows_upgrade_and_action_job[api-chromium] PASSED
+test_deployment_image_override.py::test_misnamed_container_never_added[api-chromium] PASSED
+==== 10 passed, 12 skipped, 173 deselected, 1 warning in 654.64s (0:10:54) =====
+```
+
+The 12 skipped tests are the `ui_only` drawer tests under `backend/tests/e2e/configuration/`. CI does not run this variant (`.github/workflows/ci.yml` excludes `{api, configuration}`).
+
+### UI variant, whole `shard_configuration`
+
+```bash
+uv run pytest -v -s --pdb -m "ci and shard_configuration" -k ui-chromium backend/tests/e2e
+```
+
+- vCluster: `pytest-d0da88a4-512e-4842-aa5a-c90ce3e05c5c` (Docker driver, created and deleted by the session fixture)
+- Session end: 2026-10-16T08:32:00+00:00
+
+```text
+configuration/: 12 drawer and Configuration tab tests [ui-chromium], 9 PASSED, 3 SKIPPED (skip markers)
+test_deployment_container_overrides.py::test_us3_set_and_clear_command_and_args[ui-chromium] PASSED
+test_deployment_image_override.py::test_scale_server_and_singleton_guard[ui-chromium] PASSED
+test_deployment_image_override.py::test_create_with_replica_override[ui-chromium] PASSED
+test_deployment_image_override.py::test_override_then_clear[ui-chromium] PASSED
+test_deployment_image_override.py::test_token_follows_upgrade_and_action_job[ui-chromium] PASSED
+===== 14 passed, 8 skipped, 173 deselected, 1 warning in 691.20s (0:11:31) =====
+```
+
+The 8 skipped tests are 5 `api_only` tests and `test_drawer_driver_params_edit`, `test_drawer_networking_edit` and `test_drawer_storage_runtime_edit`, which carry `skip` or `skipif` markers, as in the earlier UI run of this shard.

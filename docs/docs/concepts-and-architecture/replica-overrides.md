@@ -40,7 +40,7 @@ Each source shows up differently in the API, the UI and the CLI:
 When you clear an override, the component returns to the next source in
 this order.
 
-### Before you start
+### What a replica override changes and what it needs
 
 - **Only `Deployment` and `StatefulSet` workloads change.** Styrmin sets
   `spec.replicas` on every `Deployment` and `StatefulSet` that the
@@ -48,9 +48,12 @@ this order.
   or `DaemonSet` workloads. When the selector matches no `Deployment` and
   no `StatefulSet`, the override changes nothing and the deployment does
   not fail.
-- **The count is a whole number from 1 to 2147483647.** A count of 0 or
-  less is rejected with `INVALID_REPLICA_COUNT`. To run no pods, stop the
-  component instead (see [Stopped components](#stopped-components)).
+- **The count is a whole number from 1 to the server's maximum.** A count
+  of 0 or less is rejected with `INVALID_REPLICA_COUNT`. To run no pods,
+  stop the component instead (see [Stopped components](#stopped-components)).
+  A new or changed count above the maximum is rejected with
+  `REPLICA_COUNT_ABOVE_MAXIMUM` (see
+  [The maximum replica count](#the-maximum-replica-count)).
 - **Component scope only.** There is no environment-wide or
   deployment-wide replica count, and no layering.
 - **The cluster must have room for the new pods.** Styrmin does not check
@@ -59,13 +62,34 @@ this order.
   fails when its wait limit runs out.
 - **Permissions** are the same as for any other deployment config edit.
 
+### The maximum replica count
+
+Any user who can edit a deployment can set a replica override on any of
+its components. The server setting `STYRMIN_MAX_REPLICA_COUNT` limits the
+count that a user can set, so that a typing error such as `3000` does not
+fill a shared cluster with pods:
+
+- The default maximum is 20. In the Helm chart, set
+  `styrmin.maxReplicaCount`.
+- A new or changed override above the maximum is rejected with
+  `REPLICA_COUNT_ABOVE_MAXIMUM` before any task starts. The error carries
+  the component name, the requested count and the maximum.
+- An override stored before an administrator lowered the maximum stays
+  stored and applied. Sending it again unchanged is accepted, so other
+  changes to the deployment do not fail.
+- Driver defaults (`components.<name>.replicas`) are not limited.
+
+The maximum applies to each component, not to a deployment or a
+namespace. To limit the pods and resources of a whole deployment on a
+shared cluster, also add a Kubernetes `ResourceQuota` to its namespace.
+
 ### When the update task completes
 
 A change to a replica count starts an update task, as any other config
 edit does. The task completes after the component's workloads report the
-new count as their updated, ready and available pods. This applies to a
-scale-down as well as to a scale-up, so a completed task means that the
-change of count is done.
+new count as their updated, ready and available pods, and run no more
+pods than the new count. This applies to a scale-down as well as to a
+scale-up, so a completed task means that the change of count is done.
 
 ### Singleton components
 
@@ -151,10 +175,19 @@ To set or clear an override on an existing deployment:
    `2 (driver default)`, or `set by the chart`. Under a count below 1, the
    drawer shows "Must be 1 or more. To run no pods, stop the component."
    While a count is below 1, not a whole number or above 2147483647,
-   **Review & apply** stays disabled and names the component to fix.
-4. Click **Review & apply** and confirm.
+   **Review & apply** stays disabled and names the component to fix. A
+   count above the server's maximum is rejected when you apply.
+4. Click **Review & apply**. The review dialog lists one line per changed
+   count, for example `server: 3 → 1 pod`. Confirm.
 
-To clear the override, empty the **Replicas** field and apply.
+To clear the override, empty the **Replicas** field and apply. When you
+type a count on a component that had no override and then empty the
+field again, the drawer shows no change.
+
+When the driver version also has a parameter that sets the component's
+count, such as **Number of task worker replicas** on `infrahub` driver
+version 4, the hint under **Replicas** names that parameter and says that
+the override applies when both are set.
 
 A singleton component shows a read-only **Replicas** field with the value
 `1 (singleton)`. If such a component stores an override greater than 1,
@@ -162,9 +195,12 @@ the drawer shows the stored value with a **not applied** badge and a
 button that removes it.
 
 To set counts when you create a deployment, use the **Component replicas**
-section of the **Deploy** form. It lists the components of the selected
-driver version with the same **Replicas** field. Leave a field empty to
-use the driver default or the chart's count.
+section of the **Deploy** form. It lists each component of the selected
+driver version by name, with the same field. Leave a field empty to use
+the driver default or the chart's count. While a count is not valid,
+**Deploy** stays disabled and the form names the component to fix. The
+form deploys the driver version you select, and lists the versions of
+each driver newest first.
 
 The **Component Overrides** card on the **Settings** tab shows a replica
 line for every component: the count and its source, an **applied** or
@@ -177,7 +213,26 @@ On the driver's page, the **Components** tab shows, for each component of
 the selected driver version, a **Replicas** row (the driver default, or
 `not set`) and a **Singleton** row (`yes` or `no`).
 
-### With `styrminctl apply`
+### With `styrminctl deployments scale`
+
+`styrminctl deployments scale` sets or clears the override of one
+component and keeps every other override of the deployment:
+
+```shell
+# task-worker runs 4 pods.
+uv run styrminctl deployments scale <deployment-id> task-worker 4
+
+# Remove the override: the driver default or the chart's count applies.
+uv run styrminctl deployments scale <deployment-id> task-worker --clear
+```
+
+The command reads the stored component blocks and sends them back with
+only the count of that component changed. A change that another user
+writes between the read and the update is overwritten. The SDK method is
+`client.deployments.scale(deployment_id, component, replicas)`, with
+`replicas=None` to clear the override.
+
+### With `styrminctl deployments apply`
 
 Set `replicas` on the component's entry in `spec.config.components`:
 
@@ -242,14 +297,23 @@ async with StyrminClient(server_address="https://styrmin.example") as client:
 `components` replaces every stored component block, and leaving
 `replicas` out of a block clears it. Resubmit the env vars, `command`,
 `args`, image and replica override of every component you want to keep.
+To change only one count, use `client.deployments.scale()` or
+[`styrminctl deployments scale`](#with-styrminctl-deployments-scale).
 
 `styrminctl deployments update` and `deployments update-version --config`
 take the same payload as JSON:
 
 ```shell
+# Warning: this payload replaces every stored component block. It deletes
+# the env var, image, command and args overrides of server, and every
+# override of the other components. To change only the count, use
+# `styrminctl deployments scale <deployment-id> server 3`.
 uv run styrminctl deployments update <deployment-id> \
   --config '{"components": [{"name": "server", "replicas": 3}]}'
 ```
+
+The SDK and `styrminctl` reject a count that is not a whole number, such
+as `true` or `"3"`, before they send the request.
 
 The driver version's defaults are on `ComponentConfig.replicas` and
 `ComponentConfig.singleton` (`ApplicationDriverVersion.componentConfigs`).
@@ -285,25 +349,40 @@ version. See
 | What you see | Why | What to do |
 |--------------|-----|------------|
 | The write fails with `INVALID_REPLICA_COUNT` | The count is 0 or less | Fix the count. To run no pods, stop the component |
-| The write fails with `VALIDATION_ERROR` and the message `Int cannot represent ...` | The count is above 2147483647 or is not a whole number. The API reads every replica count as a GraphQL `Int` and rejects other values before it checks the count | Fix the count. The SDK and `styrminctl` can convert some values before they send the request, for example `true` to 1 and `"3"` to 3 |
+| The write fails with `REPLICA_COUNT_ABOVE_MAXIMUM` | The count is above the server's maximum, 20 by default | Lower the count, or ask an administrator to raise `STYRMIN_MAX_REPLICA_COUNT` |
+| The write fails with `VALIDATION_ERROR` and the message `Int cannot represent ...` | The count is above 2147483647 or is not a whole number. The API reads every replica count as a GraphQL `Int` and rejects other values before it checks the count | Fix the count. The SDK and `styrminctl` reject a count that is not a whole number before they send the request |
 | The write fails with `UNKNOWN_COMPONENT_REPLICA_OVERRIDE` | The driver version does not declare that component | Check the component name against the components listed in the error |
 | The write fails with `SINGLETON_REPLICA_OVERRIDE` | The driver version marks the component as a singleton component | Set the override to 1 or clear it |
-| A driver version change fails with `RETIRED_PARAMETER_VALUE` | The target driver version no longer declares a parameter that the deployment sets to a value other than its default | Follow [Migrating Replica Parameters](../drivers/migrating-replica-parameters.md#deployments-with-a-changed-value) |
+| A driver version change fails with `RETIRED_PARAMETER_VALUE` | The target driver version no longer declares a parameter that the deployment sets to a value other than its default | Follow [Changing Driver Versions](../drivers/changing-driver-versions.md#fix-a-rejected-driver-version-change), and for the infrahub replica parameters [Migrating Replica Parameters](../drivers/migrating-replica-parameters.md#deployments-with-a-changed-value) |
 | Pods stay in the `Pending` phase and the update task fails | The cluster cannot place the new pods, or the pods share a `ReadWriteOnce` volume | Open the deployment's **Pods** tab to read the reason, then lower the count or add capacity |
 | A component does not run the count of its override | The override is orphaned, or the component is stopped | Check the replica line on the **Component Overrides** card |
 
 ### Upgrading and rolling back Styrmin
 
-- **Upgrade the agent chart together with the server.** An agent from an
-  earlier release rejects a deployment context that carries a replica
-  override.
+- **Upgrade the agent chart together with the server.** Styrmin's agent
+  sets the replica counts, and an agent from an earlier release does not:
+  - it rejects a deployment context that carries a replica override;
+  - it ignores `replicas` in a driver declaration, so a component of the
+    `infrahub` 5 or `infrahub-enterprise` 4 driver, or of a driver that
+    moved its count to `components.<name>.replicas`, runs the chart's
+    count without any message.
+- **Upgrade the SDK and `styrminctl` after the server.** `deployments get`
+  of this release reads `Deployment.componentReplicas`, so it fails
+  against an earlier server.
 - **A driver version loaded before this release that already sets
   `components.<name>.replicas`** to a whole number starts to apply it as
   the driver default. No example driver set this key before this release.
   When a stored `replicas` or `singleton` value is not valid, Styrmin
-  ignores both keys of that component and logs a warning that names the
-  component. The deployment stays readable, and the component runs its
-  replica override, or the chart's count when it has none.
+  ignores that key and logs a warning that names the component, the key
+  and its value. When `singleton: true` and a `replicas` above 1 are both
+  stored, Styrmin ignores `replicas`, so the component runs 1 pod. The
+  deployment stays readable.
+- **Mark single-primary components before you upgrade.** As soon as the
+  server runs this release, a user can set a replica override on any
+  component, also on a driver version whose author could not mark
+  components as singleton before this release. If you maintain a driver,
+  load a version that marks such components with `singleton: true` and
+  move your deployments onto it.
 - **Clear every replica override before you roll Styrmin back** below the
   release that added them: earlier releases reject a deployment config
   that carries a `replicas` key.
@@ -313,8 +392,9 @@ version. See
 - **No autoscaling.** Styrmin does not detect a `HorizontalPodAutoscaler`
   that a chart ships, and does not work with one.
 - **No default at environment or cluster level.**
-- **No separate scale action.** Change the count by editing the
-  deployment config.
+- **No scale action in the UI.** Change the count in the **Edit
+  configuration** drawer. `styrminctl deployments scale` changes one count
+  from the command line.
 - **One pod at a time is not guaranteed** for a singleton component during
   a rolling update.
 
@@ -323,8 +403,9 @@ version. See
 - [Creating a Driver](../drivers/creating-a-driver.md#replica-counts-replicas-and-singleton) —
   declaring `replicas` and `singleton` on a component.
 - [Migrating Replica Parameters](../drivers/migrating-replica-parameters.md) —
-  the `infrahub` drivers and the rule for parameters that a new driver
-  version no longer declares.
+  the `infrahub` drivers.
+- [Changing Driver Versions](../drivers/changing-driver-versions.md) — the
+  rule for parameters that a new driver version no longer declares.
 - [`styrminctl` reference](../reference/styrminctl.md#manifest-specconfig-shape) —
   the manifest `spec.config` shape.
 - [Image overrides](./image-overrides.md) — the other per-component

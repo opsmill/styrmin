@@ -16,14 +16,19 @@ If you arrived here from an error like this one when you changed a deployment's 
 ```text
 Parameter 'replicas_task_worker' is not declared by driver infrahub version 5 (application
 version 1.7.3), and this deployment sets it to 4 (default 2). Remove the parameter or reset it
-to its default, then change the driver version again. If it set a replica count, carry the
-value over as a replica override on the component first. See
+to its default, then change the driver version again. See
+https://styrmin.pages.dev/docs/drivers/changing-driver-versions. If it set a replica count,
+carry the value over as a replica override on the component first:
 https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters
 ```
 
 the deployment sets a replica parameter to a value other than its default. Follow
 [Deployments with a changed value](#deployments-with-a-changed-value). The deployment is still
 on its old driver version, and no pod count changed.
+
+A deployment created from the earlier `examples/deployments/infrahub.yml` manifest is in this
+case: see
+[Deployments created from the earlier example manifest](#deployments-created-from-the-earlier-example-manifest).
 
 ### Changes in `infrahub` 5 and `infrahub-enterprise` 4
 
@@ -45,25 +50,18 @@ No pod count changes when a deployment moves to the new version with the default
 driver defaults are the old parameter defaults, and the charts already run 1 pod of each
 singleton component.
 
-### The rule for parameters a new driver version no longer declares
+### How Styrmin handles the removed parameters
 
-When a deployment changes to another driver version, Styrmin checks each parameter that the
-current driver version declares and the target driver version does not:
+When a deployment changes to the new driver versions, Styrmin applies the rule for
+[parameters the target driver version no longer declares](./changing-driver-versions.md#parameters-the-target-driver-version-no-longer-declares):
 
-- If the value equals the parameter's default in the current driver version, Styrmin drops the
-  value and the change continues.
-- Otherwise, Styrmin rejects the change with the error code `RETIRED_PARAMETER_VALUE` before any
-  task starts. The deployment stays on its current driver version, and no pod count changes.
+- A stored or submitted `replicas_server: 1` or `replicas_task_worker: 2`, the old defaults, is
+  dropped, and the change continues.
+- Any other value rejects the change with `RETIRED_PARAMETER_VALUE` before any task starts. When
+  both parameters hold a changed value, the error names `replicas_server` first; carry both
+  values over in the same request.
 
 The rule applies to the stored values together with the parameters sent in the same request.
-A value must have the same type as the default to be equal: the string `"2"` does not equal
-the integer default `2`. The error carries the parameter name (`parameter_name`), its value
-(`value`), its default in the current driver version (`default`) and the target driver
-version (`checked_against`). When both parameters hold a changed value, the error names
-`replicas_server` first; carry both values over in the same request.
-
-The rule applies to any driver version that removes a parameter, not only to the infrahub
-drivers.
 
 ### Deployments that kept the default values
 
@@ -77,6 +75,29 @@ uv run styrminctl deployments update-version <deployment-id> <application-versio
 The upgrade drops `replicas_server: 1` and `replicas_task_worker: 2`. `server` runs 1 pod and
 `task-worker` runs 2 pods, as before. The **Upgrade** button on the deployment page works the
 same way.
+
+### Deployments created from the earlier example manifest
+
+Earlier versions of
+[`examples/deployments/infrahub.yml`](https://github.com/opsmill/styrmin/blob/develop/examples/deployments/infrahub.yml)
+set `replicas_task_worker: 1`, which is not the old default of `2`. A deployment created from
+that manifest stores `replicas_task_worker: 1`, so its change to `infrahub` 5 is rejected with
+`RETIRED_PARAMETER_VALUE`. Carry the value over as described in
+[Deployments with a changed value](#deployments-with-a-changed-value), with `replicas: 1` on
+`task-worker`. With `styrminctl deployments apply`, the first apply after you load the new
+driver version needs both lines:
+
+```yaml
+spec:
+  parameters:
+    replicas_task_worker: 2   # the old default, so the driver version change drops it
+  config:
+    components:
+      - name: task-worker
+        replicas: 1
+```
+
+The `replicas_server: 1` of the earlier manifest is the old default, so Styrmin drops it.
 
 ### Deployments with a changed value
 
@@ -179,16 +200,20 @@ override, in one task.
 - Do not only delete the parameter from the manifest. `spec.parameters` is merged on top of
   the stored values, so the stored `4` stays and the apply is rejected.
 - After this apply, remove `replicas_task_worker` from the manifest. The deployment's driver
-  version no longer declares it, so the next apply would fail with
-  `Unknown parameter: 'replicas_task_worker'`. This also applies to a manifest that lists
-  `replicas_server: 1` or `replicas_task_worker: 2`: the first apply after you load the new
-  driver version drops them, and the next apply rejects them.
+  version no longer declares it, so the next apply fails with
+  `Unknown parameter: 'replicas_task_worker'`, and the error links
+  [Changing Driver Versions](./changing-driver-versions.md#a-request-or-manifest-that-still-lists-a-retired-parameter).
+  This also applies to a manifest that lists `replicas_server: 1` or `replicas_task_worker: 2`:
+  the first apply after you load the new driver version drops them, and the next apply rejects
+  them.
 - `components` replaces every stored component block, as in GraphQL.
 
 #### In the UI, in two steps
 
 The **Upgrade Deployment** dialog sends only the application version and the driver version, so
-it cannot send a replica override. Make the change on the old driver version first:
+it cannot send a replica override. When it shows the `RETIRED_PARAMETER_VALUE` error, it lists
+the steps below, links this guide and offers **Open the Settings tab**. Make the change on the
+old driver version first:
 
 1. On the deployment's **Settings** tab, click **Update Settings**. In the
    **Edit configuration** drawer:
@@ -201,9 +226,10 @@ it cannot send a replica override. Make the change on the old driver version fir
    Click **Review & apply**. `task-worker` keeps 4 pods: the replica override now sets the
    count, and the parameter holds its default.
 
-2. Click **Upgrade**, choose the new driver version in **Upgrade Deployment** and click
-   **Upgrade**. Styrmin drops the parameter, because it holds its default, and `task-worker`
-   keeps 4 pods.
+2. Click **Upgrade**. In **Upgrade Deployment**, enter the application version in
+   **New Version**, for example the current one, choose the new driver version and click
+   **Upgrade**. The **Upgrade** button stays disabled until **New Version** has a value.
+   Styrmin drops the parameter, because it holds its default, and `task-worker` keeps 4 pods.
 
 For a changed `replicas_server`, do the same with **Replicas** of `server` and
 **Number of server replicas**, whose default is `1`.
@@ -243,7 +269,7 @@ Kubernetes places an extra pod on another node, that pod cannot attach the volum
 the `Pending` phase. The update task then fails when its wait limit runs out. This limit
 existed with `replicas_server` too.
 
-### If you write drivers
+### Retire a replica parameter in your own driver
 
 To retire a parameter that set a replica count in your own driver:
 
@@ -255,9 +281,16 @@ To retire a parameter that set a replica count in your own driver:
 
 Deployments that kept the parameter's default then change to the new driver version without a
 manual step, and deployments with another value follow
-[Deployments with a changed value](#deployments-with-a-changed-value).
+[Deployments with a changed value](#deployments-with-a-changed-value). A parameter without a
+default cannot be dropped this way; see
+[A retired parameter that has no default](./changing-driver-versions.md#a-retired-parameter-that-has-no-default).
 
-### Next
+Users can set a replica override on any component of any driver version as soon as Styrmin is
+upgraded, also on a driver version loaded before this release. Mark each component that must run
+a single pod, such as a database in standalone mode, with `singleton: true` in a new driver
+version before you upgrade Styrmin, and move your deployments onto it.
+
+### Related pages
 
 - [Loading a Driver](./loading-drivers.md): load the new driver versions.
 - [Creating a Driver](./creating-a-driver.md): the full driver walkthrough.
