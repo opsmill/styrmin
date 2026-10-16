@@ -98,11 +98,23 @@ class LabelSelectorInput:
 
 
 @strawberry.input(
-    description="Reference to another deployment in the same environment."
+    description=(
+        "Reference to another deployment in the same environment. Styrmin stores "
+        "the id of the named deployment; a name given here is replaced with that "
+        "id when the config is written."
+    )
 )
 class DeploymentReferenceInput:
-    deployment_id: str | None = None
-    deployment_name: str | None = None
+    deployment_id: str | None = strawberry.field(
+        default=None, description="Id of a deployment in the same environment."
+    )
+    deployment_name: str | None = strawberry.field(
+        default=None,
+        description=(
+            "Name of a deployment in the same environment. Styrmin stores the id "
+            "of that deployment instead of the name when the config is written."
+        ),
+    )
     components: list[str] | None = None
 
 
