@@ -307,6 +307,18 @@ def test_template_label_patch_with_slash_in_key_and_prefix():
     assert patch.render() == {"patch": expected_render_value}
 
 
+@pytest.mark.parametrize("patch_class", [LabelPatch, TemplateLabelPatch])
+@pytest.mark.parametrize("value", ["123", "true", "null", "1.0", "", "yes"])
+def test_label_patch_value_stays_a_string(
+    patch_class: type[LabelPatch], value: str
+) -> None:
+    patch = patch_class(labels={"component": value}, label_prefix="styrmin")
+
+    ops = yaml.safe_load(patch.render_value())
+
+    assert [op["value"] for op in ops] == [value]
+
+
 def test_annotation_patch_without_slash():
     annotation_key = "key"
     annotation_value = "value"

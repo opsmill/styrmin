@@ -1,0 +1,1 @@
+Fixed the `styrmin/component` label of a driver component whose name YAML reads as a number or a boolean, such as `1`, `true` or `yes`. The agent wrote the label value as a number or a boolean, which Kubernetes does not accept as a label value, and now writes it as a string.
