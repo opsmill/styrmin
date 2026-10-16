@@ -74,7 +74,7 @@ Pure helpers and one async binder, all on raw config dicts (R-002):
 - `remap_deployment_references(config, mapping: Mapping[UUID, UUID]) -> tuple[dict | None, dict[UUID, list[str]]]`: returns a deep copy with every id rewritten and the ids that had no entry, with their paths. Never mutates its input.
 - `async bind_deployment_references(uow, environment_id: UUID | None, config: dict | None, *, path_prefix: str, upcoming_deployments: Mapping[UUID, str] | None = None) -> dict | None`: returns a deep copy in which each reference gives `deployment_id` only (canonical lowercase string) and keeps `components`. Rules from R-001 for upcoming deployments. For a name: `uow.deployments.get_by_name(name, environment_id)`, which excludes tombstoned rows. For an id: `uow.deployments.find(id)`, refused when missing, in another environment, or tombstoned (with `deleted=True` and the last name). `environment_id=None` means the environment does not exist yet, so only upcoming deployments match. Raises `UnresolvableAffinityReferenceError` with the full path on the first term that fails. A config without references is returned unchanged (same object is acceptable).
 
-Unit tests: `backend/tests/unit/services/scheduling/test_references.py`.
+Unit tests: `backend/tests/unit/services/scheduling/test_references.py`, including that a bound config is unchanged by the `EnvironmentConfig.model_validate(...).model_dump(exclude_none=True, mode="json")` round trip that the clone merge and the environment no-op check use (critique E8).
 
 ### D-002: Deployment writes call the binding
 
@@ -104,7 +104,7 @@ In `services/scheduling/validator.py`:
 
 In `services/context.py` `_populate_component_scheduling` and `api/definitions/deployment/model.py` `resolvedScheduling`: expand the environment and the deployment level once each, with prefixes `environment.config.scheduling` and `deployment.config.scheduling`, and each component level with `component[<name>].config.scheduling`, before `_resolve_scheduling_config`. `generate_instance_from_deployment` and `generate_context_from_deployment` take `upcoming_deployments` and pass it down.
 
-Tests: extend `backend/tests/unit/services/test_scheduling_validator.py` (tombstoned id refused with last name and `deleted`, name refused, upcoming id accepted, per-level path); the existing `test_resolves_by_name` changes to expect a refusal.
+Tests: extend `backend/tests/unit/services/test_scheduling_validator.py` (tombstoned id refused with last name and `deleted`, name refused, upcoming id accepted, per-level path); the existing `test_resolves_by_name` changes to expect a refusal. Existing tests that write the name of a deployment that does not exist are updated to create it first or to expect the refusal: `backend/tests/functional/test_api_scheduling_config.py::test_accepts_anti_affinity_with_deployment_ref` (L49-63) and any other found by `grep -rn deployment_name backend/tests` in scheduling tests (critique E7).
 
 ### D-005: Error types
 
@@ -117,10 +117,10 @@ In `services/backup/clone.py` `clone_environment`, before the clone row is creat
 1. Bind `canonical_override` with path prefix `config_override` against the source environment; store the bound override.
 2. `merged = merge_environment_config(source.config, bound_override, cleared_config_fields)`.
 3. `copied = {result.deployment_id for result in planned if result.outcome is PENDING}`.
-4. Collect `referenced_deployment_ids` of `merged` (prefix `environment.config`), of each copied deployment's config (prefix `deployment[<name>].config`) and of each copied deployment's components (prefix `deployment[<name>].component[<component>].config`).
+4. Collect `referenced_deployment_ids` of `merged` (prefix `environment.config`) and of each copied deployment's config (prefix `deployment[<name>].config`). For components, read the component definitions of each copied deployment's driver version and check each reference by name against the names of the copied deployments and by id against their ids (prefix `deployment[<name>].component[<component>].config`), because the flow binds those definitions by name in the new environment (critique X1).
 5. When any collected id is not in `copied`, raise `UnclonedDeploymentReferenceError`, with names from the roster (`find_all_by_environment(..., include_deleted=True)`, already loaded at L1324-1326).
 
-New helper `find_uncloned_references(...)` without side effects, so the check is unit-tested without the service. Tests: extend `backend/tests/unit/services/backup/test_environment_clone_service.py` (named deployment not selected, selected but not eligible, named by the environment config, by the override, by a component; cleared or replaced `scheduling` accepted; no record created on refusal) and `test_environment_clone.py` (GraphQL error code and metadata).
+New helper `find_uncloned_references(...)` without side effects, so the check is unit-tested without the service. Tests: extend `backend/tests/unit/services/backup/test_environment_clone_service.py` (named deployment not selected, selected but not eligible, named by the environment config, by the override, by a driver component definition, including a driver name that no copied deployment has after a rename; cleared or replaced `scheduling` accepted; no record created on refusal) and `test_environment_clone.py` (GraphQL error code and metadata).
 
 ### D-007: Clone flow
 
@@ -128,11 +128,11 @@ In `workflows/templates/clone.py` (R-008):
 
 - New pure helpers in `services/backup/clone.py`:
   - `cascade_reference_failures(snapshots, failed_ids) -> dict[UUID, UUID]`: each snapshot that fails, with the named deployment that makes it fail, repeated until nothing changes;
-  - `order_counterparts(snapshots, environment_config) -> list[snapshot]`: named by the environment config first, then each after the ones it names, cycles in name order.
+  - `order_counterparts(snapshots, environment_config) -> list[snapshot]`: each counterpart after the ones its terms name; among those that can come next, the ones named by the environment config first, then source-name order; a cycle is broken in source-name order (critique E1).
 - `_run_environment_clone`: after `_classify_captured_constituents`, cascade the capture failures and attribute them with `CLONE_REASON_REFERENCED_DEPLOYMENT_NOT_CLONED.format(name=...)`; when the merged environment config names a failed deployment, write a fatal `CloneError(step=CLONE_STEP_REFERENCED_DEPLOYMENT_NOT_CLONED, ...)`, fail the pending entries and stop. Then build `counterpart_ids = {snapshot.deployment_id: uuid4()}` and `upcoming = {counterpart_ids[s.deployment_id]: s.deployment_name}`.
 - `_create_cloned_environment`: merge, then `remap_deployment_references(merged, counterpart_ids)`, then `create_environment(..., config=remapped, upcoming_deployments=upcoming)`.
 - `_create_counterpart`: `remap_deployment_references(snapshot.config, counterpart_ids)`, then `deploy_application(..., deployment_id=counterpart_ids[...], deployment_config=remapped, upcoming_deployments=upcoming)`; return the given id instead of reading back by name.
-- The counterpart loop runs in `order_counterparts` order; before each, a counterpart whose config names a failed counterpart is attributed failed without being created; a failure of a counterpart named by the environment config writes the fatal error and fails the remaining pending entries.
+- The counterpart loop runs in `order_counterparts` order; `upcoming` holds only the counterparts that have not failed (critique E2); before each, a counterpart whose config names a failed counterpart is attributed failed without being created and `env_clone_reference_not_cloned` is logged (critique E4); a failure of a counterpart named by the environment config writes the fatal error and fails the remaining pending entries.
 - Add `CLONE_STEP_REFERENCED_DEPLOYMENT_NOT_CLONED = "referenced_deployment_not_cloned"` to `CLONE_STEPS`.
 
 Tests: unit tests for the two helpers and for the flow harness (`test_environment_clone_service.py`: capture failure cascade, fatal environment-config case, order); functional tests with the real flow (`test_environment_clone.py` via `_run_clone_flow`): A names B in both snapshot orders, A and B name each other, the environment config names A, and no term in the new environment gives a source id.
