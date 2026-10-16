@@ -32,7 +32,7 @@ description: "Tasks for 024: helm-controller runs with Helm v4 defaults"
 
 **Purpose**: a green baseline before any change.
 
-- [ ] T001 Run `uv sync`, then `uv run pytest backend/tests/unit/test_helm_agent_crd_upgrade.py backend/tests/unit/agent/test_blocks.py backend/tests/unit/agent/test_custom_resources.py -q` and `uv run pytest backend/tests/integration/test_component_container_kustomize.py -q`, and note the results as the baseline (no file change). Check that `helm` and `kubectl` are on PATH (`helm version`, `kubectl version --client`)
+- [X] T001 Run `uv sync`, then `uv run pytest backend/tests/unit/test_helm_agent_crd_upgrade.py backend/tests/unit/agent/test_blocks.py backend/tests/unit/agent/test_custom_resources.py -q` and `uv run pytest backend/tests/integration/test_component_container_kustomize.py -q`, and note the results as the baseline (no file change). Check that `helm` and `kubectl` are on PATH (`helm version`, `kubectl version --client`)
 
 ---
 
