@@ -427,6 +427,26 @@ only cluster. Before #498 the credentials update started one run per cluster of 
 environments, which with several clusters would not have reached each cluster. How a run would
 reach a given cluster if Styrmin allowed several clusters is not decided.
 
+### S3 keys of a location
+
+The flows never take the location's S3 keys as parameters, because the Prefect server stores
+the parameters of every flow run and shows them in its UI and API (#497). Before the
+`assignBackupStorageLocation` and `updateBackupStorageLocation` mutations start
+`sync-bsl-create` or `sync-bsl-update-credentials`, they save the keys in a Prefect `Secret`
+block named `styrmin-bsl-<location id>-credentials` (`PrefectManager.save_bsl_credentials`,
+`workflows/bsl_credentials.py`). The flow's task loads the keys from the block by the
+location's id and writes them to the Kubernetes Secret
+([ADR-074](../../adr/0074-bsl-keys-passed-to-flows-in-prefect-secret-block.md)).
+
+- The block's value is a JSON string, not a dict. Prefect hides a string value in API reads
+  that do not ask for secrets, but returns a dict value in plain text.
+- Prefect encrypts block data in its database. A caller of the Prefect API can still read the
+  keys by asking for secret values (`include_secrets=true`).
+- `deleteBackupStorageLocation` deletes the block. A failure to delete it is logged and does not
+  stop the deletion of the location.
+- Flow runs started before #497 keep the keys in their parameters until Prefect deletes those
+  runs.
+
 ## Restore Lifecycle
 
 A restore is a multi-stage operation: velero recreates the namespace and its resources, but Kubernetes does not restore the `status` subresource and kopf does not fire `on.create` for a restored CRD (the `kopf.zalando.org/last-handled-configuration` annotation is restored too, fooling kopf into thinking it has already handled the resource). The styrmin restore workflow therefore drives the lifecycle explicitly so the deployment converges back to a healthy state without the operator's 300 s readiness timeout tripping.

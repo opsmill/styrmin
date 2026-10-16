@@ -308,6 +308,17 @@ change named the objects after the BSL's name (`styrmin-bsl-<name>`).
 Styrmin finds those objects by the same label and keeps using them; it
 does not rename them.
 
+To create or update the Secret, the agent reads the S3 keys from a
+Prefect Secret block named `styrmin-bsl-<BSL id>-credentials`, which
+Styrmin saves on the Prefect server. The Prefect UI shows the block's
+value as `********`, and the Prefect API returns it only to a call that
+asks for secret values. Deleting the BSL deletes the block. Styrmin
+versions before this change passed the keys to these flows as flow-run
+parameters, so the Prefect UI and API show the keys in the flow runs
+that those versions started, until Prefect deletes the runs. To make
+those keys useless, rotate them in your object storage and update the
+BSL with the new keys.
+
 ### Retention: how long a backup lives
 
 Every Velero backup Styrmin creates carries a **TTL** — the duration
