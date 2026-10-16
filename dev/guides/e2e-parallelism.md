@@ -62,7 +62,8 @@ config. `test_cluster_update.py` in `shard_compute` uses it.
 ## Debugging — `--pdb` still works
 
 Matrix sharding does NOT change the per-test debugging recipe.
-AGENTS.md's `--pdb` workflow continues to apply:
+AGENTS.md's `--pdb` workflow continues to apply. Run the wrapper from
+the repository root:
 
 ```bash
 scripts/e2e-pdb.sh backend/tests/e2e/<node_id>

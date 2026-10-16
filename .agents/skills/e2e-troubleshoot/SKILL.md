@@ -86,13 +86,13 @@ cluster_name = none      # pytest-<uuid> vcluster of this iteration's run (Phase
 
 ## Phase 1: Run the Test
 
-Increment `iteration` by 1.
+Increment `iteration` by 1. Run the wrapper from the repository root (Phase 0 step 1):
 
 ```bash
 scripts/e2e-pdb.sh <test_node_id> --tb=long
 ```
 
-The wrapper keeps pdb's stdin from hitting EOF on failure, which would otherwise exit pytest and tear the cluster down before Phase 2 can look at it. When the wrapper is stopped with `kill <pid>`, pytest leaves pdb and runs its session teardown, which deletes the vcluster, and the wrapper removes its FIFO. Do **not** substitute `sleep infinity | uv run pytest …`: `sleep` never writes, so it never takes SIGPIPE when pytest exits and the command hangs forever even on a pass. See `AGENTS.md` (Debugging E2E Tests) for the full rationale.
+The wrapper keeps pdb's stdin from hitting EOF on failure, which would otherwise exit pytest and tear the cluster down before Phase 2 can look at it. When the wrapper is stopped with `kill <pid>`, pytest leaves pdb and runs its session teardown, which deletes the vcluster, and the wrapper removes its FIFO. Do **not** substitute `sleep infinity | uv run pytest …`; `AGENTS.md` (Debugging E2E Tests) explains why.
 
 **Record the PID and the log path of this run** as `run_pid` and `run_log`. The wrapper's first line, printed to stderr and written as the first line of the log, names both, for example `e2e-pdb: pid=12345 log=/tmp/e2e-pdb-log.a1B2c3 (stop with: kill 12345)`. Each run writes a new log file, so read the log of this run, never a fixed path such as `/tmp/pdb.log`, which can hold another session's output.
 

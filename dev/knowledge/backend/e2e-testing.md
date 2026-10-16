@@ -524,7 +524,7 @@ vcluster ───────────────────────�
 
 ### Always run with `--pdb`
 
-The project standard is to run E2E tests with `--pdb`. See `AGENTS.md` (Debugging E2E Tests) for the full workflow, including the FIFO recipe that keeps pdb's stdin open in non-interactive shells.
+The project standard is to run E2E tests with `--pdb`. See `AGENTS.md` (Debugging E2E Tests) for the full workflow, including `scripts/e2e-pdb.sh`, which keeps pdb's stdin open in non-interactive shells.
 
 ### Automatic Log Dump on Failure
 

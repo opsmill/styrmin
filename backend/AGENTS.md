@@ -27,6 +27,8 @@ For E2E tests in `backend/tests/e2e/`, follow the root `AGENTS.md` debugging pol
 uv run pytest backend/tests/e2e/<node_id> -v -s --pdb
 ```
 
+From a non-interactive shell (agent tool, background job), use the `scripts/e2e-pdb.sh` wrapper described in the root `AGENTS.md` instead, so pdb waits for input when the test fails.
+
 ## Context Map
 
 | Area | Read |
