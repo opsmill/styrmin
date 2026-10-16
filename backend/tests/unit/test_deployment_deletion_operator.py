@@ -13,6 +13,8 @@ Covers three orthogonal pieces:
    ``status.phase == "Deleted"`` AND whose ``Deleted`` condition is
    older than ``DELETED_CR_TTL_HOURS``; never reaps ``Deleting``-stuck
    CRs.
+4. The teardown step that deletes the deployment's service aliases in
+   all namespaces (#503).
 
 Kubernetes / kopf interactions are mocked at the helper boundary so the
 tests run in-process with no cluster.
@@ -22,10 +24,19 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from unittest.mock import call
+from uuid import UUID, uuid4
 
 import kopf
 import pytest
+from kubernetes_asyncio.client import (
+    V1ObjectMeta,
+    V1Service,
+    V1ServiceList,
+    V1ServiceSpec,
+)
 
+from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.operator.config import ANNOTATION_SKIP_TEARDOWN
 from styrmin_backend.operator.crd.schema import (
     ConditionType,
@@ -34,12 +45,16 @@ from styrmin_backend.operator.crd.schema import (
 )
 from styrmin_backend.operator.handlers import styrmin_deployment as handlers_module
 from styrmin_backend.operator.handlers.styrmin_deployment import (
+    _delete_service_aliases,
+    _teardown_owned_resources,
     kopf_on_styrmin_deployment_delete,
     kopf_on_styrmin_deployment_deletion_requested,
     kopf_on_styrmin_deployment_update,
     kopf_styrmin_deployment_timer,
 )
 from styrmin_backend.operator.janitor import is_eligible_for_reap
+
+_PRIMITIVES = "styrmin_backend.agent.service.kubernetes.primitives"
 
 
 class _Patch:
@@ -299,6 +314,263 @@ async def test_delete_handler_skips_teardown_when_annotated(mocker) -> None:
 
     teardown_mock.assert_not_called()
     assert patch.status == {}
+
+
+# ---------------------------------------------------------------------------
+# 1b. Service aliases of the deleted deployment (#503)
+# ---------------------------------------------------------------------------
+
+
+def _alias(
+    name: str, namespace: str, target_namespace: str, owner: UUID | None
+) -> V1Service:
+    """A live alias, built as ``_live_alias`` in ``agent/test_service_aliases.py``."""
+    labels = {"styrmin.io/service-alias": "true"}
+    if owner is not None:
+        labels["styrmin.io/deployment-id"] = str(owner)
+    return V1Service(
+        metadata=V1ObjectMeta(name=name, namespace=namespace, labels=labels),
+        spec=V1ServiceSpec(
+            type="ExternalName",
+            external_name=f"{name}.{target_namespace}.svc.cluster.local",
+        ),
+    )
+
+
+def _patch_alias_primitives(mocker, aliases: list[V1Service]) -> tuple[Any, Any, Any]:
+    """Patch the primitives where ``_delete_service_aliases`` imports them."""
+    list_mock = mocker.patch(
+        f"{_PRIMITIVES}.list_services_in_all_namespaces",
+        new_callable=mocker.AsyncMock,
+        return_value=V1ServiceList(items=aliases),
+    )
+    delete_mock = mocker.patch(
+        f"{_PRIMITIVES}.delete_service",
+        new_callable=mocker.AsyncMock,
+        return_value=True,
+    )
+    get_namespace_mock = mocker.patch(
+        f"{_PRIMITIVES}.get_namespace", new_callable=mocker.AsyncMock
+    )
+    return list_mock, delete_mock, get_namespace_mock
+
+
+@pytest.mark.anyio
+async def test_delete_service_aliases_deletes_only_the_aliases_of_the_deployment(
+    mocker,
+) -> None:
+    """FR-001 to FR-003: labelled aliases by id, unlabelled ones by their target namespace."""
+    deployment_id, peer, other_env_deployment, other_env_peer = (
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        uuid4(),
+    )
+    namespace = get_kubernetes_reference(deployment_id)
+    peer_namespace = get_kubernetes_reference(peer)
+    other_env_namespace = get_kubernetes_reference(other_env_deployment)
+    other_env_peer_namespace = get_kubernetes_reference(other_env_peer)
+    _, delete_mock, _ = _patch_alias_primitives(
+        mocker,
+        [
+            _alias("intent", peer_namespace, namespace, deployment_id),
+            _alias("legacy", peer_namespace, namespace, owner=None),
+            _alias("executor", namespace, peer_namespace, peer),
+            _alias("old-executor", namespace, peer_namespace, owner=None),
+            _alias(
+                "intent",
+                other_env_peer_namespace,
+                other_env_namespace,
+                other_env_deployment,
+            ),
+        ],
+    )
+    logger = _Logger()
+
+    await _delete_service_aliases(
+        deployment_id=str(deployment_id),
+        namespace=namespace,
+        deletion_requested=True,
+        logger=logger,
+    )
+
+    assert delete_mock.await_args_list == [
+        call(name="intent", namespace=peer_namespace),
+        call(name="legacy", namespace=peer_namespace),
+    ]
+    assert f"Deleted 2 service aliases of {deployment_id}" in logger.infos
+
+
+@pytest.mark.anyio
+async def test_delete_service_aliases_does_not_read_the_namespace_when_deletion_requested(
+    mocker,
+) -> None:
+    """With a deletion request the aliases go even while the namespace is being deleted."""
+    deployment_id = uuid4()
+    _, _, get_namespace_mock = _patch_alias_primitives(mocker, [])
+
+    await _delete_service_aliases(
+        deployment_id=str(deployment_id),
+        namespace=get_kubernetes_reference(deployment_id),
+        deletion_requested=True,
+        logger=_Logger(),
+    )
+
+    get_namespace_mock.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_delete_service_aliases_lists_services_by_the_alias_label(
+    mocker,
+) -> None:
+    deployment_id = uuid4()
+    list_mock, _, _ = _patch_alias_primitives(mocker, [])
+
+    await _delete_service_aliases(
+        deployment_id=str(deployment_id),
+        namespace=get_kubernetes_reference(deployment_id),
+        deletion_requested=True,
+        logger=_Logger(),
+    )
+
+    list_mock.assert_awaited_once_with(label_selector="styrmin.io/service-alias=true")
+
+
+class _FakeKubernetesClient:
+    async def __aenter__(self) -> object:
+        return object()
+
+    async def __aexit__(self, *_: object) -> None: ...
+
+
+@pytest.mark.anyio
+async def test_teardown_deletes_service_aliases_before_the_deployment_services(
+    mocker,
+) -> None:
+    """Step 1 of the teardown runs before the deployment's own Services are listed."""
+    deployment_id = str(uuid4())
+    namespace = get_kubernetes_reference(UUID(deployment_id))
+    logger = _Logger()
+    parent = mocker.Mock()
+    aliases_mock = mocker.patch.object(
+        handlers_module, "_delete_service_aliases", autospec=True
+    )
+    list_mock = mocker.patch(
+        "styrmin_backend.operator.reconciler.list_managed_resources",
+        new_callable=mocker.AsyncMock,
+        return_value=[],
+    )
+    mocker.patch(
+        "styrmin_backend.operator.reconciler.delete_kubernetes_resource",
+        new_callable=mocker.AsyncMock,
+    )
+    mocker.patch(
+        "styrmin_backend.operator.kubernetes.get_kubernetes_client",
+        return_value=_FakeKubernetesClient(),
+    )
+    custom_api = mocker.MagicMock()
+    custom_api.delete_namespaced_custom_object = mocker.AsyncMock()
+    mocker.patch("kubernetes_asyncio.client.CustomObjectsApi", return_value=custom_api)
+    parent.attach_mock(aliases_mock, "delete_service_aliases")
+    parent.attach_mock(list_mock, "list_managed_resources")
+
+    await _teardown_owned_resources(
+        namespace=namespace,
+        release_reference="rel-1",
+        deployment_id=deployment_id,
+        deletion_requested=True,
+        name="dep-1",
+        logger=logger,
+    )
+
+    assert parent.mock_calls[:2] == [
+        call.delete_service_aliases(
+            deployment_id=deployment_id,
+            namespace=namespace,
+            deletion_requested=True,
+            logger=logger,
+        ),
+        call.list_managed_resources(
+            namespace=namespace, release_reference="rel-1", kind="Service"
+        ),
+    ]
+    assert (
+        f"Teardown step 1: service aliases of {deployment_id} in all namespaces"
+        in logger.infos
+    )
+    custom_api.delete_namespaced_custom_object.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_deletion_requested_handler_tears_down_aliases_before_namespace_deletion(
+    mocker,
+) -> None:
+    """The handler passes the CR's deployment id, and the teardown runs before the
+    namespace deletion request."""
+    deployment_id = str(uuid4())
+    namespace = get_kubernetes_reference(UUID(deployment_id))
+    logger = _Logger()
+    parent = mocker.Mock()
+    teardown_mock = mocker.patch.object(
+        handlers_module, "_teardown_owned_resources", autospec=True
+    )
+    delete_ns_mock = mocker.patch.object(
+        handlers_module, "_request_namespace_deletion", autospec=True
+    )
+    parent.attach_mock(teardown_mock, "teardown")
+    parent.attach_mock(delete_ns_mock, "request_namespace_deletion")
+
+    await kopf_on_styrmin_deployment_deletion_requested(
+        spec={
+            "releaseReference": "rel-1",
+            "deletionRequested": True,
+            "deploymentId": deployment_id,
+        },
+        status={"phase": DeploymentPhase.READY.value},
+        name="dep-1",
+        namespace=namespace,
+        patch=_Patch(),
+        logger=logger,
+    )
+
+    assert parent.mock_calls == [
+        call.teardown(
+            namespace=namespace,
+            release_reference="rel-1",
+            deployment_id=deployment_id,
+            deletion_requested=True,
+            name="dep-1",
+            logger=logger,
+        ),
+        call.request_namespace_deletion(namespace=namespace, logger=logger),
+    ]
+
+
+@pytest.mark.anyio
+async def test_delete_handler_passes_no_deletion_request_to_the_teardown(
+    mocker,
+) -> None:
+    """``kubectl delete styrmindeployment``: the CR has no deletion request."""
+    deployment_id = str(uuid4())
+    namespace = get_kubernetes_reference(UUID(deployment_id))
+    teardown_mock = mocker.patch.object(
+        handlers_module, "_teardown_owned_resources", autospec=True
+    )
+
+    await kopf_on_styrmin_deployment_delete(
+        spec={"releaseReference": "rel-1", "deploymentId": deployment_id},
+        status={"phase": DeploymentPhase.READY.value},
+        name="dep-1",
+        namespace=namespace,
+        annotations={},
+        patch=_Patch(),
+        memo=kopf.Memo(),
+        logger=_Logger(),
+    )
+
+    teardown_mock.assert_awaited_once()
+    assert teardown_mock.await_args.kwargs["deployment_id"] == deployment_id
+    assert teardown_mock.await_args.kwargs["deletion_requested"] is False
 
 
 # ---------------------------------------------------------------------------
