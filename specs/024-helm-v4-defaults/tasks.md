@@ -131,10 +131,10 @@ description: "Tasks for 024: helm-controller runs with Helm v4 defaults"
 
 ## Phase 7: Polish and Verification
 
-- [ ] T031 Run `uv run invoke format lint`, `uv run invoke test`, `uv run pytest backend/tests/integration -q` and the docs build (`cd docs && pnpm install && pnpm build`, in a Node 22 container if the host Node is older); fix failures
-- [ ] T032 Check that no reference to the gate remains outside the specs and the history: `grep -rn "UseHelm3Defaults" --include=*.py --include=*.yaml --include=*.yml --include=*.md . | grep -v "specs/\|CHANGELOG.md\|dev/adr/0071"` returns only text that describes the old behaviour on purpose
-- [ ] T033 Walk through `specs/024-helm-v4-defaults/quickstart.md` §1 to §5 and confirm each expected result; note any that differ in `specs/024-helm-v4-defaults/e2e-evidence.md`
-- [ ] T034 Prepare the pull request notes: link `e2e-evidence.md` and `agent-upgrade-check.md`; state that the `api` cell of `shard_configuration` was run locally because CI excludes it; ask the maintainer to confirm that `Stalled` and the readiness timeout keep unit-test coverage only (spec Clarifications, critique P3)
+- [X] T031 Run `uv run invoke format lint`, `uv run invoke test`, `uv run pytest backend/tests/integration -q` and the docs build (`cd docs && pnpm install && pnpm build`, in a Node 22 container if the host Node is older); fix failures
+- [X] T032 Check that no reference to the gate remains outside the specs and the history: `grep -rn "UseHelm3Defaults" --include=*.py --include=*.yaml --include=*.yml --include=*.md . | grep -v "specs/\|CHANGELOG.md\|dev/adr/0072"` (ADR-072, see T028) returns only text that describes the old behaviour on purpose
+- [X] T033 Walk through `specs/024-helm-v4-defaults/quickstart.md` §1 to §5 and confirm each expected result; note any that differ in `specs/024-helm-v4-defaults/e2e-evidence.md`
+- [X] T034 Prepare the pull request notes: link `e2e-evidence.md` and `agent-upgrade-check.md`; state that the `api` cell of `shard_configuration` was run locally because CI excludes it; ask the maintainer to confirm that `Stalled` and the readiness timeout keep unit-test coverage only (spec Clarifications, critique P3)
 
 ---
 
