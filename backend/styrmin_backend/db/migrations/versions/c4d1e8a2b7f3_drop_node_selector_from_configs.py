@@ -5,6 +5,7 @@ Revises: 7948e6057857
 Create Date: 2026-10-15 00:00:00.000000
 """
 
+from collections.abc import Callable
 from typing import Any, Sequence, Union
 
 import sqlalchemy as sa
@@ -18,6 +19,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 _KEY = "node_selector"
+_BATCH_SIZE = 500
 
 _cluster = sa.table(
     "cluster", sa.column("id", sa.Uuid()), sa.column("config", sa.JSON())
@@ -63,16 +65,28 @@ def _strip_snapshots(snapshots: Any) -> Any:
     ]
 
 
-def _rewrite(table: sa.TableClause, column: str, transform: Any) -> None:
+def _rewrite(
+    table: sa.TableClause, column: str, transform: Callable[[Any], Any]
+) -> None:
+    # Instance contexts hold every config, so read only rows that name the key, in pages by id.
     bind = op.get_bind()
-    for row_id, value in bind.execute(
+    query = (
         sa.select(table.c.id, table.c[column])
-    ).fetchall():
-        new_value = transform(value)
-        if new_value != value:
-            bind.execute(
-                sa.update(table).where(table.c.id == row_id).values({column: new_value})
-            )
+        .where(sa.cast(table.c[column], sa.Text).like(f'%"{_KEY}"%'))
+        .order_by(table.c.id)
+        .limit(_BATCH_SIZE)
+    )
+    rows = bind.execute(query).fetchall()
+    while rows:
+        for row_id, value in rows:
+            new_value = transform(value)
+            if new_value != value:
+                bind.execute(
+                    sa.update(table)
+                    .where(table.c.id == row_id)
+                    .values({column: new_value})
+                )
+        rows = bind.execute(query.where(table.c.id > rows[-1][0])).fetchall()
 
 
 def upgrade() -> None:
