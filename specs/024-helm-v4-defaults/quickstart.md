@@ -33,7 +33,7 @@ uv run pytest backend/tests/e2e/test_pod_scheduling.py -m "ci and shard_compute"
   -k "api-chromium and test_scheduling_end_to_end" -v -s --pdb
 ```
 
-Expected: the test passes. After the scheduling update, the pre-upgrade hook Job in the deployment's namespace has the `dedicated=batch:NoSchedule` toleration and the preferred node affinity, carries Styrmin's labels, and has completed (its pod was scheduled and ran). The vcluster has one node, so the test checks the pod's scheduling fields and completion, not placement on a second node.
+Expected: the test passes. After the scheduling update, the pre-upgrade hook Job in the deployment's namespace has the `dedicated=batch:NoSchedule` toleration and the preferred node affinity, carries Styrmin's labels, and has completed (its pod was scheduled and ran). The unlabelled pre-upgrade hook ConfigMap exists and carries Styrmin's labels. The vcluster has one node, so the test checks the pod's scheduling fields and completion, not placement on a second node.
 
 ## 3. Same task results for failures (FR-002, SC-001, SC-002)
 
@@ -68,7 +68,7 @@ Manual check, recorded in the pull request description:
 
 3. Upgrade the agent chart to this branch. Wait until helm-controller is ready, then for two HelmRelease intervals of the controller's own reconcile (or force one with `kubectl annotate helmrelease -n styrmin-<id> <name> reconcile.fluxcd.io/requestedAt="$(date +%s)" --overwrite`).
 4. Repeat step 2. Expected: the same newest release Secret (`sh.helm.release.v1.<name>.v1`), status `deployed`, and the same pod start times.
-5. Change the deployment (for example an env var) and check that the new release revision kept client-side apply: the workload's `metadata.managedFields` shows the `helm` manager (or `helm-controller`) with `operation: Update`, not `Apply`.
+5. Change the deployment (for example an env var). Check that the task succeeds, the deployment reaches `Running`, and the new release revision kept client-side apply: the workload's `metadata.managedFields` shows the `helm` manager (or `helm-controller`) with `operation: Update`, not `Apply`. This is the only run of client-side apply with Helm v4's health checks and post-rendering (critique P1).
 
 ## 5. Documentation
 

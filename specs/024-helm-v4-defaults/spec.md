@@ -179,7 +179,7 @@ The documentation states the new behaviour in the same change: which post-render
 - **FR-011**: A towncrier fragment MUST record that new installs use server-side apply and that Helm hooks receive post-render patches.
 - **FR-012**: The GraphQL API, SDK, CLI, frontend, database schema and error types MUST NOT change.
 - **FR-013**: Styrmin's labels MUST reach every chart resource, including a Helm hook or template without `metadata.labels`, without failing the render, and MUST keep the resource's existing labels (R-008).
-  - Verification: a kustomize integration test with a labelled resource, an unlabelled resource and an unlabelled hook Job.
+  - Verification: a kustomize integration test with a labelled resource, an unlabelled resource and an unlabelled hook Job, and the extended `test_pod_scheduling.py`, which checks that an unlabelled Helm hook `ConfigMap` of the test chart carries Styrmin's labels after an upgrade (critique X1).
 
 ### Key Entities
 
