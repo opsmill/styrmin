@@ -34,6 +34,7 @@ class AffinityTermInput(BaseModel):
     """Single affinity term mirroring ``AffinityTerm``."""
 
     topology_key: str = Field(alias="topologyKey")
+    "Node label that defines the topology domain for pod affinity and pod anti-affinity. Node affinity ignores it, so pass an empty string."
     namespaces: Optional[list[str]] = None
     namespace_selector: Optional["LabelSelectorInput"] = Field(
         alias="namespaceSelector", default=None
@@ -302,6 +303,7 @@ class SchedulingInput(BaseModel):
     node_affinity: Optional["AffinityBlockInput"] = Field(
         alias="nodeAffinity", default=None
     )
+    "Places pods on nodes by node label. Each term's labelSelector matches node labels, and its topologyKey is ignored. A pod goes to a node that matches at least one required term, and preferred terms are weighted. A cluster's value is ignored."
     topology_spread_constraints: Optional[list["TopologySpreadConstraintInput"]] = (
         Field(alias="topologySpreadConstraints", default=None)
     )

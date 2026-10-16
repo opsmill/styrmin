@@ -23,6 +23,9 @@ input AffinityBlockInput {
 
 """Single affinity term mirroring ``AffinityTerm``."""
 input AffinityTermInput {
+  """
+  Node label that defines the topology domain for pod affinity and pod anti-affinity. Node affinity ignores it, so pass an empty string.
+  """
   topologyKey: String!
   namespaces: [String!] = null
   namespaceSelector: LabelSelectorInput = null
@@ -1271,6 +1274,10 @@ enum Role {
 input SchedulingInput {
   podAffinity: AffinityBlockInput = null
   podAntiAffinity: AffinityBlockInput = null
+
+  """
+  Places pods on nodes by node label. Each term's labelSelector matches node labels, and its topologyKey is ignored. A pod goes to a node that matches at least one required term, and preferred terms are weighted. A cluster's value is ignored.
+  """
   nodeAffinity: AffinityBlockInput = null
   topologySpreadConstraints: [TopologySpreadConstraintInput!] = null
   resources: ResourceRequirementsInput = null
