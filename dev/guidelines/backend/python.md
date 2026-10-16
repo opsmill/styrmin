@@ -883,7 +883,7 @@ most deployments but not for a counterpart deployment
 ([ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md) decision 3,
 `operator/crd/builder.py`).
 
-### Name a Kubernetes object after its record's id, and find it by an id label
+### Name a Kubernetes object after its record's id, and find it by the id
 
 A user can rename a backup storage location, a deployment, a group and other records. A cluster
 object named after such a name stays under the old name after a rename, so code that rebuilds the
@@ -893,11 +893,12 @@ object that Styrmin creates for a record:
 - Build its name from the record's id, as `get_kubernetes_reference` does for a deployment
   (`styrmin-<deployment id>`) and `velero_bsl_name` does for a backup storage location
   (`styrmin-bsl-<location id>`).
-- Put the id on the object as a label, such as `styrmin.io/bsl-id`, and select by that label to
-  update or delete the object. Selecting by label also finds objects that an earlier version named
-  differently.
+- Put the id on the object as a label, such as `styrmin.io/bsl-id`.
+- To update or delete the object, find it by that label or by a name built only from the id, never
+  by a name built from a field a user can change. Select by the label when objects that an earlier
+  version named differently can still exist, because a label selector also finds them.
 - When the name is what the user asked for, such as a service-name override, which names the
-  Service, keep the name and still select by the id label to update or delete the object.
+  Service, keep the name and select by the id label to update or delete the object.
 
 Do not pass a record's name to a flow that acts on cluster objects. Pass the id.
 
