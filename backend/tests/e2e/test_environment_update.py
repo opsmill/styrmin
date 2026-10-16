@@ -31,9 +31,11 @@ Scenarios:
   converges, and the failing deployment's timeline records a failed
   Task. Currently skipped pending a multi-driver fixture (see body for
   unskip path).
-* ``test_environment_update_redeploys_its_dedicated_ingress_controller`` —
+* ``test_environment_update_and_restore_redeploy_the_dedicated_ingress_controller`` —
   #424: changing the environment's own ``dedicated_ingress`` redeploys its
-  dedicated ingress controller before the application moves onto it.
+  dedicated ingress controller before the application moves onto it. #467:
+  restoring an environment backup taken before the change does the same with
+  the backed-up value.
 """
 
 from __future__ import annotations
@@ -552,6 +554,45 @@ async def test_us4_env_vars_form_redeploys_environment(
 _INGRESS_NODE_PORT = 31744
 
 
+async def _wait_for_controller_then_application(
+    client: StyrminClient,
+    controller_id: str,
+    app_id: str,
+    known_controller: set[str],
+    known_app: set[str],
+) -> None:
+    """The controller is redeployed first; the application only after the controller's task ended."""
+    [controller_task] = await new_tasks(client, controller_id, known_controller)
+    assert controller_task.type == "update_instance", controller_task
+    assert await new_tasks(client, app_id, known_app) == [], (
+        "The application was redeployed before its controller"
+    )
+    controller_task = await wait_for_task_end(client, controller_id, controller_task.id)
+    app_task = await wait_for_new_redeploy(client, app_id, known_app)
+    assert controller_task.ended_on is not None
+    assert controller_task.ended_on <= app_task.created_on, (
+        f"The application redeploy was created at {app_task.created_on}, "
+        f"before the controller task ended at {controller_task.ended_on}"
+    )
+    await wait_for_task_end(client, app_id, app_task.id)
+    await wait_for_deployment_status(client, app_id, "running")
+
+
+async def _traefik_service_answering(
+    kr8s_api: kr8s.asyncio.Api, environment_id: str, app_id: str, fqdn_suffix: str
+) -> dict[str, Any]:
+    """Return the spec of the controller's Service once the application answers through it."""
+    service = await traefik_service(kr8s_api, environment_id)
+    async with _portforward(service, remote_port=8000) as local_port:
+        await _wait_for_http(
+            f"http://localhost:{local_port}/count",
+            timeout=120.0,
+            interval=3.0,
+            headers={"Host": f"simple-app-{app_id}.{fqdn_suffix}"},
+        )
+    return service.raw["spec"]
+
+
 @pytest.mark.api_only(
     reason="The update sets dedicatedIngress, which the environment form cannot "
     "submit, and every check reads the SDK and kr8s; no dual-entrypoint "
@@ -559,15 +600,17 @@ _INGRESS_NODE_PORT = 31744
     "the same calls without adding coverage."
 )
 @pytest.mark.ci
-async def test_environment_update_redeploys_its_dedicated_ingress_controller(
+async def test_environment_update_and_restore_redeploy_the_dedicated_ingress_controller(
     styrmin_resources: dict,
     simple_app_image: str,  # noqa: ARG001 — ensures image is built
     vcluster: dict,
 ) -> None:
-    """The steps to reproduce of #424: the controller's Service goes from LoadBalancer to NodePort.
+    """The steps to reproduce of #424 and #467: LoadBalancer to NodePort, then back by a restore.
 
-    The controller is redeployed first. The application is redeployed only
-    after the controller's task ended, and then answers through the controller.
+    Each time, the controller is redeployed first. The application is
+    redeployed only after the controller's task ended, and then answers through
+    the controller. The environment backup is taken before the application is
+    deployed, so it holds only the config and the restore needs no Velero.
     """
     client: StyrminClient = styrmin_resources["client"]
     cluster_id = str(styrmin_resources["cluster_id"])
@@ -575,14 +618,20 @@ async def test_environment_update_redeploys_its_dedicated_ingress_controller(
     fqdn_suffix = (await client.clusters.get(cluster_id=cluster_id)).config[
         "fqdn_suffix"
     ]
+    load_balancer = {"dedicated_ingress": {"service": {"type": "LoadBalancer"}}}
 
     environment = await client.environments.create(
         name=f"env-update-ingress-{uuid.uuid4().hex[:6]}",
         cluster_id=cluster_id,
-        config={"dedicated_ingress": {"service": {"type": "LoadBalancer"}}},
+        config=load_balancer,
     )
     environment_id = str(environment.id)
     try:
+        snapshot = await client.environment_backups.create(
+            environment_id=environment_id
+        )
+        assert snapshot.status == "COMPLETED", snapshot
+        assert snapshot.constituents == [], snapshot
         task = await client.deployments.create(
             driver="simple-app", version="0.1.0", environment_id=environment_id
         )
@@ -606,34 +655,28 @@ async def test_environment_update_redeploys_its_dedicated_ingress_controller(
             ),
         )
 
-        [controller_task] = await new_tasks(client, controller_id, known_controller)
-        assert controller_task.type == "update_instance", controller_task
-        assert await new_tasks(client, app_id, known_app) == [], (
-            "The application was redeployed before its controller"
+        await _wait_for_controller_then_application(
+            client, controller_id, app_id, known_controller, known_app
         )
-        controller_task = await wait_for_task_end(
-            client, controller_id, controller_task.id
+        spec = await _traefik_service_answering(
+            kr8s_api, environment_id, app_id, fqdn_suffix
         )
-        app_task = await wait_for_new_redeploy(client, app_id, known_app)
-        assert controller_task.ended_on is not None
-        assert controller_task.ended_on <= app_task.created_on, (
-            f"The application redeploy was created at {app_task.created_on}, "
-            f"before the controller task ended at {controller_task.ended_on}"
-        )
-        await wait_for_task_end(client, app_id, app_task.id)
-        await wait_for_deployment_status(client, app_id, "running")
-
-        service = await traefik_service(kr8s_api, environment_id)
-        spec = service.raw["spec"]
         assert spec["type"] == "NodePort", spec
         node_ports = {port["name"]: port.get("nodePort") for port in spec["ports"]}
         assert node_ports["websecure"] == _INGRESS_NODE_PORT, node_ports
-        async with _portforward(service, remote_port=8000) as local_port:
-            await _wait_for_http(
-                f"http://localhost:{local_port}/count",
-                timeout=120.0,
-                interval=3.0,
-                headers={"Host": f"simple-app-{app_id}.{fqdn_suffix}"},
-            )
+
+        known_app = await task_ids(client, app_id)
+        known_controller = await task_ids(client, controller_id)
+        await client.environment_backups.restore(environment_backup_id=snapshot.id)
+
+        restored = await client.environments.get(environment_id=environment_id)
+        assert restored.config == load_balancer, restored.config
+        await _wait_for_controller_then_application(
+            client, controller_id, app_id, known_controller, known_app
+        )
+        spec = await _traefik_service_answering(
+            kr8s_api, environment_id, app_id, fqdn_suffix
+        )
+        assert spec["type"] == "LoadBalancer", spec
     finally:
         await client.environments.delete(environment_id=environment_id)
