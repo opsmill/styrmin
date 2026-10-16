@@ -572,9 +572,16 @@ input DeploymentPodStatusReport {
   pods: [PodStatusInput!]!
 }
 
-"""Reference to another deployment in the same environment."""
+"""
+Reference to another deployment in the same environment. Styrmin stores the id of the named deployment; a name given here is replaced with that id when the config is written.
+"""
 input DeploymentReferenceInput {
+  """Id of a deployment in the same environment."""
   deploymentId: String = null
+
+  """
+  Name of a deployment in the same environment. Styrmin stores the id of that deployment instead of the name when the config is written.
+  """
   deploymentName: String = null
   components: [String!] = null
 }

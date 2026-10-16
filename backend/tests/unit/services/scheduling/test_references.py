@@ -8,8 +8,13 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.context.models.config import EnvironmentConfig
+from styrmin_backend.db.models import Cluster
 from styrmin_backend.domain.models import Deployment, DeploymentState
 from styrmin_backend.services.exceptions import UnresolvableAffinityReferenceError
 from styrmin_backend.services.scheduling.references import (
@@ -18,6 +23,7 @@ from styrmin_backend.services.scheduling.references import (
     referenced_deployment_ids,
     remap_deployment_references,
 )
+from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 
 pytestmark = pytest.mark.anyio
 
@@ -612,3 +618,36 @@ class TestRemapDeploymentReferences:
 
     def test_none_config(self) -> None:
         assert remap_deployment_references(None, {uuid4(): uuid4()}) == (None, {})
+
+
+class TestBindInsideTheCallersUnitOfWork:
+    async def test_refusal_in_a_savepoint_keeps_the_callers_earlier_work(self) -> None:
+        engine = create_async_engine(
+            "sqlite+aiosqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+        config = _config(required=[{"deployment_name": "nope"}])
+        try:
+            async with AsyncSession(engine, expire_on_commit=False) as session:
+                uow = SqlModelUnitOfWork(session)
+                async with uow:
+                    session.add(Cluster(name="before", config={}))
+                    await session.flush()
+                    with pytest.raises(UnresolvableAffinityReferenceError):
+                        async with session.begin_nested():
+                            async with uow:  # the service's own block
+                                await bind_deployment_references(
+                                    uow,
+                                    uuid4(),
+                                    config,
+                                    path_prefix="deployment.config",
+                                )
+                    await uow.commit()
+                names = set((await session.exec(select(Cluster.name))).all())
+        finally:
+            await engine.dispose()
+
+        assert names == {"before"}

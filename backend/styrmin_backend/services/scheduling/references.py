@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 from uuid import UUID
 
 from styrmin_backend.services.exceptions import UnresolvableAffinityReferenceError
@@ -118,6 +118,28 @@ def remap_deployment_references(
     return remapped, unmapped
 
 
+@overload
+async def bind_deployment_references(
+    uow: UnitOfWork,
+    environment_id: UUID | None,
+    config: dict[str, Any],
+    *,
+    path_prefix: str,
+    upcoming_deployments: Mapping[UUID, str] | None = None,
+) -> dict[str, Any]: ...
+
+
+@overload
+async def bind_deployment_references(
+    uow: UnitOfWork,
+    environment_id: UUID | None,
+    config: dict[str, Any] | None,
+    *,
+    path_prefix: str,
+    upcoming_deployments: Mapping[UUID, str] | None = None,
+) -> dict[str, Any] | None: ...
+
+
 async def bind_deployment_references(
     uow: UnitOfWork,
     environment_id: UUID | None,
@@ -134,23 +156,25 @@ async def bind_deployment_references(
     term that names no live deployment of the environment raises
     :class:`UnresolvableAffinityReferenceError` with the term's path.
     A config without deployment references is returned as it is.
+
+    Call it inside the caller's open unit of work. It opens none of its own, so a
+    refusal inside a caller's savepoint rolls back only that savepoint.
     """
     if config is None or next(iter_reference_sites(config, path_prefix), None) is None:
         return config
     upcoming = dict(upcoming_deployments or {})
     upcoming_by_name = {name: deployment_id for deployment_id, name in upcoming.items()}
     bound = copy.deepcopy(config)
-    async with uow:
-        for site in iter_reference_sites(bound, path_prefix):
-            ref = site.deployment_ref
-            target_id = await _bind_reference(
-                uow, environment_id, ref, site.path, upcoming, upcoming_by_name
-            )
-            components = ref.get("components")
-            ref.clear()
-            ref["deployment_id"] = str(target_id)
-            if components is not None:
-                ref["components"] = components
+    for site in iter_reference_sites(bound, path_prefix):
+        ref = site.deployment_ref
+        target_id = await _bind_reference(
+            uow, environment_id, ref, site.path, upcoming, upcoming_by_name
+        )
+        components = ref.get("components")
+        ref.clear()
+        ref["deployment_id"] = str(target_id)
+        if components is not None:
+            ref["components"] = components
     return bound
 
 
