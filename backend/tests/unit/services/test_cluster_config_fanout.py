@@ -81,7 +81,6 @@ async def test_instance_generated_from_the_deployment_is_at_config_when_nothing_
         "fqdn_suffix": "apps.example.com",
         "dedicated_ingress": {},
         "standard_storage": {"storage_class": "standard"},
-        "scheduling": {"tolerations": [{"key": "cluster", "operator": "Exists"}]},
     }
     graph.env_a.config = {
         "ip_whitelist": ["10.0.0.0/8"],
@@ -331,24 +330,6 @@ async def test_standard_storage_change_redeploys_the_deployments_that_take_it(gr
     assert storage.storage_class == "premium"
     assert counts.dispatched == 1
     assert counts.skipped_noop == 1
-
-
-async def test_cluster_scheduling_change_starts_no_redeploy(graph):
-    """The resolution does not read the cluster's ``scheduling``, so nothing changes."""
-    await deploy(graph, graph.env_a, "app-a")
-    await deploy(graph, graph.env_b, "app-b")
-
-    counts = await _fan_out(
-        graph,
-        {
-            **CLUSTER_CONFIG,
-            "scheduling": {"tolerations": [{"key": "dedicated", "operator": "Exists"}]},
-        },
-    )
-
-    assert update_tasks(graph) == []
-    assert counts.dispatched == 0
-    assert counts.skipped_noop == 2
 
 
 async def test_fan_out_logs_one_line_with_every_count(graph, mocker):

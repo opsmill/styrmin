@@ -8,7 +8,6 @@ import {
   EXTERNAL_URL_SCHEME_MAP,
   transformEnumValue,
 } from "@/pages/environments/EnvironmentConfigurationTab.helpers";
-import { normalizeSchedulingEnums } from "./deployment-input";
 
 type StoredConfig = Record<string, unknown>;
 
@@ -94,7 +93,6 @@ export function clusterConfigToInput(config: StoredConfig): UpdateClusterInput {
     ),
     standardStorage: storageToInput(asRecord(config.standard_storage)),
     fastStorage: storageToInput(asRecord(config.fast_storage)),
-    scheduling: normalizeSchedulingEnums(config.scheduling),
     dbSize: asString(config.db_size),
     backupTtl: asString(config.backup_ttl),
   });

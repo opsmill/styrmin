@@ -51,18 +51,6 @@ FULL_INPUT: dict[str, Any] = {
     },
     "standardStorage": {"storageClass": "standard-rwo"},
     "fastStorage": {"storageClass": "local-nvme"},
-    "scheduling": {
-        "tolerations": [
-            {
-                "key": "dedicated",
-                "operator": "EQUAL",
-                "value": "apps",
-                "effect": "NO_SCHEDULE",
-            }
-        ],
-        "resources": {"requests": {"cpu": "100m", "memory": "128Mi"}},
-        "runtimeClass": "kata",
-    },
     "dbSize": "10Gi",
     "backupTtl": "720h",
 }
@@ -89,18 +77,6 @@ FULL_CONFIG: dict[str, Any] = {
     },
     "standard_storage": {"storage_class": "standard-rwo"},
     "fast_storage": {"storage_class": "local-nvme"},
-    "scheduling": {
-        "tolerations": [
-            {
-                "key": "dedicated",
-                "operator": "Equal",
-                "value": "apps",
-                "effect": "NoSchedule",
-            }
-        ],
-        "resources": {"requests": {"cpu": "100m", "memory": "128Mi"}},
-        "runtime_class": "kata",
-    },
     "db_size": "10Gi",
     "backup_ttl": "720h",
 }
@@ -126,13 +102,16 @@ async def _stored_cluster(session: AsyncSession, cluster_id: UUID) -> Cluster:
 
 
 def test_update_cluster_input_covers_every_cluster_config_field() -> None:
-    """Every ``ClusterConfig`` field has an ``UpdateClusterInput`` field of the same name, and no more."""
+    """Every ``ClusterConfig`` field has an ``UpdateClusterInput`` field of the same name, and no more.
+
+    ``scheduling`` is the exception: a cluster does not take it (#482).
+    """
     from styrmin_backend.api.definitions.cluster.inputs import UpdateClusterInput
 
     input_fields = {
         f.python_name for f in UpdateClusterInput.__strawberry_definition__.fields
     }
-    assert input_fields == set(ClusterConfig.model_fields)
+    assert input_fields == set(ClusterConfig.model_fields) - {"scheduling"}
 
 
 @pytest.mark.asyncio
@@ -322,6 +301,33 @@ async def test_update_cluster_invalid_config_is_refused_and_not_saved(
     assert error["extensions"]["code"] == "VALIDATION_ERROR", payload
     assert "external_url_port" in error["message"], payload
     assert error["path"] == ["updateCluster"], payload
+    assert (await _stored_cluster(session, cluster_id)).config == original
+
+
+@pytest.mark.asyncio
+async def test_update_cluster_refuses_scheduling_and_saves_nothing(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """No pod gets a cluster's scheduling value, so the input has no such field (#482)."""
+    cluster = await seed_cluster(session)
+    cluster_id = cluster.id
+    original = dict(cluster.config or {})
+
+    payload = await _post_update(
+        client,
+        {
+            "clusterId": str(cluster_id),
+            "input": {
+                "fqdnSuffix": "apps.example.com",
+                "scheduling": {
+                    "tolerations": [{"key": "dedicated", "operator": "EXISTS"}]
+                },
+            },
+        },
+    )
+
+    assert "scheduling" in payload["errors"][0]["message"], payload
+    assert payload.get("data") is None, payload
     assert (await _stored_cluster(session, cluster_id)).config == original
 
 

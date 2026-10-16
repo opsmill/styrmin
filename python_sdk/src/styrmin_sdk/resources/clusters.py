@@ -23,7 +23,7 @@ def cluster_update_input(config: Mapping[str, Any]) -> dict[str, Any]:
     """Check a cluster config and return it as the ``UpdateClusterInput`` variables.
 
     Accepts snake_case or camelCase keys, and the stored enum values that ``get()``
-    returns (``http``, ``NoSchedule``) as well as the GraphQL names.
+    returns (``http``, ``NodeExternalIP``) as well as the GraphQL names.
 
     Raises:
         ValueError: If a key, at any depth, is not a field of ``UpdateClusterInput``.

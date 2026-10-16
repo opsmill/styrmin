@@ -60,7 +60,7 @@ describe("ClusterConfiguration", () => {
     expect(section("Dedicated ingress")).toHaveTextContent("Not configured");
   });
 
-  it("renders networking, storage, runtime, scheduling and backup settings", async () => {
+  it("renders networking, storage, runtime and backup settings", async () => {
     await render(
       <ClusterConfiguration
         config={{
@@ -73,7 +73,6 @@ describe("ClusterConfiguration", () => {
           fast_storage: { storage_class: "local-path" },
           db_size: "10Gi",
           runtime_class: "gvisor",
-          scheduling: { tolerations: [{ key: "dedicated" }] },
           backup_ttl: "168h",
         }}
         capabilities={{}}
@@ -92,11 +91,8 @@ describe("ClusterConfiguration", () => {
     expect(storage).toHaveTextContent("local-path");
     expect(storage).toHaveTextContent("10Gi");
 
-    const runtime = section("Runtime and scheduling");
+    const runtime = section("Runtime");
     expect(runtime).toHaveTextContent("gvisor");
-    expect(within(runtime).getByTestId("cluster-scheduling")).toHaveTextContent(
-      '"key": "dedicated"',
-    );
 
     expect(section("Backups")).toHaveTextContent("168h");
   });

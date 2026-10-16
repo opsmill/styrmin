@@ -370,10 +370,11 @@ from the stored config.
 
 - refuses every key that is not a field name or alias of `UpdateClusterInput`, at any depth, and
   names its path (`Unknown config key(s): dedicated_ingress.servce`), through
-  `validate_input_strict` in `_input_checks.py`;
+  `validate_input_strict` in `_input_checks.py`. This includes `scheduling`, which a cluster does
+  not take (#482);
 - accepts snake_case or camelCase keys;
-- converts stored enum values, such as `http` and `NoSchedule`, to the GraphQL enum names, such as
-  `HTTP` and `NO_SCHEDULE`, through `to_graphql_enum_names`. A config printed by
+- converts stored enum values, such as `http` and `NodeExternalIP`, to the GraphQL enum names, such
+  as `HTTP` and `NODE_EXTERNAL_IP`, through `to_graphql_enum_names`. A config printed by
   `clusters get --json` can therefore be edited and passed back.
 
 `ClusterResource.update` runs the same check again, so SDK callers get it too.

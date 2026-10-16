@@ -1513,7 +1513,6 @@ input UpdateClusterInput {
   dedicatedIngress: DedicatedIngressInput = null
   standardStorage: StandardStorageInput = null
   fastStorage: FastStorageInput = null
-  scheduling: SchedulingInput = null
   dbSize: String = null
   backupTtl: String = null
 }

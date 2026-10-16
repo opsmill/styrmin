@@ -75,22 +75,6 @@ const STORED_CONFIG = {
   },
   standard_storage: { storage_class: "ebs-gp3" },
   fast_storage: { storage_class: "nvme-local" },
-  scheduling: {
-    tolerations: [
-      { key: "dedicated", operator: "Exists", effect: "NoSchedule" },
-      {
-        key: "spot",
-        operator: "Equal",
-        value: "true",
-        effect: "NoExecute",
-        toleration_seconds: 60,
-      },
-    ],
-    resources: {
-      requests: { cpu: "100m", ephemeral_storage: "1Gi" },
-    },
-    runtime_class: "kata",
-  },
 };
 
 /** The UpdateClusterInput for STORED_CONFIG with only the FQDN suffix changed. */
@@ -118,22 +102,6 @@ const EXPECTED_INPUT = {
   },
   standardStorage: { storageClass: "ebs-gp3" },
   fastStorage: { storageClass: "nvme-local" },
-  scheduling: {
-    tolerations: [
-      { key: "dedicated", operator: "EXISTS", effect: "NO_SCHEDULE" },
-      {
-        key: "spot",
-        operator: "EQUAL",
-        value: "true",
-        effect: "NO_EXECUTE",
-        tolerationSeconds: 60,
-      },
-    ],
-    resources: {
-      requests: { cpu: "100m", ephemeralStorage: "1Gi" },
-    },
-    runtimeClass: "kata",
-  },
 };
 
 const CLUSTER = { id: "cl-1", name: "default", config: STORED_CONFIG };
@@ -314,10 +282,11 @@ describe("EditClusterDialog", () => {
 
     expect(
       screen.getByText(
-        /Scheduling, the database size and the backup retention are kept as they are/,
+        /The database size and the backup retention are kept as they are/,
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/node selector/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/scheduling/i)).not.toBeInTheDocument();
   });
 
   it("changing only the FQDN suffix keeps every other stored value", async () => {
@@ -382,42 +351,6 @@ describe("EditClusterDialog", () => {
     });
   });
 
-  it("saves a scheduling value that refers to another deployment", async () => {
-    const user = await openDialog({
-      id: "cl-1",
-      name: "default",
-      config: {
-        ingress_class: "traefik",
-        runtime_class: "default",
-        scheduling: {
-          pod_affinity: {
-            required: [
-              {
-                topology_key: "kubernetes.io/hostname",
-                deployment_ref: { deployment_name: "db" },
-              },
-            ],
-          },
-        },
-      },
-    });
-
-    await review(user);
-
-    expect(submittedInput()).toMatchObject({
-      scheduling: {
-        podAffinity: {
-          required: [
-            {
-              topologyKey: "kubernetes.io/hostname",
-              deploymentRef: { deploymentName: "db" },
-            },
-          ],
-        },
-      },
-    });
-  });
-
   it("removes a value the administrator clears in the form", async () => {
     const user = await openDialog();
 
@@ -434,7 +367,8 @@ describe("EditClusterDialog", () => {
     expect(input).not.toHaveProperty("fqdnSuffix");
     expect(input).toMatchObject({
       standardStorage: { storageClass: "ebs-gp3" },
-      scheduling: EXPECTED_INPUT.scheduling,
+      dbSize: EXPECTED_INPUT.dbSize,
+      backupTtl: EXPECTED_INPUT.backupTtl,
     });
   });
 

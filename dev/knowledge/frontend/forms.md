@@ -171,7 +171,7 @@ three steps:
 `mergeFormValuesIntoConfig(stored, values)` builds the config to save from the form values and
 the stored config, because `updateCluster` replaces the whole config:
 
-- Top-level keys that the form does not show, such as `scheduling`, `db_size` and
+- Top-level keys that the form does not show, such as `db_size` and
   `backup_ttl`, keep their stored value.
 - `dedicated_ingress.service` fields that the form does not show, such as `annotations` and
   `load_balancer_ip`, keep their stored value.

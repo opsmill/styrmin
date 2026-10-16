@@ -1,8 +1,8 @@
 """Strawberry input type for the ``updateCluster`` mutation (021-cluster-config-update).
 
-``UpdateClusterInput`` mirrors ``ClusterConfig`` field by field and reuses the
-leaf inputs of :mod:`styrmin_backend.api.definitions.config.inputs` (ADR-012,
-research D2).
+``UpdateClusterInput`` mirrors ``ClusterConfig`` field by field, except
+``scheduling``, which a cluster does not take (#482). It reuses the leaf inputs
+of :mod:`styrmin_backend.api.definitions.config.inputs` (ADR-012, research D2).
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from styrmin_backend.api.definitions.config.inputs import (
     ExternalDnsEndpointsType,
     ExternalUrlScheme,
     FastStorageInput,
-    SchedulingInput,
     StandardStorageInput,
     _convert_value,
 )
@@ -40,7 +39,6 @@ class UpdateClusterInput:
     dedicated_ingress: DedicatedIngressInput | None = None
     standard_storage: StandardStorageInput | None = None
     fast_storage: FastStorageInput | None = None
-    scheduling: SchedulingInput | None = None
     db_size: str | None = None
     backup_ttl: str | None = None
 

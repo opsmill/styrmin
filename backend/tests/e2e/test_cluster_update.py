@@ -304,19 +304,6 @@ async def test_cluster_update_redeploys_and_moves_dedicated_ingress(
                 await client.environments.delete(environment_id=environment_id)
 
 
-# A cluster value the edit dialog does not show. No resolved config reads the
-# cluster's scheduling, and a toleration only allows pods onto nodes.
-_HIDDEN_SCHEDULING = {
-    "tolerations": [
-        {
-            "key": "styrmin.io/cluster-edit-e2e",
-            "operator": "Exists",
-            "effect": "NoSchedule",
-        }
-    ]
-}
-
-
 @pytest.mark.e2e
 @pytest.mark.ci
 @pytest.mark.ui_only(
@@ -332,7 +319,7 @@ async def test_edit_cluster_config_from_detail_page(
 
     The stored config gets the new suffix and keeps every other value: the
     ones the dialog shows (``dedicated_ingress``, the storage classes,
-    ``external_dns_endpoints_type``) and a ``scheduling`` value it does not
+    ``external_dns_endpoints_type``) and a ``backup_ttl`` value it does not
     show, which the test adds through the SDK first.
     """
     client: StyrminClient = styrmin_resources["client"]
@@ -344,13 +331,16 @@ async def test_edit_cluster_config_from_detail_page(
             f"session cluster has no {key}: {original}"
         )
     new_suffix = f"edit-{uuid.uuid4().hex[:6]}.styrmin.com"
+    hidden_ttl = "2160h" if original.get("backup_ttl") == "1440h" else "1440h"
 
     try:
-        await client.clusters.update(
-            {**original, "scheduling": _HIDDEN_SCHEDULING}, cluster_id=cluster_id
+        result = await client.clusters.update(
+            {**original, "backup_ttl": hidden_ttl}, cluster_id=cluster_id
         )
+        _assert_no_failure(result)
+        await wait_for_cluster_settled(client, cluster_id)
         before = (await client.clusters.get(cluster_id=cluster_id)).config
-        assert before.get("scheduling"), before
+        assert before.get("backup_ttl") == hidden_ttl, before
 
         page = ClusterDetailPage(session_ui_page)
         await page.goto(cluster_id=cluster_id)

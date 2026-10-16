@@ -1,6 +1,6 @@
 # ADR-033: Scheduling merge — affinity accumulate with per-kind `replace:true`; topology-spread keyed by `(topologyKey, whenUnsatisfiable)`
 
-**Status**: Accepted
+**Status**: Accepted — amended 2026-10-16 (#482): a cluster config rejects `scheduling` instead of ignoring it
 **Date**: 2026-05-17
 **Source**: specs/archive/001-pod-scheduling-config/research.md (Decisions 2, 4, 5)
 
@@ -24,6 +24,18 @@ Additionally, Cluster-level scheduling is **out of scope**. Node labels and tain
 ### Levels accepted
 
 Scheduling defaults are accepted at **Environment, Deployment, and Component** levels. Cluster-level values are ignored: `ClusterConfig.scheduling` is left at `None` by convention and the resolver explicitly skips it. The field still lives on `BaseConfigSection` for Pydantic-class consistency — placing it everywhere except `ClusterConfig` would fragment the model hierarchy for marginal gain — but the merge logic excludes cluster-level values in a one-line guard.
+
+Amended 2026-10-16 ([#482](https://github.com/opsmill/styrmin/issues/482)): the API accepted a
+cluster `scheduling` value and the cluster page showed it as "Scheduling defaults", although no
+pod got it. The convention is now enforced instead of ignored:
+
+- `ClusterConfig` rejects any `scheduling` value other than `null`, so `createCluster` refuses
+  it. The field stays on `BaseConfigSection`, so the class hierarchy that this ADR kept does not
+  change. `DeploymentConfig` and `ResolvedConfig` inherit from `ClusterConfig` and still take the
+  field.
+- `UpdateClusterInput` has no `scheduling` field.
+- Revision `eac41bb71a65` deletes the stored cluster values, and `ClusterContext` drops the key
+  when it loads a context stored before the change.
 
 ### Affinity merge — accumulate by default, `replace:true` per kind
 

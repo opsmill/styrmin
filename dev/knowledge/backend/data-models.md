@@ -718,7 +718,7 @@ The merge (`_resolve_instance_config` in `context/resolvers.py`) uses generic `*
 Two fields do not follow the dict spread:
 
 - `env_vars` is merged per key across the environment and the deployment, deepest value winning, so an environment key that the deployment does not set is kept.
-- `scheduling` is computed from the environment and the deployment only. The cluster's `scheduling` value is always dropped ([ADR-033](../../adr/0033-scheduling-merge-semantics.md)).
+- `scheduling` is computed from the environment and the deployment only. `ClusterConfig` rejects a `scheduling` value other than `null`, so a cluster never holds one ([ADR-033](../../adr/0033-scheduling-merge-semantics.md), #482). `DeploymentConfig` and `ResolvedConfig` inherit from `ClusterConfig` and still take the field; the validator checks the class.
 
 `resolve_instance_config(cluster, environment, deployment)` is the public wrapper of `_resolve_instance_config`, the same function whose output context generation stores in `InstanceContext.config`. The cluster config fan-out compares the value it returns now with the value stored on the active instance ([ADR-066](../../adr/0066-cluster-config-fanout.md)). Any change to the merge therefore makes the next cluster update redeploy every deployment whose stored value differs. Two tests check that the comparison and the stored value agree: `test_matches_the_private_resolver` in `tests/unit/context/test_resolve_instance_config.py`, and `test_instance_generated_from_the_deployment_is_at_config_when_nothing_changed` in `tests/unit/services/test_cluster_config_fanout.py`.
 
@@ -800,7 +800,7 @@ Existing models in the same file follow the same idiom (`DeploymentReference._re
 
 <!-- Extracted from specs/001-pod-scheduling-config on 2026-05-17 -->
 
-Top-level scheduling shape used at Environment, Deployment, and Component scopes (Cluster scope is intentionally unused — see [ADR-033](../adr/0033-scheduling-merge-semantics.md)). Lives on `BaseConfigSection.scheduling`.
+Top-level scheduling shape used at Environment, Deployment, and Component scopes. Lives on `BaseConfigSection.scheduling`. `ClusterConfig` rejects any value other than `null`, because no pod gets a cluster's scheduling value (see [ADR-033](../adr/0033-scheduling-merge-semantics.md), #482). `ClusterContext` drops the key when it loads a context stored before that change.
 
 ```python
 class SchedulingConfig(BaseModel):

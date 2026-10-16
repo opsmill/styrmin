@@ -107,7 +107,6 @@ STORED_CONFIG: dict[str, Any] = {
     "fqdn_suffix": "apps.example.com",
     "ingress_class": "traefik",
     "runtime_class": "default",
-    "scheduling": {"tolerations": [{"key": "dedicated", "operator": "Exists"}]},
 }
 
 SNAKE_CASE_CONFIG: dict[str, Any] = {
@@ -116,7 +115,6 @@ SNAKE_CASE_CONFIG: dict[str, Any] = {
     "external_url_port": 8443,
     "dedicated_ingress": {"implementation": "traefik", "service": {"type": "LoadBalancer"}},
     "standard_storage": {"storage_class": "standard"},
-    "scheduling": {"tolerations": [{"key": "dedicated", "operator": "EXISTS"}]},
 }
 
 CAMEL_CASE_CONFIG: dict[str, Any] = {
@@ -125,7 +123,6 @@ CAMEL_CASE_CONFIG: dict[str, Any] = {
     "externalUrlPort": 8443,
     "dedicatedIngress": {"implementation": "traefik", "service": {"type": "LoadBalancer"}},
     "standardStorage": {"storageClass": "standard"},
-    "scheduling": {"tolerations": [{"key": "dedicated", "operator": "EXISTS"}]},
 }
 
 
@@ -289,9 +286,9 @@ def test_clusters_update_timeout_says_the_server_may_still_work(
     [
         ({"ingress_class": "nginx", "fqdn_sufix": "apps.example.com"}, "fqdn_sufix"),
         ({"dedicated_ingress": {"servce": {"type": "LoadBalancer"}}}, "dedicated_ingress.servce"),
-        ({"scheduling": {"tolerations": [{"key": "x", "operatr": "Exists"}]}}, "scheduling.tolerations[0].operatr"),
+        ({"scheduling": {"tolerations": [{"key": "x", "operator": "Exists"}]}}, "scheduling"),
     ],
-    ids=["top_level", "nested", "inside_list"],
+    ids=["top_level", "nested", "cluster_scheduling"],
 )
 def test_clusters_update_refuses_unknown_keys_before_connecting(
     mock_client: MagicMock,
