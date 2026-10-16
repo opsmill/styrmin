@@ -188,6 +188,13 @@ driver version. As a result:
 - Deleted deployments and deployments that are being deleted are not
   redeployed. A deployment with a restore in progress is skipped; submit
   the config again after the restore has ended.
+- A deployment where the environment and the deployment both set
+  `required` node affinity terms, rendered before
+  [#486](https://github.com/opsmill/styrmin/issues/486), is not at the
+  config it resolves to: Styrmin now combines these terms. The next
+  cluster update redeploys it, even when the update changes an unrelated
+  value. See
+  [When running deployments get the combined terms](../concepts-and-architecture/node-affinity.md#when-running-deployments-get-the-combined-terms).
 - When `dedicated_ingress` changes, the applications of an environment
   that takes the cluster's value move onto the environment's ingress
   controller only once the controller is ready, and the controller is
