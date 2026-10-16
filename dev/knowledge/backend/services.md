@@ -87,8 +87,8 @@ styrmin_backend/services/
 ├── replicas/                      # Per-component replica counts (023, ADR-070)
 │   ├── resolver.py                # ReplicaSource, ResolvedReplicas, resolve_replicas, replica_patch_count
 │   ├── patch_builder.py           # build_component_replica_patches: one spec.replicas patch per kind per component
-│   ├── validator.py               # write-time checks: unknown component, singleton above 1
-│   └── exceptions.py              # InvalidReplicaCountError, UnknownComponentReplicaOverrideError, SingletonReplicaOverrideError
+│   ├── validator.py               # write-time checks: unknown component, singleton above 1, maximum count
+│   └── exceptions.py              # InvalidReplicaCountError, ReplicaCountAboveMaximumError, UnknownComponentReplicaOverrideError, SingletonReplicaOverrideError
 │
 ├── parameters/                    # Driver parameter values
 │   ├── validator.py               # validate_parameter_values: defaults, kinds, unknown parameters
@@ -533,7 +533,7 @@ Design rationale: [ADR-070](../../adr/0070-replica-overrides-and-retired-paramet
 |--------|----------|
 | `resolver.py` | `ReplicaSource` (`OVERRIDE`, `DRIVER_DEFAULT`, `CHART`), the frozen `ResolvedReplicas(count, source, override_applies)`, `resolve_replicas(declared_replicas, singleton, override, is_orphaned)` and `replica_patch_count(resolved, enabled)`. Pure functions; the patch builder and `Deployment.componentReplicas` call them. |
 | `patch_builder.py` | `build_component_replica_patches(context)`: for each component of `context.components` and each kind in `REPLICA_PATCH_KINDS` (`Deployment`, `StatefulSet`), at most one `SpecPatch(specs={"replicas": N})` targeted by the component's label selector. `N` is 0 for a stopped component; no patch when the source is `CHART`. Logs the component, count, source and enabled flag at debug level. `ApplicationHelmReleaseBuilder.build()` places the patches after the component label patches and before the backup, scheduling and component container patches. |
-| `validator.py` | `validate_replica_overrides(config, components, stored_config, checked_against)` on the raw config dict: `UnknownComponentReplicaOverrideError` for an added or changed override on an undeclared component (the stored value sent again passes), `SingletonReplicaOverrideError` for an override above 1 on a singleton component, changed or not. |
+| `validator.py` | `validate_replica_overrides(config, components, stored_config, checked_against, max_replica_count)` on the raw config dict: `UnknownComponentReplicaOverrideError` for an added or changed override on an undeclared component (the stored value sent again passes), `SingletonReplicaOverrideError` for an override above 1 on a singleton component, changed or not, and `ReplicaCountAboveMaximumError` for an added or changed override above `max_replica_count` (the stored value sent again passes). The caller passes the server setting `STYRMIN_MAX_REPLICA_COUNT`; driver defaults are not checked against it. |
 | `exceptions.py` | `InvalidReplicaCountError` (`INVALID_REPLICA_COUNT`), `UnknownComponentReplicaOverrideError` (`UNKNOWN_COMPONENT_REPLICA_OVERRIDE`), `SingletonReplicaOverrideError` (`SINGLETON_REPLICA_OVERRIDE`), `ReplicaCountAboveMaximumError` (`REPLICA_COUNT_ABOVE_MAXIMUM`). |
 
 The count itself is checked by `ComponentConfigBlock` (`context/models/config.py`), which raises

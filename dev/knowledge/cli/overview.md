@@ -231,15 +231,22 @@ manifest's config and parameters as `input`, also when the version is unchanged,
 validates the config against the driver version the manifest resolves to and one task reconciles
 it. A `null` result is `unchanged`. A rejected call is `failed` with `ApplyOutcome.error_code`, and
 the CLI prints the code in brackets at the end of the `failed` line. After an `updated` outcome
-whose manifest sets component env vars, images, `command` or `args`, `_apply_update` reads
-`isApplicable` back (`get_deployment_override_applicability.graphql`) and lists, per component,
-the kinds it set that are not applied in `ApplyOutcome.inapplicable_overrides` (`env_vars`,
-`image`, `command`, `args`; `command` and `args` share the `componentContainerOverrides` row), with
-the component names in `ApplyOutcome.inapplicable_components`. The CLI prints one stderr warning
-per component that names those kinds and the two fixes (remove them from the manifest, or load a
-driver version that declares the component container), like the pinned-image warning, and a
-failed read lists nothing. See
-[ADR-065](../../adr/0065-apply-writes-config-with-the-version.md).
+whose manifest sets component env vars, images, `command`, `args` or replica counts,
+`_apply_update` reads `isApplicable` back (`get_deployment_override_applicability.graphql`) and
+lists, per component, the kinds it set that are not applied in
+`ApplyOutcome.inapplicable_overrides` (`env_vars`, `image`, `command`, `args`, `replicas`;
+`command` and `args` share the `componentContainerOverrides` row, `replicas` reads
+`componentReplicas`), with the component names in `ApplyOutcome.inapplicable_components`. The CLI
+prints one stderr warning per component that names those kinds and the two fixes (remove them from
+the manifest, or load a driver version that declares the component container), like the
+pinned-image warning. See [ADR-065](../../adr/0065-apply-writes-config-with-the-version.md).
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-16 -->
+
+A failed read back never fails the apply. `_inapplicable_overrides` returns no components and the
+error text, which `_apply_update` stores in `ApplyOutcome.applicability_check_error`. The CLI then
+prints a stderr warning that says overrides that are stored but not applied are not listed, and
+gives the error. Before spec 023, a failed read listed nothing and printed nothing.
 
 **Server compatibility.** `update_version()` sends `input` in its own operation
 (`update_deployment_version_with_input.graphql`), so a call without `input`, such as
@@ -252,6 +259,47 @@ With `input`, such a server answers `Unknown argument 'input'`, and the SDK rais
 and the stored config is kept.
 An omitted or empty `spec.config` therefore changes nothing. To clear the last per-component
 override, a manifest writes `components: []`.
+
+## Replica counts
+
+<!-- Extracted from specs/023-per-component-replicas on 2026-10-16 -->
+
+Design rationale: [ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md).
+
+**Whole-number check before Pydantic.** `check_replica_counts(config, source=...)`
+(`styrmin_sdk/resources/deployments.py`) raises `ManifestValidationError` when a
+`components[].replicas` is a `bool`, a string, a float or another type that is not an `int`.
+Pydantic would otherwise turn `true` into 1 and `"3"` into 3 before the server sees the value. The
+SDK runs it on the `spec.config` of each manifest in `apply`, and the CLI runs it on the `--config`
+JSON of `deployments update` and `deployments update-version`. The server checks the count range
+(`INVALID_REPLICA_COUNT`, `REPLICA_COUNT_ABOVE_MAXIMUM`).
+
+**`deployments scale`.** `styrminctl deployments scale <deployment> <component> <count>` sets a
+replica override, and `--clear` removes it; the command requires exactly one of the two. It calls
+the SDK's `deployments.scale(deployment_id, component, replicas)`, which reads the deployment,
+turns each stored `config.components` block into a `ComponentConfigInput`
+(`_stored_component_inputs`), changes only `replicas` on the named component, and sends all blocks
+back with `updateDeployment`. `components` replaces every stored block, so resending them keeps the
+env vars, image, `command` and `args` of every component. A block left with no override after
+`--clear` is not sent. A write by someone else between the read and the update is overwritten.
+`None` from `update` means nothing changed, and the CLI prints that the deployment is already up to
+date. There is no scale mutation in the API.
+
+**`deployments get`.** `get_deployment.graphql` selects `componentReplicas`, and the Components
+table has a `replicas` column built by `_replicas_cell`:
+
+| Row | Cell |
+|-----|------|
+| Override applies | `3 (override)` |
+| Driver default | `2 (driver default)`, or `1 (driver default, singleton)` |
+| No source | `chart` (Styrmin does not read the chart's count) |
+| Stored override not applied | the cell above, then `, override N not applied` |
+| Stopped component | the cell above, then `, stopped: 0 pods` |
+| Override on a component the driver version no longer declares | an extra row: `N (override, not applied: no longer declared)` |
+
+**Server compatibility.** `GetDeployment` selects `componentReplicas`, so `deployments get` of this
+release fails against a server from before spec 023. The SDK and `styrminctl` are upgraded with the
+server.
 
 ## Task steps
 
