@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-16
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: PRD "Run helm-controller with Helm v4 defaults" — [opsmill/styrmin#435 (comment)](https://github.com/opsmill/styrmin/issues/435#issuecomment-6210811102). Seed issue: [#435](https://github.com/opsmill/styrmin/issues/435). The gate was set by [#434](https://github.com/opsmill/styrmin/pull/434), which fixes [#432](https://github.com/opsmill/styrmin/issues/432) and [#433](https://github.com/opsmill/styrmin/issues/433).
 

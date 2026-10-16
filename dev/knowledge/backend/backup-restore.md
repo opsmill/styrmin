@@ -1242,6 +1242,20 @@ Operator-visible consequence: **`helm list -n styrmin-<counterpart>` shows a rel
 after the *source* deployment.** Correct, not drift (assuming Helm's default secret
 storage driver).
 
+<!-- Extracted from specs/025-helm-v4-defaults on 2026-10-16 -->
+
+**Release records written by Helm v4.** helm-controller v1.6.5 uses Helm v4, which stores
+releases in Secrets of the same type (`helm.sh/release.v1`), with the same labels (`name`,
+`owner=helm`, `status`, `version`) and the same encoding (JSON, gzip, base64) as Helm v3. The
+record has one new field, `apply_method` (`ssa` or `csa`; empty means client-side apply).
+`retarget_helm_release` rewrites the source namespace in the record's `namespace` field and
+manifest and keeps every other field, so
+`apply_method` passes through a restore or a clone unchanged (research R-006 of
+[spec 025](../../../specs/archive/025-helm-v4-defaults/research.md)). The `backup` and
+`env_backup` E2E shards, in both variants, passed with releases installed with server-side apply
+on [PR #489](https://github.com/opsmill/styrmin/pull/489)
+([CI run 38907406129](https://github.com/opsmill/styrmin/actions/runs/38907406129)).
+
 `reapply_with_counterpart_identity` then, in order: retargets the restored release storage;
 applies the counterpart's CR body carrying kopf's state annotations over from the restored CR
 (a CR without `last-handled-configuration` would make kopf fire `on.create` and race the

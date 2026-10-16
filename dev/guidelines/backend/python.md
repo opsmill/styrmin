@@ -843,6 +843,45 @@ that sets the field to `null`, not a JSON6902 `remove` operation.
 
 See [ADR-071](../../adr/0071-ingress-class-set-by-post-render.md) §1.
 
+### Add keys to a map that the resource may not have with a strategic merge
+
+<!-- Extracted from specs/025-helm-v4-defaults on 2026-10-16 -->
+
+When a post-render patch adds keys to a map, such as `metadata.labels`, and its target can match a
+resource that does not have that map, write a strategic merge patch, not a JSON6902 `add` per key.
+
+- A JSON6902 `add` needs the parent of its path to exist. On a resource without
+  `metadata.labels`, `add /metadata/labels/<key>` fails the whole render. Kustomize v5.7.1 exits
+  with `add operation does not apply: doc is missing path:
+  "/metadata/labels/styrmin~1deployment-id": missing value`.
+- A strategic merge patch creates the map when it is missing and keeps the keys the resource
+  has. Example: `MetadataLabelsMergePatch` in `agent/service/kubernetes/resources/blocks/patches.py`,
+  which `build_target_for_label_patches` uses for every resource (`Target(name=".*")`).
+- Keep a JSON6902 `add` only where every resource the target matches has the parent map, for
+  example `TemplateLabelPatch` on the pod templates of `Deployment` and `StatefulSet` resources.
+- `metadata.annotations` behaves differently: in a check with kustomize v5.7.1, a JSON6902 `add`
+  under `/metadata/annotations/` succeeded on an `Ingress` without annotations. Why kustomize
+  treats annotations and labels differently was not checked, so do not rely on it for other maps.
+
+See [ADR-072](../../adr/0072-helm-v4-defaults-releases-keep-apply-method.md) §5.
+
+### Post-render patches also reach Helm hooks
+
+<!-- Extracted from specs/025-helm-v4-defaults on 2026-10-16 -->
+
+helm-controller runs with `postRenderStrategy: combined`, so every patch in `spec.postRenderers`
+applies to each Helm hook that its target matches, as it does to the chart's templates.
+
+- Write each patch so that it works on any resource its target can match, including a Helm hook
+  that lacks the labels, annotations or containers that the chart's templates have. A patch that
+  fails on one resource fails the install or upgrade of the whole release.
+- A Helm hook `Job` that carries a component's identifier label receives that component's
+  scheduling patches. Keep that in mind when you widen or narrow a target.
+- When you add a post-render patch, add it to the table in
+  [Post-render patches and the Helm hooks they reach](../../knowledge/agent/overview.md#post-render-patches-and-the-helm-hooks-they-reach).
+
+See [ADR-072](../../adr/0072-helm-v4-defaults-releases-keep-apply-method.md) §3.
+
 ### Custom-resource updates: replace the spec keys you write, merge the rest
 
 <!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
@@ -1195,3 +1234,13 @@ def my_task(context: Context) -> None:  # noqa: ARG001
   - `test_ingress_class_post_render.py` and `test_container_override_migration_parity.py` run
     `helm template` and then `kubectl kustomize`;
   - `test_component_container_kustomize.py` runs `kubectl kustomize` on fixed manifests.
+
+<!-- Extracted from specs/025-helm-v4-defaults on 2026-10-16 -->
+
+- **Put chart behaviour that only an E2E test needs behind a chart value that is off by default,
+  and turn it on from a test driver under `backend/tests/e2e/fixtures/drivers/`.** Do not add a
+  parameter to an example driver for it: the parameter would appear in the deploy form of a
+  driver that users read as a reference. Do not turn it on by patching the HelmRelease's
+  `spec.values` from the test either: the next Styrmin update of the deployment rewrites
+  `spec.values`. Example: `preUpgradeHookJob.enabled` in the `simple-app` chart, turned on by the
+  `hook-job` test driver that `test_pod_scheduling.py` uses.

@@ -2,10 +2,10 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Source**: [specs/025-helm-v4-defaults/](../../specs/025-helm-v4-defaults/) (spec, plan D-001 to D-006,
-[research R-001 to R-008](../../specs/025-helm-v4-defaults/research.md), and the evidence files
-[e2e-evidence.md](../../specs/025-helm-v4-defaults/e2e-evidence.md) and
-[agent-upgrade-check.md](../../specs/025-helm-v4-defaults/agent-upgrade-check.md));
+**Source**: [specs/archive/025-helm-v4-defaults/](../../specs/archive/025-helm-v4-defaults/) (spec, plan D-001 to D-006,
+[research R-001 to R-008](../../specs/archive/025-helm-v4-defaults/research.md), and the evidence files
+[e2e-evidence.md](../../specs/archive/025-helm-v4-defaults/e2e-evidence.md) and
+[agent-upgrade-check.md](../../specs/archive/025-helm-v4-defaults/agent-upgrade-check.md));
 [issue #435](https://github.com/opsmill/styrmin/issues/435)
 **Reverses**: the `--feature-gates=UseHelm3Defaults=true` argument that
 [PR #434](https://github.com/opsmill/styrmin/pull/434) added to helm-controller when it moved the agent
@@ -95,9 +95,11 @@ The patch that adds Styrmin's labels to every resource (`Target(name=".*")` in
 Under `combined`, a chart hook without labels would have failed every install and upgrade of that
 driver. The patch is now `MetadataLabelsMergePatch`
 (`agent/service/kubernetes/resources/blocks/patches.py`), a strategic merge that creates the map
-when it is missing and keeps the labels a resource has. The per-component label patch and the pod
-template label patch keep their JSON form, because they select resources by label or target pod
-templates, which always have labels.
+when it is missing and keeps the labels a resource has. The per-component label patch
+(`build_target_for_component_labels`) also uses `MetadataLabelsMergePatch`, so that a component
+name such as `1` or `true` stays a string (commit c7a151ac). The pod template label patch
+(`TemplateLabelPatch`) keeps its JSON form, because it targets the pod templates of `Deployment`
+and `StatefulSet` resources, which always have labels.
 
 ### 6. The operator's rules do not change (spec FR-002)
 

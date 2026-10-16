@@ -98,6 +98,27 @@ Modular building blocks compose into final resource manifests:
 
 `UtilityFactory` produces utility implementations (`IngressUtility`, `EnvironmentUtility`) for cluster-level infrastructure.
 
+### Post-render patches and the Helm hooks they reach
+
+<!-- Extracted from specs/025-helm-v4-defaults on 2026-10-16 -->
+
+`ApplicationHelmReleaseBuilder.build()` writes the patches below into the HelmRelease's `spec.postRenderers`, in this order. helm-controller runs with Helm v4 defaults (`postRenderStrategy: combined`), so Helm runs the post-renderers once on the chart's templates and Helm hooks together, and every patch whose target matches a Helm hook applies to it ([ADR-072](../../adr/0072-helm-v4-defaults-releases-keep-apply-method.md)). "Selector" is a component's identifier label selector, which kustomize matches against the resource's own `metadata.labels`.
+
+| Patch (builder) | Target | Form | Reaches a Helm hook when |
+| --- | --- | --- | --- |
+| Ingress annotations (`AnnotationPatch`, `IngressUtility`) | `Ingress` | JSON6902 `add` under `/metadata/annotations/` | the hook is an `Ingress` |
+| Ingress class: `SpecPatch` on `ingressClassName`, or `IngressClassNameRemovalPatch` with a dedicated ingress controller (`IngressUtility`) | `Ingress` | JSON6902 `add`, or strategic merge `null` | the hook is an `Ingress` and the deployment sets an ingress class or a dedicated ingress controller |
+| Styrmin labels (`MetadataLabelsMergePatch`, `build_target_for_label_patches`) | every name (`.*`) | strategic merge | always, including a resource without `metadata.labels` |
+| Styrmin pod template labels (`TemplateLabelPatch`) | `Deployment`, `StatefulSet` | JSON6902 `add` under `/spec/template/metadata/labels/` | the hook is a `Deployment` or `StatefulSet` |
+| Component label (`MetadataLabelsMergePatch`, `build_target_for_component_labels`) | selector | strategic merge | the hook carries a component's identifier label |
+| Component pod template label (`TemplateLabelPatch`) | `Deployment`, `StatefulSet` with the selector | JSON6902 `add` | the hook is a `Deployment` or `StatefulSet` that carries a component's identifier label |
+| Replica count (`SpecPatch` on `replicas`, `build_component_replica_patches`) | `Deployment`, `StatefulSet` with the selector | JSON6902 `add` on `/spec/replicas` | the hook is a matching `Deployment` or `StatefulSet`, and an override, a driver default or a stopped component sets the count |
+| Backup volumes annotation (`TemplateAnnotationPatch`, `build_backup_annotation_patches`) | `Deployment`, `StatefulSet` with the selector of a component that has a `backup` setting | strategic merge | the hook is a matching `Deployment` or `StatefulSet` |
+| Scheduling (`AffinityPatch`, `TolerationsPatch`, `TopologySpreadPatch`, `NodeAffinityPatch`, `RuntimeClassPatch`, `ResourcesPatch`; `build_scheduling_post_rendering_patches`) | `Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `CronJob`, `ReplicaSet`; with the selector of each component that has scheduling settings when the driver declares components | strategic merge; `ResourcesPatch` is a JSON6902 `replace` on `containers/0/resources` | the hook has one of these kinds and, for a driver that declares components, carries the identifier label of a component with scheduling settings |
+| Component container overrides (`ContainerMergePatch`) and the guard (`ComponentContainerPatch`; `build_component_container_patches`) | `Deployment`, `StatefulSet` with the selector of a component that has a component container and an override that applies | strategic merge, then JSON6902 guard | the hook is a matching `Deployment` or `StatefulSet`; when it does not render the component container, the guard fails the install or upgrade with `COMPONENT_CONTAINER_NOT_FOUND` |
+
+A Helm hook `Job` or `CronJob` gets the scheduling settings and the labels, but no override and no replica count. When you add a post-render patch, add it to this table.
+
 ## Combined process
 
 The kopf operator, the Prefect worker, and the status reporter run in a single async process and share one event loop via `asyncio.gather()` (see [ADR-002](../../adr/0002-shared-async-event-loop-kopf-prefect.md)).
