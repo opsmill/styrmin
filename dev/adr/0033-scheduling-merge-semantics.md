@@ -10,7 +10,7 @@
 
 Two fields, though, are intrinsically list-shaped and force a non-trivial merge semantics decision:
 
-1. **Affinity** (`pod_affinity`, `pod_anti_affinity`, `node_affinity`) — Kubernetes splits each into `requiredDuringSchedulingIgnoredDuringExecution` (a list ANDed by the scheduler) and `preferredDuringSchedulingIgnoredDuringExecution` (a weighted list).
+1. **Affinity** (`pod_affinity`, `pod_anti_affinity`, `node_affinity`) — Kubernetes splits each into `requiredDuringSchedulingIgnoredDuringExecution` and `preferredDuringSchedulingIgnoredDuringExecution` (a weighted list). The scheduler ANDs the required terms of pod affinity and pod anti-affinity, but ORs the required `nodeSelectorTerms` of node affinity.
 2. **Topology-spread constraints** — a list keyed by `topologyKey`, but two entries with the same `topologyKey` but different `whenUnsatisfiable` are genuinely independent constraints (one hard, one soft).
 
 A naïve deepest-wins on either of these would let a deployment-level setting silently shadow an environment-wide safety rule. Operators expressed strongly that this is the *opposite* of what they want — environment-wide rules ("never co-locate two replicas of a critical service across the cluster") must layer with deployment-specific rules.
@@ -49,7 +49,7 @@ in the API that it has no effect. Refusing it was chosen for two reasons:
 
 For each of the three affinity kinds (`podAffinity`, `podAntiAffinity`, `nodeAffinity`):
 
-- `requiredDuringSchedulingIgnoredDuringExecution` terms across levels are **concatenated** (the scheduler ANDs them).
+- `requiredDuringSchedulingIgnoredDuringExecution` terms of different levels are **ANDed**. For `podAffinity` and `podAntiAffinity` they are concatenated, because the scheduler ANDs them. For `nodeAffinity` the resolver builds one term for each combination of one required term per level, holding the expressions of all of them, because the scheduler ORs `nodeSelectorTerms`. The terms of one level stay alternatives.
 - `preferredDuringSchedulingIgnoredDuringExecution` terms are **merged into a single weighted list**, preserving per-level weights.
 
 Any level's affinity block may set `replace: true` for a specific kind to **discard shallower-level terms for that kind**. The flag is scoped per affinity-kind so replacing `podAntiAffinity` does not affect `nodeAffinity` or `podAffinity`. Walking levels Environment → Deployment → Component: if a level sets `replace: true` for a kind, the accumulator resets before that level's terms are added; deeper levels continue accumulating unless they too set `replace: true`.
@@ -58,9 +58,20 @@ Any level's affinity block may set `replace: true` for a specific kind to **disc
 
 Topology-spread constraints are unioned across levels with the compound key `(topologyKey, whenUnsatisfiable)`. When two levels set a constraint with the same compound key, the deepest-level entry wins for that key — scalar-style precedence on the key. Two entries with the same `topologyKey` but different `whenUnsatisfiable` are independent constraints and both survive.
 
+Amended 2026-10-16 ([#486](https://github.com/opsmill/styrmin/issues/486)): the first version of
+this decision concatenated the required terms of all three kinds. Kubernetes ORs node affinity
+terms: "the Pod can be scheduled onto a node if one of the specified terms can be satisfied (terms
+are ORed)" ([Kubernetes docs, node affinity](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity)).
+So a pod could run on a node that matched only the environment's terms or only the deployment's
+terms, and an environment-wide node rule stopped applying as soon as a deployment added its own.
+The resolver now combines the levels' node terms as described above. An environment with one
+term `pool=apps` and a deployment with the terms `zone=a` and `zone=b` give the pod two terms:
+`pool=apps` with `zone=a`, and `pool=apps` with `zone=b`.
+
 ## Consequences
 
 - An environment-wide safety rule layers cleanly with a per-deployment affinity tweak by default. Operators don't have to copy environment rules into every deployment to keep them in force.
+- The number of required node terms on a pod is the product of the number of terms at each level that sets them: an environment with 2 terms and a deployment with 3 terms give 6 terms.
 - The `replace: true` escape hatch exists for genuine "this deployment is special, throw out the parent rules for *this* kind" cases. Per-kind scoping means a narrow override of one affinity kind doesn't accidentally clobber the others.
 - The topology-spread compound key matches how the Kubernetes scheduler itself treats these constraints (each `(topologyKey, whenUnsatisfiable)` pair is an independent rule). The mental model is the same between operator config and scheduler behaviour.
 - A cluster config refuses `scheduling` (amended 2026-10-16, #482), which makes the ownership boundary clear: cluster admins manage node taints/labels via Kubernetes-native means; platform operators manage scheduling defaults via Environment/Deployment/Component scheduling config.
