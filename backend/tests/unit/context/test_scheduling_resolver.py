@@ -724,6 +724,45 @@ class TestNodeAffinityRequiredAcrossLevels:
             [("pool", "In", ["apps"]), ("zone", "In", ["a"])]
         ]
 
+    def test_level_with_only_terms_without_expressions_adds_no_requirement(
+        self,
+    ) -> None:
+        env = _cfg(
+            node_affinity=AffinityBlock(
+                required=[
+                    AffinityTerm(
+                        topology_key="",
+                        label_selector=LabelSelector(match_expressions=[]),
+                    )
+                ]
+            )
+        )
+        dep = _cfg(node_affinity=AffinityBlock(required=[_node_term(zone="a")]))
+
+        resolved, _ = _resolve_scheduling_config(env, dep, None)
+
+        assert resolved.node_affinity is not None
+        assert resolved.node_affinity.required == [_node_term(zone="a")]
+
+    def test_single_level_term_without_expressions_is_kept(self) -> None:
+        # The post-render patch renders it as ``{matchExpressions: []}``, which
+        # matches no node, as before #486.
+        dep = _cfg(
+            node_affinity=AffinityBlock(
+                required=[
+                    AffinityTerm(
+                        topology_key="",
+                        label_selector=LabelSelector(match_expressions=[]),
+                    )
+                ]
+            )
+        )
+
+        resolved, _ = _resolve_scheduling_config(None, dep, None)
+
+        assert resolved.node_affinity is not None
+        assert resolved.node_affinity.required == dep.node_affinity.required  # type: ignore[union-attr]
+
 
 class TestInjectFlagMerge:
     """T045: component-level ``inject`` flags override deployment-level
