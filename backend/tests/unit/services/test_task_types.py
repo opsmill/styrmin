@@ -10,7 +10,7 @@ task the caller actually stores.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -125,7 +125,11 @@ def prefect(prefect_manager_mock: MagicMock) -> MagicMock:
 def stub_generate(monkeypatch: pytest.MonkeyPatch) -> None:
     # "after" differs from the seeded instance's "before", so no update is a no-op.
     async def _generate(
-        *, deployment: Deployment, uow: object, release_reference: str | None = None
+        *,
+        deployment: Deployment,
+        uow: object,
+        release_reference: str | None = None,
+        upcoming_deployments: Mapping[UUID, str] | None = None,
     ) -> Instance:
         return _make_instance(deployment, environment_name="after")
 

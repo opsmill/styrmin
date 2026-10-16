@@ -29,6 +29,7 @@ from styrmin_backend.services.exceptions import (
     EnvironmentNotFoundError,
     InvalidContextError,
 )
+from styrmin_backend.services.scheduling.references import bind_deployment_references
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 
@@ -49,7 +50,7 @@ def _prevalidate_environment_env_vars(config: dict | None) -> None:
 
 
 if TYPE_CHECKING:
-    pass
+    from collections.abc import Mapping
 
 
 def _extract_environment_slice_from_context(
@@ -178,12 +179,22 @@ async def resolve_environment(
 
 
 async def create_environment(
-    name: str, cluster_id: UUID, uow: UnitOfWork, config: dict | None = None
+    name: str,
+    cluster_id: UUID,
+    uow: UnitOfWork,
+    config: dict | None = None,
+    upcoming_deployments: Mapping[UUID, str] | None = None,
 ) -> Environment:
     """Create an environment with the given name and cluster_id.
 
+    The new environment has no deployment, so an affinity term in ``config``
+    may name only one of ``upcoming_deployments``: the deployments, by id with
+    their names, that the caller is about to create in it (an environment clone).
+
     Raises:
         InvalidContextError: If the environment context is invalid.
+        UnresolvableAffinityReferenceError: If an affinity term in ``config``
+            names a deployment that is not in ``upcoming_deployments``.
     """
     async with uow:
         cluster = await uow.clusters.get(cluster_id)
@@ -206,6 +217,13 @@ async def create_environment(
             validate_environment_config(config)
         except InvalidEnvironmentContextError as e:
             raise InvalidContextError(str(e)) from e
+        config = await bind_deployment_references(
+            uow,
+            None,
+            config,
+            path_prefix="environment.config",
+            upcoming_deployments=upcoming_deployments,
+        )
 
         environment = Environment(name=name, cluster_id=cluster_id, config=config)
         environment.capabilities = compute_environment_capabilities(environment)
@@ -322,6 +340,9 @@ async def update_environment(
             building this environment (010 research D8).
         InvalidContextError: When the new config fails ``EnvironmentConfig``
             validation (e.g. invalid env var names, oversized dicts).
+        UnresolvableAffinityReferenceError: When an affinity term in the new
+            config names a deployment that is not a live deployment of the
+            environment; nothing is saved.
     """
     async with uow:
         environment = await uow.environments.get(environment_id)
@@ -350,6 +371,10 @@ async def update_environment(
             validate_environment_config(config)
         except InvalidEnvironmentContextError as e:
             raise InvalidContextError(str(e)) from e
+        # Before the save, so a refused term leaves the stored config unchanged.
+        config = await bind_deployment_references(
+            uow, environment_id, config, path_prefix="environment.config"
+        )
 
         # Persist the env-config row. Per FR-009a this commit MUST run
         # before any Task dispatch so a crash mid-fanout never reverts
