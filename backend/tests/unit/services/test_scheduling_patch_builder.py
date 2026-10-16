@@ -8,6 +8,8 @@ runtime class). US1's affinity-specific coverage lives in
 
 from __future__ import annotations
 
+import yaml
+
 from styrmin_backend.context.models.config import (
     AffinityBlock,
     AffinityTerm,
@@ -19,6 +21,7 @@ from styrmin_backend.context.models.config import (
     Toleration,
     TopologySpreadConstraint,
 )
+from styrmin_backend.context.resolvers import _resolve_scheduling_config
 from styrmin_backend.services.scheduling.patch_builder import (
     POD_TEMPLATE_BEARING_KINDS,
     build_affinity_patches,
@@ -215,6 +218,45 @@ class TestBuildNodeAffinityPatches:
         )
         patches = build_node_affinity_patches(resolved)
         assert len(patches) == len(POD_TEMPLATE_BEARING_KINDS)
+
+    def test_environment_and_deployment_terms_render_as_one_node_selector_term(
+        self,
+    ) -> None:
+        """#486: a pod must match the environment's and the deployment's terms."""
+
+        def _level(**labels: str) -> SchedulingConfig:
+            return SchedulingConfig(
+                node_affinity=AffinityBlock(
+                    required=[
+                        AffinityTerm(
+                            topology_key="",
+                            label_selector=LabelSelector(match_labels=labels),
+                        )
+                    ]
+                )
+            )
+
+        resolved, _ = _resolve_scheduling_config(
+            _level(pool="apps"), _level(zone="a"), None
+        )
+        patch = next(
+            tp.patch
+            for tp in build_node_affinity_patches(resolved)
+            if tp.target.kind == "Deployment"
+        )
+
+        rendered = yaml.safe_load(patch.render_value())
+        node_affinity = rendered["spec"]["template"]["spec"]["affinity"]["nodeAffinity"]
+        assert node_affinity["requiredDuringSchedulingIgnoredDuringExecution"] == {
+            "nodeSelectorTerms": [
+                {
+                    "matchExpressions": [
+                        {"key": "pool", "operator": "In", "values": ["apps"]},
+                        {"key": "zone", "operator": "In", "values": ["a"]},
+                    ]
+                }
+            ]
+        }
 
     def test_inject_opt_out(self) -> None:
         resolved = SchedulingConfig(

@@ -17,6 +17,7 @@ from styrmin_backend.context.models.config import (
     AffinityTerm,
     DeploymentReference,
     LabelSelector,
+    LabelSelectorRequirement,
     PostRenderInjection,
     ResourceRequirements,
     ResourceSpec,
@@ -45,6 +46,21 @@ def _weighted(app: str, weight: int = 50) -> WeightedAffinityTerm:
 
 def _cfg(**kwargs: object) -> SchedulingConfig:
     return SchedulingConfig(**kwargs)  # type: ignore[arg-type]
+
+
+def _node_term(**labels: str) -> AffinityTerm:
+    return AffinityTerm(
+        topology_key="", label_selector=LabelSelector(match_labels=labels)
+    )
+
+
+def _node_expressions(term: AffinityTerm) -> list[tuple[str, str, list[str] | None]]:
+    assert term.label_selector is not None
+    assert term.label_selector.match_labels is None
+    return [
+        (e.key, e.operator, e.values)
+        for e in term.label_selector.match_expressions or []
+    ]
 
 
 class TestScalarMerge:
@@ -250,8 +266,8 @@ class TestDeterminism:
 
 
 class TestAffinityAccumulation:
-    """T031: required terms from all levels concatenate (ANDed); preferred
-    terms merge into a single weighted list preserving each level's weights.
+    """T031: required terms from all levels are ANDed; preferred terms merge
+    into a single weighted list preserving each level's weights.
     Accumulation applies per-kind (pod/pod-anti/node) without cross-mixing.
     """
 
@@ -326,7 +342,9 @@ class TestAffinityAccumulation:
         resolved, prov = _resolve_scheduling_config(env, None, comp)
 
         assert resolved.node_affinity is not None
-        assert len(resolved.node_affinity.required) == 2
+        assert [_node_expressions(t) for t in resolved.node_affinity.required] == [
+            [("app", "In", ["web"]), ("app", "In", ["cache"])]
+        ]
         assert prov["node_affinity"] == "component"
 
     def test_no_levels_set_yields_none(self) -> None:
@@ -588,6 +606,123 @@ class TestNodeAffinityMerge:
             t.label_selector.match_labels["app"]  # type: ignore[union-attr,index]
             for t in resolved.pod_affinity.required
         ] == ["web"]
+
+
+class TestNodeAffinityRequiredAcrossLevels:
+    """#486: Kubernetes ORs ``nodeSelectorTerms``, so the resolver combines
+    the required node terms of each level into terms that a node must match
+    at every level (ADR-033).
+    """
+
+    def test_environment_and_deployment_terms_become_one_term(self) -> None:
+        env = _cfg(node_affinity=AffinityBlock(required=[_node_term(pool="apps")]))
+        dep = _cfg(node_affinity=AffinityBlock(required=[_node_term(zone="a")]))
+
+        resolved, prov = _resolve_scheduling_config(env, dep, None)
+
+        assert resolved.node_affinity is not None
+        assert [_node_expressions(t) for t in resolved.node_affinity.required] == [
+            [("pool", "In", ["apps"]), ("zone", "In", ["a"])]
+        ]
+        assert prov["node_affinity"] == "deployment"
+
+    def test_alternatives_of_one_level_each_keep_the_other_levels_terms(
+        self,
+    ) -> None:
+        env = _cfg(node_affinity=AffinityBlock(required=[_node_term(pool="apps")]))
+        dep = _cfg(
+            node_affinity=AffinityBlock(
+                required=[_node_term(zone="a"), _node_term(zone="b")]
+            )
+        )
+        comp = _cfg(
+            node_affinity=AffinityBlock(
+                required=[
+                    AffinityTerm(
+                        topology_key="",
+                        label_selector=LabelSelector(
+                            match_expressions=[
+                                LabelSelectorRequirement(key="gpu", operator="Exists")
+                            ]
+                        ),
+                    )
+                ]
+            )
+        )
+
+        resolved, _ = _resolve_scheduling_config(env, dep, comp)
+
+        assert resolved.node_affinity is not None
+        assert [_node_expressions(t) for t in resolved.node_affinity.required] == [
+            [("pool", "In", ["apps"]), ("zone", "In", ["a"]), ("gpu", "Exists", None)],
+            [("pool", "In", ["apps"]), ("zone", "In", ["b"]), ("gpu", "Exists", None)],
+        ]
+
+    def test_terms_of_a_single_level_stay_alternatives(self) -> None:
+        dep = _cfg(
+            node_affinity=AffinityBlock(
+                required=[_node_term(pool="apps"), _node_term(pool="batch")]
+            )
+        )
+
+        resolved, _ = _resolve_scheduling_config(None, dep, None)
+
+        assert resolved.node_affinity is not None
+        assert resolved.node_affinity.required == dep.node_affinity.required  # type: ignore[union-attr]
+
+    def test_same_label_with_different_values_matches_no_node(self) -> None:
+        env = _cfg(node_affinity=AffinityBlock(required=[_node_term(pool="apps")]))
+        dep = _cfg(node_affinity=AffinityBlock(required=[_node_term(pool="db")]))
+
+        resolved, _ = _resolve_scheduling_config(env, dep, None)
+
+        assert resolved.node_affinity is not None
+        assert [_node_expressions(t) for t in resolved.node_affinity.required] == [
+            [("pool", "In", ["apps"]), ("pool", "In", ["db"])]
+        ]
+
+    def test_replace_keeps_only_the_replacing_levels_terms(self) -> None:
+        env = _cfg(node_affinity=AffinityBlock(required=[_node_term(pool="apps")]))
+        dep = _cfg(
+            node_affinity=AffinityBlock(required=[_node_term(zone="a")], replace=True)
+        )
+
+        resolved, _ = _resolve_scheduling_config(env, dep, None)
+
+        assert resolved.node_affinity is not None
+        assert resolved.node_affinity.required == [_node_term(zone="a")]
+
+    def test_level_with_only_preferred_terms_adds_no_required_term(self) -> None:
+        env = _cfg(node_affinity=AffinityBlock(required=[_node_term(pool="apps")]))
+        dep = _cfg(
+            node_affinity=AffinityBlock(
+                preferred=[WeightedAffinityTerm(weight=10, term=_node_term(zone="a"))]
+            )
+        )
+
+        resolved, _ = _resolve_scheduling_config(env, dep, None)
+
+        assert resolved.node_affinity is not None
+        assert resolved.node_affinity.required == [_node_term(pool="apps")]
+        assert len(resolved.node_affinity.preferred) == 1
+
+    def test_term_without_expressions_is_dropped_before_combining(self) -> None:
+        env = _cfg(
+            node_affinity=AffinityBlock(
+                required=[
+                    AffinityTerm(topology_key="", label_selector=LabelSelector()),
+                    _node_term(pool="apps"),
+                ]
+            )
+        )
+        dep = _cfg(node_affinity=AffinityBlock(required=[_node_term(zone="a")]))
+
+        resolved, _ = _resolve_scheduling_config(env, dep, None)
+
+        assert resolved.node_affinity is not None
+        assert [_node_expressions(t) for t in resolved.node_affinity.required] == [
+            [("pool", "In", ["apps"]), ("zone", "In", ["a"])]
+        ]
 
 
 class TestInjectFlagMerge:
