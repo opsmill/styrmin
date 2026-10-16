@@ -818,7 +818,7 @@ See [ADR-057](../../adr/0057-post-render-component-overrides.md),
 
 ### Remove a field that the chart may not render with a strategic merge `null`
 
-<!-- Extracted from specs/023-ingress-class-post-render on 2026-10-16 -->
+<!-- Extracted from specs/024-ingress-class-post-render on 2026-10-16 -->
 
 To remove a field from a rendered resource in a post-render patch, write a strategic merge patch
 that sets the field to `null`, not a JSON6902 `remove` operation.
@@ -841,7 +841,7 @@ that sets the field to `null`, not a JSON6902 `remove` operation.
   ([`operator.md`](../../knowledge/agent/operator.md#fluxcd-controllers), "Post-renderers
   digest").
 
-See [ADR-070](../../adr/0070-ingress-class-set-by-post-render.md) §1.
+See [ADR-071](../../adr/0071-ingress-class-set-by-post-render.md) §1.
 
 ### Custom-resource updates: replace the spec keys you write, merge the rest
 
@@ -1185,7 +1185,7 @@ def my_task(context: Context) -> None:  # noqa: ARG001
   `backend/tests/e2e/test_deployment_image_override.py::test_scale_server_and_singleton_guard` with
   `read_workload_replicas` from `backend/tests/e2e/helpers/workloads.py`.
 
-<!-- Extracted from specs/023-ingress-class-post-render on 2026-10-16 -->
+<!-- Extracted from specs/024-ingress-class-post-render on 2026-10-16 -->
 
 - **A change to a post-render patch ships an integration test that applies the patch with
   `kubectl kustomize` and checks the resulting resources, not the patch objects.** Where the

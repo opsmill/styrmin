@@ -5,12 +5,12 @@
 
 ## ADRs Created
 
-None. [ADR-070](../../../dev/adr/0070-ingress-class-set-by-post-render.md) was written during
+None. [ADR-071](../../../dev/adr/0071-ingress-class-set-by-post-render.md) was written during
 implementation and records research D-001 to D-004.
 
 ## ADRs Updated
 
-- dev/adr/0070-ingress-class-set-by-post-render.md (source path moved to the archive)
+- dev/adr/0071-ingress-class-set-by-post-render.md (source path moved to the archive)
 
 ## Knowledge Updated
 
@@ -39,6 +39,13 @@ knowledge:
 - give strategic merge patches a base class without `_operation` and `_path`;
 - add a test that the example drivers keep no class line and keep their `spec.version`.
 
+## Renumbering
+
+The rebase onto `develop` on 2026-10-16 found ADR-070 and spec number 023 already used by
+`specs/archive/023-per-component-replicas/`. This spec became 024 and its ADR became ADR-071. The
+references in this directory were updated; research D-007 still calls the ADR "the next free
+number after ADR-069", which was true when it was written.
+
 ## Archive
 
-Spec directory moved to `specs/archive/023-ingress-class-post-render/` as a historical record.
+Spec directory moved to `specs/archive/024-ingress-class-post-render/` as a historical record.
