@@ -134,3 +134,25 @@ For writes into the departing deployment's own namespace, the namespace deletion
 
 - A deployment's own create, update or upgrade flow that runs after its own deletion was requested calls `apply_kubernetes_namespace` on its own namespace in `_write_styrmin_deployment`, so it can create that namespace again. The brief does not cover a deployment's own flows; this is recorded for a separate issue.
 - The legacy flows `create_instance`, `update_instance` and `upgrade_instance` in `orchestration.py` also call `apply_service_aliases`. They are not registered in the Prefect catalogue ([`workflows/catalogue.py`](../../backend/styrmin_backend/workflows/catalogue.py) registers only the `_crd` flows), so they never run. They get the same guard through the shared flow; their call sites drop the removed `namespace_labels` argument.
+
+## R-011: A restore's namespace deletion must not delete aliases
+
+**Decision**: `_delete_service_aliases` deletes aliases only when one of these holds:
+
+- `spec.deletionRequested` is true: the platform-driven path, environment deletion, and discarding a clone;
+- the Namespace exists and is not `Terminating`: `kubectl delete styrmindeployment`.
+
+Otherwise, when `spec.deletionRequested` is false and the Namespace is `Terminating` or gone, it logs that the namespace is being deleted without a deletion request and deletes no alias. When reading the Namespace fails, it logs the error and deletes no alias.
+
+**Rationale**:
+
+- `execute_velero_restore` deletes the target namespace and waits for it to be gone before it creates the Velero `Restore` ([`workflows/templates/backup.py`](../../backend/styrmin_backend/workflows/templates/backup.py)). The namespace deletion deletes the StyrminDeployment in it, and kopf runs `kopf_on_styrmin_deployment_delete`, which runs `_teardown_owned_resources` ([`operator.md`](../../dev/knowledge/agent/operator.md), "Deletion", describes this for restores).
+- Velero restores only the target namespace. The aliases of the restored deployment's services are in the other namespaces, and the restore flows write no alias: no module other than `service_aliases.py` and `orchestration.py` calls the alias functions. So aliases that the teardown deleted during a restore would stay missing until a create, update or upgrade flow of that environment runs.
+- `spec.deletionRequested` is set before any teardown of a real deletion, so the delete handler that the later namespace deletion starts still deletes aliases on that path; by then it finds none.
+- A failed read leaves aliases rather than deleting those of a running deployment. A left alias is overwritten by the next flow that writes that name; a deleted alias of a running deployment breaks name resolution until then.
+- The `deletionRequested` handler calls the step without the namespace read, because the flag is set on that path.
+
+**Alternatives considered**:
+
+- Have the restore flow set `styrmin.io/skip-teardown` before it deletes the namespace. Rejected: it would also skip the rest of the teardown during restores, which this fix does not intend to change.
+- Delete aliases only on the platform-driven path. Rejected: the brief expects `kubectl delete styrmindeployment` to delete them too.

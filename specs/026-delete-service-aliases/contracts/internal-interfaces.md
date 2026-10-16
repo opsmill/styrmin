@@ -18,14 +18,14 @@ The feature changes no GraphQL, SDK or CLI surface. These are the internal inter
 
 ### `is_namespace_gone_error(exc: ApiException) -> bool` (new)
 
-- `True` for a 404, and for a 403 whose status body lists a cause of type `NamespaceTerminating`.
-- `False` for anything else, including a 403 without that cause.
+- `True` for a 404, and for a 403 whose status body lists a cause of type `NamespaceTerminating` or whose message contains "because it is being terminated", the message of Kubernetes' `NamespaceLifecycle` plugin.
+- `False` for anything else, including an RBAC 403.
 
 ## Service alias flow (`agent/tasks/service_aliases.py`)
 
 ### `find_departing_namespaces(namespaces: Iterable[str]) -> set[str]` (new, async)
 
-- For each namespace, reads the Namespace and the StyrminDeployment of the same name in it.
+- For each namespace, reads the Namespace and the StyrminDeployment of the same name in it. The reads of all namespaces run concurrently.
 - Returns the departing ones, by the rule in [data-model.md](../data-model.md#departing-namespace-derived-new).
 - Propagates any read error other than 404.
 
@@ -49,17 +49,21 @@ Callers: `_apply_service_aliases_step` (the three CRD flows) and the unregistere
 
 ## Operator teardown (`operator/handlers/styrmin_deployment.py`)
 
-### `_teardown_owned_resources(*, namespace, release_reference, deployment_id, name, logger)` (changed)
+### `_teardown_owned_resources(*, namespace, release_reference, deployment_id, deletion_requested, name, logger)` (changed)
 
-- New keyword argument `deployment_id: str`, from `spec.deploymentId`.
+- New keyword arguments `deployment_id: str`, from `spec.deploymentId`, and `deletion_requested: bool`, from `spec.deletionRequested`.
 - New first step "Service aliases" (`_delete_service_aliases`), before the existing Services/Middlewares, HelmRelease and NetworkPolicies/Secrets steps.
-- Both callers pass `spec.get("deploymentId", "")`:
-  - `kopf_on_styrmin_deployment_deletion_requested`;
+- Both callers pass `spec.get("deploymentId", "")` and `spec.get("deletionRequested", False)`:
+  - `kopf_on_styrmin_deployment_deletion_requested`, where the flag is true;
   - `kopf_on_styrmin_deployment_delete`, after its skip-teardown branch.
 
-### `_delete_service_aliases(*, deployment_id: str, namespace: str, logger) -> None` (new)
+### `_delete_service_aliases(*, deployment_id: str, namespace: str, deletion_requested: bool, logger) -> None` (new)
 
 - When `deployment_id` is not a UUID, or `namespace != get_kubernetes_reference(deployment_id)`: logs a warning and returns without a call to the API server.
+- When `deletion_requested` is false: reads the Namespace with `get_namespace` (research R-011).
+  - The Namespace is missing or `Terminating`: logs that the namespace is being deleted without a deletion request, as a restore does, and returns.
+  - The read raises: logs it with `logger.exception` and returns.
+  - Otherwise (`kubectl delete styrmindeployment`): continues.
 - Lists the Services labelled `styrmin.io/service-alias=true` in all namespaces. On a listing error: logs it with `logger.exception` and returns.
 - For each listed alias for which `is_alias_of_deployment(alias, deployment_id, namespace)` is true: calls `delete_service(name, namespace)`.
   - A `False` result (404) counts as deleted.
