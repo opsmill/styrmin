@@ -199,6 +199,7 @@ An operator re-applies an unchanged manifest whose terms give names, or writes b
 - A restored environment backup names a deployment deleted since the backup: the restore succeeds, and the term fails at the next reconcile (FR-006).
 - A term names the deployment that carries it, or a request renames the deployment and changes its terms: the names resolve after the request's own changes (FR-007).
 - In `deployments apply`, B's manifest comes before the manifest of A, which B names: B is refused, as today.
+- A driver version's component definition gives a name: the name is looked up each time the driver's definitions are copied, at `deploy`, at `updateDeploymentVersion` and when a clone creates a counterpart. After the named deployment is renamed, the stored id keeps working at reconcile, but the next `updateDeploymentVersion` of a deployment that uses the driver, and the next clone that copies it, are refused with the component's path and the name. A driver can only give a name, so this stays as it is.
 - A term names a deployment in the `DELETING` state: the deployment is not tombstoned yet, so the write is accepted. Once it is tombstoned, the term fails as in FR-004.
 - A node affinity term: it has no deployment reference and passes through unchanged, as today.
 - A term with a `label_selector` instead of a deployment reference: it is stored and resolved unchanged.
@@ -218,7 +219,7 @@ An operator re-applies an unchanged manifest whose terms give names, or writes b
 - **FR-004**: When a term gives the id of a tombstoned deployment, Styrmin MUST refuse with `UnresolvableAffinityReferenceError` and give the term's path and the deployment's last name.
   - Today such a term resolves without an error, because the lookup by id also returns tombstoned deployments ([`repository/deployment.py`](../../backend/styrmin_backend/repository/deployment.py)). The term then gives a selector that matches no pod.
   - Verify: delete A, update B, and get an error that gives A's last name.
-- **FR-005**: `cloneEnvironment` MUST refuse a request in which a term names a deployment that the clone does not copy. The terms checked are those of the new environment's config (the source environment's config after `cleared_config_fields` and `config_override` are applied, including terms in the override), of each copied deployment's config and of its components' configs. A deployment is copied when it is selected and eligible; a selected deployment that is skipped (no active instance, internal, tombstoned) is not copied. The request is refused before any clone record or backup is created, and the error lists each deployment that is not copied and the path of each term that names it.
+- **FR-005**: `cloneEnvironment` MUST refuse a request in which a term names a deployment that the clone does not copy. The terms checked are those of the new environment's config (the source environment's config after `cleared_config_fields` and `config_override` are applied, including terms in the override), of each copied deployment's config and of the component definitions of its driver version, which the clone copies to the counterpart's components. A deployment is copied when it is selected and eligible; a selected deployment that is skipped (no active instance, internal, tombstoned) is not copied. The request is refused before any clone record or backup is created, and the error lists each deployment that is not copied and the path of each term that names it.
   - The operator can add the named deployment to the selection, leave out the deployment whose term names it, or, for a term in the environment's config, clear or replace `scheduling` with `cleared_config_fields` or `config_override` ([`services/backup/clone.py`](../../backend/styrmin_backend/services/backup/clone.py)).
   - A name in `config_override` is resolved against the source environment; a name that matches no deployment there is refused with `UnresolvableAffinityReferenceError`.
   - When the capture of a named deployment fails, the counterpart whose term names it is attributed `failed` with a reason that names the deployment, and the clone's status follows the existing rule: `PARTIAL` when another counterpart is cloned, `FAILED` when none is. When a term in the new environment's config names that deployment, the clone is attributed `FAILED` and no environment is created.
@@ -258,7 +259,7 @@ No new entity and no column change. `CONTEXT.md` has no entry for the first two 
 
 ### Measurable Outcomes
 
-- **SC-001**: After a deployment is renamed, 100% of later updates and config fan-out redeploys of the deployments whose terms name it succeed.
+- **SC-001**: After a deployment is renamed, 100% of later updates and config fan-out redeploys of the deployments whose terms name it succeed, for terms written by operators. Terms in a driver version's component definitions follow the edge case above.
 - **SC-002**: A rename restarts 0 pods of the deployments whose terms name the renamed deployment.
 - **SC-003**: A clone with every named deployment selected ends `COMPLETED` in every order of snapshots, including mutual terms. 0 terms in the new environment name a deployment of the source environment.
 - **SC-004**: Re-applying an unchanged manifest whose terms give names starts 0 reconciles. Writing back a config exactly as it was read starts 0 reconciles.
@@ -272,6 +273,7 @@ No new entity and no column change. `CONTEXT.md` has no entry for the first two 
 - Only pod affinity and pod anti-affinity terms use a deployment reference. The resolver passes node affinity terms through unchanged, as today.
 - The order of manifests in `deployments apply` matters for terms in a deployment's config, as today.
 - The frontend does not change. The configuration form already sends back the reference it read.
+- Drivers that name a deployment in a component definition are rare: no example driver does. A driver can only give a name, so the edge case of driver terms after a rename is accepted.
 - No new SDK method or `styrminctl` command is needed.
 - A clone still needs the `ADMIN` role.
 - The name and error code of the new typed error for a clone selection that leaves out a named deployment are not decided. The planning phase picks them.
