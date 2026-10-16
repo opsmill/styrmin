@@ -120,6 +120,8 @@ class ApplyOutcome(BaseModel):
     inapplicable_components: list[str] = Field(default_factory=list)
     # The same components, each with the override kinds the manifest sets that are not applied.
     inapplicable_overrides: dict[str, list[OverrideKind]] = Field(default_factory=dict)
+    # Set when reading which overrides apply failed: `inapplicable_overrides` is then empty.
+    applicability_check_error: str | None = None
 
 
 class ApplyEvent(BaseModel):

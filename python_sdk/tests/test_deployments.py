@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -20,9 +20,13 @@ from styrmin_sdk.exceptions import (
     DriverMismatchError,
     EnvironmentAmbiguityError,
     EnvironmentNotFoundError,
+    ManifestValidationError,
     ResourceAlreadyExistsError,
 )
 from styrmin_sdk.models.deployment_manifest import ApplyOutcome, ApplyOverrides, ResolvedManifest
+
+if TYPE_CHECKING:
+    from styrmin_sdk.models import UpdateDeploymentInput
 
 
 async def test_create_deployment_success(client: StyrminClient, mock_transport: AsyncMock) -> None:
@@ -2075,3 +2079,105 @@ async def test_list_deployments_unknown_environment_returns_empty(
     deployments = await client.deployments.list("22222222-3333-4444-5555-666666666666")
 
     assert deployments == []
+
+
+async def test_apply_reports_a_failed_applicability_read(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """A server that cannot answer the applicability query does not fail the apply, but the
+    outcome says the list of overrides that are not applied is missing."""
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+        _rejected_response("VALIDATION_ERROR", "Cannot query field 'componentReplicas'"),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(config={"components": [{"name": "server", "replicas": 3}]})
+    )
+
+    assert outcome.action == "updated"
+    assert outcome.inapplicable_overrides == {}
+    assert outcome.applicability_check_error is not None
+    assert "componentReplicas" in outcome.applicability_check_error
+
+
+@pytest.mark.parametrize("value", [True, "3", 2.0])
+async def test_apply_rejects_a_replica_count_that_is_not_a_whole_number(
+    client: StyrminClient, mock_transport: AsyncMock, value: object
+) -> None:
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _missing_deployment_response(),
+    ]
+
+    with pytest.raises(ManifestValidationError, match=r"components\['server'\]\.replicas must be a whole number"):
+        await client.deployments.apply(
+            _resolved_manifest(config={"components": [{"name": "server", "replicas": value}]})
+        )
+
+
+_STORED_COMPONENTS = {
+    "server": {"env_vars": {"A": "1"}, "image": "registry.example/acme/app:1.0", "replicas": 2},
+    "worker": {"command": ["run"], "args": ["--fast"]},
+}
+
+
+def _stub_scale_calls(client: StyrminClient, monkeypatch: pytest.MonkeyPatch, components: dict[str, Any]) -> AsyncMock:
+    """Stub the read and the update that ``scale`` sends; return the update mock."""
+    deployment = type("Deployment", (), {"config": {"components": components}})()
+    update = AsyncMock(return_value=None)
+    monkeypatch.setattr(client.deployments, "get", AsyncMock(return_value=deployment))
+    monkeypatch.setattr(client.deployments, "update", update)
+    return update
+
+
+async def _scale(
+    client: StyrminClient, monkeypatch: pytest.MonkeyPatch, component: str, replicas: int | None
+) -> UpdateDeploymentInput:
+    update = _stub_scale_calls(client, monkeypatch, _STORED_COMPONENTS)
+    await client.deployments.scale("dep-1", component, replicas)
+    sent: UpdateDeploymentInput = update.call_args.kwargs["input"]
+    return sent
+
+
+async def test_scale_changes_only_the_count(client: StyrminClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    sent = await _scale(client, monkeypatch, "server", 5)
+
+    assert sent.model_dump(by_alias=True, exclude_none=True) == {
+        "components": [
+            {"name": "worker", "command": ["run"], "args": ["--fast"]},
+            {
+                "name": "server",
+                "envVars": [{"name": "A", "value": "1"}],
+                "image": "registry.example/acme/app:1.0",
+                "replicas": 5,
+            },
+        ]
+    }
+
+
+async def test_scale_adds_a_block_for_a_component_without_one(
+    client: StyrminClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent = await _scale(client, monkeypatch, "cache", 3)
+
+    assert [block.name for block in sent.components or []] == ["server", "worker", "cache"]
+    assert (sent.components or [])[-1].replicas == 3
+
+
+async def test_scale_clear_keeps_the_other_overrides(client: StyrminClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    sent = await _scale(client, monkeypatch, "server", None)
+
+    server = next(b for b in sent.components or [] if b.name == "server")
+    assert server.replicas is None
+    assert server.image == "registry.example/acme/app:1.0"
+
+
+async def test_scale_clear_drops_a_block_that_held_only_the_count(
+    client: StyrminClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    update = _stub_scale_calls(client, monkeypatch, {"server": {"replicas": 2}})
+
+    await client.deployments.scale("dep-1", "server", None)
+
+    assert update.call_args.kwargs["input"].components == []

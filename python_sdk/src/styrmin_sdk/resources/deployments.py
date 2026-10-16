@@ -57,6 +57,7 @@ from styrmin_sdk.graphql._generated.get_deployment_timeline import (
 from styrmin_sdk.graphql._generated.input_types import (
     ComponentConfigInput,
     DeploymentConfigInput,
+    EnvVarInput,
     ParameterValueInput,
     UpdateDeploymentInput,
 )
@@ -183,6 +184,46 @@ def _load_documents(path: Path) -> list[DeploymentManifest]:
     return manifests
 
 
+def check_replica_counts(config: object, *, source: str) -> None:
+    """Reject a ``components[].replicas`` that is not a whole number.
+
+    Runs before Pydantic, which would turn ``true`` into 1 and ``"3"`` into 3.
+
+    Raises:
+        ManifestValidationError: A replica count is a bool, a string, a float or another type.
+    """
+    components = config.get("components") if isinstance(config, Mapping) else None
+    if not isinstance(components, list):
+        return
+    for block in components:
+        if not isinstance(block, Mapping):
+            continue
+        value = block.get("replicas")
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+            raise ManifestValidationError(
+                f"{source}: components[{block.get('name')!r}].replicas must be a whole number, got {value!r}"
+            )
+
+
+def _stored_component_inputs(config: object) -> dict[str, ComponentConfigInput]:
+    """The stored ``config.components`` blocks as inputs that resend each override unchanged."""
+    stored = config.get("components") if isinstance(config, dict) else None
+    blocks: dict[str, ComponentConfigInput] = {}
+    for name, block in (stored or {}).items():
+        if not isinstance(block, dict):
+            continue
+        env_vars = block.get("env_vars")
+        blocks[name] = ComponentConfigInput(
+            name=name,
+            env_vars=([EnvVarInput(name=key, value=value) for key, value in env_vars.items()] if env_vars else None),
+            command=block.get("command"),
+            args=block.get("args"),
+            image=block.get("image"),
+            replicas=block.get("replicas"),
+        )
+    return blocks
+
+
 def _build_update_input(manifest: ResolvedManifest) -> UpdateDeploymentInput:
     """Convert a resolved manifest into a typed ``UpdateDeploymentInput``.
 
@@ -201,6 +242,7 @@ def _build_update_input(manifest: ResolvedManifest) -> UpdateDeploymentInput:
     (the YAML mapping enforces uniqueness, so this is a no-op in practice).
     """
     config_payload: dict[str, Any] = dict(manifest.config)
+    check_replica_counts(config_payload, source=f"manifest {manifest.source_path}: spec.config")
     if manifest.parameters:
         config_payload.setdefault(
             "parameters",
@@ -285,6 +327,7 @@ def _build_config_input(manifest: ResolvedManifest) -> DeploymentConfigInput | N
     """
     if not manifest.config:
         return None
+    check_replica_counts(manifest.config, source=f"manifest {manifest.source_path}: spec.config")
     try:
         return DeploymentConfigInput.model_validate(dict(manifest.config))
     except ValidationError as exc:
@@ -444,6 +487,24 @@ class DeploymentResource(BaseResource):
         if result["data"].get("updateDeployment") is None:
             return None
         return self._parse(UpdateDeployment, result["data"], "update_deployment", UpdateDeploymentUpdateDeployment)
+
+    async def scale(
+        self, deployment_id: str | UUID, component: str, replicas: int | None
+    ) -> UpdateDeploymentUpdateDeployment | None:
+        """Set the replica override of one component, or clear it with ``replicas=None``.
+
+        ``components`` replaces every stored block, so the other stored blocks and the
+        component's other overrides (env vars, image, ``command``, ``args``) are resent
+        unchanged. A write between the read and the update is overwritten. Returns ``None``
+        when nothing changes, like :meth:`update`.
+        """
+        deployment = await self.get(deployment_id)
+        blocks = _stored_component_inputs(deployment.config)
+        target = blocks.pop(component, ComponentConfigInput(name=component))
+        target = target.model_copy(update={"replicas": replicas})
+        if target.model_dump(exclude={"name"}, exclude_none=True):
+            blocks[component] = target
+        return await self.update(deployment_id, input=UpdateDeploymentInput(components=list(blocks.values())))
 
     async def delete(self, deployment_id: str | UUID) -> DeleteDeploymentDeleteDeployment:
         """Request deletion of a deployment.
@@ -739,7 +800,7 @@ class DeploymentResource(BaseResource):
             )
 
         version_changed = manifest.version != existing.application_version
-        inapplicable = await self._inapplicable_overrides(existing.id, update_input)
+        inapplicable, check_error = await self._inapplicable_overrides(existing.id, update_input)
         return ApplyOutcome(
             name=manifest.name,
             action="updated",
@@ -753,20 +814,21 @@ class DeploymentResource(BaseResource):
             ),
             inapplicable_components=list(inapplicable),
             inapplicable_overrides=inapplicable,
+            applicability_check_error=check_error,
         )
 
     async def _inapplicable_overrides(
         self, deployment_id: UUID, update_input: UpdateDeploymentInput
-    ) -> dict[str, list[OverrideKind]]:
+    ) -> tuple[dict[str, list[OverrideKind]], str | None]:
         """Per component, the env vars, image, ``command``, ``args`` or replica count in ``update_input`` that are stored but not applied.
 
         Unchanged values on a component that the bound driver version gives no component
         container, or no longer declares, pass validation, so they are read back once the update
-        is written. A failed read returns no components: it never fails the apply.
+        is written. A failed read never fails the apply: it returns no components and the error.
         """
         submitted = {block.name: kinds for block in update_input.components or [] if (kinds := _override_kinds(block))}
         if not submitted:
-            return {}
+            return {}, None
         try:
             result = await self._transport.execute(
                 load_query("get_deployment_override_applicability"), {"deploymentId": str(deployment_id)}
@@ -778,8 +840,8 @@ class DeploymentResource(BaseResource):
                 "deployment",
                 GetDeploymentOverrideApplicabilityDeployment,
             )
-        except StyrminError:
-            return {}
+        except StyrminError as exc:
+            return {}, str(exc)
         container_not_applied = {b.component for b in deployment.component_container_overrides if not b.is_applicable}
         not_applied: dict[OverrideKind, set[str]] = {
             "env_vars": {b.component for b in deployment.component_env_vars if not b.is_applicable},
@@ -792,7 +854,7 @@ class DeploymentResource(BaseResource):
         for name in sorted(submitted):
             if kinds := [kind for kind in submitted[name] if name in not_applied[kind]]:
                 result[name] = kinds
-        return result
+        return result, None
 
     async def _wait_for_terminal(self, outcome: ApplyOutcome, max_wait: float | None = None) -> ApplyOutcome:
         """Poll the deployment until its ``Deployment.status`` reaches a terminal state.

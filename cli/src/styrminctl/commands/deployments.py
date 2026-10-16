@@ -10,10 +10,18 @@ from cyclopts import App, Parameter
 from styrmin_sdk.exceptions import ApplyError, BatchNameConflictError, StyrminError
 from styrmin_sdk.models import ComponentReplicas, ReplicaSource, UpdateDeploymentInput
 from styrmin_sdk.models.deployment_manifest import ApplyEvent, ApplyOutcome, ApplyOverrides
+from styrmin_sdk.resources.deployments import check_replica_counts
 
 from styrminctl import client
 from styrminctl.labels import format_driver_version_label
-from styrminctl.output import console, parse_json_argument, print_success, print_table, styrmin_error_handler
+from styrminctl.output import (
+    console,
+    parse_json_argument,
+    print_error,
+    print_success,
+    print_table,
+    styrmin_error_handler,
+)
 from styrminctl.types import (
     ClusterContextId,
     ClusterContextName,
@@ -158,6 +166,7 @@ async def update(
     """Update a deployment's configuration."""
     with styrmin_error_handler():
         parsed_config = parse_json_argument(config)
+        check_replica_counts(parsed_config, source="--config")
         update_input = UpdateDeploymentInput.model_validate(parsed_config)
         async with client.get_client() as sdk:
             task = await sdk.deployments.update(deployment_id, input=update_input)
@@ -166,6 +175,39 @@ async def update(
         print_success("Deployment already up to date; no changes applied.")
         return
     print_success(f"Deployment update in progress (task: {task.id})")
+    console.print(f"  Status: {task.status}")
+
+
+@deployments_app.command
+async def scale(
+    deployment_id: DeploymentId,
+    component: Annotated[str, Parameter(help="Name of the component to scale.")],
+    replicas: Annotated[
+        int | None,
+        Parameter(help="Replica count of the component, 1 or more. Leave out with --clear."),
+    ] = None,
+    *,
+    clear: Annotated[
+        bool,
+        Parameter(help="Remove the replica override: the driver default or the chart's count applies."),
+    ] = False,
+) -> None:
+    """Set or clear the replica override of one component.
+
+    The component's other overrides and the other components' overrides are kept.
+    """
+    if (replicas is None) == (not clear):
+        print_error("Give either a replica count or --clear.")
+        sys.exit(1)
+    with styrmin_error_handler():
+        async with client.get_client() as sdk:
+            task = await sdk.deployments.scale(deployment_id, component, None if clear else replicas)
+
+    if task is None:
+        print_success("Deployment already up to date; no changes applied.")
+        return
+    target = "the driver default or the chart's count" if clear else f"{replicas} replicas"
+    print_success(f"Scaling {component} to {target} (task: {task.id})")
     console.print(f"  Status: {task.status}")
 
 
@@ -190,7 +232,11 @@ async def update_version(
 ) -> None:
     """Update a deployment's application version (internal API)."""
     with styrmin_error_handler():
-        update_input = UpdateDeploymentInput.model_validate(parse_json_argument(config)) if config else None
+        update_input = None
+        if config:
+            parsed_config = parse_json_argument(config)
+            check_replica_counts(parsed_config, source="--config")
+            update_input = UpdateDeploymentInput.model_validate(parsed_config)
         async with client.get_client() as sdk:
             task = await sdk.deployments.update_version(
                 deployment_id, version=version, driver_version_id=driver_version_id, input=update_input
@@ -361,9 +407,22 @@ def _print_inapplicable_warning(outcome: ApplyOutcome) -> None:
             )
 
 
+def _print_applicability_check_warning(outcome: ApplyOutcome) -> None:
+    if outcome.applicability_check_error is None:
+        return
+    sys.stdout.flush()
+    print(
+        f"warning: {outcome.name}: could not check which overrides the driver version applies, "
+        f"so overrides that are stored but not applied are not listed: {outcome.applicability_check_error}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def _print_warnings(outcome: ApplyOutcome) -> None:
     _print_pinned_image_warning(outcome)
     _print_inapplicable_warning(outcome)
+    _print_applicability_check_warning(outcome)
 
 
 def _summary_line(outcomes: list[ApplyOutcome]) -> str:

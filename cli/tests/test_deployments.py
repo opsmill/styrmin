@@ -1216,3 +1216,96 @@ def test_deployments_apply_wait_prints_pinned_warning_once_on_submit(
         "running my-app",
         "0 created, 1 updated, 0 unchanged, 0 failed",
     ]
+
+
+def test_deployments_apply_warns_when_it_cannot_check_which_overrides_apply(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    outcome = _outcome("my-app", "updated").model_copy(
+        update={"applicability_check_error": "Cannot query field 'componentReplicas'"}
+    )
+    mock_client.deployments.apply_files = AsyncMock(return_value=[outcome])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest)])
+    assert exc.value.code == 0
+
+    assert capsys.readouterr().err.splitlines() == [
+        "warning: my-app: could not check which overrides the driver version applies, so "
+        "overrides that are stored but not applied are not listed: Cannot query field "
+        "'componentReplicas'",
+    ]
+
+
+def test_deployments_scale(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_client.deployments.scale = AsyncMock(return_value=MagicMock(id="t-1", status="pending"))
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "scale", DEPLOYMENT_UUID, "task-worker", "4"])
+    assert exc.value.code == 0
+
+    mock_client.deployments.scale.assert_called_once_with(DEPLOYMENT_UUID, "task-worker", 4)
+    output = capsys.readouterr().out
+    assert "Scaling task-worker to 4 replicas" in output
+    assert "t-1" in output
+
+
+def test_deployments_scale_clear(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_client.deployments.scale = AsyncMock(return_value=MagicMock(id="t-1", status="pending"))
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "scale", DEPLOYMENT_UUID, "server", "--clear"])
+    assert exc.value.code == 0
+
+    mock_client.deployments.scale.assert_called_once_with(DEPLOYMENT_UUID, "server", None)
+    assert "the driver default or the chart's count" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("args", [["server"], ["server", "3", "--clear"]], ids=["neither", "both"])
+def test_deployments_scale_needs_a_count_or_clear(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], args: list[str]
+) -> None:
+    mock_client.deployments.scale = AsyncMock()
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "scale", DEPLOYMENT_UUID, *args])
+    assert exc.value.code == 1
+
+    mock_client.deployments.scale.assert_not_called()
+    assert "Give either a replica count or --clear." in capsys.readouterr().out
+
+
+def test_deployments_scale_reports_a_rejected_count(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_client.deployments.scale = AsyncMock(
+        side_effect=StyrminError("Replica count for component 'server' is 50, above the maximum of 20")
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "scale", DEPLOYMENT_UUID, "server", "50"])
+    assert exc.value.code == 1
+
+    assert "above the maximum of 20" in capsys.readouterr().out
+
+
+def test_deployments_update_rejects_a_replica_count_that_is_not_a_whole_number(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mock_client.deployments.update = AsyncMock()
+
+    with pytest.raises(SystemExit) as exc:
+        app(
+            [
+                "deployments",
+                "update",
+                DEPLOYMENT_UUID,
+                "--config",
+                '{"components": [{"name": "server", "replicas": "3"}]}',
+            ]
+        )
+    assert exc.value.code == 1
+
+    mock_client.deployments.update.assert_not_called()
+    assert "replicas must be a whole number" in capsys.readouterr().out
