@@ -5,12 +5,20 @@ metadata:
   name: infrahub-prod
 spec:
   driver: infrahub          # required — not overridable
-  version: 1.7.3            # must satisfy the driver's >=1.5,<1.9 range
+  version: 1.7.3            # must satisfy the driver's supported_versions (>=1.5,<2.0)
   # environment: production   # resolved by name
   # cluster: us-east        # only needed if the env name is ambiguous across clusters
 
   # Driver-declared parameters (see driver.styrmin.yml). Omitted ones use
   # the driver defaults: database_storage_size=100, enable_analytics=true.
+  #
+  # Earlier versions of this example set replicas_server: 1 and
+  # replicas_task_worker: 1 under parameters. infrahub driver version 5 removes
+  # both parameters, and replicas_task_worker: 1 is not the old default of 2,
+  # so a deployment created from that example is rejected with
+  # RETIRED_PARAMETER_VALUE when it moves to version 5. Before you apply this
+  # manifest to such a deployment, follow
+  # https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters#deployments-created-from-the-earlier-example-manifest
   # parameters:
   #   database_storage_size: 200
 

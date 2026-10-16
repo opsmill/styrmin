@@ -734,3 +734,38 @@ The review ran `speckit-review-run` with all six agents enabled: code, tests, er
 3. Open the pull request (`/opsmill-dev:pr`). In its description, list the high-risk areas: the context model serialization, the lenient parse on every read of a stored context, the GraphQL schema change, and the change to the example drivers.
 4. Fix the CI exclusion of `{api, configuration}` so that CI runs the api variant of the replica E2E (needs your approval: CI change).
 5. Address the Low findings in section 5 in a follow-up, or record them as GitHub issues.
+
+## 8. PR #483 review
+
+The [PR #483 review](https://github.com/opsmill/styrmin/pull/483) listed items 1 to 17 and 19 to 21; the review text has no item 18. The author decided items 2, 4, 8 and 12.
+
+### Decisions
+
+- **E2E coverage (item 2).** The second deployment of `test_deployment_image_override.py` is now created with a `server` replica override of 2 through `scenario_driver.create_deployment(component_replicas=...)`, so the Deploy form (ui) and the deploy mutation (api) are covered by `test_create_with_replica_override`. The retired-parameter rule, the infrahub 4 to 5 upgrade and a stopped component that keeps its override stay covered by functional tests only; the PR body asks the reviewer to confirm.
+- **CI exclusion (item 8).** `.github/workflows/ci.yml` is unchanged. The api variant of `shard_configuration` runs locally only.
+- **Maximum count (item 4).** New server setting `STYRMIN_MAX_REPLICA_COUNT` (`Settings.max_replica_count`, Helm `styrmin.maxReplicaCount`), default 20, checked in `validate_replica_overrides` with the new `REPLICA_COUNT_ABOVE_MAXIMUM`. A stored count sent again unchanged passes.
+- **Scaling from the CLI (item 12).** New `styrminctl deployments scale` and SDK `deployments.scale()`, which resend the stored component blocks with one count changed.
+
+### Fixed
+
+- Item 1: the Deploy form labels each field with the component name.
+- Item 3: `docs/docs/changelog.md` entry with "What's new" and "Migration", `202.removed.md`, `202.changed.1.md` with the agent, SDK and rollback requirements.
+- Item 5: the Deploy form sends `driverVersionId` and lists versions newest first.
+- Item 6: the migration guide, the changelog and `examples/deployments/infrahub.yml` name the `replicas_task_worker: 1` case; "Unknown parameter" links the new [Changing Driver Versions](../../docs/docs/drivers/changing-driver-versions.md) page; the drop is logged with the deployment ID.
+- Item 7: `UpgradeErrorAlert` makes links clickable and lists the steps for `RETIRED_PARAMETER_VALUE`.
+- Item 9: `ComponentConfig` parses the replica keys once with `parse_stored_replica_declaration`, which reads only the replica keys. Only an invalid key is dropped, and the warning names it.
+- Item 10: clearing a new count removes the block it created; `config-diff.ts` diffs added and removed blocks field by field.
+- Item 11: the `components[*].replicas` impact rule renders one line per change, such as `server: 3 → 1 pod`.
+- Item 13: Deploy is disabled while a count is invalid, with `deploy-blocked-reason`.
+- Item 14: the Replicas hint names a `replicas_<component>` parameter and says that the override applies.
+- Items 16 and 17: driver-author warnings in `creating-a-driver.md` and `replica-overrides.md`; the general rule moved to `changing-driver-versions.md`.
+- Item 19: `_validate_replica_overrides` returns early without a `replicas` key; `componentReplicas` reads the deployment that the parent field loaded. The four other resolvers that reload the deployment are unchanged.
+- Item 20: the Deployment and StatefulSet polls wait while `status.replicas` is above `spec.replicas`.
+- Item 21: the `ComponentConfigInput` and `isApplicable` descriptions; log messages name a driver version as `driver version <uuid>` (`driver_version_label`).
+- Medium findings of section 5: the SDK and `styrminctl` reject a count that is not a whole number (`check_replica_counts`), and `apply` reports a failed applicability read in `ApplyOutcome.applicability_check_error`.
+
+### Not done in the repository
+
+- Item 15: a status comment on #202 for each acceptance criterion.
+- Item 17: a GitHub issue for retired parameters without a default.
+- Items 6 and 16: telling support, solutions engineers and the teams that maintain drivers outside `driver/examples/`.

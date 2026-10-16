@@ -294,7 +294,20 @@ the field:
 
 `singleton: true` with `replicas: 1` loads. If your driver passes a replica
 count parameter to the chart, see
-[Migrating Replica Parameters](./migrating-replica-parameters.md#if-you-write-drivers).
+[Migrating Replica Parameters](./migrating-replica-parameters.md#retire-a-replica-parameter-in-your-own-driver).
+
+:::warning Existing drivers: mark single-primary components before you upgrade Styrmin
+
+Users can set a replica override on any component as soon as the Styrmin
+server runs the release that adds replica overrides, also on a driver
+version loaded before it. A driver version from an earlier release marks
+no component as singleton, so a user can scale a database that runs as a
+single primary to 2 pods, and each pod gets its own volume and data. If
+you maintain a driver outside `driver/examples/`, load a new driver
+version that marks each such component with `singleton: true` before you
+upgrade Styrmin, and move your deployments onto it.
+
+:::
 
 ### Step 4: Configure backups
 
@@ -529,7 +542,9 @@ that changes to that version drops the parameter's value if it equals the
 parameter's default in the deployment's current driver version. Any other
 value rejects the change with `RETIRED_PARAMETER_VALUE`, which names the
 parameter and the value. See
-[Migrating Replica Parameters](./migrating-replica-parameters.md#the-rule-for-parameters-a-new-driver-version-no-longer-declares).
+[Changing Driver Versions](./changing-driver-versions.md#parameters-the-target-driver-version-no-longer-declares).
+A parameter without a default cannot be dropped this way: give a
+parameter you may retire later a default.
 
 ### Step 9: Load and test
 

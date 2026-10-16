@@ -205,17 +205,27 @@ to 2147483647) and `singleton` (a `StrictBool`, default `false`). `ReplicaDeclar
   `spec.components.<name>`.
 - `model_dump()` leaves out `replicas` when it is `None` and `singleton` when it is `false`, so a
   declaration that uses neither key is stored and serialised as before 023.
-- `validate_ignoring_invalid_replica_keys` (`context/models/components.py`) reads a stored
-  declaration. A row stored before 023 can hold an untyped `replicas` or `singleton` that the
-  typed fields reject; when dropping both keys makes the declaration valid, the function drops
-  them and logs a warning that names the component, and the driver version when the caller passes
-  it. Any other validation error is raised unchanged. A model validator on `ComponentContext` runs
-  it, so every read of a stored context gets it: the repository, the operator, the agent and
-  `resolve_global_context`, which passes the driver version as the validation context
-  `driver_version`. `parse_stored_component_declaration(raw, driver_version=..., component=...)`
-  runs it with the driver-load model for the write checks, `componentReplicas` and the
-  `ComponentConfig.replicas` and `ComponentConfig.singleton` resolvers. The driver load path does
-  not run it.
+- `split_replica_keys` (`context/models/components.py`) splits the replica keys of a stored
+  declaration into the valid ones and the invalid ones. A row stored before 023 can hold an untyped
+  `replicas` or `singleton` that the typed fields reject. It tries `singleton` first, then
+  `replicas`, so when `singleton: true` and a `replicas` above 1 are both stored, `replicas` is the
+  invalid key and the component runs 1 pod.
+- `validate_ignoring_invalid_replica_keys` reads a stored declaration with a caller's model: when
+  dropping the invalid replica keys makes it valid, it drops them and logs a warning that names
+  each dropped key and value, the component, and the driver version when the caller passes it. Any
+  other validation error is raised unchanged. A model validator on `ComponentContext` runs it, so
+  every read of a stored context gets it: the repository, the operator, the agent and
+  `resolve_global_context`, which passes the driver version label as the validation context
+  `driver_version`.
+- `parse_stored_replica_declaration(raw, component=..., driver_version=...)` reads only the
+  replica keys into a `ReplicaDeclaration`, so a problem in another key, such as an invalid
+  `container` name, does not raise. The write checks, `componentReplicas` and the
+  `ComponentConfig.replicas` and `ComponentConfig.singleton` resolvers use it.
+  `ComponentConfig` parses once per component and keeps the result, so the two fields log one
+  warning.
+- Log messages name a driver version with `driver_version_label(id)`, `driver version <uuid>`.
+
+The driver load path runs none of these, so new driver versions are checked strictly.
 
 No column and no Alembic revision: the keys ride the existing JSON. They are read through
 `ComponentConfig.replicas` and `ComponentConfig.singleton` in GraphQL, which default to `null` and

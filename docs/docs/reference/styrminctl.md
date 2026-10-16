@@ -624,7 +624,33 @@ Styrmin drops the value if it equals the parameter's default in the
 current driver version. Any other value fails the command with
 `RETIRED_PARAMETER_VALUE` before any task starts. `deployments apply`
 follows the same rule. See
+[Changing Driver Versions](../drivers/changing-driver-versions.md) and
 [Migrating Replica Parameters](../drivers/migrating-replica-parameters.md).
+
+### `deployments scale` — set the replica count of one component
+
+`styrminctl deployments scale <deployment-id> <component> <count>` sets
+the [replica override](../concepts-and-architecture/replica-overrides.md)
+of one component. `--clear` instead of a count removes the override, and
+the driver default or the chart's count applies again:
+
+```shell
+uv run styrminctl deployments scale <deployment-id> task-worker 4
+uv run styrminctl deployments scale <deployment-id> task-worker --clear
+```
+
+The command keeps every other override of the deployment: it reads the
+stored component blocks and sends them back with only that component's
+count changed. `deployments update --config` with `components` instead
+replaces every stored component block. A change that another user writes
+between the read and the update is overwritten.
+
+The server rejects a count below 1 with `INVALID_REPLICA_COUNT`, a count
+above the server's maximum (`STYRMIN_MAX_REPLICA_COUNT`, 20 by default)
+with `REPLICA_COUNT_ABOVE_MAXIMUM`, and a count above 1 on a singleton
+component with `SINGLETON_REPLICA_OVERRIDE`. The command exits with code 1
+and prints the error. When the count does not change, it prints
+`Deployment already up to date; no changes applied.`
 
 ### `tasks get` — a task's steps
 
@@ -702,11 +728,14 @@ whole number from 1 to 2147483647 that Styrmin sets on `spec.replicas` of
 the component's `Deployment` and `StatefulSet` workloads. It needs no
 component container. Removing the key clears the override on the next
 apply, with the same `components: []` exception as for `image`; the
-component then runs the driver default or the chart's count. A count below
-1 fails with `INVALID_REPLICA_COUNT`, a count above 1 on a singleton
-component fails with `SINGLETON_REPLICA_OVERRIDE`, and a new or changed
-count on a component the driver version does not declare fails with
-`UNKNOWN_COMPONENT_REPLICA_OVERRIDE`.
+component then runs the driver default or the chart's count. A value that
+is not a whole number, such as `true` or `"3"`, fails before `apply` sends
+anything. A count below 1 fails with `INVALID_REPLICA_COUNT`, a new or
+changed count above the server's maximum (`STYRMIN_MAX_REPLICA_COUNT`, 20
+by default) fails with `REPLICA_COUNT_ABOVE_MAXIMUM`, a count above 1 on a
+singleton component fails with `SINGLETON_REPLICA_OVERRIDE`, and a new or
+changed count on a component the driver version does not declare fails
+with `UNKNOWN_COMPONENT_REPLICA_OVERRIDE`.
 
 Adding or changing per-component `env_vars`, `image`, `command` or `args` on a
 component whose driver version declares no component container fails with
@@ -745,6 +774,12 @@ warning: my-app: replica override is stored on legacy but not applied: the drive
 The SDK returns these components as `ApplyOutcome.inapplicable_components`, and
 the kinds of override per component (`env_vars`, `image`, `command`, `args`,
 `replicas`) as `ApplyOutcome.inapplicable_overrides`.
+
+`apply` reads these lists back from the server after the update is written.
+When that read fails, for example against a server of an earlier release,
+`apply` still succeeds and prints a warning with the error instead, because it
+cannot list the overrides that are not applied. The SDK sets
+`ApplyOutcome.applicability_check_error`.
 See [Migrating env var wiring](../drivers/migrating-env-vars.md) and
 [Migrating container overrides](../drivers/migrating-container-overrides.md).
 

@@ -283,7 +283,7 @@ Orchestrates application deployments.
 
 Replica overrides and retired parameters (023, [ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md)):
 
-- `_validate_replica_overrides` builds the component declarations of a driver version with `parse_stored_component_declaration` and calls `validate_replica_overrides`. `_validate_config_write` calls it after `validate_deployment_config`, so `INVALID_REPLICA_COUNT` comes first, and before `_validate_component_container_targets`. `deploy_application` calls it with no stored config. `update_deployment_version` without a submitted config calls it on the stored config against the target driver version.
+- `_validate_replica_overrides` returns at once when the config sets no `replicas` (`has_replica_overrides`). Otherwise it builds the component declarations of a driver version with `parse_stored_replica_declaration` and calls `validate_replica_overrides` with the server setting `max_replica_count`. `_validate_config_write` calls it after `validate_deployment_config`, so `INVALID_REPLICA_COUNT` comes first, and before `_validate_component_container_targets`. `deploy_application` calls it with no stored config. `update_deployment_version` without a submitted config calls it on the stored config against the target driver version.
 - `update_deployment_version` calls `drop_retired_parameters` on the merged parameter map only when the target driver version differs from the bound one, before `validate_parameter_values` runs against the target driver version and before any ingress dispatch or task.
 
 **Deployment Flow:**
@@ -534,7 +534,7 @@ Design rationale: [ADR-070](../../adr/0070-replica-overrides-and-retired-paramet
 | `resolver.py` | `ReplicaSource` (`OVERRIDE`, `DRIVER_DEFAULT`, `CHART`), the frozen `ResolvedReplicas(count, source, override_applies)`, `resolve_replicas(declared_replicas, singleton, override, is_orphaned)` and `replica_patch_count(resolved, enabled)`. Pure functions; the patch builder and `Deployment.componentReplicas` call them. |
 | `patch_builder.py` | `build_component_replica_patches(context)`: for each component of `context.components` and each kind in `REPLICA_PATCH_KINDS` (`Deployment`, `StatefulSet`), at most one `SpecPatch(specs={"replicas": N})` targeted by the component's label selector. `N` is 0 for a stopped component; no patch when the source is `CHART`. Logs the component, count, source and enabled flag at debug level. `ApplicationHelmReleaseBuilder.build()` places the patches after the component label patches and before the backup, scheduling and component container patches. |
 | `validator.py` | `validate_replica_overrides(config, components, stored_config, checked_against)` on the raw config dict: `UnknownComponentReplicaOverrideError` for an added or changed override on an undeclared component (the stored value sent again passes), `SingletonReplicaOverrideError` for an override above 1 on a singleton component, changed or not. |
-| `exceptions.py` | `InvalidReplicaCountError` (`INVALID_REPLICA_COUNT`), `UnknownComponentReplicaOverrideError` (`UNKNOWN_COMPONENT_REPLICA_OVERRIDE`), `SingletonReplicaOverrideError` (`SINGLETON_REPLICA_OVERRIDE`). |
+| `exceptions.py` | `InvalidReplicaCountError` (`INVALID_REPLICA_COUNT`), `UnknownComponentReplicaOverrideError` (`UNKNOWN_COMPONENT_REPLICA_OVERRIDE`), `SingletonReplicaOverrideError` (`SINGLETON_REPLICA_OVERRIDE`), `ReplicaCountAboveMaximumError` (`REPLICA_COUNT_ABOVE_MAXIMUM`). |
 
 The count itself is checked by `ComponentConfigBlock` (`context/models/config.py`), which raises
 `InvalidReplicaCountError` before type conversion. The driver-side keys are typed by
@@ -749,6 +749,7 @@ ServiceError (base)
 ├── UnknownComponentContainerOverrideError
 ├── ContainerOverrideSizeLimitExceededError
 ├── InvalidReplicaCountError                # services/replicas/exceptions.py; INVALID_REPLICA_COUNT
+├── ReplicaCountAboveMaximumError          # services/replicas/exceptions.py; REPLICA_COUNT_ABOVE_MAXIMUM
 ├── UnknownComponentReplicaOverrideError    # UNKNOWN_COMPONENT_REPLICA_OVERRIDE
 ├── SingletonReplicaOverrideError           # SINGLETON_REPLICA_OVERRIDE
 ├── RetiredParameterValueError              # services/parameters/exceptions.py; RETIRED_PARAMETER_VALUE

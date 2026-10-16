@@ -531,23 +531,26 @@ type ComponentConfig {           # ApplicationDriverVersion.componentConfigs
 
 `componentReplicas` has one row per component of the deployment's `Component` rows (the bound
 driver version's components) plus one row per orphaned override, sorted by component name. The
-resolver parses each stored declaration with `parse_stored_component_declaration`, as the
+resolver reads the deployment the parent field loaded, without another database read. It parses
+each stored declaration with `parse_stored_replica_declaration`, as the
 `ComponentConfig.replicas` and `ComponentConfig.singleton` resolvers do, and computes
 `count` and `source` with `resolve_replicas` (`services/replicas/resolver.py`), the function the
 patch builder uses. `count` ignores the stopped state: a stopped component reports the count it
 returns to, and `Deployment.components[].enabled` is `false`. `ReplicaSource` is a plain Strawberry
 enum whose values carry descriptions.
 
-Writes raise, in this order:
+Writes raise these errors. For each check, the first failing component in the order of the
+submitted blocks is reported:
 
 - `INVALID_REPLICA_COUNT` (metadata `component_name`, `requested_replicas` as submitted) from the
   `ComponentConfigBlock` validator. Every GraphQL write path types `replicas` as `Int`, so through
   GraphQL only a count of 0 or less reaches the validator. GraphQL type validation rejects a
   `bool`, a non-integer and a count above 2147483647 first, with the code `VALIDATION_ERROR` and
   the message `Int cannot represent ...`, not `INVALID_REPLICA_COUNT`.
-  The SDK and the CLI build the input with Pydantic models that can convert a value before the
-  request is sent, for example `true` to 1 and `"3"` to 3. The validator still rejects a `bool`,
-  a non-integer or an out-of-range value on paths that do not go through GraphQL.
+  The SDK and the CLI check every `components[].replicas` with `check_replica_counts`
+  (`styrmin_sdk/resources/deployments.py`) before Pydantic can convert it, so `true` and `"3"`
+  fail before the request is sent. The validator still rejects a `bool`, a non-integer or an
+  out-of-range value on paths that do not go through GraphQL.
 - `UNKNOWN_COMPONENT_REPLICA_OVERRIDE` (metadata `component_name`, `known_components` sorted,
   `checked_against`) when an override is added or changed on a component that the driver version
   bound after the write does not declare. The stored value sent again passes.
@@ -555,6 +558,12 @@ Writes raise, in this order:
   `checked_against`) for an override above 1 on a component marked `singleton: true`, also when
   it equals the stored value. `updateDeploymentVersion` without `input` checks the stored overrides
   against the target driver version.
+- `REPLICA_COUNT_ABOVE_MAXIMUM` (metadata `component_name`, `requested_replicas`,
+  `max_replica_count`) when an override is added or changed to a count above the server setting
+  `STYRMIN_MAX_REPLICA_COUNT` (`Settings.max_replica_count`, default 20, Helm value
+  `styrmin.maxReplicaCount`). The stored value sent again passes, so lowering the setting does not
+  block other writes. The check runs in `validate_replica_overrides`, not in the context model,
+  because a stored context must still parse on the agent, which does not read the setting.
 
 `COMPONENT_CONTAINER_NOT_DECLARED` never fires for `replicas`. The apply check
 (`get_deployment_override_applicability.graphql`) selects `componentReplicas { component
