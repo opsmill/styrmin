@@ -101,11 +101,11 @@ In the update call, for each environment, Styrmin acts on the environment's live
 
 Each application whose resolved config differs is then handled as follows (`_plan_environment`):
 
-- The environment's effective `dedicated_ingress` is set, and differs from the
-  `dedicated_ingress` value the application's active instance was rendered with: the application
-  is redeployed only when the controller is `RUNNING`, was rendered with the effective value, and
-  this run starts no action on it. Otherwise it waits on its current config and is counted as
-  `skipped_waiting_for_ingress`.
+- The environment's effective `dedicated_ingress` is set, and the application's resolved
+  `dedicated_ingress` (its own value, else the effective value) differs from the value its active
+  instance was rendered with: the application is redeployed only when the controller is
+  `RUNNING`, was rendered with the effective value, and this run starts no action on it.
+  Otherwise it waits on its current config and is counted as `skipped_waiting_for_ingress`.
 - In every other case, including an effective value that is not set: it is redeployed at once,
   whatever the controller state.
 
@@ -116,6 +116,11 @@ Each application whose resolved config differs is then handled as follows (`_pla
 > a deployment that sets its own `dedicated_ingress`, different from the environment's effective
 > value, can wait for the controller for no reason. The implement report lists this as a deferred
 > finding (specs/archive/021-cluster-config-update/opsmill-implement-report.md, §5 "Deferred").
+>
+> Amended 2026-10-16 ([#453](https://github.com/opsmill/styrmin/issues/453)): the check now
+> compares the application's resolved value with the value it was rendered with, as the first
+> version intended. A deployment that sets its own `dedicated_ingress` keeps it, so it no longer
+> waits, and a `FAILED` controller is not redeployed for it.
 
 Each environment is planned first (`_plan_environment`): the applications to redeploy, the ones
 that wait and the controller action. The plan is then carried out. A dry run (decision 4) returns

@@ -260,26 +260,19 @@ The **Configuration** tab of the environment page does not edit
 values, the tab blocks saving, because a save from the tab would turn
 `dedicated_ingress` off.
 
-### Known limitation: a deployment that sets its own `dedicated_ingress` waits for the controller
+### A deployment that sets its own `dedicated_ingress`
 
-A deployment can set its own `dedicated_ingress` in its config. When an
-environment update changes the resolved config of such a deployment,
-and the deployment's value differs from the environment's, Styrmin
-redeploys the deployment only once the environment's controller is
-`RUNNING` with the environment's values. This happens even when the
-update does not change `dedicated_ingress`:
+A deployment can set its own `dedicated_ingress` in its config. It keeps
+that value when a cluster or environment update changes the
+environment's `dedicated_ingress`, so the update does not move it onto
+the environment's controller. The controller runs with the
+environment's values; the deployment's own value does not change it.
 
-- The update changes only environment variables while the controller
-  is `DEPLOYING`: the deployment keeps its current config, and Styrmin
-  redeploys it when the controller reaches `RUNNING`.
-- The update changes only environment variables while the controller
-  is `FAILED`: Styrmin also redeploys the controller, and the
-  deployment waits for it.
-
-When the controller is `RUNNING` with the environment's values, Styrmin
-redeploys the deployment at once. A cluster update holds such a
-deployment back in the same way. [#453](https://github.com/opsmill/styrmin/issues/453)
-tracks this.
+When a cluster or environment update changes another value of such a
+deployment's resolved config, for example its environment variables or
+the FQDN suffix, Styrmin redeploys the deployment at once, whatever the
+state of the controller. The deployment does not wait for the
+controller, so Styrmin does not redeploy a `FAILED` controller for it.
 
 ### How an application URL gets assigned
 
