@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
@@ -12,6 +13,9 @@ import httpx
 import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
+from prefect.client.orchestration import PrefectClient
+from prefect.client.schemas.filters import FlowFilter, FlowFilterName
+from prefect.exceptions import ObjectNotFound
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
 from styrmin_sdk.exceptions import ResourceNotFoundError
@@ -1981,6 +1985,67 @@ async def create_name_based_bsl_objects(
         await api_client.close()
 
 
+@asynccontextmanager
+async def prefect_api(kubeconfig_path: str) -> AsyncIterator[PrefectClient]:
+    """A Prefect client on a port-forward to the in-cluster Prefect server."""
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
+    service = await AsyncService.get(
+        "prefect-server", namespace="styrmin", api=kr8s_api
+    )
+    async with _portforward(service, remote_port=4200) as port:
+        url = f"http://localhost:{port}/api"
+        await _wait_for_http(f"{url}/health", timeout=60.0)
+        async with PrefectClient(api=url) as client:
+            yield client
+
+
+async def assert_bsl_keys_not_readable_from_prefect(
+    kubeconfig_path: str, bsl_id: str, keys: Sequence[str]
+) -> None:
+    """#497: the location's sync flow runs and its Secret block do not show its S3 keys."""
+    block_name = f"styrmin-bsl-{bsl_id}-credentials"
+    async with prefect_api(kubeconfig_path) as client:
+        runs = await client.read_flow_runs(
+            flow_filter=FlowFilter(
+                name=FlowFilterName(
+                    any_=["sync_bsl_create", "sync_bsl_update_credentials"]
+                )
+            )
+        )
+        block = await client.read_block_document_by_name(
+            block_name, block_type_slug="secret", include_secrets=False
+        )
+    runs = [run for run in runs if run.parameters.get("bsl_id") == bsl_id]
+    assert len(runs) >= 2, (
+        f"Expected a create and a credentials update flow run of location {bsl_id}, "
+        f"found {[run.name for run in runs]}"
+    )
+    for run in runs:
+        parameters = json.dumps(run.parameters)
+        leaked = [key for key in keys if key in parameters]
+        assert not leaked, (
+            f"Flow run {run.name} has S3 keys in its parameters: {leaked}"
+        )
+    shown = json.dumps(block.data)
+    leaked = [key for key in keys if key in shown]
+    assert not leaked, (
+        f"Block {block_name} shows S3 keys without include_secrets: {leaked}"
+    )
+
+
+async def bsl_credentials_block_exists(kubeconfig_path: str, bsl_id: str) -> bool:
+    async with prefect_api(kubeconfig_path) as client:
+        try:
+            await client.read_block_document_by_name(
+                f"styrmin-bsl-{bsl_id}-credentials",
+                block_type_slug="secret",
+                include_secrets=False,
+            )
+        except ObjectNotFound:
+            return False
+    return True
+
+
 @pytest.mark.ci
 @pytest.mark.shard_backup
 @pytest.mark.api_only(
@@ -1999,6 +2064,10 @@ async def test_renamed_bsl_cluster_objects_follow_the_location_id(
     unassign still removes the Velero object and the Secret. Objects that an
     earlier Styrmin named after the location name, which carry the same id
     label, are updated and removed too.
+
+    And #497: the sync flows load the S3 keys from the location's Prefect
+    Secret block, so the keys reach the Secret but are not in the parameters
+    of the flow runs. Deleting the location deletes the block.
     """
     from uuid import uuid4
 
@@ -2030,9 +2099,12 @@ async def test_renamed_bsl_cluster_objects_follow_the_location_id(
             kubeconfig_path,
             bsl_id,
             lambda bsls, secrets: (
-                bsls == {id_name} and set(secrets) == {f"{id_name}-credentials"}
+                bsls == {id_name}
+                and set(secrets) == {f"{id_name}-credentials"}
+                and "GKbeforerenamebeforerename" in secrets[f"{id_name}-credentials"]
             ),
-            "Assigning the location should create its objects named after its id",
+            "Assigning the location should create its objects named after its id, "
+            "with the location's keys in the Secret",
         )
 
         await client.backup_storage_locations.update(
@@ -2065,6 +2137,22 @@ async def test_renamed_bsl_cluster_objects_follow_the_location_id(
             bsl_id,
             lambda bsls, secrets: not bsls and not secrets,
             "Unassigning the renamed location should remove all its objects",
+        )
+
+        await assert_bsl_keys_not_readable_from_prefect(
+            kubeconfig_path,
+            bsl_id,
+            [
+                "GKbeforerenamebeforerename",
+                "before-rename-secret",
+                "GKafterrenameafterrename",
+                "after-rename-secret",
+            ],
+        )
+        await client.environments.delete(environment_id=environment.id)
+        await client.backup_storage_locations.delete(bsl_id)
+        assert not await bsl_credentials_block_exists(kubeconfig_path, bsl_id), (
+            "Deleting the location should delete its Prefect Secret block"
         )
     finally:
         with suppress(Exception):
