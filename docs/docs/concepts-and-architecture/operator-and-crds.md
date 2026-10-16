@@ -105,9 +105,9 @@ Helm v4:
   a field that the chart sets returns to the chart's value, also when
   `kubectl` or a driver action changed it. The upgrade does not fail.
 - A deployment created before, when helm-controller ran with the
-  `UseHelm3Defaults` feature gate, keeps client-side apply: each upgrade
-  and rollback uses the apply method of the release's previous install
-  or upgrade. From its next upgrade, the two items below apply to it
+  `UseHelm3Defaults` feature gate, keeps client-side apply: an upgrade uses
+  the apply method recorded in the release's newest revision, and a
+  rollback uses the method of the revision it returns to. From its next upgrade, the two items below apply to it
   too.
 - Installs and upgrades wait for the chart's resources with kstatus,
   FluxCD's library that computes the status of each Kubernetes resource.

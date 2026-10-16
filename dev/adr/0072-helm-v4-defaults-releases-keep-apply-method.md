@@ -31,8 +31,9 @@ The gate changes three defaults of a HelmRelease, all on fields that the operato
 | Health checks | `spec.waitStrategy.name` | `legacy`, Helm v3's checks | `poller`, kstatus |
 | Helm hooks sent to the post-renderers | `spec.postRenderStrategy` | `nohooks` | `combined` |
 
-Upgrades and rollbacks use `auto` with or without the gate: the apply method of the release's
-previous install or upgrade (`spec.upgrade.serverSideApply`, `spec.rollback.serverSideApply`).
+Upgrades and rollbacks use `auto` with or without the gate (`spec.upgrade.serverSideApply`,
+`spec.rollback.serverSideApply`): an upgrade uses the apply method recorded in the release's newest
+revision, and a rollback uses the method of the revision it returns to (R-004).
 
 Styrmin had checked these parts with Helm v3 behaviour only:
 
@@ -138,10 +139,11 @@ changed.
   new installs go back to client-side apply.
 - Rollback path for administrators: downgrade the agent chart to a release that runs helm-controller
   with the gate. Deployments created while the gate was off keep server-side apply, as above.
-- The backup `TemplateAnnotationPatch` adds keys under `/spec/template/metadata/annotations/` with
-  JSON patch `add`, so it fails on a `Deployment` or `StatefulSet` that matches a backup component
-  and has no pod annotations. That was already true for templates; under `combined` it also applies
-  to Helm hooks of those kinds. This change does not alter it (R-008).
+- The annotation patches do not fail on Helm hooks without annotations. The backup
+  `TemplateAnnotationPatch` is a strategic merge, and the Ingress `AnnotationPatch` JSON `add` on
+  `/metadata/annotations/<key>` succeeds on an `Ingress` without annotations (checked with
+  `kubectl kustomize`, kustomize v5.7.1). Research R-008 calls the backup patch a known limitation;
+  the code does not have it.
 - A Helm hook `Deployment` or `StatefulSet` of a third-party chart that matches a component but does
   not render its component container fails the install or upgrade with
   `COMPONENT_CONTAINER_NOT_FOUND` once an override applies to that component, as a template would.
@@ -149,7 +151,8 @@ changed.
   the E2E runs did not reach them (spec Clarifications).
 - The E2E suite has a `hook-job` test driver, the `simple-app` chart with a pre-upgrade Helm hook
   `Job` and an unlabelled hook `ConfigMap` turned on, which `test_pod_scheduling.py` uses to check
-  that both receive the patches (e2e-evidence.md, run 3).
+  that the `Job` receives the scheduling settings and Styrmin's labels and the `ConfigMap` receives
+  Styrmin's labels (e2e-evidence.md, run 3).
 
 ## Alternatives Considered
 
