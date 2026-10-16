@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 from collections.abc import Awaitable, Callable
 from functools import partial
-from typing import Any
+from typing import Any, NamedTuple
 
 from loguru import logger
 
@@ -73,6 +73,13 @@ def pod_volume_bytes(pod_volume_backups: list[dict[str, Any]]) -> int | None:
 
 class VeleroClientError(Exception):
     """Base error for Velero client operations."""
+
+
+class BslDeletion(NamedTuple):
+    """How many objects of a backup storage location ``delete_bsl`` deleted."""
+
+    locations: int
+    secrets: int
 
 
 class VeleroClient:
@@ -230,10 +237,10 @@ class VeleroClient:
                 f"Failed to create Velero BSL {bsl.name}: {e}"
             ) from e
 
-    async def get_bsl_name(self, bsl_id: str, namespace: str) -> str:
-        """Name of the Velero BackupStorageLocation of the location ``bsl_id``.
+    async def list_bsl_names(self, bsl_id: str, namespace: str) -> list[str]:
+        """Names of the Velero BackupStorageLocations of the location ``bsl_id``, sorted.
 
-        Found by label, so it also finds an object that an earlier Styrmin
+        Found by label, so the list also holds objects that an earlier Styrmin
         version named after the location's name.
         """
         try:
@@ -248,14 +255,21 @@ class VeleroClient:
             raise VeleroClientError(
                 f"Failed to list the Velero BSL of location {bsl_id}: {e}"
             ) from e
-        names = sorted(item["metadata"]["name"] for item in listed.get("items", []))
+        return sorted(item["metadata"]["name"] for item in listed.get("items", []))
+
+    async def get_bsl_name(self, bsl_id: str, namespace: str) -> str:
+        """Name of the Velero BackupStorageLocation of the location ``bsl_id``.
+
+        Prefers the object named after the id when there are several.
+        """
+        names = await self.list_bsl_names(bsl_id, namespace)
         if not names:
             raise VeleroClientError(
                 f"No Velero BSL labelled {BSL_ID_LABEL}={bsl_id} in namespace {namespace}"
             )
         return velero_bsl_name(bsl_id) if velero_bsl_name(bsl_id) in names else names[0]
 
-    async def delete_bsl(self, bsl_id: str, namespace: str) -> None:
+    async def delete_bsl(self, bsl_id: str, namespace: str) -> BslDeletion:
         """Delete the Velero BackupStorageLocations and credential Secrets of ``bsl_id``.
 
         Both are selected by label, which also covers objects that an earlier
@@ -268,18 +282,23 @@ class VeleroClient:
         core_api = CoreV1Api(self._api_client)
         selector = f"{BSL_ID_LABEL}={bsl_id}"
         failures: list[str] = []
+        locations = secrets_deleted = 0
 
         async def _delete(
             kind: str, name: str, delete: Callable[[], Awaitable[Any]]
-        ) -> None:
+        ) -> int:
+            """1 when this call deleted the object, else 0."""
             try:
                 await delete()
-                logger.info(f"Deleted {kind}: {name}")
             except ApiException as e:
                 if e.status != 404:
                     failures.append(f"Failed to delete {kind} {name}: {e}")
+                return 0
             except Exception as e:
                 failures.append(f"Failed to delete {kind} {name}: {e}")
+                return 0
+            logger.info(f"Deleted {kind}: {name}")
+            return 1
 
         try:
             listed = await self.custom_api.list_namespaced_custom_object(
@@ -291,7 +310,7 @@ class VeleroClient:
             )
             for item in listed.get("items", []):
                 name = item["metadata"]["name"]
-                await _delete(
+                locations += await _delete(
                     "Velero BSL",
                     name,
                     partial(
@@ -312,7 +331,7 @@ class VeleroClient:
             )
             for secret in secrets.items:
                 name = secret.metadata.name
-                await _delete(
+                secrets_deleted += await _delete(
                     "BSL credential Secret",
                     name,
                     partial(
@@ -328,6 +347,7 @@ class VeleroClient:
 
         if failures:
             raise VeleroClientError("; ".join(failures))
+        return BslDeletion(locations=locations, secrets=secrets_deleted)
 
     async def update_bsl_secret(
         self,
@@ -336,7 +356,10 @@ class VeleroClient:
         access_key_id: str,
         secret_access_key: str,
     ) -> None:
-        """Update the credential Secret of the location ``bsl_id``, found by label."""
+        """Update the credential Secrets of the location ``bsl_id``, found by label.
+
+        A failed patch does not stop the other Secrets from being patched.
+        """
         from kubernetes_asyncio.client import CoreV1Api
 
         core_api = CoreV1Api(self._api_client)
@@ -364,6 +387,7 @@ class VeleroClient:
                 f"No credential Secret labelled {BSL_ID_LABEL}={bsl_id} "
                 f"in namespace {namespace}"
             )
+        failures: list[str] = []
         for secret in secrets.items:
             secret_name = secret.metadata.name
             try:
@@ -372,9 +396,11 @@ class VeleroClient:
                 )
                 logger.info(f"Updated BSL credential Secret: {secret_name}")
             except Exception as e:
-                raise VeleroClientError(
+                failures.append(
                     f"Failed to update BSL credential Secret {secret_name}: {e}"
-                ) from e
+                )
+        if failures:
+            raise VeleroClientError("; ".join(failures))
 
     async def list_pod_volume_backups(
         self, namespace: str, backup_name: str

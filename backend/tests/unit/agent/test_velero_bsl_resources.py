@@ -87,3 +87,20 @@ def test_velero_bsl_render_secret():
         "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" in cloud_data
     )
     assert "[default]" in cloud_data
+
+
+def test_velero_bsl_extra_labels_cannot_replace_the_location_id_label():
+    """The id label selects the objects later, so extra labels must not change it."""
+    bsl = VeleroBackupStorageLocation(
+        bsl_id=BSL_ID,
+        namespace="styrmin",
+        bucket="my-bucket",
+        region="us-east-1",
+        endpoint="https://s3.example.com",
+        labels={"styrmin.io/bsl-id": "another-id", "team": "platform"},
+    )
+
+    for rendered in (bsl.render_bsl(), bsl.render_secret("key", "secret")):
+        labels = rendered["metadata"]["labels"]
+        assert labels["styrmin.io/bsl-id"] == BSL_ID
+        assert labels["team"] == "platform"

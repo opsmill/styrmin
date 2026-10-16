@@ -117,20 +117,19 @@ class VeleroBackupStorageLocation:
     def credential_secret_name(self) -> str:
         return f"{self.name}-credentials"
 
+    def _object_labels(self) -> dict[str, str]:
+        # The id label goes last, so ``labels`` cannot change the label that selects the object.
+        return {"styrmin.io/managed": "true", **self.labels, BSL_ID_LABEL: self.bsl_id}
+
     def render_bsl(self) -> dict[str, Any]:
         """Render the Velero BackupStorageLocation CRD manifest."""
-        labels = {
-            "styrmin.io/managed": "true",
-            BSL_ID_LABEL: self.bsl_id,
-            **self.labels,
-        }
         return {
             "apiVersion": "velero.io/v1",
             "kind": "BackupStorageLocation",
             "metadata": {
                 "name": self.name,
                 "namespace": self.namespace,
-                "labels": labels,
+                "labels": self._object_labels(),
             },
             "spec": {
                 "provider": "aws",
@@ -153,11 +152,6 @@ class VeleroBackupStorageLocation:
         self, access_key_id: str, secret_access_key: str
     ) -> dict[str, Any]:
         """Render the credential Secret manifest."""
-        labels = {
-            "styrmin.io/managed": "true",
-            BSL_ID_LABEL: self.bsl_id,
-            **self.labels,
-        }
         cloud_credentials = (
             f"[default]\n"
             f"aws_access_key_id = {access_key_id}\n"
@@ -169,7 +163,7 @@ class VeleroBackupStorageLocation:
             "metadata": {
                 "name": self.credential_secret_name,
                 "namespace": self.namespace,
-                "labels": labels,
+                "labels": self._object_labels(),
             },
             "type": "Opaque",
             "stringData": {

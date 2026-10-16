@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from typing import Any, AsyncIterator, Sequence
@@ -1919,7 +1920,7 @@ async def bsl_cluster_objects(
 async def wait_for_bsl_cluster_objects(
     kubeconfig_path: str,
     bsl_id: str,
-    expected: Any,
+    expected: Callable[[set[str], dict[str, str]], bool],
     description: str,
 ) -> tuple[set[str], dict[str, str]]:
     """Poll the location's cluster objects until ``expected(bsls, secrets)`` holds."""

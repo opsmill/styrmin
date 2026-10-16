@@ -32,7 +32,6 @@ def build_velero_backup(
     driver_name: str,
     ttl: str,
     hooks: list[VeleroBackupHook] | None = None,
-    storage_location: str | None = None,
 ) -> VeleroBackup:
     """Build a VeleroBackup resource for an Styrmin instance.
 
@@ -50,7 +49,6 @@ def build_velero_backup(
         },
         hooks=hooks or [],
         ttl=ttl,
-        storage_location=storage_location,
         excluded_resources=list(ALWAYS_EXCLUDED_RESOURCES),
     )
 
