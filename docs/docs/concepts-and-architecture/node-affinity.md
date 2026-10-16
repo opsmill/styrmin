@@ -23,9 +23,10 @@ environment. Styrmin adds it to the pods after the chart renders.
 - **On an environment**, for every deployment in it, with the
   `updateEnvironment` GraphQL mutation. The environment page shows the
   value but cannot change it.
-- **Not on a cluster.** Styrmin ignores a cluster's `scheduling` value,
+- **Not on a cluster.** A cluster config refuses the `scheduling` key,
   so there is no cluster-wide node affinity. See
-  [#482](https://github.com/opsmill/styrmin/issues/482).
+  [The file holds the whole config](../reference/styrminctl.md#the-file-holds-the-whole-config)
+  and [#482](https://github.com/opsmill/styrmin/issues/482).
 
 `updateDeployment`, `styrminctl deployments update` and
 `updateEnvironment` replace the whole config: a value that the request
