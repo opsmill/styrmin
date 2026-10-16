@@ -22,7 +22,7 @@ Not decided: whether `Stalled` and the operator's readiness timeout keep unit-te
 - Helm hooks of a driver's chart, the resources annotated `helm.sh/hook`, receive Styrmin's post-render patches:
   - Styrmin's labels reach every hook, also a hook without `metadata.labels`.
   - The deployment's scheduling settings reach hook `Job`, `CronJob`, `Deployment`, `StatefulSet`, `DaemonSet` and `ReplicaSet` resources whose own `metadata.labels` carry a component's first identifier label, or every hook of these kinds when the driver declares no components.
-  - Env var, image and container overrides, and the component-container guard, reach a hook only when it is a `Deployment` or `StatefulSet` that matches a component.
+  - Env var, image and container overrides, the component-container guard and the component's replica count reach a hook only when it is a `Deployment` or `StatefulSet` that matches a component.
 - A chart `Deployment` with `progressDeadlineSeconds` below 270 seconds makes FluxCD fail a change and roll the release back before Styrmin reads why the pods are not ready, so the failed step shows FluxCD's `ProgressDeadlineExceeded` failure instead of the pods' reason.
 - On a deployment installed with server-side apply, a field that the chart sets and that a driver action changes directly returns to the chart's value at the next upgrade.
 
@@ -61,6 +61,8 @@ Run 4 is the second UI session: the first failed `test_edit_cluster_config_from_
 
 The full E2E suite, both variants as marked, runs in CI on this pull request. The backup and clone shards (`shard_backup`, `shard_env_backup`) were not run locally; their CI run shows whether restored Helm v4 release Secrets still work.
 
+After the rebase onto `develop` at `32144e67`, `uv run invoke test` passed (`4787 passed, 3 skipped`), the integration suite passed (`56 passed`), E2E collection found 199 tests, the docs site built, and the API sessions of `shard_compute` (`7 passed, 1 skipped`) and `shard_task_steps` (`5 passed`) passed again (runs 5 and 6 in e2e-evidence.md).
+
 ## The api cell of shard_configuration was run locally
 
 CI excludes the `api` cell of `shard_configuration`, so its `api_only` tests, among them the component-container guard test `test_misnamed_container_never_added`, run only locally. Run 2 in e2e-evidence.md is that cell: all 8 API tests passed with the agent chart without the gate, and the guard failed the deployment with `COMPONENT_CONTAINER_NOT_FOUND` as before.
@@ -69,7 +71,7 @@ CI excludes the `api` cell of `shard_configuration`, so its `api_only` tests, am
 
 The agent upgrade check used the same server and agent image (`helmv4-f752856a`) before and after the chart upgrade, so it covers the chart change only. In that check, helm-controller found both existing releases in sync, created no new release revision, and restarted no pod. The next change to the deployment created release v2, which kept client-side apply.
 
-A real upgrade from an earlier release also replaces the agent image. That image changes the label patch, and so `spec.postRenderers`, in each HelmRelease that the operator writes, and a post-renderers change makes helm-controller upgrade the release. The message of commit `8a5d3b61`, which changes the label patch, states that the HelmRelease of an existing deployment changes only when the operator renders it again: for a new rollout, or when it resumes a deployment that is not `Ready`. This was not checked. So it is not known whether an agent restart on the new image upgrades the releases of existing deployments right away, which would restart their pods. Such an upgrade would keep client-side apply.
+A real upgrade from an earlier release also replaces the agent image. That image changes the label patch, and so `spec.postRenderers`, in each HelmRelease that the operator writes, and a post-renderers change makes helm-controller upgrade the release. The message of commit `bf9ee45e` (`8a5d3b61` before the rebase), which changes the label patch, states that the HelmRelease of an existing deployment changes only when the operator renders it again: for a new rollout, or when it resumes a deployment that is not `Ready`. This was not checked. So it is not known whether an agent restart on the new image upgrades the releases of existing deployments right away, which would restart their pods. Such an upgrade would keep client-side apply.
 
 ## Question for the maintainer: E2E coverage of Stalled and the readiness timeout
 

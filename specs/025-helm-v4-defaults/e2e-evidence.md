@@ -288,3 +288,37 @@ Each section of [quickstart.md](quickstart.md), checked on 2026-10-16 against th
 - §3 Same task results for failures: met for both named tests, by run 1 (`test_helmrelease_failure_shows_fluxcd_reason`) and run 2 (`test_misnamed_container_never_added`). Not checked locally: the backup and clone shards (`shard_backup`, `shard_env_backup`), which the quickstart leaves to the full suite in CI on the pull request.
 - §4 Agent upgrade leaves existing deployments unchanged: met, see agent-upgrade-check.md. It differs from the quickstart in two ways that the file records: the check forced one reconcile and waited 90 seconds instead of two HelmRelease intervals (the quickstart allows the forced reconcile), and the server and agent image was the same before and after the chart upgrade.
 - §5 Documentation: met. Each page of FR-006 to FR-011 states the new behaviour (`operator-and-crds.md`, `creating-a-driver.md`, `dev/knowledge/agent/operator.md`, `CONTEXT.md`, ADR-072, `changelog/435.changed.md`), `uv run invoke format lint` passes, and the docs site builds in `node:22-slim` (`[SUCCESS] Generated static files in "build".`, 2026-10-16T11:31:02Z).
+
+## Runs after the rebase onto develop
+
+The branch was rebased onto `origin/develop` at `32144e67` (67 commits, among them per-component replica overrides #202 and the ingress class post-render patch #471), and the two API sessions that cover the change were run again. Code tested: commit `2523e197`. Server image: `STYRMIN_IMAGE_VER=helmv4-rebased-2523e197`, built with `docker compose build server`. The kubeconfig paths of these sessions were not recorded.
+
+Each session ran with its own `sleep infinity` as standard input:
+
+```bash
+exec 3< <(sleep infinity); spid=$!
+uv run pytest backend/tests/e2e -m "ci and shard_<name>" -k api-chromium -v -s --pdb <&3
+exec 3<&-; kill "$spid"
+```
+
+### Run 5: shard_compute, API variant, after the rebase
+
+- Start 2026-10-16T12:22:35Z, end 2026-10-16T12:32:51Z.
+- vcluster `pytest-d368a414-5903-4bdc-8647-c764d3bf32f2`.
+- Passed: `test_cluster_update.py::test_cluster_update_redeploys_and_moves_dedicated_ingress`, the four `test_ingress_controller.py` tests, `test_pod_scheduling.py::test_scheduling_end_to_end[api-chromium]` and `test_pod_scheduling.py::test_pod_anti_affinity_cross_deployment_via_graphql[api-chromium]`. Skipped: `test_cluster_update.py::test_edit_cluster_config_from_detail_page[api-chromium]` (`ui_only`).
+
+```text
+backend/tests/e2e/test_pod_scheduling.py::test_scheduling_end_to_end[api-chromium] PASSED
+===== 7 passed, 1 skipped, 191 deselected, 1 warning in 613.63s (0:10:13) ======
+```
+
+### Run 6: shard_task_steps, API variant, after the rebase
+
+- Start 2026-10-16T12:32:51Z, end 2026-10-16T12:42:45Z.
+- vcluster `pytest-32f4c715-ce12-4158-8fa1-70ab22d36646`.
+- Passed: `test_hook_action_error_shows_failed_step`, `test_command_output_on_failed_step`, `test_prerequisite_failure_shows_attempts`, `test_update_recreates_a_missing_namespace` and `test_helmrelease_failure_shows_fluxcd_reason`, all `[api-chromium]`.
+
+```text
+backend/tests/e2e/test_task_steps.py::test_helmrelease_failure_shows_fluxcd_reason[api-chromium] PASSED
+=========== 5 passed, 194 deselected, 1 warning in 591.57s (0:09:51) ===========
+```
