@@ -13,6 +13,7 @@ from unittest.mock import patch
 from uuid import UUID, uuid4
 
 import pytest
+from loguru import logger
 
 from styrmin_backend.db.models import ApplicationDriver, ApplicationDriverVersion
 from styrmin_backend.domain.models import Deployment
@@ -43,6 +44,9 @@ CHECKED_AGAINST = "driver generic version 2 (application version 1.0.0)"
 MIGRATION_GUIDE_URL = (
     "https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters"
 )
+RETIRED_PARAMETERS_GUIDE_URL = (
+    "https://styrmin.pages.dev/docs/drivers/changing-driver-versions"
+)
 
 
 def _integer(name: str, default: int | None) -> DriverParameterDefinition:
@@ -69,6 +73,25 @@ def test_retired_value_equal_to_current_default_is_dropped() -> None:
     assert _drop({"p": 5, "q": 1}) == {"q": 1}
 
 
+def test_dropped_retired_value_is_logged_with_the_deployment() -> None:
+    messages: list[str] = []
+    sink = logger.add(messages.append, level="INFO", format="{message}")
+    try:
+        drop_retired_parameters(
+            {"p": 5},
+            current_definitions=CURRENT,
+            target_definitions=TARGET,
+            checked_against=CHECKED_AGAINST,
+            deployment_id="dep-1",
+        )
+    finally:
+        logger.remove(sink)
+
+    assert any(
+        "Deployment dep-1: dropping retired parameter p" in m for m in messages
+    ), messages
+
+
 def test_changed_retired_value_is_rejected_with_metadata() -> None:
     with pytest.raises(RetiredParameterValueError) as excinfo:
         _drop({"p": 7, "q": 1})
@@ -87,6 +110,7 @@ def test_changed_retired_value_is_rejected_with_metadata() -> None:
     assert "7" in message and "5" in message
     assert "replica override" in message
     assert MIGRATION_GUIDE_URL in message
+    assert RETIRED_PARAMETERS_GUIDE_URL in message
 
 
 @pytest.mark.parametrize(
@@ -120,8 +144,9 @@ def test_key_declared_by_neither_version_is_left_for_validate_parameter_values()
     kept = _drop({"p": 5, "typo": 3})
 
     assert kept == {"typo": 3}
-    with pytest.raises(ServiceError, match="Unknown parameter: 'typo'"):
+    with pytest.raises(ServiceError, match="Unknown parameter: 'typo'") as excinfo:
         validate_parameter_values(TARGET, kept)
+    assert RETIRED_PARAMETERS_GUIDE_URL in str(excinfo.value)
 
 
 def test_absent_retired_key_is_not_an_error() -> None:

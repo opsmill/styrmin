@@ -24,6 +24,7 @@ def drop_retired_parameters(
     current_definitions: list[DriverParameterDefinition],
     target_definitions: list[DriverParameterDefinition],
     checked_against: str,
+    deployment_id: Any = None,
 ) -> dict:
     """Return ``values`` without the retired parameters that hold their current default.
 
@@ -35,6 +36,7 @@ def drop_retired_parameters(
         current_definitions: The parameters of the driver version the deployment is bound to.
         target_definitions: The parameters of the target driver version.
         checked_against: The target driver version label, for the error.
+        deployment_id: The deployment that changes driver version, for the log.
 
     Raises:
         RetiredParameterValueError: A retired parameter holds a value that is not its current
@@ -56,7 +58,9 @@ def drop_retired_parameters(
                 checked_against=checked_against,
             )
         logger.info(
-            "Dropping retired parameter {} at its default {!r}: {} does not declare it",
+            "Deployment {}: dropping retired parameter {} at its default {!r}: {} does not "
+            "declare it",
+            deployment_id,
             name,
             default,
             checked_against,

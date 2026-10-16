@@ -27,6 +27,9 @@ from ._queries import load_query
 from .conftest import gql
 from .seeds import seed_deployment
 
+RETIRED_PARAMETERS_GUIDE_URL = (
+    "https://styrmin.pages.dev/docs/drivers/changing-driver-versions"
+)
 MIGRATION_GUIDE_URL = (
     "https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters"
 )
@@ -286,6 +289,8 @@ async def test_parameter_declared_by_neither_version_is_still_unknown(
     error = payload["errors"][0]
     assert (error.get("extensions") or {}).get("code") == "OPERATION_FAILED", error
     assert "Unknown parameter: 'typo'" in error["message"]
+    # The hint links the page on driver version changes, in case a newer version retired it.
+    assert RETIRED_PARAMETERS_GUIDE_URL in error["message"]
     await _assert_rejected_without_task(
         session, prefect_manager_mock, deployment_id, snapshot_before
     )

@@ -46,6 +46,9 @@ class DuplicateParameterNameError(ServiceError):
 MIGRATION_GUIDE_URL = (
     "https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters"
 )
+RETIRED_PARAMETERS_GUIDE_URL = (
+    "https://styrmin.pages.dev/docs/drivers/changing-driver-versions"
+)
 
 
 class RetiredParameterValueError(ServiceError):
@@ -81,8 +84,9 @@ class RetiredParameterValueError(ServiceError):
                 f"it to {json.dumps(value, default=str)} "
                 f"(default {json.dumps(default, default=str)}). Remove the "
                 "parameter or reset it to its default, then change the driver version again. "
-                "If it set a replica count, carry the value over as a replica override on the "
-                f"component first. See {MIGRATION_GUIDE_URL}"
+                f"See {RETIRED_PARAMETERS_GUIDE_URL}. If it set a replica count, carry the "
+                "value over as a replica override on the component first: "
+                f"{MIGRATION_GUIDE_URL}"
             )
         )
 
