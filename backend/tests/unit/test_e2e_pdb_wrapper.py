@@ -5,14 +5,16 @@ run that is paused in pdb. A stand-in ``uv`` on PATH runs real pytest and pdb on
 a probe test whose session fixture records its teardown, which is where the E2E
 fixtures delete the vcluster. The tests check the exit status, that teardown runs
 after ``kill <pid>`` and after a SIGKILL to the wrapper, that no FIFO directory or
-process from the run is left behind, that each run writes its own log, and that
-an unwritable log stops the wrapper before pytest starts.
+process from the run is left behind, that each run writes its own log, that
+an unwritable log or a missing test path stops the wrapper before pytest starts,
+and that at a terminal pdb takes typed commands and Ctrl-C does not end the run.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import select
 import shlex
 import shutil
 import signal
@@ -58,6 +60,12 @@ shift 2
 exec {python} -m pytest "$@"
 """
 
+# Makes the pty the controlling terminal of a new session, as a terminal emulator does.
+LOGIN_TTY = (
+    "import os, sys; os.login_tty(int(sys.argv[1])); "
+    "os.execv(sys.argv[2], sys.argv[2:])"
+)
+
 Start = Callable[..., subprocess.Popen[bytes]]
 
 
@@ -100,7 +108,10 @@ def start(tmp_path: Path) -> Iterator[Start]:
     started: list[subprocess.Popen[bytes]] = []
 
     def _start(
-        *args: str, mode: str = "fail", log: Path | None = tmp_path / "pdb.log"
+        *args: str,
+        mode: str = "fail",
+        log: Path | None = tmp_path / "pdb.log",
+        tty: int | None = None,
     ) -> subprocess.Popen[bytes]:
         env = {
             **os.environ,
@@ -114,15 +125,19 @@ def start(tmp_path: Path) -> Iterator[Start]:
         env.pop("PYTEST_ADDOPTS", None)
         if log is None:
             env.pop("E2E_PDB_LOG")
+        argv = [str(SCRIPT), *args]
+        if tty is not None:
+            argv = [sys.executable, "-c", LOGIN_TTY, str(tty), *argv]
         with (tmp_path / "stderr").open("wb") as stderr:
             proc = subprocess.Popen(  # noqa: S603
-                [str(SCRIPT), *args],
+                argv,
                 cwd=tmp_path,
                 env=env,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=stderr,
                 start_new_session=True,
+                pass_fds=() if tty is None else (tty,),
             )
         started.append(proc)
         return proc
@@ -178,11 +193,26 @@ def test_sigkill_to_wrapper_still_runs_teardown(start: Start, tmp_path: Path) ->
     _assert_run_cleaned_up(proc, tmp_path)
 
 
-def test_no_arguments_prints_usage(start: Start, tmp_path: Path) -> None:
-    proc = start()
+@pytest.mark.parametrize(
+    "args", [(), ("--tb=long", "-k", "test_probe")], ids=["none", "options-only"]
+)
+def test_no_test_path_prints_usage(
+    start: Start, tmp_path: Path, args: tuple[str, ...]
+) -> None:
+    proc = start(*args, mode="pass")
     assert proc.wait(timeout=TIMEOUT) == 2
-    assert "usage: e2e-pdb.sh <pytest-node-id>" in _read(tmp_path / "stderr")
+    assert "usage: e2e-pdb.sh <test path or node id>" in _read(tmp_path / "stderr")
+    assert not (tmp_path / "pdb.log").exists()
+    assert not (tmp_path / "mark").exists()
     assert not list((tmp_path / "tmp").glob("e2e-pdb.*"))
+
+
+def test_options_before_the_test_path(start: Start, tmp_path: Path) -> None:
+    proc = start(
+        "-k", "probe or other", "--tb=long", "test_probe.py::test_probe", mode="pass"
+    )
+    assert proc.wait(timeout=TIMEOUT) == 0
+    assert "1 passed" in _read(tmp_path / "pdb.log")
 
 
 def test_unwritable_log_stops_before_pytest(start: Start, tmp_path: Path) -> None:
@@ -211,3 +241,32 @@ def test_each_run_writes_its_own_log(start: Start, tmp_path: Path) -> None:
         assert last_line == f"e2e-pdb: exit=0 log={log}"
         logs.append(log)
     assert logs[0] != logs[1]
+
+
+def test_terminal_takes_pdb_commands_and_ctrl_c(start: Start, tmp_path: Path) -> None:
+    master, slave = os.openpty()
+    proc = start("test_probe.py", tty=slave)
+    os.close(slave)
+    out = b""
+
+    def read_until(text: bytes) -> None:
+        nonlocal out
+        deadline = time.monotonic() + TIMEOUT
+        while text not in out and time.monotonic() < deadline:
+            if select.select([master], [], [], 0.1)[0]:
+                try:
+                    out += os.read(master, 4096)
+                except OSError:  # EIO once no process has the terminal open
+                    break
+        assert text in out
+
+    read_until(b"(Pdb) ")
+    os.write(master, b"\x03")
+    read_until(b"--KeyboardInterrupt--")
+    os.write(master, b"c\n")
+    read_until(b"e2e-pdb: exit=1 ")
+    assert proc.wait(timeout=TIMEOUT) == 1
+    os.close(master)
+    assert b"(stop with: Ctrl-C, then q at the pdb prompt)" in out
+    assert "1 failed" in _read(tmp_path / "pdb.log").split("--KeyboardInterrupt--")[1]
+    _assert_run_cleaned_up(proc, tmp_path)
