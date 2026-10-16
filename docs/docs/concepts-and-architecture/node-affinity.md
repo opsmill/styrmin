@@ -34,7 +34,9 @@ value.
 
 ### How terms match nodes
 
-- A pod goes only to a node that matches at least one `required` term.
+- The `required` terms set on one environment or one deployment are
+  alternatives: a pod goes only to a node that matches at least one of
+  them.
 - A `preferred` term has a `weight` from 1 to 100. The scheduler places
   the pod on a matching node when it can, and on another node when it
   cannot.
@@ -46,9 +48,52 @@ value.
     put both in the same term, not in two terms.
 - The API requires a `topologyKey` on every term, but node affinity
   ignores it. Set it to an empty string.
-- The terms set on the environment and on the deployment are added
-  together. To drop the environment's terms for one deployment, set
+
+### When the environment and the deployment both set terms
+
+- When both set `required` terms, a pod goes only to a node that matches
+  one of the environment's terms and one of the deployment's terms.
+  Styrmin puts each environment term together with each deployment term
+  into one term on the pod.
+- The `preferred` terms of the environment and the deployment are added
+  together.
+- To drop the environment's terms for one deployment, set
   `replace: true` in the deployment's `nodeAffinity` block.
+
+For example, the environment requires `pool=apps`, and the deployment
+requires `zone=a` or `zone=b`:
+
+```json
+{ "scheduling": { "nodeAffinity": { "required": [
+  { "topologyKey": "", "labelSelector": { "matchLabels": { "pool": "apps" } } }
+] } } }
+```
+
+```json
+{ "scheduling": { "nodeAffinity": { "required": [
+  { "topologyKey": "", "labelSelector": { "matchLabels": { "zone": "a" } } },
+  { "topologyKey": "", "labelSelector": { "matchLabels": { "zone": "b" } } }
+] } } }
+```
+
+Styrmin adds two terms to the pods, so a node must have `pool=apps` and
+one of the two zones:
+
+```yaml
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: pool, operator: In, values: [apps]}
+            - {key: zone, operator: In, values: [a]}
+        - matchExpressions:
+            - {key: pool, operator: In, values: [apps]}
+            - {key: zone, operator: In, values: [b]}
+```
+
+The `resolvedScheduling` field of a deployment in the GraphQL API shows
+these combined terms.
 
 ### Replacing a node selector
 
