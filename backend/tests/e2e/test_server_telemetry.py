@@ -34,6 +34,7 @@ _SERVER_POD_SELECTOR = (
     "app.kubernetes.io/component=server,app.kubernetes.io/name=styrmin"
 )
 _FLOW_RUN_TIMEOUT_SECONDS = 180.0
+_FLOW_RUN_LOGS_TIMEOUT_SECONDS = 30.0
 
 # FR-006 keys in contract order (contracts/telemetry-report-wire-format.md).
 _REPORT_DATA_KEYS = [
@@ -124,15 +125,32 @@ async def _telemetry_show(kubeconfig_path: str) -> dict[str, Any]:
     return json.loads(output)
 
 
-async def _flow_run_logs(client: PrefectClient, flow_run_id: UUID) -> str:
-    logs = await client.read_logs(
-        log_filter=LogFilter(flow_run_id=LogFilterFlowRunId(any_=[flow_run_id]))
-    )
-    return "\n".join(f"{log.level} {log.message}" for log in logs)
+async def _flow_run_logs(
+    client: PrefectClient, flow_run_id: UUID, expected_line: str
+) -> str:
+    """Return the run's logs once they contain ``expected_line``, or after a timeout.
+
+    The run logger sends lines to the API in batches, so they can arrive after the run
+    reaches a final state.
+    """
+    deadline = time.monotonic() + _FLOW_RUN_LOGS_TIMEOUT_SECONDS
+    while True:
+        logs = await client.read_logs(
+            log_filter=LogFilter(flow_run_id=LogFilterFlowRunId(any_=[flow_run_id]))
+        )
+        text = "\n".join(f"{log.level} {log.message}" for log in logs)
+        if expected_line in text or time.monotonic() > deadline:
+            return text
+        await asyncio.sleep(1)
 
 
-async def _run_telemetry_flow(kubeconfig_path: str) -> tuple[FlowRun, str]:
-    """Start the daily telemetry deployment once; return the final run and its logs."""
+async def _run_telemetry_flow(
+    kubeconfig_path: str, expected_log_line: str
+) -> tuple[FlowRun, str]:
+    """Start the daily telemetry deployment once; return the final run and its logs.
+
+    The logs are read until they contain ``expected_log_line`` or a timeout passes.
+    """
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
     prefect_service = await AsyncService.get(
         "prefect-server", namespace="styrmin", api=kr8s_api
@@ -159,7 +177,7 @@ async def _run_telemetry_flow(kubeconfig_path: str) -> tuple[FlowRun, str]:
                 await asyncio.sleep(2)
                 run = await client.read_flow_run(flow_run.id)
 
-            return run, await _flow_run_logs(client, flow_run.id)
+            return run, await _flow_run_logs(client, flow_run.id, expected_log_line)
 
 
 @pytest.mark.ci
@@ -195,7 +213,9 @@ async def test_server_sends_daily_report(
         f"{reports_after_show[len(reports_before) :]}"
     )
 
-    run, run_logs = await _run_telemetry_flow(kubeconfig_path)
+    # One INFO (20) line says that the run sent the report, and where.
+    sent_line = f"20 Telemetry report sent to {_sink_endpoint()}"
+    run, run_logs = await _run_telemetry_flow(kubeconfig_path, sent_line)
 
     state = run.state_type.value if run.state_type else None
     assert state == "COMPLETED", (
@@ -210,8 +230,7 @@ async def test_server_sends_daily_report(
         f"{new_reports}\nFlow run logs:\n{run_logs}"
     )
     report = new_reports[0]
-    # One INFO (20) line says that the run sent the report, and where.
-    assert f"20 Telemetry report sent to {_sink_endpoint()}" in run_logs, run_logs
+    assert sent_line in run_logs, run_logs
 
     assert list(report) == _ENVELOPE_KEYS
     assert report["kind"] == "styrmin"
