@@ -18,6 +18,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { StatusBadge, getStatusColor } from "@/components/StatusBadge";
 import { ConfigurationTab } from "@/components/deployment/configuration";
+import { UpgradeErrorAlert } from "@/components/deployment/UpgradeErrorAlert";
 import { Tabs, TabPanel } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -111,7 +112,7 @@ export default function DeploymentDetailPage() {
   const updateVersionMutation = useUpdateDeploymentVersionMutation();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [newVersion, setNewVersion] = useState("");
-  const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  const [upgradeError, setUpgradeError] = useState<Error | null>(null);
   // Driver-version pin for the upgrade dialog. The "latest" sentinel keeps
   // the backend's default latest-wins resolution (driverVersionId omitted);
   // a UUID pins the binding to that specific driver version.
@@ -223,7 +224,7 @@ export default function DeploymentDetailPage() {
       setSelectedDriverVersionId("latest");
     } catch (err) {
       console.error("[update-version] mutation failed", err);
-      setUpgradeError(err instanceof Error ? err.message : "Unknown error");
+      setUpgradeError(err instanceof Error ? err : new Error("Unknown error"));
     }
   }
 
@@ -871,9 +872,15 @@ export default function DeploymentDetailPage() {
             </DialogDescription>
           </DialogHeader>
           {upgradeError && (
-            <Alert variant="destructive">
-              <AlertDescription>{upgradeError}</AlertDescription>
-            </Alert>
+            <UpgradeErrorAlert
+              error={upgradeError}
+              componentNames={deployment.components.map((c) => c.name)}
+              onOpenSettings={() => {
+                setUpgradeOpen(false);
+                setUpgradeError(null);
+                setActiveTab("settings");
+              }}
+            />
           )}
           <div className="space-y-2">
             <Label htmlFor="new-version">New Version</Label>

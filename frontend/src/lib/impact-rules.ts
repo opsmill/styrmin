@@ -1,4 +1,33 @@
-import type { ImpactRule } from "./configuration-types";
+import type {
+  DiffEntry,
+  ImpactContext,
+  ImpactRule,
+} from "./configuration-types";
+
+const COMPONENT_OVERRIDE_CONSEQUENCE =
+  "Component override changed; affected component will reconcile";
+
+/** One line per replica change, for example `server: 3 → 1 pod` (023). */
+export function describeReplicaChange(
+  entry: DiffEntry,
+  context: ImpactContext,
+): string {
+  const component = /^components\[(.+)\]\.replicas$/.exec(entry.path)?.[1];
+  if (component === undefined) return entry.path;
+  const fallback = context.replicaDefaults?.get(component) ?? null;
+  // An empty side is no override: the driver default or the chart's count applies.
+  const side = (value: string): number | null =>
+    value !== "" ? Number(value) : fallback;
+  const pods = (n: number) => `${n} ${n === 1 ? "pod" : "pods"}`;
+  const before = side(entry.before);
+  const after = side(entry.after);
+  if (before != null && after != null) {
+    return `${component}: ${before} → ${pods(after)}`;
+  }
+  const label = (n: number | null) =>
+    n != null ? pods(n) : "the chart's count";
+  return `${component}: ${label(before)} → ${label(after)}`;
+}
 
 /**
  * Initial impact rule table. Mirrors
@@ -154,9 +183,29 @@ export const impactRules: ImpactRule[] = [
     severity: "warning",
   },
   {
-    matcher: "components[*]",
-    consequence:
-      "Component override block changed; affected component will reconcile",
+    matcher: "components[*].replicas",
+    consequence: "Component pod count will change",
+    severity: "warning",
+    describe: describeReplicaChange,
+  },
+  {
+    matcher: "components[*].envVars[*]",
+    consequence: COMPONENT_OVERRIDE_CONSEQUENCE,
+    severity: "warning",
+  },
+  {
+    matcher: "components[*].image",
+    consequence: COMPONENT_OVERRIDE_CONSEQUENCE,
+    severity: "warning",
+  },
+  {
+    matcher: "components[*].command",
+    consequence: COMPONENT_OVERRIDE_CONSEQUENCE,
+    severity: "warning",
+  },
+  {
+    matcher: "components[*].args",
+    consequence: COMPONENT_OVERRIDE_CONSEQUENCE,
     severity: "warning",
   },
 ];

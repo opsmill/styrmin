@@ -1,6 +1,7 @@
 import type {
   ConfigurationDiff,
   DiffKind,
+  ImpactContext,
   ImpactEntry,
   ImpactRule,
   ImpactSeverity,
@@ -20,10 +21,13 @@ import type {
  *  4. `topSeverity` is the max across entries (or `"informational"` when
  *     no rule fires).
  *  5. Empty diff → `{entries: [], topSeverity: "informational"}` — never crash.
+ *
+ * A rule with `describe` names its consequence per entry, using `context`.
  */
 export function evaluateImpact(
   diff: ConfigurationDiff,
   rules: ImpactRule[],
+  context: ImpactContext = {},
 ): ImpactSummary {
   // Track each consequence in insertion order, with a Map for O(1) lookup.
   const byConsequence = new Map<
@@ -37,7 +41,10 @@ export function evaluateImpact(
       if (!matchPath(rule.matcher, entry.path, entry.kind, entry.after)) {
         continue;
       }
-      const existing = byConsequence.get(rule.consequence);
+      const consequence = rule.describe
+        ? rule.describe(entry, context)
+        : rule.consequence;
+      const existing = byConsequence.get(consequence);
       if (existing) {
         // Bump severity to the higher of the two (rule may fire twice
         // across DiffEntries with mismatched severities, though in
@@ -49,7 +56,7 @@ export function evaluateImpact(
           existing.triggeringPaths.push(entry.path);
         }
       } else {
-        byConsequence.set(rule.consequence, {
+        byConsequence.set(consequence, {
           severity: rule.severity,
           triggeringPaths: [entry.path],
           order: nextOrder,

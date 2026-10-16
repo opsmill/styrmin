@@ -25,12 +25,15 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import type { SectionId } from "@/lib/configuration-types";
+import type {
+  DriverParameterSchema,
+  SectionId,
+} from "@/lib/configuration-types";
 import {
   imageReferenceMessage,
   validateImageReference,
 } from "@/lib/image-reference";
-import { replicaDefault } from "@/lib/replicas";
+import { replicaDefault, replicaParameterFor } from "@/lib/replicas";
 import { cn } from "@/lib/utils";
 
 import { ChangedFieldFrame } from "../../ChangedFieldFrame";
@@ -184,6 +187,8 @@ interface Props {
   componentReplicas: readonly ComponentReplicasRow[];
   /** The pinned driver version's `componentConfigs`: its declared `replicas`. */
   driverComponentConfigs: readonly DriverComponentConfig[];
+  /** The pinned driver version's parameters, to name one that also sets a count. */
+  driverParameters?: DriverParameterSchema;
 }
 
 interface ComponentOverridesField {
@@ -242,6 +247,7 @@ export function ComponentOverridesSection({
   components,
   componentReplicas,
   driverComponentConfigs,
+  driverParameters = [],
 }: Props) {
   const initialBlocks = (initial.components ?? []) as ComponentConfigInput[];
   const envBlocks = (environment.components ?? []) as ComponentConfigInput[];
@@ -377,6 +383,10 @@ export function ComponentOverridesSection({
                           replicaRow,
                           declaredReplicasByName.get(componentName),
                         )}
+                        parameterLabel={replicaParameterLabel(
+                          componentName,
+                          driverParameters,
+                        )}
                         field={field}
                         rows={rows}
                         initialBlock={initialByName.get(componentName)}
@@ -435,6 +445,8 @@ interface ComponentOverrideBodyProps {
   singleton: boolean;
   /** Count that applies without a replica override; `null` when the chart sets it. */
   driverDefault: number | null;
+  /** Label of a driver parameter that also sets this count. */
+  parameterLabel: string | undefined;
   field: ComponentOverridesField;
   rows: ComponentConfigInput[];
   initialBlock: ComponentConfigInput | undefined;
@@ -447,6 +459,7 @@ function ComponentOverrideBody({
   hasContainer,
   singleton,
   driverDefault,
+  parameterLabel,
   field,
   rows,
   initialBlock,
@@ -467,9 +480,12 @@ function ComponentOverrideBody({
       field={field}
       componentName={componentName}
       blockIndex={existingIndex}
+      block={existingIndex < 0 ? undefined : rows[existingIndex]}
+      hasStoredBlock={initialBlock !== undefined}
       initialReplicas={initialReplicas}
       driverDefault={driverDefault}
       singleton={singleton}
+      parameterLabel={parameterLabel}
     />
   );
 
@@ -978,10 +994,15 @@ interface ComponentReplicasEditorProps {
   componentName: string;
   /** Index of the component's override block; -1 while it has none. */
   blockIndex: number;
+  /** The component's override block in the form; `undefined` while it has none. */
+  block: ComponentConfigInput | undefined;
+  /** A block for this component was stored when the drawer opened. */
+  hasStoredBlock: boolean;
   /** Count stored when the drawer opened; `undefined` when none is stored. */
   initialReplicas: number | undefined;
   driverDefault: number | null;
   singleton: boolean;
+  parameterLabel: string | undefined;
 }
 
 /**
@@ -994,9 +1015,12 @@ function ComponentReplicasEditor({
   field,
   componentName,
   blockIndex,
+  block,
+  hasStoredBlock,
   initialReplicas,
   driverDefault,
   singleton,
+  parameterLabel,
 }: ComponentReplicasEditorProps) {
   // Index -1 resolves to no value, so a missing block reads as no override.
   const path = `components.${blockIndex}.replicas`;
@@ -1009,10 +1033,14 @@ function ComponentReplicasEditor({
   );
 
   const setReplicas = (next: number | null | undefined) => {
-    if (blockIndex >= 0) {
+    if (blockIndex < 0) {
+      if (next != null)
+        field.pushValue({ name: componentName, replicas: next });
+    } else if (next == null && !hasStoredBlock && holdsOnlyReplicas(block)) {
+      // The count created this block: clearing it leaves no override at all.
+      field.removeValue(blockIndex);
+    } else {
       form.setFieldValue(path, next);
-    } else if (next != null) {
-      field.pushValue({ name: componentName, replicas: next });
     }
   };
 
@@ -1037,6 +1065,7 @@ function ComponentReplicasEditor({
           }
           driverDefault={driverDefault}
           singleton={singleton}
+          parameterLabel={parameterLabel}
         />
       </ChangedFieldFrame>
       {singleton && typeof value === "number" && value > 1 && (
@@ -1047,6 +1076,24 @@ function ComponentReplicasEditor({
         />
       )}
     </div>
+  );
+}
+
+function replicaParameterLabel(
+  componentName: string,
+  parameters: DriverParameterSchema,
+): string | undefined {
+  const parameter = replicaParameterFor(componentName, parameters);
+  return parameter ? parameter.label || parameter.name : undefined;
+}
+
+/** The block sets no override other than `replicas`. */
+function holdsOnlyReplicas(block: ComponentConfigInput | undefined): boolean {
+  return (
+    !block?.envVars?.length &&
+    !block?.command?.length &&
+    !block?.args?.length &&
+    !block?.image
   );
 }
 

@@ -206,7 +206,7 @@ export type ComponentConfig = {
   singleton: Scalars['Boolean']['output'];
 };
 
-/** Per-component override block for a deployment: env vars, the container ``command``/``args``, and the component container's ``image``. Future per-component knobs (e.g. replicas) slot into this same input without a schema renumber. */
+/** Per-component override block for a deployment: env vars, the container ``command``/``args``, the component container's ``image``, and the component's ``replicas`` count. */
 export type ComponentConfigInput = {
   /** Container args override for this component. Same shape and rules as ``command``, raising ``INVALID_CONTAINER_ARGS`` or ``COMPONENT_CONTAINER_NOT_DECLARED``. */
   args?: InputMaybe<Array<Scalars['String']['input']>>;
@@ -216,9 +216,9 @@ export type ComponentConfigInput = {
   envVars?: InputMaybe<Array<EnvVarInput>>;
   /** Image reference for this component's component container, scoped to this deployment. A full reference with an explicit tag or digest; every ``{{ app.version }}`` token is replaced with the deployment's application version at render time, and a literal tag pins the image. Under full-replacement semantics ``null``/omitting it CLEARS the override (the chart image applies). Raises ``UNKNOWN_COMPONENT_IMAGE_OVERRIDE``, ``INVALID_IMAGE_REFERENCE``, or ``COMPONENT_CONTAINER_NOT_DECLARED`` (adding or changing it on a component without a component container; removing it is always accepted). */
   image?: InputMaybe<Scalars['String']['input']>;
-  /** The component name as declared by the application-driver version the deployment is bound to after the write: the pinned one on updateDeployment, the target one on updateDeploymentVersion. Must match a known component or the mutation raises ``UNKNOWN_COMPONENT_ENV_VAR``. Overrides on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``). */
+  /** The component name as declared by the application-driver version the deployment is bound to after the write: the pinned one on updateDeployment, the target one on updateDeploymentVersion. Must match a known component: an unknown one raises the error of the override it carries, such as ``UNKNOWN_COMPONENT_ENV_VAR`` or ``UNKNOWN_COMPONENT_REPLICA_OVERRIDE``. Overrides on a component that declares no component container raise ``COMPONENT_CONTAINER_NOT_DECLARED`` (see ``envVars``). */
   name: Scalars['String']['input'];
-  /** Replica count for this component, scoped to this deployment: an integer of 1 or more, applied to `spec.replicas` of every Deployment and StatefulSet that matches the component's label selector. Needs no component container. Under full-replacement semantics `null`/omitting it CLEARS the override, and the component returns to the driver default or to the chart's count. A value below 1 raises `INVALID_REPLICA_COUNT` (stop the component instead); a value above 1 on a singleton component raises `SINGLETON_REPLICA_OVERRIDE`; adding or changing it on a component the driver version does not declare raises `UNKNOWN_COMPONENT_REPLICA_OVERRIDE`. */
+  /** Replica count for this component, scoped to this deployment: an integer of 1 or more, applied to `spec.replicas` of every Deployment and StatefulSet that matches the component's label selector. Needs no component container. Under full-replacement semantics `null`/omitting it CLEARS the override, and the component returns to the driver default or to the chart's count. A value below 1 raises `INVALID_REPLICA_COUNT` (stop the component instead); a value above 1 on a singleton component raises `SINGLETON_REPLICA_OVERRIDE`; adding or changing it on a component the driver version does not declare raises `UNKNOWN_COMPONENT_REPLICA_OVERRIDE`; adding or changing it to a value above the server setting `STYRMIN_MAX_REPLICA_COUNT` raises `REPLICA_COUNT_ABOVE_MAXIMUM`. */
   replicas?: InputMaybe<Scalars['Int']['input']>;
 };
 
@@ -272,7 +272,7 @@ export type ComponentReplicas = {
   component: Scalars['String']['output'];
   /** The count Styrmin applies while the component runs. Null when the source is CHART or the row is orphaned. A stopped component runs 0 pods whatever this is; see Deployment.components[].enabled. */
   count?: Maybe<Scalars['Int']['output']>;
-  /** False only when a stored override is not applied (orphaned component). */
+  /** False when a stored override is not applied: the component is orphaned, or the override is above 1 on a singleton component. */
   isApplicable: Scalars['Boolean']['output'];
   /** The bound driver version no longer declares the component. */
   isOrphaned: Scalars['Boolean']['output'];
@@ -1911,6 +1911,7 @@ export type DeployMutationVariables = Exact<{
   config?: InputMaybe<DeploymentConfigInput>;
   parameters?: InputMaybe<Array<ParameterValueInput> | ParameterValueInput>;
   serviceNameOverrides?: InputMaybe<Array<ServiceNameOverride> | ServiceNameOverride>;
+  driverVersionId?: InputMaybe<Scalars['UUID']['input']>;
 }>;
 
 
@@ -2009,7 +2010,7 @@ export type GetTaskQuery = { __typename?: 'Query', task?: { __typename?: 'Task',
 export type ListApplicationDriversQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type ListApplicationDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, defaultVersion?: string | null, contentHash?: string | null, sourceCommitSha?: string | null, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', name: string, replicas?: number | null, singleton: boolean }> }> }> };
+export type ListApplicationDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, defaultVersion?: string | null, createdOn: any, contentHash?: string | null, sourceCommitSha?: string | null, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', name: string, replicas?: number | null, singleton: boolean }> }> }> };
 
 export type ListBackupStorageLocationsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2652,7 +2653,7 @@ export const useDeleteUserMutation = <
     )};
 
 export const DeployDocument = `
-    mutation Deploy($version: String, $driver: String!, $name: String, $environmentId: UUID!, $config: DeploymentConfigInput, $parameters: [ParameterValueInput!], $serviceNameOverrides: [ServiceNameOverride!]) {
+    mutation Deploy($version: String, $driver: String!, $name: String, $environmentId: UUID!, $config: DeploymentConfigInput, $parameters: [ParameterValueInput!], $serviceNameOverrides: [ServiceNameOverride!], $driverVersionId: UUID) {
   deploy(
     version: $version
     driver: $driver
@@ -2661,6 +2662,7 @@ export const DeployDocument = `
     config: $config
     parameters: $parameters
     serviceNameOverrides: $serviceNameOverrides
+    driverVersionId: $driverVersionId
   ) {
     id
     type
@@ -3347,6 +3349,7 @@ export const ListApplicationDriversDocument = `
       version
       supportedVersions
       defaultVersion
+      createdOn
       contentHash
       sourceCommitSha
       parameters {

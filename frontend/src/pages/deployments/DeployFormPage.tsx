@@ -27,8 +27,11 @@ import { useState, useMemo, useEffect } from "react";
 import { IfRole } from "@/auth/IfRole";
 import { ParameterField } from "@/components/deployment/configuration/ParameterField";
 import { ReplicasField } from "@/components/deployment/configuration/ReplicasField";
-import { formatDriverVersionLabel } from "@/lib/driverVersion";
-import { replicaFieldError } from "@/lib/replicas";
+import {
+  compareVersionsLatestFirst,
+  formatDriverVersionLabel,
+} from "@/lib/driverVersion";
+import { replicaFieldError, replicaParameterFor } from "@/lib/replicas";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const deployFormSchema = z.object({
@@ -83,13 +86,12 @@ export default function DeployFormPage() {
       const replicaComponents = Object.entries(componentReplicas).map(
         ([name, replicas]) => ({ name, replicas }),
       );
-      const invalidReplicas = replicaComponents
-        .filter((c) => replicaFieldError(c.replicas))
-        .map((c) => c.name);
-      if (invalidReplicas.length > 0) {
-        setSubmitError(
-          `Fix the replica count of ${invalidReplicas.join(", ")} before deploying.`,
-        );
+      // Deploy is disabled while a count is invalid; Enter in a field still submits.
+      const firstInvalid = replicaComponents.find((c) =>
+        replicaFieldError(c.replicas),
+      );
+      if (firstInvalid) {
+        document.getElementById(`comp-${firstInvalid.name}-replicas`)?.focus();
         return;
       }
       try {
@@ -101,6 +103,8 @@ export default function DeployFormPage() {
           .filter((o) => o.driverServiceName && o.overrideName);
         const data = await deployMutation.mutateAsync({
           driver: selectedVersion!.driverName,
+          // Pin the version the form shows, so its fields match the checks.
+          driverVersionId: selectedVersion!.id,
           name: value.name,
           version: value.applicationVersion || null,
           environmentId,
@@ -140,8 +144,12 @@ export default function DeployFormPage() {
 
   const allVersions = useMemo(() => {
     if (!driversData) return [];
+    // Newest first, so the first option of a driver is the version a deploy
+    // without a choice would bind to.
     return driversData.applicationDrivers.flatMap((driver) =>
-      driver.versions.map((v) => ({ ...v, driverName: driver.name })),
+      [...driver.versions]
+        .sort(compareVersionsLatestFirst)
+        .map((v) => ({ ...v, driverName: driver.name })),
     );
   }, [driversData]);
 
@@ -165,6 +173,10 @@ export default function DeployFormPage() {
   const [componentReplicas, setComponentReplicas] = useState<
     Record<string, number>
   >({});
+
+  const invalidReplicaComponents = Object.entries(componentReplicas)
+    .filter(([, replicas]) => replicaFieldError(replicas))
+    .map(([name]) => name);
 
   const [serviceOverrides, setServiceOverrides] = useState<
     Array<{ driverServiceName: string; overrideName: string }>
@@ -386,12 +398,19 @@ export default function DeployFormPage() {
               Component replicas
             </Label>
             <p className="text-xs text-muted-foreground">
-              Optional. Set how many pods a component runs.
+              Optional. Set how many pods each component runs.
             </p>
             {selectedVersion.componentConfigs.map((component) => (
               <ReplicasField
                 key={component.name}
                 componentName={component.name}
+                label={component.name}
+                parameterLabel={
+                  replicaParameterFor(
+                    component.name,
+                    selectedVersion.parameters,
+                  )?.label ?? undefined
+                }
                 value={componentReplicas[component.name]}
                 onChange={(next) =>
                   setComponentReplicas((prev) => {
@@ -495,9 +514,28 @@ export default function DeployFormPage() {
           </Button>
         </div>
 
+        {invalidReplicaComponents.length > 0 && (
+          <p
+            id="deploy-blocked-reason"
+            data-testid="deploy-blocked-reason"
+            className="text-sm text-destructive"
+          >
+            Fix the replica count of {invalidReplicaComponents.join(", ")}{" "}
+            before deploying.
+          </p>
+        )}
+
         <div className="flex gap-2">
           <IfRole minimum="READ_WRITE">
-            <Button type="submit" disabled={isSubmitting}>
+            <Button
+              type="submit"
+              disabled={isSubmitting || invalidReplicaComponents.length > 0}
+              aria-describedby={
+                invalidReplicaComponents.length > 0
+                  ? "deploy-blocked-reason"
+                  : undefined
+              }
+            >
               {isSubmitting ? "Deploying..." : "Deploy"}
             </Button>
           </IfRole>

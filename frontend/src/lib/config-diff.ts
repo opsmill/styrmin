@@ -549,66 +549,48 @@ function diffComponents(
   const afterMap = new Map((after ?? []).map((c) => [c.name, c] as const));
   const names = new Set([...beforeMap.keys(), ...afterMap.keys()]);
   for (const name of names) {
-    const b = beforeMap.get(name);
-    const a = afterMap.get(name);
-    if (b && a) {
-      // Compare per-field env-var lists; each diff entry remains attributed
-      // to the `componentOverrides` section per data-model.md.
-      diffEnvVars(
-        entries,
-        "componentOverrides",
-        `components[${name}].envVars`,
-        `Component "${name}" env var`,
-        b.envVars ?? null,
-        a.envVars ?? null,
-      );
-      // Image override (018); the drawer's empty field means "no override".
+    // A missing block holds no override, so an added or removed block is
+    // diffed field by field: each change gets its own entry and impact line.
+    const b: Partial<ComponentConfigInput> = beforeMap.get(name) ?? {};
+    const a: Partial<ComponentConfigInput> = afterMap.get(name) ?? {};
+    // Each diff entry remains attributed to the `componentOverrides` section
+    // per data-model.md.
+    diffEnvVars(
+      entries,
+      "componentOverrides",
+      `components[${name}].envVars`,
+      `Component "${name}" env var`,
+      b.envVars ?? null,
+      a.envVars ?? null,
+    );
+    // Image override (018); the drawer's empty field means "no override".
+    diffScalar(
+      entries,
+      "componentOverrides",
+      `components[${name}].image`,
+      `Component "${name}" image`,
+      b.image || null,
+      a.image || null,
+    );
+    // Replica override (023); null and undefined both mean "no override".
+    diffScalar(
+      entries,
+      "componentOverrides",
+      `components[${name}].replicas`,
+      `Component "${name}" replicas`,
+      b.replicas ?? null,
+      a.replicas ?? null,
+    );
+    // Command and args (014); an empty list means "no override".
+    for (const field of ["command", "args"] as const) {
       diffScalar(
         entries,
         "componentOverrides",
-        `components[${name}].image`,
-        `Component "${name}" image`,
-        b.image || null,
-        a.image || null,
+        `components[${name}].${field}`,
+        `Component "${name}" ${field}`,
+        b[field]?.length ? b[field] : null,
+        a[field]?.length ? a[field] : null,
       );
-      // Replica override (023); null and undefined both mean "no override".
-      diffScalar(
-        entries,
-        "componentOverrides",
-        `components[${name}].replicas`,
-        `Component "${name}" replicas`,
-        b.replicas ?? null,
-        a.replicas ?? null,
-      );
-      // Command and args (014); an empty list means "no override".
-      for (const field of ["command", "args"] as const) {
-        diffScalar(
-          entries,
-          "componentOverrides",
-          `components[${name}].${field}`,
-          `Component "${name}" ${field}`,
-          b[field]?.length ? b[field] : null,
-          a[field]?.length ? a[field] : null,
-        );
-      }
-    } else if (!b && a) {
-      entries.push({
-        section: "componentOverrides",
-        path: `components[${name}]`,
-        label: `Component "${name}" overrides`,
-        before: "",
-        after: stringifyValue(a),
-        kind: "add",
-      });
-    } else if (b && !a) {
-      entries.push({
-        section: "componentOverrides",
-        path: `components[${name}]`,
-        label: `Component "${name}" overrides`,
-        before: stringifyValue(b),
-        after: "",
-        kind: "remove",
-      });
     }
   }
 }

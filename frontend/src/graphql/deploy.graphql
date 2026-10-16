@@ -6,6 +6,7 @@ mutation Deploy(
   $config: DeploymentConfigInput
   $parameters: [ParameterValueInput!]
   $serviceNameOverrides: [ServiceNameOverride!]
+  $driverVersionId: UUID
 ) {
   deploy(
     version: $version
@@ -15,6 +16,7 @@ mutation Deploy(
     config: $config
     parameters: $parameters
     serviceNameOverrides: $serviceNameOverrides
+    driverVersionId: $driverVersionId
   ) {
     id
     type
