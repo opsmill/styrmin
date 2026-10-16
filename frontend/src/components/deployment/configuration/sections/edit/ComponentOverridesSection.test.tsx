@@ -10,6 +10,7 @@ import type {
 } from "@/generated/graphql";
 
 import { diff } from "@/lib/config-diff";
+import type { DriverParameterSchema } from "@/lib/configuration-types";
 import { componentsFormToInput } from "@/lib/deployment-input";
 
 import { DrawerDiffProvider } from "../../DrawerDiffContext";
@@ -143,10 +144,12 @@ function Harness({
   initial,
   publish,
   replicas,
+  driverParameters,
 }: {
   initial: UpdateDeploymentInput;
   publish: (form: AnyFormApi) => void;
   replicas: ReplicaRow[];
+  driverParameters?: DriverParameterSchema;
 }) {
   const form = useForm({ defaultValues: initial });
   useEffect(() => {
@@ -162,6 +165,7 @@ function Harness({
         components={COMPONENTS}
         componentReplicas={replicas}
         driverComponentConfigs={DRIVER_COMPONENTS}
+        driverParameters={driverParameters}
       />
       <DrawerFooter onDiscard={() => {}} onReviewApply={() => {}} />
     </DrawerDiffProvider>
@@ -171,12 +175,14 @@ function Harness({
 function renderSection(
   initial: UpdateDeploymentInput = {},
   replicas: ReplicaRow[] = REPLICAS,
+  driverParameters?: DriverParameterSchema,
 ) {
   let formApi: AnyFormApi | undefined;
   render(
     <Harness
       initial={initial}
       replicas={replicas}
+      driverParameters={driverParameters}
       publish={(form) => {
         formApi = form;
       }}
@@ -770,7 +776,10 @@ describe("ComponentOverridesSection: orphaned override blocks", () => {
 
     await waitFor(() => expect(components()).toEqual([]));
     expect(diff(initial, values(), []).entries).toEqual([
-      expect.objectContaining({ path: "components[legacy]", kind: "remove" }),
+      expect.objectContaining({
+        path: "components[legacy].image",
+        kind: "remove",
+      }),
     ]);
   });
 });
@@ -827,7 +836,11 @@ describe("ComponentOverridesSection: replicas (023)", () => {
       { name: "migrate", replicas: 3 },
     ]);
     expect(diff(initial, values(), []).entries).toEqual([
-      expect.objectContaining({ path: "components[migrate]", kind: "add" }),
+      expect.objectContaining({
+        path: "components[migrate].replicas",
+        kind: "add",
+        after: "3",
+      }),
     ]);
     expect(screen.getByTestId("comp-replicas-migrate")).toHaveValue(3);
     expect(
@@ -857,6 +870,73 @@ describe("ComponentOverridesSection: replicas (023)", () => {
       ]);
     },
   );
+
+  it("removes the block again when a new count is cleared", async () => {
+    const user = userEvent.setup();
+    const { components, values } = renderSection({});
+
+    await openComponent("server");
+    const input = screen.getByTestId("comp-replicas-server");
+    await user.type(input, "3");
+    expect(components()).toEqual([{ name: "server", replicas: 3 }]);
+
+    await user.clear(input);
+
+    expect(components()).toEqual([]);
+    expect(diff({}, values(), []).entries).toEqual([]);
+    expect(screen.getByTestId("comp-replicas-server")).toBe(input);
+    expect(input).toHaveFocus();
+    expect(
+      screen.getByTestId("component-override-trigger-server"),
+    ).not.toHaveTextContent("override (empty)");
+    expect(screen.getByTestId("drawer-review-apply-button")).toBeDisabled();
+  });
+
+  it("keeps a block that holds other overrides when its new count is cleared", async () => {
+    const user = userEvent.setup();
+    const initial: UpdateDeploymentInput = {};
+    const { components } = renderSection(initial);
+
+    await openComponent("server");
+    const input = screen.getByTestId("comp-replicas-server");
+    await user.type(input, "3");
+    fireEvent.change(screen.getByTestId("comp-image-server"), {
+      target: { value: "registry.example/acme/app:1.0" },
+    });
+    await user.clear(screen.getByTestId("comp-replicas-server"));
+
+    await waitFor(() =>
+      expect(components()).toEqual([
+        expect.objectContaining({
+          name: "server",
+          image: "registry.example/acme/app:1.0",
+          replicas: undefined,
+        }),
+      ]),
+    );
+  });
+
+  it("names a driver parameter that sets the same count", async () => {
+    renderSection({}, REPLICAS, [
+      {
+        name: "replicas_server",
+        label: "Number of server replicas",
+        kind: "integer",
+        default: null,
+        values: null,
+      },
+    ]);
+
+    await openComponent("server");
+    await openComponent("migrate");
+
+    expect(screen.getByTestId("comp-replicas-hint-server")).toHaveTextContent(
+      "The driver parameter “Number of server replicas” also sets this count. When both are set, this override applies.",
+    );
+    expect(screen.getByTestId("comp-replicas-hint-migrate")).toHaveTextContent(
+      /^Leave empty for no override\.$/,
+    );
+  });
 
   it("keeps the Replicas input of an existing block focused while typing", async () => {
     const user = userEvent.setup();

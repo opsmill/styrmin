@@ -173,4 +173,23 @@ describe("graphqlFetcher", () => {
       graphqlMessage: "Already exists",
     });
   });
+
+  it("keeps the error's extensions on GraphQLOperationError", async () => {
+    const extensions = {
+      code: "RETIRED_PARAMETER_VALUE",
+      parameter_name: "replicas_task_worker",
+      value: 4,
+      default: 2,
+    };
+    mockFetchResponse(
+      JSON.stringify({ errors: [{ message: "Retired", extensions }] }),
+      { contentType: "application/json" },
+    );
+    const fetcher = graphqlFetcher<{ ok: boolean }, undefined>(QUERY);
+
+    await expect(fetcher()).rejects.toMatchObject({
+      code: "RETIRED_PARAMETER_VALUE",
+      extensions,
+    });
+  });
 });

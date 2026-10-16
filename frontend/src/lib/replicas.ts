@@ -43,3 +43,15 @@ export function replicaDefault(
   if (row?.source === "DRIVER_DEFAULT") return row.count ?? null;
   return declaredReplicas ?? null;
 }
+
+/**
+ * The integer driver parameter named `replicas_<component>` (dashes as
+ * underscores), the way driver versions before 023 passed a count to the
+ * chart, such as `replicas_task_worker` in infrahub 4.
+ */
+export function replicaParameterFor<
+  P extends { name: string; kind: string; label?: string | null },
+>(component: string, parameters: readonly P[]): P | undefined {
+  const name = `replicas_${component.replace(/-/g, "_")}`;
+  return parameters.find((p) => p.name === name && p.kind === "integer");
+}

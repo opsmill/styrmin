@@ -315,6 +315,7 @@ export function ConfigEditDrawer({
             driverComponentConfigs={
               deployment.applicationDriverVersion.componentConfigs
             }
+            driverParameters={driverSchema}
           />
         );
       case "storageRuntime":

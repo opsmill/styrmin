@@ -17,12 +17,19 @@ export class GraphQLTransportError extends Error {
 export class GraphQLOperationError extends Error {
   readonly code: string;
   readonly graphqlMessage: string;
+  /** The error's `extensions`, such as the metadata of a typed service error. */
+  readonly extensions: Record<string, unknown>;
 
-  constructor(code: string, message: string) {
+  constructor(
+    code: string,
+    message: string,
+    extensions: Record<string, unknown> = {},
+  ) {
     super(message);
     this.name = "GraphQLOperationError";
     this.code = code;
     this.graphqlMessage = message;
+    this.extensions = extensions;
   }
 }
 
@@ -82,7 +89,7 @@ function throwForGraphQLError(error: GraphQLErrorShape): never {
     throw new ForbiddenError(message);
   }
   if (typeof code === "string" && code.length > 0) {
-    throw new GraphQLOperationError(code, message);
+    throw new GraphQLOperationError(code, message, error.extensions);
   }
   throw new GraphQLOperationError("UNKNOWN", message);
 }

@@ -21,6 +21,7 @@ import {
   type SectionId,
 } from "@/lib/configuration-types";
 import { impactRules } from "@/lib/impact-rules";
+import { replicaDefault } from "@/lib/replicas";
 import {
   componentsFormToInput,
   deploymentConfigToInput,
@@ -138,9 +139,26 @@ export function ConfigDiffDialog({
     [initialValues, currentValues, driverSchema],
   );
 
+  const replicaDefaults = useMemo(() => {
+    const declared = new Map(
+      (deployment.applicationDriverVersion?.componentConfigs ?? []).map(
+        (c) => [c.name, c.replicas] as const,
+      ),
+    );
+    return new Map(
+      (deployment.componentReplicas ?? []).map(
+        (row) =>
+          [
+            row.component,
+            replicaDefault(row, declared.get(row.component)),
+          ] as const,
+      ),
+    );
+  }, [deployment]);
+
   const impactSummary = useMemo(
-    () => evaluateImpact(diffResult, impactRules),
-    [diffResult],
+    () => evaluateImpact(diffResult, impactRules, { replicaDefaults }),
+    [diffResult, replicaDefaults],
   );
 
   const grouped = useMemo(

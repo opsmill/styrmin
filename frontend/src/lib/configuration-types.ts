@@ -150,6 +150,17 @@ export interface ImpactRule {
   matcher: string;
   consequence: string;
   severity: ImpactSeverity;
+  /**
+   * Builds the consequence text from the matching entry, so each entry gets
+   * its own line. `consequence` stays the fallback description of the rule.
+   */
+  describe?: (entry: DiffEntry, context: ImpactContext) => string;
+}
+
+/** Deployment facts a rule's `describe` can use. */
+export interface ImpactContext {
+  /** Per component: the replica count without an override; `null` when the chart sets it. */
+  replicaDefaults?: ReadonlyMap<string, number | null>;
 }
 
 /** One de-duplicated consequence entry in the `ImpactSummary`. */

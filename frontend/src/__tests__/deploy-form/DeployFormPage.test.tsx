@@ -151,6 +151,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             version: "1.2.3",
             supportedVersions: "*",
             defaultVersion: null,
+            createdOn: "2026-10-01T00:00:00Z",
             contentHash: "a".repeat(64),
             sourceCommitSha: null,
             parameters: [],
@@ -167,6 +168,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             version: "2.0.0",
             supportedVersions: "*",
             defaultVersion: null,
+            createdOn: "2026-10-01T00:00:00Z",
             contentHash: null,
             sourceCommitSha: "b".repeat(40),
             parameters: [],
@@ -203,6 +205,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             version: "1.2.3",
             supportedVersions: "*",
             defaultVersion: null,
+            createdOn: "2026-10-01T00:00:00Z",
             contentHash: "a".repeat(64),
             sourceCommitSha: null,
             parameters: [],
@@ -243,6 +246,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             version: "1.2.3",
             supportedVersions: "*",
             defaultVersion: null,
+            createdOn: "2026-10-01T00:00:00Z",
             contentHash: "a".repeat(64),
             sourceCommitSha: null,
             parameters: [],
@@ -253,6 +257,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             version: "1.2.3",
             supportedVersions: "*",
             defaultVersion: null,
+            createdOn: "2026-10-01T00:00:00Z",
             contentHash: "c".repeat(64),
             sourceCommitSha: null,
             parameters: [],
@@ -290,6 +295,7 @@ describe("DeployFormPage component replicas (023)", () => {
           version: "4",
           supportedVersions: "*",
           defaultVersion: "1.0.0",
+          createdOn: "2026-10-01T00:00:00Z",
           contentHash: "d".repeat(64),
           sourceCommitSha: null,
           parameters: [],
@@ -313,7 +319,10 @@ describe("DeployFormPage component replicas (023)", () => {
 
   async function selectVersion(user: ReturnType<typeof userEvent.setup>) {
     await user.click(await screen.findByTestId("driver-version-select"));
-    await user.click(await screen.findByText("simple-app v4@ddddddd"));
+    // The select popup can keep `pointer-events: none` while it opens.
+    await userEvent
+      .setup({ pointerEventsCheck: 0 })
+      .click(await screen.findByText("simple-app v4@ddddddd"));
     await screen.findByRole("group", { name: "Component replicas" });
   }
 
@@ -364,7 +373,78 @@ describe("DeployFormPage component replicas (023)", () => {
         driver: "simple-app",
         name: "my-app",
         config: { components: [{ name: "server", replicas: 3 }] },
+        // The selected driver version is pinned, so the server checks the
+        // values against the version whose fields the form shows.
+        driverVersionId: "v-simple-4",
       }),
+    );
+  });
+
+  it("labels each field with its component name", async () => {
+    await renderPage();
+    const user = userEvent.setup();
+    await selectVersion(user);
+
+    const section = screen.getByRole("group", { name: "Component replicas" });
+    for (const name of ["server", "worker", "database"]) {
+      expect(within(section).getByText(name, { selector: "label" })).toBe(
+        section.querySelector(`label[for="comp-${name}-replicas"]`),
+      );
+    }
+  });
+
+  it("disables Deploy and names the component while a count is invalid", async () => {
+    await renderPage();
+    const user = userEvent.setup();
+    await selectVersion(user);
+
+    await user.type(screen.getByTestId("comp-replicas-worker"), "0");
+
+    const deploy = screen.getByRole("button", { name: "Deploy" });
+    expect(deploy).toBeDisabled();
+    expect(screen.getByTestId("deploy-blocked-reason")).toHaveTextContent(
+      "Fix the replica count of worker before deploying.",
+    );
+    expect(deploy).toHaveAttribute("aria-describedby", "deploy-blocked-reason");
+    expect(screen.queryByText("Deployment failed")).toBeNull();
+
+    await user.clear(screen.getByTestId("comp-replicas-worker"));
+    expect(deploy).toBeEnabled();
+    expect(screen.queryByTestId("deploy-blocked-reason")).toBeNull();
+  });
+
+  it("names a driver parameter that sets the same count", async () => {
+    const withParameter: DriversShape = [
+      {
+        ...drivers[0],
+        versions: [
+          {
+            ...drivers[0].versions[0],
+            parameters: [
+              {
+                name: "replicas_server",
+                label: "Number of server replicas",
+                kind: "integer",
+                default: null,
+                values: null,
+              },
+            ],
+          },
+        ],
+      },
+    ] as DriversShape;
+    useListApplicationDriversQueryMock.mockReturnValue(
+      makeQueryResult(withParameter),
+    );
+    await renderPage();
+    const user = userEvent.setup();
+    await selectVersion(user);
+
+    expect(screen.getByTestId("comp-replicas-hint-server")).toHaveTextContent(
+      "The driver parameter “Number of server replicas” also sets this count. When both are set, this override applies.",
+    );
+    expect(screen.getByTestId("comp-replicas-hint-worker")).toHaveTextContent(
+      /^Leave empty for no override\.$/,
     );
   });
 
@@ -426,6 +506,30 @@ describe("DeployFormPage component replicas (023)", () => {
       ),
     ).toBeInTheDocument();
     expect(noopMutationResult.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("lists the versions of a driver newest first", async () => {
+    const versions: DriversShape = [
+      {
+        ...drivers[0],
+        versions: [
+          { ...drivers[0].versions[0], id: "v-simple-9", version: "9" },
+          { ...drivers[0].versions[0], id: "v-simple-10", version: "10" },
+        ],
+      },
+    ] as DriversShape;
+    useListApplicationDriversQueryMock.mockReturnValue(
+      makeQueryResult(versions),
+    );
+    await renderPage();
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("driver-version-select"));
+
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual([
+      "simple-app v10@ddddddd",
+      "simple-app v9@ddddddd",
+    ]);
   });
 
   it("clears the counts when another driver version is selected", async () => {

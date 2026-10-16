@@ -339,9 +339,49 @@ const ruleCases: RuleCase[] = [
     }),
   },
   {
-    matcher: "components[*]",
-    positive: diffEntry("components[web]", { section: "componentOverrides" }),
-    negative: diffEntry("components", { section: "componentOverrides" }),
+    matcher: "components[*].replicas",
+    positive: diffEntry("components[web].replicas", {
+      section: "componentOverrides",
+      before: "3",
+      after: "1",
+    }),
+    negative: diffEntry("components[web].image", {
+      section: "componentOverrides",
+    }),
+  },
+  {
+    matcher: "components[*].envVars[*]",
+    positive: diffEntry("components[web].envVars[FOO]", {
+      section: "componentOverrides",
+    }),
+    negative: diffEntry("components[web].replicas", {
+      section: "componentOverrides",
+    }),
+  },
+  {
+    matcher: "components[*].image",
+    positive: diffEntry("components[web].image", {
+      section: "componentOverrides",
+    }),
+    negative: diffEntry("components[web]", { section: "componentOverrides" }),
+  },
+  {
+    matcher: "components[*].command",
+    positive: diffEntry("components[web].command", {
+      section: "componentOverrides",
+    }),
+    negative: diffEntry("components[web].args", {
+      section: "componentOverrides",
+    }),
+  },
+  {
+    matcher: "components[*].args",
+    positive: diffEntry("components[web].args", {
+      section: "componentOverrides",
+    }),
+    negative: diffEntry("components[web].command", {
+      section: "componentOverrides",
+    }),
   },
 ];
 
@@ -360,7 +400,11 @@ describe("impact-rules.ts: every shipped rule has positive + negative coverage",
       expect(rule).toBeDefined();
       const summary = evaluateImpact(asDiff([ruleCase.positive]), [rule!]);
       expect(summary.entries).toHaveLength(1);
-      expect(summary.entries[0].consequence).toBe(rule!.consequence);
+      expect(summary.entries[0].consequence).toBe(
+        rule!.describe
+          ? rule!.describe(ruleCase.positive, {})
+          : rule!.consequence,
+      );
       expect(summary.entries[0].triggeringPaths).toContain(
         ruleCase.positive.path,
       );
@@ -416,5 +460,64 @@ describe("impact-rules.ts: backup retention TTL (016)", () => {
       impactRules,
     );
     expect(summary.topSeverity).toBe("informational");
+  });
+});
+
+describe("impact-rules.ts: replica changes (023)", () => {
+  const replicas = (before: string, after: string, component = "server") =>
+    diffEntry(`components[${component}].replicas`, {
+      section: "componentOverrides",
+      before,
+      after,
+    });
+  const context = {
+    replicaDefaults: new Map<string, number | null>([
+      ["server", 1],
+      ["worker", null],
+    ]),
+  };
+
+  it.each([
+    ["3", "1", "server: 3 → 1 pod"],
+    ["1", "4", "server: 1 → 4 pods"],
+    ["", "3", "server: 1 → 3 pods"],
+    ["3", "", "server: 3 → 1 pod"],
+  ])("describes %s → %s on server", (before, after, expected) => {
+    const summary = evaluateImpact(
+      asDiff([replicas(before, after)]),
+      impactRules,
+      context,
+    );
+    expect(summary.entries.map((e) => e.consequence)).toEqual([expected]);
+  });
+
+  it("names the chart's count when no driver default applies", () => {
+    const summary = evaluateImpact(
+      asDiff([replicas("", "2", "worker"), replicas("5", "", "web")]),
+      impactRules,
+      context,
+    );
+    expect(summary.entries.map((e) => e.consequence)).toEqual([
+      "worker: the chart's count → 2 pods",
+      "web: 5 pods → the chart's count",
+    ]);
+  });
+
+  it("gives each component its own line from a real diff", () => {
+    const result = diff(
+      { components: [{ name: "server", replicas: 3 }] },
+      {
+        components: [
+          { name: "server", replicas: 1 },
+          { name: "worker", replicas: 2 },
+        ],
+      },
+      [],
+    );
+    const summary = evaluateImpact(result, impactRules, context);
+    expect(summary.entries.map((e) => e.consequence)).toEqual([
+      "server: 3 → 1 pod",
+      "worker: the chart's count → 2 pods",
+    ]);
   });
 });
