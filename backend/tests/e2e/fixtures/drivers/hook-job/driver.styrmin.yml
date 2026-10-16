@@ -1,0 +1,57 @@
+---
+# E2E test driver for #435 (backend/tests/e2e/test_pod_scheduling.py): the
+# simple-app driver without actions, whose values turn on the chart's
+# pre-upgrade Helm hook Job and unlabelled hook ConfigMap. The git-server
+# fixture points `helm.main.location` at the in-cluster chart server.
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: hook-job
+spec:
+  version: "1"
+  supported_versions: ">=0.1,<1.0"
+  info:
+    description: "Test driver: the simple-app chart with its pre-upgrade Helm hooks turned on (#435)"
+    authors: [opsmill]
+    license: Apache-2.0
+  helm:
+    main:
+      location: simple-app
+      version: 0.1.0
+
+  components:
+    server:
+      container: simple-app
+      identifier:
+        label:
+          app.kubernetes.io/name: simple-app
+
+    database:
+      container: postgresql
+      identifier:
+        label:
+          app.kubernetes.io/name: postgresql
+      backup:
+        enabled: true
+        kind: postgres
+        database_name: simple_app
+
+  env_vars:
+    - name: LOG_LEVEL
+      description: >-
+        Application log verbosity. Doc-only — actual value comes from
+        user-set deployment / environment env vars.
+      level: deployment
+    - name: DB_POOL_SIZE
+      description: >-
+        Connection pool size for the PostgreSQL database component.
+      level: component
+      components:
+        - database
+
+  services:
+    - name: simple-app
+      kind: http
+      scope: internal
+      port: 8000
+      component: server

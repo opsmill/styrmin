@@ -10,6 +10,7 @@ RUN git init --bare /git/infrahub.git
 RUN git init --bare /git/infrahub-enterprise.git
 RUN git init --bare /git/failing-actions.git
 RUN git init --bare /git/late-container.git
+RUN git init --bare /git/hook-job.git
 
 EXPOSE 9418
 

@@ -626,6 +626,11 @@ async def git_server(
             "source": FIXTURES_DIR / "drivers" / "late-container",
             "chart_name": "simple-app",
         },
+        # Test driver of test_pod_scheduling.py: simple-app with its pre-upgrade Helm hooks on (#435).
+        "hook-job": {
+            "source": FIXTURES_DIR / "drivers" / "hook-job",
+            "chart_name": "simple-app",
+        },
     }
 
     tmp_repo = tmp_path_factory.mktemp("driver-repo")
