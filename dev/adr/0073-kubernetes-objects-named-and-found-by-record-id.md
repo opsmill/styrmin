@@ -89,10 +89,9 @@ and `AGENTS.md`.
   not stay in the other deployments' namespaces
   ([#491](https://github.com/opsmill/styrmin/issues/491)). Aliases that earlier versions created
   have no such label; the flow finds their owner from the namespace that `spec.externalName`
-  points into, which is built from the deployment's id.
-- Known case that does not follow the decision yet: deleting a deployment leaves its aliases in the
-  other deployments' namespaces, because the operator's teardown acts only in the deployment's own
-  namespace ([#503](https://github.com/opsmill/styrmin/issues/503)).
+  points into, which is built from the deployment's id. When a deployment is deleted, the
+  operator's teardown finds its aliases in all namespaces by the same rule and deletes them
+  ([#503](https://github.com/opsmill/styrmin/issues/503)).
 - The open feature request [#5](https://github.com/opsmill/styrmin/issues/5) asks for namespace
   names built from the environment and deployment names, renamed on each rename. That is option 1
   of this record; implementing it needs a record that supersedes this one.

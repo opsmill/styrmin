@@ -142,6 +142,10 @@ _Avoid_: "single-replica component", "stateful component".
 A network-addressable endpoint declared by the **application driver** under `spec.services` (kind, scope, port, owning component) and materialised as a `DeployedService` row plus a Kubernetes Service object.
 _Avoid_: "endpoint" (HTTP-specific), "port" (one attribute of a service), conflating with Kubernetes-`Service` when ambiguity matters — qualify as "K8s Service" if needed.
 
+**Service alias**:
+An `ExternalName` Kubernetes Service that lets a pod reach a **service** of another **deployment** of the same **environment** by the service's short name. Styrmin creates one alias for each service in the namespace of every other deployment of the environment, named after the service's resolved name and pointing to the service in its owner's namespace. Labelled `styrmin.io/service-alias=true` and `styrmin.io/deployment-id=<owner id>`. The create, update and upgrade flows create aliases and delete those whose name the owner no longer uses ([#491](https://github.com/opsmill/styrmin/issues/491)). The **operator**'s teardown deletes the owner's aliases when the owner is deleted, best-effort ([#503](https://github.com/opsmill/styrmin/issues/503)). A restore's namespace deletion deletes no alias.
+_Avoid_: "DNS alias", "ExternalName service", "cross-namespace service".
+
 **Parameter**:
 A user-configurable input declared by the **application driver** (`name`, `label`, `kind`, `default`). Surfaced through the GraphQL API and **frontend** forms; flows through to **context** as part of the **deployment**'s config. On a **driver version** change, Styrmin drops a stored or submitted value for a parameter that the target version no longer declares when the value equals the parameter's default in the current version, with the same type; otherwise Styrmin rejects the change (`RETIRED_PARAMETER_VALUE`) and names the parameter and its value ([ADR-070](dev/adr/0070-replica-overrides-and-retired-parameters.md)).
 _Avoid_: "field" (UI term), "option", "setting", conflating with **prompt argument** in driver action templates.
