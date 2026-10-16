@@ -90,6 +90,16 @@ describe("StorageRuntimeSection: deployment-scope backup retention", () => {
     expect(section).toHaveAttribute("id", "storageRuntime-anchor");
   });
 
+  it("names the values the Settings tab shows read-only", () => {
+    renderSection();
+    expect(
+      screen.getByText(
+        "Database size and storage class are shown read-only on the Settings tab.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/node selector/i)).not.toBeInTheDocument();
+  });
+
   it("SET: applies a retention to a deployment that had none", async () => {
     const { backupTtl } = renderSection({}, { backupTtl: "720h" });
 
