@@ -46,8 +46,17 @@ import pytest
 from kubernetes_asyncio import client as kubeclient
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
+from styrmin_sdk.exceptions import OperationFailedError
 from styrmin_sdk.graphql._generated.get_deployment_resolved_scheduling import (
     GetDeploymentResolvedScheduling,
+)
+from styrmin_sdk.graphql._generated.input_types import (
+    AffinityBlockInput,
+    AffinityTermInput,
+    LabelSelectorInput,
+    SchedulingInput,
+    UpdateDeploymentInput,
+    UpdateEnvironmentInput,
 )
 
 from tests.e2e.drivers import ScenarioDriver
@@ -170,6 +179,42 @@ async def _update_scheduling_and_wait(
         predicate=predicate,
         description=description,
     )
+
+
+async def _assert_required_node_terms_without_expressions_rejected(
+    client: StyrminClient, *, environment_id: str, deployment_id: str
+) -> None:
+    """#496: saving required node affinity terms without expressions fails, names
+    each term, and stores nothing, on the environment and on the deployment."""
+    scheduling = SchedulingInput(
+        node_affinity=AffinityBlockInput(
+            required=[
+                AffinityTermInput(topology_key="", label_selector=LabelSelectorInput()),
+                AffinityTermInput(
+                    topology_key="",
+                    label_selector=LabelSelectorInput(match_expressions=[]),
+                ),
+            ]
+        )
+    )
+    environment_config = (await client.environments.get(environment_id)).config
+    deployment_config = (await client.deployments.get(deployment_id)).config
+
+    with pytest.raises(OperationFailedError) as environment_error:
+        await client.environments.update(
+            environment_id, UpdateEnvironmentInput(scheduling=scheduling)
+        )
+    with pytest.raises(OperationFailedError) as deployment_error:
+        await client.deployments.update(
+            deployment_id, input=UpdateDeploymentInput(scheduling=scheduling)
+        )
+
+    for error in (environment_error.value, deployment_error.value):
+        assert error.typename == "VALIDATION_ERROR", error
+        assert "scheduling.node_affinity.required.0" in str(error), error
+        assert "scheduling.node_affinity.required.1" in str(error), error
+    assert (await client.environments.get(environment_id)).config == environment_config
+    assert (await client.deployments.get(deployment_id)).config == deployment_config
 
 
 # ---------------------------------------------------------------------------
@@ -383,9 +428,18 @@ async def test_scheduling_end_to_end(
     complete; the hook ConfigMap, which has no labels in the chart, must
     carry Styrmin's labels. The vcluster has one node, so SC-004 of spec 025
     is checked by the hook pod's scheduling fields and its completion.
+
+    Before that, saving required node affinity terms without expressions on the
+    environment and on the deployment must fail and store nothing (#496).
     """
     client: StyrminClient = scheduling_environment["client"]
     deployment_id = scheduling_deployment["deployment_id"]
+
+    await _assert_required_node_terms_without_expressions_rejected(
+        client,
+        environment_id=scheduling_environment["environment_id"],
+        deployment_id=deployment_id,
+    )
 
     # US4: register a RuntimeClass on the vcluster so the scheduler can
     # honour the reference we are about to set. Styrmin no longer
