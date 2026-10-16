@@ -2,7 +2,8 @@
 
 Helm never updates ``crds/``, so ``templates/crd-upgrade.yaml`` runs ``styrmin agent apply-crds``
 on the chart's CRD files before every install and upgrade. The integration fixtures install the
-same FluxCD CRDs and controllers as the chart.
+same FluxCD CRDs and controllers, with the same arguments, as the chart. The chart runs
+helm-controller with Helm v4 defaults, without the ``UseHelm3Defaults`` feature gate (#435).
 """
 
 from __future__ import annotations
@@ -94,15 +95,28 @@ def test_fixture_crds_match_the_chart(path: Path) -> None:
     assert path.read_text() == (CHART_DIR / "crds" / path.name).read_text()
 
 
+def _controller_container(path: Path) -> dict[str, Any]:
+    # The chart's template lines do not change the container block.
+    text = "\n".join(line for line in path.read_text().splitlines() if "{{" not in line)
+    return yaml.safe_load(text)["spec"]["template"]["spec"]["containers"][0]
+
+
 @pytest.mark.parametrize("controller", ["helm-controller", "source-controller"])
 def test_fixture_controllers_run_the_chart_images(controller: str) -> None:
-    def container(path: Path) -> dict[str, Any]:
-        # The chart's template lines do not change the container block.
-        text = "\n".join(
-            line for line in path.read_text().splitlines() if "{{" not in line
-        )
-        return yaml.safe_load(text)["spec"]["template"]["spec"]["containers"][0]
-
-    chart = container(CHART_DIR / "templates" / controller / "deployment.yaml")
-    fixture = container(FIXTURES_DIR / "templates" / controller / "deployment.yaml")
+    chart = _controller_container(
+        CHART_DIR / "templates" / controller / "deployment.yaml"
+    )
+    fixture = _controller_container(
+        FIXTURES_DIR / "templates" / controller / "deployment.yaml"
+    )
     assert (fixture["image"], fixture["args"]) == (chart["image"], chart["args"])
+
+
+def test_helm_controller_runs_with_helm_v4_defaults() -> None:
+    args = _controller_container(
+        CHART_DIR / "templates" / "helm-controller" / "deployment.yaml"
+    )["args"]
+
+    assert args
+    assert not [arg for arg in args if "UseHelm3Defaults" in arg]
+    assert not [arg for arg in args if arg.startswith("--feature-gates")]
