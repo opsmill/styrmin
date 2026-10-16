@@ -816,6 +816,33 @@ See [ADR-057](../../adr/0057-post-render-component-overrides.md),
 [ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md),
 `services/component_container/patch_builder.py` and `services/replicas/patch_builder.py`.
 
+### Remove a field that the chart may not render with a strategic merge `null`
+
+<!-- Extracted from specs/023-ingress-class-post-render on 2026-10-16 -->
+
+To remove a field from a rendered resource in a post-render patch, write a strategic merge patch
+that sets the field to `null`, not a JSON6902 `remove` operation.
+
+- A JSON6902 `remove` fails the whole render when the field is absent. Kustomize v5.7.1 exits with
+  `error in remove for path: '/spec/ingressClassName': Unable to remove nonexistent key:
+  ingressClassName: missing value`. Use `remove` only when the render should fail on an absent
+  field, as the `ComponentContainerPatch` guard does.
+- A strategic merge patch that sets the field to `null` deletes the field when it is present and
+  leaves the resource unchanged when it is absent. Example: `IngressClassNameRemovalPatch` in
+  `agent/service/kubernetes/resources/blocks/patches.py`.
+- With a `target`, Kustomize applies the strategic merge patch to every matching resource and uses
+  each resource's own group and version: a patch written for `networking.k8s.io/v1` also applies
+  to a `networking.k8s.io/v1beta1` Ingress. The patch needs a `metadata.name`, but Kustomize does
+  not match on it when a `target` is set.
+- To set a value whatever the chart rendered, use a JSON6902 `add`. It replaces an existing value
+  (RFC 6902, section 4.1), and Kustomize creates `metadata.annotations` when the resource has none.
+- Leave the patch list of a case that the change does not affect as it is. A change to
+  `spec.postRenderers` makes helm-controller upgrade every release that gets it
+  ([`operator.md`](../../knowledge/agent/operator.md#fluxcd-controllers), "Post-renderers
+  digest").
+
+See [ADR-070](../../adr/0070-ingress-class-set-by-post-render.md) §1.
+
 ### Custom-resource updates: replace the spec keys you write, merge the rest
 
 <!-- Extracted from specs/017-post-render-env-vars on 2026-10-03 -->
@@ -1157,3 +1184,14 @@ def my_task(context: Context) -> None:  # noqa: ARG001
   `status.replicas` shows whether the extra pods are gone. Example:
   `backend/tests/e2e/test_deployment_image_override.py::test_scale_server_and_singleton_guard` with
   `read_workload_replicas` from `backend/tests/e2e/helpers/workloads.py`.
+
+<!-- Extracted from specs/023-ingress-class-post-render on 2026-10-16 -->
+
+- **A change to a post-render patch ships an integration test that applies the patch with
+  `kubectl kustomize` and checks the resulting resources, not the patch objects.** Where the
+  change depends on what a chart renders, render a real chart with `helm template` first. Skip
+  the module with `pytest.mark.skipif` when `helm` or `kubectl` is not on `PATH`. Examples, all
+  under `backend/tests/integration/`:
+  - `test_ingress_class_post_render.py` and `test_container_override_migration_parity.py` run
+    `helm template` and then `kubectl kustomize`;
+  - `test_component_container_kustomize.py` runs `kubectl kustomize` on fixed manifests.
