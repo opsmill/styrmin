@@ -31,6 +31,7 @@ class DeployFormPage:
         name: str,
         parameters: dict[str, Any] | None = None,
         service_name_overrides: list[dict[str, str]] | None = None,
+        component_replicas: dict[str, int] | None = None,
     ) -> None:
         if parameters:
             raise ScenarioActionError(
@@ -51,6 +52,14 @@ class DeployFormPage:
         # Application version input — explicitly set so we do not rely on a
         # driver-provided default.
         await self._page.get_by_label("Application Version").fill(version)
+
+        # One field per component of the selected driver version, labelled with its name.
+        if component_replicas:
+            group = self._page.get_by_role("group", name="Component replicas")
+            for component, replicas in component_replicas.items():
+                await group.get_by_label(f"Replicas for {component}").fill(
+                    str(replicas)
+                )
 
         if service_name_overrides:
             group = self._page.get_by_role("group", name="Service name overrides")

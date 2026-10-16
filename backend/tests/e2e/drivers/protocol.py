@@ -86,6 +86,7 @@ class ScenarioDriver(Protocol):
         name: str | None = None,
         service_name_overrides: list[dict[str, str]] | None = None,
         parameters: dict[str, Any] | None = None,
+        component_replicas: dict[str, int] | None = None,
     ) -> DeploymentRef: ...
 
     def attach_to_deployment(self, *, environment_id: str) -> None:
