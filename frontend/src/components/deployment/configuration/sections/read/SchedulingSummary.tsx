@@ -7,30 +7,22 @@ interface Props {
   deploymentConfig: Record<string, unknown> | null | undefined;
   /** Raw `Environment.config` JSON blob (snake_case). */
   environmentConfig: Record<string, unknown> | null | undefined;
-  /** Raw `Cluster.config` JSON blob (snake_case). */
-  clusterConfig: Record<string, unknown> | null | undefined;
 }
 
 /**
  * Read-only summary of the deployment's effective scheduling fields.
  *
- * Walks cluster → environment → deployment for each leaf. The per-row dot
- * lights up whenever the deployment layer carries an explicit value for
- * that field; the rest of the row renders the resolved value with no
- * inheritance-specific styling.
+ * Walks environment → deployment for each leaf: a cluster does not take
+ * scheduling (ADR-033, #482). The per-row dot lights up whenever the
+ * deployment layer carries an explicit value for that field; the rest of
+ * the row renders the resolved value with no inheritance-specific styling.
  */
 export function SchedulingSummary({
   deploymentConfig,
   environmentConfig,
-  clusterConfig,
 }: Props) {
   const resolve = <T,>(path: string) =>
-    resolveConfigValue<T>(
-      clusterConfig,
-      environmentConfig,
-      deploymentConfig,
-      path,
-    );
+    resolveConfigValue<T>(null, environmentConfig, deploymentConfig, path);
 
   const cpuReq = resolve<string>("scheduling.resources.requests.cpu");
   const cpuLim = resolve<string>("scheduling.resources.limits.cpu");

@@ -449,8 +449,8 @@ class BaseConfigSection(BaseModel):
 
 
 CLUSTER_SCHEDULING_REJECTED = (
-    "a cluster does not take scheduling, because no pod gets a cluster's "
-    "scheduling value; set scheduling on the environment or the deployment"
+    "a cluster does not take this setting, because no pod gets it from the "
+    "cluster; set it on the environment or the deployment"
 )
 
 
@@ -465,8 +465,8 @@ class ClusterConfig(BaseConfigSection):
         standard_storage (StandardStorage | None): The standard storage.
         fast_storage (FastStorage | None): The fast storage.
 
-    ``scheduling`` must stay unset on a cluster: no pod gets a cluster's
-    scheduling value (ADR-033, #482).
+    ``scheduling`` is refused whatever its value, ``null`` included: no pod
+    gets a cluster's scheduling value (ADR-033, #482).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -481,8 +481,8 @@ class ClusterConfig(BaseConfigSection):
     def _reject_cluster_scheduling(
         cls, v: SchedulingConfig | None
     ) -> SchedulingConfig | None:
-        # DeploymentConfig inherits this class and takes scheduling.
-        if v is not None and cls is ClusterConfig:
+        # Runs only when the key is sent. DeploymentConfig inherits this class and takes scheduling.
+        if cls is ClusterConfig:
             raise ValueError(CLUSTER_SCHEDULING_REJECTED)
         return v
 

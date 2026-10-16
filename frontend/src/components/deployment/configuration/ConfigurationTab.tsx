@@ -123,7 +123,6 @@ export function ConfigurationTab({ deployment }: Props) {
       <SchedulingSummary
         deploymentConfig={deployment.config}
         environmentConfig={deployment.environment.config}
-        clusterConfig={deployment.environment.cluster.config}
       />
       <ServiceOverridesSummary deployedServices={deployment.deployedServices} />
       <DriverParametersSummary

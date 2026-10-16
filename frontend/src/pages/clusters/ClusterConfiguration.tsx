@@ -210,6 +210,12 @@ function RuntimeSection({ config }: { config: JsonObject }) {
           value={withDefault(config.runtime_class, DEFAULT_RUNTIME_CLASS)}
         />
       </Rows>
+      <p
+        className="mt-3 text-xs text-muted-foreground"
+        data-testid="cluster-scheduling-hint"
+      >
+        Scheduling is set on each environment or deployment, not on the cluster.
+      </p>
     </ConfigSummaryCard>
   );
 }
