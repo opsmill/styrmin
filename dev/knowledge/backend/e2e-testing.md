@@ -402,7 +402,7 @@ A bare git daemon that hosts the application driver source code.
 |--------|--------|
 | **Purpose** | Serve the driver spec so Styrmin can load a driver version |
 | **Image** | Built from `tests/e2e/fixtures/git-server/Dockerfile` |
-| **How it works** | Alpine with `git-daemon`, initializes a bare repo at `/git/simple-app.git` |
+| **How it works** | Alpine with `git-daemon`; the image creates one bare repository per driver (`RUN git init --bare /git/<driver>.git`) |
 | **Cluster address** | `git://git-server.default.svc.cluster.local/<driver>.git`, one repository per driver |
 
 At setup time, the fixture:
@@ -412,7 +412,9 @@ At setup time, the fixture:
 3. Initializes a git repository using [dulwich](https://www.dulwich.io/) (pure Python git)
 4. Port-forwards the git-daemon service and pushes the repo
 
-The test drivers exist only for E2E scenarios. `failing-actions` reuses the simple-app chart, and its upgrade action fails on purpose for some target versions; `test_task_steps.py` uses it to cause the failures of spec 019. `late-container` reuses the simple-app chart without a component container on `server`; `test_deployments_apply.py` pushes its next version, which declares that container, to a branch, and moves a deployment onto it with component env vars in one apply (#388).
+The test drivers exist only for E2E scenarios. `failing-actions` reuses the simple-app chart, and its upgrade action fails on purpose for some target versions; `test_task_steps.py` uses it to cause the failures of spec 019. `late-container` reuses the simple-app chart without a component container on `server`; `test_deployments_apply.py` pushes its next version, which declares that container, to a branch, and moves a deployment onto it with component env vars in one apply (#388). `hook-job` reuses the simple-app chart with `preUpgradeHookJob.enabled: true`, which turns on the chart's pre-upgrade Helm hook Job, labelled with the server component's identifier label `app.kubernetes.io/name: simple-app`, and a pre-upgrade hook ConfigMap without labels; `test_pod_scheduling.py` uses it to check that the hook Job gets the deployment's scheduling settings and Styrmin's labels, and that the ConfigMap gets Styrmin's labels (#435).
+
+A new test driver needs two entries: one in the `drivers` map of the `git_server` fixture in `conftest.py`, and a `RUN git init --bare /git/<driver>.git` line in `tests/e2e/fixtures/git-server/Dockerfile`. Without the second, the fixture's push of that driver fails in setup with `dulwich.errors.GitProtocolError: access denied or repository not exported: /<driver>.git`.
 
 ### Telemetry Sink
 

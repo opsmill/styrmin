@@ -96,9 +96,39 @@ run Helm itself — it asks Flux to do it.
 
 The agent chart installs FluxCD's helm-controller v1.6.5 and
 source-controller v1.9.6, the controllers of Flux v2.9.6. They support
-Kubernetes 1.34.1 and later. helm-controller runs with the
-`UseHelm3Defaults` feature gate, so it installs and upgrades releases
-with Helm v3's client-side apply and health checks.
+Kubernetes 1.34.1 and later. helm-controller runs with the defaults of
+Helm v4:
+
+- A deployment created since the agent runs helm-controller with these
+  defaults is installed with server-side apply. helm-controller is the
+  field manager and forces field ownership conflicts, so at each upgrade
+  a field that the chart sets returns to the chart's value, also when
+  `kubectl` or a driver action changed it. The upgrade does not fail.
+- A deployment created before, when helm-controller ran with the
+  `UseHelm3Defaults` feature gate, keeps client-side apply: each upgrade
+  and rollback uses the apply method of the release's previous install
+  or upgrade. From its next upgrade, the two items below apply to it
+  too.
+- Installs and upgrades wait for the chart's resources with kstatus,
+  FluxCD's library that computes the status of each Kubernetes resource.
+  The wait ends before the HelmRelease timeout when kstatus reports a
+  resource as failed, for example a `Job` that failed or a `Deployment`
+  past its `progressDeadlineSeconds`. A `Deployment` whose pods cannot
+  pull their image, or whose container exits at once, is not failed for
+  kstatus, so FluxCD waits the full timeout.
+- Helm hooks of the driver's chart, the resources annotated
+  `helm.sh/hook`, receive Styrmin's post-render patches, as the chart's
+  other resources do: Styrmin's labels, the deployment's scheduling
+  settings and, on a `Deployment` or `StatefulSet` that matches a
+  component, the component overrides. See
+  [Step 1 of Creating a driver](../drivers/creating-a-driver.md#step-1-analyse-the-helm-chart)
+  for which patches reach which hooks.
+
+To go back to Helm v3's behaviour, downgrade the agent chart to a
+release that runs helm-controller with the `UseHelm3Defaults` gate.
+Deployments created while the gate was off keep server-side apply on
+their later upgrades and rollbacks, because they keep the apply method
+of their previous release.
 
 Helm installs the CRDs in a chart's `crds/` directory only when they do
 not exist yet, and never updates them. The agent chart therefore applies
@@ -198,7 +228,10 @@ not reach Ready within" followed by the timeout and the phase. The phase
 does not change, so the rollout can still become `Ready` later. Keep the
 readiness timeout below the HelmRelease timeout, as the defaults are: a
 failed rollout then reports the pods that are not ready and why before
-FluxCD's rollback removes them. The
+FluxCD's rollback removes them. This holds while FluxCD waits the full
+HelmRelease timeout, which it does for pods that cannot pull their image
+(see the kstatus item in
+[The HelmRelease](#the-helmrelease--styrmins-other-crd)). The
 timeout counts from `status.rolloutStartedAt`, or from the CR's creation
 time when that field is missing. When the operator restarts and resumes a
 rollout, it keeps the recorded start, so a restart does not extend the
