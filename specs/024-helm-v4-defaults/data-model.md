@@ -45,4 +45,6 @@ In [`driver/examples/simple-app/src/helm/values.yaml`](../../driver/examples/sim
 | --- | --- | --- | --- |
 | `preUpgradeHookJob.enabled` | boolean | `false` | Renders one `batch/v1` Job annotated `helm.sh/hook: pre-upgrade` and `helm.sh/hook-delete-policy: before-hook-creation`. The Job's `metadata.labels` carry the server component's identifier label (`app.kubernetes.io/name: simple-app`); its pod template does not, so the simple-app Service and pod affinity rules do not select the hook's pod. The container runs the chart's image and exits 0. |
 
+The same value also renders a `ConfigMap` annotated `helm.sh/hook: pre-upgrade` and `helm.sh/hook-delete-policy: before-hook-creation`, with no `metadata.labels`, which checks that Styrmin's labels reach a resource without labels (FR-013).
+
 The value is turned on only by the `hook-job` E2E test driver (see [plan.md](plan.md)). `driver/examples/simple-app/values.j2.yml` does not set it, so the 22 E2E test files that deploy `simple-app` render no Helm hook.

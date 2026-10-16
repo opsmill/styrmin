@@ -47,7 +47,9 @@ Given a driver whose chart renders a `Job` annotated `helm.sh/hook` that carries
 ## C-005: `simple-app` chart value `preUpgradeHookJob.enabled`
 
 - `false` (default): `helm template` renders no resource annotated `helm.sh/hook` other than the existing ones (none in the simple-app chart today).
-- `true`: `helm template` renders exactly one extra Job, annotated `helm.sh/hook: pre-upgrade` and `helm.sh/hook-delete-policy: before-hook-creation`, labelled `app.kubernetes.io/name: <simple-app.name>` in `metadata.labels` and not in its pod template labels.
+- `true`: `helm template` renders exactly two extra resources:
+  - a Job, annotated `helm.sh/hook: pre-upgrade` and `helm.sh/hook-delete-policy: before-hook-creation`, labelled `app.kubernetes.io/name: <simple-app.name>` in `metadata.labels` and not in its pod template labels;
+  - a ConfigMap with the same hook annotations and no `metadata.labels`.
 
 ## C-006: Agent chart upgrade
 
