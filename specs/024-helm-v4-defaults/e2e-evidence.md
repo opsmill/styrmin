@@ -161,3 +161,120 @@ No operator change needed. Every FluxCD state that runs 1 and 2 produced got the
 `Stalled=True` did not occur in these runs; unit tests cover it (spec Clarifications).
 
 One text that users read differs from the unit-test fixtures written for spec 019: FluxCD's upgrade failure message, which the operator copies into `HelmReleaseReady`, the CR message and the HelmRelease step, now ends with kstatus's `timeout waiting for: [Deployment/<namespace>/<name> status: 'InProgress']`. The fixtures in `backend/tests/unit/test_styrmin_deployment_helmrelease_generation.py` use `context deadline exceeded`. Whether that was the exact text of an E2E run with the gate is not known. The operator does not parse this text, so no rule depends on it.
+
+## Run 3: shard_compute, API variant (T021)
+
+- Code tested: the working tree that is committed as `d6193096` ("test(e2e): add a pre-upgrade Helm hook to the scheduling E2E (#435)"): the simple-app chart's `preUpgradeHookJob` value, the `hook-job` test driver, and the hook checks in `test_pod_scheduling.py`. This change has no backend code, so the server image is the same `STYRMIN_IMAGE_VER=helmv4-f752856a`, built again with `docker compose build server` before the run.
+
+### Unit test of the chart's hooks (T016)
+
+- Command, from the repository root: `uv run pytest backend/tests/unit/test_simple_app_hook_job.py -v`
+- Run at 2026-10-16T09:33:49Z, with helm v4.1.0 on PATH, so the test was not skipped.
+
+```text
+backend/tests/unit/test_simple_app_hook_job.py::test_no_hook_by_default PASSED [ 50%]
+backend/tests/unit/test_simple_app_hook_job.py::test_enabled_renders_the_hook_job_and_the_unlabelled_hook_config_map PASSED [100%]
+============================== 2 passed in 0.10s ===============================
+```
+
+### E2E session
+
+- Command, from the repository root:
+
+  ```bash
+  export STYRMIN_IMAGE_VER=helmv4-f752856a
+  exec 3< <(sleep infinity); spid=$!
+  uv run pytest backend/tests/e2e -m "ci and shard_compute" -k api-chromium -v -s --pdb <&3 > compute-api.log 2>&1
+  exec 3<&-; kill "$spid"
+  ```
+
+- Start: 2026-10-16T09:22:23Z. End: 2026-10-16T09:32:55Z.
+- vcluster: `pytest-5016eb89-01ec-494a-b643-3c50f21712ee` (kubeconfig context `vcluster-docker_pytest-5016eb89-01ec-494a-b643-3c50f21712ee`).
+- Kubeconfig: `/tmp/pytest-of-root/pytest-1721/vcluster0/kubeconfig`.
+- Collected: `collected 195 items / 187 deselected / 8 selected`.
+
+Result lines:
+
+```text
+backend/tests/e2e/test_cluster_update.py::test_cluster_update_redeploys_and_moves_dedicated_ingress[api-chromium]   (node ID line; PASSED follows the -s output)
+PASSED
+backend/tests/e2e/test_cluster_update.py::test_edit_cluster_config_from_detail_page[api-chromium] SKIPPED
+backend/tests/e2e/test_ingress_controller.py::test_traffic_routes_through_dedicated_ingress[api-chromium] PASSED
+backend/tests/e2e/test_ingress_controller.py::test_traffic_routes_through_loadbalancer_ingress[api-chromium] PASSED
+backend/tests/e2e/test_ingress_controller.py::test_ip_whitelist_enforcement_allows_and_rejects[api-chromium] PASSED
+backend/tests/e2e/test_ingress_controller.py::test_deleting_last_app_tears_down_dedicated_ingress[api-chromium] PASSED
+backend/tests/e2e/test_pod_scheduling.py::test_scheduling_end_to_end[api-chromium] PASSED
+backend/tests/e2e/test_pod_scheduling.py::test_pod_anti_affinity_cross_deployment_via_graphql[api-chromium] PASSED
+====== 7 passed, 1 skipped, 187 deselected, 1 warning in 630.22s (0:10:30) ======
+```
+
+`test_edit_cluster_config_from_detail_page` is marked `ui_only`, so its API variant is skipped. The warning is the same `kr8s` `DeprecationWarning` as in run 1.
+
+A first attempt, started at 2026-10-16T09:20:44Z on vcluster `pytest-3148d805-f6aa-429d-88d9-b3d9057f2bca`, stopped in the setup of the `git_server` fixture before any test ran: the push of the `hook-job` driver failed with `dulwich.errors.GitProtocolError: access denied or repository not exported: /hook-job.git`. The git-server image creates one bare repository per driver, and tasks.md did not list that step. `RUN git init --bare /git/hook-job.git` in `backend/tests/e2e/fixtures/git-server/Dockerfile` fixed it. The session was stopped by its own `sleep` PID, and the fixture teardown deleted that vcluster.
+
+### The hook Job and the hook ConfigMap after the scheduling update
+
+From the `kubectl` snapshot of 2026-10-16T09:31:23Z of namespace `styrmin-b7726f34-7170-42cd-b373-482c0db37492` (deployment `scheduling-a`, driver `hook-job`). No hook resource existed before the scheduling update: Helm runs pre-upgrade hooks only on an upgrade, and this update was the deployment's first upgrade.
+
+Job `styrmin-simple-app-pre-upgrade-hook`:
+
+- Created 09:31:15Z, completed 09:31:18Z: `status.succeeded: 1`, conditions `SuccessCriteriaMet` and `Complete`, reason `CompletionsReached`.
+- Annotations: `helm.sh/hook: pre-upgrade`, `helm.sh/hook-weight: "0"`, `helm.sh/hook-delete-policy: before-hook-creation`.
+- Styrmin's labels in `metadata.labels`: `styrmin/component: server`, `styrmin/deployment_id: b7726f34-7170-42cd-b373-482c0db37492`, `styrmin/environment_id: 30a7cd83-c4a4-4471-bc1a-04efa168f901`. The other labels are the chart's (`app.kubernetes.io/name: simple-app`, `app.kubernetes.io/component: pre-upgrade-hook`, …) and helm-controller's (`helm.toolkit.fluxcd.io/name`, `helm.toolkit.fluxcd.io/namespace`).
+- `spec.template.spec`:
+  - `tolerations`: `[{key: dedicated, operator: Equal, value: batch, effect: NoSchedule}]`;
+  - `affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution`: weight 1, `node-type In [worker]`;
+  - `affinity.podAffinity.preferredDuringSchedulingIgnoredDuringExecution`: weight 50, `matchLabels: {app.kubernetes.io/name: simple-app}`, `topologyKey: kubernetes.io/hostname`;
+  - `topologySpreadConstraints`: `[{maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway}]`;
+  - `runtimeClassName: kata-e2e`;
+  - `containers[0].resources`: `{requests: {memory: 192Mi}, limits: {cpu: 500m}}`. The scheduling patch replaces the chart's `requests` of `cpu: 10m`, `memory: 32Mi`.
+- Pod template labels: `app.kubernetes.io/component`, `app.kubernetes.io/instance` and the Job controller's labels, without `app.kubernetes.io/name`.
+- Pod `styrmin-simple-app-pre-upgrade-hook-6d9bz`: `Completed`, 0 restarts, on node `pytest-5016eb89-01ec-494a-b643-3c50f21712ee`, the vcluster's only node.
+
+ConfigMap `styrmin-simple-app-pre-upgrade-hook`:
+
+- Created 09:31:15Z. Annotations: `helm.sh/hook: pre-upgrade`, `helm.sh/hook-weight: "-1"`, `helm.sh/hook-delete-policy: before-hook-creation`. Data: `hook: pre-upgrade`.
+- `metadata.labels`: `styrmin/deployment_id: b7726f34-7170-42cd-b373-482c0db37492`, `styrmin/environment_id: 30a7cd83-c4a4-4471-bc1a-04efa168f901`, `helm.toolkit.fluxcd.io/name`, `helm.toolkit.fluxcd.io/namespace`. It has no `styrmin/component` label, because no component identifier label matches it. The chart renders it without `metadata.labels`, so the upgrade's render succeeded with the strategic-merge label patch and gave it Styrmin's labels (FR-013, SC-006).
+
+At 09:32:26Z, the update of `test_pod_anti_affinity_cross_deployment_via_graphql`, which sets only a pod anti-affinity, replaced the Job (`before-hook-creation`). The new Job has that pod anti-affinity and no toleration or runtime class, and it succeeded. Each upgrade's hook Job gets the scheduling settings of that upgrade.
+
+The vcluster has one node, so SC-004 ("runs on those nodes") is checked by the hook pod's scheduling fields and its completion, not by the node it ran on.
+
+## Run 4: shard_compute, UI variant (T022)
+
+The module's fixtures changed and the shard holds tests with both variants, so the UI variant runs in its own session. Both tests of `test_pod_scheduling.py` are marked `api_only`, so this session does not create the `hook-job` deployment; its `git_server` setup does push the `hook-job` driver repository.
+
+- Code tested: commit `d6193096`. Server image: `STYRMIN_IMAGE_VER=helmv4-f752856a`.
+- Command, from the repository root:
+
+  ```bash
+  export STYRMIN_IMAGE_VER=helmv4-f752856a
+  exec 3< <(sleep infinity); spid=$!
+  uv run pytest backend/tests/e2e -m "ci and shard_compute" -k ui-chromium -v -s --pdb <&3 > compute-ui.log 2>&1
+  exec 3<&-; kill "$spid"
+  ```
+
+- Start: 2026-10-16T09:36:09Z. End: 2026-10-16T09:40:43Z.
+- vcluster: `pytest-c86e8031-09f0-4ccd-ad09-2f7c363ed3b0` (kubeconfig context `vcluster-docker_pytest-c86e8031-09f0-4ccd-ad09-2f7c363ed3b0`).
+- Kubeconfig: `/tmp/pytest-of-root/pytest-1725/vcluster0/kubeconfig`.
+- Collected: `collected 195 items / 187 deselected / 8 selected`.
+
+Result lines:
+
+```text
+backend/tests/e2e/test_cluster_update.py::test_cluster_update_redeploys_and_moves_dedicated_ingress[ui-chromium] SKIPPED
+backend/tests/e2e/test_cluster_update.py::test_edit_cluster_config_from_detail_page[ui-chromium]   (node ID line; PASSED follows the -s output)
+PASSED
+backend/tests/e2e/test_ingress_controller.py::test_traffic_routes_through_dedicated_ingress[ui-chromium]   (node ID line; PASSED follows the -s output)
+PASSED
+backend/tests/e2e/test_ingress_controller.py::test_traffic_routes_through_loadbalancer_ingress[ui-chromium] PASSED
+backend/tests/e2e/test_ingress_controller.py::test_ip_whitelist_enforcement_allows_and_rejects[ui-chromium] PASSED
+backend/tests/e2e/test_ingress_controller.py::test_deleting_last_app_tears_down_dedicated_ingress[ui-chromium] SKIPPED
+backend/tests/e2e/test_pod_scheduling.py::test_scheduling_end_to_end[ui-chromium] SKIPPED
+backend/tests/e2e/test_pod_scheduling.py::test_pod_anti_affinity_cross_deployment_via_graphql[ui-chromium] SKIPPED
+===== 4 passed, 4 skipped, 187 deselected, 1 warning in 270.97s (0:04:30) ======
+```
+
+The four skipped tests are marked `api_only`. The warning is the same `kr8s` `DeprecationWarning` as in run 1.
+
+This is the second UI session. The first, from 2026-10-16T09:33:40Z to 09:35:44Z on vcluster `pytest-a657945f-1c1a-445b-88d5-37c4745a3d3c` (kubeconfig `/tmp/pytest-of-root/pytest-1724/vcluster0/kubeconfig`), failed `test_edit_cluster_config_from_detail_page[ui-chromium]` at `backend/tests/e2e/test_cluster_update.py:360`: the review dialog listed `Ingress class traefik → traefikedit-680548.styrmin.com`, so the FQDN suffix text had gone into the Ingress class field. This is a known flake of that test on this host, which does not use the `hook-job` driver or any Helm hook, so the session was stopped by its own `sleep` PID and run again once, unchanged.
