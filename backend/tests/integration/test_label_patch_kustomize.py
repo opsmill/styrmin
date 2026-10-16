@@ -24,6 +24,13 @@ from styrmin_backend.agent.service.kubernetes.resources.builders.application imp
     ApplicationHelmReleaseBuilder,
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
+from styrmin_backend.context.models.components import (
+    ArbitrarySectionModel,
+    ComponentContext,
+    ComponentsContext,
+    Identifier,
+    LabelIdentifier,
+)
 from styrmin_backend.context.models.config import (
     ClusterConfig,
     DeploymentConfig,
@@ -53,7 +60,7 @@ HOOK_ANNOTATIONS = {
 }
 
 
-def _context() -> GlobalContext:
+def _context(components: ComponentsContext | None = None) -> GlobalContext:
     deployment_id = uuid4()
     namespace = get_kubernetes_reference(deployment_id)
     return GlobalContext(
@@ -77,6 +84,7 @@ def _context() -> GlobalContext:
             ),
         ),
         deployed_services=[],
+        components=components,
     )
 
 
@@ -165,3 +173,35 @@ def test_labels_reach_resources_with_and_without_labels() -> None:
     assert rendered["ConfigMap"]["data"] == {"key": "value"}
     assert rendered["Job"]["metadata"]["labels"] == {STYRMIN_LABEL: "abc"}
     assert rendered["Job"]["metadata"]["annotations"] == HOOK_ANNOTATIONS
+
+
+@pytest.mark.parametrize("component", ["1", "true", "yes"])
+def test_component_label_stays_a_string(component: str) -> None:
+    components = ComponentsContext(
+        root={
+            component: ComponentContext(
+                name=component,
+                enabled=True,
+                config=ArbitrarySectionModel(
+                    identifier=Identifier(
+                        label=LabelIdentifier(root={"app.kubernetes.io/name": "server"})
+                    )
+                ),
+            )
+        }
+    )
+    patches = ApplicationHelmReleaseBuilder(
+        context=_context(components)
+    ).build_target_for_component_labels()
+
+    result = _kustomize(_resources(), patches)
+
+    assert result.returncode == 0, result.stderr
+    rendered = {doc["kind"]: doc for doc in yaml.safe_load_all(result.stdout)}
+    deployment = rendered["Deployment"]
+    assert deployment["metadata"]["labels"]["styrmin/component"] == component
+    assert (
+        deployment["spec"]["template"]["metadata"]["labels"]["styrmin/component"]
+        == component
+    )
+    assert "labels" not in rendered["ConfigMap"]["metadata"]

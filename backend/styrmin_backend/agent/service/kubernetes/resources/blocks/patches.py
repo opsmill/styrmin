@@ -250,13 +250,16 @@ class LabelPatch(Patch):
         return rendered_label_path
 
     def render_value(self) -> str:
-        return reduce(
-            add,
-            (
-                f"- op: {self._operation}\n  path: {self._path}/{self._render_label_path(key=key)}\n  value: {value}\n"
-                for key, value in self.labels.items()
-            ),
-        )
+        # yaml.safe_dump quotes values such as "1" or "true" so they stay strings.
+        ops = [
+            {
+                "op": self._operation,
+                "path": f"{self._path}/{self._render_label_path(key=key)}",
+                "value": str(value),
+            }
+            for key, value in self.labels.items()
+        ]
+        return yaml.safe_dump(ops, default_flow_style=False, sort_keys=False)
 
 
 @dataclass

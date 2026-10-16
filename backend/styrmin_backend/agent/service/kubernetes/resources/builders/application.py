@@ -9,7 +9,6 @@ from styrmin_backend.agent.service.kubernetes.resources.blocks.metadata import (
     Labels,
 )
 from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
-    LabelPatch,
     MetadataLabelsMergePatch,
     Target,
     TargetPatch,
@@ -324,7 +323,7 @@ class ApplicationHelmReleaseBuilder:
                         target=Target(
                             label_selector=component_definition.config.identifier.label.label_selectable(),
                         ),
-                        patch=LabelPatch(
+                        patch=MetadataLabelsMergePatch(
                             labels={"component": component},
                             label_prefix=label_prefix,
                         ),
