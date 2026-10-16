@@ -279,13 +279,16 @@ def _and_node_affinity_terms(groups: list[list[AffinityTerm]]) -> list[AffinityT
 
     Kubernetes ORs ``nodeSelectorTerms`` and ANDs the expressions of one term,
     so the result has one term for each combination of one term per level.
-    Terms without expressions are dropped first, as the post-render patch does.
+    The terms of a single level are returned unchanged. When several levels set
+    terms, terms without expressions are dropped first, and a level left without
+    terms adds no requirement.
     """
-    groups = [
-        kept
-        for group in groups
-        if (kept := [term for term in group if _node_term_expressions(term)])
-    ]
+    if len(groups) > 1:
+        groups = [
+            kept
+            for group in groups
+            if (kept := [term for term in group if _node_term_expressions(term)])
+        ]
     if len(groups) <= 1:
         return groups[0] if groups else []
     return [
