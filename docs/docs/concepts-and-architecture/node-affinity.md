@@ -95,6 +95,63 @@ affinity:
 The `resolvedScheduling` field of a deployment in the GraphQL API shows
 these combined terms.
 
+### When running deployments get the combined terms
+
+Styrmin used to add each term of each level to the pods as its own term,
+so a node that matched only the environment's terms or only the
+deployment's terms was accepted
+([#486](https://github.com/opsmill/styrmin/issues/486)). A deployment
+that already runs keeps the terms it was rendered with until Styrmin
+redeploys it. Styrmin redeploys a deployment, and gives its pods the
+combined terms, when:
+
+- you update or upgrade the deployment, or stop or start its components.
+- you change the config of its environment. Styrmin redeploys the
+  deployments of the environment, even when the change is to an
+  unrelated value.
+- you update its cluster, even when the update changes an unrelated
+  value. Styrmin redeploys each deployment whose resolved config
+  changed, and the combined terms change the resolved config of every
+  deployment where the environment and the deployment both set
+  `required` terms and the deployment does not set `replace: true`.
+
+Before you update a cluster, list the deployments that the update
+redeploys: run `styrminctl clusters update` with `--dry-run`, send
+`updateCluster` with `dryRun: true`, or open the **Edit** dialog on the
+cluster detail page, which lists them before it saves. A deployment
+whose terms cannot be met together with the environment's terms has
+pods that stay pending after this redeploy.
+
+### If pods stay Pending
+
+A pod stays `Pending` when no node matches its required terms. This
+happens when the environment's terms and the deployment's terms cannot
+be met together. For example, the environment requires `pool=apps` and
+the deployment requires `pool=db`: a node has one value for a label, so
+no node matches both. Styrmin saves this config without a warning.
+
+What you view:
+
+- The deployment's **Pods** tab shows the pods as `PENDING`, without the
+  reason. To read why the scheduler did not place a pod, expand the pod,
+  open **Commands**, and run the **Events** or the **Describe** command.
+  The `FailedScheduling` event says that the nodes didn't match the
+  pod's node affinity.
+- The deployment becomes `FAILED` when its pods are not ready within the
+  readiness timeout, and FluxCD rolls the release back at the HelmRelease
+  timeout. See
+  [When a rollout is ready or failed](operator-and-crds.md#when-a-rollout-is-ready-or-failed)
+  for both timeouts.
+
+To fix it, do one of the following:
+
+- To use only the deployment's terms, set `replace: true` in the
+  deployment's `nodeAffinity` block and update the deployment.
+- With `updateEnvironment`, change the environment's terms so that they
+  accept the nodes that the deployment needs, for example with the
+  expression `pool` `IN` `apps`, `db`. Styrmin then redeploys the
+  deployments of the environment.
+
 ### Replacing a node selector
 
 Styrmin no longer accepts `node_selector` on a cluster or a deployment,
