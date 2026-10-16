@@ -47,6 +47,11 @@ The brief's seven decisions are recorded here so later phases do not reopen them
 - Q: Can a flow guarantee that it writes nothing after the request? → A: A read and a write cannot be one atomic operation, so a write can still follow the request by a few milliseconds. The flow reads before it writes and again after it writes, and deletes each alias of a departing deployment that it wrote in between. Together with the teardown, which lists the aliases only after the request, no alias of the deleted deployment remains (R-004). A write into the deleted deployment's namespace in that window is removed by the namespace deletion, and the flow never creates a namespace, so the namespace is not created again (R-005).
 - Q: How does the teardown know which deployment's aliases to delete? → A: From `spec.deploymentId`, and only when the CR's namespace is `styrmin-<spec.deploymentId>`. This second guard keeps the copy of a source's CR that a cross-target restore deletes from deleting the running source's aliases (R-001).
 
+### Session 2026-10-16 (critique, [critique-20261016-1.md](critiques/critique-20261016-1.md))
+
+- Q: A restore deletes the target namespace, which deletes its StyrminDeployment and runs the delete handler's teardown. Does that teardown delete the aliases? → A: No. The teardown deletes aliases only when `spec.deletionRequested` is true, or when the StyrminDeployment is deleted while its namespace is not being deleted (`kubectl delete styrmindeployment`). A restored deployment keeps running, and Velero restores only its own namespace, so deleting its aliases in the other namespaces would stop the other deployments from reaching it by short name (FR-017, research R-011).
+- Q: FR-007 and FR-008 as first written asked that no write follows the request. → A: They now state the outcome a flow can guarantee: it writes nothing for a deployment whose deletion it can read, removes what it wrote just before it could read the request, and never creates another deployment's namespace (research R-004).
+
 ## User Scenarios & Testing *(mandatory)*
 
 Three people use this feature:
@@ -93,8 +98,10 @@ While deployment A is `DELETING`, a create, update or upgrade flow of deployment
 
 1. **Given** A is `DELETING`, **When** a context is built for B and B's flow runs, **Then** the flow writes no alias of A's services and nothing into `styrmin-<A id>`, and does not create that namespace.
 2. **Given** B's context was built before the user requested A's deletion, **When** B's flow runs after the request, **Then** the flow writes no alias of A's services and nothing into `styrmin-<A id>`, and does not create that namespace.
-3. **Given** A is `DELETING`, **When** a context is built for B, **Then** the context still lists A's services for B's driver templates.
-4. **Given** A is `DELETING` and B's flow runs, **When** the flow writes the aliases of B's services and of the other deployments' services, **Then** those aliases are written as today, in every namespace other than `styrmin-<A id>`.
+3. **Given** B's flow read A's state before the user requested A's deletion and writes after it, **When** the flow ends, **Then** no alias of A's services that the flow wrote remains: the flow deleted it, or A's teardown deleted it.
+4. **Given** A is `DELETING`, **When** a context is built for B, **Then** the context still lists A's services for B's driver templates.
+5. **Given** A is `DELETING` and B's flow runs, **When** the flow writes the aliases of B's services and of the other deployments' services, **Then** those aliases are written as today, in every namespace other than `styrmin-<A id>`.
+6. **Given** A's namespace is being deleted, **When** B's change runs, **Then** B's change completes. Today B's flow can fail at its service-aliases step, because Kubernetes refuses to create B's alias in a namespace that is being deleted.
 
 ---
 
@@ -123,6 +130,7 @@ When the teardown cannot delete an alias, it logs the error and continues. The d
 - **A failed teardown left an alias, and another deployment later uses that name for its own Service**: the operator writes the Service with the same create-then-replace function, so it is expected to replace the alias with its `ClusterIP` Service. A unit test covers this (see Clarifications).
 - **A deployment without services keeps a remaining alias** until its own flow runs again, if the teardown failed to delete it. This is accepted under the best-effort rule.
 - **What a pod resolves through a remaining alias**: Kubernetes answers a lookup of an `ExternalName` Service with a CNAME record. After the target namespace is deleted, the CNAME target is expected to have no record, so the lookup fails as it would without the alias. This was not checked in a cluster.
+- **A restore deletes and restores a deployment's namespace**: the namespace deletion deletes the deployment's StyrminDeployment, and the operator runs the teardown of its delete handler. That teardown deletes no alias, because the user did not request the deletion and the deployment keeps running (FR-017). While the namespace is being deleted or is gone, the flows of the other deployments skip it and do not create it again.
 - **A Velero restore copies aliases** from a source namespace into a counterpart deployment's namespace: out of scope.
 
 ## Requirements *(mandatory)*
@@ -142,11 +150,12 @@ When the teardown cannot delete an alias, it logs the error and continues. The d
   - the teardown continues, the namespace deletion is still requested, and the deployment continues to `DELETED`.
 - **FR-005**: Both deletion paths MUST delete the aliases: the platform-driven path (`spec.deletionRequested`) and `kubectl delete styrmindeployment`. Running the teardown again while the finalizer stays MUST NOT fail on aliases already deleted.
 - **FR-006**: A StyrminDeployment annotated `styrmin.io/skip-teardown: "true"` MUST be deleted without deleting any alias.
+- **FR-017**: When a StyrminDeployment without `spec.deletionRequested: true` is deleted because its namespace is being deleted, as a restore does, the teardown MUST NOT delete any alias. When the teardown cannot read the namespace, it MUST NOT delete any alias and MUST log why.
 
 **Flows of other deployments during a deletion**
 
-- **FR-007**: After the user requests the deletion of a deployment, no create, update or upgrade flow of another deployment MAY write an alias of the deleted deployment's services into any namespace. This includes a flow whose context was built before the request.
-- **FR-008**: After the user requests the deletion of a deployment, no flow of another deployment MAY write into the deleted deployment's namespace or create that namespace. This includes a flow whose context was built before the request.
+- **FR-007**: A create, update or upgrade flow of another deployment MUST NOT write an alias of the services of a deployment whose deletion it can read at write time. This includes a flow whose context was built before the request. When the request comes between the flow's read and its write, the flow MUST delete the aliases of that deployment it wrote, so that, together with the teardown, none remains.
+- **FR-008**: A flow of another deployment MUST NOT write into the namespace of a deployment whose deletion it can read at write time, and MUST NOT create the namespace of another deployment. A write that comes between the flow's read and the request is removed when the namespace is deleted.
 - **FR-009**: Apart from FR-007 and FR-008, a flow MUST write its aliases as today.
 - **FR-010**: The context built for another deployment MUST still list the services of a `DELETING` deployment for driver templates until that deployment reaches `DELETED`.
 
@@ -172,6 +181,7 @@ When the teardown cannot delete an alias, it logs the error and continues. The d
   - a flow of another deployment writes no alias of a deployment whose deletion was requested, writes nothing into its namespace and does not create it, both for a context built while the deployment is `DELETING` and for a context built before the request;
   - the context still lists the services of a `DELETING` deployment;
   - no alias is deleted when the `styrmin.io/skip-teardown` annotation is set;
+  - no alias is deleted when the StyrminDeployment has no deletion request and its namespace is being deleted, or when the namespace cannot be read; aliases are deleted when the request is set and the namespace is being deleted;
   - the operator's write of a `ClusterIP` Service replaces an alias with the same name (see Clarifications).
 - **FR-015**: A new E2E test MUST be added at the end of [`test_service_discovery.py`](../../backend/tests/e2e/test_service_discovery.py), marked `api_only` and `shard_general`. It deletes `intent`, waits until its status is `DELETED`, then checks that `executor`'s namespace holds no Service with the label `styrmin.io/deployment-id=<intent id>` and none whose `spec.externalName` points into `styrmin-<intent id>`. It reuses the deployments of the module's `discovery_deployments` fixture, starts no new deployment, and runs last in the module, because the other tests of the module use `intent`.
 - **FR-016**: The race of FR-007 and FR-008 has no E2E test, because its timing cannot be reproduced reliably.
@@ -179,7 +189,7 @@ When the teardown cannot delete an alias, it logs the error and continues. The d
 ### Key Entities
 
 - **Service alias**: an `ExternalName` Service in the namespace of one deployment that points a service's short name to the service in its owner's namespace. Labelled `styrmin.io/service-alias=true` and, since #506, `styrmin.io/deployment-id=<owner id>`. Owned by the deployment that owns the service, not by the deployment whose namespace holds it.
-- **Deployment deletion**: starts when the user requests it (status `DELETING`, StyrminDeployment `spec.deletionRequested: true`) and ends when the status becomes `DELETED`, when the server deletes the deployment's `DeployedService` rows.
+- **Deployment deletion**: starts when the user requests it. The server first sets `spec.deletionRequested: true` on the StyrminDeployment; the status becomes `DELETING` when the operator reports its teardown. It ends when the status becomes `DELETED`, when the server deletes the deployment's `DeployedService` rows.
 - **Deployment context**: built by the server before a flow starts and passed to the flow. Its `services` are what driver templates read; its `deployed_services` are what the flow builds aliases from.
 
 ## Success Criteria *(mandatory)*
@@ -187,8 +197,9 @@ When the teardown cannot delete an alias, it logs the error and continues. The d
 ### Measurable Outcomes
 
 - **SC-001**: In the E2E test, after `intent` reaches `DELETED`, `executor`'s namespace holds 0 Services labelled `styrmin.io/deployment-id=<intent id>` and 0 Services whose `spec.externalName` points into `styrmin-<intent id>`.
-- **SC-002**: In unit tests, a flow of another deployment that runs after a deletion request writes 0 aliases of the deleted deployment's services and 0 objects into its namespace, and creates 0 namespaces, for both context timings.
-- **SC-003**: When an alias deletion fails with an error other than 404, the deployment still reaches `DELETED`, and the failure appears once in the operator log with the alias's namespace and name.
+- **SC-002**: In unit tests, a flow of another deployment that reads a deletion request writes 0 aliases of the deleted deployment's services and 0 objects into its namespace, and creates 0 namespaces, for both context timings. When the request comes between the flow's two reads, 0 aliases of that deployment that the flow wrote remain.
+- **SC-003**: When an alias deletion fails with an error other than 404, the deployment still reaches `DELETED`, and each teardown run that fails to delete the alias logs the failure with the alias's namespace and name.
+- **SC-006**: In unit tests, a teardown that a restore's namespace deletion starts deletes 0 aliases.
 - **SC-004**: Driver templates of other deployments render the same values for a `DELETING` deployment's services as before the fix.
 - **SC-005**: The E2E suite gains 1 test node and 0 new deployments; the `shard_general` api cell grows only by the time to delete `intent`.
 
