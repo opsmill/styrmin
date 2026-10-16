@@ -10,6 +10,7 @@
 ```bash
 uv run pytest backend/tests/unit/agent/test_service_aliases.py \
   backend/tests/unit/agent/test_apply_service.py \
+  backend/tests/unit/agent/test_namespace_primitives.py \
   backend/tests/unit/test_deployment_deletion_operator.py \
   backend/tests/unit/services/test_context_deleting_peer_services.py -v
 ```
@@ -20,7 +21,7 @@ Expected: all pass. They cover, in order of the spec's FR-014:
 2. A 404 counts as deleted; another error is logged and the namespace deletion still runs.
 3. The alias flow writes no alias of a departing deployment and nothing into its namespace, and creates no namespace, both when the context was built while the deployment is `DELETING` and when it was built before the request (the deletion flag appears between the flow's two reads).
 4. The context lists a `DELETING` peer's services.
-5. The skip-teardown annotation deletes no alias.
+5. The skip-teardown annotation deletes no alias, and neither does a teardown that a restore's namespace deletion starts.
 6. `apply_service` replaces an alias with a `ClusterIP` Service on 409.
 
 ## E2E test

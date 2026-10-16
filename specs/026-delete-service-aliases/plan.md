@@ -143,7 +143,7 @@ The teardown lists the aliases only after the CR's `spec.deletionRequested` is s
 
 ## Documentation
 
-- `CONTEXT.md`: the "Service alias" entry from the brief, placed in alphabetical order with the other **S** entries.
+- `CONTEXT.md`: the "Service alias" entry from the brief, right after the **Service** (deployed service) entry; `CONTEXT.md` groups entries by topic.
 - `dev/knowledge/agent/operator.md`, "Deletion": the teardown order with the new first step, the namespace check, that the step is best-effort, and that a restore's namespace deletion deletes no alias.
 - `dev/knowledge/backend/orchestration-flows.md`, "Service aliases": the departing rule, the second read, and that the flow never creates a namespace.
 - `docs/docs/drivers/generic-app.md`, "Networking": deleting a deployment deletes its aliases in the other namespaces.
