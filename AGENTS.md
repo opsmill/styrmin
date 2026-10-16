@@ -138,11 +138,13 @@ scripts/e2e-pdb.sh backend/tests/e2e/<node_id>
 scripts/e2e-pdb.sh "backend/tests/e2e/test_x.py::test_y[ui-chromium]" --tb=long
 ```
 
-The wrapper holds pdb's stdin open with a FIFO, appends `-v -s --pdb`, writes a combined log to `$E2E_PDB_LOG` (default `/tmp/pdb.log`), exits with pytest's own status, and cleans up the FIFO and its holder process even when the run is interrupted. Extra arguments are passed through to pytest.
+The wrapper gives pytest a FIFO as stdin that stays open until the run ends, so pdb waits for input instead of reading end of input. It passes your arguments to pytest followed by `-v -s --pdb`, writes a combined log to `$E2E_PDB_LOG` (default `/tmp/pdb.log`), and exits with pytest's own status. When it starts, it prints its PID, the log path and the stop command on one line of stderr, for example `e2e-pdb: pid=12345 log=/tmp/pdb.log (stop with: kill 12345)`.
 
 **Do not hand-roll `sleep infinity | uv run pytest …`.** It holds stdin open, but `sleep` never writes, so it never takes SIGPIPE when pytest exits and the shell waits on it forever — the command hangs after the run finishes, **including when the test passes**. A background job started that way never reports completion, and any consumer that buffers rather than streams (`tail`, a pager) discards the output when you finally kill it.
 
-On failure pytest stays paused. pdb can't receive commands over the dummy stdin, so inspect with `kubectl` from a separate shell, then kill **that** pytest by PID or job id when you're done. Do not `pkill -f pytest`: the pattern matches every pytest on the host, and on a shared dev box or a multi-worktree checkout that kills other people's runs (and orphans their vclusters — clean those up with `vcluster delete <name>`).
+On failure pytest stays paused in pdb. Inspect the cluster with `kubectl` from a second shell. To stop the run, use `kill <pid>` with the PID that the wrapper prints when it starts. pytest leaves pdb and runs its session teardown, which deletes the vcluster (unless you passed `--e2e-keep-cluster`), and the wrapper exits with status 143 and removes its FIFO. The same command stops a run whose test is still running. If the wrapper is killed with SIGKILL instead, the run still ends with teardown within about a second.
+
+Do not kill pytest or `uv` directly: the run ends, but pytest skips its teardown and the vcluster keeps running, so you then have to delete it with `vcluster delete <name> --driver=docker`. Do not `pkill -f pytest`: the pattern matches every pytest on the host, and on a shared dev box or a multi-worktree checkout that kills other people's runs and leaves their vclusters running.
 
 Use `.agents/skills/e2e-troubleshoot/SKILL.md` for the structured multi-iteration variant of this `--pdb` workflow.
 
