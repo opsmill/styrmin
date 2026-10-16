@@ -2,7 +2,8 @@
 
 Deploy simple-app twice with service name overrides 'intent' and 'executor'.
 Call executor's /probe?target=intent endpoint and verify DNS resolution and
-HTTP connectivity between the two instances.
+HTTP connectivity between the two instances. Renaming 'executor' must create
+its new Service and replace its alias in the 'intent' namespace (#237, #491).
 """
 
 import asyncio
@@ -126,15 +127,24 @@ async def test_service_rename_creates_new_kubernetes_service(
     discovery_deployments: dict[str, str],
     vcluster: dict,
 ) -> None:
-    """#237: renaming a deployed service must create the new Service object."""
+    """#237: renaming a deployed service must create the new Service object.
+
+    #491: the alias in the peer namespace follows the rename, and the alias
+    with the old name is deleted.
+    """
     kubeconfig_path = vcluster["kubeconfig_path"]
     deployment_id = discovery_deployments["executor"]
     namespace = f"styrmin-{deployment_id}"
+    peer_namespace = f"styrmin-{discovery_deployments['intent']}"
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
 
-    # Pre-rename: Service "executor" exists.
+    # Pre-rename: Service "executor" exists, and its alias in the peer namespace.
     before = await _find_service(kr8s_api, namespace, "executor")
     assert before is not None, "Pre-rename Service should exist"
+    aliases = await _wait_for_alias_names(
+        kr8s_api, peer_namespace, deployment_id, {"executor"}
+    )
+    assert aliases == {"executor"}, f"Pre-rename aliases: {sorted(aliases)}"
 
     # Trigger the rename via the same path that #237 broke.
     await scenario_driver.update_deployment(
@@ -164,6 +174,44 @@ async def test_service_rename_creates_new_kubernetes_service(
         "This is #237 regressing — the new instance's context did not "
         "include the renamed service."
     )
+
+    aliases = await _wait_for_alias_names(
+        kr8s_api, peer_namespace, deployment_id, {"after-rename"}
+    )
+    assert aliases == {"after-rename"}, (
+        f"Aliases of the renamed service in {peer_namespace}: {sorted(aliases)}. "
+        "The alias with the old name 'executor' must be deleted (#491)."
+    )
+
+
+async def _wait_for_alias_names(
+    kr8s_api: kr8s.asyncio.Api,
+    namespace: str,
+    deployment_id: str,
+    expected: set[str],
+    timeout: float = 60.0,
+) -> set[str]:
+    """Names of the aliases in *namespace* of the services of *deployment_id*.
+
+    Polls until they are *expected* or *timeout* runs out, and returns the last names.
+    """
+    deadline = time.time() + timeout
+    while True:
+        names = {
+            svc.name
+            async for svc in AsyncService.list(
+                namespace=namespace,
+                label_selector={
+                    "styrmin.io/service-alias": "true",
+                    "styrmin.io/deployment-id": deployment_id,
+                },
+                api=kr8s_api,
+            )
+            if isinstance(svc, AsyncService)
+        }
+        if names == expected or time.time() >= deadline:
+            return names
+        await asyncio.sleep(5)
 
 
 async def _find_service(
