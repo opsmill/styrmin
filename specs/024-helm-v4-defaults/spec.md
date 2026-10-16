@@ -46,8 +46,17 @@ The PRD's decisions were taken in a review session of [#435](https://github.com/
 - Q: How do existing releases move from client-side to server-side apply? → A: They do not. Upgrades and rollbacks keep `auto`, so a release keeps the apply method of its previous install or upgrade. Moving existing releases (`spec.upgrade.serverSideApply: enabled`) is out of scope.
 - Q: Which E2E tests need to run, or be added? → A: The full E2E suite in CI, both variants as marked; the `api` cell of `shard_configuration` run locally, because CI excludes it; and `test_pod_scheduling.py` extended with a Helm hook Job check. No new heavy E2E test is added.
 - Q: Do Helm hooks receiving post-render patches count as a defect to prevent? → A: No. It is intended behaviour, and the driver documentation states which patches reach Helm hooks.
-- Q: Do server-side apply field ownership conflicts get special handling? → A: No. A failed upgrade is shown like any other FluxCD failure, and FluxCD rolls back. Whether helm-controller v1.6.5 forces conflicts is looked up during planning and recorded in the documentation.
+- Q: Do server-side apply field ownership conflicts get special handling? → A: No. helm-controller v1.6.5 always forces conflicts under server-side apply (see the planning session below), so a conflict does not fail an upgrade.
 - Q: Add E2E checks for `Stalled` and the readiness timeout, or accept the unit tests that use recorded FluxCD states? → A: Accept the unit tests (`test_styrmin_deployment_timer.py`, `steps/test_operator_history_failures.py`) for these two outcomes, and record the gap. This feature changes no operator rule, and reaching either outcome in E2E needs FluxCD to use all its retries or the 270-second timeout to pass, in a session that other tests share. The PRD leaves this open; the decision is flagged for the maintainer to confirm, as AGENTS.md asks before E2E coverage is left out.
+
+### Session 2026-10-16 (planning research, [research.md](research.md))
+
+- Q: Does helm-controller v1.6.5 force field ownership conflicts under server-side apply? → A: Yes, always, with field manager `helm-controller`, and no HelmRelease field turns it off (R-002). A field of a chart resource that another tool changed returns to the chart's value at the next upgrade; the upgrade does not fail. The driver documentation says this instead of "can make the next upgrade fail".
+- Q: Does Helm v4's kstatus wait end early on a failed resource? → A: Yes for a resource kstatus reports `Failed`, but a Deployment with pods in `ImagePullBackOff` stays `InProgress`, so FluxCD still waits the full 5 minutes and the failed step keeps the pods' reason (R-005).
+- Q: Does helm-controller upgrade an in-sync release when only its defaults change? → A: No (R-003). Releases installed with the gate keep client-side apply on every later upgrade and rollback (R-004).
+- Q: Does Helm v4 write release Secrets of type `helm.sh/release.v1`? → A: Yes, with the same labels and encoding, and one new record field, `apply_method` (R-006).
+- Q: Does any post-render patch fail on a Helm hook? → A: The patch that adds Styrmin's labels to every resource fails the whole render when a resource has no `metadata.labels` (R-008). Today only templates reach it, and chart templates carry labels; a chart hook without labels would fail every install and upgrade of that driver. The patch becomes a strategic merge that adds the labels map when it is missing (FR-013).
+- Q: The PRD's FR-003 names the hook Job's "node selector". → A: Styrmin's scheduling settings have no node selector; nodes are chosen with node affinity and tolerations. The check covers those (R-009). The E2E vcluster has one node, so the check is that the hook Job's pod has the settings and completed.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -65,7 +74,7 @@ The user needs from the PRD, numbered as there:
 3. As a user who creates a deployment, I want it to reach `Running` with the same steps as today.
 4. As an administrator who upgrades the agent chart, I want the upgrade to leave existing deployments unchanged, with no new Helm release revision and no pod restarts, so that the agent upgrade does not interrupt the applications users run.
 5. As a driver author whose chart has Helm hook Jobs, I want those Jobs to run with the deployment's scheduling settings, so that they can run on the nodes the deployment is pinned to, including nodes with taints that only the deployment's tolerations allow.
-6. As a driver author, I want the driver documentation to state which post-render patches reach Helm hooks, and that an action which changes a resource the chart owns can make the next upgrade fail, so that I can write charts and actions that work with Styrmin.
+6. As a driver author, I want the driver documentation to state which post-render patches reach Helm hooks, and that an action which changes a resource the chart owns can make the next upgrade fail, so that I can write charts and actions that work with Styrmin. (Research R-002: the upgrade does not fail; the changed field returns to the chart's value. The documentation states what happens.)
 7. As a Styrmin maintainer, I want Styrmin to stop depending on the `UseHelm3Defaults` gate, so that a FluxCD release without the gate does not change how deployments behave.
 
 The PRD defines one user journey (P1). The stories below split it so each part can be checked on its own; all four ship in one change.
@@ -100,6 +109,7 @@ A driver author's chart has a Helm hook Job. A user pins the deployment to nodes
 
 1. **Given** a deployment pinned to nodes with a node selector and tolerations, and a chart with a pre-upgrade Helm hook Job, **When** the deployment is upgraded, **Then** the hook Job's pod has the deployment's node selector and tolerations and runs on a pinned node.
 2. **Given** the same deployment, **When** the hook Job is created, **Then** it carries Styrmin's labels.
+3. **Given** a chart whose Helm hook has no `metadata.labels`, **When** the deployment is installed or upgraded, **Then** the render succeeds and the hook carries Styrmin's labels.
 
 ---
 
@@ -128,7 +138,7 @@ The documentation states the new behaviour in the same change: which post-render
 
 **Acceptance Scenarios**:
 
-1. **Given** the driver documentation, **When** a driver author reads it, **Then** it lists which post-render patches reach Helm hooks and states that an action which changes a resource the chart owns can make the next upgrade fail.
+1. **Given** the driver documentation, **When** a driver author reads it, **Then** it lists which post-render patches reach Helm hooks and states that, for a deployment installed with server-side apply, a field of a chart resource that an action changes returns to the chart's value at the next upgrade.
 2. **Given** the operator and CRDs page, **When** an operator reads it, **Then** it states that helm-controller runs with Helm v4 defaults, not with `UseHelm3Defaults`.
 
 ---
@@ -136,15 +146,16 @@ The documentation states the new behaviour in the same change: which post-render
 ### Edge Cases
 
 - **Existing releases**: they keep client-side apply. They switch to kstatus health checks and `combined` post-rendering at their next install or upgrade.
-- **Restore and environment clone**: the operator rewrites restored release Secrets of type `helm.sh/release.v1` and keeps every field of the release record ([`operator/restore_recovery.py`](../../backend/styrmin_backend/operator/restore_recovery.py)). It is not known whether Helm v4 writes Secrets of the same type. The backup and clone E2E tests fail if it does not.
-- **Field ownership conflicts under server-side apply**: for deployments created after the change, a field that `kubectl`, a driver action or an autoscaler changes can make the next upgrade fail, or Helm can take the field back. It is not known whether helm-controller forces conflicts. A failed upgrade is shown like any other FluxCD failure, and FluxCD rolls back. Styrmin changes workloads only through post-render patches, so it causes no such conflict itself.
+- **Restore and environment clone**: the operator rewrites restored release Secrets of type `helm.sh/release.v1` and keeps every field of the release record ([`operator/restore_recovery.py`](../../backend/styrmin_backend/operator/restore_recovery.py)). Helm v4 writes Secrets of the same type and encoding, with one new field, `apply_method`, which the restore keeps (R-006). The backup and clone E2E tests confirm it.
+- **Field ownership conflicts under server-side apply**: for deployments created after the change, a field that the chart sets and that `kubectl`, a driver action or an autoscaler changed returns to the chart's value at the next upgrade, because helm-controller always forces conflicts (R-002). A field the chart does not set stays as the other tool left it. Styrmin changes workloads only through post-render patches, so it causes no such conflict itself.
+- **Helm hook without labels**: a chart resource without `metadata.labels` fails the current label patch (R-008). After the change it renders and receives Styrmin's labels (FR-013).
 - **Which post-render patches reach Helm hooks with `combined`** ([`application.py` patch assembly](../../backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py)):
   - Styrmin's labels reach every resource, because the label patch targets every name.
   - Scheduling settings reach `Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `CronJob` and `ReplicaSet` resources ([`scheduling/patch_builder.py`](../../backend/styrmin_backend/services/scheduling/patch_builder.py)).
   - Env var, image and container overrides and the component-container guard reach a Helm hook `Deployment` or `StatefulSet` that matches a component's labels ([`component_container/patch_builder.py`](../../backend/styrmin_backend/services/component_container/patch_builder.py)).
 - **Example drivers**: rendered with default values on 2026-10-15, the infrahub chart has no Helm hook, and the semaphore chart has one `test-success` Pod, which Helm runs only for a Helm test. Neither changes. Third-party driver charts can have Helm hooks.
 - **Ingress controller**: its HelmRelease can stay `Progressing` while a LoadBalancer gets no external IP, so the operator counts it as ready when one of its pods is ready. It is not known whether kstatus waits for the external IP. The result the user views is the same either way.
-- **Early end of the kstatus wait**: it is not known whether Helm v4's kstatus wait ends early on a failed resource. If it does, FluxCD would roll back before the operator's 270-second timeout and the pods' reason would be lost from the failed step (SC-002).
+- **Early end of the kstatus wait**: FluxCD's wait ends early when a resource reaches kstatus `Failed`, for example a failed template `Job` or a Deployment whose `progressDeadlineSeconds` passed (R-005). The task then shows FluxCD's failure sooner than before. A Deployment with pods in `ImagePullBackOff` stays `InProgress`, so that case still waits the full 5 minutes. A chart that sets `progressDeadlineSeconds` below 270 seconds gets FluxCD's `ProgressDeadlineExceeded` failure in the failed step instead of the pods' reason.
 - **Turning the gate on again**: releases installed while the gate was off keep server-side apply, because upgrades use `auto`. The new ADR records this.
 
 ## Requirements *(mandatory)*
@@ -161,12 +172,14 @@ The documentation states the new behaviour in the same change: which post-render
   - Verification: a manual check recorded in the implementing pull request (SC-003).
 - **FR-005**: The `simple-app` test chart MUST offer a pre-upgrade Helm hook Job that carries a component's labels, behind a chart value that is off by default, so that only the scheduling test turns it on. The 22 E2E test files that deploy `simple-app` MUST NOT get the Job.
 - **FR-006**: The operator and CRDs page (`docs/docs/concepts-and-architecture/operator-and-crds.md`) MUST state that helm-controller runs with Helm v4 defaults, replacing the text that says it runs with `UseHelm3Defaults`.
-- **FR-007**: The "Creating a driver" page (`docs/docs/drivers/creating-a-driver.md`) MUST state which post-render patches reach Helm hooks, and that an action which changes a resource the chart owns can make the next upgrade fail.
+- **FR-007**: The "Creating a driver" page (`docs/docs/drivers/creating-a-driver.md`) MUST state which post-render patches reach Helm hooks, and that, for a deployment installed with server-side apply, a field of a chart resource that an action changes returns to the chart's value at the next upgrade (R-002).
 - **FR-008**: The operator knowledge page (`dev/knowledge/agent/operator.md`) MUST replace the "Helm v3 behaviour" item and the statement that the rules were observed with Helm v3 behaviour. Its statement that it was not checked whether v1.6.5 still reports the rollback of a post-renderers change as ready MUST be updated if the E2E runs answer that.
 - **FR-009**: `CONTEXT.md` MUST gain a **Helm hook** entry, and the **Hook** entry MUST list "Helm hook" among the terms to avoid.
 - **FR-010**: A new ADR MUST record the decisions: "helm-controller runs with Helm v4 defaults; releases keep their apply method". It MUST state that if the gate were turned on again, releases installed in the meantime would keep server-side apply.
 - **FR-011**: A towncrier fragment MUST record that new installs use server-side apply and that Helm hooks receive post-render patches.
 - **FR-012**: The GraphQL API, SDK, CLI, frontend, database schema and error types MUST NOT change.
+- **FR-013**: Styrmin's labels MUST reach every chart resource, including a Helm hook or template without `metadata.labels`, without failing the render, and MUST keep the resource's existing labels (R-008).
+  - Verification: a kustomize integration test with a labelled resource, an unlabelled resource and an unlabelled hook Job.
 
 ### Key Entities
 
@@ -181,7 +194,8 @@ The documentation states the new behaviour in the same change: which post-render
 
 - **SC-001**: For every failure the existing E2E tests cover, the task shows the same failed step, reason and message as before the change.
 - **SC-002**: When a change fails because an image cannot be pulled, the failed HelmRelease step names the pods' reason (`ImagePullBackOff`) in every run.
-- **SC-003**: Upgrading the agent chart creates no new Helm release revision for any existing deployment, so no pod restarts. It is not known whether helm-controller upgrades a release that is in sync when only its own defaults change; the manual check answers this.
+- **SC-006**: A driver whose chart has a Helm hook without labels installs and upgrades without a render error.
+- **SC-003**: Upgrading the agent chart creates no new Helm release revision for any existing deployment, so no pod restarts. Research R-003 shows helm-controller does not upgrade a release that is in sync when only its own defaults change; the manual check confirms it.
 - **SC-004**: The Helm hook Job of a deployment pinned to nodes runs on those nodes in every run.
 - **SC-005**: A deployment created after the change reaches `Running` with the same steps as before the change.
 
