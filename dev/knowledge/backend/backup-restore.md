@@ -417,6 +417,16 @@ unassign removes them. Styrmin does not rename them, because a Velero restore ne
 
 The flows take the location's id (`bsl_id`) and never its name.
 
+A change to a location's access key or secret key starts one `sync-bsl-update-credentials` run
+when at least one environment has the location (`update_backup_storage_location` in
+`api/schema/mutation.py`). No run names a cluster, and neither do the `sync-bsl-create` and
+`sync-bsl-delete` runs: they are USER flows, so each run goes to the agent that polls the work
+pool. Styrmin allows one cluster
+([ADR-039](../../adr/0039-single-cluster-platform-scope.md)), so that agent is the agent of the
+only cluster. Before #498 the credentials update started one run per cluster of the location's
+environments, which with several clusters would not have reached each cluster. How a run would
+reach a given cluster if Styrmin allowed several clusters is not decided.
+
 ## Restore Lifecycle
 
 A restore is a multi-stage operation: velero recreates the namespace and its resources, but Kubernetes does not restore the `status` subresource and kopf does not fire `on.create` for a restored CRD (the `kopf.zalando.org/last-handled-configuration` annotation is restored too, fooling kopf into thinking it has already handled the resource). The styrmin restore workflow therefore drives the lifecycle explicitly so the deployment converges back to a healthy state without the operator's 300 s readiness timeout tripping.
