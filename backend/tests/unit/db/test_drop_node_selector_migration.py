@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import sqlalchemy as sa
 from alembic import command
+from alembic.script import ScriptDirectory
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from styrmin_backend.cli.db import _get_alembic_config
@@ -182,3 +183,31 @@ def test_upgrade_removes_node_selector_from_every_stored_config(
             {"deployment_name": "other", "config": None},
         ]
     ]
+
+
+def test_upgrade_rewrites_rows_past_the_first_batch(database_url: str) -> None:
+    alembic_config = _get_alembic_config()
+    revision = ScriptDirectory.from_config(alembic_config).get_revision(REVISION)
+    assert revision is not None
+    count = 2 * revision.module._BATCH_SIZE + 1
+    command.upgrade(alembic_config, PREVIOUS_REVISION)
+    _run(
+        database_url,
+        [
+            sa.insert(CLUSTER).values(
+                [
+                    {
+                        "id": uuid.uuid4(),
+                        "name": f"cluster-{index}",
+                        "config": {"node_selector": "pool=apps"},
+                    }
+                    for index in range(count)
+                ]
+            )
+        ],
+    )
+
+    command.upgrade(alembic_config, REVISION)
+
+    [configs] = _run(database_url, [sa.select(CLUSTER.c.config)])
+    assert [row.config for row in configs] == [{}] * count
