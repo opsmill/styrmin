@@ -30,11 +30,14 @@ from uuid import UUID, uuid4
 import kopf
 import pytest
 from kubernetes_asyncio.client import (
+    V1Namespace,
+    V1NamespaceStatus,
     V1ObjectMeta,
     V1Service,
     V1ServiceList,
     V1ServiceSpec,
 )
+from kubernetes_asyncio.client.api_client import ApiException
 
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.operator.config import ANNOTATION_SKIP_TEARDOWN
@@ -69,14 +72,20 @@ class _Patch:
 class _Logger:
     def __init__(self) -> None:
         self.infos: list[str] = []
+        self.warnings: list[str] = []
+        self.exceptions: list[str] = []
 
     def info(self, msg: str, *args: Any, **__: Any) -> None:
         self.infos.append(msg % args)
 
-    def warning(self, *_: Any, **__: Any) -> None: ...
+    def warning(self, msg: str, *args: Any, **__: Any) -> None:
+        self.warnings.append(msg % args)
+
     def debug(self, *_: Any, **__: Any) -> None: ...
     def error(self, *_: Any, **__: Any) -> None: ...
-    def exception(self, *_: Any, **__: Any) -> None: ...
+
+    def exception(self, msg: str, *args: Any, **__: Any) -> None:
+        self.exceptions.append(msg % args)
 
 
 class _Stopped:
@@ -443,18 +452,8 @@ class _FakeKubernetesClient:
     async def __aexit__(self, *_: object) -> None: ...
 
 
-@pytest.mark.anyio
-async def test_teardown_deletes_service_aliases_before_the_deployment_services(
-    mocker,
-) -> None:
-    """Step 1 of the teardown runs before the deployment's own Services are listed."""
-    deployment_id = str(uuid4())
-    namespace = get_kubernetes_reference(UUID(deployment_id))
-    logger = _Logger()
-    parent = mocker.Mock()
-    aliases_mock = mocker.patch.object(
-        handlers_module, "_delete_service_aliases", autospec=True
-    )
+def _patch_teardown_kubernetes(mocker) -> tuple[Any, Any]:
+    """Patch steps 2 to 4 of the teardown; return the listing mock and the CustomObjectsApi."""
     list_mock = mocker.patch(
         "styrmin_backend.operator.reconciler.list_managed_resources",
         new_callable=mocker.AsyncMock,
@@ -471,6 +470,22 @@ async def test_teardown_deletes_service_aliases_before_the_deployment_services(
     custom_api = mocker.MagicMock()
     custom_api.delete_namespaced_custom_object = mocker.AsyncMock()
     mocker.patch("kubernetes_asyncio.client.CustomObjectsApi", return_value=custom_api)
+    return list_mock, custom_api
+
+
+@pytest.mark.anyio
+async def test_teardown_deletes_service_aliases_before_the_deployment_services(
+    mocker,
+) -> None:
+    """Step 1 of the teardown runs before the deployment's own Services are listed."""
+    deployment_id = str(uuid4())
+    namespace = get_kubernetes_reference(UUID(deployment_id))
+    logger = _Logger()
+    parent = mocker.Mock()
+    aliases_mock = mocker.patch.object(
+        handlers_module, "_delete_service_aliases", autospec=True
+    )
+    list_mock, custom_api = _patch_teardown_kubernetes(mocker)
     parent.attach_mock(aliases_mock, "delete_service_aliases")
     parent.attach_mock(list_mock, "list_managed_resources")
 
@@ -571,6 +586,290 @@ async def test_delete_handler_passes_no_deletion_request_to_the_teardown(
     teardown_mock.assert_awaited_once()
     assert teardown_mock.await_args.kwargs["deployment_id"] == deployment_id
     assert teardown_mock.await_args.kwargs["deletion_requested"] is False
+
+
+# ---------------------------------------------------------------------------
+# 1c. Failed alias deletions, and the guards that keep aliases (#503)
+# ---------------------------------------------------------------------------
+
+
+def _aliases_of(deployment_id: UUID) -> tuple[str, str, list[V1Service]]:
+    """Return the deployment's namespace, a peer's namespace, and two aliases held there."""
+    namespace = get_kubernetes_reference(deployment_id)
+    peer_namespace = get_kubernetes_reference(uuid4())
+    aliases = [
+        _alias("first", peer_namespace, namespace, deployment_id),
+        _alias("second", peer_namespace, namespace, deployment_id),
+    ]
+    return namespace, peer_namespace, aliases
+
+
+@pytest.mark.anyio
+async def test_delete_service_aliases_counts_an_alias_already_gone(mocker) -> None:
+    """FR-004, US3 scenario 1: a 404 (``False``) counts as deleted; the next alias goes."""
+    deployment_id = uuid4()
+    namespace, peer_namespace, aliases = _aliases_of(deployment_id)
+    _, delete_mock, _ = _patch_alias_primitives(mocker, aliases)
+    delete_mock.side_effect = [False, True]
+    logger = _Logger()
+
+    await _delete_service_aliases(
+        deployment_id=str(deployment_id),
+        namespace=namespace,
+        deletion_requested=True,
+        logger=logger,
+    )
+
+    assert delete_mock.await_args_list == [
+        call(name="first", namespace=peer_namespace),
+        call(name="second", namespace=peer_namespace),
+    ]
+    assert f"Deleted 2 service aliases of {deployment_id}" in logger.infos
+    assert logger.exceptions == []
+
+
+@pytest.mark.anyio
+async def test_delete_service_aliases_logs_a_failed_delete_and_deletes_the_next(
+    mocker,
+) -> None:
+    """FR-004, SC-003: the log names the alias's namespace and name; the loop continues."""
+    deployment_id = uuid4()
+    namespace, peer_namespace, aliases = _aliases_of(deployment_id)
+    _, delete_mock, _ = _patch_alias_primitives(mocker, aliases)
+    delete_mock.side_effect = [ApiException(status=500), True]
+    logger = _Logger()
+
+    await _delete_service_aliases(
+        deployment_id=str(deployment_id),
+        namespace=namespace,
+        deletion_requested=True,
+        logger=logger,
+    )
+
+    assert delete_mock.await_args_list == [
+        call(name="first", namespace=peer_namespace),
+        call(name="second", namespace=peer_namespace),
+    ]
+    assert logger.exceptions == [
+        f"Failed to delete service alias {peer_namespace}/first"
+    ]
+    assert f"Deleted 1 service aliases of {deployment_id}" in logger.infos
+
+
+@pytest.mark.anyio
+async def test_delete_service_aliases_logs_a_failed_listing_and_returns(mocker) -> None:
+    """FR-004, US3 scenario 3: a listing error is logged, not raised."""
+    deployment_id = uuid4()
+    namespace = get_kubernetes_reference(deployment_id)
+    list_mock, delete_mock, _ = _patch_alias_primitives(mocker, [])
+    list_mock.side_effect = ApiException(status=500)
+    logger = _Logger()
+
+    await _delete_service_aliases(
+        deployment_id=str(deployment_id),
+        namespace=namespace,
+        deletion_requested=True,
+        logger=logger,
+    )
+
+    delete_mock.assert_not_called()
+    assert logger.exceptions == [
+        f"Failed to list the service aliases of {deployment_id}"
+    ]
+
+
+@pytest.mark.anyio
+async def test_deletion_requested_handler_finishes_the_teardown_when_listing_aliases_fails(
+    mocker,
+) -> None:
+    """FR-004: the HelmRelease is still deleted and the namespace deletion still requested."""
+    deployment_id = str(uuid4())
+    namespace = get_kubernetes_reference(UUID(deployment_id))
+    list_aliases_mock, _, _ = _patch_alias_primitives(mocker, [])
+    list_aliases_mock.side_effect = ApiException(status=500)
+    _, custom_api = _patch_teardown_kubernetes(mocker)
+    delete_ns_mock = mocker.patch.object(
+        handlers_module, "_request_namespace_deletion", autospec=True
+    )
+    logger = _Logger()
+
+    await kopf_on_styrmin_deployment_deletion_requested(
+        spec={
+            "releaseReference": "rel-1",
+            "deletionRequested": True,
+            "deploymentId": deployment_id,
+        },
+        status={"phase": DeploymentPhase.READY.value},
+        name="dep-1",
+        namespace=namespace,
+        patch=_Patch(),
+        logger=logger,
+    )
+
+    list_aliases_mock.assert_awaited_once()
+    assert logger.exceptions == [
+        f"Failed to list the service aliases of {deployment_id}"
+    ]
+    custom_api.delete_namespaced_custom_object.assert_awaited_once_with(
+        group="helm.toolkit.fluxcd.io",
+        version="v2",
+        namespace=namespace,
+        plural="helmreleases",
+        name="rel-1",
+    )
+    delete_ns_mock.assert_awaited_once_with(namespace=namespace, logger=logger)
+
+
+@pytest.mark.anyio
+async def test_delete_handler_with_skip_teardown_makes_no_alias_call(mocker) -> None:
+    """FR-006, US3 scenario 4: the restored copy of a source's CR keeps every alias."""
+    deployment_id = uuid4()
+    namespace, _, aliases = _aliases_of(deployment_id)
+    list_mock, delete_mock, get_namespace_mock = _patch_alias_primitives(
+        mocker, aliases
+    )
+    _patch_teardown_kubernetes(mocker)
+
+    await kopf_on_styrmin_deployment_delete(
+        spec={"releaseReference": "rel-1", "deploymentId": str(deployment_id)},
+        status={"phase": DeploymentPhase.RESTORING.value},
+        name="dep-1",
+        namespace=namespace,
+        annotations={ANNOTATION_SKIP_TEARDOWN: "true"},
+        patch=_Patch(),
+        memo=kopf.Memo(),
+        logger=_Logger(),
+    )
+
+    get_namespace_mock.assert_not_called()
+    list_mock.assert_not_called()
+    delete_mock.assert_not_called()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "namespace_object",
+    [V1Namespace(status=V1NamespaceStatus(phase="Terminating")), None],
+    ids=["terminating", "gone"],
+)
+async def test_delete_service_aliases_keeps_aliases_when_the_namespace_goes_without_a_request(
+    mocker, namespace_object: V1Namespace | None
+) -> None:
+    """FR-017, SC-006: a restore deletes the namespace, and with it the CR, without a
+    deletion request; the restored deployment keeps running, so its aliases stay."""
+    deployment_id = uuid4()
+    namespace, _, aliases = _aliases_of(deployment_id)
+    list_mock, delete_mock, get_namespace_mock = _patch_alias_primitives(
+        mocker, aliases
+    )
+    get_namespace_mock.return_value = namespace_object
+    logger = _Logger()
+
+    await _delete_service_aliases(
+        deployment_id=str(deployment_id),
+        namespace=namespace,
+        deletion_requested=False,
+        logger=logger,
+    )
+
+    get_namespace_mock.assert_awaited_once_with(name=namespace)
+    list_mock.assert_not_called()
+    delete_mock.assert_not_called()
+    assert (
+        f"Namespace {namespace} is being deleted without a deletion request; "
+        "keeping its service aliases"
+    ) in logger.infos
+
+
+@pytest.mark.anyio
+async def test_delete_service_aliases_keeps_aliases_when_the_namespace_cannot_be_read(
+    mocker,
+) -> None:
+    """FR-017: without a deletion request, an unreadable namespace keeps the aliases."""
+    deployment_id = uuid4()
+    namespace, _, aliases = _aliases_of(deployment_id)
+    list_mock, delete_mock, get_namespace_mock = _patch_alias_primitives(
+        mocker, aliases
+    )
+    get_namespace_mock.side_effect = ApiException(status=500)
+    logger = _Logger()
+
+    await _delete_service_aliases(
+        deployment_id=str(deployment_id),
+        namespace=namespace,
+        deletion_requested=False,
+        logger=logger,
+    )
+
+    list_mock.assert_not_called()
+    delete_mock.assert_not_called()
+    assert logger.exceptions == [
+        f"Failed to read namespace {namespace}; keeping its service aliases"
+    ]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("deletion_requested", "phase"),
+    [(False, "Active"), (True, "Terminating")],
+    ids=["kubectl-delete-active-namespace", "deletion-requested-terminating-namespace"],
+)
+async def test_delete_service_aliases_deletes_the_aliases(
+    mocker, deletion_requested: bool, phase: str
+) -> None:
+    """FR-005: ``kubectl delete styrmindeployment`` leaves the namespace ``Active``; with
+    a deletion request the namespace phase does not matter."""
+    deployment_id = uuid4()
+    namespace, peer_namespace, aliases = _aliases_of(deployment_id)
+    _, delete_mock, get_namespace_mock = _patch_alias_primitives(mocker, aliases)
+    get_namespace_mock.return_value = V1Namespace(status=V1NamespaceStatus(phase=phase))
+
+    await _delete_service_aliases(
+        deployment_id=str(deployment_id),
+        namespace=namespace,
+        deletion_requested=deletion_requested,
+        logger=_Logger(),
+    )
+
+    assert delete_mock.await_args_list == [
+        call(name="first", namespace=peer_namespace),
+        call(name="second", namespace=peer_namespace),
+    ]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("deletion_requested", [True, False])
+@pytest.mark.parametrize(
+    "has_deployment_id", [True, False], ids=["source-id", "no-deployment-id"]
+)
+async def test_delete_service_aliases_makes_no_api_call_outside_the_deployment_namespace(
+    mocker, deletion_requested: bool, has_deployment_id: bool
+) -> None:
+    """Research R-001: a restored copy of a source's CR is in the counterpart's
+    namespace but carries the source's id, and the source keeps running."""
+    source_id = uuid4()
+    counterpart_namespace = get_kubernetes_reference(uuid4())
+    deployment_id = str(source_id) if has_deployment_id else ""
+    _, _, aliases = _aliases_of(source_id)
+    list_mock, delete_mock, get_namespace_mock = _patch_alias_primitives(
+        mocker, aliases
+    )
+    logger = _Logger()
+
+    await _delete_service_aliases(
+        deployment_id=deployment_id,
+        namespace=counterpart_namespace,
+        deletion_requested=deletion_requested,
+        logger=logger,
+    )
+
+    get_namespace_mock.assert_not_called()
+    list_mock.assert_not_called()
+    delete_mock.assert_not_called()
+    assert logger.warnings == [
+        f"Namespace {counterpart_namespace} is not the namespace of deployment "
+        f"{deployment_id!r}; keeping its service aliases"
+    ]
 
 
 # ---------------------------------------------------------------------------
