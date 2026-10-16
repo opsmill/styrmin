@@ -309,6 +309,17 @@ describe("EditClusterDialog", () => {
     );
   });
 
+  it("names the stored values the form keeps without listing them", async () => {
+    await openDialog();
+
+    expect(
+      screen.getByText(
+        /Scheduling, the database size and the backup retention are kept as they are/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/node selector/i)).not.toBeInTheDocument();
+  });
+
   it("changing only the FQDN suffix keeps every other stored value", async () => {
     const user = await openDialog();
 

@@ -138,8 +138,8 @@ export function StorageRuntimeSection({
         </form.Field>
 
         <p className="text-xs italic text-muted-foreground">
-          Database size, storage class, and node selector are shown read-only on
-          the Settings tab.
+          Database size and storage class are shown read-only on the Settings
+          tab.
         </p>
       </div>
     </section>
