@@ -32,7 +32,7 @@ description: "Tasks for 026: deleting a deployment deletes its service aliases"
 
 **Purpose**: a green baseline before any change.
 
-- [ ] T001 Run `uv sync`, then `uv run pytest backend/tests/unit/agent/test_service_aliases.py backend/tests/unit/agent/test_delete_service.py backend/tests/unit/test_deployment_deletion_operator.py backend/tests/unit/agent/test_kopf_deletion_cycle.py backend/tests/unit/test_restore_recovery_cross_target.py -q`, and note the result as the baseline (no file change)
+- [X] T001 Run `uv sync`, then `uv run pytest backend/tests/unit/agent/test_service_aliases.py backend/tests/unit/agent/test_delete_service.py backend/tests/unit/test_deployment_deletion_operator.py backend/tests/unit/agent/test_kopf_deletion_cycle.py backend/tests/unit/test_restore_recovery_cross_target.py -q`, and note the result as the baseline (no file change)
 
 ---
 
