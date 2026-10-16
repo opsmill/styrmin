@@ -202,6 +202,23 @@ def _rendered_ingress_values(deployment: Deployment) -> dict[str, Any] | None:
     return _ingress_values(rendered_dedicated_ingress(deployment))
 
 
+def _resolved_ingress_values(
+    deployment: Deployment,
+    cluster_config: ClusterConfig,
+    environment_config: EnvironmentConfig,
+) -> dict[str, Any] | None:
+    """The ``dedicated_ingress`` values the deployment's next instance is rendered with.
+
+    The deployment's own value, else the environment's effective value.
+    """
+    resolved = resolve_instance_config(
+        cluster=cluster_config,
+        environment=environment_config,
+        deployment=DeploymentConfig.model_validate(deployment.config or {}),
+    )
+    return _ingress_values(resolved.dedicated_ingress)
+
+
 def _entry(
     deployment: Deployment, environment: _EnvironmentRef, task_id: UUID | None = None
 ) -> FanOutDeployment:
@@ -227,13 +244,16 @@ def _changed_applications(
     applications: list[Deployment],
     environment: _EnvironmentRef,
     at_config: Callable[[Deployment], bool],
+    moves_onto_controller: Callable[[Deployment], bool],
     result: FanOutResult,
-) -> list[Deployment]:
-    """The applications that ``at_config`` finds not at their config."""
-    changed = []
+) -> tuple[list[Deployment], set[UUID]]:
+    """The applications that ``at_config`` finds not at their config, and the ids of those that move onto the controller."""
+    changed: list[Deployment] = []
+    moving: set[UUID] = set()
     for application in applications:
         try:
             converged = at_config(application)
+            moves = not converged and moves_onto_controller(application)
         except Exception:  # noqa: BLE001 — one deployment must not stop the others (FR-002)
             result.evaluation_failed += 1
             result.failed_to_start.append(_entry(application, environment))
@@ -251,7 +271,9 @@ def _changed_applications(
             result.skipped_for_restore.append(_entry(application, environment))
         else:
             changed.append(application)
-    return changed
+            if moves:
+                moving.add(application.id)
+    return changed, moving
 
 
 def _controller_action(
@@ -288,10 +310,11 @@ async def _plan_environment(
 ) -> _EnvironmentPlan:
     """Decide what the fan-out does in one environment.
 
-    An application whose ``dedicated_ingress`` changes to a set value moves only
-    onto a controller that is RUNNING with that value; it waits otherwise
-    (research D4). A ``DELETING`` application is counted as evaluated and left to
-    its teardown. ``at_config`` defaults to the resolved-config comparison (D1).
+    An application whose own resolved ``dedicated_ingress`` changes to a set value
+    moves only onto a controller that is RUNNING with the environment's value; it
+    waits otherwise (research D4, #453). A ``DELETING`` application is counted as
+    evaluated and left to its teardown. ``at_config`` defaults to the
+    resolved-config comparison (D1).
     """
     environment_config = EnvironmentConfig.model_validate(environment.config)
     if at_config is None:
@@ -308,16 +331,22 @@ async def _plan_environment(
         for deployment in deployments
         if not deployment.internal and deployment.status != DeploymentState.DELETING
     ]
-    changed = _changed_applications(applications, environment, at_config, result)
-
     target = _ingress_values(
         effective_dedicated_ingress(environment_config, cluster_config)
     )
-    moving_onto_controller = {
-        application.id
-        for application in changed
-        if target is not None and _rendered_ingress_values(application) != target
-    }
+
+    def _moves_onto_controller(application: Deployment) -> bool:
+        # A deployment that sets its own value keeps it, so it does not move (#453).
+        if target is None:
+            return False
+        resolved = _resolved_ingress_values(
+            application, cluster_config, environment_config
+        )
+        return _rendered_ingress_values(application) != resolved
+
+    changed, moving_onto_controller = _changed_applications(
+        applications, environment, at_config, _moves_onto_controller, result
+    )
     controller = _live_controller(deployments)
     action = _controller_action(
         controller,
