@@ -17,9 +17,9 @@ uv run pytest backend/tests/unit/agent/test_service_aliases.py \
 
 Expected: all pass. They cover, in order of the spec's FR-014:
 
-1. The teardown deletes labelled and unlabelled aliases of the deployment and keeps other deployments' aliases ([contract](contracts/internal-interfaces.md#_delete_service_aliases-deployment_id-str-namespace-str-logger---none-new)).
+1. The teardown deletes labelled and unlabelled aliases of the deployment and keeps other deployments' aliases ([contract](contracts/internal-interfaces.md#operator-teardown-operatorhandlersstyrmin_deploymentpy)).
 2. A 404 counts as deleted; another error is logged and the namespace deletion still runs.
-3. The alias flow writes no alias of a departing deployment and nothing into its namespace, and creates no namespace, both when the context was built while the deployment is `DELETING` and when it was built before the request (the deletion flag appears between the flow's two reads).
+3. The alias flow writes no alias of a departing deployment and nothing into its namespace, and creates no namespace, both when the context was built while the deployment is `DELETING` and when it was built before the request. When the deletion flag appears between the flow's two reads, the flow deletes the alias it wrote.
 4. The context lists a `DELETING` peer's services.
 5. The skip-teardown annotation deletes no alias, and neither does a teardown that a restore's namespace deletion starts.
 6. `apply_service` replaces an alias with a `ClusterIP` Service on 409.
