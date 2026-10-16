@@ -799,10 +799,12 @@ async def test_backup_and_restore_lifecycle(
     assert "velero" in environment.capabilities["backup"], (
         "Environment should have velero backup provider"
     )
+    # #509: the capability names the location's Velero object, which the backup below uses.
+    expected_storage_location = f"styrmin-bsl-{styrmin_resources['bsl_id']}"
     assert (
         environment.capabilities["backup"]["velero"]["storage_location"]
-        == styrmin_resources["bsl_name"]
-    ), f"Backup storage_location should be '{styrmin_resources['bsl_name']}'"
+        == expected_storage_location
+    ), f"Backup storage_location should be '{expected_storage_location}'"
 
     # 0. Set the environment-scope retention policy (016 / FR-001), then let
     #    the redeploy fanout it triggers settle before touching any data —
@@ -2046,6 +2048,12 @@ async def bsl_credentials_block_exists(kubeconfig_path: str, bsl_id: str) -> boo
     return True
 
 
+async def _velero_storage_location(client: StyrminClient, environment_id: str) -> str:
+    environment = await client.environments.get(environment_id=environment_id)
+    assert environment.capabilities is not None
+    return environment.capabilities["backup"]["velero"]["storage_location"]
+
+
 @pytest.mark.ci
 @pytest.mark.shard_backup
 @pytest.mark.api_only(
@@ -2106,9 +2114,15 @@ async def test_renamed_bsl_cluster_objects_follow_the_location_id(
             "Assigning the location should create its objects named after its id, "
             "with the location's keys in the Secret",
         )
+        assert await _velero_storage_location(client, environment.id) == id_name, (
+            "The backup capability should name the location's Velero object"
+        )
 
         await client.backup_storage_locations.update(
             bsl_id, name=f"after-rename-{suffix}"
+        )
+        assert await _velero_storage_location(client, environment.id) == id_name, (
+            "A rename should not change the backup capability (#509)"
         )
         await create_name_based_bsl_objects(
             kubeconfig_path, bsl_id, f"before-rename-{suffix}", bucket
