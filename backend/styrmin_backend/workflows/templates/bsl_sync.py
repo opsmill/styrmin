@@ -2,15 +2,13 @@
 
 Manages the lifecycle of Velero BackupStorageLocation CRDs and their
 credential Secrets on Kubernetes clusters. The flows identify a location by its
-id, never by its name, which an operator can change.
+id, never by its name, which an administrator can change.
 
 INTERNAL flows (styrmin-work-pool): DB lookups, dispatching USER flows.
 USER flows (user-work-pool / K8s Job): K8s operations only.
 """
 
 from __future__ import annotations
-
-from typing import Any
 
 from prefect import flow, task
 from prefect.logging import get_run_logger
@@ -29,8 +27,13 @@ async def create_velero_bsl_task(
     endpoint: str,
     access_key_id: str,
     secret_access_key: str,
-) -> dict[str, Any]:
-    """Create the Velero BSL CRD and credential Secret on the cluster."""
+) -> None:
+    """Create the Velero BSL CRD and credential Secret on the cluster.
+
+    Creates nothing when a Velero BSL with the location's id label already
+    exists, whatever its name, so the cluster never has two Velero locations
+    for one location.
+    """
     from styrmin_backend.agent.service.kubernetes.velero.client import VeleroClient
     from kubernetes_asyncio import client as k8s_client
     from kubernetes_asyncio.config import load_incluster_config
@@ -42,6 +45,12 @@ async def create_velero_bsl_task(
 
     try:
         velero_client = VeleroClient(api_client)
+        if existing := await velero_client.list_bsl_names(bsl_id, namespace):
+            logger.info(
+                f"Velero BSL of location {bsl_id} already exists "
+                f"({', '.join(existing)}), nothing to create"
+            )
+            return
         bsl = VeleroBackupStorageLocation(
             bsl_id=bsl_id,
             namespace=namespace,
@@ -49,13 +58,12 @@ async def create_velero_bsl_task(
             region=region,
             endpoint=endpoint,
         )
-        result = await velero_client.create_bsl(
+        await velero_client.create_bsl(
             bsl=bsl,
             access_key_id=access_key_id,
             secret_access_key=secret_access_key,
         )
         logger.info(f"Created Velero BSL '{bsl.name}' on cluster")
-        return result
     finally:
         await api_client.close()
 
@@ -77,8 +85,11 @@ async def delete_velero_bsl_task(
 
     try:
         velero_client = VeleroClient(api_client)
-        await velero_client.delete_bsl(bsl_id=bsl_id, namespace=namespace)
-        logger.info(f"Deleted the Velero BSL of location {bsl_id} from cluster")
+        deleted = await velero_client.delete_bsl(bsl_id=bsl_id, namespace=namespace)
+        logger.info(
+            f"Deleted {deleted.locations} Velero BSL(s) and {deleted.secrets} "
+            f"credential Secret(s) of location {bsl_id} from cluster"
+        )
     finally:
         await api_client.close()
 
@@ -122,9 +133,9 @@ async def sync_bsl_create_flow(
     endpoint: str,
     access_key_id: str,
     secret_access_key: str,
-) -> dict[str, Any]:
+) -> None:
     """Create a Velero BSL and credentials on the cluster."""
-    return await create_velero_bsl_task(
+    await create_velero_bsl_task(
         bsl_id=bsl_id,
         namespace=namespace,
         bucket=bucket,

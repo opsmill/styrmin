@@ -292,7 +292,9 @@ creates two objects in the `styrmin` namespace:
 - a Secret named `styrmin-bsl-<BSL id>-credentials`, which holds the
   S3 access key and secret key.
 
-Both carry the label `styrmin.io/bsl-id=<BSL id>`. To list them:
+Both carry the label `styrmin.io/bsl-id=<BSL id>`. Styrmin creates them
+only when no Velero `BackupStorageLocation` with that label exists, so
+assigning the same BSL again does not add a second one. To list them:
 
 ```bash
 kubectl get backupstoragelocations.velero.io,secrets -n styrmin \

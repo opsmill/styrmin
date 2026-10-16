@@ -15,6 +15,7 @@ import pytest
 from kubernetes_asyncio.client import ApiException
 
 from styrmin_backend.agent.service.kubernetes.velero.client import (
+    BslDeletion,
     VeleroClient,
     VeleroClientError,
 )
@@ -96,8 +97,9 @@ async def test_delete_bsl_removes_every_labelled_object_whatever_its_name() -> N
     core_api = _core_api(("styrmin-bsl-old-name-credentials",))
 
     with patch(CORE_V1_API, return_value=core_api):
-        await client.delete_bsl(bsl_id=BSL_ID, namespace="styrmin")
+        deleted = await client.delete_bsl(bsl_id=BSL_ID, namespace="styrmin")
 
+    assert deleted == BslDeletion(locations=2, secrets=1)
     deleted_bsls = [
         call.kwargs["name"]
         for call in client.custom_api.delete_namespaced_custom_object.await_args_list
@@ -116,8 +118,9 @@ async def test_delete_bsl_with_nothing_left_in_the_cluster_succeeds() -> None:
     core_api = _core_api()
 
     with patch(CORE_V1_API, return_value=core_api):
-        await client.delete_bsl(bsl_id=BSL_ID, namespace="styrmin")
+        deleted = await client.delete_bsl(bsl_id=BSL_ID, namespace="styrmin")
 
+    assert deleted == BslDeletion(locations=0, secrets=0)
     client.custom_api.delete_namespaced_custom_object.assert_not_awaited()
     core_api.delete_namespaced_secret.assert_not_awaited()
 
@@ -131,7 +134,10 @@ async def test_delete_bsl_treats_an_object_deleted_meanwhile_as_removed() -> Non
     core_api.delete_namespaced_secret.side_effect = ApiException(status=404)
 
     with patch(CORE_V1_API, return_value=core_api):
-        await client.delete_bsl(bsl_id=BSL_ID, namespace="styrmin")
+        deleted = await client.delete_bsl(bsl_id=BSL_ID, namespace="styrmin")
+
+    # Removed, but not by this call.
+    assert deleted == BslDeletion(locations=0, secrets=0)
 
 
 async def test_delete_bsl_removes_the_secret_when_the_velero_object_fails() -> None:
@@ -191,3 +197,30 @@ async def test_update_bsl_secret_raises_when_the_location_has_no_secret() -> Non
         )
 
     core_api.patch_namespaced_secret.assert_not_awaited()
+
+
+async def test_update_bsl_secret_patches_the_other_secrets_after_a_failure() -> None:
+    client = _client()
+    core_api = _core_api(
+        (f"styrmin-bsl-{BSL_ID}-credentials", "styrmin-bsl-old-name-credentials")
+    )
+    core_api.patch_namespaced_secret.side_effect = [ApiException(status=500), None]
+
+    with (
+        patch(CORE_V1_API, return_value=core_api),
+        pytest.raises(VeleroClientError, match=f"styrmin-bsl-{BSL_ID}-credentials"),
+    ):
+        await client.update_bsl_secret(
+            bsl_id=BSL_ID,
+            namespace="styrmin",
+            access_key_id="new-key",
+            secret_access_key="new-secret",
+        )
+
+    patched = [
+        call.kwargs["name"] for call in core_api.patch_namespaced_secret.await_args_list
+    ]
+    assert patched == [
+        f"styrmin-bsl-{BSL_ID}-credentials",
+        "styrmin-bsl-old-name-credentials",
+    ]

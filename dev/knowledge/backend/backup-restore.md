@@ -392,15 +392,21 @@ namespace:
   key.
 
 Both carry the labels `styrmin.io/managed: "true"` and `styrmin.io/bsl-id: <location id>`. The
-names come from the location's id, never its name, because an operator can rename a location
+names come from the location's id, never its name, because an administrator can rename a location
 ([ADR-073](../../adr/0073-kubernetes-objects-named-and-found-by-record-id.md), #488).
+
+The flow creates nothing when a Velero BSL with the location's `styrmin.io/bsl-id` label already
+exists, whatever its name. Assigning an environment the location it already has dispatches
+`sync-bsl-create` again, so without this check a cluster with objects named after the location's
+name would get a second Velero location for the same bucket. When the objects are missing and no
+other environment of the cluster has the location, the same assignment creates them.
 
 Every later step selects the objects by the `styrmin.io/bsl-id` label, not by name
 (`VeleroClient` in `agent/service/kubernetes/velero/client.py`):
 
 | Step | Flow or caller | What it does |
 |------|----------------|--------------|
-| Credentials update | `sync-bsl-update-credentials` | Patches every Secret with the label. Fails when there is none. |
+| Credentials update | `sync-bsl-update-credentials` | Patches every Secret with the label. A failed patch does not stop the others. Fails when there is no Secret, or when a patch failed. |
 | Unassign, or reassign to another location | `sync-bsl-delete` | Deletes every Velero BSL and every Secret with the label. An object that is already gone counts as removed, and a failure on the Velero object does not stop the Secret from being deleted. |
 | Backup | `execute_velero_backup_flow` | Uses the name of the Velero BSL with the label as `spec.storageLocation`. Prefers `styrmin-bsl-<location id>` when there are several. Fails before it creates the Velero Backup when there is none. |
 

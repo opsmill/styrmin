@@ -27,9 +27,16 @@ LOAD_CONFIG = (
 
 @dataclass
 class FlowRun:
-    payload: dict[str, Any]
+    variable: MagicMock
     velero_client: MagicMock
     logger: MagicMock
+    raised: VeleroClientError | None = None
+
+    @property
+    def payload(self) -> dict[str, Any]:
+        """What the flow stored in the Prefect Variable for the INTERNAL flow."""
+        self.variable.set.assert_awaited_once()
+        return self.variable.set.await_args.kwargs["value"]
 
 
 async def _run_flow(
@@ -37,6 +44,7 @@ async def _run_flow(
     phase: str,
     pod_volume_backups: list[dict[str, Any]] | Exception | None = None,
     bsl_id: str | None = None,
+    bsl_lookup_error: VeleroClientError | None = None,
 ) -> FlowRun:
     velero_backup = {
         "metadata": {"name": "styrmin-backup-1"},
@@ -48,7 +56,9 @@ async def _run_flow(
     }
     velero_client = MagicMock()
     velero_client.create_backup_from_dict = AsyncMock()
-    velero_client.get_bsl_name = AsyncMock(return_value="styrmin-bsl-old-name")
+    velero_client.get_bsl_name = AsyncMock(
+        return_value="styrmin-bsl-old-name", side_effect=bsl_lookup_error
+    )
     velero_client.poll_backup_status = AsyncMock(return_value=velero_backup)
     if isinstance(pod_volume_backups, Exception):
         velero_client.list_pod_volume_backups = AsyncMock(
@@ -64,6 +74,7 @@ async def _run_flow(
     variable = MagicMock()
     variable.set = AsyncMock()
     logger = MagicMock()
+    raised: VeleroClientError | None = None
 
     with (
         patch("kubernetes_asyncio.client.ApiClient", return_value=api_client),
@@ -74,18 +85,18 @@ async def _run_flow(
         patch(f"{MODULE}.flow_run_ctx", MagicMock(id="flow-run-1")),
         patch(f"{MODULE}.Variable", variable),
     ):
-        await execute_velero_backup_flow.fn(
-            crd_body={"kind": "Backup", "spec": {"ttl": "720h"}},
-            velero_backup_name="styrmin-backup-1",
-            velero_namespace="styrmin",
-            bsl_id=bsl_id,
-        )
+        try:
+            await execute_velero_backup_flow.fn(
+                crd_body={"kind": "Backup", "spec": {"ttl": "720h"}},
+                velero_backup_name="styrmin-backup-1",
+                velero_namespace="styrmin",
+                bsl_id=bsl_id,
+            )
+        except VeleroClientError as e:
+            raised = e
 
-    variable.set.assert_awaited_once()
     return FlowRun(
-        payload=variable.set.await_args.kwargs["value"],
-        velero_client=velero_client,
-        logger=logger,
+        variable=variable, velero_client=velero_client, logger=logger, raised=raised
     )
 
 
@@ -138,3 +149,14 @@ async def test_backup_without_location_uses_the_velero_default() -> None:
     run.velero_client.get_bsl_name.assert_not_awaited()
     created = run.velero_client.create_backup_from_dict.await_args.args[0]
     assert "storageLocation" not in created["spec"]
+
+
+async def test_backup_without_a_velero_bsl_fails_before_creating_the_backup() -> None:
+    """A location with no Velero BSL in the cluster fails the flow, and no Backup is created (#488)."""
+    error = VeleroClientError("No Velero BSL labelled styrmin.io/bsl-id=bsl-1")
+
+    run = await _run_flow(phase="Completed", bsl_id="bsl-1", bsl_lookup_error=error)
+
+    assert run.raised is error
+    run.velero_client.create_backup_from_dict.assert_not_awaited()
+    run.variable.set.assert_not_awaited()

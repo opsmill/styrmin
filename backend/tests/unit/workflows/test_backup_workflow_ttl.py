@@ -101,6 +101,7 @@ async def _run_backup_workflow(
     velero_phase: str = "Completed",
     velero_expiration: str | None = VELERO_EXPIRATION,
     velero_volume_bytes: int | None = None,
+    user_flow_failure: str | None = None,
     record_deleted_after_status_writes: int | None = None,
     capture_exception: bool = False,
 ) -> WorkflowRun:
@@ -126,6 +127,8 @@ async def _run_backup_workflow(
         velero_phase: ``status.phase`` the USER flow reports back.
         velero_expiration: ``status.expiration`` the USER flow reports back.
         velero_volume_bytes: ``volume_bytes`` the USER flow reports back.
+        user_flow_failure: The message of the USER flow's failed state, or None
+            when the USER flow completes.
         record_deleted_after_status_writes: Simulate the backup row being
             deleted after this many successful ``update_backup_status`` calls —
             every call from then on raises ``BackupNotFoundError``, including the
@@ -206,7 +209,8 @@ async def _run_backup_workflow(
     flow_run.id = uuid4()
     flow_run.state = MagicMock()
     flow_run.state.type = StateType.COMPLETED
-    flow_run.state.is_failed.return_value = False
+    flow_run.state.is_failed.return_value = user_flow_failure is not None
+    flow_run.state.message = user_flow_failure
 
     velero_result = {
         "volume_bytes": velero_volume_bytes,
@@ -456,9 +460,30 @@ async def test_cluster_read_failure_keeps_the_environment_bsl() -> None:
     assert run.user_flow_parameters is not None
     assert run.user_flow_parameters["bsl_id"] == str(bsl_id)
     assert run.velero_kwargs is not None
+    # The USER flow sets spec.storageLocation from the cluster, by the location's id.
+    assert "storage_location" not in run.velero_kwargs
     # The environment scope was read before the failure, so retention still
     # comes from it rather than the built-in default.
     assert run.velero_kwargs["ttl"] == "2160h"
+
+
+@pytest.mark.anyio
+async def test_a_missing_velero_bsl_is_recorded_on_the_backup() -> None:
+    """The USER flow's failure to find the location's Velero BSL reaches the record (#488)."""
+    failure = (
+        "Flow run encountered an exception: VeleroClientError: "
+        "No Velero BSL labelled styrmin.io/bsl-id=bsl-1 in namespace styrmin"
+    )
+    run = await _run_backup_workflow(
+        backup_storage_location_id=uuid4(),
+        user_flow_failure=failure,
+        capture_exception=True,
+    )
+
+    assert isinstance(run.raised, RuntimeError)
+    terminal = run.status_calls[-1]
+    assert terminal["status"] == BackupStatus.FAILED
+    assert "No Velero BSL labelled styrmin.io/bsl-id=bsl-1" in terminal["error_message"]
 
 
 # ---------------------------------------------------------------------------
