@@ -11,6 +11,14 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [Styrmin - v0.1.49](https://github.com/opsmill/styrmin/tree/v0.1.49) - 2026-10-16
+
+### Fixed
+
+- Fixed `deleteCluster` failing with `INTERNAL_ERROR` when the cluster still had environments: it is now refused with an `IN_USE` error that lists the environments to delete first. ([#366](https://github.com/opsmill/styrmin/issues/366))
+- Fixed user actions of one driver being overwritten when another driver declares an action with the same name. Every bundled driver declares `pre_setup`, `post_setup` and `upgrade`, so only the last driver loaded ran them. Each driver and driver version now keeps its own action registrations. ([#373](https://github.com/opsmill/styrmin/issues/373))
+- Fixed restores that failed after 10 minutes with `Namespace <namespace> was not deleted within 600s`, and application deployments and dedicated ingress controllers that stayed `DELETING`: when a namespace was deleted while the operator was checking the `StyrminDeployment` in it, the operator could keep the custom resource's finalizer, so the namespace stayed `Terminating`. When the upgraded agent starts, it removes a finalizer that an earlier agent kept, and Kubernetes finishes deleting the namespace, so you do not need to annotate the custom resource. ([#446](https://github.com/opsmill/styrmin/issues/446), [#461](https://github.com/opsmill/styrmin/issues/461))
+
 ## [Styrmin - v0.1.48](https://github.com/opsmill/styrmin/tree/v0.1.48) - 2026-10-15
 
 ### Removed
