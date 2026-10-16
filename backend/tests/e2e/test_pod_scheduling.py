@@ -139,6 +139,19 @@ async def _wait_for_job_succeeded(
         await asyncio.sleep(RECONCILE_POLL_INTERVAL)
 
 
+async def _wait_until_running(client: StyrminClient, deployment_id: str) -> None:
+    """Poll the deployment through the SDK until it is ``running``, for the api-only tests."""
+    deadline = time.time() + 300.0
+    while time.time() < deadline:
+        dep = await client.deployments.get(deployment_id)
+        if getattr(dep, "status", None) == "running":
+            return
+        await asyncio.sleep(3.0)
+    raise TimeoutError(
+        f"deployment {deployment_id} did not reach 'running' within 300s"
+    )
+
+
 async def _update_scheduling_and_wait(
     scenario_driver: ScenarioDriver,
     deployment_id: str,
@@ -710,21 +723,8 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
         await client.deployments.update(dep_a_id, input=_anti_affinity_input(dep_b_id))
         await client.deployments.update(dep_b_id, input=_anti_affinity_input(dep_a_id))
 
-        async def _wait_running(deployment_id: str) -> None:
-            # Scoped to this test's api-only path — we drive the SDK
-            # directly so no scenario driver is in play.
-            deadline = time.time() + 300.0
-            while time.time() < deadline:
-                dep = await client.deployments.get(deployment_id)
-                if getattr(dep, "status", None) == "running":
-                    return
-                await asyncio.sleep(3.0)
-            raise TimeoutError(
-                f"deployment {deployment_id} did not reach 'running' within 300s"
-            )
-
-        await _wait_running(dep_a_id)
-        await _wait_running(dep_b_id)
+        await _wait_until_running(client, dep_a_id)
+        await _wait_until_running(client, dep_b_id)
 
         def _anti_affinity_targets(expected_deployment_id: str):
             def _predicate(dep: Any) -> bool:
@@ -769,6 +769,130 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
         # post-test state matches what other tests expect.
         cleanup_input = UpdateDeploymentInput(scheduling=SchedulingInput())
         for did in (dep_a_id, dep_b_id):
+            try:
+                await client.deployments.update(did, input=cleanup_input)
+            except Exception:  # noqa: BLE001
+                pass
+
+
+@pytest.mark.ci
+@pytest.mark.api_only(
+    reason="renames one deployment and checks the rule of another; the UI's "
+    "configuration drawer edits a single deployment, so no UI page covers the "
+    "two together"
+)
+async def test_affinity_rule_naming_a_deployment_follows_its_rename(
+    scheduling_environment: dict,
+    scheduling_deployment: dict,
+    scheduling_deployment_b: dict,
+    vcluster: dict,
+) -> None:
+    """#492: deployment B's anti-affinity rule names deployment A by name.
+
+    Renaming A rewrites the name in B's stored rule. B's next update submits
+    the stored rule back, as the configuration drawer does, and must reconcile
+    with a pod template that still selects A's pods by A's id.
+    """
+    from styrmin_sdk.graphql._generated.input_types import (
+        AffinityBlockInput,
+        AffinityTermInput,
+        DeploymentReferenceInput,
+        SchedulingInput,
+        UpdateDeploymentInput,
+        WeightedAffinityTermInput,
+    )
+
+    client: StyrminClient = scheduling_environment["client"]
+    dep_a_id = scheduling_deployment["deployment_id"]
+    dep_b_id = scheduling_deployment_b["deployment_id"]
+    original_name = (await client.deployments.get(dep_a_id)).name
+    new_name = f"{original_name}-renamed"
+
+    def _anti_affinity_input(
+        deployment_name: str, weight: int
+    ) -> UpdateDeploymentInput:
+        return UpdateDeploymentInput(
+            scheduling=SchedulingInput(
+                podAntiAffinity=AffinityBlockInput(
+                    preferred=[
+                        WeightedAffinityTermInput(
+                            weight=weight,
+                            term=AffinityTermInput(
+                                topologyKey="kubernetes.io/hostname",
+                                deploymentRef=DeploymentReferenceInput(
+                                    deploymentName=deployment_name,
+                                ),
+                            ),
+                        )
+                    ]
+                )
+            )
+        )
+
+    async def _stored_target_name() -> str:
+        dep = await client.deployments.get(dep_b_id)
+        weighted = dep.config["scheduling"]["pod_anti_affinity"]["preferred"][0]
+        return weighted["term"]["deployment_ref"]["deployment_name"]
+
+    def _targets_a_with_weight(weight: int) -> Callable[[Any], bool]:
+        def _predicate(dep: Any) -> bool:
+            affinity = dep.spec.template.spec.affinity
+            if affinity is None or affinity.pod_anti_affinity is None:
+                return False
+            return any(
+                w.weight == weight
+                and (w.pod_affinity_term.label_selector.match_labels or {}).get(
+                    "styrmin/deployment_id"
+                )
+                == dep_a_id
+                for w in affinity.pod_anti_affinity.preferred_during_scheduling_ignored_during_execution
+                or []
+            )
+
+        return _predicate
+
+    try:
+        await client.deployments.update(
+            dep_b_id, input=_anti_affinity_input(original_name, weight=100)
+        )
+        await _wait_until_running(client, dep_b_id)
+
+        await client.deployments.update(
+            dep_a_id, input=UpdateDeploymentInput(name=new_name)
+        )
+        assert await _stored_target_name() == new_name
+
+        raw = await client._transport.execute(
+            load_query("get_deployment_resolved_scheduling"),
+            {"deploymentId": dep_b_id},
+        )
+        assert not raw.get("errors"), raw.get("errors")
+        parsed = GetDeploymentResolvedScheduling.model_validate(raw["data"])
+        assert parsed.deployment is not None
+        assert parsed.deployment.resolved_scheduling, "resolvedScheduling is empty"
+        for entry in parsed.deployment.resolved_scheduling:
+            term = entry.config["pod_anti_affinity"]["preferred"][0]["term"]
+            assert term["label_selector"]["match_labels"] == {
+                "styrmin/deployment_id": dep_a_id
+            }, f"component {entry.component_name} term = {term!r}"
+
+        await client.deployments.update(
+            dep_b_id,
+            input=_anti_affinity_input(await _stored_target_name(), weight=50),
+        )
+        await _wait_until_running(client, dep_b_id)
+        await _wait_for_pod_template(
+            vcluster,
+            namespace=scheduling_deployment_b["namespace"],
+            label_selector="app.kubernetes.io/name=simple-app",
+            predicate=_targets_a_with_weight(50),
+            description=f"deployment B anti-affinity against renamed {dep_a_id}",
+        )
+    finally:
+        for did, cleanup_input in (
+            (dep_a_id, UpdateDeploymentInput(name=original_name)),
+            (dep_b_id, UpdateDeploymentInput(scheduling=SchedulingInput())),
+        ):
             try:
                 await client.deployments.update(did, input=cleanup_input)
             except Exception:  # noqa: BLE001
