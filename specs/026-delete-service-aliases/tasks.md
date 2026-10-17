@@ -147,10 +147,10 @@ description: "Tasks for 026: deleting a deployment deletes its service aliases"
 
 ## Phase 7: Polish and verification
 
-- [ ] T034 Run `uv run invoke format lint` and `uv run invoke test`; fix failures. Run the docs build for the `generic-app.md` change (`cd docs && pnpm install && pnpm build`, in a `node:22-slim` container when the host Node is older)
-- [ ] T035 Run the `ui-chromium` variant of the module in its own session (`-k "ui-chromium"`, same rules), to check that the discovery test still passes with the new alias flow; record it in `e2e-evidence.md`
-- [ ] T036 Walk through `specs/026-delete-service-aliases/quickstart.md` (unit tests, E2E, the two `kubectl` checks on the paused session of T015) and note any result that differs in `e2e-evidence.md`
-- [ ] T037 Complete `specs/026-delete-service-aliases/pr-notes.md`: link `e2e-evidence.md`; state that the change touches operator and agent code that AGENTS.md lists as high risk (teardown, flow writes into other namespaces); ask the maintainer to confirm (1) the unit test chosen for the brief's open question (spec Clarifications) and (2) FR-017, which the brief did not list; list research R-010 (a deployment's own flow can create its own namespace again after its deletion was requested) as a follow-up issue to file
+- [X] T034 Run `uv run invoke format lint` and `uv run invoke test`; fix failures. Run the docs build for the `generic-app.md` change (`cd docs && pnpm install && pnpm build`, in a `node:22-slim` container when the host Node is older)
+- [X] T035 Run the `ui-chromium` variant of the module in its own session (`-k "ui-chromium"`, same rules), to check that the discovery test still passes with the new alias flow; record it in `e2e-evidence.md`
+- [X] T036 Walk through `specs/026-delete-service-aliases/quickstart.md` (unit tests, E2E, the two `kubectl` checks on the paused session of T015) and note any result that differs in `e2e-evidence.md`
+- [X] T037 Complete `specs/026-delete-service-aliases/pr-notes.md`: link `e2e-evidence.md`; state that the change touches operator and agent code that AGENTS.md lists as high risk (teardown, flow writes into other namespaces); ask the maintainer to confirm (1) the unit test chosen for the brief's open question (spec Clarifications) and (2) FR-017, which the brief did not list; list research R-010 (a deployment's own flow can create its own namespace again after its deletion was requested) as a follow-up issue to file
 
 ---
 
