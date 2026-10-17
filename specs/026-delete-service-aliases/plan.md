@@ -114,10 +114,13 @@ changelog/503.fixed.md
 2. It computes the namespaces involved, calls `find_departing_namespaces` (reads run concurrently), and drops aliases whose holder or owner namespace is departing and stale aliases in a departing namespace. It logs each dropped alias.
 3. `apply_single_alias` writes with `apply_service` and returns a `WrittenAlias`, or `None` when the namespace is gone or terminating (R-005).
 4. After the stale deletions, it calls `find_departing_namespaces` on the owners of the written aliases and deletes, with the write's `resourceVersion`, each written alias whose owner became departing and whose holder did not (R-004).
+   - Changed on 2026-10-17, after the code review: the second read uses `find_deleted_deployment_namespaces`, the operator teardown's rule, so a restore's namespace deletion does not count, and the flow deletes a written alias whatever namespace holds it (research R-004).
 
 ### Ordering argument
 
 The teardown lists the aliases only after the CR's `spec.deletionRequested` is set, and the flow's second read happens after its write. So every alias written before the second read either is in the teardown's list or is deleted by the flow (research R-004).
+
+Changed on 2026-10-17, after the code review: one case remains. When the StyrminDeployment is already removed at the second read, the read does not count it, so an alias written after the delete handler's teardown listed the aliases, and before the removal, can remain (research R-004).
 
 ### What stays the same
 
