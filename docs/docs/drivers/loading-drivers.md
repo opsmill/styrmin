@@ -16,7 +16,7 @@ There are two ways to load a driver:
 | Source | Use it when… |
 |--------|--------------|
 | **Local directory** | The driver is mounted into the Styrmin server container (the bundled examples, drivers you're iterating on locally, or anything you ship in your own image). |
-| **Git repository** | The driver lives in a git repo — public or private — and you want Styrmin to fetch it directly. Each load creates a new version pinned to the requested branch's tip. |
+| **Git repository** | The driver lives in a git repo — public or private — at its root or in a driver directory, and you want Styrmin to fetch it directly. Each load creates a new version pinned to the requested branch's tip. |
 
 Both paths produce the same end result: a new Application Driver Version
 in the database that a Deployment can reference.
@@ -44,20 +44,163 @@ mutation with the in-container path.
 
 ### From a git repository
 
+A load from git takes the repository URL, the branch and, optionally, the
+driver directory: the folder of the repository that holds the driver's
+`driver.styrmin.yml`, `values.j2.yml` and `actions.py`, given as a path
+relative to the repository root. Without a driver directory, Styrmin
+reads the driver from the repository root:
+
 ```shell
 uv run styrminctl drivers load-version \
   https://github.com/your-org/styrmin-drivers.git \
   main
 ```
 
-The repository must contain a `driver.styrmin.yml` at its root. Each load
-creates a new Application Driver Version pinned to the commit at the tip
-of the requested branch — re-running the command after pushing to the
-branch produces a new version, so older deployments keep working until you
-deliberately upgrade them.
+Styrmin clones the whole repository, records the commit at the tip of the
+branch, and reads `driver.styrmin.yml` from the driver directory, or from
+the repository root when no driver directory is given. A load fails when
+that folder holds no `driver.styrmin.yml`.
 
-Under the hood this calls the `loadApplicationDriverVersionFromGithub`
-GraphQL mutation with the repository URL and branch.
+The CLI calls the `loadRemoteApplicationDriverVersion` GraphQL mutation
+with the `repositoryUrl`, `branch` and `driverDirectory` arguments. The
+mutation needs the `ADMIN` role.
+
+#### Loading a driver from a driver directory
+
+A repository can hold several drivers, each in its own driver directory,
+for example `drivers/infrahub/` and `drivers/semaphore/`. To load one of
+them, give its driver directory:
+
+```shell
+uv run styrminctl drivers load-version \
+  https://github.com/your-org/styrmin-drivers.git \
+  main \
+  --driver-directory drivers/infrahub
+```
+
+The command prints `Driver directory: drivers/infrahub` after the commit
+SHA. See [`drivers load-version`](../reference/styrminctl.md#drivers-load-version--load-a-driver-version-from-git)
+for the full output.
+
+From the Python SDK, pass `driver_directory` to `drivers.load_version`:
+
+```python
+from styrmin_sdk import StyrminClient
+
+async with StyrminClient(server_address="https://styrmin.example") as client:
+    version = await client.drivers.load_version(
+        "https://github.com/your-org/styrmin-drivers.git",
+        "main",
+        driver_directory="drivers/infrahub",
+    )
+    print(version.source_path)  # drivers/infrahub
+```
+
+A refused or failed load raises `OperationFailedError` with the server's
+message.
+
+From the GraphQL API, pass the `driverDirectory` argument:
+
+```graphql
+mutation {
+  loadRemoteApplicationDriverVersion(
+    repositoryUrl: "https://github.com/your-org/styrmin-drivers.git"
+    branch: "main"
+    driverDirectory: "drivers/infrahub"
+  ) {
+    id
+    sourceCommitSha
+    sourcePath
+  }
+}
+```
+
+In the UI, open the Drivers page, select "Load driver", and on the
+"Git repository" tab fill in "Repository URL", "Branch" and
+"Driver directory". Leave "Driver directory" empty to load from the
+repository root. When the server refuses the load, the drawer shows the
+server's message and keeps the values you entered.
+
+The application driver version stores the driver directory in its
+`sourcePath` field. The Overview tab of the driver version shows it in a
+"Driver directory" row after the "Source" row, and the Source cell of the
+drivers list shows it after the repository and branch, as
+`<repository> @ <branch> · drivers/infrahub`. A driver version loaded
+from the repository root has no `sourcePath`, no "Driver directory" row
+and no driver directory in its Source cell.
+
+Styrmin stores every way of writing the same folder in one form, so a
+reload at the same commit returns the existing driver version:
+`./drivers/infrahub/`, `drivers//infrahub` and `drivers/./infrahub` are
+stored as `drivers/infrahub`. An empty value, `.` and `./` load from the
+repository root, the same as a load without a driver directory.
+
+#### Refused driver directories and error messages
+
+Styrmin refuses these values before it clones the repository:
+
+- an absolute path, such as `/etc`;
+- a path with a `..` segment, such as `../other` or `drivers/../../etc`;
+- a path with a backslash, such as `drivers\infrahub`;
+- a value with a NUL character.
+
+The error message names the value and the rule, for example:
+
+```text
+Driver directory '../other' is refused: it contains a '..' segment. Give a path relative to the repository root, such as 'drivers/infrahub'.
+```
+
+After the clone, Styrmin refuses the load, and reads no file, when the
+driver directory, or its `driver.styrmin.yml`, `values.j2.yml` or
+`actions.py`, is a symlink to a path outside the repository. This check
+also applies to loads from the repository root. A symlink to a path
+inside the repository is accepted. The message names the part of the path
+that is a symlink leading outside the repository.
+
+When the driver directory does not exist, is not a folder, or holds no
+`driver.styrmin.yml`, the message names the driver directory, the
+repository, the branch and the commit, for example:
+
+```text
+Driver directory 'drivers/missing' does not exist in repository 'https://github.com/your-org/styrmin-drivers.git' (branch 'main', commit 0123456789abcdef0123456789abcdef01234567).
+No driver.styrmin.yml in driver directory 'drivers/infrahub' of repository 'https://github.com/your-org/styrmin-drivers.git' (branch 'main', commit 0123456789abcdef0123456789abcdef01234567).
+```
+
+Messages show the repository URL without a username or token.
+
+#### Actions run from the driver directory
+
+Each action of a driver version loaded from a driver directory runs with
+the driver directory as its working directory: the action's Job clones
+the repository at the recorded commit, then changes to the driver
+directory.
+`actions.py` can import modules from the driver directory, such as a
+`helpers.py` next to it with `import helpers`, but not modules from other
+folders of the repository. Packages installed in the action's image, such
+as `prefect` and `styrmin_backend`, import as before. Put code that
+several drivers share into each driver directory, or install it in the
+image that the actions run in.
+
+Actions of a driver version loaded from the repository root run from the
+repository root, as before.
+
+#### A new commit to the repository creates a new driver version
+
+The provenance fingerprint of a git driver version is the commit SHA, and
+a commit covers the whole repository, not only the driver directory. A
+reload after any new commit to the branch
+creates a new application driver version, even when the commit changed no
+file in the driver directory. Deployments keep the driver version they are
+bound to until they are upgraded. An upgrade resolves the driver version
+again with the latest-wins rule, so it can bind a deployment to the new
+driver version (see
+[Selecting a driver version](#selecting-a-driver-version-when-deploying-or-upgrading)).
+
+Two driver directories of one repository, loaded at the same commit, give
+two driver versions, also when their drivers have the same name. The
+version picker labels both `<version>@<short commit>`; the "Driver
+directory" row of the Overview tab tells them apart. Each driver version
+runs the actions of its own driver directory.
 
 #### Private repositories
 
@@ -160,8 +303,9 @@ screenshots) are invisible to the fingerprint and never produce a new
 row.
 
 For git-sourced drivers, the fingerprint is the resolved commit SHA on
-the requested branch — loading the same `repo@branch@commit` twice is a
-no-op; loading after a new commit lands creates a new row.
+the requested branch — loading the same repository, branch, commit and
+driver directory twice is a no-op; loading after a new commit lands
+creates a new row.
 
 The recorded commit is also the code a deployment's actions run. Pushing
 new commits to the driver's branch does not change what a deployment
@@ -264,7 +408,9 @@ For your own drivers, the typical layouts are:
   prototyping against the local demo.
 - **In a dedicated git repository** — recommended for production use.
   Versioned, reviewable, and Styrmin can pin deployments to a specific
-  commit per branch load.
+  commit per branch load. One repository can hold several drivers, each
+  in its own driver directory (see
+  [Loading a driver from a driver directory](#loading-a-driver-from-a-driver-directory)).
 - **In your own container image** — fork or extend the Styrmin server
   image, copy your driver directories into `/styrmin/drivers/`, and use
   `load-local-version` against the baked-in paths.

@@ -5,7 +5,7 @@
 Application drivers can define **user actions** - custom Prefect workflows that execute driver-specific logic during deployment lifecycle events. Actions are organized into **hooks** with **modes** that determine when they run relative to the core operation.
 
 ```text
-Driver Repository
+Driver directory (repository root, or a folder such as drivers/infrahub/)
 ├── driver.styrmin.yml       # Driver manifest (includes action declarations)
 ├── actions.py               # Action implementations (Prefect flows)
 └── values.j2.yml            # Helm values template
@@ -155,7 +155,7 @@ Validates that all declared actions have corresponding function implementations:
 
 ## Registration Pipeline
 
-When a driver is loaded via `load_application_driver_from_object()` in `services/applications.py`:
+When a driver is loaded via `load_application_driver_from_object()` in `services/applications.py` (step 3 runs only for loads from git; local loads register no actions):
 
 ```text
 1. Parse driver.styrmin.yml ──> DriverSpec (with embedded actions)
@@ -163,17 +163,38 @@ When a driver is loaded via `load_application_driver_from_object()` in `services
 3. For each action in driver_spec.spec.actions:
    a. ActionsWorkflowBuilder.build_user_action_workflow_definition(action)
       ──> Creates a GitSourceWorkflowDefinition with:
-          - source: driver's Git repository + branch
-          - module/function: from action.location
+          - source: driver's Git repository, pinned to source_commit_sha
+          - module/function: from action.location (entrypoint actions.py:<function>)
           - image: from action.image (optional)
-   b. PrefectManager.register_user_action(workflow, application, version, hook, mode)
+          - set_directory: the driver directory (GitSource.driver_directory), or None
+   b. PrefectManager.register_user_action(
+          workflow, application, version, hook, mode, fingerprint, driver_directory)
       ──> Saves deployment to Prefect with tags:
           - "application/{name}"
           - "version/{supported_versions}"
           - "hook/{hook.value}"
           - "mode/{mode}"
+          - "fingerprint/{short fingerprint}"
+          - "directory/{driver_directory}"  (driver directory versions only)
    c. Save Action to database via UnitOfWork
 ```
+
+### Pull steps
+
+A driver version loaded from the repository root has one pull step, `prefect.deployments.steps.git_clone`, which clones the repository at the recorded commit into `<repository name>-<short commit>` and leaves the working directory at the root of the clone.
+
+A driver version loaded from a driver directory has a second pull step, `prefect.deployments.steps.set_working_directory`, with the relative path `<repository name>-<short commit>/<driver directory>` (`set_directory_pull_step` in `workflows/utils.py`). Prefect resolves the path against the folder that `git_clone` cloned into, which is the image's working directory (`/source` for the default `styrmin` image). The entrypoint stays `actions.py:<function>`, so Prefect's script loader puts only the driver directory on `sys.path`: `actions.py` imports modules from the driver directory and not from other folders of the repository ([ADR-076](../../adr/0076-driver-actions-import-only-from-their-driver-directory.md)).
+
+### Deployment names
+
+Prefect replaces a deployment with the same flow and deployment name, and refuses `/` in deployment names. The name therefore carries the driver name, the short fingerprint and, for a driver version loaded from a driver directory, the first 7 hex characters of the SHA-256 of the driver directory (`driver_directory_digest` in `services/driver/driver_directory.py`):
+
+| Driver version | Deployment name | Extra tag |
+|----------------|-----------------|-----------|
+| Loaded from the repository root | `User Action: setup (infrahub@0123456)` | none |
+| Loaded from `drivers/infrahub` | `User Action: setup (infrahub@0123456 c8dc0c0)` | `directory/drivers/infrahub` |
+
+Two driver versions loaded from different driver directories at one commit, also with the same driver name, keep separate deployments. Driver versions loaded from the repository root keep the names and tags they had before spec 028.
 
 ## Lookup
 
@@ -188,16 +209,24 @@ async def get_user_action_deployment_id(
     version: str,                # e.g., ">=1.5,<1.7"
     hook: HookKind,              # e.g., HookKind.SETUP
     mode: Literal["pre", "core", "post"],
+    fingerprint: str | None = None,       # short fingerprint of the driver version
+    driver_directory: str | None = None,  # source_path of a git driver version
 ) -> UUID | None:
     """Query Prefect deployments by tag combination. Returns None if not found."""
 ```
 
-Queries Prefect for deployments matching ALL four tags:
+Queries Prefect for deployments that carry all of these tags, newest first:
 
 - `application/{application}`
 - `hook/{hook.value}`
 - `mode/{mode}`
 - `version/{version}`
+- `fingerprint/{fingerprint}`, when a fingerprint is given
+- `directory/{driver_directory}`, when a driver directory is given
+
+Without a driver directory (a driver version loaded from the repository root), the lookup drops every deployment that carries a `directory/` tag before it picks one, so a root driver version never runs the action of a driver directory version with the same driver name, version and commit. Prefect's tag filter cannot exclude a tag, so Styrmin filters the results.
+
+The callers (`instantiate_application` in `services/applications.py` and the create and upgrade paths in `services/reconciliation/remediation.py`) pass `driver_directory_of(source_type=..., source_path=...)` from `services/driver/labels.py`: the `source_path` of a git driver version, and `None` for a local one.
 
 Returns the first matching deployment's UUID, or `None`.
 
@@ -445,6 +474,9 @@ If no upgrade core hook is defined for the application version, `_handle_upgrade
 | [services/user.py](backend/styrmin_backend/services/user.py) | `ActionsWorkflowBuilder` |
 | [services/applications.py](backend/styrmin_backend/services/applications.py) | Action registration during driver loading |
 | [workflows/manager.py](backend/styrmin_backend/workflows/manager.py) | `register_user_action`, `get_user_action_deployment_id` |
+| [workflows/utils.py](../../../backend/styrmin_backend/workflows/utils.py) | `set_directory_pull_step` (relative `set_working_directory` path) |
+| [services/driver/driver_directory.py](../../../backend/styrmin_backend/services/driver/driver_directory.py) | `normalise_driver_directory`, `resolve_inside`, `driver_directory_digest` |
+| [services/driver/labels.py](../../../backend/styrmin_backend/services/driver/labels.py) | `driver_directory_of`: the driver directory a lookup passes |
 | [workflows/catalogue.py](backend/styrmin_backend/workflows/catalogue.py) | Workflow registry (UPGRADE_INSTANCE definition) |
 | [actions/primitives.py](backend/styrmin_backend/actions/primitives.py) | `stop_components`, `start_components`, `execute_commands`, `get_component_images`, `get_component_labels`, `upgrade_deployment_version` |
 | [agent/service/kubernetes/primitives.py](backend/styrmin_backend/agent/service/kubernetes/primitives.py) | Kubernetes side of `get_component_images` (component container image first) and `get_component_env` (component container env); `run_job` and `run_kubernetes_job` raise `JobFailedError` with the end of the output |
