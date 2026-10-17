@@ -256,17 +256,30 @@ def get_local_driver_loader(path: str) -> DriverLoader:
     return DriverLoader(provider=LocalDriverProvider(path=path))
 
 
-def get_git_driver_loader(repository: str, branch: str, token: str) -> DriverLoader:
+def get_git_driver_loader(
+    repository: str, branch: str, token: str, driver_directory: str | None = None
+) -> DriverLoader:
     """Get the driver loader for the git repository.
 
     Args:
         repository (str): The git repository.
         branch (str): The git branch.
         token (str): The git token.
+        driver_directory (str | None): The folder of the repository that holds the
+            driver, relative to the repository root; None for the repository root.
 
     Returns:
         DriverLoader: The driver loader.
+
+    Raises:
+        DriverLoadingError: The driver directory is refused (absolute, ``..``
+            segment, backslash or NUL character).
     """
     return DriverLoader(
-        provider=GitDriverProvider(repository=repository, branch=branch, token=token)
+        provider=GitDriverProvider(
+            repository=repository,
+            branch=branch,
+            token=token,
+            driver_directory=driver_directory,
+        )
     )

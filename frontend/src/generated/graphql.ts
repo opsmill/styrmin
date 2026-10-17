@@ -969,6 +969,7 @@ export type MutationLoadLocalApplicationDriverVersionArgs = {
 
 export type MutationLoadRemoteApplicationDriverVersionArgs = {
   branch: Scalars['String']['input'];
+  driverDirectory?: InputMaybe<Scalars['String']['input']>;
   repositoryUrl: Scalars['String']['input'];
 };
 

@@ -7,6 +7,7 @@ from typing import Any, Generator
 from dulwich import porcelain
 from dulwich.repo import Repo
 
+from styrmin_backend.services.driver.driver_directory import normalise_driver_directory
 from styrmin_backend.services.driver.exceptions import DriverLoadingError
 from styrmin_backend.services.driver.models.structure.source import (
     DriverSource,
@@ -37,10 +38,24 @@ class GitDriverProvider(DriverProvider):
     """The git driver provider class.
 
     The git driver provider is responsible for providing the driver content from a git repository.
+    It clones the whole repository and provides the driver directory, or the clone root when no
+    driver directory is given.
     """
 
-    def __init__(self, repository: str, branch: str, token: str):
-        self.source = GitSource(repository=repository, branch=branch, token=token)
+    def __init__(
+        self,
+        repository: str,
+        branch: str,
+        token: str,
+        driver_directory: str | None = None,
+    ):
+        # Normalise here so a refused driver directory fails before any clone (FR-007).
+        self.source = GitSource(
+            repository=repository,
+            branch=branch,
+            token=token,
+            driver_directory=normalise_driver_directory(driver_directory),
+        )
         self._resolved_commit_sha: str | None = None
 
     def get_source(self) -> GitSource:
@@ -56,7 +71,7 @@ class GitDriverProvider(DriverProvider):
 
     @contextmanager
     def provide(self) -> Generator[Path, None, None]:
-        """Provide the driver content as a temporary directory."""
+        """Provide the driver directory of a temporary clone of the repository."""
         with tempfile.TemporaryDirectory() as tempdir:
             tempdir_path = Path(tempdir)
             # Clone the git repository
@@ -83,7 +98,12 @@ class GitDriverProvider(DriverProvider):
                     f"Failed to resolve HEAD commit SHA for "
                     f"{self.source.repository!r}: {exc}"
                 ) from exc
-            yield tempdir_path
+            driver_directory = self.source.driver_directory
+            yield (
+                tempdir_path
+                if driver_directory is None
+                else tempdir_path / driver_directory
+            )
 
 
 class LocalDriverProvider(DriverProvider):

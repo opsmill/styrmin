@@ -991,7 +991,7 @@ type Mutation {
   assignBackupStorageLocation(environmentId: UUID!, backupStorageLocationId: UUID!): Environment @requiresRole
   unassignBackupStorageLocation(environmentId: UUID!): Environment @requiresRole
   loadLocalApplicationDriverVersion(path: String!): ApplicationDriverVersion @requiresRole
-  loadRemoteApplicationDriverVersion(repositoryUrl: String!, branch: String!): ApplicationDriverVersion @requiresRole
+  loadRemoteApplicationDriverVersion(repositoryUrl: String!, branch: String!, driverDirectory: String = null): ApplicationDriverVersion @requiresRole
   deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: DeploymentConfigInput = null, parameters: [ParameterValueInput!] = null, serviceNameOverrides: [ServiceNameOverride!] = null, driverVersionId: UUID = null): Task @requiresRole
   updateDeployment(deploymentId: UUID!, input: UpdateDeploymentInput!): Task @requiresRole
   deleteDeployment(deploymentId: UUID!): Task! @requiresRole

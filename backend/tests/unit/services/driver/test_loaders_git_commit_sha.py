@@ -19,6 +19,9 @@ Coverage:
 - ``test_git_load_new_commit_creates_new_row`` — two loads where the
   provider reports two distinct SHAs yield two rows with the same
   ``version`` and different ``source_commit_sha`` values (T029).
+- ``test_git_load_*driver_directory*`` — spec 028 (T008): a load from a
+  driver directory stores it in ``source_path``, a reload finds the same
+  row, and a root load at the same commit is a separate row.
 """
 
 from __future__ import annotations
@@ -38,6 +41,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from styrmin_backend.db.models import ApplicationDriverVersion
 from styrmin_backend.services.applications import (
     load_application_driver_from_git_repository,
+)
+from styrmin_backend.services.driver.driver_directory import (
+    normalise_driver_directory,
 )
 from styrmin_backend.services.driver.loaders import DriverLoader
 from styrmin_backend.services.driver.models.structure.source import GitSource
@@ -63,11 +69,14 @@ class _FakeGitProvider(DriverProvider):
     commits".
     """
 
-    def __init__(self, *, driver_dir: Path, commit_sha: str) -> None:
+    def __init__(
+        self, *, driver_dir: Path, commit_sha: str, driver_directory: str | None = None
+    ) -> None:
         self.source = GitSource(
             repository="https://example.com/fake.git",
             branch="main",
             token="",
+            driver_directory=driver_directory,
         )
         self._driver_dir = driver_dir
         self._commit_sha = commit_sha
@@ -80,6 +89,11 @@ class _FakeGitProvider(DriverProvider):
 
     def set_commit_sha(self, sha: str) -> None:
         self._commit_sha = sha
+
+    def set_driver_directory(self, driver_directory: str | None) -> None:
+        self.source = self.source.model_copy(
+            update={"driver_directory": driver_directory}
+        )
 
     @contextmanager
     def provide(self) -> Generator[Path, None, None]:
@@ -146,7 +160,14 @@ def patch_git_loader(monkeypatch, driver_dir: Path):
     """
     fake_provider = _FakeGitProvider(driver_dir=driver_dir, commit_sha="a" * 40)
 
-    def _fake_get_git_driver_loader(repository: str, branch: str, token: str):  # noqa: ARG001
+    def _fake_get_git_driver_loader(
+        repository: str,  # noqa: ARG001
+        branch: str,  # noqa: ARG001
+        token: str,  # noqa: ARG001
+        driver_directory: str | None = None,
+    ):
+        # Mirror the real provider, which normalises the value in its constructor.
+        fake_provider.set_driver_directory(normalise_driver_directory(driver_directory))
         return DriverLoader(provider=fake_provider)
 
     # The function is imported into ``services.applications`` at module
@@ -343,3 +364,69 @@ async def test_register_user_action_keyed_on_fingerprint_across_reloads(
     assert fingerprints[3] == sha2[:7]
     # The two loads use different keys, so they do NOT collide.
     assert {fingerprints[0], fingerprints[2]} == {sha1[:7], sha2[:7]}
+
+
+async def _load(uow: SqlModelUnitOfWork, driver_directory: str | None):
+    return (
+        await load_application_driver_from_git_repository(
+            repository_url="https://example.com/fake.git",
+            branch="main",
+            uow=uow,
+            driver_directory=driver_directory,
+        )
+    ).version
+
+
+@pytest.mark.asyncio
+async def test_git_load_from_driver_directory_stores_source_path(
+    db_session: AsyncSession,
+    patch_git_loader: _FakeGitProvider,
+    prefect_manager_mock,  # noqa: ARG001 — keeps the @inject hop quiet
+):
+    """Spec 028 (FR-005): the driver directory is stored in ``source_path``."""
+    patch_git_loader.set_commit_sha("e" * 40)
+    uow = SqlModelUnitOfWork(session=db_session)
+
+    row = await _load(uow, "drivers/a")
+
+    assert row.source_type == "git"
+    assert row.source_path == "drivers/a"
+    assert row.source_commit_sha == "e" * 40
+
+
+@pytest.mark.asyncio
+async def test_git_load_same_commit_and_driver_directory_returns_same_row(
+    db_session: AsyncSession,
+    patch_git_loader: _FakeGitProvider,
+    prefect_manager_mock,  # noqa: ARG001 — keeps the @inject hop quiet
+):
+    """Spec 028 (US1-5): a reload at the same commit and driver directory,
+    written in another form, finds the existing row."""
+    patch_git_loader.set_commit_sha("e" * 40)
+    uow = SqlModelUnitOfWork(session=db_session)
+
+    first = await _load(uow, "drivers/a")
+    second = await _load(uow, "./drivers/a/")
+
+    assert second.id == first.id
+    assert len(await _all_rows(db_session)) == 1
+
+
+@pytest.mark.asyncio
+async def test_git_load_from_root_and_driver_directory_are_separate_rows(
+    db_session: AsyncSession,
+    patch_git_loader: _FakeGitProvider,
+    prefect_manager_mock,  # noqa: ARG001 — keeps the @inject hop quiet
+):
+    """Spec 028 (US4-1): a root load at the same commit stores no
+    ``source_path`` and does not reuse the driver directory's row."""
+    patch_git_loader.set_commit_sha("e" * 40)
+    uow = SqlModelUnitOfWork(session=db_session)
+
+    from_directory = await _load(uow, "drivers/a")
+    from_root = await _load(uow, None)
+
+    assert from_root.id != from_directory.id
+    assert from_root.source_path is None
+    rows = await _all_rows(db_session)
+    assert sorted((r.source_path or "") for r in rows) == ["", "drivers/a"]
