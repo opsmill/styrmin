@@ -142,7 +142,7 @@ description: "Task list for storing the id of the deployment that an affinity te
 
 **Independent Test**: delete A, update B, and get an error with the term's path, A's last name and `deleted: true`.
 
-- [ ] T032 [P] [US4] Functional tests in `backend/tests/functional/graphql/test_deployment_reference_scenarios.py` (spec US4): B's config names A; tombstone A (the repository or service path the existing deletion tests use to reach `DELETED`); `updateDeployment` on B is refused with `extensions.deleted == True`, `deployment_name` A's last name and the path; E's config names A, A tombstoned, and the environment fan-out redeploy of B fails (counted as failed); create a new A and re-send B's config with `deploymentName: A`: accepted, and the stored id is the new A's id
+- [X] T032 [P] [US4] Functional tests in `backend/tests/functional/graphql/test_deployment_reference_scenarios.py` (spec US4): B's config names A; tombstone A (the repository or service path the existing deletion tests use to reach `DELETED`); `updateDeployment` on B is refused with `extensions.deleted == True`, `deployment_name` A's last name and the path; E's config names A, A tombstoned, and the environment fan-out redeploy of B fails (counted as failed); create a new A and re-send B's config with `deploymentName: A`: accepted, and the stored id is the new A's id
 
 **Checkpoint**: deletions are reported with the deployment's last name.
 
