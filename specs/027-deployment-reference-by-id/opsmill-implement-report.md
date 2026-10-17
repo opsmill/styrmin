@@ -4,8 +4,8 @@
 
 - Feature: deployment references stored by id (#508, fixes #492)
 - Spec directory: `specs/027-deployment-reference-by-id/`
-- Base commit: `738591927c5ec1d25743d58d1a76b425583b6c3b`
-- Head commit: `a642c80a6787055e47293c0315c31f3d47c55a8d` (29 commits, none pushed)
+- Base commit: `ca9c19f952b4542129f803e9887e8944c177c57e`
+- Head commit at the end of the run: `61e9b13f90651891960d70bbdeb356e90bb6971d` (29 commits, none pushed). The commit ids in this report are the ids after the branch was rebased onto `develop` (`ce8cb7d8`) on 2026-10-17. Every run recorded here was made before that rebase; see "Rebase onto develop" at the end of §4.
 - Wall-clock time: about 2026-10-16T23:10Z to 2026-10-17T04:55Z, including a pause of about one and a half hours (00:25Z to 02:00Z) for a usage limit
 - Run status: DONE. All 46 tasks are ticked, and every new or modified test has local-pass evidence.
 
@@ -13,21 +13,21 @@
 
 | # | Chunk | Tasks | Outcome | Commits |
 |---|-------|-------|---------|---------|
-| 1 | Phase 1 + Phase 2 (part 1): baseline, error types, reference helpers | T001-T005 (5) | 5 done | `bf9cf0ae`, `4ab04b9d` |
-| 2 | Phase 2 (part 2): resolver reads ids only, expansion per level | T006-T009 (4) | 4 done | `df24bff0` |
-| 3 | Phase 3 (US2): every write stores the id | T010-T016 (7) | 7 done | `ca0e4d2e`, `77820076`, `fc04c22a`, `6c441575` |
-| 3b | Fix added by the orchestrator: nested unit-of-work rollback | none | fixed | `f1ee83dc` |
-| 4 | Phase 4 (US3): refusal at write time | T017-T018 (2) | 2 done | `7caf4194` |
-| 5 | Phase 5 (US1): rename, with E2E | T019-T021 (3) | 3 done | `0bb0b7c7`, `ae8dff34`, `8ca893f9` |
-| 6 | Phase 6 (US5): clone points terms at the counterparts | T022-T025 (4) | 4 done | `14955d47` |
-| 7 | Phase 7 (US6, part 1): request check and cascade | T026-T029 (4) | 4 done | `a67b3d98`, `342da41f` |
-| 8 | Phase 7 (US6, part 2): clone E2E, both variants | T030-T031 (2) | 2 done | `17ca4840`, `7ad1efa8` |
-| 9 | Phase 8 (US4): delete and re-create | T032 (1) | 1 done | `1c4da57c` |
-| 10 | Phase 9 (US8): re-apply without a reconcile | T033-T034 (2) | 2 done | `10a2125b` |
-| 11 | Phase 10 (US7): restore isolates each redeploy | T035-T037 (3) | 3 done | `5fdbfb68` |
-| 12 | Phase 11 (part 1): documentation, ADR, changelog | T038-T043 (6) | 6 done | `065eaec2` |
-| 13 | Phase 11 (part 2): verification and handoff notes | T044-T046 (3) | 3 done | `6895a1d1` |
-| R | Review fixes | none | 5 code and test fixes, documentation fixes | `2079f97b`, `d820bbc7`, `9596d318`, `79c1bd19`, `91df29bf`, `f48d76fe`, `a642c80a` |
+| 1 | Phase 1 + Phase 2 (part 1): baseline, error types, reference helpers | T001-T005 (5) | 5 done | `6e61f978`, `100b4423` |
+| 2 | Phase 2 (part 2): resolver reads ids only, expansion per level | T006-T009 (4) | 4 done | `4d172c63` |
+| 3 | Phase 3 (US2): every write stores the id | T010-T016 (7) | 7 done | `bd01e0a9`, `aacbc2b3`, `413455d9`, `9c56f40c` |
+| 3b | Fix added by the orchestrator: nested unit-of-work rollback | none | fixed | `ef007e71` |
+| 4 | Phase 4 (US3): refusal at write time | T017-T018 (2) | 2 done | `6702fd70` |
+| 5 | Phase 5 (US1): rename, with E2E | T019-T021 (3) | 3 done | `163dff87`, `256bb517`, `0fb9f755` |
+| 6 | Phase 6 (US5): clone points terms at the counterparts | T022-T025 (4) | 4 done | `fe534af0` |
+| 7 | Phase 7 (US6, part 1): request check and cascade | T026-T029 (4) | 4 done | `ebdde558`, `5f1fc755` |
+| 8 | Phase 7 (US6, part 2): clone E2E, both variants | T030-T031 (2) | 2 done | `14cbc24c`, `e2c9d53c` |
+| 9 | Phase 8 (US4): delete and re-create | T032 (1) | 1 done | `20b29f4e` |
+| 10 | Phase 9 (US8): re-apply without a reconcile | T033-T034 (2) | 2 done | `006c34b9` |
+| 11 | Phase 10 (US7): restore isolates each redeploy | T035-T037 (3) | 3 done | `4350614b` |
+| 12 | Phase 11 (part 1): documentation, ADR, changelog | T038-T043 (6) | 6 done | `09accc64` |
+| 13 | Phase 11 (part 2): verification and handoff notes | T044-T046 (3) | 3 done | `06645477` |
+| R | Review fixes | none | 5 code and test fixes, documentation fixes | `ee5d0f99`, `64accb4e`, `0f069283`, `6a3d7c33`, `b781eace`, `a1c4c3d4`, `61e9b13f` |
 
 Decisions and surprises reported by each chunk:
 
@@ -84,7 +84,7 @@ Commands referred to in the table:
 - R20: `uv run pytest` with the 12 node ids marked R20, `-v` (after the review fixes)
 - E-S: `export STYRMIN_IMAGE_VER=e2e-508-1792195869 && docker compose build server`, then `uv run pytest "backend/tests/e2e/test_pod_scheduling.py::test_pod_anti_affinity_cross_deployment_via_graphql" -m "ci and shard_compute" -k api-chromium -v -s --pdb`, with stdin from a `sleep infinity` file descriptor
 - E-C: `export STYRMIN_IMAGE_VER=e2e-508-1792204778 && docker compose build server`, then `uv run pytest "backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle" -m "ci and shard_env_backup" -k <variant> -v -s --pdb`, with the same stdin
-- E-R: `export STYRMIN_IMAGE_VER=e2e-508-final-1792208899 && docker compose build server`, then `uv run pytest backend/tests/e2e -m "ci and shard_env_backup" -k <variant> -v -s --pdb`, with the same stdin (run by the orchestrator at HEAD `6895a1d1`)
+- E-R: `export STYRMIN_IMAGE_VER=e2e-508-final-1792208899 && docker compose build server`, then `uv run pytest backend/tests/e2e -m "ci and shard_env_backup" -k <variant> -v -s --pdb`, with the same stdin (run by the orchestrator at HEAD `06645477`)
 
 Environment context:
 
@@ -229,7 +229,7 @@ Pass lines are as the subagents reported them from `pytest -v`. "PASSED" without
 | `backend/tests/e2e/test_pod_scheduling.py::test_pod_anti_affinity_cross_deployment_via_graphql[api-chromium]` | e2e | E-S | 2026-10-17T00:21:55+00:00 | vCluster `pytest-b46f26c7-ae52-4e17-8a8e-15d522f53cf9`, `/tmp/pytest-of-root/pytest-1886/vcluster0/kubeconfig`, image `e2e-508-1792195869` | `PASSED`, `1 passed, 1 deselected, 1 warning in 241.05s (0:04:01)` |
 | `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[api-chromium]` | e2e | E-C | 2026-10-17T02:44:57+00:00 | vCluster `pytest-f097d326-bf0b-4381-923f-bfd0d35a72bd`, `/tmp/pytest-of-root/pytest-1896/vcluster0/kubeconfig`, image `e2e-508-1792204778` | `PASSED`, `1 passed, 1 deselected, 1 warning in 299.13s (0:04:59)` |
 | `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium]` | e2e | E-C | 2026-10-17T02:50:55+00:00 | vCluster `pytest-7a8ba2a6-5087-4c4e-8cf5-e54219ffb4ee`, `/tmp/pytest-of-root/pytest-1897/vcluster0/kubeconfig`, image `e2e-508-1792204778` | `PASSED`, `1 passed, 1 deselected, 1 warning in 338.06s (0:05:38)` |
-| `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[api-chromium]` and `::test_environment_clone_lifecycle[api-chromium]` (whole shard, existing restore test rerun after `5fdbfb68`) | e2e | E-R | 2026-10-17T03:56:18+00:00 | vCluster `pytest-9a2cbfca-babd-42cb-af33-be2e77f316f5`, image `e2e-508-final-1792208899`; the log does not print the kubeconfig path | `PASSED` for both, `2 passed, 199 deselected, 1 warning in 469.80s (0:07:49)` |
+| `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[api-chromium]` and `::test_environment_clone_lifecycle[api-chromium]` (whole shard, existing restore test rerun after `4350614b`) | e2e | E-R | 2026-10-17T03:56:18+00:00 | vCluster `pytest-9a2cbfca-babd-42cb-af33-be2e77f316f5`, image `e2e-508-final-1792208899`; the log does not print the kubeconfig path | `PASSED` for both, `2 passed, 199 deselected, 1 warning in 469.80s (0:07:49)` |
 | `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium]` and `::test_environment_clone_lifecycle[ui-chromium]` (whole shard) | e2e | E-R | 2026-10-17T04:04:52+00:00 | vCluster `pytest-fbc6560e-76e9-49d9-8d89-81bcf1cd491c`, image `e2e-508-final-1792208899` | `PASSED` for both, `2 passed, 199 deselected, 1 warning in 511.15s (0:08:31)` |
 
 Full suites after the review fixes:
@@ -243,7 +243,17 @@ Before the review fixes, chunk 13 ran these:
 - `uv run invoke validate-graphql`: 277 of 277 files passed.
 - `uv run invoke format lint`: exit 0.
 
-The review-fix commits after `6895a1d1` change log fields, the binder's validation of each reference, and one clone log line. The unit and functional suites cover them; no E2E ran after them.
+The review-fix commits after `06645477` change log fields, the binder's validation of each reference, and one clone log line. The unit and functional suites cover them; no E2E ran after them.
+
+Rebase onto develop: on 2026-10-17 the branch was rebased onto `origin/develop` at `ce8cb7d8`, which brings in 18 commits, among them #493. Four files had conflicts (`services/deployment.py`, `workflows/templates/clone.py`, `dev/knowledge/backend/services.md`, `dev/README.md`), and both sides are kept in each. After the rebase:
+
+- `uv run invoke format lint` passed (11:50:55Z).
+- Unit: 4217 passed, 1 skipped (11:52:16Z).
+- Functional: 774 passed, 2 skipped (11:53:40Z).
+- SDK: 298 passed (11:53:41Z).
+- `uv run invoke validate-graphql`: 277 of 277 files passed.
+
+No E2E ran after the rebase. Details are in `e2e-evidence.md`.
 
 ## 5. Review findings
 
@@ -251,18 +261,18 @@ The review ran six aspects: code, comments, tests, errors, types and simplify. N
 
 | Severity | File | Finding | Status |
 |----------|------|---------|--------|
-| High | `services/backup/environment.py` | A redeploy that an environment restore refuses was hard to trace. The log line had no restore id, and the count included Velero dispatch failures. | Fixed in `2079f97b`: added `environment_restore_id`, `error_code`, `path`, a separate `config_redeploy_failed` count, and a metric line. Storing the failures on `EnvironmentRestore` needs a schema change and was not made. |
-| Medium | `services/scheduling/references.py` | Driver component configs reached the binder without validation. A term with both an id and a name kept the id and dropped the name, and a malformed reference was skipped. | Fixed in `79c1bd19` |
-| Medium (test, rated 7 of 10) | `tests/functional/test_unit_of_work_savepoint.py` | No test checked that a block which exits normally is removed from the savepoint stack. | Fixed in `d820bbc7` |
-| Medium (test, rated 6 of 10) | `tests/functional/graphql/test_deployment_reference_scenarios.py` | The #492 rename test passed even on the base code. | Fixed in `9596d318` |
-| Medium | Clone documentation in 3 places | The pages said an empty-selection clone always completes. It is now refused when the environment's config names a deployment. | Fixed in `f48d76fe` |
-| Medium | `services/exceptions.py`, `backup-restore.md` | One docstring and one knowledge-page count were inaccurate. | Fixed in `f48d76fe` |
+| High | `services/backup/environment.py` | A redeploy that an environment restore refuses was hard to trace. The log line had no restore id, and the count included Velero dispatch failures. | Fixed in `ee5d0f99`: added `environment_restore_id`, `error_code`, `path`, a separate `config_redeploy_failed` count, and a metric line. Storing the failures on `EnvironmentRestore` needs a schema change and was not made. |
+| Medium | `services/scheduling/references.py` | Driver component configs reached the binder without validation. A term with both an id and a name kept the id and dropped the name, and a malformed reference was skipped. | Fixed in `6a3d7c33` |
+| Medium (test, rated 7 of 10) | `tests/functional/test_unit_of_work_savepoint.py` | No test checked that a block which exits normally is removed from the savepoint stack. | Fixed in `64accb4e` |
+| Medium (test, rated 6 of 10) | `tests/functional/graphql/test_deployment_reference_scenarios.py` | The #492 rename test passed even on the base code. | Fixed in `0f069283` |
+| Medium | Clone documentation in 3 places | The pages said an empty-selection clone always completes. It is now refused when the environment's config names a deployment. | Fixed in `a1c4c3d4` |
+| Medium | `services/exceptions.py`, `backup-restore.md` | One docstring and one knowledge-page count were inaccurate. | Fixed in `a1c4c3d4` |
 | Medium (existed before) | `services/deployment.py` | `update_deployment` commits phase 1 before phase 2 resolves the terms at environment and component level. A refusal at those levels comes after the deployment's own change is saved. | Deferred |
 | Medium | SDK `resources/_base.py` | `OperationFailedError` drops the GraphQL extensions, so SDK and CLI users do not get the term path. The contract fixes the message of the clone refusal. | Deferred |
 | Low (reviewer rated it medium; latent) | `services/deployment.py` (ingress controller) | In a clone, the dedicated ingress controller's instance is built without `upcoming_deployments`. It does not fail today, because the ingress driver has no components and resolution returns early. | Deferred, test gap recorded |
 | Low | `workflows/templates/clone.py` | A failed restore dispatch, after the counterpart row exists, is cascaded as "not cloned". | Deferred, design question |
-| Low | `workflows/templates/clone.py` | The branch that stops the clone had no log line. | Fixed in `91df29bf` |
-| Low | Comment and documentation wording: driver terms not cascaded, "whose capture failed", savepoint list, `DriverMismatchError`, `order_counterparts` docstring, "no live deployment", refusal lists, ADR index, R-015 | Wording did not match the code. | Fixed in `f48d76fe` |
+| Low | `workflows/templates/clone.py` | The branch that stops the clone had no log line. | Fixed in `b781eace` |
+| Low | Comment and documentation wording: driver terms not cascaded, "whose capture failed", savepoint list, `DriverMismatchError`, `order_counterparts` docstring, "no live deployment", refusal lists, ADR index, R-015 | Wording did not match the code. | Fixed in `a1c4c3d4` |
 | Low | `services/backup/clone.py` (around L501) | A malformed driver component id is parsed with a bare `UUID()`. | Deferred |
 | Low | Several clone and binder paths | The counterpart cascade checks only deployment-level ids. | Deferred |
 | Low | Error and type design: `UnclonedReference` invariants, a classmethod for `deleted=True`, `_CreatedEnvironment.merged_config` naming, `Mapping` parameters | The suggestions do not change behaviour. | Deferred |
@@ -274,7 +284,7 @@ The review ran six aspects: code, comments, tests, errors, types and simplify. N
 - T001, the baseline run, was merged into chunk 1, because its only output was the T002 commit message.
 - Phase 2 was split in two (T001 to T005, and T006 to T009), and so were Phase 7 (code, then E2E) and Phase 11 (documentation, then verification), to keep each chunk under about 10 tasks and 15 files.
 - Chunk 3b was added; tasks.md has no such task. It fixes the nested unit-of-work rollback defect before Phases 8 and 10, which rely on savepoint isolation. It touches the shared unit of work, a high-risk area, and changes how failures in nested blocks are rolled back.
-- The whole `shard_env_backup` shard was run again for both variants after the restore change. The commit `5fdbfb68` came after the clone E2E runs, and AGENTS.md asks for confirmation before relying on an older E2E pass.
+- The whole `shard_env_backup` shard was run again for both variants after the restore change. The commit `4350614b` came after the clone E2E runs, and AGENTS.md asks for confirmation before relying on an older E2E pass.
 - No E2E ran after the review-fix commits. They change log fields, the validation of each reference in the binder, and one log line, and the unit and functional suites cover them. Confirm whether you want another E2E run before the PR.
 - Review triage:
   - The code review's top finding, the dedicated ingress controller in a clone, was rated low after a check of the code.
@@ -287,7 +297,7 @@ The review ran six aspects: code, comments, tests, errors, types and simplify. N
 ## 7. Suggested next steps
 
 1. Read `pr-notes.md`, then open a PR from `fac/affinity-by-id-zsdtf`. The high-risk areas are the unit of work, the clone flow, the environment restore and the GraphQL descriptions.
-2. Decide whether to run `shard_compute` and `shard_env_backup` again after the review-fix commits, or to rely on CI.
+2. Decide whether to run `shard_compute` and `shard_env_backup` again after the review-fix commits and the rebase onto `develop`, or to rely on CI.
 3. Decide on the deferred review findings that need your input:
    - storing restore failures on `EnvironmentRestore` (schema change);
    - the two-phase `update_deployment` saving part of a refused change;
