@@ -275,6 +275,14 @@ back the whole transaction, including the savepoint of the caller and the redepl
 written, and the caller kept using a session whose transaction was gone. An explicit
 `uow.rollback()` still rolls back the whole transaction.
 
+Since [#508](https://github.com/opsmill/styrmin/issues/508), the rule depends on the savepoint
+that was open when the block was entered, not when it exits: a block entered inside a savepoint
+rolls back that savepoint if it is still active, and a block entered outside any savepoint rolls
+back the whole transaction. Under the first rule, when two nested blocks were open inside the
+savepoint (context generation calls `resolve_deployment_reference`), the inner block rolled back
+the savepoint, and the outer block found no savepoint open and rolled back the whole transaction
+(amended 2026-10-17).
+
 ## Consequences
 
 - Administrators change any cluster value without deleting a deployment, an environment or the

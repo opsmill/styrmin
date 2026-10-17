@@ -301,9 +301,9 @@ without it and no application is rolling out, `FAILED` or `RESTORING`. A failure
 `cluster_config_fanout_hook_error`, and the status report still commits.
 
 These savepoints isolate a failure because `SqlModelUnitOfWork.__aexit__`
-rolls back only the innermost open savepoint when a nested `async with uow`
-block fails inside one, and `SqlModelUnitOfWork.commit()` raises inside a
-savepoint (see [`backend/services.md`](backend/services.md#unit-of-work-pattern)).
+rolls back only the savepoint that was open when a nested `async with uow`
+block was entered, however many such blocks fail inside it, and
+`SqlModelUnitOfWork.commit()` raises inside a savepoint (see [`backend/services.md`](backend/services.md#unit-of-work-pattern)).
 
 Both fan-outs compare per deployment, so a resubmission of the same config
 redeploys only the deployments that are not at the config the fan-out
