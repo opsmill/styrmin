@@ -1,0 +1,6 @@
+query ListEnvironmentServices($environmentId: UUID!) {
+    environmentServices(environmentId: $environmentId) {
+        resolvedName
+        deploymentId
+    }
+}

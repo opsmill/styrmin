@@ -83,6 +83,8 @@ class Cluster:
         #: The aliases of old service names that the flow finds in the cluster.
         self.stale_aliases: list[StaleAlias] = []
         self.deleted_aliases: list[StaleAlias] = []
+        #: The contexts that the alias step selects stale aliases from.
+        self.alias_contexts: list[GlobalContext] = []
 
     async def namespace(self, **kwargs: Any) -> None:
         self.events.append(("namespace",))
@@ -103,8 +105,12 @@ class Cluster:
         self.events.append(("aliases",))
         self.deleted_aliases.extend(kwargs.get("stale_aliases") or [])
 
-    async def find_stale(self, _context: GlobalContext) -> list[StaleAlias]:
+    async def find_stale(self, context: GlobalContext) -> list[StaleAlias]:
+        self.alias_contexts.append(context)
         return self.stale_aliases
+
+    async def current_services(self, context: GlobalContext) -> GlobalContext:
+        return context
 
     async def action(self, *, name: UUID, step_id: UUID | None = None, **_: Any):
         self.events.append(("action", name))
@@ -146,6 +152,7 @@ def cluster(monkeypatch: pytest.MonkeyPatch, events: list[Event]) -> Cluster:
         ("patch_custom_resource_status", fake.status_reset),
         ("apply_service_aliases", fake.aliases),
         ("find_stale_service_aliases", fake.find_stale),
+        ("with_current_peer_services", fake.current_services),
         ("run_driver_action_or_fail", fake.action),
     ):
         monkeypatch.setattr(orchestration, name, AsyncMock(side_effect=mock))
@@ -225,6 +232,32 @@ def _assert_started_records(api: FakeStepApi, task_id: UUID) -> None:
 
 
 # create_instance_crd
+
+
+@pytest.mark.asyncio
+async def test_alias_step_uses_the_services_that_the_server_lists_now(
+    api: FakeStepApi, cluster: Cluster, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#503: the context lists no deployment requested after it, so the step reads them."""
+    instance = _instance()
+    current = instance.context.model_copy(
+        update={"deployed_services": [{"resolved_name": "peer"}]}
+    )
+    read = AsyncMock(return_value=current)
+    computed: list[GlobalContext] = []
+
+    def compute(context: GlobalContext) -> list[str]:
+        computed.append(context)
+        return ["alias"]
+
+    monkeypatch.setattr(orchestration, "with_current_peer_services", read)
+    monkeypatch.setattr(orchestration, "compute_service_aliases", compute)
+
+    await create_instance_crd(instance=instance, prehook=None, posthook=None)
+
+    read.assert_awaited_once()
+    assert computed == [current]
+    assert cluster.alias_contexts == [current]
 
 
 @pytest.mark.asyncio
