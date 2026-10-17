@@ -1,5 +1,13 @@
-mutation LoadRemoteApplicationDriverVersion($repositoryUrl: String!, $branch: String!) {
-    loadRemoteApplicationDriverVersion(repositoryUrl: $repositoryUrl, branch: $branch) {
+mutation LoadRemoteApplicationDriverVersion(
+    $repositoryUrl: String!
+    $branch: String!
+    $driverDirectory: String = null
+) {
+    loadRemoteApplicationDriverVersion(
+        repositoryUrl: $repositoryUrl
+        branch: $branch
+        driverDirectory: $driverDirectory
+    ) {
         id
         applicationDriverId
         applicationDriver {
@@ -8,6 +16,9 @@ mutation LoadRemoteApplicationDriverVersion($repositoryUrl: String!, $branch: St
         version
         contentHash
         sourceCommitSha
+        sourceRepository
+        sourceBranch
+        sourcePath
         loadWarnings
         supportedVersions
         components

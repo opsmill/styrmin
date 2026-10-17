@@ -34,6 +34,10 @@ def _print_version_details(version: Any) -> None:  # noqa: ANN401
         console.print(f"  Content hash: {content_hash}")
     elif source_commit_sha:
         console.print(f"  Commit SHA: {source_commit_sha}")
+    # Local versions keep their folder in source_path too; only a git version has a repository.
+    driver_directory = getattr(version, "source_path", None)
+    if driver_directory and getattr(version, "source_repository", None):
+        console.print(f"  Driver directory: {driver_directory}")
 
     if version.component_configs:
         rows = [
@@ -70,11 +74,24 @@ async def create(name: Annotated[str, Parameter(help="Name of the application dr
 async def load_version(
     repository_url: Annotated[str, Parameter(help="Git repository URL of the driver.")],
     branch: Annotated[str, Parameter(help="Git branch to load from.")],
+    *,
+    driver_directory: Annotated[
+        str | None,
+        Parameter(
+            name="--driver-directory",
+            help=(
+                "Folder of the repository that holds driver.styrmin.yml, relative to the repository root. "
+                "Default: the repository root."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Load an application driver version from a remote git repository."""
     with styrmin_error_handler():
         async with client.get_client() as sdk:
-            version = await sdk.drivers.load_version(repository_url=repository_url, branch=branch)
+            version = await sdk.drivers.load_version(
+                repository_url=repository_url, branch=branch, driver_directory=driver_directory
+            )
 
     _print_version_details(version)
 

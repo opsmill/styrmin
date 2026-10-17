@@ -24,6 +24,9 @@ class LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersion(BaseM
     version: str
     content_hash: Optional[str] = Field(alias="contentHash")
     source_commit_sha: Optional[str] = Field(alias="sourceCommitSha")
+    source_repository: str = Field(alias="sourceRepository")
+    source_branch: Optional[str] = Field(alias="sourceBranch")
+    source_path: Optional[str] = Field(alias="sourcePath")
     load_warnings: list[str] = Field(alias="loadWarnings")
     supported_versions: str = Field(alias="supportedVersions")
     components: Optional[Any]
