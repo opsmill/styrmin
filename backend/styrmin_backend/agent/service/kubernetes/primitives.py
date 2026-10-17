@@ -179,7 +179,7 @@ def _status_cause_types(body: str) -> set[str]:
 
 
 def is_namespace_gone_error(exc: ApiException) -> bool:
-    """True when a write failed because its namespace does not exist or is being deleted.
+    """True for a 404 (the namespace or the Service is gone) and when the namespace is terminating.
 
     A 403 counts only with the NamespaceLifecycle plugin's cause or message, never an RBAC 403.
     """

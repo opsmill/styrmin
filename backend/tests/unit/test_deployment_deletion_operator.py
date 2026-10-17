@@ -588,6 +588,45 @@ async def test_delete_handler_passes_no_deletion_request_to_the_teardown(
     assert teardown_mock.await_args.kwargs["deletion_requested"] is False
 
 
+@pytest.mark.anyio
+async def test_delete_handler_with_a_deletion_request_deletes_aliases_in_a_terminating_namespace(
+    mocker,
+) -> None:
+    """The namespace deletion after a deletion request runs this handler. The CR still has
+    ``spec.deletionRequested``, so the ``Terminating`` namespace does not keep the aliases."""
+    deployment_id = uuid4()
+    namespace, peer_namespace, aliases = _aliases_of(deployment_id)
+    _, delete_mock, get_namespace_mock = _patch_alias_primitives(mocker, aliases)
+    get_namespace_mock.return_value = V1Namespace(
+        status=V1NamespaceStatus(phase="Terminating")
+    )
+    _patch_teardown_kubernetes(mocker)
+    teardown_spy = mocker.spy(handlers_module, "_teardown_owned_resources")
+    logger = _Logger()
+
+    await kopf_on_styrmin_deployment_delete(
+        spec={
+            "releaseReference": "rel-1",
+            "deploymentId": str(deployment_id),
+            "deletionRequested": True,
+        },
+        status={"phase": DeploymentPhase.DELETING.value},
+        name="dep-1",
+        namespace=namespace,
+        annotations={},
+        patch=_Patch(),
+        memo=kopf.Memo(),
+        logger=logger,
+    )
+
+    assert teardown_spy.call_args.kwargs["deletion_requested"] is True
+    assert delete_mock.await_args_list == [
+        call(name="first", namespace=peer_namespace),
+        call(name="second", namespace=peer_namespace),
+    ]
+    assert f"Deleted 2 service aliases of {deployment_id}" in logger.infos
+
+
 # ---------------------------------------------------------------------------
 # 1c. Failed alias deletions, and the guards that keep aliases (#503)
 # ---------------------------------------------------------------------------
@@ -626,6 +665,30 @@ async def test_delete_service_aliases_counts_an_alias_already_gone(mocker) -> No
     ]
     assert f"Deleted 2 service aliases of {deployment_id}" in logger.infos
     assert logger.exceptions == []
+
+
+@pytest.mark.anyio
+async def test_delete_service_aliases_compares_the_labels_with_the_canonical_id(
+    mocker,
+) -> None:
+    """A ``spec.deploymentId`` written in upper case still finds the labelled aliases."""
+    deployment_id = uuid4()
+    namespace, peer_namespace, aliases = _aliases_of(deployment_id)
+    _, delete_mock, _ = _patch_alias_primitives(mocker, aliases)
+    logger = _Logger()
+
+    await _delete_service_aliases(
+        deployment_id=str(deployment_id).upper(),
+        namespace=namespace,
+        deletion_requested=True,
+        logger=logger,
+    )
+
+    assert delete_mock.await_args_list == [
+        call(name="first", namespace=peer_namespace),
+        call(name="second", namespace=peer_namespace),
+    ]
+    assert f"Deleted 2 service aliases of {deployment_id}" in logger.infos
 
 
 @pytest.mark.anyio

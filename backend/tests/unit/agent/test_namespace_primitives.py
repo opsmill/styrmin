@@ -78,6 +78,11 @@ _RBAC_MESSAGE = (
             _api_error(403, _TERMINATING_STATUS.encode()), id="terminating-cause-bytes"
         ),
         pytest.param(_api_error(403, _TERMINATING_MESSAGE), id="terminating-message"),
+        # kubernetes_asyncio gives ApiException.body as bytes.
+        pytest.param(
+            _api_error(403, _TERMINATING_MESSAGE.encode()),
+            id="terminating-message-bytes",
+        ),
     ],
 )
 def test_namespace_gone_errors(exc: ApiException) -> None:
@@ -88,6 +93,9 @@ def test_namespace_gone_errors(exc: ApiException) -> None:
     "exc",
     [
         pytest.param(_api_error(403, _RBAC_MESSAGE), id="rbac-forbidden"),
+        pytest.param(
+            _api_error(403, _RBAC_MESSAGE.encode()), id="rbac-forbidden-bytes"
+        ),
         pytest.param(_api_error(403), id="forbidden-without-body"),
         pytest.param(_api_error(409), id="conflict"),
         pytest.param(_api_error(500), id="server-error"),
