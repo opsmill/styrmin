@@ -7,6 +7,7 @@ Constitution §V definition-of-done record for tasks T015, T035 and T036. Three 
 | `api-chromium` | T015 | `e2e-503-1792193732` | `3 passed, 3 deselected` |
 | `ui-chromium` | T035 | `e2e-503-1792194439` | `1 passed, 2 skipped, 3 deselected` |
 | `api-chromium`, paused after the deletion for the `kubectl` checks | T036 | `e2e-503-1792194439` | `3 passed, 3 deselected` |
+| `api-chromium`, after the review fixes (2026-10-17) | review | `e2e-503-1792203741` | `3 passed, 3 deselected` |
 
 The `api-chromium` session of `backend/tests/e2e/test_service_discovery.py` passed locally on 2026-10-16 at the first attempt. The module's three tests ran in one pytest session, the new test last. The module carries the `shard_general` marker, and the new test carries `ci` and `api_only`.
 
@@ -225,3 +226,61 @@ The delete handler ran when the StyrminDeployment was deleted with its namespace
 - At the time of the checks the cluster held no alias of any deployment, so the second check could not have found an alias of `intent` even without the fix. The positive evidence is the first check, the E2E test's own check before the deletion (the alias `intent` was in `executor`'s namespace), and the agent log line `Deleted 1 service aliases of c90a04f1-17d3-4565-a8ff-7a8e38565a54`.
 - `ls /tmp/pytest-of-*/pytest-*/vcluster0/kubeconfig | tail -1` sorts by name, not by time. On this host it found one kubeconfig, which was this session's. When other sessions leave kubeconfigs, it can return another session's file (for example `pytest-999` sorts after `pytest-1877`); `ls -t ... | head -1`, and a check of the context name, find the right one.
 - All other results matched: the unit tests passed, the three E2E tests passed with the new one last, and the agent log showed `Teardown step 1: service aliases of <A id> in all namespaces` and `Deleted <n> service aliases of <A id>` on both deletion paths.
+
+## api-chromium session after the review fixes (2026-10-17)
+
+The session ran after the review fixes: the second read follows the operator teardown's rule (rule A), the flow deletes a written alias whatever namespace holds it (rule B), and `test_deleted_deployment_leaves_no_alias` waits with `wait_for_deployment_status` from `backend/tests/e2e/helpers/ingress.py` (timeout 300 seconds). It passed at the first attempt.
+
+The image was built before the session with its own tag. A check in the image found `find_deleted_deployment_namespaces` in `styrmin_backend/agent/tasks/service_aliases.py` and the canonical-id line in `styrmin_backend/operator/handlers/styrmin_deployment.py`. The working tree held commit `d3703200` plus the uncommitted review fixes, which are now commits `32d0fd2f` (code and unit tests) and `88a66613` (documentation).
+
+```bash
+export STYRMIN_IMAGE_VER=e2e-503-1792203741
+docker compose build server
+```
+
+| Item | Value |
+|---|---|
+| pytest node IDs | `backend/tests/e2e/test_service_discovery.py::test_service_discovery_between_apps[api-chromium]`, `backend/tests/e2e/test_service_discovery.py::test_service_rename_creates_new_kubernetes_service[api-chromium]`, `backend/tests/e2e/test_service_discovery.py::test_deleted_deployment_leaves_no_alias[api-chromium]` |
+| Exact command | `export STYRMIN_IMAGE_VER=e2e-503-1792203741 npm_config_ignore_workspace=true; exec 3< <(sleep infinity); spid=$!; uv run pytest backend/tests/e2e/test_service_discovery.py -k api-chromium -v -s --pdb <&3 > e2e-api-1.log 2>&1; rc=$?; exec 3<&-; kill "$spid"` |
+| Start (UTC) | `2026-10-17T02:25:24Z` |
+| Last `PASSED` line (UTC) | `2026-10-17T02:27:54Z` |
+| End, pytest exited (UTC) | `2026-10-17T02:27:59Z`, exit code 0 |
+| vcluster name | `pytest-fc2c9cbe-76c5-4d80-ac02-1b81903a4703` (deleted by the fixture teardown after the pass) |
+| Kubeconfig path during the run | `/tmp/pytest-of-root/pytest-1892/vcluster0/kubeconfig`, context `vcluster-docker_pytest-fc2c9cbe-76c5-4d80-ac02-1b81903a4703` |
+| Summary line | `============ 3 passed, 3 deselected, 1 warning in 152.85s (0:02:32) ============` |
+
+Verbatim `PASSED` lines (ANSI color codes removed):
+
+```text
+backend/tests/e2e/test_service_discovery.py::test_service_discovery_between_apps[api-chromium] 02:25:26 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+...
+PASSED
+backend/tests/e2e/test_service_discovery.py::test_service_rename_creates_new_kubernetes_service[api-chromium] PASSED
+backend/tests/e2e/test_service_discovery.py::test_deleted_deployment_leaves_no_alias[api-chromium] PASSED02:27:54 info Removing vCluster container vcluster.cp.pytest-fc2c9cbe-76c5-4d80-ac02-1b81903a4703...
+```
+
+In this session `intent` had the id `9f24bf1a-dfc5-4333-952d-632a2fdbb8e6` and `executor` had the id `09712a80-459a-4e73-9eee-8f287bbecdf0`. Agent log, from `kubectl -n styrmin logs -f styrmin-styrmin-agent-agent-7b84dc5dff-fj47c --all-containers --timestamps`:
+
+- The alias flow of the rename test wrote the alias `intent` into `executor`'s namespace 7 seconds before the deletion. It logged no skipped alias and no deleted write:
+
+  ```text
+  2026-10-17T02:27:37.353866727Z 02:27:37.353 | INFO    | Flow run 'Apply service aliases' - Applying service alias: intent in namespace styrmin-09712a80-459a-4e73-9eee-8f287bbecdf0
+  ```
+
+- The `deletionRequested` handler deleted it in the first teardown step:
+
+  ```text
+  2026-10-17T02:27:44.227171057Z 2026-10-17 02:27:44,227 INFO     kopf.objects: Deletion requested via spec for styrmin-9f24bf1a-dfc5-4333-952d-632a2fdbb8e6/styrmin-9f24bf1a-dfc5-4333-952d-632a2fdbb8e6 — running teardown
+  2026-10-17T02:27:44.227192457Z 2026-10-17 02:27:44,227 INFO     kopf.objects: Teardown step 1: service aliases of 9f24bf1a-dfc5-4333-952d-632a2fdbb8e6 in all namespaces
+  2026-10-17T02:27:44.303871935Z 2026-10-17 02:27:44,303 INFO     kopf.objects: Deleted 1 service aliases of 9f24bf1a-dfc5-4333-952d-632a2fdbb8e6
+  ```
+
+- The delete handler ran when the namespace deletion deleted the StyrminDeployment, and found no alias left:
+
+  ```text
+  2026-10-17T02:27:49.343486133Z 2026-10-17 02:27:49,343 INFO     kopf.objects: Deleting StyrminDeployment styrmin-9f24bf1a-dfc5-4333-952d-632a2fdbb8e6/styrmin-9f24bf1a-dfc5-4333-952d-632a2fdbb8e6 (safety-net path), cleaning up resources
+  2026-10-17T02:27:49.343511060Z 2026-10-17 02:27:49,343 INFO     kopf.objects: Teardown step 1: service aliases of 9f24bf1a-dfc5-4333-952d-632a2fdbb8e6 in all namespaces
+  2026-10-17T02:27:49.348019643Z 2026-10-17 02:27:49,347 INFO     kopf.objects: Deleted 0 service aliases of 9f24bf1a-dfc5-4333-952d-632a2fdbb8e6
+  ```
+
+The lines at 02:27:54 for `executor` and the ingress controller deployment come from the fixture teardown at the end of the session.

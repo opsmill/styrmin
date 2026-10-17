@@ -24,6 +24,8 @@ The change does not delete these aliases:
 
 Driver templates of other deployments still see a `DELETING` deployment's services until it reaches `DELETED`, as before.
 
+Review fixes (2026-10-17): the flow's second read counts an owner only under the operator teardown's rule, a `spec.deletionRequested` flag or a `deletionTimestamp` while the namespace exists and is not `Terminating` (rule A), so a restore's namespace deletion no longer makes a flow delete the alias it has just written; and the flow deletes every alias it wrote of a deleted owner, whatever namespace holds it (rule B). With rule A, an alias written after the delete handler's teardown listed the aliases, and before the StyrminDeployment was removed, can remain (research R-004).
+
 Not decided: the two questions for the maintainer below.
 
 ## High-risk areas touched
@@ -41,7 +43,7 @@ The GraphQL API, SDK, CLI, frontend, database schema and Helm charts do not chan
 
 ## Evidence
 
-[e2e-evidence.md](https://github.com/opsmill/styrmin/blob/fac/services-cleanup-zk1ti/specs/026-delete-service-aliases/e2e-evidence.md) records three local sessions of `backend/tests/e2e/test_service_discovery.py`, with their commands, times, vclusters and `PASSED` lines, the agent log of each deletion of `intent`, and the walk-through of [quickstart.md](https://github.com/opsmill/styrmin/blob/fac/services-cleanup-zk1ti/specs/026-delete-service-aliases/quickstart.md), including the two `kubectl` checks in all namespaces.
+[e2e-evidence.md](https://github.com/opsmill/styrmin/blob/fac/services-cleanup-zk1ti/specs/026-delete-service-aliases/e2e-evidence.md) records four local sessions of `backend/tests/e2e/test_service_discovery.py`, the last one after the review fixes, with their commands, times, vclusters and `PASSED` lines, the agent log of each deletion of `intent`, and the walk-through of [quickstart.md](https://github.com/opsmill/styrmin/blob/fac/services-cleanup-zk1ti/specs/026-delete-service-aliases/quickstart.md), including the two `kubectl` checks in all namespaces.
 
 ## Checks run
 
@@ -54,6 +56,7 @@ The GraphQL API, SDK, CLI, frontend, database schema and Helm charts do not chan
 | E2E `shard_general` module, API variant (task T015) | 23:36:09 to 23:38:38 | `3 passed, 3 deselected` |
 | E2E `shard_general` module, UI variant (task T035) | 23:50:54 to 23:53:13 | `1 passed, 2 skipped, 3 deselected` (the skipped tests are `api_only`) |
 | E2E `shard_general` module, API variant, paused after the deletion for the `kubectl` checks (task T036) | 23:54:23 to 23:57:42 | `3 passed, 3 deselected` |
+| E2E `shard_general` module, API variant, after the review fixes | 2026-10-17, 02:25:24 to 02:27:59 | `3 passed, 3 deselected` |
 
 Each E2E session passed at the first attempt. Only the module `test_service_discovery.py` ran locally, not the whole `shard_general` shard; the next section explains why that is enough for the new test. CI runs the full suite on this pull request.
 
