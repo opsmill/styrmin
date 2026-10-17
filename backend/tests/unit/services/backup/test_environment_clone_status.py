@@ -32,6 +32,7 @@ from styrmin_backend.services.backup.clone import (
     CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
     CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
     CLONE_STEP_ENVIRONMENT_CREATION_FAILED,
+    CLONE_STEP_REFERENCED_DEPLOYMENT_NOT_CLONED,
     CLONE_STEP_SOURCE_ENVIRONMENT_DELETED,
     CLONE_STEP_TARGET_NAME_TAKEN,
     CLONE_STEPS,
@@ -115,7 +116,7 @@ def test_terminal_set_is_completed_partial_failed() -> None:
 
 
 def test_outcome_and_step_vocabularies_are_fixed() -> None:
-    """The four write-side outcomes and the six recorded steps (data-model.md)."""
+    """The four write-side outcomes and the seven recorded steps (data-model.md, 027 D-007)."""
     assert {outcome.value for outcome in EnvironmentCloneDeploymentOutcome} == {
         "pending",
         "cloned",
@@ -129,6 +130,7 @@ def test_outcome_and_step_vocabularies_are_fixed() -> None:
         CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
         CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
         CLONE_STEP_SOURCE_ENVIRONMENT_DELETED,
+        CLONE_STEP_REFERENCED_DEPLOYMENT_NOT_CLONED,
     }
 
 
