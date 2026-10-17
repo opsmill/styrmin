@@ -11,6 +11,7 @@ RUN git init --bare /git/infrahub-enterprise.git
 RUN git init --bare /git/failing-actions.git
 RUN git init --bare /git/late-container.git
 RUN git init --bare /git/hook-job.git
+RUN git init --bare /git/driver-collection.git
 
 EXPOSE 9418
 

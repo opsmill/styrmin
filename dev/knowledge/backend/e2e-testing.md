@@ -402,8 +402,8 @@ A bare git daemon that hosts the application driver source code.
 |--------|--------|
 | **Purpose** | Serve the driver spec so Styrmin can load a driver version |
 | **Image** | Built from `tests/e2e/fixtures/git-server/Dockerfile` |
-| **How it works** | Alpine with `git-daemon`; the image creates one bare repository per driver (`RUN git init --bare /git/<driver>.git`) |
-| **Cluster address** | `git://git-server.default.svc.cluster.local/<driver>.git`, one repository per driver |
+| **How it works** | Alpine with `git-daemon`; the image creates one bare repository per driver (`RUN git init --bare /git/<driver>.git`), and one for `driver-collection` |
+| **Cluster address** | `git://git-server.default.svc.cluster.local/<driver>.git`, one repository per driver, and `git://git-server.default.svc.cluster.local/driver-collection.git` |
 
 At setup time, the fixture:
 
@@ -413,6 +413,8 @@ At setup time, the fixture:
 4. Port-forwards the git-daemon service and pushes the repo
 
 The test drivers exist only for E2E scenarios. `failing-actions` reuses the simple-app chart, and its upgrade action fails on purpose for some target versions; `test_task_steps.py` uses it to cause the failures of spec 019. `late-container` reuses the simple-app chart without a component container on `server`; `test_deployments_apply.py` pushes its next version, which declares that container, to a branch, and moves a deployment onto it with component env vars in one apply (#388). `hook-job` reuses the simple-app chart with `preUpgradeHookJob.enabled: true`, which turns on the chart's pre-upgrade Helm hook Job, labelled with the server component's identifier label `app.kubernetes.io/name: simple-app`, and a pre-upgrade hook ConfigMap without labels; `test_pod_scheduling.py` uses it to check that the hook Job gets the deployment's scheduling settings and Styrmin's labels, and that the ConfigMap gets Styrmin's labels (#435).
+
+The `driver-collection` repository holds two drivers, each in its own driver directory: `drivers/simple-app/` and `drivers/db-test/`. The fixture prepares each one as it prepares the repository of that driver (`_prepare_driver` in `conftest.py`). The session fixture `styrmin_resources` loads `simple-app` from the driver directory `drivers/simple-app` of `driver-collection` (spec 028), so every session deploys a driver version loaded from a driver directory and runs its actions from that folder. The `simple-app` repository stays: `test_driver_version_reselection.py` and `helpers/drivers.py` push new branches to it and load them from the repository root.
 
 <!-- Extracted from specs/025-helm-v4-defaults on 2026-10-16 -->
 

@@ -348,9 +348,13 @@ class ApiScenarioDriver:
         except StyrminError as exc:
             raise _normalise(exc) from exc
 
-    async def load_driver_version(self, *, git_url: str, ref: str) -> DriverVersionRef:
+    async def load_driver_version(
+        self, *, git_url: str, ref: str, driver_directory: str | None = None
+    ) -> DriverVersionRef:
         try:
-            version = await self._client.drivers.load_version(git_url, ref)
+            version = await self._client.drivers.load_version(
+                git_url, ref, driver_directory=driver_directory
+            )
         except StyrminError as exc:
             raise _normalise(exc) from exc
         return DriverVersionRef(
