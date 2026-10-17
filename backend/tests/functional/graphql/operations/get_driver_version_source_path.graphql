@@ -1,0 +1,10 @@
+query GetDriverVersionSourcePath($applicationDriverId: UUID!) {
+    applicationDriver(applicationDriverId: $applicationDriverId) {
+        id
+        versions {
+            id
+            sourceType
+            sourcePath
+        }
+    }
+}

@@ -10,12 +10,15 @@ class GitSource(BaseModel):
         repository (str): The repository URL.
         branch (str): The branch name.
         token (str): The token to access the repository.
+        driver_directory (str | None): The stored driver directory relative to the
+            repository root; None for the repository root.
     """
 
     type: Literal["git"] = "git"
     repository: str
     branch: str
     token: str
+    driver_directory: str | None = None
 
 
 class LocalSource(BaseModel):

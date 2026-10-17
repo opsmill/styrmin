@@ -102,6 +102,10 @@ async def load_application_driver_from_object(
 ) -> ApplicationDriverVersionModel:
     """Load an application driver from an object.
 
+    The driver version's identity includes ``source_path``: the absolute path
+    of a local load, the driver directory of a git load from one, or None for
+    a git load from the repository root.
+
     Args:
         driver_object (ApplicationDriver): The object representing the application driver.
 
@@ -128,7 +132,8 @@ async def load_application_driver_from_object(
             source_type = "git"
             source_repository = driver_object.source.repository
             source_branch: str | None = driver_object.source.branch
-            source_path: str | None = None
+            # The driver directory, or None for a load from the repository root (spec 028).
+            source_path: str | None = driver_object.source.driver_directory
         else:
             source_type = "local"
             source_repository = ""
@@ -380,16 +385,26 @@ async def load_application_driver_from_object(
 
 
 async def load_application_driver_from_git_repository(
-    repository_url: str, branch: str, uow: UnitOfWork
+    repository_url: str,
+    branch: str,
+    uow: UnitOfWork,
+    driver_directory: str | None = None,
 ) -> LoadedDriverVersion:
     """Load an application driver from a git repository.
 
     Args:
         repository_url (str): The URL of the git repository.
         branch (str): The branch to clone.
+        uow (UnitOfWork): The unit of work to use.
+        driver_directory (str | None): The folder of the repository that holds the
+            driver, relative to the repository root; None for the repository root.
+            Stored in normalised form in ``source_path``.
 
     Returns:
         LoadedDriverVersion: The stored driver version and the load warnings.
+
+    Raises:
+        DriverLoadingError: The driver directory is refused, before any clone.
     """
 
     # TODO: Token setup
@@ -401,7 +416,10 @@ async def load_application_driver_from_git_repository(
 
     # Load the driver from the remote repository
     driver_loader = get_git_driver_loader(
-        repository=repository_url, branch=branch, token=token
+        repository=repository_url,
+        branch=branch,
+        token=token,
+        driver_directory=driver_directory,
     )
     application_driver = driver_loader.load_driver()
 

@@ -36,6 +36,11 @@ T033 adds the reload case: an unchanged driver fills in a pre-feature row (FR-00
 default replica count and the singleton flag, loaded through ``loadLocalApplicationDriverVersion``,
 plus the load failure for ``singleton: true`` with ``replicas`` above 1.
 
+028-git-driver-directory (T009) adds the ``driverDirectory`` argument of
+``loadRemoteApplicationDriverVersion``: a load from a local git repository stores the
+normalised driver directory in ``source_path``, and ``applicationDriver.versions`` returns it
+as ``sourcePath``.
+
 Test location note: the task list specifies
 ``backend/tests/unit/api/schema/test_application_driver_version_propagation.py``
 but the project's documented propagation-test harness (fixtures, seeds,
@@ -45,12 +50,14 @@ operation loader) lives in ``backend/tests/functional/graphql/`` per
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 import pytest
 import yaml
+from dulwich import porcelain
 from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -760,3 +767,101 @@ async def test_invalid_replica_keys_fail_load_and_store_nothing(
     assert f"spec.components.server.{field}" in error["message"]
     assert (await session.exec(select(ApplicationDriverVersion))).all() == []
     assert (await session.exec(select(ComponentConfig))).all() == []
+
+
+_FIXTURE_DRIVER = (
+    Path(__file__).resolve().parents[2]
+    / "unit"
+    / "services"
+    / "driver"
+    / "fixtures"
+    / "local_driver_directory"
+)
+
+
+@pytest.fixture
+def driver_repository(tmp_path: Path) -> tuple[str, str, str]:
+    """A local git repository with the fixture driver at the root and in ``drivers/a/``.
+
+    Returns:
+        The repository path, the branch and the commit SHA.
+    """
+    repo_path = tmp_path / "driver-repository"
+    shutil.copytree(_FIXTURE_DRIVER, repo_path)
+    shutil.copytree(_FIXTURE_DRIVER, repo_path / "drivers" / "a")
+    with porcelain.init(str(repo_path)) as repo:
+        branch = repo.refs.read_ref(b"HEAD").decode("ascii").rsplit("/", 1)[-1]
+    files = sorted(
+        str(p) for p in repo_path.rglob("*") if p.is_file() and ".git" not in p.parts
+    )
+    porcelain.add(str(repo_path), paths=files)
+    sha = porcelain.commit(
+        str(repo_path), message=b"drivers", author=b"t <t@t>", committer=b"t <t@t>"
+    ).decode("ascii")
+    return str(repo_path), branch, sha
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_driver_directory_propagates_from_git_load_to_db(
+    client: AsyncClient,
+    session: AsyncSession,
+    driver_repository: tuple[str, str, str],
+) -> None:
+    """028 T009 (FR-001, FR-005): ``driverDirectory`` reaches the git load, and the
+    normalised driver directory is stored in ``source_path``."""
+    repository, branch, sha = driver_repository
+
+    loaded = await gql(
+        client,
+        "load_remote_driver_directory",
+        {
+            "repositoryUrl": repository,
+            "branch": branch,
+            "driverDirectory": "./drivers/a/",
+        },
+    )
+    version = loaded["loadRemoteApplicationDriverVersion"]
+    assert version["sourceType"] == "git"
+    assert version["sourcePath"] == "drivers/a"
+    assert version["sourceCommitSha"] == sha
+
+    row = await session.get(
+        ApplicationDriverVersion, UUID(version["id"]), populate_existing=True
+    )
+    assert row is not None
+    assert row.source_type == "git"
+    assert row.source_path == "drivers/a"
+    assert row.source_commit_sha == sha
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_driver_directory_projects_through_application_driver_query(
+    client: AsyncClient,
+    driver_repository: tuple[str, str, str],
+) -> None:
+    """028 T009 (FR-005): ``applicationDriver.versions`` returns the stored driver
+    directory as ``sourcePath``."""
+    repository, branch, _sha = driver_repository
+    loaded = await gql(
+        client,
+        "load_remote_driver_directory",
+        {
+            "repositoryUrl": repository,
+            "branch": branch,
+            "driverDirectory": "./drivers/a/",
+        },
+    )
+    version = loaded["loadRemoteApplicationDriverVersion"]
+
+    data = await gql(
+        client,
+        "get_driver_version_source_path",
+        {"applicationDriverId": version["applicationDriverId"]},
+    )
+    [read_back] = [
+        v for v in data["applicationDriver"]["versions"] if v["id"] == version["id"]
+    ]
+    assert read_back["sourceType"] == "git"
+    assert read_back["sourcePath"] == "drivers/a"

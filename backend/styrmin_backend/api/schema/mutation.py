@@ -792,11 +792,18 @@ class Mutation:
 
     @strawberry.mutation(extensions=[_requires(Role.ADMIN)])
     async def load_remote_application_driver_version(
-        self, repository_url: str, branch: str, info: strawberry.Info
+        self,
+        repository_url: str,
+        branch: str,
+        info: strawberry.Info,
+        driver_directory: str | None = None,
     ) -> ApplicationDriverVersion | None:
         uow = info.context["uow"]
         loaded = await load_application_driver_from_git_repository(
-            repository_url=repository_url, branch=branch, uow=uow
+            repository_url=repository_url,
+            branch=branch,
+            uow=uow,
+            driver_directory=driver_directory,
         )
         result = ApplicationDriverVersion.from_instance(loaded.version)
         result.load_warnings = loaded.warnings
