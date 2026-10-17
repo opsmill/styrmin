@@ -710,6 +710,12 @@ async def _create_cloned_environment(
     )
     if unmapped:
         # A term names a deployment whose capture failed: no environment (027 FR-005).
+        logger.error(
+            "env_clone_environment_reference_not_cloned environment_clone_id=%s "
+            "named_deployment_ids=%s",
+            clone.id,
+            ",".join(str(named_id) for named_id in unmapped),
+        )
         source_names = {r.deployment_id: r.deployment_name for r in results}
         await _save_progress(
             clone.id,

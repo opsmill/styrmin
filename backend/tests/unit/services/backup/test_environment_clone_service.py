@@ -3025,7 +3025,10 @@ async def test_a_failed_capture_fails_the_counterparts_whose_terms_name_it(
 
 @pytest.mark.asyncio
 async def test_an_environment_term_that_names_a_failed_capture_fails_the_clone(
-    scenario: _Scenario, prefect_manager_mock, flow_harness
+    scenario: _Scenario,
+    prefect_manager_mock,
+    flow_harness,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """US6 scenario 5: E's term names postgres-main, whose capture fails."""
     scenario.source.config = {
@@ -3035,7 +3038,17 @@ async def test_an_environment_term_that_names_a_failed_capture_fails_the_clone(
     clone = await scenario.clone()
     await _complete_capture(scenario, failed_deployment=scenario.first)
 
-    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+    with caplog.at_level(logging.ERROR, logger="test"):
+        await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    assert [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("env_clone_environment_reference_not_cloned")
+    ] == [
+        f"env_clone_environment_reference_not_cloned environment_clone_id={clone.id} "
+        f"named_deployment_ids={scenario.first.id}"
+    ]
 
     refreshed = await scenario.uow.environment_clones.get(clone.id)
     assert refreshed is not None
