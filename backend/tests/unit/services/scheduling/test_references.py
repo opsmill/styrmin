@@ -334,6 +334,73 @@ class TestBindById:
         )
 
 
+class TestBindRefusesMalformedReferences:
+    """A driver version's component configs reach the binder without the API's validation."""
+
+    _PATH = "component[server].config.scheduling.pod_affinity.required[0]"
+
+    async def test_id_and_name_together_are_refused_with_the_path(self, uow) -> None:  # type: ignore[no-untyped-def]
+        env_id = uuid4()
+        a = _make_deployment(name="a", environment_id=env_id)
+        await uow.deployments.save(a)
+        config = _config(
+            required=[{"deployment_id": str(a.id), "deployment_name": "a"}]
+        )
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await bind_deployment_references(
+                uow, env_id, config, path_prefix="component[server].config"
+            )
+
+        assert exc.value.error_code == "VALIDATION_ERROR"
+        assert exc.value.error_metadata == {
+            "deployment_id": str(a.id),
+            "deployment_name": "a",
+            "path": self._PATH,
+        }
+        assert "Exactly one of deployment_id or deployment_name" in str(exc.value)
+
+    async def test_neither_id_nor_name_is_refused_with_the_path(self, uow) -> None:  # type: ignore[no-untyped-def]
+        config = _config(required=[{"components": ["primary"]}])
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await bind_deployment_references(
+                uow, uuid4(), config, path_prefix="component[server].config"
+            )
+
+        assert exc.value.error_code == "VALIDATION_ERROR"
+        assert exc.value.error_metadata == {"path": self._PATH}
+
+    async def test_malformed_id_is_refused_with_the_path(self, uow) -> None:  # type: ignore[no-untyped-def]
+        config = _config(required=[{"deployment_id": "not-a-uuid"}])
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await bind_deployment_references(
+                uow, uuid4(), config, path_prefix="component[server].config"
+            )
+
+        assert exc.value.error_code == "VALIDATION_ERROR"
+        assert exc.value.error_metadata == {
+            "deployment_id": "not-a-uuid",
+            "path": self._PATH,
+        }
+
+    def test_malformed_stored_id_is_refused_with_the_path(self) -> None:
+        config = _config(preferred=[{"deployment_id": "not-a-uuid"}])
+        path = "environment.config.scheduling.pod_affinity.preferred[0].term"
+        expected = {"deployment_id": "not-a-uuid", "path": path}
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as found:
+            referenced_deployment_ids(config, "environment.config")
+        with pytest.raises(UnresolvableAffinityReferenceError) as remapped:
+            remap_deployment_references(
+                config, {uuid4(): uuid4()}, path_prefix="environment.config"
+            )
+
+        assert found.value.error_metadata == expected
+        assert remapped.value.error_metadata == expected
+
+
 class TestBindUpcomingDeployments:
     async def test_upcoming_name_gives_its_id_without_a_row(self, uow) -> None:  # type: ignore[no-untyped-def]
         new_id = uuid4()

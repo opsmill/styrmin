@@ -83,7 +83,10 @@ We chose option 2, as decided in the review of PR #504 and recorded in #508.
 - **A write that names a missing deployment is refused.** A name that no non-tombstoned deployment of
   the environment has, an id of another environment's deployment, and the id of a tombstoned
   deployment are refused with `UnresolvableAffinityReferenceError` (`VALIDATION_ERROR`) and the
-  term's path, and nothing is saved. `createEnvironment` refuses every term that names a
+  term's path, and nothing is saved. The binder checks each reference with the
+  `DeploymentReference` model first, so a component config from a driver version that gives
+  both or neither of `deployment_id` and `deployment_name`, or an id that is not a UUID, is
+  refused with the same error and path. `createEnvironment` refuses every term that names a
   deployment, because a new environment has no deployment, except the deployments that the caller
   is about to create (an environment clone).
 - **A reconcile resolves ids only.** `resolve_deployment_reference` refuses a reference that gives

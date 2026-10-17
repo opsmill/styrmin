@@ -105,6 +105,12 @@ term gives. The path starts with the config that holds the term:
 `environment.config`, `deployment.config` or `component[<name>].config`,
 for example `environment.config.scheduling.pod_anti_affinity.preferred[0].term`.
 
+The same error, with the term's path, refuses a `deployment_ref` that
+gives both or neither of `deployment_id` and `deployment_name`, or a
+`deployment_id` that is not a UUID. The API checks the environment and
+deployment configs for these before it looks names up; for the
+component configs that a driver version gives, this check is the first.
+
 Two consequences:
 
 - `createEnvironment` and `styrminctl environments create -c` refuse
