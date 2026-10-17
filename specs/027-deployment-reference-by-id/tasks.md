@@ -83,8 +83,8 @@ description: "Task list for storing the id of the deployment that an affinity te
 
 **Independent Test**: `updateEnvironment` with a term that names a missing deployment returns `VALIDATION_ERROR` with the path, and the environment's config is unchanged.
 
-- [ ] T017 [P] [US3] Functional tests in `backend/tests/functional/graphql/test_environment_update_propagation.py`: `updateEnvironment` with a term that names a missing deployment is refused with `extensions.code == "VALIDATION_ERROR"` and `extensions.path == "environment.config.scheduling.pod_anti_affinity.preferred[0].term"`, and the stored config is unchanged; `createEnvironment` with any term that names a deployment is refused and no environment is created
-- [ ] T018 [P] [US3] Functional tests in `backend/tests/functional/graphql/test_update_deployment_input_propagation.py`: `updateDeployment` with a term that names a missing deployment, and one that gives the id of a deployment of another environment, are refused with the path, and the deployment's stored config and name are unchanged (FR-002, research R-006)
+- [X] T017 [P] [US3] Functional tests in `backend/tests/functional/graphql/test_environment_update_propagation.py`: `updateEnvironment` with a term that names a missing deployment is refused with `extensions.code == "VALIDATION_ERROR"` and `extensions.path == "environment.config.scheduling.pod_anti_affinity.preferred[0].term"`, and the stored config is unchanged; `createEnvironment` with any term that names a deployment is refused and no environment is created
+- [X] T018 [P] [US3] Functional tests in `backend/tests/functional/graphql/test_update_deployment_input_propagation.py`: `updateDeployment` with a term that names a missing deployment, and one that gives the id of a deployment of another environment, are refused with the path, and the deployment's stored config and name are unchanged (FR-002, research R-006)
 
 **Checkpoint**: refusals happen at write time with the term's path.
 
