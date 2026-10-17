@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-16
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: Design brief "Design brief for the fix" — [opsmill/styrmin#503 (comment)](https://github.com/opsmill/styrmin/issues/503#issuecomment-6226003710). Seed issue: [#503](https://github.com/opsmill/styrmin/issues/503). The brief's links point to `develop` at [d1a3105](https://github.com/opsmill/styrmin/tree/d1a3105bdee724d9a434dda096f32f0c0b2f87d5), which includes [#506](https://github.com/opsmill/styrmin/pull/506), the fix for [#491](https://github.com/opsmill/styrmin/issues/491).
 

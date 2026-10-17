@@ -14,8 +14,7 @@ equivalent). It MUST NOT create, modify, or delete deployments.
 - **Shard:** `general` (lumped together with isolated-mutation tests
   because read-only assertions are cheap and don't warrant their own
   shard).
-- **Examples:** `test_service_discovery`, `test_pod_component_attribution`,
-  `test_ui_smoke`, `test_deployment_timeline`, the cli-auth and
+- **Examples:** `test_pod_component_attribution`, `test_ui_smoke`, `test_deployment_timeline`, the cli-auth and
   admin-user/group suites.
 - **Review rule:** A read-only test that creates its own deployment is a
   review-blocker. Refactor to consume the shared fixture.
@@ -32,7 +31,11 @@ must not depend on another's state.
   `apply_files` tests, `task_steps` for tests that fail a rollout on
   purpose and wait out the operator's or FluxCD's timeouts.
 - **Examples:** `test_deploy_app`, `test_delete_deployment_*`,
-  `test_environment_update`.
+  `test_environment_update`, `test_service_discovery` (its module fixture
+  creates `intent` and `executor` in the session's scenario environment, and
+  its last test deletes `intent`, so the other tests of the module run before
+  it).
+  <!-- Extracted from specs/026-delete-service-aliases on 2026-10-17 -->
 - **Review rule:** Reuse `deployed_simple_app` if your test only reads —
   do not create a fresh deployment just for an isolated assertion.
 
