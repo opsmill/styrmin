@@ -31,11 +31,13 @@ A namespace `N` is departing when one of these holds (research R-003):
 
 The flow uses this rule in its first read, before its writes.
 
+> Added on 2026-10-17, after the review of PR #516: a namespace that does not exist yet, because its deployment's flow has not created it, is departing too, and the cluster holds nothing that tells it apart from a deleted deployment's namespace. The flow of that deployment writes the skipped aliases, because its alias step reads the current services from the server (research R-012). The 60-second wait for a missing namespace that commit `c4fd1534` added is removed.
+
 ## Owner namespace of a deleted deployment (derived, new)
 
 > Added on 2026-10-17, after the code review: the second read used the departing rule, so a restore's namespace deletion made the flow delete an alias it had just written (research R-004).
 
-The second read, after the writes, uses the rule by which the operator's teardown deletes aliases (research R-004, R-011). An owner namespace `N` counts when one of these holds:
+The second read, after the writes, uses the rule by which the operator's teardown deletes aliases (research R-004, R-011). Both call `teardown_deletes_aliases` in `agent/service/kubernetes/service_alias_rules.py`. An owner namespace `N` counts when one of these holds:
 
 - the StyrminDeployment `N` has `spec.deletionRequested == true`, whatever the phase of the Namespace;
 - the StyrminDeployment `N` has `metadata.deletionTimestamp` set, and the Namespace `N` exists and is not `Terminating`.

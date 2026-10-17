@@ -154,6 +154,22 @@ description: "Tasks for 026: deleting a deployment deletes its service aliases"
 
 ---
 
+## Phase 8: Review fixes of PR #516
+
+**Purpose**: the maintainer's answers to the PR questions (spec, Session 2026-10-17) and the review findings.
+
+- [X] T038 In `backend/styrmin_backend/agent/tasks/service_aliases.py`, add `with_current_peer_services`, which reads the environment's services with `read_environment_services` (`agent/tasks/environment_services.py`, `list_environment_services.graphql`), and call it in `_apply_service_aliases_step` (`orchestration.py`); remove the 60-second wait of commit `c4fd1534` (FR-018, research R-012)
+- [X] T039 Move the alias labels, `is_alias_of_deployment` and the teardown's deletion rule (`teardown_deletes_aliases`) to `backend/styrmin_backend/agent/service/kubernetes/service_alias_rules.py`, and the StyrminDeployment read of `orchestration.py` and `service_aliases.py` to `agent/service/kubernetes/styrmin_deployment.py`; the operator and the flow's second read call the same rule
+- [X] T040 Limit the flow's namespace reads to 10 namespaces at the same time (`MAX_CONCURRENT_NAMESPACE_READS`)
+- [X] T041 In `_delete_service_aliases` (`operator/handlers/styrmin_deployment.py`), list with the two label selectors and delete with the `resourceVersion` of the listing (FR-004)
+- [X] T042 Unit tests: `test_environment_services.py`; `TestWithCurrentPeerServices` and `TestReadNamespaceStates` in `test_service_aliases.py`; the alias-step test in `tasks/test_remediation_flow_steps.py`; the selector, precondition and partial-listing tests in `test_deployment_deletion_operator.py` (FR-014)
+- [X] T043 Docs: the "Service aliases" section of `docs/docs/concepts-and-architecture/ingress-and-networking.md`, with the aliases that stay and the step that finds and deletes them; the restore case in `backups-and-restores.md`; the link in `generic-app.md`; `CONTEXT.md`; `dev/knowledge/backend/orchestration-flows.md`; `dev/knowledge/agent/operator.md`
+- [X] T044 Rewrite `changelog/503.fixed.md` in the past tense, outcomes first, with each kind of alias that stays and a link to the step (FR-012)
+- [X] T045 Update FR-004, FR-007, FR-012 to FR-014, the edge cases and Out of Scope in `spec.md`; correct research R-005 and add R-012; note the changes in `data-model.md` and the contract
+- [X] T046 Run `test_service_discovery.py` (`api-chromium`) and record it in `e2e-evidence.md`
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

@@ -94,6 +94,8 @@ The flow never creates the deleted deployment's namespace (R-005). On the platfo
 
 ## R-005: Never creating another deployment's namespace
 
+> Changed on 2026-10-17, after CI run [39030125607](https://github.com/opsmill/styrmin/actions/runs/39030125607) and the review of PR #516. The rationale below said that a missing namespace belongs to another deployment whose own flow writes both sets of aliases, so a peer that skips it "loses nothing". That holds only when the other deployment's flow lists the deployment that skipped. A flow's context lists the deployments that existed when the change was requested, so when B is requested just after A, A's context does not list B. When B's alias step runs before A's flow has created A's namespace, B skips the aliases between the two, and A's flow, with its context alone, never writes them. Before this fix, B's flow created A's namespace and wrote both. R-012 closes the gap: the alias step reads the current services from the server.
+
 **Decision**: `apply_service_aliases` no longer calls `apply_namespace`. The flow writes each alias into a namespace that exists; when the create or replace returns 404 (namespace not found) or 403 with the cause `NamespaceTerminating`, the flow logs it and skips that alias. The `namespace_labels` parameter, used only for those `apply_namespace` calls, is removed.
 
 **Rationale**:
@@ -171,3 +173,27 @@ Otherwise, when `spec.deletionRequested` is false and the Namespace is `Terminat
 
 - Have the restore flow set `styrmin.io/skip-teardown` before it deletes the namespace. Rejected: it would also skip the rest of the teardown during restores, which this fix does not intend to change.
 - Delete aliases only on the platform-driven path. Rejected: the brief expects `kubectl delete styrmindeployment` to delete them too.
+
+## R-012: Reading the current services in the alias step
+
+> Added on 2026-10-17, after CI run [39030125607](https://github.com/opsmill/styrmin/actions/runs/39030125607) of PR #516 failed the three tests of `test_service_discovery.py`: neither `intent`'s nor `executor`'s namespace held the other's alias.
+
+**Decision**: Before it computes the aliases, the alias step (`_apply_service_aliases_step`) calls `with_current_peer_services`. It reads the services of the environment from the server with the `environmentServices` query, sent with the flow's action token (ADR-059), and replaces the other deployments' entries of `deployed_services` with that list. The deployment's own entries stay as the context lists them. The environment id comes from the context's `labels.environment_id`. When the token is missing or the read fails, the step logs a warning and uses the context's list. The rule that a missing namespace counts as departing does not change.
+
+**Rationale**:
+
+- The server builds the context in `apply_state` when the change is requested, and a deployment's `DeployedService` rows exist from its request on. So a context lists every deployment requested before it, and none requested after it.
+- Each flow creates its own namespace in `_write_styrmin_deployment` before its alias step. Of two alias steps, the one that runs last therefore finds both namespaces, and with the server's list it knows both deployments, so it writes both sets. The skip of a missing namespace loses nothing as long as the step that runs last reads the server's list.
+- The deployment's own services come from the context, because they are the Services that this flow deploys. A rename requested after this flow's context would otherwise point the aliases at a Service that this flow does not create.
+- The server's list no longer holds a deployment that reached `DELETED`, because the server deletes its `DeployedService` rows then. A deployment that is `DELETING` is still listed, and the cluster read skips it, as before.
+- No GraphQL schema change: `environmentServices` exists, and the actions service account has the `READ_WRITE` role.
+
+**Alternatives considered**:
+
+- Wait up to 60 seconds for a missing namespace (commit `c4fd1534`). Replaced: it covers the CI case only when the peer's flow creates its namespace within the wait, not a peer with a long setup pre-hook or a queued flow. It also adds the full wait to each flow whose context still lists a deployment whose namespace was deleted.
+- Count a missing owner namespace as not departing, as the review proposed. Rejected: it writes only one direction of the pair, and a flow whose context was built before a peer reached `DELETED` writes that peer's aliases again after its namespace is gone, which is the defect of #503.
+- Create the missing namespace, as before this fix. Rejected by FR-008: the namespace of a deleted deployment would come back.
+- Add the environment id to `EnvironmentContext`. Not needed: `labels.environment_id` holds it, and the context model is part of the driver template surface.
+
+**Not covered**: a deployment created or changed while a peer is being restored. The restored deployment's namespace is terminating or missing, so the step skips the aliases between the two, and no flow runs when the restore ends. The maintainer chose to document this and its recovery (spec, Session 2026-10-17).
+
