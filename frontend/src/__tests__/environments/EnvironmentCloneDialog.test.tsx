@@ -253,6 +253,37 @@ describe("describeCloneMutationError", () => {
     ).toMatch(/ADMIN role/);
   });
 
+  it("names each uncloned deployment, its reason and its terms, and lists the fixes", () => {
+    const message = describeCloneMutationError(
+      new GraphQLOperationError("VALIDATION_ERROR", "server message", {
+        code: "VALIDATION_ERROR",
+        deployments: [
+          {
+            deployment_id: "7f0c2a3e-1b2c-4d5e-8f90-0a1b2c3d4e5f",
+            deployment_name: "postgres",
+            paths: [
+              "environment.config.scheduling.pod_anti_affinity.preferred[0].term",
+              "deployment[api].config.scheduling.pod_affinity.required[0]",
+            ],
+            reason: "not included in the requested deployment selection",
+          },
+        ],
+      }),
+    );
+
+    expect(message).toBe(
+      "An affinity term that the clone copies names a deployment that the clone " +
+        'does not copy: "postgres" (not included in the requested deployment ' +
+        "selection), named by the term at " +
+        "environment.config.scheduling.pod_anti_affinity.preferred[0].term, " +
+        "deployment[api].config.scheduling.pod_affinity.required[0]. To fix it, " +
+        "select that application too, leave out the applications whose " +
+        "terms name it, or, for a term in the environment's config, clear " +
+        '"scheduling" or override it with a scheduling that names no deployment.',
+    );
+    expect(message).not.toMatch(/check the override fields/);
+  });
+
   it("keeps the server's own message so the specifics survive", () => {
     expect(
       describeCloneMutationError(
