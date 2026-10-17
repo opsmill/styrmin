@@ -103,7 +103,8 @@ frontend/src/
 ├── graphql/load_remote_driver.graphql    # $driverDirectory
 ├── generated/graphql.ts                  # regenerated
 ├── pages/drivers/LoadDriverDrawer.tsx    # Driver directory field
-└── pages/drivers/DriverDetailPage.tsx    # Overview "Driver directory" row
+├── pages/drivers/DriverDetailPage.tsx    # Overview "Driver directory" row
+└── pages/drivers/lib/driverList.ts       # Source cell shows the driver directory
 
 backend/tests/
 ├── unit/services/driver/test_driver_directory.py           # new
@@ -122,9 +123,11 @@ backend/tests/
     └── test_ui_smoke.py                  # Overview row assertion
 
 python_sdk/tests/test_drivers.py, cli/tests/test_drivers.py
-frontend/src/__tests__/drivers/LoadDriverDrawer.test.tsx, frontend/src/__tests__/driver-detail/DriverDetailPage.test.tsx
+frontend/src/__tests__/drivers/LoadDriverDrawer.test.tsx, frontend/src/__tests__/drivers/driverList.test.ts,
+frontend/src/__tests__/driver-detail/DriverDetailPage.test.tsx
 
-docs/docs/drivers/loading-drivers.md, driver/DRIVERS.md,
+docs/docs/drivers/loading-drivers.md, docs/docs/drivers/creating-a-driver.md,
+docs/docs/reference/styrminctl.md, driver/DRIVERS.md,
 dev/knowledge/backend/api.md, dev/knowledge/backend/hooks-and-actions.md,
 dev/adr/00NN-driver-actions-import-only-from-their-driver-directory.md,
 CONTEXT.md, changelog/517.added.md
@@ -149,6 +152,8 @@ CONTEXT.md, changelog/517.added.md
   4. Fail with the FR-009 message when `driver.styrmin.yml` is not a file.
   5. Yield the resolved driver directory.
 - Clone errors keep their current message and add the driver directory when one is set.
+- Every driver loading message shows the repository URL without user info (`https://user:token@host/x.git` becomes `https://host/x.git`), the clone error included (critique E3).
+- A successful git load logs the repository (without user info), branch, commit and driver directory at info level (critique E8).
 
 ### 3. Loader and storage (`loaders.py`, `applications.py`, extend)
 
@@ -175,6 +180,7 @@ As in [contracts/sdk-cli-frontend.md](contracts/sdk-cli-frontend.md). Regenerate
 
 - Drawer: a third Git-tab field `driverDirectory`, optional; trimmed value sent only when not empty.
 - Overview tab: a "Driver directory" row with `data-testid="driver-overview-driver-directory"` for git versions with `sourcePath`.
+- Drivers list: `versionSource` (`frontend/src/pages/drivers/lib/driverList.ts`) appends the driver directory for git versions with `sourcePath`, so the Source cell and its search show it (critique P2).
 - Regenerate `frontend/src/generated/graphql.ts`.
 
 ### 8. E2E (extends; research R-009)
@@ -194,6 +200,8 @@ A new ADR (next free number on every branch at writing time; `0076` is free on 2
 | Page | Change |
 | --- | --- |
 | [`docs/docs/drivers/loading-drivers.md`](../../docs/docs/drivers/loading-drivers.md) | "From a git repository": the driver directory on the CLI, the SDK, the GraphQL mutation and the drawer; the files it must hold; actions run from it and import only from it; a reload after any commit to the repository creates a new driver version; the refused values; the mutation name `loadRemoteApplicationDriverVersion` (the page says `loadApplicationDriverVersionFromGithub`). |
+| [`docs/docs/reference/styrminctl.md`](../../docs/docs/reference/styrminctl.md) | New section `drivers load-version`: the two arguments, `--driver-directory`, the `Driver directory:` output line, the refused values and the errors (critique E9). |
+| [`docs/docs/drivers/creating-a-driver.md`](../../docs/docs/drivers/creating-a-driver.md) | "The shape of a driver": a driver can sit in a folder of a repository that holds other drivers; its actions run from that folder and import only modules inside it (critique E9). |
 | [`driver/DRIVERS.md`](../../driver/DRIVERS.md) | "Driver Loading": the driver directory, and the import rule for `actions.py`. |
 | [`dev/knowledge/backend/api.md`](../../dev/knowledge/backend/api.md) | Mutation table: the `driverDirectory` argument; `sourcePath` for git driver versions. |
 | [`dev/knowledge/backend/hooks-and-actions.md`](../../dev/knowledge/backend/hooks-and-actions.md) | Registration pipeline: `set_working_directory`, the `directory/` tag, the deployment name, the lookup rule. |
@@ -207,7 +215,23 @@ A new ADR (next free number on every branch at writing time; `0076` is free on 2
 | --- | --- |
 | The `styrmin_resources` change reaches every E2E shard; a test that assumes the session driver comes from the `simple-app` repository root fails. | `git_server` keeps the `simple-app` repository; tests that push branches use it unchanged. Search for `git_server["simple-app"]` and `source_repository` in `backend/tests/e2e/` before the change, and run `shard_general` in both variants locally. CI runs all shards. |
 | A root lookup drops a deployment it should keep. | Only deployments with a `directory/` tag are dropped, and only this change adds that tag. Unit test covers both lookups. |
+| The server is rolled back after driver versions were loaded from a driver directory. The older lookup does not drop `directory/` deployments, so a root driver version with the same driver name, `version` and commit could pick one (critique E2). | Accepted: it needs a root driver and a driver directory with the same name and `version` at one commit. Those deployments keep their `set_working_directory` step, so actions still run from their own folder. |
 | The relative `set_working_directory` path resolves against a different folder in the Prefect runner path than in the engine path. | Both paths resolve it against the working directory after `git_clone`, which does not change it (research R-001). The E2E session runs setup actions of the driver directory version in a real Job. |
+
+## Coverage of acceptance scenarios
+
+| Scenario | Test |
+| --- | --- |
+| US1-1, US1-2 | E2E: `styrmin_resources` (both variants), `test_driver_version_reselection`; CLI: `cli/tests/test_drivers.py` |
+| US1-3, US1-4 (imports) | Unit: `test_action_driver_directory.py` (Prefect `run_steps` and `load_flow_from_entrypoint`) |
+| US1-5 (reload in another form) | Unit: `test_loaders_git_commit_sha.py`; propagation test |
+| US1-6 (two same-name drivers at one commit) | Unit: `test_user_action_registration.py` (names, tags, lookup) |
+| US2-1, US2-2, US2-5 | Frontend: `LoadDriverDrawer.test.tsx`; E2E UI variant of `styrmin_resources` |
+| US2-3, US2-4 | Frontend: `DriverDetailPage.test.tsx`; E2E: `test_driver_detail_inspects_versions_via_tabs` |
+| US2-6 | Frontend: `driverList.test.ts` |
+| US3-1 to US3-5 | Unit: `test_driver_directory.py`, `test_provider.py` (local repository with symlinks); propagation test for one refused value |
+| US4-1, US4-2 | Unit: `test_loaders_git_commit_sha.py`; propagation test (root load stores `NULL`) |
+| US4-3 | Unit: `test_git_source_commit_pinning.py` (root keeps one pull step); E2E: every root driver fixture (`semaphore`, `generic-app`, `infrahub`, test drivers) |
 
 ## Complexity Tracking
 
