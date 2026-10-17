@@ -82,6 +82,7 @@ from styrmin_backend.services.backup.clone import (
     clone_environment,
     derive_environment_clone_status_from_record,
     find_clone_occupying_environment,
+    order_counterparts,
 )
 from styrmin_backend.services.backup.environment import (
     ConstituentError,
@@ -935,7 +936,7 @@ def flow_harness(monkeypatch: pytest.MonkeyPatch, scenario: _Scenario):
         assert environment is not None, "counterpart created without an environment"
         calls["observed_config"].append(dict(environment.config or {}))
         counterpart = DeploymentEntity(
-            id=uuid4(),
+            id=kwargs.get("deployment_id") or uuid4(),
             name=kwargs["deployment_name"],
             application_version=kwargs["version"],
             config=kwargs.get("deployment_config"),
@@ -1514,12 +1515,13 @@ async def test_the_merge_precedes_environment_creation_and_counterpart_creation(
     merged = {"db_size": "5Gi"}
     # Merged exactly once (the environment config is one decision, not one per
     # counterpart), then handed straight to ``create_environment`` as its
-    # *creation* input, and only then are the two counterparts created.
+    # *creation* input, and only then are the two counterparts created, in
+    # source-name order since no affinity term names one (027 plan D-007).
     assert flow_harness["order"] == [
         ("merge", merged),
         ("create_environment", merged),
-        ("deploy", "postgres-main"),
         ("deploy", "api"),
+        ("deploy", "postgres-main"),
     ]
 
 
@@ -2480,3 +2482,126 @@ async def test_a_failed_environment_deletion_converges_on_retry(
     assert created.id not in {
         environment.id for environment in scenario.uow.environments.models
     }
+
+
+# ---------------------------------------------------------------------------
+# 027 T024 — the order in which counterparts are created (plan D-007)
+# ---------------------------------------------------------------------------
+
+
+def _affinity_config(named_ids: list[UUID]) -> dict[str, Any]:
+    """A stored config with one pod affinity term per named deployment id."""
+    return {
+        "scheduling": {
+            "pod_affinity": {
+                "preferred": [
+                    {
+                        "weight": 1,
+                        "term": {
+                            "topology_key": "kubernetes.io/hostname",
+                            "deployment_ref": {"deployment_id": str(named_id)},
+                        },
+                    }
+                    for named_id in named_ids
+                ]
+            }
+        }
+    }
+
+
+def _ordering_snapshots(
+    names: list[str], terms: dict[str, list[str]] | None = None
+) -> dict[str, DeploymentSnapshot]:
+    """One snapshot per name; ``terms`` maps a name to the names its terms give."""
+    ids = {name: uuid4() for name in names}
+    ids["outside"] = uuid4()
+    return {
+        name: DeploymentSnapshot(
+            deployment_id=ids[name],
+            deployment_name=name,
+            instance_id=uuid4(),
+            driver_name="test-driver",
+            driver_version="1.0.0",
+            application_version="1.6.0",
+            config=(
+                _affinity_config([ids[named] for named in (terms or {})[name]])
+                if name in (terms or {})
+                else {"replicas": 1}
+            ),
+        )
+        for name in names
+    }
+
+
+def _ordered_names(
+    snapshots: dict[str, DeploymentSnapshot],
+    input_order: list[str],
+    environment_names: list[str] | None = None,
+) -> list[str]:
+    environment_config = (
+        _affinity_config([snapshots[name].deployment_id for name in environment_names])
+        if environment_names
+        else {"fqdn_suffix": "prod.example.com"}
+    )
+    return [
+        snapshot.deployment_name
+        for snapshot in order_counterparts(
+            [snapshots[name] for name in input_order], environment_config
+        )
+    ]
+
+
+@pytest.mark.parametrize("input_order", [["a", "b", "c"], ["c", "a", "b"]])
+def test_order_counterparts_puts_each_after_the_ones_its_terms_name(
+    input_order: list[str],
+) -> None:
+    """A chain: a names b, b names c. The snapshot order does not matter."""
+    snapshots = _ordering_snapshots(["a", "b", "c"], {"a": ["b"], "b": ["c"]})
+
+    assert _ordered_names(snapshots, input_order) == ["c", "b", "a"]
+
+
+def test_order_counterparts_ignores_self_terms_and_deployments_outside_the_clone() -> (
+    None
+):
+    """A term that names the deployment itself, or no snapshot, orders nothing."""
+    snapshots = _ordering_snapshots(["a", "b"], {"a": ["a", "outside"]})
+
+    assert _ordered_names(snapshots, ["b", "a"]) == ["a", "b"]
+
+
+def test_order_counterparts_puts_the_ones_the_environment_names_first() -> None:
+    """With no term between counterparts, the environment-named one comes first."""
+    snapshots = _ordering_snapshots(["a", "b", "c"])
+
+    assert _ordered_names(snapshots, ["a", "b", "c"], ["c"]) == ["c", "a", "b"]
+
+
+def test_order_counterparts_puts_a_named_counterpart_before_an_environment_named_one() -> (
+    None
+):
+    """Critique E1: the environment names a and a names b, so b comes before a."""
+    snapshots = _ordering_snapshots(["a", "b"], {"a": ["b"]})
+
+    assert _ordered_names(snapshots, ["a", "b"], ["a"]) == ["b", "a"]
+
+
+@pytest.mark.parametrize("input_order", [["a", "b"], ["b", "a"]])
+def test_order_counterparts_breaks_a_cycle_in_source_name_order(
+    input_order: list[str],
+) -> None:
+    """a and b name each other: a first, also when the environment names b."""
+    snapshots = _ordering_snapshots(["a", "b"], {"a": ["b"], "b": ["a"]})
+
+    assert _ordered_names(snapshots, input_order) == ["a", "b"]
+    assert _ordered_names(snapshots, input_order, ["b"]) == ["a", "b"]
+
+
+def test_order_counterparts_breaks_first_the_cycle_that_names_no_other() -> None:
+    """Cycle a-b also names c, which is in cycle c-d: c and d come first."""
+    snapshots = _ordering_snapshots(
+        ["a", "b", "c", "d"],
+        {"a": ["b", "c"], "b": ["a"], "c": ["d"], "d": ["c"]},
+    )
+
+    assert _ordered_names(snapshots, ["a", "b", "c", "d"]) == ["c", "d", "a", "b"]

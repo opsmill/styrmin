@@ -17,7 +17,9 @@ Sequence:
    merged over it and capabilities recomputed (FR-006, ADR-0027);
 4. create one counterpart deployment per usable constituent, pinned to the
    captured driver version, in ``RESTORING``, with no initial reconcile
-   (research D5);
+   (research D5). Each counterpart's id is chosen before step 3, so the copied
+   affinity terms name the counterparts, and the counterparts are created in
+   ``order_counterparts`` order (027 plan D-007);
 5. dispatch one cross-target restore per counterpart (research D2) and record
    the attribution.
 
@@ -35,8 +37,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Any, Sequence
-from uuid import UUID
+from typing import Any, Mapping, NamedTuple, Sequence
+from uuid import UUID, uuid4
 
 from prefect import flow
 from prefect.logging import get_run_logger
@@ -59,6 +61,7 @@ from styrmin_backend.services.backup.clone import (
     EnvironmentCloneDeploymentOutcome,
     derive_clone_capture_status,
     merge_environment_config,
+    order_counterparts,
 )
 from styrmin_backend.services.backup.environment import (
     RESTORABLE_ENVIRONMENT_BACKUP_STATUSES,
@@ -77,7 +80,10 @@ from styrmin_backend.services.environments import create_environment
 from styrmin_backend.services.exceptions import (
     EnvironmentAlreadyExistsError,
     EnvironmentCloneNotFoundError,
+    UnclonedDeploymentReferenceError,
+    UnclonedReference,
 )
+from styrmin_backend.services.scheduling.references import remap_deployment_references
 from styrmin_backend.services.unit_of_work import UnitOfWork, get_unit_of_work
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.models import PrefectAction
@@ -385,10 +391,29 @@ async def _resolve_pinned_driver_version(
         return candidates[0].id if candidates else None
 
 
+def _uncloned_reference_error(
+    unmapped: Mapping[UUID, list[str]], source_names: Mapping[UUID, str]
+) -> UnclonedDeploymentReferenceError:
+    return UnclonedDeploymentReferenceError(
+        [
+            UnclonedReference(
+                deployment_id=deployment_id,
+                deployment_name=source_names.get(deployment_id),
+                paths=paths,
+            )
+            for deployment_id, paths in unmapped.items()
+        ]
+    )
+
+
 async def _create_counterpart(
     clone: EnvironmentClone,
     created_environment_id: UUID,
     constituent: _UsableConstituent,
+    *,
+    counterpart_ids: Mapping[UUID, UUID],
+    upcoming_deployments: Mapping[UUID, str],
+    source_names: Mapping[UUID, str],
 ) -> UUID:
     """Create one counterpart deployment from a captured snapshot.
 
@@ -398,13 +423,30 @@ async def _create_counterpart(
     and the Helm release name it adopts so its restore's data lands under an
     identity Helm already agrees with (research D2).
 
-    The counterpart is identified by the id ``deploy_application`` returns,
-    not by its name: a user can rename it as soon as it is committed (#493).
+    The counterpart gets the id that ``counterpart_ids`` gives its source
+    deployment, and each affinity term of the copied config names the
+    counterpart of the deployment it named (027 FR-008).
+    ``upcoming_deployments`` holds every counterpart that has not failed, by id
+    with its name, so a term may name one that is not created yet.
+
+    Returns:
+        The counterpart's id, the one chosen in advance, as ``deploy_application``
+        returns it. It is never looked up by name, because a user can rename the
+        counterpart as soon as it is committed (#493, ADR-073).
 
     Raises:
+        UnclonedDeploymentReferenceError: When an affinity term names a
+            deployment that has no counterpart.
         RuntimeError: When the captured driver version no longer resolves.
     """
     snapshot = constituent.snapshot
+    counterpart_id = counterpart_ids[snapshot.deployment_id]
+    config, unmapped = remap_deployment_references(
+        snapshot.config, counterpart_ids, path_prefix="deployment.config"
+    )
+    if unmapped:
+        raise _uncloned_reference_error(unmapped, source_names)
+
     async with get_unit_of_work() as uow:
         driver_version_id = await _resolve_pinned_driver_version(snapshot, uow)
     if driver_version_id is None:
@@ -421,7 +463,7 @@ async def _create_counterpart(
             environment_id=created_environment_id,
             uow=uow,
             created_by_user_id=clone.created_by_user_id,
-            deployment_config=snapshot.config,
+            deployment_config=config,
             deployment_parameters=snapshot.parameters,
             deployment_name=snapshot.deployment_name,
             service_name_overrides=snapshot.service_name_overrides,
@@ -431,6 +473,8 @@ async def _create_counterpart(
                 snapshot.release_reference
                 or f"{_NAMESPACE_PREFIX}{snapshot.deployment_id}"
             ),
+            deployment_id=counterpart_id,
+            upcoming_deployments=dict(upcoming_deployments),
         )
 
 
@@ -555,19 +599,32 @@ async def _dispatch_cross_target_restore(
     return restore.id
 
 
+class _CreatedEnvironment(NamedTuple):
+    """The environment a clone created, with its merged config before the remap."""
+
+    environment_id: UUID
+    merged_config: dict[str, Any]
+
+
 async def _create_cloned_environment(
-    clone: EnvironmentClone, results: list[CloneDeploymentResult]
-) -> UUID | None:
+    clone: EnvironmentClone,
+    results: list[CloneDeploymentResult],
+    counterpart_ids: Mapping[UUID, UUID],
+    upcoming_deployments: Mapping[UUID, str],
+) -> _CreatedEnvironment | None:
     """Create the cloned environment, or attribute why it could not be created.
 
     The config is the capture's, with the clone's cleared fields dropped and its
     override merged over the rest (research D7); ``create_environment``
-    recomputes capabilities rather than copying them (ADR-0027).
+    recomputes capabilities rather than copying them (ADR-0027). Each affinity
+    term of the merged config then names the counterpart that ``counterpart_ids``
+    gives the deployment it named, and ``upcoming_deployments`` (the
+    counterparts, by id with their names) lets ``create_environment`` accept it.
 
     Returns:
-        The created environment's id, or ``None`` when a fatal
-        ``clone_errors`` entry was written instead (the clone derives
-        ``FAILED``).
+        The created environment's id and the merged config with the source ids,
+        or ``None`` when a fatal ``clone_errors`` entry was written instead (the
+        clone derives ``FAILED``).
     """
     logger = get_run_logger()
     source_environment = clone.source_environment
@@ -608,13 +665,31 @@ async def _create_cloned_environment(
         )
         return None
 
+    remapped_config, unmapped = remap_deployment_references(
+        merged_config, counterpart_ids, path_prefix="environment.config"
+    )
+    if unmapped:
+        # T027: replace with the fatal referenced_deployment_not_cloned step.
+        source_names = {r.deployment_id: r.deployment_name for r in results}
+        await _save_progress(
+            clone.id,
+            results=_fail_pending(results, CLONE_REASON_CAPTURE_UNUSABLE),
+            error=CloneError(
+                step=CLONE_STEP_ENVIRONMENT_CREATION_FAILED,
+                error=str(_uncloned_reference_error(unmapped, source_names)),
+                fatal=True,
+            ),
+        )
+        return None
+
     try:
         async with get_unit_of_work() as uow:
             environment = await create_environment(
                 name=clone.name,
                 cluster_id=source_environment.cluster_id,
                 uow=uow,
-                config=merged_config,
+                config=remapped_config,
+                upcoming_deployments=upcoming_deployments,
             )
     except EnvironmentAlreadyExistsError as exc:
         # The name was free when the mutation validated it and is taken now
@@ -650,7 +725,7 @@ async def _create_cloned_environment(
     # discard handle for everything that follows (spec SC-005), so it must be
     # attributed on the record the moment it exists.
     await _save_progress(clone.id, created_environment_id=environment.id)
-    return environment.id
+    return _CreatedEnvironment(environment.id, merged_config)
 
 
 @flow(name="execute_environment_clone")
@@ -732,26 +807,51 @@ async def _run_environment_clone(clone_id: UUID) -> None:
     results = [by_deployment.get(r.deployment_id, r) for r in results]
     await _save_progress(clone_id, results=results)
 
-    created_environment_id = await _create_cloned_environment(clone, results)
-    if created_environment_id is None:
+    # Ids chosen in advance, so every copied term is written once, naming the counterparts.
+    counterpart_ids = {c.snapshot.deployment_id: uuid4() for c in usable}
+    upcoming = {
+        counterpart_ids[c.snapshot.deployment_id]: c.snapshot.deployment_name
+        for c in usable
+    }
+    created = await _create_cloned_environment(
+        clone, results, counterpart_ids, upcoming
+    )
+    if created is None:
         return
+    created_environment_id = created.environment_id
+
+    source_names = {result.deployment_id: result.deployment_name for result in results}
+    by_source_id = {c.snapshot.deployment_id: c for c in usable}
+    ordered = [
+        by_source_id[snapshot.deployment_id]
+        for snapshot in order_counterparts(
+            [c.snapshot for c in usable], created.merged_config
+        )
+    ]
 
     cloned = 0
     failed = 0
-    for constituent in usable:
+    for constituent in ordered:
         deployment_id = constituent.snapshot.deployment_id
         entry = by_deployment.get(deployment_id)
         counterpart_deployment_id: UUID | None = None
         restore_id: UUID | None = None
         try:
             counterpart_deployment_id = await _create_counterpart(
-                clone, created_environment_id, constituent
+                clone,
+                created_environment_id,
+                constituent,
+                counterpart_ids=counterpart_ids,
+                upcoming_deployments=upcoming,
+                source_names=source_names,
             )
             restore_id = await _dispatch_cross_target_restore(
                 constituent, counterpart_deployment_id
             )
         except Exception as exc:  # noqa: BLE001 — per-deployment isolation (D5)
             failed += 1
+            # A failed counterpart is no longer upcoming for the ones created after it (critique E2).
+            upcoming.pop(counterpart_ids[deployment_id], None)
             if isinstance(exc, _CounterpartError):
                 counterpart_deployment_id = (
                     exc.counterpart_deployment_id or counterpart_deployment_id
