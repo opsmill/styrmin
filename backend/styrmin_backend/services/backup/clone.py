@@ -53,6 +53,7 @@ from styrmin_backend.domain.models import Deployment as DeploymentEntity
 from styrmin_backend.repository.environment_backup import NON_TERMINAL_RESTORE_STATUSES
 from styrmin_backend.services.backup.environment import (
     TERMINAL_ENVIRONMENT_OPERATION_STATUSES,
+    DeploymentSnapshot,
     EnvironmentOperationStatus,
     _guard_no_environment_operation_in_progress,
     derive_environment_operation_status,
@@ -69,6 +70,7 @@ from styrmin_backend.services.exceptions import (
     InvalidContextError,
     UnknownEnvironmentConfigFieldError,
 )
+from styrmin_backend.services.scheduling.references import referenced_deployment_ids
 
 # ``UnitOfWork`` is imported at runtime, not under ``TYPE_CHECKING``: the
 # ``@inject``-decorated ``clone_environment`` below has fast-depends build a
@@ -354,6 +356,95 @@ def merge_environment_config(
             f"the merged environment config is invalid: {exc}"
         ) from exc
     return merged
+
+
+# ---------------------------------------------------------------------------
+# Counterpart order (027 plan D-007)
+# ---------------------------------------------------------------------------
+
+
+def _source_name_key(snapshot: DeploymentSnapshot) -> tuple[str, str]:
+    return snapshot.deployment_name, str(snapshot.deployment_id)
+
+
+def order_counterparts(
+    snapshots: Sequence[DeploymentSnapshot],
+    environment_config: Mapping[str, Any] | None,
+) -> list[DeploymentSnapshot]:
+    """Return the order in which an environment clone creates its counterpart deployments.
+
+    Each counterpart comes after the counterparts that its affinity terms name.
+    Among the counterparts that can come next, the ones that the environment
+    config names come first, then the others in source-name order. When only
+    cycles of terms are left, the cycle that names no other remaining
+    counterpart is broken at its member with the lowest source name (critique E1).
+
+    Pure: reads the source deployment ids in ``snapshot.config`` and in
+    ``environment_config``, which must name the same source deployments.
+    """
+    by_id = {snapshot.deployment_id: snapshot for snapshot in snapshots}
+    named_by_environment = set(
+        referenced_deployment_ids(
+            dict(environment_config) if environment_config else None, ""
+        )
+    )
+    named: dict[UUID, set[UUID]] = {
+        deployment_id: (
+            set(referenced_deployment_ids(snapshot.config, ""))
+            & (by_id.keys() - {deployment_id})
+        )
+        for deployment_id, snapshot in by_id.items()
+    }
+
+    ordered: list[DeploymentSnapshot] = []
+    remaining = dict(by_id)
+    while remaining:
+        ready = [
+            snapshot
+            for deployment_id, snapshot in remaining.items()
+            if not named[deployment_id] & remaining.keys()
+        ]
+        if ready:
+            chosen = min(
+                ready,
+                key=lambda s: (
+                    s.deployment_id not in named_by_environment,
+                    *_source_name_key(s),
+                ),
+            )
+        else:
+            chosen = min(
+                (remaining[i] for i in _closed_cycle_members(named, set(remaining))),
+                key=_source_name_key,
+            )
+        ordered.append(chosen)
+        del remaining[chosen.deployment_id]
+    return ordered
+
+
+def _closed_cycle_members(
+    named: Mapping[UUID, set[UUID]], remaining: set[UUID]
+) -> list[UUID]:
+    """The remaining ids whose cycle of terms names no remaining id outside the cycle.
+
+    Called only when every remaining id names another remaining id, so at least
+    one such cycle exists.
+    """
+    reachable: dict[UUID, set[UUID]] = {}
+    for start in remaining:
+        seen: set[UUID] = set()
+        stack = [start]
+        while stack:
+            for target in named[stack.pop()] & remaining:
+                if target not in seen:
+                    seen.add(target)
+                    stack.append(target)
+        reachable[start] = seen
+    return [
+        deployment_id
+        for deployment_id in remaining
+        if all(deployment_id in reachable[other] for other in reachable[deployment_id])
+    ]
 
 
 # ---------------------------------------------------------------------------

@@ -47,6 +47,8 @@ from styrmin_backend.db.models import (
     Backup,
     BackupStatus,
     Cluster,
+    Component,
+    ComponentConfig,
     DeployedService,
     Deployment,
     DeploymentState,
@@ -65,6 +67,7 @@ from styrmin_backend.services.backup.clone import (
     EnvironmentCloneDeploymentOutcome,
     EnvironmentCloneStatus,
 )
+from styrmin_backend.services.scheduling.references import referenced_deployment_ids
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 from styrmin_backend.workflows.templates import clone as clone_flow
 from tests.helpers.unit_of_work import yield_unit_of_work
@@ -974,13 +977,34 @@ class _Materialised(NamedTuple):
     restore_calls: list[dict[str, Any]]
 
 
+async def _reorder_snapshots(
+    session: AsyncSession, environment_backup_id: UUID, names: Sequence[str]
+) -> None:
+    """Store the capture's deployment snapshots in the order of ``names``."""
+    capture = await session.get(EnvironmentBackup, environment_backup_id)
+    assert capture is not None
+    by_name = {
+        snapshot["deployment_name"]: snapshot
+        for snapshot in capture.deployment_snapshots or []
+    }
+    assert sorted(by_name) == sorted(names)
+    capture.deployment_snapshots = [by_name[name] for name in names]
+    session.add(capture)
+    await session.commit()
+
+
 async def _clone_and_materialise(
     fresh_client: AsyncClient,
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
     variables: dict[str, Any],
+    *,
+    snapshot_order: Sequence[str] | None = None,
 ) -> _Materialised:
     """Register a clone through GraphQL and run it to its counterparts.
+
+    ``snapshot_order`` gives the order of the capture's snapshots by deployment
+    name; the repository returns them in no set order.
 
     Returns the clone record re-read from the database with everything the flow
     wrote on it, alongside every ``create_restore`` call the fan-out made.
@@ -991,6 +1015,10 @@ async def _clone_and_materialise(
     registered = await session.get(EnvironmentClone, clone_id)
     assert registered is not None
     assert registered.environment_backup_id is not None
+    if snapshot_order is not None:
+        await _reorder_snapshots(
+            session, registered.environment_backup_id, snapshot_order
+        )
     await _complete_capture_constituents(session, registered.environment_backup_id)
 
     restore_calls = await _run_clone_flow(session, monkeypatch, clone_id)
@@ -2701,3 +2729,285 @@ async def test_environment_clone_projects_an_unreadable_result_entry(
     assert entries[2]["deploymentId"] == "00000000-0000-0000-0000-000000000000"
     # And the clone is honest about it rather than claiming COMPLETED.
     assert row["status"] == "PARTIAL"
+
+
+# ---------------------------------------------------------------------------
+# 027 US5 — the copied affinity terms name the counterparts (FR-008, SC-003)
+# ---------------------------------------------------------------------------
+#
+# Each counterpart gets its id before anything is created, so the environment's
+# and the counterparts' terms are written once, naming the counterparts. These
+# tests run the real flow and the real ``deploy_application``, whose binding and
+# first reconcile refuse a term that names neither a deployment of the new
+# environment nor a counterpart still to come.
+
+_TOPOLOGY_KEY = "kubernetes.io/hostname"
+_SELECTOR_LABEL = "styrmin/deployment_id"
+
+
+def _affinity_config(named_ids: Sequence[UUID]) -> dict[str, Any]:
+    """A stored config with one pod affinity term per named deployment id."""
+    return {
+        "scheduling": {
+            "pod_affinity": {
+                "preferred": [
+                    {
+                        "weight": 1,
+                        "term": {
+                            "topology_key": _TOPOLOGY_KEY,
+                            "deployment_ref": {"deployment_id": str(named_id)},
+                        },
+                    }
+                    for named_id in named_ids
+                ]
+            }
+        }
+    }
+
+
+async def _seed_referencing_source(
+    session: AsyncSession,
+    environment_name: str,
+    *,
+    terms: dict[str, list[str]],
+    environment_terms: Sequence[str] = (),
+) -> tuple[UUID, dict[str, UUID]]:
+    """Source E with running deployments a and b, whose terms name each other by id.
+
+    Each driver version declares a component, so a counterpart's first
+    reconcile resolves its terms. ``terms`` maps a deployment name to the names
+    its config's terms give; ``environment_terms`` gives the names E's config names.
+    """
+    source = await seed_environment(session, name=environment_name)
+    source_id = source.id
+    ids: dict[str, UUID] = {}
+    for name in ("a", "b"):
+        adv = await seed_application_driver_version(session)
+        session.add(
+            ComponentConfig(
+                name="server",
+                config={"identifier": {"label": {"app": "server"}}},
+                application_driver_version_id=adv.id,
+            )
+        )
+        await session.commit()
+        deployment, _ = await seed_running_deployment(
+            session, environment=source, adv=adv, name=name
+        )
+        ids[name] = deployment.id
+    for name, named in terms.items():
+        deployment = await session.get(Deployment, ids[name])
+        assert deployment is not None
+        deployment.config = _affinity_config([ids[other] for other in named])
+        session.add(deployment)
+        await session.commit()
+    if environment_terms:
+        source = await session.get(Environment, source_id)
+        assert source is not None
+        source.config = _affinity_config([ids[name] for name in environment_terms])
+        session.add(source)
+        await session.commit()
+    return source_id, ids
+
+
+def _selected_deployment_ids(value: Any) -> set[str]:
+    """Every ``styrmin/deployment_id`` label value that a rendered context selects."""
+    if isinstance(value, dict):
+        found = {
+            str(label)
+            for key, label in value.items()
+            if key == _SELECTOR_LABEL and isinstance(label, str)
+        }
+        for nested in value.values():
+            found |= _selected_deployment_ids(nested)
+        return found
+    if isinstance(value, list):
+        return set().union(*(_selected_deployment_ids(item) for item in value))
+    return set()
+
+
+async def _assert_terms_name_the_counterparts(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    materialised: _Materialised,
+    source_ids: dict[str, UUID],
+    *,
+    terms: dict[str, list[str]],
+    environment_terms: Sequence[str] = (),
+) -> None:
+    """Both entries ``CLONED``, every term names a counterpart, none a source deployment."""
+    clone = materialised.clone
+    assert clone.created_environment_id is not None
+    entries = {
+        entry["deployment_name"]: entry for entry in clone.deployment_results or []
+    }
+    assert {name: entry["outcome"] for name, entry in entries.items()} == {
+        "a": EnvironmentCloneDeploymentOutcome.CLONED.value,
+        "b": EnvironmentCloneDeploymentOutcome.CLONED.value,
+    }, clone.deployment_results
+
+    # The id on the entry, chosen in advance, is the id of the row the flow
+    # created under the source's name, and its restore targets that id (ADR-073).
+    counterpart_ids: dict[str, UUID] = {}
+    for name in source_ids:
+        rows = await session.exec(
+            select(Deployment).where(
+                Deployment.environment_id == clone.created_environment_id,
+                Deployment.name == name,
+            )
+        )
+        [row] = rows.all()
+        assert row.id == UUID(entries[name]["counterpart_deployment_id"])
+        counterpart_ids[name] = row.id
+    assert {
+        (call["target_deployment_id"], call["target_namespace"])
+        for call in materialised.restore_calls
+    } == {(cp_id, f"styrmin-{cp_id}") for cp_id in counterpart_ids.values()}
+
+    created = await session.get(Environment, clone.created_environment_id)
+    assert created is not None
+    assert set(referenced_deployment_ids(created.config, "environment.config")) == {
+        counterpart_ids[name] for name in environment_terms
+    }
+    configs: dict[str, dict[str, Any] | None] = {"environment": created.config}
+    for name, counterpart_id in counterpart_ids.items():
+        counterpart = await session.get(Deployment, counterpart_id)
+        assert counterpart is not None
+        assert set(referenced_deployment_ids(counterpart.config, name)) == {
+            counterpart_ids[other] for other in terms.get(name, [])
+        }
+        configs[name] = counterpart.config
+        components = await session.exec(
+            select(Component).where(Component.deployment_id == counterpart_id)
+        )
+        for component in components.all():
+            configs[f"{name}/{component.name}"] = component.config
+
+    # SC-003: no config in the new environment names a deployment of the source.
+    for label, config in configs.items():
+        named = set(referenced_deployment_ids(config, label))
+        assert not named & set(source_ids.values()), label
+        assert named <= set(counterpart_ids.values()), label
+
+    # Each counterpart's first reconcile resolved its terms to counterpart ids.
+    for name in source_ids:
+        context = await _counterpart_instance_context(session, clone, name)
+        expected = {
+            str(counterpart_ids[other])
+            for other in [*terms.get(name, []), *environment_terms]
+        }
+        assert _selected_deployment_ids(context.get("components")) == expected, name
+
+    # SC-003: the clone ends COMPLETED once the two restores land.
+    for entry in entries.values():
+        restore = await session.get(Restore, UUID(entry["restore_id"]))
+        assert restore is not None
+        restore.status = RestoreStatus.COMPLETED
+        session.add(restore)
+        await session.commit()
+    payload = await gql(
+        fresh_client, "get_environment_clone", {"environmentCloneId": str(clone.id)}
+    )
+    assert payload["environmentClone"]["status"] == "COMPLETED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_order", [["a", "b"], ["b", "a"]])
+async def test_clone_points_a_term_at_the_counterpart_in_either_snapshot_order(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    prefect_manager_mock,
+    snapshot_order: list[str],
+) -> None:
+    """FR-008: a's term names b; the result is the same whichever snapshot comes first."""
+    terms = {"a": ["b"]}
+    source_id, ids = await _seed_referencing_source(
+        session, f"prod-us5-order-{snapshot_order[0]}", terms=terms
+    )
+
+    materialised = await _clone_and_materialise(
+        fresh_client,
+        session,
+        monkeypatch,
+        {
+            "environmentId": str(source_id),
+            "name": f"prod-us5-order-{snapshot_order[0]}-rehearsal",
+        },
+        snapshot_order=snapshot_order,
+    )
+
+    await _assert_terms_name_the_counterparts(
+        fresh_client, session, materialised, ids, terms=terms
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_order", [["a", "b"], ["b", "a"]])
+async def test_clone_points_mutual_terms_at_each_others_counterpart(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    prefect_manager_mock,
+    snapshot_order: list[str],
+) -> None:
+    """US5 scenario 3: a and b name each other, so one counterpart is created while
+    the other has no row yet; its write and its first reconcile still accept the term."""
+    terms = {"a": ["b"], "b": ["a"]}
+    source_id, ids = await _seed_referencing_source(
+        session, f"prod-us5-mutual-{snapshot_order[0]}", terms=terms
+    )
+
+    materialised = await _clone_and_materialise(
+        fresh_client,
+        session,
+        monkeypatch,
+        {
+            "environmentId": str(source_id),
+            "name": f"prod-us5-mutual-{snapshot_order[0]}-rehearsal",
+        },
+        snapshot_order=snapshot_order,
+    )
+
+    await _assert_terms_name_the_counterparts(
+        fresh_client, session, materialised, ids, terms=terms
+    )
+
+
+@pytest.mark.asyncio
+async def test_clone_points_the_environment_term_at_the_counterpart(
+    fresh_client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    prefect_manager_mock,
+) -> None:
+    """US5 scenarios 1 and 2: E's term and b's term name a; in E2 both name a's counterpart.
+
+    E2 is created before any counterpart exists, so ``create_environment`` accepts
+    the term only because the counterparts are passed as upcoming deployments.
+    """
+    terms = {"b": ["a"]}
+    source_id, ids = await _seed_referencing_source(
+        session, "prod-us5-environment", terms=terms, environment_terms=["a"]
+    )
+
+    materialised = await _clone_and_materialise(
+        fresh_client,
+        session,
+        monkeypatch,
+        {"environmentId": str(source_id), "name": "prod-us5-environment-rehearsal"},
+    )
+
+    await _assert_terms_name_the_counterparts(
+        fresh_client,
+        session,
+        materialised,
+        ids,
+        terms=terms,
+        environment_terms=["a"],
+    )
+
+    # SC-002: the source environment's term still names the source deployment.
+    source = await session.get(Environment, source_id)
+    assert source is not None
+    assert set(referenced_deployment_ids(source.config, "")) == {ids["a"]}
