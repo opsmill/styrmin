@@ -12,7 +12,9 @@ uv run pytest backend/tests/unit/agent/test_service_aliases.py \
   backend/tests/unit/agent/test_apply_service.py \
   backend/tests/unit/agent/test_namespace_primitives.py \
   backend/tests/unit/test_deployment_deletion_operator.py \
-  backend/tests/unit/services/test_context_deleting_peer_services.py -v
+  backend/tests/unit/services/test_context_deleting_peer_services.py \
+  backend/tests/unit/agent/test_environment_services.py \
+  backend/tests/unit/agent/tasks/test_remediation_flow_steps.py -v
 ```
 
 Expected: all pass. They cover, in order of the spec's FR-014:
@@ -23,6 +25,7 @@ Expected: all pass. They cover, in order of the spec's FR-014:
 4. The context lists a `DELETING` peer's services.
 5. The skip-teardown annotation deletes no alias, and neither does a teardown that a restore's namespace deletion starts.
 6. `apply_service` replaces an alias with a `ClusterIP` Service on 409.
+7. The alias step reads the other deployments' services from the server, and keeps its context when the server cannot be read (FR-018).
 
 ## E2E test
 
@@ -53,7 +56,7 @@ kubectl get svc -A -l styrmin.io/service-alias=true \
   | grep "styrmin-<A id>"
 ```
 
-Expected: both commands print nothing once `A`'s status is `DELETED`.
+Expected: both commands print nothing once `A`'s status is `DELETED`. To find aliases that a deletion left on a cluster, use the step in [Service aliases](../../docs/docs/concepts-and-architecture/ingress-and-networking.md#finding-and-deleting-aliases-that-stay).
 
 The operator log of the deletion shows the new teardown step first:
 

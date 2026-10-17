@@ -3,6 +3,8 @@
 The feature changes no GraphQL, SDK or CLI surface. These are the internal interfaces that change, with the behaviour the tests check. Names are proposals for the implementation; the behaviour is the contract.
 
 > Changed on 2026-10-17, after the code review: step 5 of `apply_service_aliases` uses the new `find_deleted_deployment_namespaces`, which follows the operator teardown's rule, and deletes a written alias whatever namespace holds it (research R-004).
+>
+> Changed on 2026-10-17, after the review of PR #516: the alias step reads the current services from the server (`with_current_peer_services`, research R-012), in place of the 60-second wait for a missing namespace that commit `c4fd1534` added. The labels and the shared rules move to `service_alias_rules.py`, and the StyrminDeployment read to `styrmin_deployment.py`, so the operator imports no Prefect module. The teardown lists the aliases with two label selectors and deletes them with a `resourceVersion` precondition.
 
 ## Kubernetes primitives (`agent/service/kubernetes/primitives.py`)
 
@@ -23,15 +25,40 @@ The feature changes no GraphQL, SDK or CLI surface. These are the internal inter
 - `True` for a 404 (the namespace or the Service is gone), and for a 403 whose status body lists a cause of type `NamespaceTerminating` or whose message contains "because it is being terminated", the message of Kubernetes' `NamespaceLifecycle` plugin.
 - `False` for anything else, including an RBAC 403.
 
+## Shared alias rules (`agent/service/kubernetes/service_alias_rules.py`, new)
+
+Imports no Prefect code, so the operator imports it.
+
+- `SERVICE_ALIAS_LABEL`, `DEPLOYMENT_ID_LABEL`: the two labels of an alias.
+- `is_alias_of_deployment(alias, deployment_id, namespace) -> bool`: the label holds `deployment_id`, or, without the label, `spec.externalName` points into `namespace`.
+- `is_gone_or_terminating(namespace: V1Namespace | None) -> bool`.
+- `teardown_deletes_aliases(*, deletion_requested: bool, namespace: V1Namespace | None) -> bool`: true when `deletion_requested`, or when the Namespace exists and is not `Terminating`. The operator's `_delete_service_aliases` and the flow's second read both use it.
+
+## StyrminDeployment read (`agent/service/kubernetes/styrmin_deployment.py`, new)
+
+- `read_styrmin_deployment(*, name, namespace) -> dict | None`: the custom resource, or `None` on 404. `orchestration.py` and the alias flow both use it.
+
+## Current services of an environment (`agent/tasks/environment_services.py`, new)
+
+### `read_environment_services(environment_id: str) -> list[dict[str, str]]` (new, async)
+
+- Sends the `ListEnvironmentServices` query (`agent/tasks/list_environment_services.graphql`, `environmentServices`) with the flow's action token, and returns `resolved_name` and `deployment_id` for each service.
+- Raises `EnvironmentServicesReadError` when there is no token, the request fails, the response is not JSON, it carries GraphQL errors, or it has no `environmentServices`.
+
 ## Service alias flow (`agent/tasks/service_aliases.py`)
 
-### `find_departing_namespaces(namespaces: Iterable[str], wait_for: Iterable[str] = ()) -> set[str]` (new, async)
+### `with_current_peer_services(context: GlobalContext) -> GlobalContext` (new, async)
 
-- For each namespace, reads the Namespace and the StyrminDeployment of the same name in it. The reads of all namespaces run concurrently.
-- Returns the departing ones, by the rule in [data-model.md](../data-model.md#departing-namespace-derived-new).
+- Reads the environment's services with `read_environment_services(context.labels["environment_id"])`.
+- Returns a copy of `context` whose `deployed_services` holds the deployment's own entries from the context and the other deployments' entries from the server. Logs the ids of the deployments that the server lists and the context does not.
+- Returns `context` unchanged, with a warning, when the labels have no `environment_id` or the read raises `EnvironmentServicesReadError`.
+- `_apply_service_aliases_step` calls it before `compute_service_aliases` and `find_stale_service_aliases`.
+
+### `find_departing_namespaces(namespaces: Iterable[str]) -> set[str]` (new, async)
+
+- For each namespace, reads the Namespace and the StyrminDeployment of the same name in it. The reads run concurrently, at most `MAX_CONCURRENT_NAMESPACE_READS` (10) namespaces at the same time.
+- Returns the departing ones, by the rule in [data-model.md](../data-model.md#departing-namespace-derived-new). A namespace that does not exist yet counts as departing; the alias step of its deployment writes the skipped aliases later (research R-012).
 - Propagates any read error other than 404.
-
-> Changed on 2026-10-17, after CI run [39030125607](https://github.com/opsmill/styrmin/actions/runs/39030125607) of PR #516: a namespace of `wait_for` that is missing is read again every `MISSING_NAMESPACE_POLL_SECONDS` (2 s), for at most `MISSING_NAMESPACE_WAIT_SECONDS` (60 s). When it appears, its Namespace and StyrminDeployment are read again, and it counts as departing only by that read. In that run, `executor`'s flow found the namespace of `intent`, created just before it, still missing, and skipped the aliases between the two. `intent`'s context did not list `executor`, so no flow wrote them. The flow passes the holder and owner namespaces of its aliases as `wait_for`.
 
 ### `find_deleted_deployment_namespaces(namespaces: Iterable[str]) -> set[str]` (new, async)
 
@@ -48,7 +75,7 @@ The feature changes no GraphQL, SDK or CLI surface. These are the internal inter
 
 The `namespace_labels` parameter is removed. The flow no longer calls `apply_namespace`.
 
-1. Collects the holder and owner namespaces of `aliases` and the namespaces of `stale_aliases`, and calls `find_departing_namespaces` on them, with the holder and owner namespaces as `wait_for`.
+1. Collects the holder and owner namespaces of `aliases` and the namespaces of `stale_aliases`, and calls `find_departing_namespaces` on them.
 2. Skips, and logs, each alias whose holder or owner namespace is departing, and each stale alias whose namespace is departing. The log names the departing namespace: the owner's when it matched, otherwise the holder's.
 3. Writes the remaining aliases with `apply_single_alias`.
 4. Deletes the remaining stale aliases, as today.
@@ -73,9 +100,9 @@ Callers: `_apply_service_aliases_step` (the three CRD flows) and the unregistere
   - The Namespace is missing or `Terminating`: logs that the namespace is being deleted without a deletion request, as a restore does, and returns.
   - The read raises: logs it with `logger.exception` and returns.
   - Otherwise (`kubectl delete styrmindeployment`): continues.
-- Lists the Services labelled `styrmin.io/service-alias=true` in all namespaces. On a listing error: logs it with `logger.exception` and returns.
-- For each listed alias for which `is_alias_of_deployment(alias, deployment_id, namespace)` is true: calls `delete_service(name, namespace)`.
-  - A `False` result (404) counts as deleted.
+- Lists the aliases in all namespaces with two label selectors: `styrmin.io/service-alias=true,styrmin.io/deployment-id=<deployment_id>`, and `styrmin.io/service-alias=true,!styrmin.io/deployment-id`. On an error of one listing: logs it with `logger.exception`, naming the selector, and goes on with the other.
+- For each listed alias for which `is_alias_of_deployment(alias, deployment_id, namespace)` is true: calls `delete_service(name, namespace, resource_version)` with the `resourceVersion` of the listing.
+  - A `False` result (404, or 409 because the Service changed since the listing) is logged, naming the alias, and is no error.
   - Any exception is logged with `logger.exception`, naming the alias's namespace and name, and the loop continues.
 - Never raises.
-- Logs one info line with the number of aliases deleted.
+- Logs one info line with the number of aliases it deleted.

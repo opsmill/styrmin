@@ -91,6 +91,16 @@ All six aspects ran: code, comments, tests, errors, types and simplify.
 - The review-fix pass added dated notes to `plan.md`, research R-004, the contract and the data model. This command normally does not edit those files. The notes record the rule change.
 - Cheap low findings in the same code were fixed in the same pass. The others are deferred and listed above.
 
+## Review fixes of PR #516 (2026-10-17)
+
+- The maintainer confirmed FR-017 and accepted the FR-007 exception. The spec records the answers (Session 2026-10-17), and FR-007 names the exception.
+- CI run [39030125607](https://github.com/opsmill/styrmin/actions/runs/39030125607) showed that two deployments requested one after the other could get no aliases to each other. Commit `c4fd1534` added a 60-second wait for a missing namespace. Commit `19204796` replaces it: the alias step reads the other deployments' services from the server (FR-018, research R-012).
+- Commit `5e817b92`: the teardown lists the aliases with two label selectors and deletes them with a `resourceVersion` precondition.
+- The alias labels, `is_alias_of_deployment` and the shared deletion rule moved to `service_alias_rules.py`, and the StyrminDeployment read to `styrmin_deployment.py`. The two low findings deferred above for `_read_styrmin_deployment` are fixed.
+- The flow reads at most 10 namespaces at the same time.
+- A deployment created or changed while a peer is being restored still gets no aliases to it until a later change. The maintainer chose to document this; `backups-and-restores.md` and the changelog describe it and the recovery.
+- Evidence: unit tests of the changed files pass (156 tests), `uv run invoke test` gives `5019 passed, 3 skipped`, `uv run invoke lint` passes, the docs build passes, and `test_service_discovery.py` (`api-chromium`) passes with 3 tests. A paused session showed the alias step reading the server's list ([e2e-evidence.md](e2e-evidence.md)).
+
 ## Suggested next steps
 
 1. Decide on the FR-007 trade-off above. Then update spec.md, or ask for a different second-read rule.

@@ -44,13 +44,20 @@ The brief's seven decisions are recorded here so later phases do not reopen them
 ### Session 2026-10-16 (planning research, [research.md](research.md))
 
 - Q: Which signal tells a flow that the user requested a deployment's deletion? → A: The deployment's StyrminDeployment: `spec.deletionRequested: true` or a `deletionTimestamp`, or its namespace missing or `Terminating`. The server sets `spec.deletionRequested` before the database status becomes `DELETING`, so the flow reads the cluster at write time instead of the status in its context (R-003).
-- Q: Can a flow guarantee that it writes nothing after the request? → A: A read and a write cannot be one atomic operation, so a write can still follow the request by a few milliseconds. The flow reads before it writes and again after it writes, and deletes each alias of a departing deployment that it wrote in between. Together with the teardown, which lists the aliases only after the request, no alias of the deleted deployment remains (R-004). A write into the deleted deployment's namespace in that window is removed by the namespace deletion, and the flow never creates a namespace, so the namespace is not created again (R-005).
+- Q: Can a flow guarantee that it writes nothing after the request? → A: A read and a write cannot be one atomic operation, so a write can still follow the request by a few milliseconds. The flow reads before it writes and again after it writes, and deletes each alias of a departing deployment that it wrote in between. Together with the teardown, which lists the aliases only after the request, no alias of the deleted deployment remains (R-004), with the one exception that FR-007 names (Session 2026-10-17). A write into the deleted deployment's namespace in that window is removed by the namespace deletion, and the flow never creates a namespace, so the namespace is not created again (R-005).
 - Q: How does the teardown know which deployment's aliases to delete? → A: From `spec.deploymentId`, and only when the CR's namespace is `styrmin-<spec.deploymentId>`. This second guard keeps the copy of a source's CR that a cross-target restore deletes from deleting the running source's aliases (R-001).
 
 ### Session 2026-10-16 (critique, [critique-20261016-1.md](critiques/critique-20261016-1.md))
 
 - Q: A restore deletes the target namespace, which deletes its StyrminDeployment and runs the delete handler's teardown. Does that teardown delete the aliases? → A: No. The teardown deletes aliases only when `spec.deletionRequested` is true, or when the StyrminDeployment is deleted while its namespace is not being deleted (`kubectl delete styrmindeployment`). A restored deployment keeps running, and Velero restores only its own namespace, so deleting its aliases in the other namespaces would stop the other deployments from reaching it by short name (FR-017, research R-011).
 - Q: FR-007 and FR-008 as first written asked that no write follows the request. → A: They now state the outcome a flow can guarantee: it writes nothing for a deployment whose deletion it can read, removes what it wrote just before it could read the request, and never creates another deployment's namespace (research R-004).
+
+### Session 2026-10-17 (maintainer answers to the PR #516 review)
+
+- Q: FR-017: a namespace deletion without a deletion request, as a restore or `kubectl delete namespace` makes, deletes no alias. Is this the wanted behaviour? → A: Yes. The changelog and the user documentation list the aliases of a deployment whose namespace was deleted directly among the aliases that stay.
+- Q: FR-007: an alias can stay when a flow writes it after the delete handler's teardown listed the aliases and before the StyrminDeployment is removed. Is this trade-off acceptable? → A: Yes. FR-007 now names this case. A cleanup of aliases that stay is a separate issue.
+- Q: A flow skips a peer whose namespace does not exist yet. When the peer was requested first, its context does not list the deployment requested after it, so no flow wrote the aliases between the two (CI run [39030125607](https://github.com/opsmill/styrmin/actions/runs/39030125607)). How does the fix handle this? → A: The alias step reads the other deployments' services from the server when it runs (FR-018), so the alias step that runs last writes both sets. This replaces the 60-second wait for a missing namespace of commit `c4fd1534`, which did not cover a slower peer and made each flow wait when a listed peer's namespace was already deleted (research R-012).
+- Q: A deployment created or changed while a peer's namespace is being restored skips that peer's aliases, and no flow writes them after the restore. How does the fix handle this? → A: It documents the case and its recovery, a later change of either deployment, in the user documentation of restores and in the changelog. The code does not change.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -131,6 +138,9 @@ When the teardown cannot delete an alias, it logs the error and continues. The d
 - **A deployment without services keeps a remaining alias** until its own flow runs again, if the teardown failed to delete it. This is accepted under the best-effort rule.
 - **What a pod resolves through a remaining alias**: Kubernetes answers a lookup of an `ExternalName` Service with a CNAME record. After the target namespace is deleted, the CNAME target is expected to have no record, so the lookup fails as it would without the alias. This was not checked in a cluster.
 - **A restore deletes and restores a deployment's namespace**: the namespace deletion deletes the deployment's StyrminDeployment, and the operator runs the teardown of its delete handler. That teardown deletes no alias, because the user did not request the deletion and the deployment keeps running (FR-017). While the namespace is being deleted or is gone, the flows of the other deployments skip it and do not create it again.
+- **A deployment is created or changed while a peer is being restored**: its flow skips the aliases between itself and the restored deployment, because the restored deployment's namespace is terminating or missing. No flow runs when the restore ends, so the two deployments cannot reach each other by short name until a later change of either deployment runs a create, update or upgrade flow. The user documentation of restores and the changelog describe this and the recovery.
+- **Two deployments are requested one after the other**: the context of the first does not list the second. When the second's alias step runs before the first's flow has created its namespace, it skips the aliases between the two. The first's alias step reads the current services from the server, which list the second, so it writes both sets (FR-018).
+- **A namespace is deleted directly**, for example with `kubectl delete namespace`, without a deletion request: the teardown cannot tell this from a restore, so the deployment's aliases stay (FR-017).
 - **A Velero restore copies aliases** from a source namespace into a counterpart deployment's namespace: out of scope.
 
 ## Requirements *(mandatory)*
@@ -146,6 +156,7 @@ When the teardown cannot delete an alias, it logs the error and continues. The d
 - **FR-003**: The teardown MUST NOT delete an alias of another deployment's services, including those of deployments of other environments on the same cluster.
 - **FR-004**: Deleting the aliases MUST be best-effort:
   - a 404 counts as deleted;
+  - each delete carries the `resourceVersion` of the listing, so a Service that replaced the alias since, such as another deployment's `ClusterIP` Service with the same name, returns 409 and stays;
   - any other error when listing or deleting is logged, with the alias's namespace and name when known;
   - the teardown continues, the namespace deletion is still requested, and the deployment continues to `DELETED`.
 - **FR-005**: Both deletion paths MUST delete the aliases: the platform-driven path (`spec.deletionRequested`) and `kubectl delete styrmindeployment`. Running the teardown again while the finalizer stays MUST NOT fail on aliases already deleted.
@@ -154,10 +165,13 @@ When the teardown cannot delete an alias, it logs the error and continues. The d
 
 **Flows of other deployments during a deletion**
 
-- **FR-007**: A create, update or upgrade flow of another deployment MUST NOT write an alias of the services of a deployment whose deletion it can read at write time. This includes a flow whose context was built before the request. When the request comes between the flow's read and its write, the flow MUST delete the aliases of that deployment it wrote, so that, together with the teardown, none remains.
+- **FR-007**: A create, update or upgrade flow of another deployment MUST NOT write an alias of the services of a deployment whose deletion it can read at write time. This includes a flow whose context was built before the request. When the request comes between the flow's read and its write, the flow MUST delete the aliases of that deployment it wrote, as long as its second read finds the deployment's StyrminDeployment. Together with the teardown, no such alias remains, with one exception that the maintainer accepted:
+  - An alias remains when the flow writes it after the delete handler's teardown listed the aliases, and the StyrminDeployment is removed before the flow's second read. Without the StyrminDeployment, the second read cannot tell a deletion from a restore, so it keeps the alias (research R-004).
+  - Nothing deletes such an alias later. It points into a namespace that no longer exists, and a deployment that later uses the same service name replaces it.
 - **FR-008**: A flow of another deployment MUST NOT write into the namespace of a deployment whose deletion it can read at write time, and MUST NOT create the namespace of another deployment. A write that comes between the flow's read and the request is removed when the namespace is deleted.
 - **FR-009**: Apart from FR-007 and FR-008, a flow MUST write its aliases as today.
 - **FR-010**: The context built for another deployment MUST still list the services of a `DELETING` deployment for driver templates until that deployment reaches `DELETED`.
+- **FR-018**: The alias step of a create, update or upgrade flow MUST build the aliases of the other deployments' services from the services that the server lists when the step runs, and keep the deployment's own services as its context lists them. When the server cannot be read, the step MUST log a warning and use the context's list.
 
 **Changes this fix does not make**
 
@@ -165,12 +179,14 @@ When the teardown cannot delete an alias, it logs the error and continues. The d
 
 **Changelog and documentation**
 
-- **FR-012**: The fix MUST add `changelog/503.fixed.md`, which says that a deployment's deletion deletes its service aliases, that a failed deletion can leave an alias, and that aliases left by deletions made before the upgrade stay.
+- **FR-012**: The fix MUST add `changelog/503.fixed.md`, which says that a deployment's deletion through Styrmin deletes its service aliases, and names each kind of alias that stays: aliases left by deletions made before the upgrade, an alias whose deletion failed, the aliases of a deployment whose namespace was deleted directly, the aliases of a StyrminDeployment annotated `styrmin.io/skip-teardown`, and the FR-007 case. It also names the restore case of the edge cases, and links a user step that finds and deletes the aliases that stay.
 - **FR-013**: The same change MUST update:
   - `CONTEXT.md`: a new entry "Service alias", with the text the brief proposes;
   - [`dev/knowledge/agent/operator.md`](../../dev/knowledge/agent/operator.md): the teardown steps;
   - [`dev/knowledge/backend/orchestration-flows.md`](../../dev/knowledge/backend/orchestration-flows.md), section "Service aliases";
   - [`docs/docs/drivers/generic-app.md`](../../docs/docs/drivers/generic-app.md), section "Networking";
+  - [`docs/docs/concepts-and-architecture/ingress-and-networking.md`](../../docs/docs/concepts-and-architecture/ingress-and-networking.md): a section "Service aliases" with the aliases that stay and the step that finds and deletes them;
+  - [`docs/docs/concepts-and-architecture/backups-and-restores.md`](../../docs/docs/concepts-and-architecture/backups-and-restores.md), section "What happens when you restore": the restore case of the edge cases and its recovery;
   - [ADR-073](../../dev/adr/0073-kubernetes-objects-named-and-found-by-record-id.md), "More information": remove the known case for deployment deletion.
 
 **Tests**
@@ -182,7 +198,9 @@ When the teardown cannot delete an alias, it logs the error and continues. The d
   - the context still lists the services of a `DELETING` deployment;
   - no alias is deleted when the `styrmin.io/skip-teardown` annotation is set;
   - no alias is deleted when the StyrminDeployment has no deletion request and its namespace is being deleted, or when the namespace cannot be read; aliases are deleted when the request is set and the namespace is being deleted;
-  - the operator's write of a `ClusterIP` Service replaces an alias with the same name (see Clarifications).
+  - the operator's write of a `ClusterIP` Service replaces an alias with the same name (see Clarifications);
+  - the alias step adds the services of a deployment that the server lists and the context does not, keeps the deployment's own services from the context, and keeps the context when the server cannot be read (FR-018);
+  - the teardown lists the aliases with the two label selectors and deletes each with the `resourceVersion` of the listing (FR-004).
 - **FR-015**: A new E2E test MUST be added at the end of [`test_service_discovery.py`](../../backend/tests/e2e/test_service_discovery.py), marked `api_only` and `shard_general`. It deletes `intent`, waits until its status is `DELETED`, then checks that `executor`'s namespace holds no Service with the label `styrmin.io/deployment-id=<intent id>` and none whose `spec.externalName` points into `styrmin-<intent id>`. It reuses the deployments of the module's `discovery_deployments` fixture, starts no new deployment, and runs last in the module, because the other tests of the module use `intent`.
 - **FR-016**: The race of FR-007 and FR-008 has no E2E test, because its timing cannot be reproduced reliably.
 
@@ -217,3 +235,5 @@ When the teardown cannot delete an alias, it logs the error and continues. The d
 - A later cleanup, in flows, of aliases that a failed teardown left.
 - Aliases that a Velero restore copies from the source namespace into a counterpart deployment's namespace.
 - An E2E test for the race of FR-007 and FR-008.
+- A cleanup of the alias that the FR-007 exception leaves; it is a separate issue.
+- Writing the aliases of a restored deployment when the restore ends (see the restore case of the edge cases).

@@ -284,3 +284,47 @@ In this session `intent` had the id `9f24bf1a-dfc5-4333-952d-632a2fdbb8e6` and `
   ```
 
 The lines at 02:27:54 for `executor` and the ingress controller deployment come from the fixture teardown at the end of the session.
+
+## api-chromium session after the PR #516 review fixes (2026-10-17, task T046)
+
+Run at commit `5e817b92`, which reads the environment's current services in the alias step (FR-018) and replaces the 60-second wait of `c4fd1534`.
+
+| | |
+|---|---|
+| pytest node IDs | `backend/tests/e2e/test_service_discovery.py::test_service_discovery_between_apps[api-chromium]`, `backend/tests/e2e/test_service_discovery.py::test_service_rename_creates_new_kubernetes_service[api-chromium]`, `backend/tests/e2e/test_service_discovery.py::test_deleted_deployment_leaves_no_alias[api-chromium]` |
+| Exact command | `export STYRMIN_IMAGE_VER=e2e-503-review-1792246824 npm_config_ignore_workspace=true; docker compose build server; exec 3< <(sleep infinity); spid=$!; uv run pytest backend/tests/e2e/test_service_discovery.py -k api-chromium -v -s --pdb <&3 > e2e-api.log 2>&1; rc=$?; exec 3<&-; kill "$spid"` |
+| Start, vcluster creation (UTC) | `2026-10-17T14:20:34Z` |
+| Last `PASSED` line (UTC) | `2026-10-17T14:22:53Z` |
+| End | pytest exit code 0 |
+| vcluster name | `pytest-2d5b7dd5-5f05-456d-bb57-ee0036f014c1` (deleted by the fixture teardown after the pass) |
+| Kubeconfig path during the run | `/tmp/pytest-of-root/pytest-1922/vcluster0/kubeconfig` |
+| Summary line | `============ 3 passed, 3 deselected, 1 warning in 144.51s (0:02:24) ============` |
+
+Verbatim `PASSED` lines (ANSI color codes removed):
+
+```text
+PASSED
+backend/tests/e2e/test_service_discovery.py::test_service_rename_creates_new_kubernetes_service[api-chromium] PASSED
+backend/tests/e2e/test_service_discovery.py::test_deleted_deployment_leaves_no_alias[api-chromium] PASSED14:22:53 info Removing vCluster container vcluster.cp.pytest-2d5b7dd5-5f05-456d-bb57-ee0036f014c1...
+```
+
+### A paused session to read the alias step's log
+
+The pytest log does not show the flows' logs, so a pass does not show whether the alias step read the server's list or fell back to the context. A second session ran `test_deleted_deployment_leaves_no_alias[api-chromium]` alone, with a temporary `breakpoint()` before the deletion (not committed), at image tag `e2e-503-review-1792247020`. vcluster `pytest-3c88fcd7-34ed-4d07-9e3e-0d0e17cf1fdd`, kubeconfig `/tmp/pytest-of-root/pytest-1924/vcluster0/kubeconfig`. Closing the session's stdin ended it at the breakpoint (pytest exit code 2), and the fixture teardown deleted the vcluster.
+
+In this session `intent` had the id `9b839b61-161a-45d5-a8df-dbbdd98d49a7`, `executor` had the id `9f899b92-6a71-4d9f-85cd-85ae8f8cc3f7`, and the environment's ingress controller deployment had the id `e7e183ca-a512-4a34-962c-ec67be0bdf52`. Alias lines of `kubectl -n styrmin logs styrmin-styrmin-agent-agent-69bfd9847b-m9r8p --all-containers`:
+
+```text
+14:25:31.250 | INFO    | Flow run 'Create instance (CRD)' - The server lists services of deployments that the context does not list: 9b839b61-161a-45d5-a8df-dbbdd98d49a7, 9f899b92-6a71-4d9f-85cd-85ae8f8cc3f7
+14:25:31.424 | INFO    | Flow run 'Apply service aliases' - Skipping service alias intent in namespace styrmin-e7e183ca-a512-4a34-962c-ec67be0bdf52: namespace styrmin-9b839b61-161a-45d5-a8df-dbbdd98d49a7 does not exist or is terminating, or the deletion of its deployment was requested
+14:25:31.425 | INFO    | Flow run 'Apply service aliases' - Skipping service alias executor in namespace styrmin-e7e183ca-a512-4a34-962c-ec67be0bdf52: namespace styrmin-9f899b92-6a71-4d9f-85cd-85ae8f8cc3f7 does not exist or is terminating, or the deletion of its deployment was requested
+14:25:36.476 | INFO    | Flow run 'Create instance (CRD)' - The server lists services of deployments that the context does not list: 9f899b92-6a71-4d9f-85cd-85ae8f8cc3f7
+14:25:36.588 | INFO    | Flow run 'Apply service aliases' - Applying service alias: executor in namespace styrmin-9b839b61-161a-45d5-a8df-dbbdd98d49a7
+14:25:36.611 | INFO    | Flow run 'Apply service aliases' - Applying service alias: intent in namespace styrmin-9f899b92-6a71-4d9f-85cd-85ae8f8cc3f7
+14:25:36.702 | INFO    | Flow run 'Apply service aliases' - Applying service alias: intent in namespace styrmin-9f899b92-6a71-4d9f-85cd-85ae8f8cc3f7
+14:25:36.726 | INFO    | Flow run 'Apply service aliases' - Applying service alias: executor in namespace styrmin-9b839b61-161a-45d5-a8df-dbbdd98d49a7
+```
+
+- At 14:25:36.476, the create flow of `intent`, whose context was built before `executor` was requested, read `executor`'s services from the server and wrote both aliases. This is the case of CI run 39030125607, in which neither alias was written.
+- The ingress controller deployment's flow read both deployments from the server at 14:25:31 and skipped them, because their namespaces did not exist yet.
+- No line says that the server could not be read.

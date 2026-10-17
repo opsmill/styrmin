@@ -13,6 +13,8 @@ When a user deletes a deployment, its service aliases stay in the other deployme
 
 The context that the server builds does not change, so driver templates still see a `DELETING` deployment's services (R-006).
 
+> Changed on 2026-10-17, after the review of PR #516: the alias step reads the other deployments' services from the server when it runs (FR-018, R-012), because a flow's context lists no deployment requested after it. The context that driver templates read still does not change. The teardown lists the aliases with two label selectors and deletes them with a `resourceVersion` precondition. The alias labels and the shared deletion rule move to `agent/service/kubernetes/service_alias_rules.py`.
+
 ## Technical Context
 
 **Language/Version**: Python 3.14+
