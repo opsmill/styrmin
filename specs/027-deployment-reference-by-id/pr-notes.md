@@ -24,15 +24,18 @@ Not done in this change ([spec Out of Scope](spec.md#out-of-scope)):
 - Making `deployments apply` resolve terms after the whole batch. The order of manifests matters for a term in a deployment's config.
 - The limits listed under [Known limits](#known-limits).
 
-## E2E evidence: three local passes
+## E2E evidence: local passes of the new tests and of the whole `shard_env_backup` shard
 
-[e2e-evidence.md](e2e-evidence.md) records, for each run, the command, the start and end times, the vCluster id, the kubeconfig path and the verbatim `PASSED` line:
+[e2e-evidence.md](e2e-evidence.md) records, for each run, the command, the start and end times, the vCluster id, the kubeconfig path when the log prints it, and the verbatim `PASSED` line:
 
 - `backend/tests/e2e/test_pod_scheduling.py::test_pod_anti_affinity_cross_deployment_via_graphql[api-chromium]` (`shard_compute`, `api_only`): rename of the deployment that an affinity term names. Passed at 2026-10-17T00:21:55+00:00 on commit `ae8dff34`.
 - `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[api-chromium]` (`shard_env_backup`): environment clone whose peer names the primary in an affinity term, and the refused clone request. Passed at 2026-10-17T02:44:57+00:00 on commit `17ca4840`.
 - `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium]` (`shard_env_backup`): the same, with the clone started from the clone dialog. Passed at 2026-10-17T02:50:55+00:00 on commit `17ca4840`.
+- The whole `shard_env_backup` shard, `test_environment_backup_and_restore_lifecycle` and `test_environment_clone_lifecycle`, on commit `6895a1d1`, one variant per pytest session ([e2e-evidence.md](e2e-evidence.md#whole-shard_env_backup-shard-after-the-environment-restore-change)): `[api-chromium]` passed at 2026-10-17T03:56:18+00:00 (`2 passed, 199 deselected`), `[ui-chromium]` passed at 2026-10-17T04:04:52+00:00 (`2 passed, 199 deselected`).
 
-Commit `5fdbfb68` (environment restore savepoints) changed production code after these runs. The existing E2E test `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle` (`shard_env_backup`) calls `restore_environment_backup` and was not run locally after that commit; CI runs it in the `shard_env_backup` shard. The change is covered locally by a unit test and a functional test (T036, T037).
+Commit `5fdbfb68` (environment restore savepoints) changed production code after the first three runs. The shard run on commit `6895a1d1` includes `test_environment_backup_and_restore_lifecycle`, which restores an environment backup, and passed in both variants. The change is also covered by a unit test and a functional test (T036, T037).
+
+Commits `2079f97b` (restore log fields), `79c1bd19` (the binder checks each deployment reference with `DeploymentReference`), `91df29bf` (clone log line `env_clone_environment_reference_not_cloned`) and the test-only commits `d820bbc7` and `9596d318` came after the shard run. They were verified by the unit and functional suites only ([e2e-evidence.md](e2e-evidence.md#commits-after-the-shard-run)).
 
 ## High-risk areas for review
 
@@ -49,8 +52,8 @@ Files: [`workflows/templates/clone.py`](../../backend/styrmin_backend/workflows/
 - Ids given in advance: the flow generates one id per usable snapshot and passes it to `deploy_application`. `_create_counterpart` returns that id instead of reading the counterpart back by name.
 - Remap: `remap_deployment_references` replaces each source deployment's id with its counterpart's id in the merged environment config and in each snapshot config. `create_environment` and `deploy_application` accept the ids of the counterparts that the clone is about to create (`upcoming_deployments`).
 - Order: `order_counterparts` creates each counterpart after the counterparts its terms name. Among those that can come next, the ones named by the environment's config come first, then source-name order; a cycle is broken in source-name order. Counterparts with no terms are now created in source-name order, not in snapshot order.
-- Cascade: a counterpart whose terms name a deployment whose capture or creation failed is attributed `FAILED` with the reason "an affinity term names deployment {name}, which was not cloned", is not created, and is logged as `env_clone_reference_not_cloned`.
-- New fatal step `referenced_deployment_not_cloned`: written when the new environment's config names a deployment whose capture or creation failed. After a failed capture the clone creates no environment; after a failed creation it creates no further counterpart. The step and the reason are plain strings, so the GraphQL schema and the frontend do not change.
+- Cascade: a counterpart whose config's terms name a deployment whose captured data cannot be used (capture failed; backup deleted, not completed or expired) or whose creation failed is attributed `FAILED` with the reason "an affinity term names deployment {name}, which was not cloned", is not created, and is logged as `env_clone_reference_not_cloned`. The terms of the driver version's component definitions are not part of the cascade: `deploy_application` looks their names up, and a name that no counterpart has fails the counterpart with `UnresolvableAffinityReferenceError`, whose message becomes the reason.
+- New fatal step `referenced_deployment_not_cloned`: written when the new environment's config names a deployment that has no counterpart (its captured data cannot be used, or the capture cascade failed it) or whose creation failed. In the first case the clone creates no environment and logs `env_clone_environment_reference_not_cloned` (commit 91df29bf); after a failed creation it creates no further counterpart. The step and the reason are plain strings, so the GraphQL schema and the frontend do not change.
 - Request-time check: `clone_environment` refuses, before it creates a clone record or a backup or starts a flow, a request whose copied terms name a deployment that the clone does not copy (`UnclonedDeploymentReferenceError`, code `VALIDATION_ERROR`, `extensions.deployments` with ids, names and term paths).
 - Request-time merge: the check runs `merge_environment_config` at request time, so a source environment config that no longer validates is now refused when the request is made. Before, the flow failed the clone.
 
@@ -59,6 +62,7 @@ Files: [`workflows/templates/clone.py`](../../backend/styrmin_backend/workflows/
 - `restore_environment_backup` in [`services/backup/environment.py`](../../backend/styrmin_backend/services/backup/environment.py) now runs each redeploy in `uow.session.begin_nested()` ([research R-009](research.md#r-009-an-environment-restore-puts-the-captured-config-back-unchanged), commit 5fdbfb68).
 - Before, one failed redeploy rolled back the whole transaction. That dropped the redeploys written before it, and the restore returned `INTERNAL_ERROR` although the config revert was already committed.
 - The restore still writes the captured environment config back as captured, without binding, so a captured term that names a deployment deleted since the backup does not refuse the restore (FR-006).
+- A failed redeploy is logged as `env_restore_fanout_dispatch_error` with `environment_restore_id`, `error_code` and `path`, and counted in `config_redeploy_failed` of `env_restore_fanout_dispatched` and in the `env_restore_fanout_deployments_total` metric line with `outcome=config_redeploy_failed` (commit 2079f97b).
 
 ### Unit of work: a failure inside a caller's savepoint
 
@@ -84,7 +88,7 @@ Files: [`workflows/templates/clone.py`](../../backend/styrmin_backend/workflows/
 
   After the named deployment is renamed, the stored id keeps working at each reconcile. A `deploy` with that driver version, an `updateDeploymentVersion` to a driver version whose definitions give the old name, and a clone that copies a deployment of that driver version are refused, with the name and the `component[<name>]` path. Fixing this needs drivers that do not name deployments.
 - A cycle of terms with a creation failure in a clone ([research R-008](research.md#r-008-the-clone-flow-gives-counterparts-their-ids-before-it-creates-them)). Inside a cycle of terms, a counterpart created before a peer whose creation then fails keeps a term with the peer's id. The clone attributes it `CLONED`, and its next reconcile is refused with the term's path. A creation failure after a successful capture needs the driver version to disappear or the database to fail, so the case is recorded, not handled.
-- An environment restore records a refused redeploy only in the server log (`env_restore_fanout_dispatch_error`) and in the `dispatch_failed` count of `env_restore_fanout_dispatched`, not on the `EnvironmentRestore` record ([backup-restore knowledge page](../../dev/knowledge/backend/backup-restore.md), [changelog/508.fixed.md](../../changelog/508.fixed.md)).
+- An environment restore records a refused redeploy only in the server log, not on the `EnvironmentRestore` record: `env_restore_fanout_dispatch_error` gives `environment_restore_id`, `deployment_id`, `error_code` and `path`; `env_restore_fanout_dispatched` counts the redeploy in `config_redeploy_failed` and `dispatch_failed`; and `metric=env_restore_fanout_deployments_total` is logged with `outcome=config_redeployed` and `outcome=config_redeploy_failed` (commit 2079f97b) ([backup-restore knowledge page](../../dev/knowledge/backend/backup-restore.md), [changelog/508.fixed.md](../../changelog/508.fixed.md)).
 - The SDK error for a clone request that leaves out a named deployment does not carry the GraphQL extensions. The SDK raises `OperationFailedError` with `typename == "VALIDATION_ERROR"` and the message, which lists the names. Only raw GraphQL clients read `extensions.deployments` with the term paths ([e2e-evidence.md](e2e-evidence.md), `test_environment_clone_lifecycle` in [`test_backup_restore.py`](../../backend/tests/e2e/test_backup_restore.py)).
 
 ## Checks run locally: all passed
@@ -111,7 +115,7 @@ Quickstart ([quickstart.md](quickstart.md)):
 - §2, functional tests: exit code 0, finished at 2026-10-17T03:45:10+00:00, `148 passed in 11.32s`.
 - §5, `uv run invoke format lint`: exit code 0, finished at 2026-10-17T03:46:21+00:00, with the same results as the T044 run. rumdl excludes `specs/`, so `uv run rumdl check --no-exclude` was also run on this file and on `e2e-evidence.md`: "No issues found in 2 files".
 
-E2E: the three passes listed under [E2E evidence: three local passes](#e2e-evidence-three-local-passes). §3 of the quickstart (manual check on the dev stack) is optional and was not run.
+E2E: the passes listed under [E2E evidence: local passes of the new tests and of the whole `shard_env_backup` shard](#e2e-evidence-local-passes-of-the-new-tests-and-of-the-whole-shard_env_backup-shard). §3 of the quickstart (manual check on the dev stack) is optional and was not run.
 
 ## Database: no schema change
 
