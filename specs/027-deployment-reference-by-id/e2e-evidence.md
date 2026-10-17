@@ -103,3 +103,62 @@ Not an E2E run: the local results of [quickstart.md](quickstart.md) §1, §2 and
 - §2, unit tests: the expected result holds. Exit code 0, 2026-10-17T03:44:51+00:00, `137 passed in 0.49s`.
 - §2, functional tests: the expected result holds. Exit code 0, 2026-10-17T03:45:10+00:00, `148 passed in 11.32s`.
 - §5, `uv run invoke format lint`: the expected result holds. Exit code 0, 2026-10-17T03:46:21+00:00: ruff, ty and rumdl report no issue, yamllint gives the same two warnings as in T044 in files that this change does not touch, "277/277 .graphql files passed validation.", and the generated types are up to date.
+
+## Whole `shard_env_backup` shard after the environment restore change
+
+- Why: commit `5fdbfb68` changed `restore_environment_backup` after the T031 runs, so that each redeploy of the restore's fan-out runs in its own savepoint. `test_environment_backup_and_restore_lifecycle` restores an environment backup through `scenario_driver.restore_environment_backup`, so the whole shard was run again.
+- Tests: the two tests of `shard_env_backup`, `test_environment_backup_and_restore_lifecycle` and `test_environment_clone_lifecycle`, in both variants, one variant per pytest session.
+- Shard and markers: `shard_env_backup`, `ci`.
+- Code under test: commit `6895a1d1` (branch `fac/affinity-by-id-zsdtf`). The orchestrator ran both sessions.
+- Server image: built once before both sessions from the same production code, tag `registry.opsmill.io/opsmill/styrmin:e2e-508-final-1792208899`.
+- Command, with `<variant>` set to `api-chromium` and then to `ui-chromium`:
+
+  ```bash
+  export STYRMIN_IMAGE_VER=e2e-508-final-1792208899 && docker compose build server
+  exec 3< <(sleep infinity); spid=$!
+  uv run pytest backend/tests/e2e -m "ci and shard_env_backup" -k <variant> -v -s --pdb <&3 > <log> 2>&1
+  exec 3<&-; kill "$spid"
+  ```
+
+### `[api-chromium]` of the shard
+
+- Pytest node ids:
+  - `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[api-chromium]`
+  - `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[api-chromium]`
+- Run started: 2026-10-17T03:48:26+00:00. Run passed and ended: 2026-10-17T03:56:18+00:00 (pytest exit code 0).
+- vCluster: `pytest-9a2cbfca-babd-42cb-af33-be2e77f316f5`. The log does not print the kubeconfig path. The fixture deleted the vCluster at the end of the session.
+- Log: `/tmp/claude-0/-root-emdash-worktrees-styrmin-55123dec-fac-affinity-by-id-zsdtf/6c6555ca-4cb0-4ef2-9353-5841c914d68b/scratchpad/e2e/shard-env-backup-api-chromium.log`.
+- Verbatim result lines (ANSI colours removed; with `-s`, pytest prints the `PASSED` of the first test after its captured output, on its own line):
+
+  ```text
+  backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[api-chromium] 03:48:28 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+  PASSED
+  backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[api-chromium] PASSED03:56:13 info Removing vCluster container vcluster.cp.pytest-9a2cbfca-babd-42cb-af33-be2e77f316f5...
+  =========== 2 passed, 199 deselected, 1 warning in 469.80s (0:07:49) ===========
+  ```
+
+### `[ui-chromium]` of the shard
+
+- Pytest node ids:
+  - `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium]`
+  - `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium]`
+- Run started: 2026-10-17T03:56:18+00:00. Run passed and ended: 2026-10-17T04:04:52+00:00 (pytest exit code 0).
+- vCluster: `pytest-fbc6560e-76e9-49d9-8d89-81bcf1cd491c`. The log does not print the kubeconfig path. The fixture deleted the vCluster at the end of the session.
+- Log: `/tmp/claude-0/-root-emdash-worktrees-styrmin-55123dec-fac-affinity-by-id-zsdtf/6c6555ca-4cb0-4ef2-9353-5841c914d68b/scratchpad/e2e/shard-env-backup-ui-chromium.log`.
+- Verbatim result lines (ANSI colours removed):
+
+  ```text
+  backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium] 03:56:19 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+  PASSED
+  backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium] PASSED04:04:46 info Removing vCluster container vcluster.cp.pytest-fbc6560e-76e9-49d9-8d89-81bcf1cd491c...
+  =========== 2 passed, 199 deselected, 1 warning in 511.15s (0:08:31) ===========
+  ```
+
+### Commits after the shard run
+
+These commits came after the run and were verified by the unit and functional suites only, not by an E2E run:
+
+- `2079f97b`: the restore log lines give `environment_restore_id`, `error_code` and `path`, and count failed redeploys in `config_redeploy_failed`.
+- `d820bbc7` and `9596d318`: tests only.
+- `79c1bd19`: the binder checks each deployment reference with `DeploymentReference` before it looks the reference up.
+- `91df29bf`: the clone flow logs `env_clone_environment_reference_not_cloned`.
