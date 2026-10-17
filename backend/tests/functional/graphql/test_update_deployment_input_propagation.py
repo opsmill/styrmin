@@ -21,12 +21,14 @@ from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import (
     Component,
     ComponentConfig,
     Deployment,
+    Task,
 )
 
 from ._queries import load_query
@@ -1112,3 +1114,76 @@ async def test_update_deployment_deployment_ref_name_is_stored_as_the_id(
         client, "get_deployment_config", {"deploymentId": str(deployment_id)}
     )
     assert data["deployment"]["config"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ref_kind", ["missing_name", "other_environment_id"])
+async def test_update_deployment_refuses_a_term_that_names_no_deployment_of_the_environment(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    ref_kind: str,
+) -> None:
+    """A term that names a missing deployment, or gives the id of a deployment of another
+    environment, is refused with the term's path. Neither the rename sent in the same
+    request nor the config is saved, and no task is created (027 FR-002, US3, R-006)."""
+    prefect_manager_mock.run_action = AsyncMock()
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session)
+    deployment = await seed_deployment(
+        session, environment=environment, adv=adv, name="api"
+    )
+    deployment.config = {"ip_whitelist": ["10.0.0.0/8"]}
+    session.add(deployment)
+    await session.commit()
+    deployment_id = deployment.id
+    if ref_kind == "missing_name":
+        ref_field, identifier = "deployment_name", "missing"
+        deployment_ref = {"deploymentName": identifier}
+    else:
+        other_environment = await seed_environment(session)
+        other = await seed_deployment(session, environment=other_environment, adv=adv)
+        ref_field, identifier = "deployment_id", str(other.id)
+        deployment_ref = {"deploymentId": identifier}
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "input": {
+                    "name": "api-renamed",
+                    "scheduling": {
+                        "podAffinity": {
+                            "required": [
+                                {
+                                    "topologyKey": "kubernetes.io/hostname",
+                                    "deploymentRef": deployment_ref,
+                                }
+                            ]
+                        }
+                    },
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "VALIDATION_ERROR"
+    assert (
+        extensions.get("path")
+        == "deployment.config.scheduling.pod_affinity.required[0]"
+    )
+    assert extensions.get(ref_field) == identifier
+    session.expire_all()
+    db_row = await session.get(Deployment, deployment_id)
+    assert db_row is not None
+    assert db_row.name == "api"
+    assert db_row.config == {"ip_whitelist": ["10.0.0.0/8"]}
+    tasks = await session.exec(select(Task).where(Task.deployment_id == deployment_id))
+    assert list(tasks.all()) == []
+    prefect_manager_mock.run_action.assert_not_awaited()

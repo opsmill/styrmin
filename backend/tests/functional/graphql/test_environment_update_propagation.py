@@ -799,6 +799,121 @@ async def test_update_environment_deployment_ref_name_is_stored_as_the_id(
 
 
 @pytest.mark.asyncio
+async def test_update_environment_refuses_a_term_that_names_a_missing_deployment(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """A term whose ``deploymentName`` matches no deployment of the environment is
+    refused with the term's path, the stored config is unchanged and no deployment is
+    redeployed (027 FR-002, US3 scenario 1)."""
+    prefect_manager_mock.run_action = AsyncMock()
+    environment = await seed_environment(session)
+    environment.config = {"ip_whitelist": ["10.0.0.0/8"]}
+    session.add(environment)
+    await session.commit()
+    deployment = await seed_deployment(session, environment=environment, name="db")
+    environment_id, deployment_id = environment.id, deployment.id
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_environment"),
+            "variables": {
+                "environmentId": str(environment_id),
+                "input": {
+                    "scheduling": {
+                        "podAntiAffinity": {
+                            "preferred": [
+                                {
+                                    "weight": 100,
+                                    "term": {
+                                        "topologyKey": "kubernetes.io/hostname",
+                                        "deploymentRef": {"deploymentName": "missing"},
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "VALIDATION_ERROR"
+    assert (
+        extensions.get("path")
+        == "environment.config.scheduling.pod_anti_affinity.preferred[0].term"
+    )
+    assert extensions.get("deployment_name") == "missing"
+    session.expire_all()
+    db_row = await session.get(Environment, environment_id)
+    assert db_row is not None
+    assert db_row.config == {"ip_whitelist": ["10.0.0.0/8"]}
+    tasks = await session.exec(select(Task).where(Task.deployment_id == deployment_id))
+    assert list(tasks.all()) == []
+    prefect_manager_mock.run_action.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ref_field", ["deployment_name", "deployment_id"])
+async def test_create_environment_refuses_a_term_that_names_a_deployment(
+    client: AsyncClient, session: AsyncSession, ref_field: str
+) -> None:
+    """A new environment has no deployment, so a term that names one, by name or by
+    id, is refused with the term's path and no environment is created (027 FR-002,
+    US3 scenario 2). The named deployment exists in another environment."""
+    other_environment = await seed_environment(session)
+    other = await seed_deployment(session, environment=other_environment, name="db")
+    cluster_id = other_environment.cluster_id
+    identifier = other.name if ref_field == "deployment_name" else str(other.id)
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("create_environment"),
+            "variables": {
+                "name": "new-env",
+                "clusterId": str(cluster_id),
+                "config": {
+                    "scheduling": {
+                        "pod_anti_affinity": {
+                            "preferred": [
+                                {
+                                    "weight": 100,
+                                    "term": {
+                                        "topology_key": "kubernetes.io/hostname",
+                                        "deployment_ref": {ref_field: identifier},
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "errors" in payload, payload
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "VALIDATION_ERROR"
+    assert (
+        extensions.get("path")
+        == "environment.config.scheduling.pod_anti_affinity.preferred[0].term"
+    )
+    assert extensions.get(ref_field) == identifier
+    session.expire_all()
+    created = await session.exec(
+        select(Environment).where(Environment.name == "new-env")
+    )
+    assert list(created.all()) == []
+
+
+@pytest.mark.asyncio
 async def test_update_environment_input_dedicated_ingress_service_nested(
     client: AsyncClient, session: AsyncSession
 ) -> None:
