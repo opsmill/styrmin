@@ -1,8 +1,8 @@
 """A failing ``async with uow`` block inside a savepoint rolls back only that savepoint (021 review F1),
 and ``commit()`` inside a savepoint is refused.
 
-Runs on the real SQLModel session (in-memory SQLite). Outside a savepoint the
-whole transaction still rolls back, as before.
+Runs on the real SQLModel session, on in-memory SQLite and on PostgreSQL. Outside
+a savepoint the whole transaction still rolls back, as before.
 """
 
 from __future__ import annotations
@@ -19,13 +19,23 @@ from styrmin_backend.db.models import Cluster
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 
 
+@pytest.fixture(params=["sqlite", "postgresql"])
+def database_url(request: pytest.FixtureRequest) -> str:
+    if request.param == "postgresql":
+        return request.getfixturevalue("postgres_url")
+    return "sqlite+aiosqlite://"
+
+
 @pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine(
-        "sqlite+aiosqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+async def session(database_url: str) -> AsyncGenerator[AsyncSession, None]:
+    if database_url.startswith("sqlite"):
+        engine = create_async_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        engine = create_async_engine(database_url)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
     async with AsyncSession(engine, expire_on_commit=False) as session:
