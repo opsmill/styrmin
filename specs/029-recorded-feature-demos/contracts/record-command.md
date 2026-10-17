@@ -44,7 +44,7 @@ clone                 recorded   demo-videos/4-clone.mp4             2:58
 ```
 
 - A recorded video longer than 3:00 is listed with a warning (SC-002). The command still exits 0 for it.
-- A failed demo lists the failing step, the error and the environments it kept (FR-010).
+- A failed demo lists the failing step, the error and the environments it kept (FR-010). The summary adds that kept environments still use the cluster's memory until the next run of that demo deletes them, which can make later demos of the same run fail (critique P3).
 
 ## Exit codes
 

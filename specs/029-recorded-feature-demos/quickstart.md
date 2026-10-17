@@ -7,6 +7,7 @@ How to check that the feature works. The command's options, output and exit code
 - The tools of the [local demo guide](../../dev/guides/local-demo.md): `docker`, `vcluster`, `helm`, `kubectl`.
 - `ffmpeg` on the PATH, any build with libx264. `brew install ffmpeg` or `apt install ffmpeg` is enough; `drawtext` is not needed.
 - `uv sync` run after the Playwright upgrade, then `uv run playwright install chromium`.
+- Network access: building the Semaphore image downloads from Ansible Galaxy and PyPI, and each Semaphore start runs `pip install infrahub-sdk` from PyPI inside the vCluster (research R-009).
 - Enough memory for two environments with Infrahub and Semaphore at the same time, which demo 4 needs. How much is not measured (spec Assumptions).
 
 ## 1. Unit tests of the post-processor

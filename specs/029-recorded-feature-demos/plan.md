@@ -35,7 +35,7 @@ Technical approach (details in [research.md](research.md)):
 **Testing**:
 
 - Unit tests for the post-processor's planning and ffmpeg arguments in `backend/tests/unit/demos/` (the CI unit job runs them).
-- The FR-016 read-only check added to `test_environment_clone_lifecycle` (`shard_env_backup`), run locally in both variants with recorded PASS evidence.
+- The FR-016 read-only check added to `test_environment_clone_lifecycle` (`shard_env_backup`), run locally in both variants with recorded PASS evidence. It proves that no alias in the clone points to the source; demo 4 proves that the clone's Semaphore reaches the clone's Infrahub (research R-013).
 - The UI E2E suite in CI after the Playwright upgrade and the page-object change.
 - One run of all four demos on a demo stack that `uv run invoke start` just created, with the output attached to the PR (the approved E2E exception).
 
@@ -48,7 +48,7 @@ Technical approach (details in [research.md](research.md)):
 **Constraints**:
 
 - The demo scripts contain no selector for a Styrmin page (FR-003). Missing Styrmin actions are added to the E2E page objects, not to the demos.
-- The E2E suite keeps filling fields in one step (FR-004): `keystroke_delay_ms` defaults to `None` everywhere the E2E fixtures build page objects.
+- The E2E suite keeps filling fields in one step (FR-004): `keystroke_delay_ms` is a keyword argument with default `None` on every page object and on `UiScenarioDriver`, and a page object or driver that creates another page object passes its value on (critique E2).
 - No CI workflow change (Governance gate). CI installs the browser with `uv run playwright install chromium`, which follows the lock file.
 - The Semaphore image is not pushed to a registry (FR-015).
 - No product code change. If the alias check fails, the fix is a separate change (R-013).
@@ -65,7 +65,7 @@ Technical approach (details in [research.md](research.md)):
 | II. Driver-based deployment | Pass | No driver change. Demos 3 and 4 use the existing `infrahub-enterprise` driver (R-007); the Semaphore image is selected with the `semaphore` driver's existing `docker_image` parameter and with an image override. |
 | III. Layered architecture | Pass | No API, service or repository change. The demos act through the UI (page objects) and the public SDK. |
 | IV. Type safety and typed errors | Pass | New code is typed and checked by `ty`. No product error types. |
-| V. Test-first development | Pass, with the approved exception | No E2E test for the demo scripts, approved in the grilling session; the proof is one full run on a fresh demo stack. The read-only FR-016 check extends `test_environment_clone_lifecycle` instead of adding a node ("reuse before you boot"); its local PASS evidence is recorded for both variants. Research predicts it fails on the current code (R-013); the plan then stops for a maintainer decision instead of weakening the check. Unit tests cover the post-processor. |
+| V. Test-first development | Pass, with the approved exception | No E2E test for the demo scripts, approved in the grilling session; the proof is one full run on a fresh demo stack. The read-only FR-016 check extends `test_environment_clone_lifecycle` instead of adding a node ("reuse before you boot"); its local PASS evidence is recorded for both variants. Research predicts it fails on the current code (R-013); the plan then stops for a maintainer decision on the product fix instead of weakening the check, and the check lands only once it passes (no `xfail`). Unit tests cover the post-processor. |
 | VI. Format and lint | Pass | `uv run invoke format lint` before each commit. |
 | VII. Documentation accuracy | Pass | "Recording the demos" in `dev/guides/local-demo.md`; a paragraph in `dev/knowledge/backend/e2e-testing.md` on the page objects' `keystroke_delay_ms` and their reuse by the demos. No `docs/`, towncrier or `CONTEXT.md` change, as agreed in the grilling session. If R-013 is confirmed, the wrong statement in `docs/.../ingress-and-networking.md` is part of the bug issue, not of this change. |
 | Governance gates | Pass | New dependencies approved in the grilling session (Playwright upgrade, ffmpeg, Semaphore image). No schema, GraphQL, CI workflow or auth change. Skipping E2E coverage for the demos approved in the grilling session. |
@@ -97,7 +97,7 @@ backend/tests/e2e/
 ├── pages/
 │   ├── _dom.py                        # + enter_text(locator, text, *, keystroke_delay_ms)
 │   ├── deploy_form.py                 # constructors take keystroke_delay_ms; .fill → enter_text
-│   ├── deployment_detail.py           #   (same in every page-object file) + open_timeline() for demo 1
+│   ├── deployment_detail.py           #   (same in every page-object file) + open_timeline(), wait_for_new_task()
 │   ├── environments.py
 │   └── ...
 ├── drivers/
@@ -158,6 +158,7 @@ dev/knowledge/backend/e2e-testing.md   # keystroke_delay_ms, demos reuse the pag
    - `async with recorder.wait(label)`: records a wait;
    - `async with recorder.unrecorded() as page`: a second page whose time is cut from the video;
    - `UiScenarioDriver(page=..., base_url=..., keystroke_delay_ms=45)` for every Styrmin action, and the Infrahub and Semaphore page objects for the rest.
+   - `DeploymentDetailPage.wait_for_new_task(task_type, known_task_ids=..., timeout=...)` to wait for an upgrade or update task. Before submitting a change, the demo reads the task ids already in the timeline; the method waits until a task of that type that was not there before reaches a terminal result, and raises when the result is a failure. It reads the timeline's `data-task-id`, `data-task-type` and `data-task-result` attributes that `read_timeline` already uses. `wait_for_deployment_running` is not enough here: the header can still show Running before the task starts (critique E1).
 5. **Post-processing**: `stop()`, `plan_segments`, label PNGs, ffmpeg to `<output>/<n>-<slug>.mp4` through a temporary file that is renamed only when ffmpeg succeeds.
 6. **Deletion** (FR-009): delete the demo's environments and wait for their namespaces.
 7. **Failure** (FR-010): any exception in steps 2 to 5 stops the demo, deletes the raw and temporary files, keeps the environments and records the failing step and error. The run loop goes on with the next demo (FR-011).
@@ -166,8 +167,8 @@ dev/knowledge/backend/e2e-testing.md   # keystroke_delay_ms, demos reuse the pag
 
 | Demo | Setup (SDK and APIs, not recorded) | Recorded steps (page objects) | Waits |
 | --- | --- | --- | --- |
-| 1 `deploy-upgrade` | Environment `network-lab-upgrade` | Deploy Infrahub `previous` with the `infrahub` driver version chosen in the form; open the deployment; upgrade to `latest`; open the timeline, where the running upgrade task is expanded and shows its steps, including the driver's upgrade action | Deployment running; upgrade task finished |
-| 2 `component-overrides` | Environment `network-lab-overrides` with `infrahub` (`latest`) and `semaphore` | Set the Semaphore `server` image override to `styrmin-demo/semaphore:v2.16.47`; set a replica override of 2 on the Infrahub `server` component | Each update task finished |
+| 1 `deploy-upgrade` | Environment `network-lab-upgrade` | Deploy Infrahub `previous` with the `infrahub` driver version chosen in the form; open the deployment; upgrade to `latest`; open the timeline, where the running upgrade task is expanded and shows its steps, including the driver's upgrade action | Deployment running; upgrade task finished (`wait_for_new_task`) |
+| 2 `component-overrides` | Environment `network-lab-overrides` with `infrahub` (`latest`) and `semaphore` | Set the Semaphore `server` image override to `styrmin-demo/semaphore:v2.16.47`; set a replica override of 2 on the Infrahub `server` component | Each update task finished (`wait_for_new_task`) |
 | 3 `backup-restore` | Environment `network-lab-backup` with `infrahub-enterprise` (`latest`) and `semaphore`; schema, two devices; Semaphore project and template | Create an environment backup; delete a device in Infrahub; delete the template in Semaphore; restore the backup; list the devices and the templates again | Backup finished; restore finished; Infrahub answering again |
 | 4 `clone` | Environment `network-lab` with `infrahub-enterprise` (`latest`) and `semaphore` (`docker_image: styrmin-demo/semaphore`); schema, two devices; Semaphore project, inventory, environment and template | Run the template in the source Semaphore (2 devices); clone the environment as `network-lab-clone`; add a third device in the clone's Infrahub; run the template in the clone's Semaphore (3 devices); run it in the source again (2 devices) | Each Semaphore task; clone finished |
 
@@ -178,16 +179,18 @@ Each demo checks what it shows, so a demo that shows a wrong result fails instea
 Detailed tasks come from `speckit-tasks`. The order:
 
 1. **Checks first** (blocking):
-   - FR-016 alias check added and run in both variants (R-013). If it fails: file the bug issue, stop, and ask the maintainer how to proceed.
+   - FR-016 alias check added and run in both variants (R-013). If it fails: file the bug issue and ask the maintainer about the product fix; go on with phases 2 to 5 and 7 to 8 for demos 1 to 3; the check and demo 4 (phase 6) land after the fix, once the check passes.
    - On a fresh demo stack, with a throwaway SDK script: Infrahub `previous` on chart 4.33.2 and its upgrade to `latest` (R-015); `infrahub-enterprise` at `latest`, an environment backup and restore of it (R-007); the demo Semaphore image runs the inventory against Infrahub through the `infrahub` alias (R-008, R-009).
    - Playwright 1.64 upgrade with the UI smoke E2E test run locally; a screencast that crosses origins keeps recording (R-001).
 2. **Foundation**: `enter_text` and `keystroke_delay_ms` through the page objects and `UiScenarioDriver`; `video.py` with its unit tests; `encode.py`; `recorder.py`; `prerequisites.py`; `stack.py`; `catalog.py`; `__main__.py`; the `record` invoke task; `.gitignore`.
-3. **Demo 1** (User Story 1, P1): versions file, `open_timeline()`, the demo script; record it alone.
+3. **Demo 1** (User Story 1, P1): versions file, `open_timeline()` and `wait_for_new_task()`, the demo script; record it alone.
 4. **Demo 2** (User Story 2): the Semaphore image and its build in `tasks/demo.py`; the demo script; record it alone.
 5. **Demo 3** (User Story 3): `infrahub_setup.py`, `semaphore_setup.py`, the two page objects; the demo script; record it alone.
-6. **Demo 4** (User Story 4): the demo script; record it alone. Blocked if the alias check failed.
+6. **Demo 4** (User Story 4): the demo script; record it alone. Waits for the product fix if the alias check failed.
 7. **All demos and re-recording** (User Stories 5 and 6): failure isolation and the summary; leftover cleanup checked by making demo 3 fail once.
-8. **Documentation and evidence**: the guide section, the knowledge paragraph, the full run on a fresh demo stack with its output for the PR, and the three presentation applications opening one video each (SC-003).
+8. **Documentation and evidence**: the guide section (including network access for the image build and Semaphore's start, and that environments kept after a failure still use memory until the next run of that demo deletes them), the knowledge paragraph, the full run on a fresh demo stack with its output for the PR, and the three presentation applications opening one video each (SC-003).
+
+The pull request merges when every check passes. If the alias defect is confirmed and its fix is not ready, the maintainer decides whether to ship the recorder and demos 1 to 3 first.
 
 ## Complexity Tracking
 
