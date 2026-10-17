@@ -167,9 +167,9 @@ description: "Task list for storing the id of the deployment that an affinity te
 
 **Independent Test**: back up E, delete A, and restore E; the restore succeeds, and B's next update fails with A's last name.
 
-- [ ] T035 [US7] In `restore_environment_backup` in `backend/styrmin_backend/services/backup/environment.py` (L1071-1089, plan D-008), wrap `redeploy_for_environment_update(deployment, uow)` in `async with uow.session.begin_nested():` inside the existing `try`, as `_redeploy_application` does in `backend/styrmin_backend/services/cluster_config_fanout.py` (L375-400)
-- [ ] T036 [P] [US7] Unit test in `backend/tests/unit/services/backup/test_environment_backup.py`: in the restore fan-out, the first deployment's redeploy raises `UnresolvableAffinityReferenceError` and the second's succeeds; the second's redeploy is committed and the restore returns normally
-- [ ] T037 [P] [US7] Functional test in `backend/tests/functional/graphql/test_deployment_reference_scenarios.py` (FR-006): E's captured config names A; tombstone A; restore the environment backup: the restore succeeds and E's config equals the captured config; `updateDeployment` on B is refused with A's last name and `deleted: true`
+- [X] T035 [US7] In `restore_environment_backup` in `backend/styrmin_backend/services/backup/environment.py` (L1071-1089, plan D-008), wrap `redeploy_for_environment_update(deployment, uow)` in `async with uow.session.begin_nested():` inside the existing `try`, as `_redeploy_application` does in `backend/styrmin_backend/services/cluster_config_fanout.py` (L375-400)
+- [X] T036 [P] [US7] Unit test in `backend/tests/unit/services/backup/test_environment_backup.py`: in the restore fan-out, the first deployment's redeploy raises `UnresolvableAffinityReferenceError` and the second's succeeds; the second's redeploy is committed and the restore returns normally
+- [X] T037 [P] [US7] Functional test in `backend/tests/functional/graphql/test_deployment_reference_scenarios.py` (FR-006): E's captured config names A; tombstone A; restore the environment backup: the restore succeeds and E's config equals the captured config; `updateDeployment` on B is refused with A's last name and `deleted: true`
 
 **Checkpoint**: one term does not block a recovery.
 

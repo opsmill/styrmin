@@ -9,6 +9,7 @@ update and config fan-out redeploy succeed.
 Once A is a tombstoned deployment, the terms still give its id. Every update or
 redeploy that expands such a term is refused with the term's path, A's last name and
 ``deleted``. Writing the term again with A's name binds it to a new deployment named A.
+An environment restore puts back a captured term that names A unchanged (US7).
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from styrmin_backend.db.models import (
     Deployment,
     DeploymentState,
     Environment,
+    EnvironmentBackup,
     Task,
 )
 from styrmin_backend.repository.deployment import SQLModelDeploymentRepository
@@ -589,3 +591,110 @@ async def test_term_written_again_with_the_name_binds_the_re_created_deployment(
     old_a = await session.get(Deployment, ids.a_id)
     assert old_a is not None
     assert (old_a.name, old_a.status) == ("a", DeploymentState.DELETED)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_crd")
+@pytest.mark.parametrize("b_redeploys", ["first", "last"])
+async def test_environment_restore_puts_back_a_term_that_names_a_tombstoned_deployment(
+    client: AsyncClient, session: AsyncSession, mocker, b_redeploys: str
+) -> None:
+    """US7 and FR-006: E's environment backup captured a term that names A. After A is
+    a tombstoned deployment, the environment restore succeeds and puts E's captured
+    config back unchanged, without binding it.
+
+    The restore then redeploys B and C. E's term is expanded for every deployment that
+    has a component, so it fails each of their redeploys: B's fails with A's last name
+    and is only logged and counted. C has no component, so its redeploy expands no term
+    and is committed, before or after B's. B's next ``updateDeployment`` is refused."""
+    ids = await _set_up(client, session, b_names_a=False)
+    environment = await session.get(Environment, ids.environment_id)
+    assert environment is not None
+    c_id = (await seed_deployment(session, environment=environment, name="c")).id
+    captured = environment.config
+    assert captured == {"scheduling": {"pod_anti_affinity": _stored_term(ids.a_id)}}
+    # A config-only environment backup, so the restore redeploys B and C.
+    backup = EnvironmentBackup(
+        name="before-a-was-deleted",
+        environment_id=ids.environment_id,
+        environment_config=captured,
+    )
+    session.add(backup)
+    await session.commit()
+    backup_id = backup.id
+    # E's config changes after the backup; this fan-out gives C its first instance.
+    await gql(
+        client,
+        "update_environment",
+        {
+            "environmentId": str(ids.environment_id),
+            "input": {"envVars": [{"name": "FOO", "value": "bar"}]},
+        },
+    )
+    await _tombstone(client, session, ids.a_id)
+    instances_before = {}
+    for deployment_id in (ids.b_id, c_id):
+        row = await session.get(Deployment, deployment_id)
+        assert row is not None
+        assert row.active_application_instance_id is not None
+        instances_before[deployment_id] = row.active_application_instance_id
+    tasks_before = {d: await _task_count(session, d) for d in (ids.b_id, c_id)}
+    original = SQLModelDeploymentRepository.find_all_by_environment
+
+    async def _in_name_order(
+        self: SQLModelDeploymentRepository, environment_id: UUID, **kwargs: Any
+    ) -> list:
+        rows = await original(self, environment_id, **kwargs)
+        return sorted(rows, key=lambda row: row.name, reverse=b_redeploys == "last")
+
+    mocker.patch.object(
+        SQLModelDeploymentRepository, "find_all_by_environment", _in_name_order
+    )
+    log_info = mocker.patch.object(cluster_config_fanout.logger, "info")
+    logged = _capture_logged_errors(mocker)
+
+    data = await gql(
+        client, "restore_environment_backup", {"environmentBackupId": str(backup_id)}
+    )
+
+    restore = data["restoreEnvironmentBackup"]
+    assert (restore["restores"], restore["skippedConstituents"]) == ([], [])
+    session.expire_all()
+    environment = await session.get(Environment, ids.environment_id)
+    assert environment is not None
+    assert environment.config == captured
+    fields, failure = _dispatch_error(logged, "env_restore_fanout")
+    assert fields["deployment_id"] == str(ids.b_id)
+    assert isinstance(failure, UnresolvableAffinityReferenceError)
+    assert failure.error_metadata == _names_tombstoned_a(ids.a_id, _E_TERM_PATH)
+    [line] = [
+        line
+        for line in _logged(log_info)
+        if line.startswith("env_restore_fanout_dispatched ")
+    ]
+    counts = _fields(line)
+    assert (counts["config_redeployed"], counts["dispatch_failed"]) == ("1", "1")
+    b = await session.get(Deployment, ids.b_id)
+    c = await session.get(Deployment, c_id)
+    assert b is not None
+    assert c is not None
+    assert b.active_application_instance_id == instances_before[ids.b_id]
+    assert await _task_count(session, ids.b_id) == tasks_before[ids.b_id]
+    assert c.active_application_instance_id != instances_before[c_id]
+    assert c.status == DeploymentState.DEPLOYING
+    assert await _task_count(session, c_id) == tasks_before[c_id] + 1
+
+    refused = await _post(
+        client,
+        "update_deployment",
+        {
+            "deploymentId": str(ids.b_id),
+            "input": {"envVars": [{"name": "FOO", "value": "baz"}]},
+        },
+    )
+
+    [error] = refused["errors"]
+    assert error["extensions"] == {
+        "code": "VALIDATION_ERROR",
+        **_names_tombstoned_a(ids.a_id, _E_TERM_PATH),
+    }
