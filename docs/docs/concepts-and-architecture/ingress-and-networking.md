@@ -312,6 +312,69 @@ clone, not back to production.
 The driver decides which services are internal and which are external.
 Internal services don't get an external hostname; external ones do.
 
+#### Service aliases
+
+Each deployment runs in its own namespace, `styrmin-<deployment id>`. So
+that an application can reach a service of another deployment of its
+environment by the service's short name, Styrmin writes a **service
+alias** into the namespace of every other deployment of the environment.
+An alias is an `ExternalName` Service named after the service, which
+points to the service in its owner's namespace. It carries the labels
+`styrmin.io/service-alias=true` and `styrmin.io/deployment-id=<owner id>`.
+
+Styrmin writes the aliases each time it creates, updates or upgrades a
+deployment. Deleting a deployment through Styrmin, from the UI,
+`styrminctl` or the SDK, deletes its aliases in the other namespaces, so
+the names of its services stop resolving in the other applications.
+
+These aliases are not deleted:
+
+- the aliases of deployments deleted with a Styrmin release earlier than
+  the one that fixed
+  [opsmill/styrmin#503](https://github.com/opsmill/styrmin/issues/503);
+- an alias that the deletion failed to delete; the operator logs the
+  failure;
+- the aliases of a deployment whose namespace was deleted directly, for
+  example with `kubectl delete namespace`, because Styrmin cannot tell
+  that deletion from the one that a restore makes;
+- an alias that a change of another deployment wrote at the end of the
+  deletion, after the operator listed the aliases for the last time and
+  before Kubernetes removed the deployment's `StyrminDeployment`;
+- the aliases of a `StyrminDeployment` annotated
+  `styrmin.io/skip-teardown`. A restore into another deployment deletes
+  such a copy of the source's `StyrminDeployment`, and the source keeps
+  running, so its aliases are still in use.
+
+An alias that stays after its deployment is deleted points into a
+namespace that no longer exists, so its name does not resolve, as it
+would not without the alias. The next deployment of the environment that
+uses the same service name replaces it.
+
+##### Finding and deleting aliases that stay
+
+This command lists each alias that points into a namespace that does not
+exist. Each line names the namespace that holds the alias, the alias, and
+the missing namespace:
+
+```bash
+kubectl get services --all-namespaces -l styrmin.io/service-alias=true \
+  -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name} {.spec.externalName}{"\n"}{end}' |
+while read -r namespace name target; do
+  owner=$(echo "$target" | cut -d. -f2)
+  kubectl get namespace "$owner" > /dev/null 2>&1 || echo "$namespace $name $owner"
+done
+```
+
+Before you delete an alias, check that no deployment has the id in the
+missing namespace's name, `styrmin-<deployment id>`, for example with
+`styrminctl deployments get <deployment id>`. A restore deletes a
+deployment's namespace and creates it again, and the deployment's aliases
+must stay in the meantime. Then delete the alias:
+
+```bash
+kubectl delete service --namespace <namespace> <alias>
+```
+
 ### What you actually have to configure
 
 - **Once per cluster:** an FQDN suffix and an ingress in front of
