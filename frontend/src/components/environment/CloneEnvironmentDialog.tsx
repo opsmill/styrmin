@@ -230,13 +230,55 @@ export function clearableConfigFields(
 // Error mapping
 // ---------------------------------------------------------------------------
 
+/** One deployment that a copied affinity term names but the clone does not copy. */
+export interface UnclonedDeployment {
+  deployment_id: string | null;
+  deployment_name: string | null;
+  paths: string[];
+  reason?: string | null;
+}
+
+/** The `extensions.deployments` of a refused clone whose copied terms name a deployment it leaves out. */
+export function unclonedDeployments(
+  extensions: Record<string, unknown>,
+): UnclonedDeployment[] {
+  const raw = extensions.deployments;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (entry): entry is UnclonedDeployment =>
+      typeof entry === "object" &&
+      entry !== null &&
+      Array.isArray((entry as { paths?: unknown }).paths),
+  );
+}
+
+/** Name each deployment, why the clone does not copy it and the terms that name it, then the three fixes. */
+export function describeUnclonedDeployments(
+  deployments: readonly UnclonedDeployment[],
+): string {
+  const entries = deployments.map((entry) => {
+    const name = entry.deployment_name ?? entry.deployment_id ?? "unknown";
+    const reason = entry.reason ? ` (${entry.reason})` : "";
+    return `"${name}"${reason}, named by the term at ${entry.paths.join(", ")}`;
+  });
+  return (
+    "An affinity term that the clone copies names a deployment that the clone " +
+    `does not copy: ${entries.join("; ")}. To fix it, select that application ` +
+    "too, leave out the applications whose terms name it, or, for a term " +
+    'in the environment\'s config, clear "scheduling" or override it with a ' +
+    "scheduling that names no deployment."
+  );
+}
+
 /**
  * Turn a rejected `cloneEnvironment` into an actionable sentence.
  *
  * Keyed on the typed `extensions.code` carried by `GraphQLOperationError`
  * (never on the message text — see the data-fetching guidelines). The server's
  * own message is appended rather than replaced: it carries the specifics the
- * code cannot (which name, which deployment ids, which unknown field).
+ * code cannot (which name, which deployment ids, which unknown field). A
+ * refusal whose `extensions.deployments` lists uncloned deployments is built
+ * from those entries instead.
  */
 export function describeCloneMutationError(error: unknown): string {
   if (error instanceof GraphQLOperationError) {
@@ -248,8 +290,11 @@ export function describeCloneMutationError(error: unknown): string {
         return `The source environment or one of the selected applications no longer exists. Close the dialog, let the page refresh, and try again. (${detail})`;
       case "ALREADY_IN_PROGRESS":
         return `Another environment-level operation (backup, restore, or a clone still capturing) is running on this environment. Wait for it to finish and retry. (${detail})`;
-      case "VALIDATION_ERROR":
+      case "VALIDATION_ERROR": {
+        const uncloned = unclonedDeployments(error.extensions);
+        if (uncloned.length > 0) return describeUnclonedDeployments(uncloned);
         return `The clone request was rejected as invalid — check the override fields and the fields marked for clearing. (${detail})`;
+      }
       case "FORBIDDEN":
         return `Cloning an environment requires the ADMIN role. (${detail})`;
       default:
