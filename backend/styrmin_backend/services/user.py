@@ -38,5 +38,7 @@ class ActionsWorkflowBuilder:
             token=self.source.token,
             type=WorkflowType.USER,
             image=action.image,
+            # Spec 028: the action runs from its driver directory, if any.
+            set_directory=self.source.driver_directory,
         )
         return workflow_definition

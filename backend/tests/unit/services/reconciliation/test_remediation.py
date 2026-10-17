@@ -12,9 +12,11 @@ from styrmin_backend.services.reconciliation.diffs.diffs import (
     ApplicationDriverVersionChange,
     ApplicationVersionChange,
     ContextChange,
+    InstanceCreation,
     InstanceUpdate,
 )
 from styrmin_backend.services.reconciliation.remediation import (
+    InstanceCreationStrategy,
     InstanceUpdateStrategy,
     RemediationType,
 )
@@ -112,7 +114,9 @@ async def test_upgrade_with_version_change_and_core_hook(
     prehook_id = uuid4()
     posthook_id = uuid4()
 
-    async def fake_get_user_action(application, hook, mode, version, fingerprint=None):  # noqa: ARG001 — spec 013 fingerprint disambiguator, mock-irrelevant here
+    async def fake_get_user_action(  # noqa: ARG001 — spec 013/028 disambiguators, mock-irrelevant here
+        application, hook, mode, version, fingerprint=None, driver_directory=None
+    ):
         if hook == HookKind.UPGRADE and mode == "core":
             return upgrade_hook_id
         if hook == HookKind.UPGRADE and mode == "pre":
@@ -163,7 +167,9 @@ async def test_upgrade_fallback_to_update_when_no_core_hook(
     update_flow_id = uuid4()
     update_helm_flow_id = uuid4()
 
-    async def fake_get_user_action(application, hook, mode, version, fingerprint=None):  # noqa: ARG001 — spec 013 fingerprint disambiguator, mock-irrelevant here
+    async def fake_get_user_action(  # noqa: ARG001 — spec 013/028 disambiguators, mock-irrelevant here
+        application, hook, mode, version, fingerprint=None, driver_directory=None
+    ):
         return None  # No hooks defined
 
     async def fake_get_action(action):
@@ -237,7 +243,9 @@ async def test_upgrade_without_pre_post_hooks(uow, instance, prefect_manager_moc
     upgrade_flow_id = uuid4()
     update_helm_flow_id = uuid4()
 
-    async def fake_get_user_action(application, hook, mode, version, fingerprint=None):  # noqa: ARG001 — spec 013 fingerprint disambiguator, mock-irrelevant here
+    async def fake_get_user_action(  # noqa: ARG001 — spec 013/028 disambiguators, mock-irrelevant here
+        application, hook, mode, version, fingerprint=None, driver_directory=None
+    ):
         if hook == HookKind.UPGRADE and mode == "core":
             return upgrade_hook_id
         return None  # No pre/post hooks
@@ -304,3 +312,53 @@ async def test_update_with_driver_version_change(uow, instance, prefect_manager_
     assert remediation is not None
     assert remediation.type == RemediationType.UPDATE_INSTANCE
     prefect_manager_mock.get_user_action_deployment_id.assert_not_called()
+
+
+# ---- Driver directory (spec 028) ----
+
+
+@pytest.mark.parametrize(
+    ("source_type", "source_path", "expected"),
+    [
+        ("git", "drivers/a", "drivers/a"),
+        ("git", None, None),
+        ("local", "/srv/drivers/simple-app", None),
+    ],
+    ids=["git-driver-directory", "git-root", "local-server-path"],
+)
+async def test_every_user_action_lookup_receives_the_driver_directory(
+    uow,
+    instance,
+    driver_version,
+    prefect_manager_mock,
+    source_type: str,
+    source_path: str | None,
+    expected: str | None,
+):
+    """Create ``pre``/``post`` and upgrade ``core``/``pre``/``post`` lookups.
+
+    A git row's ``source_path`` is its driver directory; a local row's is a
+    server path, so the lookup gets ``None`` and skips ``directory/`` deployments.
+    """
+    driver_version.source_type = source_type
+    driver_version.source_path = source_path
+    prefect_manager_mock.get_user_action_deployment_id = AsyncMock(return_value=uuid4())
+    prefect_manager_mock.get_action_deployment_id = AsyncMock(return_value=uuid4())
+
+    await InstanceCreationStrategy(uow=uow).execute(InstanceCreation(instance=instance))
+    await InstanceUpdateStrategy(uow=uow).execute(
+        InstanceUpdate(
+            instance=instance,
+            diffs=[ApplicationVersionChange.create("1.0.0", "2.0.0")],
+        )
+    )
+
+    calls = prefect_manager_mock.get_user_action_deployment_id.await_args_list
+    assert sorted((c.kwargs["hook"].value, c.kwargs["mode"]) for c in calls) == [
+        ("setup", "post"),
+        ("setup", "pre"),
+        ("upgrade", "core"),
+        ("upgrade", "post"),
+        ("upgrade", "pre"),
+    ]
+    assert [c.kwargs["driver_directory"] for c in calls] == [expected] * 5

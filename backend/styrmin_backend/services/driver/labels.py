@@ -70,3 +70,21 @@ def short_fingerprint(
     if not fingerprint:
         return None
     return fingerprint[:7]
+
+
+def driver_directory_of(*, source_type: str, source_path: str | None) -> str | None:
+    """Return the driver directory of a driver-version row, or ``None``.
+
+    Spec 028 — the driver directory of a git row is its ``source_path``
+    (``None`` for a load from the repository root). A local row's
+    ``source_path`` is a server path, not a driver directory, so it gives
+    ``None``. Prefect lookups pass the result as ``driver_directory``.
+
+    >>> driver_directory_of(source_type="git", source_path="drivers/a")
+    'drivers/a'
+    >>> driver_directory_of(source_type="local", source_path="/srv/drivers/a") is None
+    True
+    """
+    if source_type == "git":
+        return source_path
+    return None

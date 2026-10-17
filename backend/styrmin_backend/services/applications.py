@@ -35,7 +35,10 @@ from styrmin_backend.domain.payloads import (
     HookDeploymentsPayload,
 )
 from styrmin_backend.services.driver import ApplicationDriver
-from styrmin_backend.services.driver.labels import short_fingerprint
+from styrmin_backend.services.driver.labels import (
+    driver_directory_of,
+    short_fingerprint,
+)
 from styrmin_backend.services.driver.loaders import (
     get_git_driver_loader,
     get_local_driver_loader,
@@ -237,6 +240,7 @@ async def load_application_driver_from_object(
                         hook=action.hook,
                         mode=action.mode,
                         fingerprint=fingerprint,
+                        driver_directory=driver_object.source.driver_directory,
                     )
 
         # Create application
@@ -539,6 +543,11 @@ async def instantiate_application(
             content_hash=application.content_hash,
             source_commit_sha=application.source_commit_sha,
         )
+        # Spec 028 — and the one registered for this row's driver directory.
+        instance_driver_directory = driver_directory_of(
+            source_type=application.source_type,
+            source_path=application.source_path,
+        )
         prehook, posthook, corehook = await asyncio.gather(
             prefect_manager.get_user_action_deployment_id(
                 application=application.name,  # type: ignore[attr-defined]
@@ -546,6 +555,7 @@ async def instantiate_application(
                 mode="pre",
                 version=application.application_supported_versions,
                 fingerprint=instance_fingerprint,
+                driver_directory=instance_driver_directory,
             ),
             prefect_manager.get_user_action_deployment_id(
                 application=application.name,  # type: ignore[attr-defined]
@@ -553,6 +563,7 @@ async def instantiate_application(
                 mode="post",
                 version=application.application_supported_versions,
                 fingerprint=instance_fingerprint,
+                driver_directory=instance_driver_directory,
             ),
             prefect_manager.get_action_deployment_id(
                 action=PrefectAction.CREATE_HELM_RELEASE

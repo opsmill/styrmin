@@ -18,6 +18,7 @@ from uuid import uuid4
 import pytest
 from prefect.client.schemas.sorting import DeploymentSort
 
+from styrmin_backend.services.driver.driver_directory import driver_directory_digest
 from styrmin_backend.services.driver.models.resources.actions import HookKind
 from styrmin_backend.workflows.manager import PrefectManager
 from styrmin_backend.workflows.models import (
@@ -61,6 +62,7 @@ async def _register(
     manager: PrefectManager,
     fingerprint: str | None,
     application: str = "lab-driver-a",
+    driver_directory: str | None = None,
 ) -> _Workflow:
     workflow = _Workflow(
         name="User Action: post_setup", module="actions", function="post_setup"
@@ -72,6 +74,7 @@ async def _register(
         hook=HookKind.SETUP,
         mode="post",
         fingerprint=fingerprint,
+        driver_directory=driver_directory,
     )
     return workflow
 
@@ -128,8 +131,8 @@ async def test_lookup_prefers_the_newest_matching_deployment(
     manager: PrefectManager, client, mocker
 ) -> None:
     """Newest first, so a pinned re-registration beats a branch-tip leftover."""
-    newest = mocker.Mock(id=uuid4())
-    client.read_deployments.return_value = [newest, mocker.Mock(id=uuid4())]
+    newest = mocker.Mock(id=uuid4(), tags=[])
+    client.read_deployments.return_value = [newest, mocker.Mock(id=uuid4(), tags=[])]
 
     found = await manager.get_user_action_deployment_id(
         application="lab-driver-a",
@@ -154,6 +157,119 @@ async def test_lookup_prefers_the_newest_matching_deployment(
 async def test_lookup_returns_none_when_nothing_matches(
     manager: PrefectManager, client
 ) -> None:
+    assert (
+        await manager.get_user_action_deployment_id(
+            application="lab-driver-a",
+            version=">=1.0.0",
+            hook=HookKind.SETUP,
+            mode="post",
+            fingerprint="555d155",
+        )
+        is None
+    )
+
+
+# ---------------------------------------------------------------------------
+# Driver directory (spec 028, research R-003)
+# ---------------------------------------------------------------------------
+
+
+async def test_registration_with_driver_directory_is_tagged_and_named(
+    manager: PrefectManager, client
+) -> None:
+    await _register(manager, fingerprint="555d155", driver_directory="drivers/a")
+
+    kwargs = client.create_deployment.await_args.kwargs
+    assert "directory/drivers/a" in kwargs["tags"]
+    assert kwargs["name"] == (
+        f"User Action: post_setup (lab-driver-a@555d155 "
+        f"{driver_directory_digest('drivers/a')})"
+    )
+    assert kwargs["name"].endswith("@555d155 99a4d0e)")
+
+
+async def test_registration_with_driver_directory_and_no_fingerprint(
+    manager: PrefectManager, client
+) -> None:
+    await _register(manager, fingerprint=None, driver_directory="drivers/a")
+
+    assert client.create_deployment.await_args.kwargs["name"] == (
+        "User Action: post_setup (lab-driver-a 99a4d0e)"
+    )
+
+
+async def test_two_driver_directories_at_one_commit_register_distinct_deployments(
+    manager: PrefectManager, client
+) -> None:
+    """US1-6: same driver name and commit, two driver directories."""
+    await _register(manager, fingerprint="555d155", driver_directory="drivers/a")
+    await _register(manager, fingerprint="555d155", driver_directory="drivers/b")
+
+    calls = client.create_deployment.await_args_list
+    names = [c.kwargs["name"] for c in calls]
+    assert len(set(names)) == 2, names
+    assert "directory/drivers/a" in calls[0].kwargs["tags"]
+    assert "directory/drivers/b" in calls[1].kwargs["tags"]
+
+
+async def test_registration_without_driver_directory_has_no_directory_tag(
+    manager: PrefectManager, client
+) -> None:
+    await _register(manager, fingerprint="555d155")
+
+    kwargs = client.create_deployment.await_args.kwargs
+    assert kwargs["name"] == "User Action: post_setup (lab-driver-a@555d155)"
+    assert not any(tag.startswith("directory/") for tag in kwargs["tags"])
+
+
+async def test_lookup_with_driver_directory_filters_on_its_tag(
+    manager: PrefectManager, client, mocker
+) -> None:
+    match = mocker.Mock(id=uuid4(), tags=["directory/drivers/a"])
+    client.read_deployments.return_value = [match]
+
+    found = await manager.get_user_action_deployment_id(
+        application="lab-driver-a",
+        version=">=1.0.0",
+        hook=HookKind.SETUP,
+        mode="post",
+        fingerprint="555d155",
+        driver_directory="drivers/a",
+    )
+
+    assert found == match.id
+    tags = client.read_deployments.await_args.kwargs["deployment_filter"].tags.all_
+    assert "directory/drivers/a" in tags
+
+
+async def test_lookup_without_driver_directory_skips_driver_directory_deployments(
+    manager: PrefectManager, client, mocker
+) -> None:
+    """A root driver version never runs another driver directory's action."""
+    newer_tagged = mocker.Mock(id=uuid4(), tags=["directory/drivers/a"])
+    older_root = mocker.Mock(id=uuid4(), tags=["application/lab-driver-a"])
+    client.read_deployments.return_value = [newer_tagged, older_root]
+
+    found = await manager.get_user_action_deployment_id(
+        application="lab-driver-a",
+        version=">=1.0.0",
+        hook=HookKind.SETUP,
+        mode="post",
+        fingerprint="555d155",
+    )
+
+    assert found == older_root.id
+    tags = client.read_deployments.await_args.kwargs["deployment_filter"].tags.all_
+    assert not any(tag.startswith("directory/") for tag in tags)
+
+
+async def test_lookup_without_driver_directory_returns_none_when_only_tagged_match(
+    manager: PrefectManager, client, mocker
+) -> None:
+    client.read_deployments.return_value = [
+        mocker.Mock(id=uuid4(), tags=["directory/drivers/a"])
+    ]
+
     assert (
         await manager.get_user_action_deployment_id(
             application="lab-driver-a",
