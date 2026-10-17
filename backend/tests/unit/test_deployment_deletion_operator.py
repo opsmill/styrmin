@@ -338,7 +338,9 @@ def _alias(
     if owner is not None:
         labels["styrmin.io/deployment-id"] = str(owner)
     return V1Service(
-        metadata=V1ObjectMeta(name=name, namespace=namespace, labels=labels),
+        metadata=V1ObjectMeta(
+            name=name, namespace=namespace, labels=labels, resource_version="1"
+        ),
         spec=V1ServiceSpec(
             type="ExternalName",
             external_name=f"{name}.{target_namespace}.svc.cluster.local",
@@ -346,12 +348,30 @@ def _alias(
     )
 
 
+_ID_LABEL = "styrmin.io/deployment-id"
+
+
 def _patch_alias_primitives(mocker, aliases: list[V1Service]) -> tuple[Any, Any, Any]:
-    """Patch the primitives where ``_delete_service_aliases`` imports them."""
+    """Patch the primitives where ``_delete_service_aliases`` imports them.
+
+    The listing applies the label selector as the API server does.
+    """
+
+    async def list_services(*, label_selector: str) -> V1ServiceList:
+        alias_term, owner_term = label_selector.split(",")
+        assert alias_term == "styrmin.io/service-alias=true"
+        if owner_term == "!styrmin.io/deployment-id":
+            items = [a for a in aliases if _ID_LABEL not in a.metadata.labels]
+        else:
+            key, value = owner_term.split("=")
+            assert key == _ID_LABEL
+            items = [a for a in aliases if a.metadata.labels.get(key) == value]
+        return V1ServiceList(items=items)
+
     list_mock = mocker.patch(
         f"{_PRIMITIVES}.list_services_in_all_namespaces",
         new_callable=mocker.AsyncMock,
-        return_value=V1ServiceList(items=aliases),
+        side_effect=list_services,
     )
     delete_mock = mocker.patch(
         f"{_PRIMITIVES}.delete_service",
@@ -404,8 +424,8 @@ async def test_delete_service_aliases_deletes_only_the_aliases_of_the_deployment
     )
 
     assert delete_mock.await_args_list == [
-        call(name="intent", namespace=peer_namespace),
-        call(name="legacy", namespace=peer_namespace),
+        call(name="intent", namespace=peer_namespace, resource_version="1"),
+        call(name="legacy", namespace=peer_namespace, resource_version="1"),
     ]
     assert f"Deleted 2 service aliases of {deployment_id}" in logger.infos
 
@@ -429,9 +449,10 @@ async def test_delete_service_aliases_does_not_read_the_namespace_when_deletion_
 
 
 @pytest.mark.anyio
-async def test_delete_service_aliases_lists_services_by_the_alias_label(
+async def test_delete_service_aliases_lists_the_deployment_and_unlabelled_aliases(
     mocker,
 ) -> None:
+    """Review of PR #516: the API server selects the aliases, not the operator."""
     deployment_id = uuid4()
     list_mock, _, _ = _patch_alias_primitives(mocker, [])
 
@@ -442,7 +463,14 @@ async def test_delete_service_aliases_lists_services_by_the_alias_label(
         logger=_Logger(),
     )
 
-    list_mock.assert_awaited_once_with(label_selector="styrmin.io/service-alias=true")
+    assert list_mock.await_args_list == [
+        call(
+            label_selector=(
+                f"styrmin.io/service-alias=true,styrmin.io/deployment-id={deployment_id}"
+            )
+        ),
+        call(label_selector="styrmin.io/service-alias=true,!styrmin.io/deployment-id"),
+    ]
 
 
 class _FakeKubernetesClient:
@@ -621,8 +649,8 @@ async def test_delete_handler_with_a_deletion_request_deletes_aliases_in_a_termi
 
     assert teardown_spy.call_args.kwargs["deletion_requested"] is True
     assert delete_mock.await_args_list == [
-        call(name="first", namespace=peer_namespace),
-        call(name="second", namespace=peer_namespace),
+        call(name="first", namespace=peer_namespace, resource_version="1"),
+        call(name="second", namespace=peer_namespace, resource_version="1"),
     ]
     assert f"Deleted 2 service aliases of {deployment_id}" in logger.infos
 
@@ -644,8 +672,12 @@ def _aliases_of(deployment_id: UUID) -> tuple[str, str, list[V1Service]]:
 
 
 @pytest.mark.anyio
-async def test_delete_service_aliases_counts_an_alias_already_gone(mocker) -> None:
-    """FR-004, US3 scenario 1: a 404 (``False``) counts as deleted; the next alias goes."""
+async def test_delete_service_aliases_continues_after_an_alias_gone_or_changed(
+    mocker,
+) -> None:
+    """FR-004, US3 scenario 1: a 404 is no error. A 409 from the ``resourceVersion``
+    precondition keeps a Service that replaced the alias, such as a ``ClusterIP`` Service
+    with the same name. ``delete_service`` returns ``False`` for both."""
     deployment_id = uuid4()
     namespace, peer_namespace, aliases = _aliases_of(deployment_id)
     _, delete_mock, _ = _patch_alias_primitives(mocker, aliases)
@@ -660,10 +692,14 @@ async def test_delete_service_aliases_counts_an_alias_already_gone(mocker) -> No
     )
 
     assert delete_mock.await_args_list == [
-        call(name="first", namespace=peer_namespace),
-        call(name="second", namespace=peer_namespace),
+        call(name="first", namespace=peer_namespace, resource_version="1"),
+        call(name="second", namespace=peer_namespace, resource_version="1"),
     ]
-    assert f"Deleted 2 service aliases of {deployment_id}" in logger.infos
+    assert (
+        f"Did not delete service alias {peer_namespace}/first: it is gone, or it "
+        "changed since the listing"
+    ) in logger.infos
+    assert f"Deleted 1 service aliases of {deployment_id}" in logger.infos
     assert logger.exceptions == []
 
 
@@ -685,8 +721,8 @@ async def test_delete_service_aliases_compares_the_labels_with_the_canonical_id(
     )
 
     assert delete_mock.await_args_list == [
-        call(name="first", namespace=peer_namespace),
-        call(name="second", namespace=peer_namespace),
+        call(name="first", namespace=peer_namespace, resource_version="1"),
+        call(name="second", namespace=peer_namespace, resource_version="1"),
     ]
     assert f"Deleted 2 service aliases of {deployment_id}" in logger.infos
 
@@ -710,13 +746,17 @@ async def test_delete_service_aliases_logs_a_failed_delete_and_deletes_the_next(
     )
 
     assert delete_mock.await_args_list == [
-        call(name="first", namespace=peer_namespace),
-        call(name="second", namespace=peer_namespace),
+        call(name="first", namespace=peer_namespace, resource_version="1"),
+        call(name="second", namespace=peer_namespace, resource_version="1"),
     ]
     assert logger.exceptions == [
         f"Failed to delete service alias {peer_namespace}/first"
     ]
     assert f"Deleted 1 service aliases of {deployment_id}" in logger.infos
+
+
+_LABELLED = "styrmin.io/service-alias=true,styrmin.io/deployment-id={}"
+_UNLABELLED = "styrmin.io/service-alias=true,!styrmin.io/deployment-id"
 
 
 @pytest.mark.anyio
@@ -737,8 +777,37 @@ async def test_delete_service_aliases_logs_a_failed_listing_and_returns(mocker) 
 
     delete_mock.assert_not_called()
     assert logger.exceptions == [
-        f"Failed to list the service aliases of {deployment_id}"
+        f"Failed to list the service aliases of {deployment_id} "
+        f"({_LABELLED.format(deployment_id)})",
+        f"Failed to list the service aliases of {deployment_id} ({_UNLABELLED})",
     ]
+
+
+@pytest.mark.anyio
+async def test_delete_service_aliases_deletes_the_unlabelled_aliases_when_one_listing_fails(
+    mocker,
+) -> None:
+    """FR-004: each listing is best-effort on its own."""
+    deployment_id = uuid4()
+    namespace = get_kubernetes_reference(deployment_id)
+    peer_namespace = get_kubernetes_reference(uuid4())
+    legacy = _alias("legacy", peer_namespace, namespace, owner=None)
+    list_mock, delete_mock, _ = _patch_alias_primitives(mocker, [legacy])
+    list_mock.side_effect = [ApiException(status=500), V1ServiceList(items=[legacy])]
+    logger = _Logger()
+
+    await _delete_service_aliases(
+        deployment_id=str(deployment_id),
+        namespace=namespace,
+        deletion_requested=True,
+        logger=logger,
+    )
+
+    assert delete_mock.await_args_list == [
+        call(name="legacy", namespace=peer_namespace, resource_version="1")
+    ]
+    assert len(logger.exceptions) == 1
+    assert f"Deleted 1 service aliases of {deployment_id}" in logger.infos
 
 
 @pytest.mark.anyio
@@ -769,9 +838,11 @@ async def test_deletion_requested_handler_finishes_the_teardown_when_listing_ali
         logger=logger,
     )
 
-    list_aliases_mock.assert_awaited_once()
+    assert list_aliases_mock.await_count == 2
     assert logger.exceptions == [
-        f"Failed to list the service aliases of {deployment_id}"
+        f"Failed to list the service aliases of {deployment_id} "
+        f"({_LABELLED.format(deployment_id)})",
+        f"Failed to list the service aliases of {deployment_id} ({_UNLABELLED})",
     ]
     custom_api.delete_namespaced_custom_object.assert_awaited_once_with(
         group="helm.toolkit.fluxcd.io",
@@ -895,8 +966,8 @@ async def test_delete_service_aliases_deletes_the_aliases(
     )
 
     assert delete_mock.await_args_list == [
-        call(name="first", namespace=peer_namespace),
-        call(name="second", namespace=peer_namespace),
+        call(name="first", namespace=peer_namespace, resource_version="1"),
+        call(name="second", namespace=peer_namespace, resource_version="1"),
     ]
 
 

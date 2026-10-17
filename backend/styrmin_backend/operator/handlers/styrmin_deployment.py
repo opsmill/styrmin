@@ -1131,11 +1131,13 @@ async def _delete_service_aliases(
         get_namespace,
         list_services_in_all_namespaces,
     )
-    from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
-    from styrmin_backend.agent.tasks.service_aliases import (
+    from styrmin_backend.agent.service.kubernetes.service_alias_rules import (
+        DEPLOYMENT_ID_LABEL,
         SERVICE_ALIAS_LABEL,
         is_alias_of_deployment,
+        teardown_deletes_aliases,
     )
+    from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 
     try:
         own_namespace = get_kubernetes_reference(UUID(deployment_id))
@@ -1159,9 +1161,8 @@ async def _delete_service_aliases(
                 "Failed to read namespace %s; keeping its service aliases", namespace
             )
             return
-        if namespace_object is None or (
-            namespace_object.status is not None
-            and namespace_object.status.phase == "Terminating"
+        if not teardown_deletes_aliases(
+            deletion_requested=False, namespace=namespace_object
         ):
             logger.info(
                 "Namespace %s is being deleted without a deletion request; "
@@ -1170,22 +1171,31 @@ async def _delete_service_aliases(
             )
             return
 
-    try:
-        listed = await list_services_in_all_namespaces(
-            label_selector=f"{SERVICE_ALIAS_LABEL}=true"
-        )
-    except Exception:
-        logger.exception("Failed to list the service aliases of %s", deployment_id)
-        return
+    # The aliases labelled with the id, and those written before the label existed.
+    aliases = []
+    for selector in (
+        f"{SERVICE_ALIAS_LABEL}=true,{DEPLOYMENT_ID_LABEL}={deployment_id}",
+        f"{SERVICE_ALIAS_LABEL}=true,!{DEPLOYMENT_ID_LABEL}",
+    ):
+        try:
+            listed = await list_services_in_all_namespaces(label_selector=selector)
+        except Exception:
+            logger.exception(
+                "Failed to list the service aliases of %s (%s)", deployment_id, selector
+            )
+            continue
+        aliases.extend(listed.items)
 
     deleted = 0
-    for alias in listed.items:
+    for alias in aliases:
         if not is_alias_of_deployment(alias, deployment_id, namespace):
             continue
         try:
-            # False means the alias was already gone, which counts as deleted.
-            await delete_service(
-                name=alias.metadata.name, namespace=alias.metadata.namespace
+            # The precondition keeps a Service that replaced the listed alias.
+            removed = await delete_service(
+                name=alias.metadata.name,
+                namespace=alias.metadata.namespace,
+                resource_version=alias.metadata.resource_version,
             )
         except Exception:
             logger.exception(
@@ -1194,7 +1204,15 @@ async def _delete_service_aliases(
                 alias.metadata.name,
             )
             continue
-        deleted += 1
+        if removed:
+            deleted += 1
+        else:
+            logger.info(
+                "Did not delete service alias %s/%s: it is gone, or it changed "
+                "since the listing",
+                alias.metadata.namespace,
+                alias.metadata.name,
+            )
     logger.info("Deleted %d service aliases of %s", deleted, deployment_id)
 
 
