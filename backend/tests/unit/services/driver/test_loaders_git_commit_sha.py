@@ -22,6 +22,9 @@ Coverage:
 - ``test_git_load_*driver_directory*`` — spec 028 (T008): a load from a
   driver directory stores it in ``source_path``, a reload finds the same
   row, and a root load at the same commit is a separate row.
+- ``test_git_load_registers_actions_with_the_driver_directory`` — spec 028
+  (FR-010): each ``register_user_action`` call gets the driver directory,
+  or ``None`` for a root load.
 """
 
 from __future__ import annotations
@@ -392,6 +395,31 @@ async def test_git_load_from_driver_directory_stores_source_path(
     assert row.source_type == "git"
     assert row.source_path == "drivers/a"
     assert row.source_commit_sha == "e" * 40
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "driver_directory", ["drivers/a", None], ids=["driver-directory", "root"]
+)
+async def test_git_load_registers_actions_with_the_driver_directory(
+    db_session: AsyncSession,
+    patch_git_loader: _FakeGitProvider,
+    prefect_manager_mock,
+    driver_directory: str | None,
+):
+    """Spec 028 (FR-010, US1-6): each action is registered with the driver
+    directory it runs from, or ``None`` for a root load."""
+    patch_git_loader.set_commit_sha("e" * 40)
+    uow = SqlModelUnitOfWork(session=db_session)
+
+    await _load(uow, driver_directory)
+
+    # The fixture driver declares two actions, so the check is not vacuous.
+    register_calls = prefect_manager_mock.register_user_action.await_args_list
+    assert len(register_calls) >= 1
+    assert [call.kwargs["driver_directory"] for call in register_calls] == [
+        driver_directory
+    ] * len(register_calls)
 
 
 @pytest.mark.asyncio
