@@ -1570,11 +1570,16 @@ class _SavepointUnitOfWork(FakeUnitOfWork):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("b_redeploys", ["first", "last"])
 async def test_restore_keeps_a_redeploy_when_another_names_a_tombstoned_deployment(
-    environment: Environment, prefect_manager_mock, no_config_fanout, b_redeploys: str
+    environment: Environment,
+    prefect_manager_mock,
+    no_config_fanout,
+    mocker,
+    b_redeploys: str,
 ) -> None:
     """027 US7 (FR-006): B's redeploy is refused because the captured term names
     tombstoned A. C's redeploy is committed, before or after B's, and the restore
-    returns normally."""
+    returns normally. B's failure is logged with the restore's id and the term's path,
+    and counted apart from the dispatch of constituent restores."""
     adv = _driver_version()
     a = _deployment(
         environment_id=environment.id,
@@ -1628,6 +1633,7 @@ async def test_restore_keeps_a_redeploy_when_another_names_a_tombstoned_deployme
                 )
 
     no_config_fanout.side_effect = _redeploy
+    log = mocker.patch("styrmin_backend.services.backup.environment.logger")
 
     environment_restore = await restore_environment_backup(
         environment_backup_id=parent.id, uow=uow
@@ -1639,6 +1645,39 @@ async def test_restore_keeps_a_redeploy_when_another_names_a_tombstoned_deployme
     assert redeployed == (["b", "c"] if b_redeploys == "first" else ["c", "b"])
     assert uow.transaction.committed == ["c"]
     assert uow.transaction.pending == []
+
+    def _lines(method) -> list[str]:
+        return [call.args[0].format(*call.args[1:]) for call in method.call_args_list]
+
+    def _fields(line: str) -> dict[str, str]:
+        return dict(part.split("=", 1) for part in line.split()[1:])
+
+    [error_line] = _lines(log.exception)
+    assert error_line.startswith("env_restore_fanout_dispatch_error ")
+    assert _fields(error_line) == {
+        "environment_id": str(environment.id),
+        "environment_restore_id": str(environment_restore.id),
+        "deployment_id": str(b.id),
+        "error_code": "VALIDATION_ERROR",
+        "path": term_path,
+    }
+    [summary] = [
+        line
+        for line in _lines(log.info)
+        if line.startswith("env_restore_fanout_dispatched ")
+    ]
+    counts = _fields(summary)
+    assert (
+        counts["config_redeployed"],
+        counts["config_redeploy_failed"],
+        counts["dispatch_failed"],
+    ) == ("1", "1", "1")
+    metrics = [line for line in _lines(log.info) if line.startswith("metric=")]
+    assert metrics == [
+        "metric=env_restore_fanout_deployments_total "
+        f"environment_id={environment.id} outcome={outcome} count=1"
+        for outcome in ("config_redeployed", "config_redeploy_failed")
+    ]
 
 
 # ---------------------------------------------------------------------------

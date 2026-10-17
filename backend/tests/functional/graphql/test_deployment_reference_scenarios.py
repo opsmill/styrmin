@@ -664,7 +664,9 @@ async def test_environment_restore_puts_back_a_term_that_names_a_tombstoned_depl
     assert environment is not None
     assert environment.config == captured
     fields, failure = _dispatch_error(logged, "env_restore_fanout")
+    assert fields["environment_restore_id"] == restore["id"]
     assert fields["deployment_id"] == str(ids.b_id)
+    assert (fields["error_code"], fields["path"]) == ("VALIDATION_ERROR", _E_TERM_PATH)
     assert isinstance(failure, UnresolvableAffinityReferenceError)
     assert failure.error_metadata == _names_tombstoned_a(ids.a_id, _E_TERM_PATH)
     [line] = [
@@ -673,7 +675,16 @@ async def test_environment_restore_puts_back_a_term_that_names_a_tombstoned_depl
         if line.startswith("env_restore_fanout_dispatched ")
     ]
     counts = _fields(line)
-    assert (counts["config_redeployed"], counts["dispatch_failed"]) == ("1", "1")
+    assert counts["environment_restore_id"] == restore["id"]
+    assert (
+        counts["config_redeployed"],
+        counts["config_redeploy_failed"],
+        counts["dispatch_failed"],
+    ) == ("1", "1", "1")
+    assert (
+        "metric=env_restore_fanout_deployments_total "
+        f"environment_id={ids.environment_id} outcome=config_redeploy_failed count=1"
+    ) in _logged(log_info)
     b = await session.get(Deployment, ids.b_id)
     c = await session.get(Deployment, c_id)
     assert b is not None

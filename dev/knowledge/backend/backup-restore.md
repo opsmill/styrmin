@@ -603,7 +603,7 @@ Structured audit lines mirror ADR-0012's `env_config_fanout_dispatched`:
 
 ```text
 env_backup_fanout_dispatched environment_id=… environment_backup_id=… evaluated=… dispatched=… conflict=… dispatch_failed=…
-env_restore_fanout_dispatched environment_id=… environment_backup_id=… environment_restore_id=… evaluated=… restored=… skipped=… config_redeployed=… dispatch_failed=…
+env_restore_fanout_dispatched environment_id=… environment_backup_id=… environment_restore_id=… evaluated=… restored=… skipped=… config_redeployed=… config_redeploy_failed=… dispatch_failed=…
 ```
 
 The two lines count differently:
@@ -615,7 +615,7 @@ The two lines count differently:
   (`len(deployment_snapshots)`).
 - `dispatch_failed` on a restore adds two kinds of failure: constituent
   restores whose `EXECUTE_RESTORE` could not be started, and deployments whose
-  config redeploy raised.
+  config redeploy raised. `config_redeploy_failed` counts the second kind alone.
 - `config_redeployed` counts every deployment for which
   `redeploy_for_environment_update` returned without raising, including one
   that the function skipped because it was `RESTORING` (see
@@ -924,8 +924,13 @@ How the step-4 fan-out differs from the fan-out of `update_environment`
 - **All redeploys run in one `async with uow` block with one commit**, and each
   redeploy runs in its own savepoint (`uow.session.begin_nested()`), as in the
   config fan-outs. A failed redeploy rolls back only its savepoint, is logged as
-  `env_restore_fanout_dispatch_error` and counted in `dispatch_failed`, and the
-  restore returns normally. Before [#508](https://github.com/opsmill/styrmin/issues/508)
+  `env_restore_fanout_dispatch_error` (with `environment_restore_id`,
+  `deployment_id`, and the error's `error_code` and `path` when it has them),
+  is counted in `config_redeploy_failed` and `dispatch_failed`, and the
+  restore returns normally. The restore also logs
+  `metric=env_restore_fanout_deployments_total` lines with the outcomes
+  `config_redeployed` and `config_redeploy_failed`, as `update_environment`
+  logs `env_config_fanout_deployments_total`. Before [#508](https://github.com/opsmill/styrmin/issues/508)
   there was no savepoint: a failed redeploy rolled back the whole transaction,
   which dropped the redeploys written before it, and the restore then returned
   `INTERNAL_ERROR` although the config revert was committed. The failure is not
