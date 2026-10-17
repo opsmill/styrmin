@@ -851,6 +851,65 @@ class TestApplyServiceAliasesFlow:
         } <= set(cluster.messages)
 
     @pytest.mark.asyncio
+    async def test_apply_service_aliases_waits_for_a_peer_created_at_the_same_time(
+        self, aliases: list[dict], ns: dict[str, str]
+    ) -> None:
+        """FR-009: B was created just before A, and B's flow has not created B's namespace yet.
+
+        A's context lists B but B's context does not list A, so only A's flow writes the pair.
+        """
+        cluster = _Cluster(before={ns["b"]: (None, None)})
+        read_namespace = cluster._get_namespace
+
+        async def created_by_b_flow(*, name: str) -> V1Namespace | None:
+            if name == ns["b"] and (False, ns["b"]) in cluster.namespace_reads:
+                cluster.before[ns["b"]] = RUNNING
+            return await read_namespace(name=name)
+
+        cluster._get_namespace = created_by_b_flow  # type: ignore[method-assign]
+        with patch(f"{MODULE}.MISSING_NAMESPACE_POLL_SECONDS", 0):
+            await cluster.run(aliases)
+
+        assert cluster.written == {
+            (ns["a"], "executor"),
+            (ns["a"], "worker"),
+            (ns["b"], "intent"),
+            (ns["c"], "intent"),
+        }
+        assert sorted(
+            ns_ for after, ns_ in cluster.resource_reads if not after
+        ) == sorted([ns["a"], ns["b"], ns["b"], ns["c"]])
+        assert not any(m.startswith("Skipping service alias") for m in cluster.messages)
+
+    @pytest.mark.asyncio
+    async def test_apply_service_aliases_skips_a_namespace_still_missing_after_the_wait(
+        self, aliases: list[dict], ns: dict[str, str]
+    ) -> None:
+        """B was deleted, and its namespace and StyrminDeployment are gone; A creates no namespace."""
+        cluster = _Cluster(before={ns["b"]: (None, None)})
+        stale = [StaleAlias(namespace=ns["d"], name="old-intent", resource_version="5")]
+
+        with (
+            patch(f"{MODULE}.MISSING_NAMESPACE_POLL_SECONDS", 0),
+            patch(f"{MODULE}.MISSING_NAMESPACE_WAIT_SECONDS", 0.05),
+        ):
+            await cluster.run(aliases, stale)
+
+        assert cluster.written == {(ns["a"], "worker"), (ns["c"], "intent")}
+        assert cluster.deleted == {(ns["d"], "old-intent", "5")}
+        first_read = {name for after, name in cluster.namespace_reads if not after}
+        assert first_read == {ns["a"], ns["b"], ns["c"], ns["d"]}
+        # The flow waits only for the namespaces of its aliases, not for those of stale aliases.
+        assert [name for _, name in cluster.namespace_reads].count(ns["d"]) == 1
+        assert (
+            f"Namespaces {ns['b']} still do not exist after 0.05s" in cluster.messages
+        )
+        assert (
+            f"Skipping service alias executor in namespace {ns['a']}: "
+            f"namespace {ns['b']} {DEPARTING_REASON}"
+        ) in cluster.messages
+
+    @pytest.mark.asyncio
     async def test_apply_service_aliases_skips_a_departing_owner_of_a_flow_without_services(
         self, peer_aliases: list[dict], ns: dict[str, str]
     ) -> None:

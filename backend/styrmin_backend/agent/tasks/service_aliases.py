@@ -12,7 +12,9 @@ A flow deletes that deployment's aliases whose name it no longer uses.
 
 Before its writes, a flow skips the aliases of, and in the namespace of, a
 deployment that is being deleted or whose namespace is gone or terminating, and
-it never creates a namespace. A write can still race with a deletion request.
+it never creates a namespace. It first waits a bounded time for a missing
+namespace, which a deployment created at about the same time has not created
+yet. A write can still race with a deletion request.
 The flow then deletes the alias when its second read finds the request, and the
 operator's teardown deletes it when the request comes after that read (#503).
 
@@ -272,25 +274,72 @@ def _is_deployment_deleted(found: V1Namespace | None, resource: dict | None) -> 
     )
 
 
+async def _read_namespace_states(
+    namespaces: Iterable[str],
+) -> dict[str, tuple[V1Namespace | None, dict | None]]:
+    distinct = sorted(set(namespaces))
+    states = await asyncio.gather(*(_read_namespace_state(ns) for ns in distinct))
+    return dict(zip(distinct, states, strict=True))
+
+
 async def _select_namespaces(
     namespaces: Iterable[str],
     predicate: Callable[[V1Namespace | None, dict | None], bool],
 ) -> set[str]:
-    distinct = sorted(set(namespaces))
-    states = await asyncio.gather(*(_read_namespace_state(ns) for ns in distinct))
+    states = await _read_namespace_states(namespaces)
     return {
-        ns
-        for ns, (found, resource) in zip(distinct, states, strict=True)
-        if predicate(found, resource)
+        ns for ns, (found, resource) in states.items() if predicate(found, resource)
     }
 
 
-async def find_departing_namespaces(namespaces: Iterable[str]) -> set[str]:
+# A deployment created at about the same time creates its namespace only when its own flow
+# writes its StyrminDeployment; the namespace of a deleted deployment does not come back.
+MISSING_NAMESPACE_WAIT_SECONDS = 60.0
+MISSING_NAMESPACE_POLL_SECONDS = 2.0
+
+
+async def _wait_for_namespaces(namespaces: set[str]) -> set[str]:
+    """Read each missing namespace until it exists; return the ones that exist at the end."""
+    logger = get_run_logger()
+    logger.info(
+        "Waiting up to %ss for namespaces %s, which do not exist: the flow of a "
+        "deployment created at the same time creates its namespace",
+        MISSING_NAMESPACE_WAIT_SECONDS,
+        ", ".join(sorted(namespaces)),
+    )
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + MISSING_NAMESPACE_WAIT_SECONDS
+    missing = sorted(namespaces)
+    while missing and loop.time() < deadline:
+        await asyncio.sleep(MISSING_NAMESPACE_POLL_SECONDS)
+        found = await asyncio.gather(*(get_namespace(name=ns) for ns in missing))
+        missing = [ns for ns, item in zip(missing, found, strict=True) if item is None]
+    if missing:
+        logger.info(
+            "Namespaces %s still do not exist after %ss",
+            ", ".join(missing),
+            MISSING_NAMESPACE_WAIT_SECONDS,
+        )
+    return namespaces - set(missing)
+
+
+async def find_departing_namespaces(
+    namespaces: Iterable[str], wait_for: Iterable[str] = ()
+) -> set[str]:
     """The namespaces whose deployment is being deleted or that are gone or terminating.
 
     A namespace without a StyrminDeployment counts only when it is gone or terminating.
+    A missing namespace of *wait_for* is read again until it exists, for at most
+    ``MISSING_NAMESPACE_WAIT_SECONDS``, and counts only when it is still missing.
     """
-    return await _select_namespaces(namespaces, _is_departing)
+    states = await _read_namespace_states(namespaces)
+    missing = {ns for ns in set(wait_for) & states.keys() if states[ns][0] is None}
+    if missing:
+        created = await _wait_for_namespaces(missing)
+        states.update(await _read_namespace_states(created))
+    return {
+        ns for ns, (found, resource) in states.items() if _is_departing(found, resource)
+    }
 
 
 async def find_deleted_deployment_namespaces(namespaces: Iterable[str]) -> set[str]:
@@ -378,17 +427,18 @@ async def apply_service_aliases(
 ) -> None:
     """Apply ExternalName Service aliases to the cluster and delete the stale ones.
 
-    Skips the aliases and stale aliases that touch a departing namespace, writes
-    into existing namespaces only, then deletes the written aliases whose owner's
-    deletion started during the writes.
+    Waits for the missing namespaces of the aliases, skips the aliases and stale
+    aliases that touch a departing namespace, writes into existing namespaces only,
+    then deletes the written aliases whose owner's deletion started during the writes.
     """
     logger = get_run_logger()
     stale_aliases = stale_aliases or []
 
+    targets = {alias["metadata"]["namespace"] for alias in aliases} | {
+        owner_namespace(alias) for alias in aliases
+    }
     departing = await find_departing_namespaces(
-        {alias["metadata"]["namespace"] for alias in aliases}
-        | {owner_namespace(alias) for alias in aliases}
-        | {stale.namespace for stale in stale_aliases}
+        targets | {stale.namespace for stale in stale_aliases}, wait_for=targets
     )
 
     written: list[WrittenAlias] = []
