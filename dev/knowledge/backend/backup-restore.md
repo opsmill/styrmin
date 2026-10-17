@@ -921,11 +921,22 @@ How the step-4 fan-out differs from the fan-out of `update_environment`
   is not excluded is redeployed, even when the reverted config equals its
   current one. `update_environment` skips those with
   `_deployment_already_at_config`.
-- **All redeploys run in one `async with uow` block with one commit**, and one
-  deployment's failure is caught and counted without a savepoint of its own.
+- **All redeploys run in one `async with uow` block with one commit**, and each
+  redeploy runs in its own savepoint (`uow.session.begin_nested()`), as in the
+  config fan-outs. A failed redeploy rolls back only its savepoint, is logged as
+  `env_restore_fanout_dispatch_error` and counted in `dispatch_failed`, and the
+  restore returns normally. Before [#508](https://github.com/opsmill/styrmin/issues/508)
+  there was no savepoint: a failed redeploy rolled back the whole transaction,
+  which dropped the redeploys written before it, and the restore then returned
+  `INTERNAL_ERROR` although the config revert was committed. The failure is not
+  recorded on the `EnvironmentRestore` record.
 - **The captured config is written back without validation.** The restore does
   not call `validate_environment_config` or run the env-var checks that
-  `update_environment` runs before it writes.
+  `update_environment` runs before it writes, and it does not bind the
+  deployment references. A captured affinity term that names a deployment
+  deleted since the backup is written back as captured; the redeploys of the
+  deployments it applies to then fail with the deleted deployment's last name
+  and `deleted: true` ([ADR-075](../../adr/0075-deployment-references-stored-by-id.md)).
 - **A restore never creates or deletes deployments.** A deployment created
   after the backup is not in the snapshot, so it is part of the fan-out: it
   receives the reverted config and keeps its data.
@@ -1016,6 +1027,8 @@ surfacing as an opaque `INTERNAL_ERROR`.
 | `EnvironmentCloneNotFoundError` | `NOT_FOUND` | Clone id does not resolve. The clone flow also ends without an error when its own clone record is deleted while it runs. |
 | `InvalidCloneDeploymentSelectionError` | `NOT_FOUND` | `cloneEnvironment` names deployment ids that are unknown or belong to another environment. Metadata `deployment_ids`. |
 | `UnknownEnvironmentConfigFieldError` | `VALIDATION_ERROR` | `clearConfigFields` names a field that `EnvironmentConfig` does not have. Metadata `fields` and `known_fields`. |
+| `UnclonedDeploymentReferenceError` | `VALIDATION_ERROR` | `cloneEnvironment` copies an affinity term that names a deployment the clone does not copy. Metadata `deployments`: one `{deployment_id, deployment_name, paths}` entry per such deployment. |
+| `UnresolvableAffinityReferenceError` | `VALIDATION_ERROR` | `cloneEnvironment` with a `configOverride` term whose name no non-tombstoned source deployment has. Metadata `deployment_name` and `path`. |
 
 The clone errors are defined in `services/exceptions.py:405-509`.
 
@@ -1059,8 +1072,11 @@ burn the name).
 
 | Function | Purpose |
 |----------|---------|
-| `clone_environment(...)` | The mutation half. Three phases: (1) upfront validation with zero side effects — source resolution (ADR-031), config-override canonicalisation, cleared-field names, target name free, every selected id belongs to the source, source concurrency guard; (2) one transaction writing the clone record, its upfront attribution and the whole capture; (3) post-commit dispatch of one `EXECUTE_BACKUP` per constituent plus the single `EXECUTE_ENVIRONMENT_CLONE` run. The target name is checked but **not reserved** — reserving it needs a placeholder environment, which FR-002 forbids. |
+| `clone_environment(...)` | The mutation half. Three phases: (1) upfront validation with zero side effects — source resolution (ADR-031), config-override canonicalisation, cleared-field names, target name free, every selected id belongs to the source, the deployment references of the override bound against the source, the refusal of a request whose copied affinity terms name a deployment it does not copy (see [Affinity terms in a clone](#affinity-terms-in-a-clone)), source concurrency guard; (2) one transaction writing the clone record, its upfront attribution and the whole capture; (3) post-commit dispatch of one `EXECUTE_BACKUP` per constituent plus the single `EXECUTE_ENVIRONMENT_CLONE` run. The target name is checked but **not reserved** — reserving it needs a placeholder environment, which FR-002 forbids. |
 | `merge_environment_config(captured, override, cleared)` | Top-level-field replacement merge over the canonicalised capture, cleared fields popped **before** the override is applied. Validates the result; a field both cleared and overridden takes the override. |
+| `find_uncloned_references(environment_config, copied, component_configs, roster)` | Pure. Lists the deployments that the affinity terms of the new environment's config, of each copied deployment's config and of its driver version's component definitions name but the clone does not copy, each with the paths of the terms that name it. `_refuse_uncloned_references` raises `UnclonedDeploymentReferenceError` when the list is not empty. |
+| `cascade_reference_failures(snapshots, failed_ids)` | Pure. Maps each snapshot whose terms name a failed deployment to that deployment, repeated until nothing changes, so a chain of terms fails together. |
+| `order_counterparts(snapshots, environment_config)` | Pure. The order in which the flow creates the counterparts (see [Affinity terms in a clone](#affinity-terms-in-a-clone)). |
 | `derive_clone_capture_status(environment_backup)` | The backing capture's own derived status, or `None` when the capture is unreachable (never registered, or since deleted). The absence is never re-interpreted — the deletion path records what happened in `clone_errors` instead. |
 | `derive_environment_clone_status(...)` / `..._from_record(clone, restores)` | The derivation (below). The `_from_record` adapter is what the resolvers, the guards and the deletion cascades all read the record through. |
 | `find_clone_occupying_environment(...)` | Backs the environment-level guard: a non-terminal clone occupies its *created* environment for its whole lifetime, and its *source* only while the capture is in flight. |
@@ -1083,6 +1099,9 @@ GraphQL Mutation (cloneEnvironment)            [ADMIN]
         |  UPFRONT — zero side effects on any failure
         |   resolve source, validate override + cleared fields,
         |   target name free?, selection ids belong to source?,
+        |   bind the override's deployment references against the source,
+        |   merge, refuse affinity terms that name a deployment not copied
+        |   (UnclonedDeploymentReferenceError),
         |   environment-level guard on the source
         |
         |  ONE TRANSACTION ------------------------------------------------
@@ -1105,15 +1124,23 @@ GraphQL Mutation (cloneEnvironment)            [ADMIN]
         |  1. poll the capture's DERIVED status until terminal
         |  2. gate: FAILED capture -> fatal capture_failed, nothing
         |     materialises.  COMPLETED / PARTIAL -> proceed with the
-        |     usable constituents
-        |  3. create the environment from the captured config with the
-        |     clone's cleared fields dropped and its override merged over
-        |     the rest; capabilities recomputed (ADR-0027).  Committed
-        |     before any counterpart exists — it is the discard handle
-        |  4. per usable constituent: deploy_application(driver_version_id
-        |     pinned from the snapshot fingerprint, skip_initial_reconcile,
-        |     release_reference = the SOURCE's release name), created in
-        |     RESTORING
+        |     usable constituents; a constituent whose affinity terms
+        |     name a failed capture fails too (cascade_reference_failures)
+        |  3. choose one id per counterpart; create the environment from
+        |     the captured config with the clone's cleared fields dropped,
+        |     its override merged over the rest and its deployment
+        |     references pointed at the counterparts; capabilities
+        |     recomputed (ADR-0027).  A term that names a failed capture
+        |     -> fatal referenced_deployment_not_cloned, no environment.
+        |     Committed before any counterpart exists — it is the discard
+        |     handle
+        |  4. per usable constituent, in order_counterparts order:
+        |     deploy_application(deployment_id = the chosen id,
+        |     upcoming_deployments = the counterparts not failed,
+        |     driver_version_id pinned from the snapshot fingerprint,
+        |     skip_initial_reconcile, release_reference = the SOURCE's
+        |     release name), created in RESTORING.  A constituent whose
+        |     terms name a failed counterpart fails without being created
         |  5. per counterpart: create_restore(target_deployment_id=<counterpart>)
         |     -> cross-target restore; record the attribution
         v
@@ -1160,7 +1187,14 @@ Audit lines:
 ```text
 env_clone_dispatched source_environment_id=… environment_clone_id=… environment_backup_id=… target_name=… evaluated=… pending=… skipped=… capture_dispatched=… capture_conflict=… capture_dispatch_failed=… flow_dispatched=…
 env_clone_materialised environment_clone_id=… created_environment_id=… capture=… usable=… cloned=… failed=…
+env_clone_reference_not_cloned environment_clone_id=… deployment_id=… named_deployment_id=…
 ```
+
+`env_clone_reference_not_cloned` is a warning, one per constituent that fails because its
+affinity terms name a deployment whose capture or counterpart failed. In
+`env_clone_materialised`, `usable` counts the constituents left after the capture cascade, and
+`failed` counts the counterparts that failed in the creation loop, including those failed by
+that cascade (`workflows/templates/clone.py`, `_run_environment_clone`).
 
 `environment_deleted` also reports `clones_discarded`, `source_clones_kept`,
 `source_clones_deleted` and `source_clones_failed` (`services/environments.py:557-571`).
@@ -1210,6 +1244,7 @@ Four points worth internalising, all pinned by the unit matrix:
 | `environment_backup_deleted` | The backing capture was deleted post-capture. | yes on a non-terminal clone, no on a terminal one |
 | `created_environment_deleted` | The created environment was deleted — the discard path. | yes on a non-terminal clone, no on a terminal one |
 | `source_environment_deleted` | The source environment was deleted while the clone was still building the environment it had created. | yes (written only on a non-terminal clone) |
+| `referenced_deployment_not_cloned` | An affinity term of the new environment's config names a deployment whose capture failed (no environment is created) or whose counterpart failed (no further counterpart is created). | yes |
 
 How the derivation reads entries that are missing data or cannot be read
 (`services/backup/clone.py:370-487`):
@@ -1248,8 +1283,11 @@ the cloned environment gets its own fresh ingress controller as part of ordinary
 reporting the source's as a skip would be noise. The reason constants are
 `CLONE_REASON_*` in `services/backup/clone.py` (`not_selected`, `not_eligible`,
 `internal`, `tombstoned`, `capture_failed`, `backup_not_completed`, `backup_deleted`,
-`backup_expired`, `driver_version_gone`, `capture_unusable`); like ADR-055's skip
-classification the wire value is free text, not a closed code set.
+`backup_expired`, `driver_version_gone`, `capture_unusable`,
+`referenced_deployment_not_cloned`); like ADR-055's skip classification the wire value is
+free text, not a closed code set. `referenced_deployment_not_cloned` reads "an affinity term
+names deployment {name}, which was not cloned", with the source name of the deployment whose
+capture or counterpart failed.
 
 ### Config override and clearing
 
@@ -1264,8 +1302,93 @@ asymmetry is deliberate and documented on the public surface. `clearConfigFields
   a `VALIDATION_ERROR`.
 - The merge runs **before** `create_environment`, so the counterparts' very first instance
   contexts already observe the merged config — there is no window under source config.
+- The mutation also runs the merge, on the source's live config, for the affinity-term check
+  (see [Affinity terms in a clone](#affinity-terms-in-a-clone)). A source config that no
+  longer validates is therefore refused at request time with `VALIDATION_ERROR`; before
+  [#508](https://github.com/opsmill/styrmin/issues/508), the flow failed the clone with
+  `environment_creation_failed`.
+- A deployment reference in the override that gives a name is bound against the source
+  environment, and the clone record stores the bound override, with the source deployment's
+  id. A name that no non-tombstoned source deployment has is refused with
+  `UnresolvableAffinityReferenceError` and a `config_override.scheduling…` path.
 - Known caveat: the generated input model does not forbid extra keys, so a **misspelled**
   override field is silently dropped and the captured value stays in place.
+
+<!-- Extracted from specs/027-deployment-reference-by-id on 2026-10-17 -->
+
+### Affinity terms in a clone
+
+Every stored deployment reference gives a deployment id
+([ADR-075](../../adr/0075-deployment-references-stored-by-id.md)), so a term copied unchanged
+would name a source deployment, and `create_environment` and `deploy_application` would refuse
+it in the new environment. The clone points every copied term at the counterpart deployments.
+
+**Request check.** `clone_environment` checks the terms before it creates anything, after the
+selection is validated and before the concurrency guard (`_refuse_uncloned_references`):
+
+1. It merges the source config with the bound override and the cleared fields, with
+   `merge_environment_config`, as the flow will.
+2. It takes the deployments that `_plan_deployment_results` leaves `PENDING` as the copied
+   deployments. A selected deployment that is skipped (no active instance, internal,
+   tombstoned) is not copied.
+3. `find_uncloned_references` reads every reference in the merged config (path prefix
+   `environment.config`), in each copied deployment's config (`deployment[<name>].config`) and
+   in the component definitions of each copied deployment's driver version
+   (`deployment[<name>].component[<component>].config`). An id must be a copied deployment's
+   id; a name, which only a driver version can still give, must be a copied deployment's name.
+   The source's `Component` rows are not read, because the flow binds the driver's names again
+   in the new environment.
+4. When a reference names a deployment that is not copied, it raises
+   `UnclonedDeploymentReferenceError` (`VALIDATION_ERROR`). `extensions.deployments` lists each
+   such deployment with `deployment_id`, `deployment_name` (the last name of a tombstoned
+   deployment, from the roster with tombstones) and `paths`. `deployment_id` is `null` for a
+   driver name that no source deployment has.
+
+**Counterpart ids chosen in advance.** After the capture cascade, `_run_environment_clone`
+builds one new id per usable constituent, keyed by the source deployment id, and the
+counterparts as `{counterpart id: source name}`:
+
+- `_create_cloned_environment` rewrites the merged config with `remap_deployment_references`
+  and calls `create_environment(..., upcoming_deployments=<the counterparts>)`, so the binding
+  accepts ids of counterparts that do not exist yet.
+- `_create_counterpart` rewrites the snapshot config the same way and calls
+  `deploy_application(..., deployment_id=<chosen id>, upcoming_deployments=<counterparts not
+  failed>)`. It returns the chosen id; the counterpart is no longer read back by name. The
+  driver version's component definitions are bound by name against the counterparts, so a
+  driver term names the counterpart with that name.
+- The reconcile-time resolver accepts the id of a counterpart in `upcoming_deployments` without
+  a lookup, so a counterpart created first can name a peer created after it, and terms that
+  name each other resolve in any order.
+- An id that the mapping does not have fails that counterpart with
+  `UnclonedDeploymentReferenceError`, or, in the environment config, writes the fatal
+  `referenced_deployment_not_cloned` error. After the request check and the capture cascade,
+  this happens only through a capture or creation failure.
+
+**Creation order.** `order_counterparts` puts each counterpart after the counterparts that its
+terms name. Among the counterparts that can come next, the ones that the environment config
+names come first, then the others in source-name order. When only cycles of terms are left, the
+cycle that names no other remaining counterpart is broken at its member with the lowest source
+name. Counterparts without terms are therefore created in source-name order, where they were
+created in snapshot order before.
+
+**Failures cascade along the terms.**
+
+- After `_classify_captured_constituents`, `cascade_reference_failures` fails each usable
+  constituent whose terms name a deployment whose capture failed, repeated over chains. Each is
+  attributed `FAILED` with the `referenced_deployment_not_cloned` reason and logged as
+  `env_clone_reference_not_cloned`. When the environment config names a failed capture, the
+  flow writes the fatal `referenced_deployment_not_cloned` error, fails the pending entries and
+  creates no environment.
+- In the creation loop, a constituent whose terms name a counterpart that failed is failed
+  without being created, with the same reason and log line, and a failed counterpart is removed
+  from the `upcoming_deployments` of the ones after it. When a counterpart that the environment
+  config names fails, the flow writes the fatal `referenced_deployment_not_cloned` error, creates
+  no further counterpart, and fails the remaining pending entries.
+
+Known limit: inside a cycle of terms, a counterpart created before a peer whose creation then
+fails keeps a term with the peer's id. The clone attributes it `cloned`, and its next reconcile
+is refused with the term's path (research R-008 of
+[spec 027](../../../specs/027-deployment-reference-by-id/research.md)).
 
 ### Cross-target restore
 
@@ -1540,7 +1663,8 @@ for the stamp to move and fails fast on a `Failed` entry in
 |------|---------|
 | [services/backup/service.py](backend/styrmin_backend/services/backup/service.py) | Backup and restore service functions |
 | [services/backup/environment.py](backend/styrmin_backend/services/backup/environment.py) | Environment-level fan-out, snapshot capture, derived status, classification, cascades |
-| [services/backup/clone.py](backend/styrmin_backend/services/backup/clone.py) | Environment clone: registration, config merge/clear, derived clone status, guards and the discard cascades |
+| [services/backup/clone.py](backend/styrmin_backend/services/backup/clone.py) | Environment clone: registration, config merge/clear, the affinity-term request check, counterpart order and failure cascade, derived clone status, guards and the discard cascades |
+| [services/scheduling/references.py](backend/styrmin_backend/services/scheduling/references.py) | Find, bind and remap the deployment references of a stored config |
 | [services/backup/ttl.py](backend/styrmin_backend/services/backup/ttl.py) | Retention default, validation, and deepest-wins scope resolution |
 | [services/backup/scheduler.py](backend/styrmin_backend/services/backup/scheduler.py) | Backup schedule management |
 | [services/backup/strategies/](backend/styrmin_backend/services/backup/strategies/) | Backup strategy implementations |
