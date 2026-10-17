@@ -75,6 +75,7 @@ from styrmin_backend.services.exceptions import (
 from styrmin_backend.services.scheduling.references import (
     bind_deployment_references,
     iter_reference_sites,
+    parse_deployment_id,
     referenced_deployment_ids,
 )
 
@@ -501,7 +502,7 @@ def find_uncloned_references(
             name = site.deployment_ref.get("deployment_name")
             deployment_id: UUID | None
             if raw_id is not None:
-                deployment_id = UUID(str(raw_id))
+                deployment_id = parse_deployment_id(raw_id, site.path)
                 if deployment_id in copied_ids:
                     continue
                 name = names_by_id.get(deployment_id)
@@ -588,7 +589,28 @@ async def _refuse_uncloned_references(
         roster,
     )
     if uncloned:
-        raise UnclonedDeploymentReferenceError(uncloned)
+        for reference in uncloned:
+            reference.reason = _why_not_copied(reference, roster, results)
+        raise UnclonedDeploymentReferenceError(uncloned, with_fixes=True)
+
+
+def _why_not_copied(
+    reference: UnclonedReference,
+    roster: Sequence[DeploymentEntity],
+    results: Sequence[CloneDeploymentResult],
+) -> str:
+    """The reason a request does not copy the deployment, as the clone record would give it."""
+    if reference.deployment_id is None:
+        return "no deployment of the source environment has this name"
+    for result in results:
+        if result.deployment_id == reference.deployment_id and result.reason:
+            return result.reason
+    deployment = next((d for d in roster if d.id == reference.deployment_id), None)
+    if deployment is not None and deployment.deleted_at is not None:
+        return CLONE_REASON_TOMBSTONED
+    if deployment is not None and deployment.internal:
+        return CLONE_REASON_INTERNAL
+    return "not a deployment of the source environment"
 
 
 # ---------------------------------------------------------------------------
@@ -1570,6 +1592,8 @@ async def clone_environment(
         # else is running (FR-011).
         _validate_deployment_selection(deployment_ids, deployments)
 
+        await _guard_no_environment_operation_in_progress(source.id, uow)
+
         results = _plan_deployment_results(deployments, deployment_ids)
         # A name in the override is bound against the source and stored as an id,
         # the way the clone flow merges it (027 plan D-006).
@@ -1584,8 +1608,6 @@ async def clone_environment(
             deployments,
             results,
         )
-
-        await _guard_no_environment_operation_in_progress(source.id, uow)
 
         clone_id = uuid4()
         clone = await uow.environment_clones.create(

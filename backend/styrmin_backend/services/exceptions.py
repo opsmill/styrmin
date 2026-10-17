@@ -760,12 +760,24 @@ class UnclonedReference:
     """A deployment that affinity terms of a clone name but the clone does not copy.
 
     ``deployment_id`` is ``None`` for a name, given by a driver version, that no
-    live deployment of the source environment has.
+    live deployment of the source environment has. ``reason`` says why the clone
+    does not copy the deployment, when the request is checked.
     """
 
     deployment_id: UUID | None
     deployment_name: str | None
     paths: list[str] = field(default_factory=list)
+    reason: str | None = None
+
+    def describe(self) -> str:
+        name = (
+            repr(self.deployment_name)
+            if self.deployment_name is not None
+            else str(self.deployment_id)
+        )
+        reason = f" ({self.reason})" if self.reason else ""
+        paths = f", named at {', '.join(self.paths)}" if self.paths else ""
+        return f"{name}{reason}{paths}"
 
 
 class UnclonedDeploymentReferenceError(ServiceError):
@@ -777,19 +789,31 @@ class UnclonedDeploymentReferenceError(ServiceError):
     The clone flow also builds one for the message of the fatal
     ``referenced_deployment_not_cloned`` error. Each entry gives the named
     deployment (last name when tombstoned) and the path of every term that names it.
+    ``with_fixes`` adds the three ways to fix a request to the message.
     """
 
     error_code = "VALIDATION_ERROR"
     default_message = "An affinity term names a deployment that the clone does not copy"
+    fixes = (
+        "Add the deployment to the selection, leave out the deployments whose terms "
+        "name it, or, for a term in the environment's config, clear scheduling or "
+        "override it with a scheduling that names no deployment."
+    )
 
-    def __init__(self, deployments: list[UnclonedReference], message: str = "") -> None:
+    def __init__(
+        self,
+        deployments: list[UnclonedReference],
+        message: str = "",
+        *,
+        with_fixes: bool = False,
+    ) -> None:
         self.deployments = deployments
-        names = ", ".join(
-            d.deployment_name or str(d.deployment_id) for d in deployments
-        )
-        super().__init__(
-            message or (f"{self.default_message}: {names}" if names else "")
-        )
+        if not message and deployments:
+            entries = "; ".join(d.describe() for d in deployments)
+            message = f"{self.default_message}: {entries}."
+            if with_fixes:
+                message = f"{message} {self.fixes}"
+        super().__init__(message)
 
     @property
     def error_metadata(self) -> dict[str, Any]:
@@ -801,6 +825,7 @@ class UnclonedDeploymentReferenceError(ServiceError):
                     ),
                     "deployment_name": d.deployment_name,
                     "paths": list(d.paths),
+                    "reason": d.reason,
                 }
                 for d in self.deployments
             ]

@@ -3047,7 +3047,12 @@ async def test_clone_environment_refuses_a_selection_that_leaves_out_a_named_dep
     assert response.status_code == 200
     [error] = response.json()["errors"]
     assert error["message"] == (
-        "An affinity term names a deployment that the clone does not copy: a"
+        "An affinity term names a deployment that the clone does not copy: 'a' "
+        "(not included in the requested deployment selection), named at "
+        "deployment[b].config.scheduling.pod_affinity.preferred[0].term. "
+        "Add the deployment to the selection, leave out the deployments whose terms "
+        "name it, or, for a term in the environment's config, clear scheduling or "
+        "override it with a scheduling that names no deployment."
     )
     assert error["extensions"]["code"] == "VALIDATION_ERROR"
     assert error["extensions"]["deployments"] == [
@@ -3055,6 +3060,7 @@ async def test_clone_environment_refuses_a_selection_that_leaves_out_a_named_dep
             "deployment_id": str(ids["a"]),
             "deployment_name": "a",
             "paths": ["deployment[b].config.scheduling.pod_affinity.preferred[0].term"],
+            "reason": "not included in the requested deployment selection",
         }
     ]
     await _assert_no_clone_was_written(session)

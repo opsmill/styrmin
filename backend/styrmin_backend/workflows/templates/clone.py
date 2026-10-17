@@ -976,6 +976,31 @@ async def _run_environment_clone(clone_id: UUID) -> None:
             stopped_by = deployment_id
             break
 
+    # A counterpart created before a peer that its terms name (in a cycle of terms) and
+    # that then failed or was never attempted names a counterpart that does not exist.
+    not_created = {c.snapshot.deployment_id for c in ordered} - {
+        deployment_id
+        for deployment_id, entry in by_deployment.items()
+        if entry.outcome is EnvironmentCloneDeploymentOutcome.CLONED
+    }
+    for deployment_id, named_failed in cascade_reference_failures(
+        [c.snapshot for c in ordered], not_created
+    ).items():
+        entry = by_deployment.get(deployment_id)
+        if (
+            entry is None
+            or entry.outcome is not EnvironmentCloneDeploymentOutcome.CLONED
+        ):
+            continue
+        _log_reference_not_cloned(clone_id, deployment_id, named_failed)
+        cloned -= 1
+        by_deployment[deployment_id] = entry.model_copy(
+            update={
+                "outcome": EnvironmentCloneDeploymentOutcome.FAILED,
+                "reason": _reference_not_cloned_reason(named_failed, source_names),
+            }
+        )
+
     results = [by_deployment.get(result.deployment_id, result) for result in results]
     fatal_error: CloneError | None = None
     if stopped_by is not None:

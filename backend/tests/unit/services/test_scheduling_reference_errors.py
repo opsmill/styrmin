@@ -122,7 +122,9 @@ class TestUnresolvableAffinityReferenceError:
 
 
 class TestUnclonedDeploymentReferenceError:
-    def test_metadata_lists_each_deployment_with_its_paths(self) -> None:
+    def test_message_and_metadata_list_each_deployment_with_its_reason_and_paths(
+        self,
+    ) -> None:
         err = UnclonedDeploymentReferenceError(
             [
                 UnclonedReference(
@@ -132,21 +134,30 @@ class TestUnclonedDeploymentReferenceError:
                         "environment.config.scheduling.pod_anti_affinity.preferred[0].term",
                         "deployment[api].config.scheduling.pod_affinity.required[0]",
                     ],
+                    reason="not included in the requested deployment selection",
                 ),
                 UnclonedReference(
                     deployment_id=UUID(_REDIS_ID),
                     deployment_name="redis",
                     paths=[
-                        "deployment[api].config.scheduling.pod_affinity.required[1]",
                         "deployment[api].component[server].config.scheduling.pod_affinity.required[0]",
                     ],
                 ),
-            ]
+            ],
+            with_fixes=True,
         )
 
         assert err.error_code == "VALIDATION_ERROR"
         assert str(err) == (
-            "An affinity term names a deployment that the clone does not copy: postgres, redis"
+            "An affinity term names a deployment that the clone does not copy: "
+            "'postgres' (not included in the requested deployment selection), named at "
+            "environment.config.scheduling.pod_anti_affinity.preferred[0].term, "
+            "deployment[api].config.scheduling.pod_affinity.required[0]; "
+            "'redis', named at "
+            "deployment[api].component[server].config.scheduling.pod_affinity.required[0]. "
+            "Add the deployment to the selection, leave out the deployments whose terms "
+            "name it, or, for a term in the environment's config, clear scheduling or "
+            "override it with a scheduling that names no deployment."
         )
         assert err.error_metadata == {
             "deployments": [
@@ -157,19 +168,22 @@ class TestUnclonedDeploymentReferenceError:
                         "environment.config.scheduling.pod_anti_affinity.preferred[0].term",
                         "deployment[api].config.scheduling.pod_affinity.required[0]",
                     ],
+                    "reason": "not included in the requested deployment selection",
                 },
                 {
                     "deployment_id": _REDIS_ID,
                     "deployment_name": "redis",
                     "paths": [
-                        "deployment[api].config.scheduling.pod_affinity.required[1]",
                         "deployment[api].component[server].config.scheduling.pod_affinity.required[0]",
                     ],
+                    "reason": None,
                 },
             ]
         }
 
-    def test_message_falls_back_to_id_without_name(self) -> None:
+    def test_message_falls_back_to_id_without_name_and_has_no_fixes_by_default(
+        self,
+    ) -> None:
         err = UnclonedDeploymentReferenceError(
             [
                 UnclonedReference(
@@ -180,9 +194,9 @@ class TestUnclonedDeploymentReferenceError:
             ]
         )
 
-        assert (
-            str(err)
-            == f"An affinity term names a deployment that the clone does not copy: {_POSTGRES_ID}"
+        assert str(err) == (
+            "An affinity term names a deployment that the clone does not copy: "
+            f"{_POSTGRES_ID}, named at {_PATH}."
         )
         assert err.error_metadata["deployments"][0]["deployment_name"] is None
 
