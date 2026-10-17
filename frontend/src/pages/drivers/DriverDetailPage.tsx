@@ -275,19 +275,35 @@ function OverviewPanel({ version }: { version: DriverVersionDetail }) {
       ? `${version.sourceRepository} @ ${version.sourceBranch}`
       : version.sourceRepository;
 
-  const rows: Array<{ label: string; value: React.ReactNode; copy?: string }> =
-    [
-      {
-        label: "Supports app versions",
-        value: mono(version.supportedVersions || "—"),
-      },
-      { label: isLocal ? "Path" : "Source", value: mono(source), copy: source },
-      {
-        label: isLocal ? "Content hash" : "Commit",
-        value: fingerprint ? mono(fingerprint.slice(0, 12)) : "—",
-        copy: fingerprint ?? undefined,
-      },
-    ];
+  const driverDirectory = isLocal ? null : version.sourcePath;
+
+  const rows: Array<{
+    label: string;
+    value: React.ReactNode;
+    copy?: string;
+    testId?: string;
+  }> = [
+    {
+      label: "Supports app versions",
+      value: mono(version.supportedVersions || "—"),
+    },
+    { label: isLocal ? "Path" : "Source", value: mono(source), copy: source },
+    ...(driverDirectory
+      ? [
+          {
+            label: "Driver directory",
+            value: mono(driverDirectory),
+            copy: driverDirectory,
+            testId: "driver-overview-driver-directory",
+          },
+        ]
+      : []),
+    {
+      label: isLocal ? "Content hash" : "Commit",
+      value: fingerprint ? mono(fingerprint.slice(0, 12)) : "—",
+      copy: fingerprint ?? undefined,
+    },
+  ];
   if (version.helmChart) {
     rows.push({
       label: "Helm chart",
@@ -313,6 +329,7 @@ function OverviewPanel({ version }: { version: DriverVersionDetail }) {
             {rows.map((row, i) => (
               <tr
                 key={row.label}
+                data-testid={row.testId}
                 className={
                   i < rows.length - 1 ? "border-b border-border/60" : ""
                 }

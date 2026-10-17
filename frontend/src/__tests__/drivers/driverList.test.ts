@@ -60,6 +60,33 @@ describe("versionSource", () => {
       ),
     ).toBe("/opt/drivers/x");
   });
+
+  it("appends the driver directory of a git source as `repo @ branch · dir`", () => {
+    expect(
+      versionSource(
+        mkVersion({
+          id: "a",
+          version: "1",
+          createdOn: "2026-01-01",
+          sourcePath: "drivers/simple-app",
+        }),
+      ),
+    ).toBe("opsmill/drivers @ main · drivers/simple-app");
+  });
+
+  it("appends the driver directory of a git source without a branch as `repo · dir`", () => {
+    expect(
+      versionSource(
+        mkVersion({
+          id: "a",
+          version: "1",
+          createdOn: "2026-01-01",
+          sourceBranch: null,
+          sourcePath: "drivers/simple-app",
+        }),
+      ),
+    ).toBe("opsmill/drivers · drivers/simple-app");
+  });
 });
 
 describe("findLatestVersion", () => {
