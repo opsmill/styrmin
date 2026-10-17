@@ -14,7 +14,7 @@ from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.context.models.config import EnvironmentConfig
-from styrmin_backend.db.models import Cluster
+from styrmin_backend.db.models import Cluster, Environment
 from styrmin_backend.domain.models import Deployment, DeploymentState
 from styrmin_backend.services.exceptions import UnresolvableAffinityReferenceError
 from styrmin_backend.services.scheduling.references import (
@@ -205,6 +205,36 @@ class TestBindByName:
             "path": "environment.config.scheduling.pod_anti_affinity.preferred[0].term",
         }
 
+    async def test_message_gives_the_path_and_the_environment_s_name(self, uow) -> None:  # type: ignore[no-untyped-def]
+        environment = await uow.environments.create(
+            Environment(name="prod", cluster_id=uuid4())
+        )
+        path = "deployment.config.scheduling.pod_affinity.required[0]"
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await bind_deployment_references(
+                uow,
+                environment.id,
+                _config(required=[{"deployment_name": "nope"}]),
+                path_prefix="deployment.config",
+            )
+
+        assert str(exc.value) == (
+            f"Affinity term at {path} names deployment 'nope', which is not a "
+            "deployment of environment 'prod'."
+        )
+
+    async def test_new_environment_says_it_has_no_deployments_yet(self, uow) -> None:  # type: ignore[no-untyped-def]
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await bind_deployment_references(
+                uow,
+                None,
+                _config(required=[{"deployment_name": "db"}]),
+                path_prefix="environment.config",
+            )
+
+        assert "but a new environment has no deployments yet" in str(exc.value)
+
     async def test_name_of_another_environment_is_refused(self, uow) -> None:  # type: ignore[no-untyped-def]
         other = _make_deployment(name="a", environment_id=uuid4())
         await uow.deployments.save(other)
@@ -328,9 +358,9 @@ class TestBindById:
             "path": path,
             "deleted": True,
         }
-        assert (
-            str(exc.value)
-            == f"Affinity term at {path} names deployment 'postgres' ({gone.id}), which was deleted"
+        assert str(exc.value) == (
+            f"Affinity term at {path} names deployment 'postgres' ({gone.id}), which was "
+            "deleted. To fix it, change or remove the term in the deployment's config."
         )
 
 

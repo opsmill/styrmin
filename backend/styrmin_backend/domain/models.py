@@ -187,6 +187,17 @@ class Deployment(BaseModel):
         )
 
 
+class DeploymentReferenceTarget(BaseModel):
+    """The columns of a deployment that an affinity term's deployment reference is checked against."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    name: str
+    environment_id: UUID
+    deleted_at: datetime | None = None
+
+
 class DeployedService(BaseModel):
     """A runtime instance of a service definition, tied to a specific deployment."""
 

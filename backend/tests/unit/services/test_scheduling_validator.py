@@ -251,9 +251,9 @@ class TestResolveDeploymentReferenceUnresolvable:
             "path": path,
             "deleted": True,
         }
-        assert str(exc.value) == (
+        assert str(exc.value).startswith(
             f"Affinity term at {path} names deployment 'postgres' ({target.id}),"
-            " which was deleted"
+            " which was deleted. To fix it,"
         )
 
     @pytest.mark.anyio

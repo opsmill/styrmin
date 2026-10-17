@@ -669,9 +669,9 @@ class UnresolvableAffinityReferenceError(ServiceError):
     Raised when an affinity term's ``deployment_ref`` points at a
     deployment that doesn't exist, lives in a different environment, or is
     tombstoned (``deleted=True``, with the deployment's last name).
-    Surfacing the specific identifier and the term's ``path`` lets the
-    operator fix the typo/stale reference before Kubernetes sees an
-    always-unsatisfied affinity rule.
+    The message gives the term's ``path``, the environment when known, the
+    reason and, for a tombstoned deployment, how to fix the term, because the
+    SDK and ``styrminctl`` show the message only.
     """
 
     error_code = "VALIDATION_ERROR"
@@ -685,24 +685,61 @@ class UnresolvableAffinityReferenceError(ServiceError):
         path: str | None = None,
         *,
         deleted: bool = False,
+        environment_name: str | None = None,
+        new_environment: bool = False,
     ) -> None:
         self.deployment_id = deployment_id
         self.deployment_name = deployment_name
         self.path = path
         self.deleted = deleted
+        self.environment_name = environment_name
+        self.new_environment = new_environment
         super().__init__(message or self._build_message())
 
     def _build_message(self) -> str:
-        if not self.deleted:
-            identifier = self.deployment_id or self.deployment_name or "<unspecified>"
-            return f"Affinity deployment reference cannot be resolved: {identifier}"
-        location = f" at {self.path}" if self.path is not None else ""
-        name = (
-            repr(self.deployment_name)
-            if self.deployment_name is not None
-            else "<unknown>"
-        )
-        return f"Affinity term{location} names deployment {name} ({self.deployment_id}), which was deleted"
+        term = "Affinity term" if self.path is None else f"Affinity term at {self.path}"
+        if self.deleted:
+            name = (
+                repr(self.deployment_name)
+                if self.deployment_name is not None
+                else "<unknown>"
+            )
+            message = f"{term} names deployment {name} ({self.deployment_id}), which was deleted."
+            fix = self._fix_for_deleted()
+            return f"{message} {fix}" if fix else message
+        if self.deployment_name is not None:
+            named = f"deployment {self.deployment_name!r}"
+        elif self.deployment_id is not None:
+            named = f"deployment id {self.deployment_id}"
+        else:
+            return f"{term} gives no deployment."
+        if self.new_environment:
+            return (
+                f"{term} names {named}, but a new environment has no deployments yet. "
+                "Add the term with updateEnvironment once the deployment exists."
+            )
+        if self.environment_name is not None:
+            return f"{term} names {named}, which is not a deployment of environment {self.environment_name!r}."
+        return f"{term} names {named}, which is not a deployment of the environment."
+
+    def _fix_for_deleted(self) -> str | None:
+        path = self.path or ""
+        if path.startswith("environment.config"):
+            return (
+                "To fix it, change or remove the term in the environment's config "
+                "with updateEnvironment, which needs the ADMIN role, or discard the "
+                "environment's terms of this kind in the deployment's config with "
+                "replace: true."
+            )
+        if path.startswith("deployment.config"):
+            return "To fix it, change or remove the term in the deployment's config."
+        if path.startswith("component["):
+            return (
+                "The term comes from the component definitions of the deployment's "
+                "driver version. To fix it, move the deployment to a driver version "
+                "whose definitions do not name the deleted deployment."
+            )
+        return None
 
     @property
     def error_metadata(self) -> dict[str, Any]:
