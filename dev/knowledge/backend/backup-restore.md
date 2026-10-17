@@ -1193,10 +1193,14 @@ Audit lines:
 env_clone_dispatched source_environment_id=… environment_clone_id=… environment_backup_id=… target_name=… evaluated=… pending=… skipped=… capture_dispatched=… capture_conflict=… capture_dispatch_failed=… flow_dispatched=…
 env_clone_materialised environment_clone_id=… created_environment_id=… capture=… usable=… cloned=… failed=…
 env_clone_reference_not_cloned environment_clone_id=… deployment_id=… named_deployment_id=…
+env_clone_environment_reference_not_cloned environment_clone_id=… named_deployment_ids=…
 ```
 
 `env_clone_reference_not_cloned` is a warning, one per constituent that fails because its
-affinity terms name a deployment whose capture or counterpart failed. In
+affinity terms name a deployment whose capture or counterpart failed.
+`env_clone_environment_reference_not_cloned` is an error, written once when the merged
+environment config names deployments whose capture failed, so the clone creates no
+environment; `named_deployment_ids` lists every such id, separated by commas. In
 `env_clone_materialised`, `usable` counts the constituents left after the capture cascade, and
 `failed` counts the counterparts that failed in the creation loop, including those failed by
 that cascade (`workflows/templates/clone.py`, `_run_environment_clone`).
