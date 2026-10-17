@@ -317,6 +317,20 @@ Each deployment has its own namespace, so the applications of an environment can
 - One case loses aliases. A deployment that is created, updated or upgraded while another deployment of its environment is being restored skips the aliases between the two, because the restored deployment's namespace is terminating or missing. No flow runs when the restore ends, so the aliases stay missing until a change of either deployment runs a create, update or upgrade flow. The user documentation describes the recovery in [Backups and restores](../../../docs/docs/concepts-and-architecture/backups-and-restores.md#what-happens-when-you-restore).
 - Deleting a deployment deletes its aliases in the other namespaces. The operator's teardown lists the deployment's aliases in all namespaces with two label selectors that the API server applies: `styrmin.io/deployment-id=<id>`, and `!styrmin.io/deployment-id` for the aliases without the label, of which it keeps those whose `externalName` points into the deployment's namespace. It deletes each alias with the `resourceVersion` of the listing, so it does not delete a Service that replaced the alias since, such as another deployment's `ClusterIP` Service with the same name. See [Deletion](../agent/operator.md#deletion) ([#503](https://github.com/opsmill/styrmin/issues/503)).
 
+<!-- Extracted from specs/026-delete-service-aliases on 2026-10-17 -->
+
+The two reads decide as follows for the namespace of a deployment over its life. "Skipped" means that the first read counts the namespace as departing, so the flow writes no alias into it or pointing into it. "Deleted after the write" means that the second read counts it, so the flow deletes the aliases pointing into it that it wrote. The decisions are those of `_is_departing` and `_is_deployment_deleted` in `agent/tasks/service_aliases.py` ([ADR-077](../../adr/0077-alias-flow-reads-deletion-state-at-write-time.md)).
+
+| Moment | Namespace | StyrminDeployment | Skipped (first read) | Deleted after the write (second read) |
+| --- | --- | --- | --- | --- |
+| Running | `Active` | exists, no flag | no | no |
+| User requested the deletion | `Active` | `spec.deletionRequested: true` | yes | yes |
+| Operator requested the namespace deletion | `Terminating` | `spec.deletionRequested: true`, `deletionTimestamp` set | yes | yes |
+| Namespace gone, status `DELETED` | absent | absent | yes | no |
+| `kubectl delete styrmindeployment` | `Active` | `deletionTimestamp` set | yes | yes |
+| New deployment, before its StyrminDeployment write | `Active` or absent | absent | no if `Active`, yes if absent | no |
+| A restore deletes the namespace | `Terminating`, then absent | no flag, then `deletionTimestamp` set, then absent | yes | no |
+
 ## Remediation-flow steps
 
 The three CRD flows record their steps with `StepReporter.from_env()`. Keys, names and kinds come from `domain/steps.py`:
@@ -553,6 +567,9 @@ See ADR-006 for the rationale behind this responsibility shift.
 | [agent/tasks/core.py](backend/styrmin_backend/agent/tasks/core.py) | `render_application_helm_release_specifications` |
 | [agent/tasks/shared.py](backend/styrmin_backend/agent/tasks/shared.py) | `get_context`, `render_helm_chart_specifications`, `render_helm_repository_specifications` |
 | [agent/tasks/extra.py](backend/styrmin_backend/agent/tasks/extra.py) | `install_utility`, `update_utility` |
+| [agent/tasks/service_aliases.py](backend/styrmin_backend/agent/tasks/service_aliases.py) | `apply_service_aliases`, `with_current_peer_services`, `find_departing_namespaces`, `find_deleted_deployment_namespaces` |
+| [agent/tasks/environment_services.py](backend/styrmin_backend/agent/tasks/environment_services.py) | `read_environment_services`, the alias step's read of the environment's services |
+| [agent/service/kubernetes/service_alias_rules.py](backend/styrmin_backend/agent/service/kubernetes/service_alias_rules.py) | Alias labels, `is_alias_of_deployment`, `teardown_deletes_aliases` |
 | [workflows/catalogue.py](backend/styrmin_backend/workflows/catalogue.py) | Workflow registry |
 | [workflows/templates/telemetry.py](backend/styrmin_backend/workflows/templates/telemetry.py) | `send_telemetry_report_flow`, the daily telemetry report |
 | [workflows/models.py](backend/styrmin_backend/workflows/models.py) | `PrefectAction`, `WorkflowDefinition` |

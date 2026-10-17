@@ -1034,6 +1034,66 @@ Do not pass a record's name to a flow that acts on cluster objects. Pass the id.
 
 See [ADR-073](../../adr/0073-kubernetes-objects-named-and-found-by-record-id.md).
 
+### Delete an object that another writer can replace with a `resourceVersion` precondition
+
+<!-- Extracted from specs/026-delete-service-aliases on 2026-10-17 -->
+
+When code deletes an object by name, and another flow or the operator can write an object with the
+same name in between, pass the `resourceVersion` that the code read or wrote to the delete:
+
+- Take it from the listing that selected the object, or from the object that your create or
+  replace returned.
+- Treat the 409 that a changed object returns as "not deleted, and not an error". Log it and go on.
+- Treat a 404 the same way: the object is already gone.
+
+Without the precondition, the delete removes whatever holds the name now, such as another
+deployment's `ClusterIP` Service that replaced a service alias, or an alias that another flow wrote
+again. Three deletes use this rule today: the alias flow's deletion of stale aliases (#506) and of
+the aliases it wrote for a deleted deployment, and the operator's teardown of a deployment's aliases
+(`delete_service(name, namespace, resource_version)` in `agent/service/kubernetes/primitives.py`).
+
+### Never create another deployment's namespace
+
+<!-- Extracted from specs/026-delete-service-aliases on 2026-10-17 -->
+
+A flow creates only its own deployment's namespace, in `_write_styrmin_deployment`, before it
+writes the StyrminDeployment. Code that writes into the namespace of another deployment:
+
+- Writes into the namespace only when it exists. Do not call `apply_namespace` or
+  `apply_kubernetes_namespace` on it: a namespace that is missing may belong to a deleted
+  deployment, and creating it again brings that deployment's namespace back.
+- Skips the object, and logs why, when the write returns 404 (the namespace is gone) or 403
+  because the namespace is terminating. `is_namespace_gone_error` in
+  `agent/service/kubernetes/primitives.py` tells these apart from other errors: a 403 counts only
+  with the `NamespaceTerminating` cause or the `NamespaceLifecycle` message.
+- Lets every other error fail the step. An RBAC 403 must stay visible.
+
+See [ADR-077](../../adr/0077-alias-flow-reads-deletion-state-at-write-time.md).
+
+### Delete objects outside a deployment's namespace only for a requested deletion
+
+<!-- Extracted from specs/026-delete-service-aliases on 2026-10-17 -->
+
+The operator's delete handler also runs when a deployment keeps running:
+
+- A restore deletes the deployment's namespace, which deletes its StyrminDeployment, and Velero
+  restores only that namespace.
+- A cross-target restore deletes a copy of the source's StyrminDeployment that carries the
+  source's `spec.deploymentId`, in the counterpart's namespace.
+
+So a teardown step that deletes objects outside the deployment's own namespace, such as its
+service aliases in the other deployments' namespaces, acts only when:
+
+- the StyrminDeployment's namespace is `styrmin-<spec.deploymentId>` (`get_kubernetes_reference`);
+- and `spec.deletionRequested` is true, or the Namespace exists and is not `Terminating`
+  (`teardown_deletes_aliases` in `agent/service/kubernetes/service_alias_rules.py`). When the
+  Namespace cannot be read, the step deletes nothing and logs why.
+
+Objects inside the deployment's own namespace need no such check, because Velero restores them with
+the namespace. A step that deletes too little leaves objects that the next write of that name
+replaces. A step that deletes too much breaks a running deployment until a flow writes the objects
+again. See [ADR-076](../../adr/0076-teardown-deletes-service-aliases-in-all-namespaces.md).
+
 ## GraphQL (Strawberry)
 
 - Types use `@strawberry.type` decorator
@@ -1267,6 +1327,33 @@ async with get_unit_of_work() as uow:
 ```
 
 Reference: `_await_capture_terminal` in `workflows/templates/clone.py`.
+
+### Read state that another deployment changes when you write, not from the flow's context
+
+<!-- Extracted from specs/026-delete-service-aliases on 2026-10-17 -->
+
+The server builds a flow's context when the change is requested, and passes it to the flow as a
+parameter. A flow can run seconds or minutes later, and by then another deployment of the
+environment may have been requested, deleted or restored. When a flow writes into another
+deployment's namespace, or writes objects about another deployment:
+
+- Read whether that deployment is being deleted from the cluster when you write: its Namespace
+  (missing or `Terminating`) and its StyrminDeployment (`spec.deletionRequested` or
+  `metadata.deletionTimestamp`). The server sets `spec.deletionRequested` before the deployment's
+  status becomes `DELETING`, so the status in the context lags the request.
+- Read the list of the other deployments from the server when you need it, with the flow's action
+  token ([ADR-059](../../adr/0059-driver-action-api-tokens.md)), because the context lists no
+  deployment requested after it. When the read fails, log a warning and use the context.
+- When a write must not outlive a deletion that can start between your read and your write, read
+  again after the write and delete what you wrote, with the `resourceVersion` that the write
+  returned.
+- Keep the deployment's own data from the context: it describes what this flow deploys.
+- Do not change the context that driver templates render with to get these values.
+
+Reference: `apply_service_aliases` and `with_current_peer_services` in
+`agent/tasks/service_aliases.py`
+([ADR-077](../../adr/0077-alias-flow-reads-deletion-state-at-write-time.md),
+[ADR-078](../../adr/0078-alias-step-reads-current-services-from-server.md)).
 
 ## Outbound HTTP requests
 

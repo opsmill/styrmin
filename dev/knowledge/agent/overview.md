@@ -28,6 +28,9 @@ backend/styrmin_backend/
 │   │   ├── application.py      # Application-specific (create/update HelmRelease)
 │   │   ├── orchestration.py    # apply_state, create_instance, update_instance, upgrade_instance, run_job, run_job_command
 │   │   ├── extra.py            # Utility install/update
+│   │   ├── service_aliases.py  # "Apply service aliases" flow: write, skip and delete ExternalName aliases
+│   │   ├── environment_services.py # Reads an environment's services from the server (alias step, #503)
+│   │   ├── list_environment_services.graphql
 │   │   └── shared.py           # Shared task utilities
 │   │
 │   ├── status/                 # Periodic status reporter (see "Status Reporter")
@@ -47,6 +50,8 @@ backend/styrmin_backend/
 │       └── kubernetes/
 │           ├── primitives.py   # Low-level K8s ops (apply, delete, list, get_custom_resource)
 │           ├── job_logs.py     # End of a failed Job's output (read_job_output_tail)
+│           ├── service_alias_rules.py # Alias labels and rules shared by the alias flow and the operator; no Prefect import
+│           ├── styrmin_deployment.py  # read_styrmin_deployment: the CR, or None on 404
 │           ├── utils.py        # Reference helpers (namespace, release_reference)
 │           └── resources/      # Resource builders
 │               ├── custom_resource.py     # HelmRelease CRD
@@ -252,4 +257,8 @@ post-rendered one, so it includes the replica override or driver default
 | [services/steps/operator_history.py](backend/styrmin_backend/services/steps/operator_history.py) | Phase history: turns each status report into operator-phase step changes |
 | [agent/steps/reporter.py](backend/styrmin_backend/agent/steps/reporter.py) | Flow step reporter: `recordStep` calls from USER flows and driver actions |
 | [agent/service/kubernetes/job_logs.py](backend/styrmin_backend/agent/service/kubernetes/job_logs.py) | Reads the end of a failed Job's output |
+| [agent/tasks/service_aliases.py](backend/styrmin_backend/agent/tasks/service_aliases.py) | "Apply service aliases" flow; see [Service aliases](../backend/orchestration-flows.md#service-aliases) |
+| [agent/tasks/environment_services.py](backend/styrmin_backend/agent/tasks/environment_services.py) | `read_environment_services`: the environment's services from the server, with the flow's action token |
+| [agent/service/kubernetes/service_alias_rules.py](backend/styrmin_backend/agent/service/kubernetes/service_alias_rules.py) | `is_alias_of_deployment`, `teardown_deletes_aliases`: the rules that the alias flow and the operator's teardown share |
+| [agent/service/kubernetes/styrmin_deployment.py](backend/styrmin_backend/agent/service/kubernetes/styrmin_deployment.py) | `read_styrmin_deployment` |
 | [entrypoint/combined.py](backend/styrmin_backend/entrypoint/combined.py) | Shared event loop: kopf + Prefect worker + status reporter |
