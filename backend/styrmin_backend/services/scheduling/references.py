@@ -19,6 +19,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, overload
 from uuid import UUID
 
+from pydantic import ValidationError
+
+from styrmin_backend.context.models.config import DeploymentReference
 from styrmin_backend.services.exceptions import UnresolvableAffinityReferenceError
 
 if TYPE_CHECKING:
@@ -86,7 +89,7 @@ def referenced_deployment_ids(
     for site in iter_reference_sites(config, path_prefix):
         raw_id = site.deployment_ref.get("deployment_id")
         if raw_id is not None:
-            found.setdefault(UUID(str(raw_id)), []).append(site.path)
+            found.setdefault(_parse_id(raw_id, site.path), []).append(site.path)
     return found
 
 
@@ -109,7 +112,7 @@ def remap_deployment_references(
         raw_id = site.deployment_ref.get("deployment_id")
         if raw_id is None:
             continue
-        source_id = UUID(str(raw_id))
+        source_id = _parse_id(raw_id, site.path)
         target_id = mapping.get(source_id)
         if target_id is None:
             unmapped.setdefault(source_id, []).append(site.path)
@@ -155,6 +158,8 @@ async def bind_deployment_references(
     environment does not exist yet, so only upcoming deployments match. The first
     term that names no live deployment of the environment raises
     :class:`UnresolvableAffinityReferenceError` with the term's path.
+    A reference that gives both or neither of ``deployment_id`` and ``deployment_name``,
+    or a malformed id, raises the same error with the term's path.
     A config without deployment references is returned as it is.
 
     Call it inside the caller's open unit of work. It opens none of its own, so a
@@ -168,7 +173,12 @@ async def bind_deployment_references(
     for site in iter_reference_sites(bound, path_prefix):
         ref = site.deployment_ref
         target_id = await _bind_reference(
-            uow, environment_id, ref, site.path, upcoming, upcoming_by_name
+            uow,
+            environment_id,
+            _validate_reference(site),
+            site.path,
+            upcoming,
+            upcoming_by_name,
         )
         components = ref.get("components")
         ref.clear()
@@ -178,18 +188,42 @@ async def bind_deployment_references(
     return bound
 
 
+def _parse_id(raw_id: object, path: str) -> UUID:
+    try:
+        return UUID(str(raw_id))
+    except ValueError:
+        raise UnresolvableAffinityReferenceError(
+            deployment_id=str(raw_id), path=path
+        ) from None
+
+
+def _validate_reference(site: ReferenceSite) -> DeploymentReference:
+    """Check the reference as the API checks it, since a driver's component configs are not checked before."""
+    ref = site.deployment_ref
+    try:
+        return DeploymentReference.model_validate(ref)
+    except ValidationError as exc:
+        raw_id, raw_name = ref.get("deployment_id"), ref.get("deployment_name")
+        reason = exc.errors()[0]["msg"]
+        raise UnresolvableAffinityReferenceError(
+            f"Affinity term at {site.path} has an invalid deployment reference: {reason}",
+            deployment_id=None if raw_id is None else str(raw_id),
+            deployment_name=None if raw_name is None else str(raw_name),
+            path=site.path,
+        ) from None
+
+
 async def _bind_reference(
     uow: UnitOfWork,
     environment_id: UUID | None,
-    ref: dict[str, Any],
+    ref: DeploymentReference,
     path: str,
     upcoming: Mapping[UUID, str],
     upcoming_by_name: Mapping[str, UUID],
 ) -> UUID:
-    raw_id = ref.get("deployment_id")
-    if raw_id is not None:
-        return await _bind_id(uow, environment_id, raw_id, path, upcoming)
-    name = ref.get("deployment_name")
+    if ref.deployment_id is not None:
+        return await _bind_id(uow, environment_id, ref.deployment_id, path, upcoming)
+    name = ref.deployment_name
     if name is None:
         raise UnresolvableAffinityReferenceError(path=path)
     if name in upcoming_by_name:
@@ -205,16 +239,10 @@ async def _bind_reference(
 async def _bind_id(
     uow: UnitOfWork,
     environment_id: UUID | None,
-    raw_id: object,
+    target_id: UUID,
     path: str,
     upcoming: Mapping[UUID, str],
 ) -> UUID:
-    try:
-        target_id = UUID(str(raw_id))
-    except ValueError:
-        raise UnresolvableAffinityReferenceError(
-            deployment_id=str(raw_id), path=path
-        ) from None
     if target_id in upcoming:
         return target_id
     target = (
