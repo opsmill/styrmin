@@ -534,14 +534,19 @@ components:
 
 ## Driver Loading
 
-Drivers are loaded from Git repositories. When loading a driver, Styrmin:
+Drivers are loaded from Git repositories, or from a directory on the Styrmin server. A load from git takes the repository URL, the branch and, optionally, the driver directory: the folder of the repository that holds the driver's files, given as a path relative to the repository root. When loading a driver from git, Styrmin:
 
-1. Clones the repository at the specified branch/tag
-2. Parses `driver.styrmin.yml` and validates the schema (including embedded action declarations)
-3. Reads `values.j2.yml` as a template string (if present)
-4. If actions are declared, loads and validates `actions.py` to ensure all referenced functions exist
-5. Stores the driver version in the database
-6. Registers any actions with the workflow engine (Prefect)
+1. Clones the whole repository at the tip of the branch and records the commit
+2. Reads the driver files from the driver directory, or from the repository root when no driver directory is given. It refuses the load when the driver directory, `driver.styrmin.yml`, `values.j2.yml` or `actions.py` is a symlink to a path outside the repository
+3. Parses `driver.styrmin.yml` and validates the schema (including embedded action declarations)
+4. Reads `values.j2.yml` as a template string (if present)
+5. If actions are declared, loads and validates `actions.py` to ensure all referenced functions exist
+6. Stores the driver version in the database, with the driver directory in `source_path`
+7. Registers any actions with the workflow engine (Prefect)
+
+Each action runs with the driver directory as its working directory. `actions.py` can import modules from the driver directory, such as a `helpers.py` next to it, but not modules from other folders of the repository. Packages installed in the action's image, such as `prefect` and `styrmin_backend`, import as before. Code that several drivers share goes into each driver directory, or is installed in the action's image.
+
+See [Loading a Driver](../docs/docs/drivers/loading-drivers.md#from-a-git-repository) for the CLI, SDK, GraphQL and UI options and the values refused as a driver directory, and [ADR-076](../dev/adr/0076-driver-actions-import-only-from-their-driver-directory.md) for the reasons behind the import rule and the symlink check.
 
 ## Examples
 

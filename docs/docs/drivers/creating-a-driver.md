@@ -45,6 +45,30 @@ You'll fill them in roughly in that order: spec first to define the
 shape, then values to wire the chart up, then actions only if the
 application has lifecycle work that can't be expressed as Helm values.
 
+This directory is the driver directory. In git, it can be the root of a
+repository, or a folder of a repository that holds other drivers too:
+
+```text
+styrmin-drivers/
+└── drivers/
+    ├── my-driver/
+    │   ├── driver.styrmin.yml
+    │   ├── values.j2.yml
+    │   ├── actions.py
+    │   └── helpers.py      # imported by actions.py with "import helpers"
+    └── other-driver/
+        └── driver.styrmin.yml
+```
+
+The driver's actions run with the driver directory as their working
+directory. `actions.py` can import modules from the driver directory,
+such as `helpers.py` above, but not modules from other folders of the
+repository, such as `other-driver/` or a folder at the repository root.
+Put code that several drivers share into each driver directory, or
+install it in the image that the actions run in (the action's `image`).
+See [Loading a Driver](./loading-drivers.md#loading-a-driver-from-a-driver-directory)
+for how to load a driver from a driver directory.
+
 ### Step 1: Analyse the Helm chart
 
 Before you write a single line of driver, install the chart by hand

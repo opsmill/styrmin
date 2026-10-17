@@ -835,6 +835,68 @@ in an earlier apply that keeps `spec.version`.
 
 :::
 
+### `drivers load-version` — load a driver version from git
+
+`styrminctl drivers load-version REPOSITORY-URL BRANCH` loads an
+application driver version from a git repository. The server clones the
+repository, records the commit at the tip of the branch, and reads the
+driver from the driver directory. The command needs the `ADMIN` role.
+
+| Argument or option | Default | Purpose |
+|--------------------|---------|---------|
+| `REPOSITORY-URL` | required | Git repository URL of the driver. |
+| `BRANCH` | required | Git branch to load from. |
+| `--driver-directory PATH` | the repository root | Folder of the repository that holds driver.styrmin.yml, relative to the repository root. |
+
+```shell
+uv run styrminctl drivers load-version \
+  https://github.com/your-org/styrmin-drivers.git main \
+  --driver-directory drivers/infrahub
+```
+
+The command prints the loaded driver version, then its component
+configs, actions and Helm chart. Load warnings, if any, follow the
+`Success:` line:
+
+```text
+Success: Application driver version '<version>@<short commit>' loaded (id: <driver version id>)
+  Driver ID: <driver id>
+  Supported versions: <supported application versions>
+  Commit SHA: <40-character commit SHA>
+  Driver directory: drivers/infrahub
+```
+
+The `Driver directory:` line is printed only for a driver version loaded
+from a driver directory. A load from the repository root prints no such
+line. `./drivers/infrahub/`, `drivers//infrahub` and `drivers/./infrahub`
+load the same driver directory as `drivers/infrahub`, and an empty value
+or `.` loads from the repository root.
+
+The server refuses these values before it clones the repository:
+
+- an absolute path, such as `/etc`;
+- a path with a `..` segment, such as `../other`;
+- a path with a backslash, such as `drivers\infrahub`;
+- a value with a NUL character.
+
+The server also refuses the load when the driver directory, or its
+`driver.styrmin.yml`, `values.j2.yml` or `actions.py`, is a symlink to a
+path outside the repository, for loads from the repository root too.
+
+When the server refuses the load or the load fails, the command prints
+`Error:` and the server's message, and exits with code 1. When the driver
+directory does not exist, is not a folder, or holds no
+`driver.styrmin.yml`, the message names the driver directory, the
+repository, the branch and the commit:
+
+```text
+Error: Driver directory 'drivers/missing' does not exist in repository 'https://github.com/your-org/styrmin-drivers.git' (branch 'main', commit 0123456789abcdef0123456789abcdef01234567).
+```
+
+See [Loading a Driver](../drivers/loading-drivers.md#from-a-git-repository)
+for the SDK, GraphQL and UI equivalents, and for how the actions of a
+driver version loaded from a driver directory run.
+
 ### Related
 
 - [Installation → Quickstart](../installation/quickstart.md) — the
