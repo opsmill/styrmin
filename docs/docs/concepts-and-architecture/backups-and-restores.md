@@ -615,8 +615,10 @@ restore. That propagation is tracked by those deployments' own
 reconciliations — watch their status, not the restore's.
 
 When the redeploy of one of those deployments cannot start, the other
-redeploys still run and the restore returns normally. The failure is
-written only to the server log, not on the restore: an
+redeploys still run and the restore returns normally, with a status that
+does not show the failure. The failure is written only to the server log,
+not on the restore, so `styrminctl env-backups restore-get` and the UI do
+not list it ([#520](https://github.com/opsmill/styrmin/issues/520)): an
 `env_restore_fanout_dispatch_error` line gives the restore's
 `environment_restore_id`, the `deployment_id` and, when the error has
 them, the `error_code` and the term's `path`. The
@@ -722,7 +724,7 @@ What happens depends on what you name, and the difference matters:
 | A deployment that doesn't exist, or belongs to a different environment | The whole request is **rejected up front**. Nothing is created and no backup is taken. |
 | A deployment that exists but isn't eligible | It's **skipped**, by name, with a reason. Not an error. |
 | An eligible deployment | It's included. |
-| A selection that leaves out a deployment, or includes one that isn't eligible, when an affinity term that the clone copies names that deployment | The whole request is **rejected up front** with `VALIDATION_ERROR`. The error lists each such deployment and the path of every term that names it. Nothing is created and no backup is taken. Add the deployment to the selection, leave out the deployment whose term names it, or, for a term in the environment's config, clear or override `scheduling`. |
+| A selection that leaves out a deployment, or includes one that isn't eligible, when an affinity term that the clone copies names that deployment | The whole request is **rejected up front** with `VALIDATION_ERROR`. The error message lists each such deployment, the reason the clone does not copy it, and the path of every term that names it. Nothing is created and no backup is taken. Add the deployment to the selection, leave out the deployment whose term names it, or, for a term in the environment's config, clear or override `scheduling`. |
 
 An affinity term can name another deployment of the same environment, in
 `scheduling.pod_affinity` or `scheduling.pod_anti_affinity`. Styrmin stores
@@ -828,11 +830,17 @@ expired) or when its counterpart fails:
 - A deployment whose own config has such a term is attributed as failed,
   and no counterpart is created for it. The reason is
   `an affinity term names deployment <name>, which was not cloned`.
+- When two deployments' terms name each other, one counterpart is
+  created first. If the other counterpart then fails, the first one is
+  attributed as failed with the same reason. Its counterpart exists in
+  the new environment, and its next update is refused until you change
+  the term.
 - A term that comes from the component definitions of the deployment's
   driver version gives a name, which Styrmin looks up when it creates the
   counterpart. When no counterpart has that name, the counterpart is not
   created and the deployment is attributed as failed with the reason
-  `Affinity deployment reference cannot be resolved: <name>`.
+  `Affinity term at <path> names deployment '<name>', which is not a
+  deployment of environment '<new environment>'.`
 - When the new environment's config names the failed deployment, the
   clone reports `FAILED` with a `referenced_deployment_not_cloned` event.
   When the deployment's captured data cannot be used, no environment is

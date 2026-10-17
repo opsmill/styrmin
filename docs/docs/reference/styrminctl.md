@@ -299,7 +299,7 @@ Seven commands:
 | `env-backups get <ENVIRONMENT_BACKUP_ID>` | Show one snapshot, including per-constituent outcomes. |
 | `env-backups list [ENVIRONMENT]` | List an environment's snapshots, newest first. |
 | `env-backups restore <ENVIRONMENT_BACKUP_ID>` | Restore a snapshot in place. Requires the administrator role. |
-| `env-backups restore-get <ENVIRONMENT_RESTORE_ID>` | Show one restore, including skipped constituents and their reasons. |
+| `env-backups restore-get <ENVIRONMENT_RESTORE_ID>` | Show one restore, including skipped constituents and their reasons. A redeploy that the restore could not start is not listed ([#520](https://github.com/opsmill/styrmin/issues/520)). |
 | `env-backups restore-list <ENVIRONMENT_BACKUP_ID>` | List the restores performed from a snapshot, newest first. |
 | `env-backups delete <ENVIRONMENT_BACKUP_ID>` | Delete a snapshot, its constituent backups, and their restores. |
 
@@ -443,7 +443,8 @@ versus `none (configuration only)`.
 
 When the environment's config has an affinity term that names a
 deployment, an empty selection is rejected with `VALIDATION_ERROR`,
-because the clone copies no deployment. Add
+because the clone copies no deployment. The error message names each
+such deployment and the path of every term that names it. Add
 `--clear-config-field scheduling`, or give a `scheduling` that names no
 deployment in `--config-override`.
 

@@ -94,9 +94,16 @@ We chose option 2, as decided in the review of PR #504 and recorded in #508.
 - **A reconcile resolves ids only.** `resolve_deployment_reference` refuses a reference that gives
   a name, an id that is not a deployment of the environment, and a tombstoned deployment, which it
   reports with `deleted: true` and the deployment's last name. Each level (environment,
-  deployment, component) is resolved before the levels are merged, with its own path prefix
+  deployment, component) is resolved in its own level, with its own path prefix
   (`environment.config.scheduling`, `deployment.config.scheduling`,
-  `component[<name>].config.scheduling`).
+  `component[<name>].config.scheduling`), and then the levels are merged. A pod affinity block
+  that a deeper level discards with `replace: true` is dropped before it is resolved. The error
+  message gives the term's path, the environment's name and the reason, and for a tombstoned
+  deployment how to fix the term, because the SDK shows only the message.
+- **`updateDeployment` checks every level before it saves.** It resolves the terms of the
+  environment's config and of each component's config, as building the next instance does, before
+  its first commit, so a term that names a tombstoned deployment refuses the update and saves
+  nothing.
 - **An environment clone gives counterparts their ids in advance.** The clone flow chooses one id
   per counterpart before it creates the new environment, rewrites every copied id to the
   counterpart's id (`remap_deployment_references`), and passes the counterparts to
@@ -139,20 +146,27 @@ name source deployments. Option 3 keeps the failure of #492 and the clone failur
   `deleted: true`, and the config fan-outs fail those redeploys and keep the others, until the
   terms are written again. After a re-create under the same name, writing the terms again with the
   name, for example by re-applying the unchanged manifest, stores the new deployment's id. A
-  warning at delete time is out of scope.
+  warning at delete time is out of scope
+  ([#523](https://github.com/opsmill/styrmin/issues/523)). The refusal says how to fix the term
+  and, for the environment's config, that `updateEnvironment` needs the ADMIN role.
 - Bad, because `createEnvironment` and `styrminctl environments create -c` refuse every term that
   names a deployment. Before, the write was accepted and the term failed at the first reconcile.
-- Bad, because a term that a deeper level discards with `replace: true` is still resolved, so a
-  term that names a deleted deployment fails the reconcile even when a deeper level replaces it.
+- Good, because a deployment can discard a term of the environment's config that names a
+  deleted deployment with `replace: true` in its own config, so a user with the READ_WRITE role
+  does not need the ADMIN role to end the failures of that deployment.
 - Bad, because a driver version can give only a name. Styrmin looks the name up again each time
   it copies the driver version's component definitions: at `deploy`, at an
   `updateDeploymentVersion` that moves the deployment to another driver version, and when a clone
   creates a counterpart. After the named deployment is renamed, the stored id keeps working at
   reconcile, but these copies are refused with the `component[<name>]` path and the name when
-  the driver version's definitions give the old name. Fixing
-  this needs drivers that do not name deployments.
+  the driver version's definitions give the old name. This case is tracked in
+  [#524](https://github.com/opsmill/styrmin/issues/524).
 - Bad, because `styrminctl deployments get` and the GraphQL `config` show only an id. Showing which
-  deployment a term names next to the id is a follow-up; the issue is not filed yet.
+  deployment a term names next to the id is tracked in
+  [#521](https://github.com/opsmill/styrmin/issues/521).
+- Bad, because an environment restore whose redeploy is refused returns normally and records the
+  refusal only in the server log. Listing the refused redeploys on the restore is tracked in
+  [#520](https://github.com/opsmill/styrmin/issues/520).
 - The clone flow changes shape. Each counterpart is created after the counterparts that its terms
   name; among those that can come next, the ones that the environment's config names come first,
   then the others in source-name order, and a cycle of terms is broken in source-name order
@@ -162,10 +176,11 @@ name source deployments. Option 3 keeps the failure of #492 and the clone failur
   `referenced_deployment_not_cloned` when the new environment's config names it. The request check
   merges the source config and the override at request time, so a source config that no longer
   validates is refused at request time instead of failing the clone.
-- Known limit: inside a cycle of terms, a counterpart created before a peer whose creation then
-  fails keeps a term with the peer's id. The clone attributes it `cloned`, and its next reconcile
-  is refused with the term's path. A creation failure after a successful capture needs the driver
-  version to disappear or the database to fail (research R-008).
+- Inside a cycle of terms, a counterpart created before a peer whose creation then fails keeps a
+  term with the peer's id. After the last counterpart, the clone runs the failure cascade again,
+  so that counterpart is attributed `failed` with the reason that names the peer, and keeps its
+  `counterpart_deployment_id`. The counterpart exists, and its next reconcile is refused with the
+  term's path.
 - Rollback: the code before this change resolves stored ids, so reverting it leaves the stored
   configs valid, and there is no migration to reverse (critique E9). After a revert, a term that
   names a tombstoned deployment resolves again to a selector that matches no pod, and an
@@ -192,5 +207,5 @@ name source deployments. Option 3 keeps the failure of #492 and the clone failur
   describes the clone flow.
 - While this change was made, a defect in `SqlModelUnitOfWork.__aexit__` was fixed: a failure in
   two nested unit-of-work blocks inside a caller's savepoint rolled back the caller's whole
-  transaction. The rule is recorded in
+  transaction ([#525](https://github.com/opsmill/styrmin/issues/525)). The rule is recorded in
   [ADR-066](0066-cluster-config-fanout.md) (amended 2026-10-17).

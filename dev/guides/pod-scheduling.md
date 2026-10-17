@@ -79,6 +79,9 @@ gives:
             components: [primary]
 ```
 
+The read gives no name next to the id
+([#521](https://github.com/opsmill/styrmin/issues/521)).
+
 Every write that stores a config does this:
 
 - `createEnvironment` and `updateEnvironment`, for the environment's
@@ -105,6 +108,15 @@ the term's `path` and the `deployment_name` or `deployment_id` that the
 term gives. The path starts with the config that holds the term:
 `environment.config`, `deployment.config` or `component[<name>].config`,
 for example `environment.config.scheduling.pod_anti_affinity.preferred[0].term`.
+Paths use the snake_case keys of the stored config, as a read gives them.
+The message gives the same path, the environment's name and the reason,
+because the SDK and `styrminctl` show only the message
+([#522](https://github.com/opsmill/styrmin/issues/522)), for example:
+
+```text
+Affinity term at deployment.config.scheduling.pod_affinity.required[0] names
+deployment 'postgres', which is not a deployment of environment 'prod'.
+```
 
 The same error, with the term's path, refuses a `deployment_ref` that:
 
@@ -122,8 +134,8 @@ Two consequences:
 
 - `createEnvironment` and `styrminctl environments create -c` refuse
   every term that names a deployment, because a new environment has no
-  deployment yet. Add the terms with `updateEnvironment` once the named
-  deployments exist.
+  deployment yet. The message says so. Add the terms with
+  `updateEnvironment` once the named deployments exist.
 - `styrminctl deployments apply` applies the manifests one at a time,
   in order. A manifest whose term names a deployment that a later
   manifest creates is refused. Put the named deployment first.
@@ -132,14 +144,16 @@ Two consequences:
 
 At each reconcile, Styrmin resolves the ids of the environment's terms,
 the deployment's terms and each component's terms to
-`styrmin/deployment_id=<id>`, one level at a time, before it merges the
+`styrmin/deployment_id=<id>`, each in its own level, and then merges the
 levels. An error gives the path of the term in its own level, such as
 `deployment.config.scheduling.pod_affinity.required[1]`.
 
-Because each level is resolved before the merge, a term that a deeper
-level discards with `replace: true` is still resolved. A term that names
-a deleted deployment therefore fails the reconcile even when a deeper
-level replaces it.
+A term that a deeper level discards with `replace: true` is dropped
+before it is resolved. A deployment can therefore discard a term of the
+environment's config that names a deleted deployment: set `replace: true`
+on the same kind (`pod_affinity` or `pod_anti_affinity`) in the
+deployment's config. The `resolvedScheduling` field resolves the levels
+the same way.
 
 ### A rename changes no term
 
@@ -155,9 +169,10 @@ environment's config named the renamed deployment
 
 ### A deleted deployment fails the terms that name it
 
-Deleting a deployment gives no warning about the terms that name it.
-Styrmin never gives its id to another deployment, so the terms keep
-naming the deleted deployment. Once it is tombstoned:
+Deleting a deployment gives no warning about the terms that name it
+([#523](https://github.com/opsmill/styrmin/issues/523)). Styrmin never
+gives its id to another deployment, so the terms keep naming the deleted
+deployment. Once it is tombstoned:
 
 - Every `updateDeployment` and `updateDeploymentVersion` of a deployment
   whose own config names it is refused, and saves nothing. The error
@@ -166,17 +181,40 @@ naming the deleted deployment. Once it is tombstoned:
   changes only the deployment's name, because Styrmin checks the whole
   stored config on every update.
 - When the environment's config names it, every `updateEnvironment` that
-  keeps the term is refused and saves nothing. Every update of a
-  deployment of the environment fails when Styrmin builds the new
-  instance; `updateDeployment` has saved the request's config and name
-  at that point, and the deployment keeps its active instance.
+  keeps the term is refused and saves nothing. Every `updateDeployment`
+  of a deployment that the term applies to is refused too, before it
+  saves anything, unless the request's config discards the term with
+  `replace: true`. `updateDeploymentVersion` of such a deployment fails
+  when Styrmin builds the new instance.
+- When a component's config, copied from the driver version, names it,
+  every `updateDeployment` of that deployment is refused and saves
+  nothing.
 - The environment and cluster config fan-outs fail the redeploys of the
   deployments that such a term applies to, count them as failed, and
   keep the other redeploys. `updateCluster` lists those deployments in
   `failedToStart`.
 
-To end the failures, write each term again: name another deployment, or
-remove the term.
+The message of each refusal says how to fix the term:
+
+- a term of the environment's config: change or remove it with
+  `updateEnvironment`, which needs the ADMIN role, or discard the
+  environment's terms of that kind in the deployment's config with
+  `replace: true`, which `updateDeployment` allows with the READ_WRITE
+  role;
+- a term of the deployment's config: change or remove it;
+- a term of a component's config: move the deployment to a driver
+  version whose component definitions do not name the deleted
+  deployment.
+
+For example:
+
+```text
+Affinity term at environment.config.scheduling.pod_anti_affinity.preferred[0].term
+names deployment 'postgres' (7f0c2a3e-1b2c-4d5e-8f90-0a1b2c3d4e5f), which was
+deleted. To fix it, change or remove the term in the environment's config with
+updateEnvironment, which needs the ADMIN role, or discard the environment's terms
+of this kind in the deployment's config with replace: true.
+```
 
 ### A re-created deployment needs the terms written again
 
@@ -216,9 +254,8 @@ each reconcile, but the next copy looks the driver's name up again and
 finds no deployment. A `deploy` with that driver version, an
 `updateDeploymentVersion` to a driver version whose definitions give the
 old name, and a clone that copies a deployment of that driver version
-are refused, with the name and the `component[<name>]` path. Fixing this
-needs drivers that do not name deployments, which is outside
-[#508](https://github.com/opsmill/styrmin/issues/508).
+are refused, with the name and the `component[<name>]` path. This case
+is tracked in [#524](https://github.com/opsmill/styrmin/issues/524).
 
 ### An environment clone points copied terms at its counterparts
 
@@ -236,9 +273,15 @@ The terms checked are those of the new environment's config (after the
 override and the cleared fields), of each copied deployment's config,
 and of the component definitions of its driver version. The error is
 `VALIDATION_ERROR`, and `extensions.deployments` lists each such
-deployment with `deployment_id`, `deployment_name` and the `paths` of the
-terms that name it. `deployment_id` is `null` for a name, given by a
-driver version, that no live deployment of the source environment has.
+deployment with `deployment_id`, `deployment_name`, the `paths` of the
+terms that name it, and the `reason` the clone does not copy it, such as
+`not included in the requested deployment selection`. `deployment_id` is
+`null` for a name, given by a driver version, that no live deployment of
+the source environment has. The message lists the same deployments,
+reasons and paths, then the three ways to fix the request. The terms are
+checked after the environment-operation guard: while another environment
+operation runs on the source, the request gets
+`EnvironmentOperationInProgressError` first.
 A name in the clone's
 `configOverride` is looked up among the source environment's
 deployments. The details of the clone flow are in
@@ -257,7 +300,9 @@ server log, not on the `EnvironmentRestore` record:
 `env_restore_fanout_dispatch_error` gives the `environment_restore_id`,
 the `deployment_id`, the `error_code` and the term's `path`, and
 `env_restore_fanout_dispatched` counts the failure in
-`config_redeploy_failed` and in `dispatch_failed`.
+`config_redeploy_failed` and in `dispatch_failed`. Listing the refused
+redeploys on the restore is tracked in
+[#520](https://github.com/opsmill/styrmin/issues/520).
 
 ## Per-feature opt-out
 

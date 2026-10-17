@@ -934,7 +934,8 @@ How the step-4 fan-out differs from the fan-out of `update_environment`
   there was no savepoint: a failed redeploy rolled back the whole transaction,
   which dropped the redeploys written before it, and the restore then returned
   `INTERNAL_ERROR` although the config revert was committed. The failure is not
-  recorded on the `EnvironmentRestore` record.
+  recorded on the `EnvironmentRestore` record, so `restore-get` and the UI do not
+  show it ([#520](https://github.com/opsmill/styrmin/issues/520)).
 - **The captured config is written back without validation.** The restore does
   not call `validate_environment_config` or run the env-var checks that
   `update_environment` runs before it writes, and it does not bind the
@@ -1077,7 +1078,7 @@ burn the name).
 
 | Function | Purpose |
 |----------|---------|
-| `clone_environment(...)` | The mutation half. Three phases: (1) upfront validation with zero side effects — source resolution (ADR-031), config-override canonicalisation, cleared-field names, target name free, every selected id belongs to the source, the deployment references of the override bound against the source, the refusal of a request whose copied affinity terms name a deployment it does not copy (see [Affinity terms in a clone](#affinity-terms-in-a-clone)), source concurrency guard; (2) one transaction writing the clone record, its upfront attribution and the whole capture; (3) post-commit dispatch of one `EXECUTE_BACKUP` per constituent plus the single `EXECUTE_ENVIRONMENT_CLONE` run. The target name is checked but **not reserved** — reserving it needs a placeholder environment, which FR-002 forbids. |
+| `clone_environment(...)` | The mutation half. Three phases: (1) upfront validation with zero side effects — source resolution (ADR-031), config-override canonicalisation, cleared-field names, target name free, every selected id belongs to the source, source concurrency guard, the deployment references of the override bound against the source, the refusal of a request whose copied affinity terms name a deployment it does not copy (see [Affinity terms in a clone](#affinity-terms-in-a-clone)); (2) one transaction writing the clone record, its upfront attribution and the whole capture; (3) post-commit dispatch of one `EXECUTE_BACKUP` per constituent plus the single `EXECUTE_ENVIRONMENT_CLONE` run. The target name is checked but **not reserved** — reserving it needs a placeholder environment, which FR-002 forbids. |
 | `merge_environment_config(captured, override, cleared)` | Top-level-field replacement merge over the canonicalised capture, cleared fields popped **before** the override is applied. Validates the result; a field both cleared and overridden takes the override. |
 | `find_uncloned_references(environment_config, copied, component_configs, roster)` | Pure. Lists the deployments that the affinity terms of the new environment's config, of each copied deployment's config and of its driver version's component definitions name but the clone does not copy, each with the paths of the terms that name it. `_refuse_uncloned_references` raises `UnclonedDeploymentReferenceError` when the list is not empty. |
 | `cascade_reference_failures(snapshots, failed_ids)` | Pure. Maps each snapshot whose terms name a failed deployment to that deployment, repeated until nothing changes, so a chain of terms fails together. |
@@ -1340,7 +1341,8 @@ would name a source deployment, and `create_environment` and `deploy_application
 it in the new environment. The clone points every copied term at the counterpart deployments.
 
 **Request check.** `clone_environment` checks the terms before it creates anything, after the
-selection is validated and before the concurrency guard (`_refuse_uncloned_references`):
+selection is validated and after the concurrency guard (`_refuse_uncloned_references`), so a
+busy source is reported first:
 
 1. It merges the source config with the bound override and the cleared fields, with
    `merge_environment_config`, as the flow will.
@@ -1357,8 +1359,16 @@ selection is validated and before the concurrency guard (`_refuse_uncloned_refer
 4. When a reference names a deployment that is not copied, it raises
    `UnclonedDeploymentReferenceError` (`VALIDATION_ERROR`). `extensions.deployments` lists each
    such deployment with `deployment_id`, `deployment_name` (the last name of a tombstoned
-   deployment, from the roster with tombstones) and `paths`. `deployment_id` is `null` for a
-   driver name that no live source deployment has.
+   deployment, from the roster with tombstones), `paths` and `reason`. `deployment_id` is `null`
+   for a driver name that no live source deployment has. `reason` is the reason the clone
+   record would give (`_why_not_copied`): the `SKIPPED` reason from `_plan_deployment_results`,
+   `deployment has been deleted` or `deployment is internal platform infrastructure` for a
+   deployment that the plan leaves off the record, or
+   `no deployment of the source environment has this name`. The message lists the same
+   deployments, reasons and paths, then the three ways to fix the request
+   (`UnclonedDeploymentReferenceError.fixes`), because the SDK shows only the message. A
+   malformed `deployment_id` in a driver version's component definitions raises
+   `UnresolvableAffinityReferenceError` with the term's path (`parse_deployment_id`).
 
 **Counterpart ids chosen in advance.** After the capture cascade, `_run_environment_clone`
 builds one new id per usable constituent, keyed by the source deployment id, and the
@@ -1412,10 +1422,14 @@ created in snapshot order before.
   `deploy_application` raises `UnresolvableAffinityReferenceError` and its message becomes the
   deployment's failure reason.
 
-Known limit: inside a cycle of terms, a counterpart created before a peer whose creation then
-fails keeps a term with the peer's id. The clone attributes it `cloned`, and its next reconcile
-is refused with the term's path (research R-008 of
-[spec 027](../../../specs/027-deployment-reference-by-id/research.md)).
+- After the creation loop, `cascade_reference_failures` runs again over the counterparts that
+  were not created: the failed ones and the ones never attempted. Inside a cycle of terms, a
+  counterpart created before a peer whose creation then fails keeps a term with the peer's id;
+  this second run attributes it `FAILED` with the `referenced_deployment_not_cloned` reason
+  that names the peer, logs `env_clone_reference_not_cloned`, and keeps its
+  `counterpart_deployment_id` and `restore_id`. The counterpart exists, and its next reconcile
+  is refused with the term's path (research R-008 of
+  [spec 027](../../../specs/027-deployment-reference-by-id/research.md)).
 
 ### Cross-target restore
 

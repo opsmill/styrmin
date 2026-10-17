@@ -280,7 +280,7 @@ No new entity and no column change. `CONTEXT.md` has no entry for the first two 
 
 ## Out of Scope
 
-- Showing which deployment a term names, next to the id. This goes into a follow-up issue.
+- Showing which deployment a term names, next to the id. This goes into a follow-up issue ([#521](https://github.com/opsmill/styrmin/issues/521)).
 - Writing or showing deployment references in the UI.
 - A public documentation page for pod affinity by deployment reference. No page under `docs/docs/` describes deployment references today, so no public page becomes wrong.
 - Terms that name a deployment in another environment.
