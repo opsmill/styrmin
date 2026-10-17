@@ -93,3 +93,13 @@ What both passing runs checked:
 - The clone that selects both deployments (through the SDK in `[api-chromium]`, through the clone dialog in `[ui-chromium]`) starts both entries `PENDING`, captures both deployments, and ends `COMPLETED` with both entries `CLONED`, each with a counterpart deployment and a restore.
 - The peer's counterpart's term gives the primary's counterpart's id. The deployment references in the new environment's config and in both counterparts' configs are exactly the primary's counterpart's id, so none gives a source deployment's id. The peer's counterpart reaches `running`.
 - The re-clone with an empty selection attributes both source deployments `SKIPPED` with the reason "not included in the requested deployment selection" and no counterpart.
+
+## T045: walk-through of quickstart sections 1, 2 and 5
+
+Not an E2E run: the local results of [quickstart.md](quickstart.md) §1, §2 and §5, on commit `065eaec2`, with `pr-notes.md` and this section the only uncommitted changes.
+
+- §1, generated surface: the expected result holds. After `uv run styrmin export graphql-schema schema.graphql` (exit code 0, 2026-10-17T03:44:29+00:00) and the type generation, `git diff --stat schema.graphql python_sdk/src/styrmin_sdk/graphql/_generated frontend/src/generated` printed nothing. Compared with the base commit `73859192`, only the descriptions of `DeploymentReferenceInput` and of its `deploymentId` and `deploymentName` fields change.
+- §1, difference from the quickstart: `uv run invoke generate` completed its SDK step (`ariadne-codegen`) and failed at its frontend step (exit code 1, 2026-10-17T03:44:33+00:00). The step printed only `ELIFECYCLE Command failed with exit code 1`, so the cause is not known. This host runs Node 18.19.1, and commit fc04c22a records the same failure. `pnpm -C frontend --ignore-workspace codegen`, run directly, completed (exit code 0, 2026-10-17T03:44:40+00:00), and so did the frontend codegen that `uv run invoke lint` runs to check the generated types.
+- §2, unit tests: the expected result holds. Exit code 0, 2026-10-17T03:44:51+00:00, `137 passed in 0.49s`.
+- §2, functional tests: the expected result holds. Exit code 0, 2026-10-17T03:45:10+00:00, `148 passed in 11.32s`.
+- §5, `uv run invoke format lint`: the expected result holds. Exit code 0, 2026-10-17T03:46:21+00:00: ruff, ty and rumdl report no issue, yamllint gives the same two warnings as in T044 in files that this change does not touch, "277/277 .graphql files passed validation.", and the generated types are up to date.
