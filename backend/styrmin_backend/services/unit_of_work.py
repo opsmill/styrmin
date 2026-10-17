@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import TracebackType
 
+from sqlalchemy.ext.asyncio import AsyncSessionTransaction
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.repository.action import ActionRepository, SQLModelActionRepository
@@ -169,6 +170,8 @@ class SqlModelUnitOfWork(UnitOfWork):
 
     def __init__(self, session: AsyncSession):
         self.session: AsyncSession = session
+        # The savepoint open when each `async with` level was entered, innermost last.
+        self._entry_savepoints: list[AsyncSessionTransaction | None] = []
 
     async def __aenter__(self) -> "SqlModelUnitOfWork":
         self.backup_storage_locations = SQLModelBackupStorageLocationRepository(
@@ -211,6 +214,7 @@ class SqlModelUnitOfWork(UnitOfWork):
             session=self.session
         )
         self.installation = SQLModelInstallationRepository(session=self.session)
+        self._entry_savepoints.append(self.session.get_nested_transaction())
         return self
 
     async def __aexit__(
@@ -219,12 +223,14 @@ class SqlModelUnitOfWork(UnitOfWork):
         value: BaseException | None,
         traceback: TracebackType | None,
     ) -> bool | None:
-        savepoint = self.session.get_nested_transaction()
-        if type_ is not None and savepoint is not None:
-            # Inside a caller's savepoint, undo only that savepoint, so the caller can isolate the failure.
+        savepoint = self._entry_savepoints.pop()
+        if type_ is None or savepoint is None:
+            return await super().__aexit__(type_, value, traceback)
+        # Entered inside a caller's savepoint: undo only that savepoint, once, even when
+        # several levels unwind through it, so the caller can isolate the failure.
+        if savepoint.is_active:
             await savepoint.rollback()
-            return None
-        return await super().__aexit__(type_, value, traceback)
+        return None
 
     async def rollback(self) -> None:
         await self.session.rollback()

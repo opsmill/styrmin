@@ -59,6 +59,43 @@ async def test_failure_inside_a_savepoint_rolls_back_only_that_savepoint(
     assert await _names(session) == {"before", "after"}
 
 
+async def test_failure_in_nested_blocks_inside_a_savepoint_keeps_the_callers_work(
+    session: AsyncSession,
+) -> None:
+    """Two ``async with uow`` levels inside the savepoint, as context generation and the reference resolver open."""
+    uow = SqlModelUnitOfWork(session)
+    async with uow:
+        await _add(session, "before")
+        try:
+            async with session.begin_nested():
+                async with uow:
+                    async with uow:
+                        await _add(session, "in-savepoint")
+                        raise RuntimeError("simulated failure")
+        except RuntimeError:
+            pass
+        await _add(session, "after")
+        await uow.commit()
+
+    assert await _names(session) == {"before", "after"}
+
+
+async def test_uncaught_failure_in_nested_blocks_inside_a_savepoint_rolls_back_everything(
+    session: AsyncSession,
+) -> None:
+    uow = SqlModelUnitOfWork(session)
+    with pytest.raises(RuntimeError):
+        async with uow:
+            await _add(session, "before")
+            async with session.begin_nested():
+                async with uow:
+                    async with uow:
+                        await _add(session, "in-savepoint")
+                        raise RuntimeError("simulated failure")
+
+    assert await _names(session) == set()
+
+
 async def test_failure_outside_a_savepoint_rolls_back_the_whole_transaction(
     session: AsyncSession,
 ) -> None:
