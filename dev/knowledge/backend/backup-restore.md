@@ -1129,14 +1129,16 @@ GraphQL Mutation (cloneEnvironment)            [ADMIN]
         |  1. poll the capture's DERIVED status until terminal
         |  2. gate: FAILED capture -> fatal capture_failed, nothing
         |     materialises.  COMPLETED / PARTIAL -> proceed with the
-        |     usable constituents; a constituent whose affinity terms
-        |     name a failed capture fails too (cascade_reference_failures)
+        |     usable constituents; a constituent whose config's terms
+        |     name a deployment whose captured data cannot be used fails
+        |     too (cascade_reference_failures)
         |  3. choose one id per counterpart; create the environment from
         |     the captured config with the clone's cleared fields dropped,
         |     its override merged over the rest and its deployment
         |     references pointed at the counterparts; capabilities
-        |     recomputed (ADR-0027).  A term that names a failed capture
-        |     -> fatal referenced_deployment_not_cloned, no environment.
+        |     recomputed (ADR-0027).  A term that names a deployment with
+        |     no counterpart -> fatal referenced_deployment_not_cloned,
+        |     no environment.
         |     Committed before any counterpart exists — it is the discard
         |     handle
         |  4. per usable constituent, in order_counterparts order:
@@ -1197,13 +1199,15 @@ env_clone_environment_reference_not_cloned environment_clone_id=… named_deploy
 ```
 
 `env_clone_reference_not_cloned` is a warning, one per constituent that fails because its
-affinity terms name a deployment whose capture or counterpart failed.
-`env_clone_environment_reference_not_cloned` is an error, written once when the merged
-environment config names deployments whose capture failed, so the clone creates no
-environment; `named_deployment_ids` lists every such id, separated by commas. In
-`env_clone_materialised`, `usable` counts the constituents left after the capture cascade, and
-`failed` counts the counterparts that failed in the creation loop, including those failed by
-that cascade (`workflows/templates/clone.py`, `_run_environment_clone`).
+config's affinity terms name a deployment whose captured data cannot be used or whose
+counterpart failed. `env_clone_environment_reference_not_cloned` is an error, written once
+when the merged environment config names deployments that have no counterpart, so the clone
+creates no environment; `named_deployment_ids` lists every such id, separated by commas. In
+`env_clone_materialised`, `usable` counts the constituents left after the capture cascade.
+`failed` counts the counterparts that failed in the creation loop, including those failed
+without being created because their terms name a counterpart that failed earlier in the loop.
+The constituents that the capture cascade failed are removed from `usable` before the loop, so
+`failed` does not count them (`workflows/templates/clone.py`, `_run_environment_clone`).
 
 `environment_deleted` also reports `clones_discarded`, `source_clones_kept`,
 `source_clones_deleted` and `source_clones_failed` (`services/environments.py:557-571`).
@@ -1237,7 +1241,10 @@ Four points worth internalising, all pinned by the unit matrix:
 - **"Included" means "not skipped".** A skipped deployment neither fails the clone nor
   rescues it: `skipped` + `failed` with nothing cloned is `FAILED`, while **all-skipped is
   `COMPLETED`** — as is a clone of an empty selection (`deploymentIds: []`), which is the
-  legal "configuration only, no applications" shape.
+  legal "configuration only, no applications" shape. `clone_environment` refuses an empty
+  selection when the merged environment config has an affinity term that names a
+  deployment (`_refuse_uncloned_references`), so such a request has to clear `scheduling`
+  with `clearConfigFields` or replace it with `configOverride`.
 - **A missing `Restore` row does not retract a recorded outcome.** A restore that cascaded
   away leaves its `cloned` entry standing; only a `FAILED` restore turns it into a
   failure (`RestoreStatus` has no `PARTIAL` member).
@@ -1253,7 +1260,7 @@ Four points worth internalising, all pinned by the unit matrix:
 | `environment_backup_deleted` | The backing capture was deleted post-capture. | yes on a non-terminal clone, no on a terminal one |
 | `created_environment_deleted` | The created environment was deleted — the discard path. | yes on a non-terminal clone, no on a terminal one |
 | `source_environment_deleted` | The source environment was deleted while the clone was still building the environment it had created. | yes (written only on a non-terminal clone) |
-| `referenced_deployment_not_cloned` | An affinity term of the new environment's config names a deployment whose capture failed (no environment is created) or whose counterpart failed (no further counterpart is created). | yes |
+| `referenced_deployment_not_cloned` | An affinity term of the new environment's config names a deployment that has no counterpart, because its captured data cannot be used or the capture cascade failed it (no environment is created), or a deployment whose counterpart failed (no further counterpart is created). | yes |
 
 How the derivation reads entries that are missing data or cannot be read
 (`services/backup/clone.py:370-487`):
@@ -1351,7 +1358,7 @@ selection is validated and before the concurrency guard (`_refuse_uncloned_refer
    `UnclonedDeploymentReferenceError` (`VALIDATION_ERROR`). `extensions.deployments` lists each
    such deployment with `deployment_id`, `deployment_name` (the last name of a tombstoned
    deployment, from the roster with tombstones) and `paths`. `deployment_id` is `null` for a
-   driver name that no source deployment has.
+   driver name that no live source deployment has.
 
 **Counterpart ids chosen in advance.** After the capture cascade, `_run_environment_clone`
 builds one new id per usable constituent, keyed by the source deployment id, and the
@@ -1370,29 +1377,40 @@ counterparts as `{counterpart id: source name}`:
   name each other resolve in any order.
 - An id that the mapping does not have fails that counterpart with
   `UnclonedDeploymentReferenceError`, or, in the environment config, writes the fatal
-  `referenced_deployment_not_cloned` error. After the request check and the capture cascade,
-  this happens only through a capture or creation failure.
+  `referenced_deployment_not_cloned` error. After the request check, the mapping lacks the
+  deployments whose captured data cannot be used and the constituents that the capture cascade
+  failed; the cascade has already failed every constituent whose config names one of them.
 
 **Creation order.** `order_counterparts` puts each counterpart after the counterparts that its
 terms name. Among the counterparts that can come next, the ones that the environment config
-names come first, then the others in source-name order. When only cycles of terms are left, the
-cycle that names no other remaining counterpart is broken at its member with the lowest source
-name. Counterparts without terms are therefore created in source-name order, where they were
+names come first, then the others in source-name order. When only cycles of terms are left,
+`_closed_cycle_members` returns the members of every cycle that names no other remaining
+counterpart, and the member with the lowest source name among them comes next. The environment
+config passed to `order_counterparts` must give source ids, not counterpart ids. Counterparts
+without terms are therefore created in source-name order, where they were
 created in snapshot order before.
 
 **Failures cascade along the terms.**
 
-- After `_classify_captured_constituents`, `cascade_reference_failures` fails each usable
-  constituent whose terms name a deployment whose capture failed, repeated over chains. Each is
-  attributed `FAILED` with the `referenced_deployment_not_cloned` reason and logged as
-  `env_clone_reference_not_cloned`. When the environment config names a failed capture, the
-  flow writes the fatal `referenced_deployment_not_cloned` error, fails the pending entries and
-  creates no environment.
+- `_classify_captured_constituents` fails each deployment whose captured data cannot be used:
+  its capture failed, or its backup was deleted, did not complete or expired. Then
+  `cascade_reference_failures` fails each usable constituent whose terms name such a
+  deployment, repeated over chains. Each is attributed `FAILED` with the
+  `referenced_deployment_not_cloned` reason and logged as `env_clone_reference_not_cloned`.
+  When the environment config names a deployment that has no counterpart, the flow writes the
+  fatal `referenced_deployment_not_cloned` error, fails the pending entries and creates no
+  environment.
 - In the creation loop, a constituent whose terms name a counterpart that failed is failed
   without being created, with the same reason and log line, and a failed counterpart is removed
   from the `upcoming_deployments` of the ones after it. When a counterpart that the environment
   config names fails, the flow writes the fatal `referenced_deployment_not_cloned` error, creates
   no further counterpart, and fails the remaining pending entries.
+- Both checks read only the ids in `snapshot.config`. The terms of the driver version's
+  component definitions are not part of either cascade: they give names, which
+  `deploy_application` binds when it creates the counterpart. When such a name matches no
+  counterpart that exists or is still upcoming, for example the name of a failed counterpart,
+  `deploy_application` raises `UnresolvableAffinityReferenceError` and its message becomes the
+  deployment's failure reason.
 
 Known limit: inside a cycle of terms, a counterpart created before a peer whose creation then
 fails keeps a term with the peer's id. The clone attributes it `cloned`, and its next reconcile

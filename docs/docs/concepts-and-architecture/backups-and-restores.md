@@ -616,8 +616,12 @@ reconciliations — watch their status, not the restore's.
 
 When the redeploy of one of those deployments cannot start, the other
 redeploys still run and the restore returns normally. The failure is
-written only to the server log (`env_restore_fanout_dispatch_error`),
-not on the restore. One case: the captured config has an affinity term
+written only to the server log, not on the restore: an
+`env_restore_fanout_dispatch_error` line gives the restore's
+`environment_restore_id`, the `deployment_id` and, when the error has
+them, the `error_code` and the term's `path`. The
+`env_restore_fanout_dispatched` line counts the failure in
+`config_redeploy_failed`. One case: the captured config has an affinity term
 that names a deployment you deleted after the backup. The restore puts
 the config back as captured, and the next update of each deployment that
 the term applies to fails with the deleted deployment's last name and
@@ -737,7 +741,13 @@ setup.
 
 An **empty** selection is legal and means something useful: clone the
 environment only — its configuration, none of its applications. That
-clone reports `COMPLETED`.
+clone reports `COMPLETED`, unless the environment's config has an
+affinity term that names a deployment. The clone copies no deployment, so
+that request is rejected up front, as the last row of the table above
+describes. Clear `scheduling` (`clearConfigFields: ["scheduling"]`,
+`--clear-config-field scheduling`), or replace it in the override
+(`configOverride`, `--config-override`) with a `scheduling` that names no
+deployment.
 
 #### Changing the config on the way in
 
@@ -811,12 +821,22 @@ counterpart is created. That deployment is attributed as failed, its
 neighbours are cloned, and the clone reports the mix.
 
 A failure also reaches the deployments whose affinity terms name the
-failed one. Each is attributed as failed with the reason
-`an affinity term names deployment <name>, which was not cloned`. When the new
-environment's config names it, the clone reports `FAILED` with a
-`referenced_deployment_not_cloned` event: after a failed capture, no
-environment is created; after a failed counterpart, no further
-counterpart is created.
+failed one. A deployment fails this way when its captured data cannot be
+used (its capture failed, or its backup was deleted, did not complete or
+expired) or when its counterpart fails:
+
+- A deployment whose own config has such a term is attributed as failed,
+  and no counterpart is created for it. The reason is
+  `an affinity term names deployment <name>, which was not cloned`.
+- A term that comes from the component definitions of the deployment's
+  driver version gives a name, which Styrmin looks up when it creates the
+  counterpart. When no counterpart has that name, the counterpart is not
+  created and the deployment is attributed as failed with the reason
+  `Affinity deployment reference cannot be resolved: <name>`.
+- When the new environment's config names the failed deployment, the
+  clone reports `FAILED` with a `referenced_deployment_not_cloned` event.
+  When the deployment's captured data cannot be used, no environment is
+  created; after a failed counterpart, no further counterpart is created.
 
 #### Discarding a clone
 

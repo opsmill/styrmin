@@ -441,6 +441,12 @@ the environment's configuration only and settles on `COMPLETED` once that
 environment exists. `env-clones get` tells the two apart: `all eligible`
 versus `none (configuration only)`.
 
+When the environment's config has an affinity term that names a
+deployment, an empty selection is rejected with `VALIDATION_ERROR`,
+because the clone copies no deployment. Add
+`--clear-config-field scheduling`, or give a `scheduling` that names no
+deployment in `--config-override`.
+
 `--config-override` is an `UpdateEnvironmentInput` payload, so `envVars`
 is a list of `{name, value}` entries rather than a map. camelCase keys
 (`backupTtl`, `fqdnSuffix`) are the GraphQL spelling and always work;

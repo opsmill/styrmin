@@ -7,7 +7,7 @@
 [PRD comment](https://github.com/opsmill/styrmin/issues/508#issuecomment-6226052128);
 [issue #492](https://github.com/opsmill/styrmin/issues/492) (the failure);
 [PR #504](https://github.com/opsmill/styrmin/pull/504) (closed: the option rejected);
-`specs/027-deployment-reference-by-id/` (spec, research R-001 to R-014, critique)
+`specs/027-deployment-reference-by-id/` (spec, research R-001 to R-015, critique)
 **Related**: [ADR-034](0034-affinity-by-deployment-reference-via-label.md) (amended here: a
 stored reference gives an id, so a reconcile looks up no name),
 [ADR-054](0054-backend-authoritative-noop-detection.md) (a write-back or a re-apply must start
@@ -81,14 +81,16 @@ We chose option 2, as decided in the review of PR #504 and recorded in #508.
   `deployment_id` as a lowercase UUID string and keeps `components`; every other key of the config
   is stored as written.
 - **A write that names a missing deployment is refused.** A name that no non-tombstoned deployment of
-  the environment has, an id of another environment's deployment, and the id of a tombstoned
-  deployment are refused with `UnresolvableAffinityReferenceError` (`VALIDATION_ERROR`) and the
-  term's path, and nothing is saved. The binder checks each reference with the
-  `DeploymentReference` model first, so a component config from a driver version that gives
-  both or neither of `deployment_id` and `deployment_name`, or an id that is not a UUID, is
-  refused with the same error and path. `createEnvironment` refuses every term that names a
-  deployment, because a new environment has no deployment, except the deployments that the caller
-  is about to create (an environment clone).
+  the environment has, an id that matches no deployment, an id of another environment's
+  deployment, and the id of a tombstoned deployment are refused with
+  `UnresolvableAffinityReferenceError` (`VALIDATION_ERROR`) and the term's path, and nothing is
+  saved. The binder checks each reference with the `DeploymentReference` model first, so a
+  component config from a driver version is refused with the same error and path when a
+  reference gives both or neither of `deployment_id` and `deployment_name`, has a key other than
+  `deployment_id`, `deployment_name` and `components`, gives a `components` value that is not a
+  list of strings, or gives an id that is not a UUID. `createEnvironment` refuses every term that
+  names a deployment, because a new environment has no deployment, except the deployments that the
+  caller is about to create (an environment clone).
 - **A reconcile resolves ids only.** `resolve_deployment_reference` refuses a reference that gives
   a name, an id that is not a deployment of the environment, and a tombstoned deployment, which it
   reports with `deleted: true` and the deployment's last name. Each level (environment,
@@ -155,11 +157,11 @@ name source deployments. Option 3 keeps the failure of #492 and the clone failur
   name; among those that can come next, the ones that the environment's config names come first,
   then the others in source-name order, and a cycle of terms is broken in source-name order
   (critique E1). Counterparts without terms are therefore created in source-name order instead
-  of snapshot order. A capture or creation failure fails the counterparts whose terms name the
-  failed deployment, with the new step `referenced_deployment_not_cloned` when the new
-  environment's config names it. The request check merges the source config and the override at
-  request time, so a source config that no longer validates is refused at request time instead of
-  failing the clone.
+  of snapshot order. A deployment whose captured data cannot be used, or whose counterpart
+  fails, fails the counterparts whose terms name it, with the new step
+  `referenced_deployment_not_cloned` when the new environment's config names it. The request check
+  merges the source config and the override at request time, so a source config that no longer
+  validates is refused at request time instead of failing the clone.
 - Known limit: inside a cycle of terms, a counterpart created before a peer whose creation then
   fails keeps a term with the peer's id. The clone attributes it `cloned`, and its next reconcile
   is refused with the term's path. A creation failure after a successful capture needs the driver

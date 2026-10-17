@@ -723,7 +723,7 @@ class UnclonedReference:
     """A deployment that affinity terms of a clone name but the clone does not copy.
 
     ``deployment_id`` is ``None`` for a name, given by a driver version, that no
-    deployment of the source environment has.
+    live deployment of the source environment has.
     """
 
     deployment_id: UUID | None
@@ -734,9 +734,12 @@ class UnclonedReference:
 class UnclonedDeploymentReferenceError(ServiceError):
     """A clone request copies an affinity term whose deployment it leaves out.
 
-    Raised by ``cloneEnvironment`` before any record or backup is created. Each
-    entry gives the named deployment (last name when tombstoned) and the path of
-    every term that names it.
+    Raised by ``cloneEnvironment`` before any record or backup is created, and by
+    the clone flow's ``_create_counterpart`` when a copied term names a deployment
+    that has no counterpart; its message is then that deployment's failure reason.
+    The clone flow also builds one for the message of the fatal
+    ``referenced_deployment_not_cloned`` error. Each entry gives the named
+    deployment (last name when tombstoned) and the path of every term that names it.
     """
 
     error_code = "VALIDATION_ERROR"

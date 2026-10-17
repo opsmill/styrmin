@@ -392,11 +392,13 @@ def order_counterparts(
     Each counterpart comes after the counterparts that its affinity terms name.
     Among the counterparts that can come next, the ones that the environment
     config names come first, then the others in source-name order. When only
-    cycles of terms are left, the cycle that names no other remaining
-    counterpart is broken at its member with the lowest source name (critique E1).
+    cycles of terms are left, the next counterpart is the member with the lowest
+    source name among the members of every cycle that names no other remaining
+    counterpart (critique E1).
 
     Pure: reads the source deployment ids in ``snapshot.config`` and in
-    ``environment_config``, which must name the same source deployments.
+    ``environment_config``, so ``environment_config`` must give source ids, not
+    counterpart ids.
     """
     by_id = {snapshot.deployment_id: snapshot for snapshot in snapshots}
     named_by_environment = set(
