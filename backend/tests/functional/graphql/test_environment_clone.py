@@ -3011,3 +3011,55 @@ async def test_clone_points_the_environment_term_at_the_counterpart(
     source = await session.get(Environment, source_id)
     assert source is not None
     assert set(referenced_deployment_ids(source.config, "")) == {ids["a"]}
+
+
+# ---------------------------------------------------------------------------
+# 027 US6 — a clone request that leaves out a named deployment is refused (FR-005)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_clone_environment_refuses_a_selection_that_leaves_out_a_named_deployment(
+    fresh_client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """US6 scenario 1: b's term names a, and the selection gives b only.
+
+    The refusal comes before the clone record and the capture, and its extensions
+    list a with the path of b's term. ``test_clone_environment_requires_admin``
+    keeps the mutation ADMIN-only.
+    """
+    source_id, ids = await _seed_referencing_source(
+        session, "prod-us6-left-out", terms={"b": ["a"]}
+    )
+
+    response = await fresh_client.post(
+        "/graphql",
+        json={
+            "query": load_query("clone_environment"),
+            "variables": {
+                "environmentId": str(source_id),
+                "name": "prod-us6-left-out-rehearsal",
+                "deploymentIds": [str(ids["b"])],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    [error] = response.json()["errors"]
+    assert error["message"] == (
+        "An affinity term names a deployment that the clone does not copy: a"
+    )
+    assert error["extensions"]["code"] == "VALIDATION_ERROR"
+    assert error["extensions"]["deployments"] == [
+        {
+            "deployment_id": str(ids["a"]),
+            "deployment_name": "a",
+            "paths": ["deployment[b].config.scheduling.pod_affinity.preferred[0].term"],
+        }
+    ]
+    await _assert_no_clone_was_written(session)
+    captures = await session.exec(select(EnvironmentBackup))
+    assert list(captures.all()) == []
+    constituents = await session.exec(select(Backup))
+    assert list(constituents.all()) == []
+    prefect_manager_mock.run_action.assert_not_called()

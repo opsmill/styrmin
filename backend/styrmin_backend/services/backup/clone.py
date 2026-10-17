@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Mapping, NamedTuple, Sequence
+from typing import Any, Collection, Mapping, NamedTuple, Sequence
 from uuid import UUID, uuid4
 
 from fast_depends import Depends, inject
@@ -68,9 +68,15 @@ from styrmin_backend.services.exceptions import (
     EnvironmentCloneNotFoundError,
     InvalidCloneDeploymentSelectionError,
     InvalidContextError,
+    UnclonedDeploymentReferenceError,
+    UnclonedReference,
     UnknownEnvironmentConfigFieldError,
 )
-from styrmin_backend.services.scheduling.references import referenced_deployment_ids
+from styrmin_backend.services.scheduling.references import (
+    bind_deployment_references,
+    iter_reference_sites,
+    referenced_deployment_ids,
+)
 
 # ``UnitOfWork`` is imported at runtime, not under ``TYPE_CHECKING``: the
 # ``@inject``-decorated ``clone_environment`` below has fast-depends build a
@@ -190,6 +196,10 @@ CLONE_STEP_CREATED_ENVIRONMENT_DELETED = "created_environment_deleted"
 #: the record survives as the created environment's provenance.
 CLONE_STEP_SOURCE_ENVIRONMENT_DELETED = "source_environment_deleted"
 
+#: An affinity term of the new environment's config names a deployment whose
+#: capture or counterpart creation failed (027 FR-005). Always fatal.
+CLONE_STEP_REFERENCED_DEPLOYMENT_NOT_CLONED = "referenced_deployment_not_cloned"
+
 #: Every step name the clone paths write. The derivation keys on the deletion
 #: markers; the rest are always fatal and so are only read as history.
 CLONE_STEPS = frozenset(
@@ -200,6 +210,7 @@ CLONE_STEPS = frozenset(
         CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
         CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
         CLONE_STEP_SOURCE_ENVIRONMENT_DELETED,
+        CLONE_STEP_REFERENCED_DEPLOYMENT_NOT_CLONED,
     }
 )
 
@@ -250,6 +261,11 @@ CLONE_REASON_BACKUP_EXPIRED = "constituent backup expired"
 CLONE_REASON_DRIVER_VERSION_GONE = "captured driver version no longer exists"
 #: The whole capture failed, so no counterpart was ever attempted (FR-002).
 CLONE_REASON_CAPTURE_UNUSABLE = "environment backup capture did not succeed"
+#: An affinity term names a deployment whose capture or counterpart failed
+#: (027 FR-005); ``{name}`` is that deployment's source name.
+CLONE_REASON_REFERENCED_DEPLOYMENT_NOT_CLONED = (
+    "an affinity term names deployment {name}, which was not cloned"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -445,6 +461,132 @@ def _closed_cycle_members(
         for deployment_id in remaining
         if all(deployment_id in reachable[other] for other in reachable[deployment_id])
     ]
+
+
+# ---------------------------------------------------------------------------
+# Deployment references that a clone leaves out (027 plan D-006, D-007)
+# ---------------------------------------------------------------------------
+
+
+def find_uncloned_references(
+    environment_config: Mapping[str, Any] | None,
+    copied: Sequence[DeploymentEntity],
+    component_configs: Mapping[UUID, Mapping[str, dict[str, Any] | None]],
+    roster: Sequence[DeploymentEntity],
+) -> list[UnclonedReference]:
+    """List the deployments that the affinity terms of a clone name but the clone does not copy.
+
+    Checks the new environment's config, each copied deployment's config and the
+    component definitions of its driver version (``component_configs``, by
+    deployment id). An id must be a copied deployment's id and a name a copied
+    deployment's name, the way the clone flow binds them in the new environment
+    (critique X1). Names come from ``roster``, the source's deployments with
+    tombstones, so a tombstoned deployment is listed with its last name.
+    """
+    names_by_id = {deployment.id: deployment.name for deployment in roster}
+    live_ids_by_name = {
+        deployment.name: deployment.id
+        for deployment in roster
+        if deployment.deleted_at is None
+    }
+    copied_ids = {deployment.id for deployment in copied}
+    copied_names = {deployment.name for deployment in copied}
+    found: dict[UUID | str, UnclonedReference] = {}
+
+    def check(config: Mapping[str, Any] | None, path_prefix: str) -> None:
+        for site in iter_reference_sites(dict(config) if config else None, path_prefix):
+            raw_id = site.deployment_ref.get("deployment_id")
+            name = site.deployment_ref.get("deployment_name")
+            deployment_id: UUID | None
+            if raw_id is not None:
+                deployment_id = UUID(str(raw_id))
+                if deployment_id in copied_ids:
+                    continue
+                name = names_by_id.get(deployment_id)
+            elif name is not None and name not in copied_names:
+                deployment_id = live_ids_by_name.get(name)
+            else:
+                continue
+            key: UUID | str = deployment_id if deployment_id is not None else name
+            found.setdefault(
+                key,
+                UnclonedReference(deployment_id=deployment_id, deployment_name=name),
+            ).paths.append(site.path)
+
+    check(environment_config, "environment.config")
+    for deployment in copied:
+        check(deployment.config, f"deployment[{deployment.name}].config")
+        for component, config in component_configs.get(deployment.id, {}).items():
+            check(
+                config, f"deployment[{deployment.name}].component[{component}].config"
+            )
+    return list(found.values())
+
+
+def cascade_reference_failures(
+    snapshots: Sequence[DeploymentSnapshot], failed_ids: Collection[UUID]
+) -> dict[UUID, UUID]:
+    """Map each snapshot whose affinity terms name a failed deployment to that deployment.
+
+    A snapshot that fails this way fails the snapshots that name it in turn, until
+    nothing changes. The snapshots in ``failed_ids`` are not in the result.
+    """
+    failed = set(failed_ids)
+    cascaded: dict[UUID, UUID] = {}
+    changed = True
+    while changed:
+        changed = False
+        for snapshot in sorted(snapshots, key=_source_name_key):
+            if snapshot.deployment_id in failed:
+                continue
+            named_failed = next(
+                (
+                    named_id
+                    for named_id in referenced_deployment_ids(snapshot.config, "")
+                    if named_id in failed
+                ),
+                None,
+            )
+            if named_failed is not None:
+                cascaded[snapshot.deployment_id] = named_failed
+                failed.add(snapshot.deployment_id)
+                changed = True
+    return cascaded
+
+
+async def _refuse_uncloned_references(
+    uow: UnitOfWork,
+    source_config: Mapping[str, Any] | None,
+    override: dict[str, Any] | None,
+    cleared_fields: Sequence[str] | None,
+    roster: Sequence[DeploymentEntity],
+    results: Sequence[CloneDeploymentResult],
+) -> None:
+    """Raise when an affinity term that the clone copies names a deployment it leaves out (FR-005)."""
+    merged = merge_environment_config(source_config, override, cleared_fields)
+    pending = {
+        result.deployment_id
+        for result in results
+        if result.outcome is EnvironmentCloneDeploymentOutcome.PENDING
+    }
+    copied = [deployment for deployment in roster if deployment.id in pending]
+    driver_components: dict[UUID, dict[str, dict[str, Any] | None]] = {}
+    for driver_version_id in {d.application_driver_version_id for d in copied}:
+        driver_version = await uow.application_driver_versions.get(driver_version_id)
+        driver_components[driver_version_id] = {
+            component.name: component.config
+            for component in (
+                driver_version.component_configs if driver_version is not None else []
+            )
+        }
+    uncloned = find_uncloned_references(
+        merged,
+        copied,
+        {d.id: driver_components[d.application_driver_version_id] for d in copied},
+        roster,
+    )
+    if uncloned:
+        raise UnclonedDeploymentReferenceError(uncloned)
 
 
 # ---------------------------------------------------------------------------
@@ -1319,8 +1461,9 @@ async def clone_environment(
        source (ADR-031 dual identifier), canonicalise/validate the config
        override and the cleared-field names, check the target environment name
        is free in the source's cluster, check every selected deployment id is
-       one of the source's, and apply the environment-level concurrency guard
-       to the source (research D8).
+       one of the source's, refuse a request whose copied affinity terms name a
+       deployment it does not copy (027 FR-005), and apply the
+       environment-level concurrency guard to the source (research D8).
     2. **One registration transaction**: the clone record, its per-deployment
        attribution (including the skips already knowable — FR-004), and the
        whole capture (parent snapshot + constituent ``Backup`` rows + recorded
@@ -1374,6 +1517,11 @@ async def clone_environment(
             environment config.
         UnknownEnvironmentConfigFieldError: When ``clear_config_fields`` names
             something that is not a top-level ``EnvironmentConfig`` field.
+        UnresolvableAffinityReferenceError: When an affinity term of
+            ``config_override`` names no live deployment of the source.
+        UnclonedDeploymentReferenceError: When an affinity term of the new
+            environment's config, of a copied deployment's config or of its
+            driver version's components names a deployment the clone does not copy.
         EnvironmentOperationInProgressError: When an environment-level
             operation already occupies the source (research D8).
         EnvironmentCloneNotFoundError: When the record was deleted while the
@@ -1420,9 +1568,22 @@ async def clone_environment(
         # else is running (FR-011).
         _validate_deployment_selection(deployment_ids, deployments)
 
-        await _guard_no_environment_operation_in_progress(source.id, uow)
-
         results = _plan_deployment_results(deployments, deployment_ids)
+        # A name in the override is bound against the source and stored as an id,
+        # the way the clone flow merges it (027 plan D-006).
+        canonical_override = await bind_deployment_references(
+            uow, source.id, canonical_override, path_prefix="config_override"
+        )
+        await _refuse_uncloned_references(
+            uow,
+            source.config,
+            canonical_override,
+            clear_config_fields,
+            deployments,
+            results,
+        )
+
+        await _guard_no_environment_operation_in_progress(source.id, uow)
 
         clone_id = uuid4()
         clone = await uow.environment_clones.create(
