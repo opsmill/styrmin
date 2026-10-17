@@ -2,6 +2,8 @@
 
 The feature changes no GraphQL, SDK or CLI surface. These are the internal interfaces that change, with the behaviour the tests check. Names are proposals for the implementation; the behaviour is the contract.
 
+> Changed on 2026-10-17, after the code review: step 5 of `apply_service_aliases` uses the new `find_deleted_deployment_namespaces`, which follows the operator teardown's rule, and deletes a written alias whatever namespace holds it (research R-004).
+
 ## Kubernetes primitives (`agent/service/kubernetes/primitives.py`)
 
 ### `get_namespace(name: str) -> V1Namespace | None` (new)
@@ -18,7 +20,7 @@ The feature changes no GraphQL, SDK or CLI surface. These are the internal inter
 
 ### `is_namespace_gone_error(exc: ApiException) -> bool` (new)
 
-- `True` for a 404, and for a 403 whose status body lists a cause of type `NamespaceTerminating` or whose message contains "because it is being terminated", the message of Kubernetes' `NamespaceLifecycle` plugin.
+- `True` for a 404 (the namespace or the Service is gone), and for a 403 whose status body lists a cause of type `NamespaceTerminating` or whose message contains "because it is being terminated", the message of Kubernetes' `NamespaceLifecycle` plugin.
 - `False` for anything else, including an RBAC 403.
 
 ## Service alias flow (`agent/tasks/service_aliases.py`)
@@ -29,10 +31,15 @@ The feature changes no GraphQL, SDK or CLI surface. These are the internal inter
 - Returns the departing ones, by the rule in [data-model.md](../data-model.md#departing-namespace-derived-new).
 - Propagates any read error other than 404.
 
+### `find_deleted_deployment_namespaces(namespaces: Iterable[str]) -> set[str]` (new, async)
+
+- Reads as `find_departing_namespaces` does, concurrently.
+- Returns the namespaces whose StyrminDeployment has `spec.deletionRequested: true`, or has a `metadata.deletionTimestamp` while the Namespace exists and is not `Terminating`, by the rule in [data-model.md](../data-model.md#owner-namespace-of-a-deleted-deployment-derived-new). A Namespace that is missing or `Terminating` without a deletion request does not count.
+
 ### `apply_single_alias(alias_namespace, alias_name, resource) -> WrittenAlias | None` (changed task)
 
 - Writes with `apply_service`.
-- Returns `None`, and logs, when `is_namespace_gone_error` is true for the error.
+- Returns `None`, and logs the status with its meaning, when `is_namespace_gone_error` is true for the error: 404 (the namespace or the Service is gone), or 403 (the namespace is terminating).
 - Propagates any other error, as today.
 
 ### `apply_service_aliases(aliases: list[dict], stale_aliases: list[StaleAlias] | None = None) -> None` (changed flow)
@@ -40,10 +47,10 @@ The feature changes no GraphQL, SDK or CLI surface. These are the internal inter
 The `namespace_labels` parameter is removed. The flow no longer calls `apply_namespace`.
 
 1. Collects the holder and owner namespaces of `aliases` and the namespaces of `stale_aliases`, and calls `find_departing_namespaces` on them.
-2. Skips, and logs, each alias whose holder or owner namespace is departing, and each stale alias whose namespace is departing.
+2. Skips, and logs, each alias whose holder or owner namespace is departing, and each stale alias whose namespace is departing. The log names the departing namespace: the owner's when it matched, otherwise the holder's.
 3. Writes the remaining aliases with `apply_single_alias`.
 4. Deletes the remaining stale aliases, as today.
-5. Calls `find_departing_namespaces` on the owner namespaces of the written aliases. For each written alias whose owner namespace is now departing and whose holder namespace is not, deletes it with `delete_service` and the `resource_version` of the write.
+5. Calls `find_deleted_deployment_namespaces` on the owner namespaces of the written aliases. For each written alias whose owner namespace it returns, whatever namespace holds the alias, deletes it with `delete_service` and the `resource_version` of the write, and logs whether the delete deleted the alias.
 
 Callers: `_apply_service_aliases_step` (the three CRD flows) and the unregistered legacy flows `create_instance`, `update_instance` and `upgrade_instance`. All drop the `namespace_labels` argument.
 

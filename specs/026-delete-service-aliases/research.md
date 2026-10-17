@@ -59,23 +59,38 @@ A namespace whose StyrminDeployment does not exist but whose Namespace is `Activ
 
 ## R-004: Closing the race between the check and the write
 
-**Decision**: After it writes, the flow reads the same state again for the owners of the aliases it wrote. It deletes each alias it wrote whose owner's namespace has become departing, with a `resourceVersion` precondition taken from its own write. Aliases that it wrote into a namespace that became departing are left to that namespace's deletion.
+> Changed on 2026-10-17, after the code review. The second read now follows the rule by which the operator's teardown deletes aliases (R-011), not the departing rule of R-003, and the flow deletes a written alias whatever namespace holds it. The first version had two faults. When a restore deleted the owner's namespace between the two reads, the flow deleted the valid alias that it had just written, and no flow wrote it again after the restore. It also kept an alias held in a departing namespace, on the assumption that the namespace's deletion removes it, which `kubectl delete styrmindeployment` does not do.
 
-**Rationale**: A read and a write cannot be one atomic operation, so a flow can read "no deletion requested" just before the request and write just after it. With the second read, an alias of a deleted deployment cannot remain:
+**Decision**: After it writes, the flow reads the Namespace and the StyrminDeployment again for the owner namespaces of the aliases it wrote (`find_deleted_deployment_namespaces`). An owner namespace counts when one of these holds:
+
+- its StyrminDeployment has `spec.deletionRequested: true`, whatever the phase of the Namespace;
+- its StyrminDeployment has a `metadata.deletionTimestamp` while the Namespace exists and is not `Terminating` (`kubectl delete styrmindeployment`).
+
+A Namespace that is missing or `Terminating` without a deletion request does not count. The flow deletes each alias it wrote whose owner namespace counts, whatever namespace holds the alias, with a `resourceVersion` precondition taken from its own write, and logs whether the delete deleted the alias.
+
+**Rationale**: A read and a write cannot be one atomic operation, so a flow can read "no deletion requested" just before the request and write just after it. With the second read, an alias of a deleted deployment remains only in the last case of this list:
 
 - Let the flow's write complete at time *w* and its second read happen at *c*, with *w* < *c*. Let the request set `spec.deletionRequested` at *f*, and the teardown list the aliases at *l*, with *f* < *l*, because the teardown starts on that update.
-- If *c* ≥ *f*, the second read returns the flag, and the flow deletes the alias.
+- The flag can be read until the StyrminDeployment is removed, at *g*. The namespace deletion that follows the teardown runs the delete handler, whose teardown lists the aliases again at *l2*. kopf removes the StyrminDeployment only after that handler returns, so *l* < *l2* < *g*.
+- If *f* ≤ *c* < *g*, the second read returns the flag, and the flow deletes the alias.
 - If *c* < *f*, then *w* < *c* < *f* < *l*, so the teardown's list returns the alias and the teardown deletes it.
+- If *c* ≥ *g* and *w* < *l2*, the delete handler's list returns the alias and its teardown deletes it.
+- If *l2* < *w* < *g* ≤ *c*, the alias remains: the second read finds no StyrminDeployment, and without it the read cannot tell a deletion from a restore.
 - Reads from the Kubernetes API server without a `resourceVersion` are consistent reads, so a read after a write returns that write.
+
+A missing or `Terminating` Namespace does not count, because a restore deletes the target namespace without a deletion request (R-011). Velero restores the namespace later and no flow runs, so an alias of the restored deployment that the flow deleted would stay missing until a create, update or upgrade flow of the environment runs. The `metadata.deletionTimestamp` that the namespace deletion sets on the StyrminDeployment counts only while the Namespace is not `Terminating`, for the same reason. This is the rule of `_delete_service_aliases` in the operator.
+
+The flow deletes a written alias whatever namespace holds it, because on the `kubectl delete styrmindeployment` path the namespace that holds the alias is not deleted. Kubernetes' `NamespaceLifecycle` plugin allows deletes in a `Terminating` namespace, and `delete_service` returns `False` on a 404.
 
 The precondition keeps the second step from deleting an alias that another flow replaced in between, the same protection #506 gives stale aliases (`StaleAlias.resource_version`).
 
-For writes into the departing deployment's own namespace, the namespace deletion removes what was written, and the flow never creates that namespace (R-005). A write that races with the request can still reach that namespace before its deletion; the spec's Clarifications record this.
+The flow never creates the deleted deployment's namespace (R-005). On the platform-driven path, the namespace deletion removes the aliases of other deployments' services written into it, including a write that races with the request; the spec's Clarifications record this.
 
 **Alternatives considered**:
 
 - One read before the write, with no second read. Rejected: it leaves the window described above, so an alias can remain.
 - A Kubernetes admission webhook or a lock shared by the operator and the flows. Rejected: a new component or new shared state for a window of milliseconds that the second read closes.
+- A second read with the departing rule of R-003, and no delete of an alias whose holder namespace is departing. This was the first version; rejected after the review for the reasons in the note above.
 
 ## R-005: Never creating another deployment's namespace
 

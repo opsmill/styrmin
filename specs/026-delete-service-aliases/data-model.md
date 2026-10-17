@@ -29,16 +29,30 @@ A namespace `N` is departing when one of these holds (research R-003):
 - `N.status.phase == "Terminating"`;
 - the StyrminDeployment `N` in namespace `N` exists and has `spec.deletionRequested == true` or `metadata.deletionTimestamp` set.
 
-State over a deployment's deletion:
+The flow uses this rule in its first read, before its writes.
 
-| Moment | Namespace | StyrminDeployment | Departing |
-| --- | --- | --- | --- |
-| Running | `Active` | exists, no flag | no |
-| User requested the deletion | `Active` | `spec.deletionRequested: true` | yes |
-| Operator requested the namespace deletion | `Terminating` | `deletionTimestamp` set | yes |
-| Namespace gone, status `DELETED` | absent | absent | yes |
-| `kubectl delete styrmindeployment` | `Active` | `deletionTimestamp` set | yes |
-| New deployment, before its CR write | `Active` or absent | absent | no if `Active`; yes if absent |
+## Owner namespace of a deleted deployment (derived, new)
+
+> Added on 2026-10-17, after the code review: the second read used the departing rule, so a restore's namespace deletion made the flow delete an alias it had just written (research R-004).
+
+The second read, after the writes, uses the rule by which the operator's teardown deletes aliases (research R-004, R-011). An owner namespace `N` counts when one of these holds:
+
+- the StyrminDeployment `N` has `spec.deletionRequested == true`, whatever the phase of the Namespace;
+- the StyrminDeployment `N` has `metadata.deletionTimestamp` set, and the Namespace `N` exists and is not `Terminating`.
+
+A Namespace that is missing or `Terminating` without a deletion request does not count.
+
+State over a deployment's deletion, for both reads:
+
+| Moment | Namespace | StyrminDeployment | Departing (first read) | Counts in the second read |
+| --- | --- | --- | --- | --- |
+| Running | `Active` | exists, no flag | no | no |
+| User requested the deletion | `Active` | `spec.deletionRequested: true` | yes | yes |
+| Operator requested the namespace deletion | `Terminating` | `spec.deletionRequested: true`, `deletionTimestamp` set | yes | yes |
+| Namespace gone, status `DELETED` | absent | absent | yes | no |
+| `kubectl delete styrmindeployment` | `Active` | `deletionTimestamp` set | yes | yes |
+| New deployment, before its CR write | `Active` or absent | absent | no if `Active`; yes if absent | no |
+| A restore deletes the namespace | `Terminating`, then absent | no flag; then `deletionTimestamp` set; then absent | yes | no |
 
 ## `WrittenAlias` (Pydantic model, new, agent)
 
