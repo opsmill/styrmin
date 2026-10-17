@@ -10,21 +10,23 @@ An alias is named after the service's resolved name, which a service-name
 override sets, and carries the id of the deployment that owns the service.
 A flow deletes that deployment's aliases whose name it no longer uses.
 
-A flow never writes an alias for, or into the namespace of, a deployment whose
-deletion was requested, and never creates a namespace. It reads that state
-again after its writes and deletes the aliases whose owner's deletion was
-requested in between (#503).
+Before its writes, a flow skips the aliases of, and in the namespace of, a
+deployment that is being deleted or whose namespace is gone or terminating, and
+it never creates a namespace. A write can still race with a deletion request.
+The flow then deletes the alias when its second read finds the request, and the
+operator's teardown deletes it when the request comes after that read (#503).
 
 ClusterIP Services for each deployment's own services are handled by
 ``ServiceDiscoveryUtility`` (see ``resources/utilities/service_discovery.py``).
 """
 
 import asyncio
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from http import HTTPStatus
 from typing import Any
 from uuid import UUID
 
-from kubernetes_asyncio.client import V1Service
+from kubernetes_asyncio.client import V1Namespace, V1Service
 from kubernetes_asyncio.client.api_client import ApiException
 from prefect import flow, task
 from prefect.logging import get_run_logger
@@ -62,7 +64,7 @@ class WrittenAlias(BaseModel):
     namespace: str
     name: str
     owner_namespace: str
-    resource_version: str | None = None
+    resource_version: str | None
 
 
 def owner_namespace(alias: dict) -> str:
@@ -76,13 +78,13 @@ def owner_namespace(alias: dict) -> str:
 def build_external_name_service(
     resolved_name: str,
     target_namespace: str,
-    owner_namespace: str,
+    holder_namespace: str,
     deployment_id: str,
     cluster_domain: str = "cluster.local",
 ) -> dict[str, Any]:
     """Build a Kubernetes ExternalName Service manifest.
 
-    Creates a Service resource in *owner_namespace* that aliases *resolved_name*
+    Creates a Service resource in *holder_namespace* that aliases *resolved_name*
     to its FQDN in *target_namespace*. *deployment_id* is the deployment that
     owns the service.
     """
@@ -91,7 +93,7 @@ def build_external_name_service(
         "kind": "Service",
         "metadata": {
             "name": resolved_name,
-            "namespace": owner_namespace,
+            "namespace": holder_namespace,
             "labels": {
                 "app.kubernetes.io/managed-by": "styrmin",
                 SERVICE_ALIAS_LABEL: "true",
@@ -135,7 +137,7 @@ def compute_service_aliases(context: GlobalContext) -> list[dict[str, Any]]:
             build_external_name_service(
                 resolved_name=svc["resolved_name"],
                 target_namespace=svc_namespace,
-                owner_namespace=this_namespace,
+                holder_namespace=this_namespace,
                 deployment_id=str(svc_deployment_id),
                 cluster_domain=cluster_domain,
             )
@@ -153,7 +155,7 @@ def compute_service_aliases(context: GlobalContext) -> list[dict[str, Any]]:
                 build_external_name_service(
                     resolved_name=svc["resolved_name"],
                     target_namespace=this_namespace,
-                    owner_namespace=other_ns,
+                    holder_namespace=other_ns,
                     deployment_id=this_deployment_id,
                     cluster_domain=cluster_domain,
                 )
@@ -226,18 +228,61 @@ async def _read_styrmin_deployment(namespace: str) -> dict | None:
     return resource
 
 
-async def _is_departing(namespace: str) -> bool:
+async def _read_namespace_state(
+    namespace: str,
+) -> tuple[V1Namespace | None, dict | None]:
+    """The Namespace *namespace* and the StyrminDeployment in it; None for each one missing."""
     found, resource = await asyncio.gather(
         get_namespace(name=namespace), _read_styrmin_deployment(namespace)
     )
-    if found is None or (found.status and found.status.phase == "Terminating"):
+    return found, resource
+
+
+def _is_gone_or_terminating(found: V1Namespace | None) -> bool:
+    return found is None or (
+        found.status is not None and found.status.phase == "Terminating"
+    )
+
+
+def _deletion_requested(resource: dict) -> bool:
+    return bool((resource.get("spec") or {}).get("deletionRequested"))
+
+
+def _has_deletion_timestamp(resource: dict) -> bool:
+    return bool((resource.get("metadata") or {}).get("deletionTimestamp"))
+
+
+def _is_departing(found: V1Namespace | None, resource: dict | None) -> bool:
+    if _is_gone_or_terminating(found):
         return True
     if resource is None:
         return False
-    return bool(
-        (resource.get("spec") or {}).get("deletionRequested")
-        or (resource.get("metadata") or {}).get("deletionTimestamp")
+    return _deletion_requested(resource) or _has_deletion_timestamp(resource)
+
+
+def _is_deployment_deleted(found: V1Namespace | None, resource: dict | None) -> bool:
+    """The rule by which the operator's teardown deletes the deployment's aliases.
+
+    A namespace that is gone or terminating without a deletion request, as in a restore, does not count.
+    """
+    if resource is None:
+        return False
+    return _deletion_requested(resource) or (
+        _has_deletion_timestamp(resource) and not _is_gone_or_terminating(found)
     )
+
+
+async def _select_namespaces(
+    namespaces: Iterable[str],
+    predicate: Callable[[V1Namespace | None, dict | None], bool],
+) -> set[str]:
+    distinct = sorted(set(namespaces))
+    states = await asyncio.gather(*(_read_namespace_state(ns) for ns in distinct))
+    return {
+        ns
+        for ns, (found, resource) in zip(distinct, states, strict=True)
+        if predicate(found, resource)
+    }
 
 
 async def find_departing_namespaces(namespaces: Iterable[str]) -> set[str]:
@@ -245,25 +290,34 @@ async def find_departing_namespaces(namespaces: Iterable[str]) -> set[str]:
 
     A namespace without a StyrminDeployment counts only when it is gone or terminating.
     """
-    distinct = sorted(set(namespaces))
-    departing = await asyncio.gather(*(_is_departing(ns) for ns in distinct))
-    return {ns for ns, gone in zip(distinct, departing, strict=True) if gone}
+    return await _select_namespaces(namespaces, _is_departing)
+
+
+async def find_deleted_deployment_namespaces(namespaces: Iterable[str]) -> set[str]:
+    """The namespaces whose StyrminDeployment has a deletion request, or is deleted while
+    the namespace exists and is not terminating."""
+    return await _select_namespaces(namespaces, _is_deployment_deleted)
 
 
 @task(task_run_name="Apply service alias: {alias_namespace}/{alias_name}")
 async def apply_single_alias(
     alias_namespace: str, alias_name: str, resource: dict
 ) -> WrittenAlias | None:
-    """Write one alias; None when its namespace is gone or being deleted."""
+    """Write one alias; None on a 404 (the namespace or the Service is gone) or when the
+    namespace is terminating."""
     try:
         written = await apply_service(resource=resource, namespace=alias_namespace)
     except ApiException as exc:
         if not is_namespace_gone_error(exc):
             raise
         get_run_logger().info(
-            "Skipping service alias %s/%s: the namespace is gone or being deleted",
+            "Skipping service alias %s/%s: the write returned %s (%s)",
             alias_namespace,
             alias_name,
+            exc.status,
+            "the namespace or the Service is gone"
+            if exc.status == HTTPStatus.NOT_FOUND
+            else "the namespace is terminating",
         )
         return None
     return WrittenAlias(
@@ -285,6 +339,38 @@ async def delete_single_alias(
     )
 
 
+async def _delete_writes_of_deleted_deployments(written: list[WrittenAlias]) -> None:
+    """Delete each written alias whose owner's deletion the second read finds (#503)."""
+    logger = get_run_logger()
+    deleted_owners = await find_deleted_deployment_namespaces(
+        {alias.owner_namespace for alias in written}
+    )
+    for alias in written:
+        if alias.owner_namespace not in deleted_owners:
+            continue
+        deleted = await delete_single_alias(
+            alias_namespace=alias.namespace,
+            alias_name=alias.name,
+            resource_version=alias.resource_version,
+        )
+        if deleted:
+            logger.info(
+                "Deleted service alias %s in namespace %s: the deletion of the "
+                "deployment in %s started after the flow's first read (#503)",
+                alias.name,
+                alias.namespace,
+                alias.owner_namespace,
+            )
+        else:
+            logger.info(
+                "Did not delete service alias %s in namespace %s of the deleted "
+                "deployment in %s: the alias is gone, or another flow wrote it again (#503)",
+                alias.name,
+                alias.namespace,
+                alias.owner_namespace,
+            )
+
+
 @flow(flow_run_name="Apply service aliases")
 async def apply_service_aliases(
     aliases: list[dict],
@@ -293,8 +379,8 @@ async def apply_service_aliases(
     """Apply ExternalName Service aliases to the cluster and delete the stale ones.
 
     Skips the aliases and stale aliases that touch a departing namespace, writes
-    into existing namespaces only, then deletes the written aliases whose owner
-    started departing during the writes.
+    into existing namespaces only, then deletes the written aliases whose owner's
+    deletion started during the writes.
     """
     logger = get_run_logger()
     stale_aliases = stale_aliases or []
@@ -309,12 +395,14 @@ async def apply_service_aliases(
     for alias in aliases:
         alias_ns = alias["metadata"]["namespace"]
         alias_name = alias["metadata"]["name"]
-        if {alias_ns, owner_namespace(alias)} & departing:
+        owner_ns = owner_namespace(alias)
+        if {alias_ns, owner_ns} & departing:
             logger.info(
-                "Skipping service alias %s in namespace %s: its deployment or the "
-                "namespace is being deleted",
+                "Skipping service alias %s in namespace %s: namespace %s is gone or "
+                "terminating, or the deletion of its deployment was requested",
                 alias_name,
                 alias_ns,
+                owner_ns if owner_ns in departing else alias_ns,
             )
             continue
         logger.info(
@@ -333,9 +421,10 @@ async def apply_service_aliases(
     for stale in stale_aliases:
         if stale.namespace in departing:
             logger.info(
-                "Keeping service alias %s in namespace %s: the namespace is being "
-                "deleted",
+                "Keeping service alias %s in namespace %s: namespace %s is gone or "
+                "terminating, or the deletion of its deployment was requested",
                 stale.name,
+                stale.namespace,
                 stale.namespace,
             )
             continue
@@ -350,25 +439,4 @@ async def apply_service_aliases(
             resource_version=stale.resource_version,
         )
 
-    # A deletion requested between the first read and a write: remove that write (#503).
-    departing_after = await find_departing_namespaces(
-        {alias.owner_namespace for alias in written}
-    )
-    for alias in written:
-        if (
-            alias.owner_namespace not in departing_after
-            or alias.namespace in departing_after
-        ):
-            continue
-        logger.info(
-            "Deleting service alias %s in namespace %s: the deletion of the "
-            "deployment in %s was requested while the alias was written (#503)",
-            alias.name,
-            alias.namespace,
-            alias.owner_namespace,
-        )
-        await delete_single_alias(
-            alias_namespace=alias.namespace,
-            alias_name=alias.name,
-            resource_version=alias.resource_version,
-        )
+    await _delete_writes_of_deleted_deployments(written)

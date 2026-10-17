@@ -1148,6 +1148,8 @@ async def _delete_service_aliases(
             deployment_id,
         )
         return
+    # The labels hold the canonical form of the id.
+    deployment_id = str(UUID(deployment_id))
 
     if not deletion_requested:
         try:

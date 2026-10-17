@@ -3,7 +3,7 @@
 import json
 from contextlib import ExitStack
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -24,6 +24,7 @@ from styrmin_backend.agent.tasks.service_aliases import (
     apply_service_aliases,
     build_external_name_service,
     compute_service_aliases,
+    find_deleted_deployment_namespaces,
     find_departing_namespaces,
     owner_namespace,
     select_stale_aliases,
@@ -86,7 +87,7 @@ class TestBuildExternalNameService:
         manifest = build_external_name_service(
             resolved_name="intent",
             target_namespace="styrmin-aaa",
-            owner_namespace="styrmin-bbb",
+            holder_namespace="styrmin-bbb",
             deployment_id="aaa",
         )
         assert manifest["apiVersion"] == "v1"
@@ -102,7 +103,7 @@ class TestBuildExternalNameService:
         manifest = build_external_name_service(
             resolved_name="web",
             target_namespace="styrmin-aaa",
-            owner_namespace="styrmin-bbb",
+            holder_namespace="styrmin-bbb",
             deployment_id="aaa",
         )
         labels = manifest["metadata"]["labels"]
@@ -472,42 +473,61 @@ def _styrmin_deployment(
 _ABSENT = CustomResourceNotFound("absent")
 
 
-class TestFindDepartingNamespaces:
-    """One case per row of the state table in data-model.md (#503, research R-003)."""
+_STATE_TABLE = [
+    pytest.param("Active", _styrmin_deployment(), False, False, id="running"),
+    pytest.param(
+        "Active",
+        _styrmin_deployment(deletion_requested=True),
+        True,
+        True,
+        id="deletion-requested",
+    ),
+    pytest.param(
+        "Terminating",
+        _styrmin_deployment(
+            deletion_requested=True, deletion_timestamp="2026-10-16T10:00:00Z"
+        ),
+        True,
+        True,
+        id="namespace-terminating-after-request",
+    ),
+    pytest.param(None, _ABSENT, True, False, id="namespace-and-cr-gone"),
+    pytest.param(
+        "Active",
+        _styrmin_deployment(deletion_timestamp="2026-10-16T10:00:00Z"),
+        True,
+        True,
+        id="kubectl-delete",
+    ),
+    pytest.param("Active", _ABSENT, False, False, id="new-deployment-no-cr"),
+    pytest.param(
+        "Terminating",
+        _styrmin_deployment(),
+        True,
+        False,
+        id="namespace-terminating-without-request",
+    ),
+    pytest.param(
+        "Terminating",
+        _styrmin_deployment(deletion_timestamp="2026-10-16T10:00:00Z"),
+        True,
+        False,
+        id="restore-deletes-the-cr-with-the-namespace",
+    ),
+    pytest.param("Terminating", _ABSENT, True, False, id="restore-cr-gone"),
+]
 
-    @pytest.mark.parametrize(
-        ("phase", "resource", "departing"),
-        [
-            pytest.param("Active", _styrmin_deployment(), False, id="running"),
-            pytest.param(
-                "Active",
-                _styrmin_deployment(deletion_requested=True),
-                True,
-                id="deletion-requested",
-            ),
-            pytest.param(
-                "Terminating",
-                _styrmin_deployment(
-                    deletion_requested=True, deletion_timestamp="2026-10-16T10:00:00Z"
-                ),
-                True,
-                id="namespace-terminating",
-            ),
-            pytest.param(None, _ABSENT, True, id="both-gone"),
-            pytest.param(
-                "Active",
-                _styrmin_deployment(deletion_timestamp="2026-10-16T10:00:00Z"),
-                True,
-                id="kubectl-delete",
-            ),
-            pytest.param("Active", _ABSENT, False, id="new-deployment-no-cr"),
-            pytest.param(None, _ABSENT, True, id="no-cr-no-namespace"),
-        ],
-    )
-    @pytest.mark.asyncio
-    async def test_find_departing_namespaces_state_table(
-        self, phase: str | None, resource: Any, departing: bool
-    ) -> None:
+
+class TestFindDepartingNamespaces:
+    """One case per row of the state table in data-model.md (#503, research R-003, R-004).
+
+    ``departing`` is the first read's answer; ``deleted`` the second read's, the teardown's rule.
+    """
+
+    @staticmethod
+    async def _read(
+        find: Any, phase: str | None, resource: Any
+    ) -> tuple[set[str], AsyncMock, AsyncMock]:
         get_namespace = AsyncMock(return_value=_namespace(phase))
         get_resource = AsyncMock(
             side_effect=resource if isinstance(resource, Exception) else None,
@@ -517,7 +537,19 @@ class TestFindDepartingNamespaces:
             patch(f"{MODULE}.get_namespace", get_namespace),
             patch(f"{MODULE}.get_custom_resource", get_resource),
         ):
-            result = await find_departing_namespaces(["styrmin-x"])
+            result = await find(["styrmin-x"])
+        return result, get_namespace, get_resource
+
+    @pytest.mark.parametrize(
+        ("phase", "resource", "departing", "deleted"), _STATE_TABLE
+    )
+    @pytest.mark.asyncio
+    async def test_find_departing_namespaces_state_table(
+        self, phase: str | None, resource: Any, departing: bool, deleted: bool
+    ) -> None:
+        result, get_namespace, get_resource = await self._read(
+            find_departing_namespaces, phase, resource
+        )
 
         assert result == ({"styrmin-x"} if departing else set())
         get_namespace.assert_awaited_once_with(name="styrmin-x")
@@ -528,6 +560,22 @@ class TestFindDepartingNamespaces:
             version="v1alpha1",
             namespace="styrmin-x",
         )
+
+    @pytest.mark.parametrize(
+        ("phase", "resource", "departing", "deleted"), _STATE_TABLE
+    )
+    @pytest.mark.asyncio
+    async def test_find_deleted_deployment_namespaces_state_table(
+        self, phase: str | None, resource: Any, departing: bool, deleted: bool
+    ) -> None:
+        """Rule A: a namespace gone or terminating without a deletion request does not count."""
+        result, get_namespace, get_resource = await self._read(
+            find_deleted_deployment_namespaces, phase, resource
+        )
+
+        assert result == ({"styrmin-x"} if deleted else set())
+        get_namespace.assert_awaited_once_with(name="styrmin-x")
+        get_resource.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_find_departing_namespaces_reads_each_namespace_once(self) -> None:
@@ -589,19 +637,60 @@ def _stored(resource: dict, namespace: str) -> V1Service:
     )
 
 
+# (Namespace phase, StyrminDeployment) of a namespace; None for one that is missing.
+_State = tuple[str | None, dict[str, Any] | None]
+_TIMESTAMP = "2026-10-17T10:00:00Z"
+RUNNING: _State = ("Active", _styrmin_deployment())
+DELETION_REQUESTED: _State = ("Active", _styrmin_deployment(deletion_requested=True))
+KUBECTL_DELETE: _State = ("Active", _styrmin_deployment(deletion_timestamp=_TIMESTAMP))
+REQUESTED_AND_TERMINATING: _State = (
+    "Terminating",
+    _styrmin_deployment(deletion_requested=True, deletion_timestamp=_TIMESTAMP),
+)
+DEPARTING_REASON = (
+    "is gone or terminating, or the deletion of its deployment was requested"
+)
+
+
 class _Cluster:
-    """Patches the module's cluster calls; ``departing`` holds the answer of each read."""
+    """Fakes the cluster that the flow reads and writes.
+
+    ``before`` and ``after`` give the state of each namespace before and after the flow's first
+    write; a namespace that they do not name is running.
+    """
 
     def __init__(
         self,
-        departing: list[set[str]],
+        before: dict[str, _State] | None = None,
+        after: dict[str, _State] | None = None,
         failures: dict[tuple[str, str], ApiException] | None = None,
     ) -> None:
+        self.before = before or {}
+        self.after = self.before if after is None else after
         self.failures = failures or {}
-        self.find_departing = AsyncMock(side_effect=departing)
+        self.namespace_reads: list[tuple[bool, str]] = []
+        self.resource_reads: list[tuple[bool, str]] = []
         self.apply_service = AsyncMock(side_effect=self._apply)
         self.delete_service = AsyncMock(return_value=True)
         self.logger = MagicMock()
+
+    def _state(self, namespace: str) -> tuple[bool, _State]:
+        after_first_write = self.apply_service.await_count > 0
+        states = self.after if after_first_write else self.before
+        return after_first_write, states.get(namespace, RUNNING)
+
+    async def _get_namespace(self, *, name: str) -> V1Namespace | None:
+        after_first_write, (phase, _) = self._state(name)
+        self.namespace_reads.append((after_first_write, name))
+        return _namespace(phase)
+
+    async def _get_custom_resource(self, **kwargs: str) -> dict[str, Any]:
+        assert kwargs["name"] == kwargs["namespace"]
+        after_first_write, (_, resource) = self._state(kwargs["namespace"])
+        self.resource_reads.append((after_first_write, kwargs["namespace"]))
+        if resource is None:
+            raise CustomResourceNotFound(kwargs["name"])
+        return resource
 
     async def _apply(self, *, resource: dict, namespace: str) -> V1Service:
         key = (namespace, resource["metadata"]["name"])
@@ -613,11 +702,13 @@ class _Cluster:
         self, aliases: list[dict], stale: list[StaleAlias] | None = None
     ) -> None:
         with ExitStack() as stack:
-            stack.enter_context(
-                patch(f"{MODULE}.find_departing_namespaces", self.find_departing)
-            )
-            stack.enter_context(patch(f"{MODULE}.apply_service", self.apply_service))
-            stack.enter_context(patch(f"{MODULE}.delete_service", self.delete_service))
+            for name, fake in (
+                ("get_namespace", self._get_namespace),
+                ("get_custom_resource", self._get_custom_resource),
+                ("apply_service", self.apply_service),
+                ("delete_service", self.delete_service),
+            ):
+                stack.enter_context(patch(f"{MODULE}.{name}", fake))
             stack.enter_context(
                 patch(f"{MODULE}.get_run_logger", return_value=self.logger)
             )
@@ -628,11 +719,31 @@ class _Cluster:
             await apply_service_aliases.fn(aliases=aliases, stale_aliases=stale)
 
     @property
+    def reads(self) -> tuple[list[str], list[str]]:
+        """The namespaces of the first read and of the second read, in sorted order."""
+        assert sorted(self.resource_reads) == sorted(self.namespace_reads)
+        return (
+            sorted(ns for after, ns in self.namespace_reads if not after),
+            sorted(ns for after, ns in self.namespace_reads if after),
+        )
+
+    @property
     def written(self) -> set[tuple[str, str]]:
         return {
             (c.kwargs["namespace"], c.kwargs["resource"]["metadata"]["name"])
             for c in self.apply_service.await_args_list
         }
+
+    @property
+    def deleted(self) -> set[tuple[str, str, str | None]]:
+        return {
+            (c.kwargs["namespace"], c.kwargs["name"], c.kwargs["resource_version"])
+            for c in self.delete_service.await_args_list
+        }
+
+    @property
+    def messages(self) -> list[str]:
+        return [c.args[0] % c.args[1:] for c in self.logger.info.call_args_list]
 
 
 class TestApplyServiceAliasesFlow:
@@ -640,7 +751,7 @@ class TestApplyServiceAliasesFlow:
 
     @pytest.fixture
     def ids(self) -> dict[str, UUID]:
-        return {"a": uuid4(), "b": uuid4(), "c": uuid4()}
+        return {"a": uuid4(), "b": uuid4(), "c": uuid4(), "d": uuid4()}
 
     @pytest.fixture
     def ns(self, ids: dict[str, UUID]) -> dict[str, str]:
@@ -648,10 +759,23 @@ class TestApplyServiceAliasesFlow:
 
     @pytest.fixture
     def aliases(self, ids: dict[str, UUID]) -> list[dict]:
+        """A has a service of its own, so the flow writes into A, B and C."""
         context = _make_context(
             deployment_id=ids["a"],
             deployed_services=[
                 _service("intent", ids["a"]),
+                _service("executor", ids["b"]),
+                _service("worker", ids["c"]),
+            ],
+        )
+        return compute_service_aliases(context)
+
+    @pytest.fixture
+    def peer_aliases(self, ids: dict[str, UUID]) -> list[dict]:
+        """A has no service of its own, so the flow writes only into A, aliases owned by B and C."""
+        context = _make_context(
+            deployment_id=ids["a"],
+            deployed_services=[
                 _service("executor", ids["b"]),
                 _service("worker", ids["c"]),
             ],
@@ -663,7 +787,7 @@ class TestApplyServiceAliasesFlow:
         self, aliases: list[dict], ns: dict[str, str]
     ) -> None:
         """FR-009: with no departing namespace, the flow writes as before #503."""
-        cluster = _Cluster(departing=[set(), set()])
+        cluster = _Cluster()
 
         await cluster.run(aliases)
 
@@ -674,13 +798,29 @@ class TestApplyServiceAliasesFlow:
             (ns["b"], "intent"),
             (ns["c"], "intent"),
         }
-        assert cluster.find_departing.await_args_list[0] == call(
-            {ns["a"], ns["b"], ns["c"]}
-        )
+        everyone = sorted([ns["a"], ns["b"], ns["c"]])
+        assert cluster.reads == (everyone, everyone)
         cluster.delete_service.assert_not_awaited()
         # FR-008: the flow creates no namespace, so it imports no namespace writer.
         assert not hasattr(service_aliases, "apply_namespace")
         assert not hasattr(service_aliases, "apply_kubernetes_namespace")
+
+    @pytest.mark.asyncio
+    async def test_apply_service_aliases_reads_holders_and_owners_then_owners(
+        self, peer_aliases: list[dict], ns: dict[str, str]
+    ) -> None:
+        """The first read covers holders, owners and stale aliases; the second, the owners."""
+        cluster = _Cluster()
+        stale = [StaleAlias(namespace=ns["d"], name="old-intent", resource_version="5")]
+
+        await cluster.run(peer_aliases, stale)
+
+        assert cluster.written == {(ns["a"], "executor"), (ns["a"], "worker")}
+        assert cluster.reads == (
+            sorted([ns["a"], ns["b"], ns["c"], ns["d"]]),
+            sorted([ns["b"], ns["c"]]),
+        )
+        assert cluster.deleted == {(ns["d"], "old-intent", "5")}
 
     @pytest.mark.asyncio
     async def test_apply_service_aliases_skips_a_peer_departing_before_the_flow(
@@ -691,7 +831,7 @@ class TestApplyServiceAliasesFlow:
         A context built before the request and one built while B is DELETING both
         list B's services, so both give the flow this input.
         """
-        cluster = _Cluster(departing=[{ns["b"]}, set()])
+        cluster = _Cluster(before={ns["b"]: DELETION_REQUESTED})
         stale = [
             StaleAlias(namespace=ns["b"], name="old-intent", resource_version="3"),
             StaleAlias(namespace=ns["c"], name="old-intent", resource_version="4"),
@@ -700,54 +840,154 @@ class TestApplyServiceAliasesFlow:
         await cluster.run(aliases, stale)
 
         assert cluster.written == {(ns["a"], "worker"), (ns["c"], "intent")}
-        cluster.delete_service.assert_awaited_once_with(
-            name="old-intent", namespace=ns["c"], resource_version="4"
-        )
+        assert cluster.deleted == {(ns["c"], "old-intent", "4")}
+        assert {
+            f"Skipping service alias executor in namespace {ns['a']}: "
+            f"namespace {ns['b']} {DEPARTING_REASON}",
+            f"Skipping service alias intent in namespace {ns['b']}: "
+            f"namespace {ns['b']} {DEPARTING_REASON}",
+            f"Keeping service alias old-intent in namespace {ns['b']}: "
+            f"namespace {ns['b']} {DEPARTING_REASON}",
+        } <= set(cluster.messages)
+
+    @pytest.mark.asyncio
+    async def test_apply_service_aliases_skips_a_departing_owner_of_a_flow_without_services(
+        self, peer_aliases: list[dict], ns: dict[str, str]
+    ) -> None:
+        """The first read covers B although no alias is written into B's namespace."""
+        cluster = _Cluster(before={ns["b"]: DELETION_REQUESTED})
+
+        await cluster.run(peer_aliases)
+
+        assert cluster.written == {(ns["a"], "worker")}
+        assert cluster.reads == (sorted([ns["a"], ns["b"], ns["c"]]), [ns["c"]])
+        cluster.delete_service.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_apply_service_aliases_deletes_a_write_that_raced_the_request(
+        self, peer_aliases: list[dict], ns: dict[str, str]
+    ) -> None:
+        """Research R-004: B's deletion was requested between the two reads.
+
+        A has no service, so the second read must cover the owners, not the holder A.
+        """
+        cluster = _Cluster(after={ns["b"]: DELETION_REQUESTED})
+
+        await cluster.run(peer_aliases)
+
+        assert cluster.reads == (
+            sorted([ns["a"], ns["b"], ns["c"]]),
+            sorted([ns["b"], ns["c"]]),
+        )
+        assert cluster.deleted == {(ns["a"], "executor", f"rv-{ns['a']}-executor")}
+        assert (
+            f"Deleted service alias executor in namespace {ns['a']}: the deletion of "
+            f"the deployment in {ns['b']} started after the flow's first read (#503)"
+        ) in cluster.messages
+
+    @pytest.mark.parametrize(
+        ("state", "deleted"),
+        [
+            pytest.param(("Terminating", _styrmin_deployment()), False, id="restore"),
+            pytest.param(
+                ("Terminating", _styrmin_deployment(deletion_timestamp=_TIMESTAMP)),
+                False,
+                id="restore-deletes-the-cr-with-the-namespace",
+            ),
+            pytest.param(("Terminating", None), False, id="restore-cr-gone"),
+            pytest.param((None, None), False, id="restore-namespace-gone"),
+            pytest.param(KUBECTL_DELETE, True, id="kubectl-delete"),
+            pytest.param(REQUESTED_AND_TERMINATING, True, id="requested-terminating"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_apply_service_aliases_second_read_follows_the_teardown_rule(
+        self,
+        peer_aliases: list[dict],
+        ns: dict[str, str],
+        state: _State,
+        deleted: bool,
+    ) -> None:
+        """Rule A: only a deletion of B's deployment, not a restore of its namespace, deletes the write.
+
+        Velero restores B's namespace and no flow runs, so a deleted alias would stay missing.
+        """
+        cluster = _Cluster(after={ns["b"]: state})
+
+        await cluster.run(peer_aliases)
+
+        assert cluster.written == {(ns["a"], "executor"), (ns["a"], "worker")}
+        assert cluster.deleted == (
+            {(ns["a"], "executor", f"rv-{ns['a']}-executor")} if deleted else set()
+        )
+
+    @pytest.mark.asyncio
+    async def test_apply_service_aliases_deletes_a_write_whose_holder_is_also_deleted(
         self, aliases: list[dict], ns: dict[str, str]
     ) -> None:
-        """Research R-004: B's deletion was requested between the two reads."""
-        cluster = _Cluster(departing=[set(), {ns["b"]}])
+        """Rule B: the deletion of A and of B were both requested between the reads.
+
+        On the ``kubectl delete styrmindeployment`` path the holder's namespace stays, so the
+        flow deletes every write of a deleted owner, whatever namespace holds it.
+        """
+        cluster = _Cluster(
+            after={ns["a"]: DELETION_REQUESTED, ns["b"]: REQUESTED_AND_TERMINATING}
+        )
 
         await cluster.run(aliases)
 
-        assert cluster.find_departing.await_args_list[1] == call(
-            {ns["a"], ns["b"], ns["c"]}
-        )
-        cluster.delete_service.assert_awaited_once_with(
-            name="executor",
-            namespace=ns["a"],
-            resource_version=f"rv-{ns['a']}-executor",
-        )
+        assert cluster.deleted == {
+            (ns["a"], "executor", f"rv-{ns['a']}-executor"),
+            (ns["b"], "intent", f"rv-{ns['b']}-intent"),
+            (ns["c"], "intent", f"rv-{ns['c']}-intent"),
+        }
+
+    @pytest.mark.asyncio
+    async def test_apply_service_aliases_logs_a_delete_that_deleted_nothing(
+        self, peer_aliases: list[dict], ns: dict[str, str]
+    ) -> None:
+        """A 404 or 409 makes ``delete_service`` return False; the log says so."""
+        cluster = _Cluster(after={ns["b"]: DELETION_REQUESTED})
+        cluster.delete_service.return_value = False
+
+        await cluster.run(peer_aliases)
+
+        assert cluster.deleted == {(ns["a"], "executor", f"rv-{ns['a']}-executor")}
+        assert (
+            f"Did not delete service alias executor in namespace {ns['a']} of the "
+            f"deleted deployment in {ns['b']}: the alias is gone, or another flow "
+            "wrote it again (#503)"
+        ) in cluster.messages
+        assert not any(m.startswith("Deleted service alias") for m in cluster.messages)
 
     @pytest.mark.parametrize(
-        "error",
+        ("error", "reason"),
         [
             pytest.param(
                 _forbidden({"details": {"causes": [{"type": "NamespaceTerminating"}]}}),
+                "403 (the namespace is terminating)",
                 id="403-namespace-terminating",
             ),
-            pytest.param(ApiException(status=404, reason="Not Found"), id="404"),
+            pytest.param(
+                ApiException(status=404, reason="Not Found"),
+                "404 (the namespace or the Service is gone)",
+                id="404",
+            ),
         ],
     )
     @pytest.mark.asyncio
     async def test_apply_service_aliases_skips_a_namespace_that_is_gone(
-        self, aliases: list[dict], ns: dict[str, str], error: ApiException
+        self, aliases: list[dict], ns: dict[str, str], error: ApiException, reason: str
     ) -> None:
         """Spec User Story 2 scenario 6: B's namespace refuses the write; A completes."""
-        cluster = _Cluster(
-            departing=[set(), set()], failures={(ns["b"], "intent"): error}
-        )
+        cluster = _Cluster(failures={(ns["b"], "intent"): error})
 
         await cluster.run(aliases)
 
         assert cluster.apply_service.await_count == 4
-        assert any(
-            "the namespace is gone or being deleted" in c.args[0]
-            and c.args[1:] == (ns["b"], "intent")
-            for c in cluster.logger.info.call_args_list
+        assert (
+            f"Skipping service alias {ns['b']}/intent: the write returned {reason}"
+            in cluster.messages
         )
         cluster.delete_service.assert_not_awaited()
 
@@ -759,9 +999,7 @@ class TestApplyServiceAliasesFlow:
             'services is forbidden: User "system:serviceaccount:styrmin:agent" '
             'cannot create resource "services"'
         )
-        cluster = _Cluster(
-            departing=[set(), set()], failures={(ns["b"], "intent"): rbac}
-        )
+        cluster = _Cluster(failures={(ns["b"], "intent"): rbac})
 
         with pytest.raises(ApiException) as raised:
             await cluster.run(aliases)
