@@ -164,10 +164,11 @@ async def test_driver_detail_inspects_versions_via_tabs(
     session_ui_page: "Page",
 ) -> None:
     driver_id = styrmin_resources["driver_id"]
+    driver_version_id = styrmin_resources["driver_version_id"]
     page = session_ui_page
 
-    # 1. Navigate to the driver detail page.
-    await page.goto(f"/drivers/{driver_id}")
+    # 1. Navigate to the session driver version, loaded from a driver directory (spec 028).
+    await page.goto(f"/drivers/{driver_id}?version={driver_version_id}")
 
     # 2. Page root present with the expected data attributes — confirms the
     # redesigned header + tabs layout rendered, addressing a single version.
@@ -179,6 +180,9 @@ async def test_driver_detail_inspects_versions_via_tabs(
 
     # 3. Overview tab is active by default — the Details panel is visible.
     await expect(page.locator("[data-testid=driver-overview]")).to_be_visible()
+    await expect(
+        page.locator("[data-testid=driver-overview-driver-directory]")
+    ).to_contain_text("drivers/simple-app")
 
     # 4. Switch to Parameters — the panel renders (table or empty state) and
     # the Overview panel is unmounted (tabs are wired to distinct panels).

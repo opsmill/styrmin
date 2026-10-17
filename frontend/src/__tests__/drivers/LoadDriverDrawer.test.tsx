@@ -123,6 +123,89 @@ describe("LoadDriverDrawer", () => {
     });
   });
 
+  it("sends the driver directory when one is entered", async () => {
+    loadRemoteMutateAsync.mockResolvedValue({
+      loadRemoteApplicationDriverVersion: {
+        id: "v1",
+        applicationDriverId: "d1",
+      },
+    });
+    await renderDrawer();
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText("Repository URL"),
+      "https://github.com/org/repo",
+    );
+    await user.type(screen.getByLabelText("Driver directory"), "drivers/a");
+    await user.click(screen.getByRole("button", { name: /^load driver$/i }));
+    await waitFor(() => {
+      expect(loadRemoteMutateAsync).toHaveBeenCalledTimes(1);
+    });
+    expect(loadRemoteMutateAsync.mock.calls[0][0]).toStrictEqual({
+      repositoryUrl: "https://github.com/org/repo",
+      branch: "main",
+      driverDirectory: "drivers/a",
+    });
+  });
+
+  it.each([
+    ["empty", ""],
+    ["spaces only", "   "],
+  ])(
+    "sends no driver directory when the field is %s",
+    async (_case, entered) => {
+      loadRemoteMutateAsync.mockResolvedValue({
+        loadRemoteApplicationDriverVersion: {
+          id: "v1",
+          applicationDriverId: "d1",
+        },
+      });
+      await renderDrawer();
+      const user = userEvent.setup();
+      await user.type(
+        screen.getByLabelText("Repository URL"),
+        "https://github.com/org/repo",
+      );
+      if (entered) {
+        await user.type(screen.getByLabelText("Driver directory"), entered);
+      }
+      await user.click(screen.getByRole("button", { name: /^load driver$/i }));
+      await waitFor(() => {
+        expect(loadRemoteMutateAsync).toHaveBeenCalledTimes(1);
+      });
+      expect(loadRemoteMutateAsync.mock.calls[0][0]).toStrictEqual({
+        repositoryUrl: "https://github.com/org/repo",
+        branch: "main",
+      });
+    },
+  );
+
+  it("shows the load error and keeps the entered values when the load fails", async () => {
+    const error =
+      "Driver directory 'drivers/a' does not exist in repository " +
+      "'https://github.com/org/repo' (branch 'release', commit " +
+      "0123456789abcdef0123456789abcdef01234567).";
+    loadRemoteMutateAsync.mockRejectedValue(new Error(error));
+    await renderDrawer();
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText("Repository URL"),
+      "https://github.com/org/repo",
+    );
+    await user.clear(screen.getByLabelText("Branch"));
+    await user.type(screen.getByLabelText("Branch"), "release");
+    await user.type(screen.getByLabelText("Driver directory"), "drivers/a");
+    await user.click(screen.getByRole("button", { name: /^load driver$/i }));
+
+    expect(await screen.findByText(error)).toBeInTheDocument();
+    expect(screen.getByText("Couldn't load the driver")).toBeInTheDocument();
+    expect(screen.getByLabelText("Repository URL")).toHaveValue(
+      "https://github.com/org/repo",
+    );
+    expect(screen.getByLabelText("Branch")).toHaveValue("release");
+    expect(screen.getByLabelText("Driver directory")).toHaveValue("drivers/a");
+  });
+
   it("navigates to the new version's detail page and toasts on success", async () => {
     loadRemoteMutateAsync.mockResolvedValue({
       loadRemoteApplicationDriverVersion: {

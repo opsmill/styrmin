@@ -26,6 +26,7 @@ const localSchema = z.object({
 const remoteSchema = z.object({
   repositoryUrl: z.string().min(1, "Repository URL is required"),
   branch: z.string().min(1, "Branch is required"),
+  driverDirectory: z.string(),
 });
 
 type SourceTab = "git" | "local";
@@ -93,12 +94,17 @@ export function LoadDriverDrawer({
   };
 
   const remoteForm = useForm({
-    defaultValues: { repositoryUrl: "", branch: "main" },
+    defaultValues: { repositoryUrl: "", branch: "main", driverDirectory: "" },
     validators: { onSubmit: remoteSchema },
     onSubmit: async ({ value }) => {
       setSubmitError(null);
+      const driverDirectory = value.driverDirectory.trim();
       try {
-        const data = await loadRemoteMutation.mutateAsync(value);
+        const data = await loadRemoteMutation.mutateAsync({
+          repositoryUrl: value.repositoryUrl,
+          branch: value.branch,
+          ...(driverDirectory ? { driverDirectory } : {}),
+        });
         const v = data.loadRemoteApplicationDriverVersion;
         if (v) handleLoaded(v);
       } catch (err) {
@@ -259,6 +265,27 @@ export function LoadDriverDrawer({
                             {fieldError(field.state.meta.errors[0])}
                           </p>
                         )}
+                      </div>
+                    )}
+                  </remoteForm.Field>
+                  <remoteForm.Field name="driverDirectory">
+                    {(field) => (
+                      <div className="space-y-2">
+                        <Label htmlFor="driverDirectory">
+                          Driver directory
+                        </Label>
+                        <Input
+                          id="driverDirectory"
+                          placeholder="drivers/my-driver"
+                          className="font-mono text-xs"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          onBlur={field.handleBlur}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Folder that holds driver.styrmin.yml, relative to the
+                          repository root. Leave empty for the root.
+                        </p>
                       </div>
                     )}
                   </remoteForm.Field>

@@ -18,11 +18,15 @@ export type FilteredDriver = DriverListItem & {
   totalVersions: number;
 };
 
-/** Human-readable source: `repo @ branch` for git, the path for local. */
+/**
+ * Human-readable source: the path for local, `repo @ branch` for git, followed
+ * by ` · <driver directory>` when the git version was loaded from one.
+ */
 export function versionSource(v: DriverListVersion): string {
   if (v.sourceType === "local") return v.sourcePath ?? "local";
   const repo = v.sourceRepository || "";
-  return v.sourceBranch ? `${repo} @ ${v.sourceBranch}` : repo;
+  const source = v.sourceBranch ? `${repo} @ ${v.sourceBranch}` : repo;
+  return v.sourcePath ? `${source} · ${v.sourcePath}` : source;
 }
 
 /** Versions ordered "latest first" per the backend latest-wins rule. */

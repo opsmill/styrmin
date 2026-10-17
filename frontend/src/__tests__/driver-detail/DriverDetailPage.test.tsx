@@ -599,6 +599,71 @@ describe("DriverDetailPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows the driver directory row in the Overview tab for a git version loaded from one", async () => {
+    useGetDriverQueryMock.mockReturnValue(
+      makeQueryResult(
+        makeDriver([
+          makeVersion({
+            id: "v1",
+            version: "1.0.0",
+            createdOn: "2026-03-01T00:00:00Z",
+            sourcePath: "drivers/a",
+          }),
+        ]),
+      ),
+    );
+
+    await renderPage();
+
+    const row = screen.getByTestId("driver-overview-driver-directory");
+    expect(within(row).getByText("Driver directory")).toBeInTheDocument();
+    expect(within(row).getByText("drivers/a")).toBeInTheDocument();
+    expect(
+      within(row).getByRole("button", { name: "Copy to clipboard" }),
+    ).toBeInTheDocument();
+    // The row follows the Source row.
+    expect(row.previousElementSibling).toHaveTextContent("Source");
+  });
+
+  it.each([
+    [
+      "a git version without a driver directory",
+      { sourceType: "git", sourcePath: null },
+    ],
+    [
+      "a local version",
+      {
+        sourceType: "local",
+        sourceRepository: null,
+        sourceBranch: null,
+        sourcePath: "/opt/drivers/a",
+        sourceCommitSha: null,
+        contentHash: "0123456789abcdef",
+      },
+    ],
+  ])("shows no driver directory row for %s", async (_case, source) => {
+    useGetDriverQueryMock.mockReturnValue(
+      makeQueryResult(
+        makeDriver([
+          makeVersion({
+            id: "v1",
+            version: "1.0.0",
+            createdOn: "2026-03-01T00:00:00Z",
+            ...(source as Partial<VersionShape>),
+          }),
+        ]),
+      ),
+    );
+
+    await renderPage();
+
+    expect(screen.getByTestId("driver-overview")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("driver-overview-driver-directory"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Driver directory")).not.toBeInTheDocument();
+  });
+
   it("renders no description area and no links section when the version has neither", async () => {
     useGetDriverQueryMock.mockReturnValue(
       makeQueryResult(

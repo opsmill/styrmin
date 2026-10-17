@@ -2095,6 +2095,7 @@ export type LoadLocalDriverMutation = { __typename?: 'Mutation', loadLocalApplic
 export type LoadRemoteDriverMutationVariables = Exact<{
   repositoryUrl: Scalars['String']['input'];
   branch: Scalars['String']['input'];
+  driverDirectory?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 
@@ -3865,10 +3866,11 @@ export const useLoadLocalDriverMutation = <
     )};
 
 export const LoadRemoteDriverDocument = `
-    mutation LoadRemoteDriver($repositoryUrl: String!, $branch: String!) {
+    mutation LoadRemoteDriver($repositoryUrl: String!, $branch: String!, $driverDirectory: String = null) {
   loadRemoteApplicationDriverVersion(
     repositoryUrl: $repositoryUrl
     branch: $branch
+    driverDirectory: $driverDirectory
   ) {
     id
     version
