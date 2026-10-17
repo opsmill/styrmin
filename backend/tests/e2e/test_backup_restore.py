@@ -18,7 +18,7 @@ from prefect.client.schemas.filters import FlowFilter, FlowFilterName
 from prefect.exceptions import ObjectNotFound
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
-from styrmin_sdk.exceptions import ResourceNotFoundError
+from styrmin_sdk.exceptions import OperationFailedError, ResourceNotFoundError
 
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import (
@@ -160,6 +160,12 @@ CLONE_CLEARED_CONFIG_FIELD = "backup_ttl"
 # keep the scenario off the service layer's import graph. If the wording
 # changes, this is the one place that fails.
 CLONE_REASON_NOT_SELECTED = "not included in the requested deployment selection"
+
+# The message of ``UnclonedDeploymentReferenceError`` without the names that follow
+# it, mirrored by hand for the same reason as the reason above.
+CLONE_REFUSED_UNCLONED_REFERENCE = (
+    "An affinity term names a deployment that the clone does not copy"
+)
 
 # The ``clone_errors`` step prefix written when the environment a clone created
 # is deleted through ordinary environment deletion — the supported discard path
@@ -2201,6 +2207,19 @@ def _clone_results_by_deployment(
     return results
 
 
+def _referenced_deployment_ids(value: Any) -> set[str]:
+    """Every ``deployment_ref.deployment_id`` in a stored config, at any depth."""
+    if isinstance(value, list):
+        return set().union(*(_referenced_deployment_ids(item) for item in value))
+    if not isinstance(value, dict):
+        return set()
+    found = set().union(*(_referenced_deployment_ids(item) for item in value.values()))
+    reference = value.get("deployment_ref")
+    if isinstance(reference, dict) and reference.get("deployment_id"):
+        found.add(str(reference["deployment_id"]))
+    return found
+
+
 @pytest.mark.ci
 @pytest.mark.shard_env_backup
 async def test_environment_clone_lifecycle(
@@ -2219,8 +2238,17 @@ async def test_environment_clone_lifecycle(
     config override including field clearing) and US4 (derived tracking, full
     attribution, discard-and-re-clone). It reuses the stack the environment
     backup/restore node already deploys — ``scenario_environment_id``,
-    ``deployed_simple_app``, ``velero_ready`` — and adds one peer deployment so
-    the selection has something to exclude.
+    ``deployed_simple_app``, ``velero_ready`` — and adds one peer deployment
+    whose preferred pod affinity term names the primary.
+
+    027-deployment-reference-by-id (US5, US6, research R-013): the peer's term is
+    written with the primary's name and stored with the primary's id. A clone
+    request that selects only the peer is refused before any clone record or
+    backup exists, with the primary's name and the path of the peer's term. The
+    clone then selects both, and the peer's counterpart's term gives the primary's
+    counterpart id; no term in the new environment gives a source deployment's id.
+    The UI cannot write a deployment reference, so both variants write the term
+    and send the refused request through the SDK.
 
     Success criteria asserted here:
 
@@ -2232,10 +2260,10 @@ async def test_environment_clone_lifecycle(
       source-side artefact gained is the one environment backup the clone was
       built from.
     * **SC-003** — every source deployment considered is attributed exactly
-      once: the selected one ``CLONED`` with a counterpart and a restore, the
-      unselected one ``SKIPPED`` with a reason. Internal deployments are omitted
-      entirely (not reported as skips), which is what makes set *equality* the
-      right assertion.
+      once: both selected ones ``CLONED`` with a counterpart and a restore; the
+      re-clone's empty selection gives each ``SKIPPED`` with the not-selected
+      reason. Internal deployments are omitted entirely (not reported as skips),
+      which is what makes set *equality* the right assertion.
     * **SC-004** — the clone holds the data as of the capture, not the source
       mutation written after it, proved by an **authenticated write** against
       the counterpart (step 9 explains why ``/count`` is that write).
@@ -2248,6 +2276,15 @@ async def test_environment_clone_lifecycle(
     """
     from uuid import uuid4
 
+    from styrmin_sdk.graphql._generated.input_types import (
+        AffinityBlockInput,
+        AffinityTermInput,
+        DeploymentReferenceInput,
+        SchedulingInput,
+        UpdateDeploymentInput,
+        WeightedAffinityTermInput,
+    )
+
     client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
@@ -2258,11 +2295,28 @@ async def test_environment_clone_lifecycle(
     suffix = uuid4().hex[:8]
     clone_name = f"clone-target-{suffix}"
 
-    # A second eligible deployment is what makes the selection meaningful: with
-    # only one, "clone exactly what I selected" and "clone everything" are the
-    # same request. The shared environment enforces per-env service-name
-    # uniqueness, hence the override (see ``scenario_environment_id``).
-    excluded = await scenario_driver.create_deployment(
+    def _peer_scheduling(deployment_id: str) -> dict[str, Any]:
+        # The peer's stored scheduling: one preferred pod affinity term that names
+        # ``deployment_id``; preferred, so it never leaves a pod Pending.
+        return {
+            "pod_affinity": {
+                "preferred": [
+                    {
+                        "weight": 1,
+                        "term": {
+                            "topology_key": "kubernetes.io/hostname",
+                            "deployment_ref": {"deployment_id": deployment_id},
+                        },
+                    }
+                ]
+            }
+        }
+
+    # A second eligible deployment, whose affinity term names the primary, is
+    # what makes the refused selection and the counterpart remap meaningful. The
+    # shared environment enforces per-env service-name uniqueness, hence the
+    # override (see ``scenario_environment_id``).
+    peer = await scenario_driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
         environment_id=scenario_environment_id,
@@ -2271,12 +2325,12 @@ async def test_environment_clone_lifecycle(
             {"driverServiceName": "simple-app", "overrideName": f"envclone{suffix}"}
         ],
     )
-    excluded_deployment_id = excluded.id
+    peer_deployment_id = peer.id
     await scenario_driver.wait_for_deployment_running(
-        deployment_id=excluded_deployment_id,
+        deployment_id=peer_deployment_id,
         timeout=DEPLOYMENT_RUNNING_TIMEOUT_SECONDS,
     )
-    excluded_name = (await client.deployments.get(excluded_deployment_id)).name
+    peer_name = (await client.deployments.get(peer_deployment_id)).name
 
     previous_backup_ttl = (
         (await client.environments.get(environment_id=scenario_environment_id)).config
@@ -2289,6 +2343,46 @@ async def test_environment_clone_lifecycle(
     created_environment_ids: list[str] = []
 
     try:
+        # 0. The peer's affinity term names the primary by name and is stored with
+        #    the primary's id (027 US2). The wait is the fanout rule applied to
+        #    the update's own Task: it ends and the peer runs again.
+        peer_timeline_length = len(
+            await client.deployments.get_timeline(deployment_id=peer_deployment_id)
+        )
+        peer_task = await client.deployments.update(
+            peer_deployment_id,
+            input=UpdateDeploymentInput(
+                scheduling=SchedulingInput(
+                    podAffinity=AffinityBlockInput(
+                        preferred=[
+                            WeightedAffinityTermInput(
+                                weight=1,
+                                term=AffinityTermInput(
+                                    topologyKey="kubernetes.io/hostname",
+                                    deploymentRef=DeploymentReferenceInput(
+                                        deploymentName=primary_name
+                                    ),
+                                ),
+                            )
+                        ]
+                    )
+                )
+            ),
+        )
+        assert peer_task is not None, "adding the affinity term must reconcile the peer"
+        await wait_for_env_fanout_steady_state(
+            client,
+            deployment_id=peer_deployment_id,
+            pre_timeline_length=peer_timeline_length,
+        )
+        peer_config = (await client.deployments.get(peer_deployment_id)).config or {}
+        assert peer_config.get("scheduling") == _peer_scheduling(
+            primary_deployment_id
+        ), (
+            "the peer's term written with the primary's name must be stored with "
+            f"the primary's id (027 FR-001); got {peer_config!r}"
+        )
+
         # 1. Give the source a config field worth clearing (FR-006 / US3), then
         #    let the redeploy fanout settle before anything is captured — the
         #    environment is session-shared and a capture must not race a
@@ -2297,7 +2391,7 @@ async def test_environment_clone_lifecycle(
             deployment_id: len(
                 await client.deployments.get_timeline(deployment_id=deployment_id)
             )
-            for deployment_id in (primary_deployment_id, excluded_deployment_id)
+            for deployment_id in (primary_deployment_id, peer_deployment_id)
         }
         await scenario_driver.set_environment_backup_ttl(
             environment_id=scenario_environment_id,
@@ -2345,14 +2439,14 @@ async def test_environment_clone_lifecycle(
         source_deployments_before = await instanced_deployment_ids(
             client, scenario_environment_id
         )
-        assert {primary_deployment_id, excluded_deployment_id} <= (
+        assert {primary_deployment_id, peer_deployment_id} <= (
             source_deployments_before
         ), (
             "both source deployments must carry an active instance before the "
             f"clone, got {source_deployments_before!r}"
         )
         source_state_before = await source_deployment_state(
-            client, (primary_deployment_id, excluded_deployment_id)
+            client, (primary_deployment_id, peer_deployment_id)
         )
         source_objects_before = await workload_object_names(
             kubeconfig_path, primary_namespace
@@ -2364,13 +2458,55 @@ async def test_environment_clone_lifecycle(
             f"settled, otherwise the comparison is meaningless: {source_state_before!r}"
         )
 
-        # 3. One operation clones the environment: only the primary is selected
-        #    (US2), the override injects an env var and clears the captured
-        #    retention policy (US3).
+        # 3. A request that selects only the peer leaves out the primary its term
+        #    names, so it is refused before any clone record or backup (027 US6;
+        #    step 7 checks that the source gained no backup). The SDK drops the
+        #    GraphQL extensions, so the same request is sent raw to read the path.
+        clones_before = {
+            str(c.id)
+            for c in await client.environment_clones.list(scenario_environment_id)
+        }
+        with pytest.raises(OperationFailedError) as refused:
+            await client.environment_clones.create(
+                clone_name,
+                environment_id=scenario_environment_id,
+                deployment_ids=[peer_deployment_id],
+            )
+        assert refused.value.typename == "VALIDATION_ERROR", refused.value
+        assert str(refused.value) == (
+            f"{CLONE_REFUSED_UNCLONED_REFERENCE}: {primary_name}"
+        ), str(refused.value)
+        raw_refusal = await client._transport.execute(
+            load_query("clone_environment"),
+            {
+                "name": clone_name,
+                "environmentId": scenario_environment_id,
+                "deploymentIds": [peer_deployment_id],
+            },
+        )
+        [refusal_error] = raw_refusal.get("errors") or [{}]
+        assert (refusal_error.get("extensions") or {}).get("deployments") == [
+            {
+                "deployment_id": primary_deployment_id,
+                "deployment_name": primary_name,
+                "paths": [
+                    f"deployment[{peer_name}].config.scheduling.pod_affinity"
+                    ".preferred[0].term"
+                ],
+            }
+        ], raw_refusal
+        assert {
+            str(c.id)
+            for c in await client.environment_clones.list(scenario_environment_id)
+        } == clones_before, "a refused clone request must create no clone record"
+
+        #    One operation then clones the environment: both deployments are
+        #    selected (US2), the override injects an env var and clears the
+        #    captured retention policy (US3).
         clone = await scenario_driver.clone_environment(
             environment_id=scenario_environment_id,
             name=clone_name,
-            deployment_ids=[primary_deployment_id],
+            deployment_ids=[primary_deployment_id, peer_deployment_id],
             config_override={
                 "envVars": [
                     {
@@ -2382,9 +2518,8 @@ async def test_environment_clone_lifecycle(
             clear_config_fields=[CLONE_CLEARED_CONFIG_FIELD],
         )
         assert clone.name == clone_name
-        # ``PENDING`` is deliberately not required: an upfront skip is recorded
-        # with the clone row itself, which is already enough progress for the
-        # derivation to read ``IN_PROGRESS`` on the very first observation.
+        # ``PENDING`` is deliberately not required: the derivation may already
+        # read ``IN_PROGRESS`` on the very first observation.
         assert clone.status in {"PENDING", "IN_PROGRESS"}, (
             f"a just-registered clone must not be terminal, got {clone.status!r}"
         )
@@ -2402,20 +2537,22 @@ async def test_environment_clone_lifecycle(
         # deployment with an active instance, and it is *omitted* rather than
         # reported as a skip, which is why equality is the right assertion.
         registered = _clone_results_by_deployment(clone)
-        assert set(registered) == {primary_deployment_id, excluded_deployment_id}, (
+        assert set(registered) == {primary_deployment_id, peer_deployment_id}, (
             "every source deployment considered must be attributed, internal "
             f"deployments omitted (SC-003): got {set(registered)!r}"
         )
-        assert registered[excluded_deployment_id].outcome == "SKIPPED"
-        assert registered[excluded_deployment_id].deployment_name == excluded_name, (
-            "a skip is attributed by deployment name (SC-003); got "
-            f"{registered[excluded_deployment_id].deployment_name!r}"
-        )
-        assert registered[excluded_deployment_id].reason == (
-            CLONE_REASON_NOT_SELECTED
-        ), f"unexpected skip reason {registered[excluded_deployment_id].reason!r}"
+        for deployment_id, name in (
+            (primary_deployment_id, primary_name),
+            (peer_deployment_id, peer_name),
+        ):
+            assert registered[deployment_id].outcome == "PENDING", (
+                f"a selected deployment starts PENDING, got "
+                f"{registered[deployment_id].outcome!r} "
+                f"({registered[deployment_id].reason!r})"
+            )
+            assert registered[deployment_id].deployment_name == name
 
-        # 4. The capture is the *selected* deployment only (US2 at the cluster
+        # 4. The capture is the *selected* deployments only (US2 at the cluster
         #    level, not merely in the record), and it goes terminal before the
         #    source is mutated again.
         capture = await scenario_driver.wait_for_environment_backup(
@@ -2427,7 +2564,8 @@ async def test_environment_clone_lifecycle(
             f"it (FR-002); got {capture.status!r}"
         )
         assert {c.deployment_id for c in capture.constituents} == {
-            primary_deployment_id
+            primary_deployment_id,
+            peer_deployment_id,
         }, (
             "the selection must filter the capture itself, not just the clone "
             f"record (US2 / FR-003); got {[c.deployment_id for c in capture.constituents]!r}"
@@ -2456,7 +2594,7 @@ async def test_environment_clone_lifecycle(
             max_wait=ENVIRONMENT_CLONE_TIMEOUT_SECONDS,
         )
         assert finished.status == "COMPLETED", (
-            "the selected deployment cloned and restored cleanly, so the derived "
+            "both selected deployments cloned and restored cleanly, so the derived "
             f"status must be COMPLETED; got {finished.status!r} with events "
             f"{finished.clone_errors!r}"
         )
@@ -2468,28 +2606,30 @@ async def test_environment_clone_lifecycle(
         created_environment_ids.append(created_environment_id)
 
         results = _clone_results_by_deployment(finished)
-        assert set(results) == {primary_deployment_id, excluded_deployment_id}, (
+        assert set(results) == {primary_deployment_id, peer_deployment_id}, (
             f"attribution must still cover every source deployment (SC-003): "
             f"got {set(results)!r}"
         )
-        cloned_result = results[primary_deployment_id]
-        assert cloned_result.outcome == "CLONED", (
-            f"the selected deployment must be cloned, got {cloned_result.outcome!r} "
-            f"({cloned_result.reason!r})"
-        )
-        assert cloned_result.deployment_name == primary_name
-        counterpart_deployment_id = cloned_result.counterpart_deployment_id
-        assert counterpart_deployment_id is not None, (
-            "a CLONED entry must name the counterpart deployment it created"
-        )
-        assert cloned_result.restore_id is not None, (
-            "a CLONED entry must name the cross-target restore carrying its data"
-        )
-        skipped_result = results[excluded_deployment_id]
-        assert skipped_result.outcome == "SKIPPED"
-        assert skipped_result.counterpart_deployment_id is None, (
-            "an unselected deployment must not get a counterpart"
-        )
+        counterpart_ids: dict[str, str] = {}
+        for deployment_id, name in (
+            (primary_deployment_id, primary_name),
+            (peer_deployment_id, peer_name),
+        ):
+            cloned_result = results[deployment_id]
+            assert cloned_result.outcome == "CLONED", (
+                f"the selected deployment {name!r} must be cloned, got "
+                f"{cloned_result.outcome!r} ({cloned_result.reason!r})"
+            )
+            assert cloned_result.deployment_name == name
+            assert cloned_result.counterpart_deployment_id is not None, (
+                "a CLONED entry must name the counterpart deployment it created"
+            )
+            assert cloned_result.restore_id is not None, (
+                "a CLONED entry must name the cross-target restore carrying its data"
+            )
+            counterpart_ids[deployment_id] = cloned_result.counterpart_deployment_id
+        counterpart_deployment_id = counterpart_ids[primary_deployment_id]
+        peer_counterpart_deployment_id = counterpart_ids[peer_deployment_id]
 
         # 7. SC-002 — the source is untouched. Read through the SDK on both
         #    entrypoints: this is the source's *state*, not a UI affordance, and
@@ -2513,7 +2653,7 @@ async def test_environment_clone_lifecycle(
         # its resolved service names — must be exactly what it was.
         assert (
             await source_deployment_state(
-                client, (primary_deployment_id, excluded_deployment_id)
+                client, (primary_deployment_id, peer_deployment_id)
             )
         ) == source_state_before, (
             "cloning mutated a source deployment's declared state (SC-002); "
@@ -2592,9 +2732,37 @@ async def test_environment_clone_lifecycle(
             f"{CLONE_CLEARED_CONFIG_FIELD!r} cleared and the override merged "
             f"over it (FR-006); got {created_environment.config!r}"
         )
+        # 027 US5 — the peer's counterpart's term gives the primary's counterpart
+        # id, and no term in the new environment gives a source deployment's id.
+        # The simple-app driver's component definitions carry no term.
+        counterpart_configs = {
+            deployment_id: (await client.deployments.get(deployment_id)).config or {}
+            for deployment_id in (
+                counterpart_deployment_id,
+                peer_counterpart_deployment_id,
+            )
+        }
+        assert counterpart_configs[peer_counterpart_deployment_id].get(
+            "scheduling"
+        ) == _peer_scheduling(counterpart_deployment_id), (
+            "the peer's counterpart's term must name the primary's counterpart "
+            f"{counterpart_deployment_id} (027 US5); got "
+            f"{counterpart_configs[peer_counterpart_deployment_id]!r}"
+        )
+        new_environment_references = _referenced_deployment_ids(
+            created_environment.config
+        ).union(*(_referenced_deployment_ids(c) for c in counterpart_configs.values()))
+        assert new_environment_references == {counterpart_deployment_id}, (
+            "every term in the new environment must name a counterpart and none a "
+            f"source deployment (027 FR-008); got {new_environment_references!r}"
+        )
 
-        # 9. SC-001 / SC-004 — the counterpart is running in the new environment
-        #    and holds the data as of the capture.
+        # 9. SC-001 / SC-004 — the counterparts run in the new environment and
+        #    the primary's holds the data as of the capture. The peer's
+        #    counterpart must leave RESTORING before step 10 deletes it.
+        await _wait_for_sdk_deployment_running(
+            client, peer_counterpart_deployment_id, DEPLOYMENT_RUNNING_TIMEOUT_SECONDS
+        )
         scenario_driver.attach_to_deployment(environment_id=created_environment_id)
         await scenario_driver.wait_for_deployment_running(
             deployment_id=counterpart_deployment_id,
@@ -2708,7 +2876,7 @@ async def test_environment_clone_lifecycle(
         reclone_results = _clone_results_by_deployment(rematerialised)
         assert set(reclone_results) == {
             primary_deployment_id,
-            excluded_deployment_id,
+            peer_deployment_id,
         }, f"SC-003 must hold for a config-only clone too: {set(reclone_results)!r}"
         assert all(
             result.outcome == "SKIPPED" for result in reclone_results.values()
@@ -2716,6 +2884,21 @@ async def test_environment_clone_lifecycle(
             "an empty selection includes nothing, so every source deployment is "
             f"a skip: {[(r.deployment_id, r.outcome) for r in reclone_results.values()]!r}"
         )
+        for deployment_id, name in (
+            (primary_deployment_id, primary_name),
+            (peer_deployment_id, peer_name),
+        ):
+            skipped_result = reclone_results[deployment_id]
+            assert skipped_result.deployment_name == name, (
+                "a skip is attributed by deployment name (SC-003); got "
+                f"{skipped_result.deployment_name!r}"
+            )
+            assert skipped_result.reason == CLONE_REASON_NOT_SELECTED, (
+                f"unexpected skip reason {skipped_result.reason!r}"
+            )
+            assert skipped_result.counterpart_deployment_id is None, (
+                "an unselected deployment must not get a counterpart"
+            )
     finally:
         # Every cleanup step below is best-effort *except* the retention revert:
         # the environment is session-shared, so leaving a 1800h policy behind
@@ -2733,7 +2916,7 @@ async def test_environment_clone_lifecycle(
             deployment_id: len(
                 await client.deployments.get_timeline(deployment_id=deployment_id)
             )
-            for deployment_id in (primary_deployment_id, excluded_deployment_id)
+            for deployment_id in (primary_deployment_id, peer_deployment_id)
         }
         await scenario_driver.set_environment_backup_ttl(
             environment_id=scenario_environment_id, ttl=previous_backup_ttl
@@ -2756,7 +2939,7 @@ async def test_environment_clone_lifecycle(
         # constituent in any snapshot, an extra redeploy in any env-config
         # fanout, and a service name the next ``simple-app`` peer must avoid.
         with suppress(Exception):
-            await client.deployments.delete(excluded_deployment_id)
+            await client.deployments.delete(peer_deployment_id)
         # The UI driver's page is session-scoped and sibling tests act on
         # whatever page is open, so hand it back on the source environment's
         # primary deployment. Teardown only — the load-bearing source health
