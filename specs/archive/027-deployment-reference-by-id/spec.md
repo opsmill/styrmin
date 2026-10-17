@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-16
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: PRD "Deployment references stored by id" — [opsmill/styrmin#508 (comment)](https://github.com/opsmill/styrmin/issues/508#issuecomment-6226052128). Seed issue: [#508](https://github.com/opsmill/styrmin/issues/508). The failure it fixes: [#492](https://github.com/opsmill/styrmin/issues/492). The approach rejected for it: [PR #504](https://github.com/opsmill/styrmin/pull/504).
 

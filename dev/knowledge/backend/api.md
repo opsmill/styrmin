@@ -829,6 +829,32 @@ type ResolvedComponentScheduling {
 
 For accumulated lists (affinity terms, tolerations, topology-spread constraints), provenance is recorded **per element** at the resolved list's index — drivers and the frontend index into the map by index. See [ADR-036](../adr/0036-scheduling-provenance-map.md) for the rationale.
 
+### Deployment references in config inputs
+
+<!-- Extracted from specs/027-deployment-reference-by-id on 2026-10-17 -->
+
+A pod affinity or pod anti-affinity term (`AffinityTermInput.deploymentRef`, or `deployment_ref` in a JSON config) can name another deployment of the same environment with `DeploymentReferenceInput { deploymentId, deploymentName, components }`. Exactly one of `deploymentId` and `deploymentName` is given. The input's descriptions say that a name is replaced with the id when the config is written; no field was added or removed for this.
+
+`Deployment.config` and `Environment.config` (`JSON!`) return the stored form, which gives `deployment_id` only, as a lowercase UUID string, and keeps `components`. A client that writes back a config as it read it sends the id, and the write starts no reconcile ([ADR-054](../../adr/0054-backend-authoritative-noop-detection.md)).
+
+| Operation | A reference that gives a name | A reference to a missing or deleted deployment |
+| --- | --- | --- |
+| `deploy(config:)` | Stored as the id. The name of the deployment being created gives its new id. | Refused, nothing saved |
+| `updateDeployment(input:)` | Stored as the id, resolved after the rename in the same request | Refused, nothing saved |
+| `updateDeploymentVersion(input:)` | Stored as the id, resolved after the rename in the same request | Refused, nothing saved |
+| `createEnvironment(config:)` | Refused: a new environment has no deployment | Refused |
+| `updateEnvironment(input:)` | Stored as the id | Refused, config unchanged |
+| `cloneEnvironment(configOverride:)` | Resolved against the source environment, then pointed at the counterpart | Refused |
+
+`updateDeployment` also refuses, before it saves, a term of the environment's config or of a component's config that names a deleted deployment, because building the next instance resolves the terms of every level.
+
+Two errors carry the deployment that a term names. Both use the code `VALIDATION_ERROR`, so the SDK and `styrminctl` map them like any validation error and show the message.
+
+- `UnresolvableAffinityReferenceError` (`services/exceptions.py`): `extensions` gives `path` (for example `deployment.config.scheduling.pod_affinity.required[0]` or `component[server].config.scheduling…`), `deployment_id` and/or `deployment_name`, and `deleted: true` when the deployment is deleted. The message gives the path, the environment's name when known and the reason. For a deleted deployment, it also says how to fix the term at that level.
+- `UnclonedDeploymentReferenceError`: returned by `cloneEnvironment` before any record or backup is created. `extensions.deployments` lists `{deployment_id, deployment_name, paths, reason}` for each deployment that a copied term names and the clone does not copy. `deployment_id` is `null` for a name, given by a driver version, that no deployment of the source environment has.
+
+See [ADR-075](../../adr/0075-deployment-references-stored-by-id.md), [`data-models.md`](data-models.md) → Affinity-by-deployment-reference for the stored form, and [`backup-restore.md`](backup-restore.md#affinity-terms-in-a-clone) for the clone.
+
 ### DeploymentTimelineEntry
 
 <!-- Extracted from specs/001-deployment-history-timeline on 2026-05-17 -->

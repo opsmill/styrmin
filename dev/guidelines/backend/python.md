@@ -100,6 +100,17 @@ Save the deployment with its new instance before `apply_state`. `uow.deployments
 rows, so the database rejects a conflict, such as an instance name already in use, before the flow
 run starts. Save the task that `apply_state` returns after it ([#499](https://github.com/opsmill/styrmin/issues/499)).
 
+<!-- Extracted from specs/027-deployment-reference-by-id on 2026-10-17 -->
+
+The same order applies to a service that commits in phases. Run every check that can refuse the
+request before the first commit, including the checks that a later phase runs again. Otherwise a
+refused request leaves the first phase's writes saved. `update_deployment` in
+`services/deployment.py` commits the new config in phase 1 and builds the instance in phase 2. It
+replaces the names in the request's affinity terms with ids, and resolves the terms of the
+environment's config and of each component's config (`check_deployment_scheduling`), before the
+phase 1 commit, so a term that names a missing or deleted deployment saves nothing
+([ADR-075](../../adr/0075-deployment-references-stored-by-id.md)).
+
 ### Calculate a status that several writers change; do not store it
 
 <!-- Extracted from specs/019-task-steps on 2026-10-08 -->
@@ -200,6 +211,54 @@ backup = Backup(
 
 `create_backup` and `create_restore` in `services/backup/service.py`, and
 `register_environment_backup` in `services/backup/environment.py`, follow this rule.
+
+<!-- Extracted from specs/027-deployment-reference-by-id on 2026-10-17 -->
+
+Choose the ids first, too, when one operation creates several records whose configs name each
+other, or a record whose config names records created after it. Generate one id per record before
+you create any of them, rewrite the references in every config with those ids, and pass each id
+to the function that creates its record. Each config is then written once, in its final form, and
+the order in which the records are created does not decide whether a reference resolves. Pass the
+records that are not created yet to the checks that look references up, so the checks accept their
+ids.
+
+The environment clone flow (`_run_environment_clone` in `workflows/templates/clone.py`) builds
+`counterpart_ids = {source deployment id: uuid4()}` before it creates the new environment,
+rewrites the copied configs with `remap_deployment_references`, and calls
+`deploy_application(..., deployment_id=<chosen id>, upcoming_deployments=...)` for each
+counterpart. Do not create the rows first and update their configs afterwards: rows without an
+instance are a state the rest of the code does not handle, and a crash between the two writes
+leaves configs that name the wrong records
+([ADR-075](../../adr/0075-deployment-references-stored-by-id.md)).
+
+### Store a reference to another record by its id; look up a name only during the write
+
+<!-- Extracted from specs/027-deployment-reference-by-id on 2026-10-17 -->
+
+A user can rename a deployment and other records. A config that names another record by its name
+stops matching it after a rename ([#492](https://github.com/opsmill/styrmin/issues/492)), and
+rewriting the name in every config on each rename does not survive a restore that brings back an
+older config (PR [#504](https://github.com/opsmill/styrmin/pull/504)). When a config that Styrmin
+stores refers to another record:
+
+- Accept a name in the request when users write configs by hand, because ids differ in each
+  environment. Replace the name with the record's id before anything is saved or dispatched, and
+  store the id only, in one canonical form (a lowercase UUID string).
+- Look the name up after the request's own changes. Pass the records that the same write creates
+  or renames, with their names after the write, so that a reference can name the record being
+  created or its new name. A record found under a name that the same write changes is not a match.
+- Refuse a reference that names no live record in the same scope, by name or by id, and save
+  nothing. Give the full path of the reference in the config that was written, with the level as
+  the prefix (`environment.config.…`, `deployment.config.…`, `component[<name>].config.…`), and the
+  name or id it gives.
+- When the config is used later, at reconcile, look up ids only. Refuse an id of a deleted
+  (tombstoned) record and give its last name, because the stored config shows only the id.
+
+Reference: `bind_deployment_references` and `resolve_deployment_reference` in
+`services/scheduling/`. This is the rule of
+[Name a Kubernetes object after its record's id, and find it by the id](#name-a-kubernetes-object-after-its-records-id-and-find-it-by-the-id)
+applied to the configs that Styrmin stores. See
+[ADR-075](../../adr/0075-deployment-references-stored-by-id.md).
 
 ### Check for an operation in progress against its unfinished rows
 
@@ -554,6 +613,13 @@ Reference: `services/cluster_config_fanout.py` and
 `services/environments.py` predates the savepoint rule: its loop catches the error of each
 redeploy without a savepoint.
 
+<!-- Extracted from specs/027-deployment-reference-by-id on 2026-10-17 -->
+
+The redeploy loop of `restore_environment_backup` in `services/backup/environment.py` follows the
+rule. A restore puts back the captured environment config without checking it, so a redeploy
+refused because an affinity term names a deployment deleted since the backup does not drop the
+other redeploys ([ADR-075](../../adr/0075-deployment-references-stored-by-id.md)).
+
 <!-- Extracted from specs/011-admin-user-group-mgmt on 2026-05-13 -->
 
 ### Admin & authorization mutations
@@ -682,6 +748,27 @@ and a status calculated from the list would lose it.
 
 Reference: `_read_results` and `_merge_results` in `workflows/templates/clone.py`, which update
 `EnvironmentClone.deployment_results`.
+
+### Normalize a stored JSON config by walking the dict, not by a model round-trip
+
+<!-- Extracted from specs/027-deployment-reference-by-id on 2026-10-17 -->
+
+When a write rewrites some values of a JSON config before it stores it, such as names replaced
+with ids, change those keys in a copy of the dict and keep every other key as the user wrote it.
+Do not validate the dict into its Pydantic model, change the model and dump it back. The dump also
+changes keys the write did not touch (defaults, aliases, value forms), so a config written back
+exactly as it was read would differ from the stored dict. The no-op checks compare the stored
+dicts and the instance contexts built from them
+([ADR-054](../../adr/0054-backend-authoritative-noop-detection.md)), so the write would start a
+reconcile that changes nothing, and an older stored dict would change its form at its next write.
+
+- Copy the dict (`copy.deepcopy`) and change only the keys you normalize.
+- Give each normalized value exactly one stored form for one target, so that a request with the
+  name and a request with the id store the same dict.
+- Apply the same function on every write path that stores the config, so every stored config is
+  in that form when the no-op checks compare it.
+
+Reference: `bind_deployment_references` in `services/scheduling/references.py`.
 
 ## Domain Models (Pydantic)
 

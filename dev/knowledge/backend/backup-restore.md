@@ -1429,7 +1429,7 @@ created in snapshot order before.
   that names the peer, logs `env_clone_reference_not_cloned`, and keeps its
   `counterpart_deployment_id` and `restore_id`. The counterpart exists, and its next reconcile
   is refused with the term's path (research R-008 of
-  [spec 027](../../../specs/027-deployment-reference-by-id/research.md)).
+  [spec 027](../../../specs/archive/027-deployment-reference-by-id/research.md)).
 
 ### Cross-target restore
 
