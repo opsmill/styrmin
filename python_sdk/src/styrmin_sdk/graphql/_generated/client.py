@@ -2434,13 +2434,18 @@ class Client(AsyncBaseClient):
         return LoadLocalApplicationDriverVersion.model_validate(data)
 
     async def load_remote_application_driver_version(
-        self, repository_url: str, branch: str, **kwargs: Any
+        self,
+        repository_url: str,
+        branch: str,
+        driver_directory: Union[Optional[str], UnsetType] = UNSET,
+        **kwargs: Any,
     ) -> LoadRemoteApplicationDriverVersion:
         query = gql("""
-            mutation LoadRemoteApplicationDriverVersion($repositoryUrl: String!, $branch: String!) {
+            mutation LoadRemoteApplicationDriverVersion($repositoryUrl: String!, $branch: String!, $driverDirectory: String = null) {
               loadRemoteApplicationDriverVersion(
                 repositoryUrl: $repositoryUrl
                 branch: $branch
+                driverDirectory: $driverDirectory
               ) {
                 id
                 applicationDriverId
@@ -2450,6 +2455,9 @@ class Client(AsyncBaseClient):
                 version
                 contentHash
                 sourceCommitSha
+                sourceRepository
+                sourceBranch
+                sourcePath
                 loadWarnings
                 supportedVersions
                 components
@@ -2477,6 +2485,7 @@ class Client(AsyncBaseClient):
         variables: dict[str, object] = {
             "repositoryUrl": repository_url,
             "branch": branch,
+            "driverDirectory": driver_directory,
         }
         response = await self.execute(
             query=query,

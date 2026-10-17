@@ -48,10 +48,56 @@ def test_drivers_load_version(mock_client: MagicMock, capsys: pytest.CaptureFixt
         app(["drivers", "load-version", "https://github.com/example/driver.git", "main"])
     assert exc.value.code == 0
     mock_client.drivers.load_version.assert_called_once_with(
-        repository_url="https://github.com/example/driver.git", branch="main"
+        repository_url="https://github.com/example/driver.git", branch="main", driver_directory=None
     )
     output = capsys.readouterr().out
     assert "1.0.0" in output
+
+
+def test_drivers_load_version_with_driver_directory(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    """Spec 028 / US1: --driver-directory reaches the SDK and the output names the driver directory."""
+    mock_version = MagicMock(
+        id="v-1",
+        version="1.0.0",
+        application_driver_id="d-1",
+        supported_versions=">=14",
+        content_hash=None,
+        source_commit_sha="def4567890abcdef1234567890abcdef12345678",
+        source_repository="https://github.com/example/drivers.git",
+        source_branch="main",
+        source_path="drivers/a",
+        load_warnings=[],
+        component_configs=[],
+        actions=[],
+        helm_chart=None,
+    )
+    mock_client.drivers.load_version = AsyncMock(return_value=mock_version)
+
+    with pytest.raises(SystemExit) as exc:
+        app(
+            [
+                "drivers",
+                "load-version",
+                "https://github.com/example/drivers.git",
+                "main",
+                "--driver-directory",
+                "drivers/a",
+            ]
+        )
+    assert exc.value.code == 0
+    mock_client.drivers.load_version.assert_called_once_with(
+        repository_url="https://github.com/example/drivers.git", branch="main", driver_directory="drivers/a"
+    )
+    output = capsys.readouterr().out
+    assert "Driver directory: drivers/a" in output
+    assert output.index("Commit SHA:") < output.index("Driver directory:")
+
+
+def test_drivers_load_version_help_lists_driver_directory(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        app(["drivers", "load-version", "--help"])
+    assert exc.value.code == 0
+    assert "--driver-directory" in capsys.readouterr().out
 
 
 def test_drivers_load_local_version(mock_client: MagicMock, capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
@@ -123,6 +169,8 @@ def test_drivers_load_version_renders_label_and_full_commit_sha(
         supported_versions=">=14",
         content_hash=None,
         source_commit_sha=full_sha,
+        source_repository="https://github.com/example/driver.git",
+        source_path=None,
         component_configs=[],
         actions=[],
         helm_chart=None,
@@ -138,6 +186,7 @@ def test_drivers_load_version_renders_label_and_full_commit_sha(
     # T041: full fingerprint exposed on detail
     assert f"Commit SHA: {full_sha}" in output
     assert "Content hash:" not in output
+    assert "Driver directory:" not in output
 
 
 def test_drivers_load_local_version_prints_load_warnings(

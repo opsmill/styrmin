@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from styrmin_sdk._queries import load_query
 from styrmin_sdk.graphql._generated.list_application_drivers import (
     ListApplicationDrivers,
@@ -26,12 +28,12 @@ class DriverResource(BaseResource):
         return data.application_drivers or []
 
     async def load_version(
-        self, repository_url: str, branch: str
+        self, repository_url: str, branch: str, driver_directory: str | None = None
     ) -> LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersion:
-        result = await self._transport.execute(
-            load_query("load_version"),
-            {"repositoryUrl": repository_url, "branch": branch},
-        )
+        variables: dict[str, Any] = {"repositoryUrl": repository_url, "branch": branch}
+        if driver_directory is not None:
+            variables["driverDirectory"] = driver_directory
+        result = await self._transport.execute(load_query("load_version"), variables)
         self._check_graphql_errors(result)
         return self._parse(
             LoadRemoteApplicationDriverVersion,
