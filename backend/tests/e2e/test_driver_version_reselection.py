@@ -22,12 +22,18 @@ spec 013, hence a second ApplicationDriverVersion row on the same driver.
 Loading that second build must not disturb the first one's actions: each
 build keeps its own Prefect deployments, pinned to the commit it was loaded
 from (#375).
+
+The session driver version comes from the driver directory
+``drivers/simple-app`` of the ``driver-collection`` repository: the test checks
+that it stores that driver directory and that its actions run from it (#517).
 """
 
 from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -39,6 +45,7 @@ from kr8s.asyncio.objects import Service as AsyncService
 from prefect.client.orchestration import PrefectClient
 from prefect.client.schemas.filters import DeploymentFilter, DeploymentFilterTags
 from styrmin_sdk import StyrminClient
+from styrmin_sdk._queries import load_query
 from playwright.async_api import expect
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
@@ -50,6 +57,8 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.shard_general,
 ]
+
+SESSION_DRIVER_DIRECTORY = "drivers/simple-app"
 
 
 async def _publish_driver_version(
@@ -96,8 +105,9 @@ async def _publish_driver_version(
     return branch
 
 
-async def _assert_actions_pinned(*, vcluster: dict, commits: list[str]) -> None:
-    """Each commit has its own action deployments, checking out that commit."""
+@asynccontextmanager
+async def _prefect(vcluster: dict) -> AsyncIterator[PrefectClient]:
+    """A Prefect client on a port-forward to the vcluster's Prefect server."""
     kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
     prefect_service = await AsyncService.get(
         "prefect-server", namespace="styrmin", api=kr8s_api
@@ -106,19 +116,50 @@ async def _assert_actions_pinned(*, vcluster: dict, commits: list[str]) -> None:
         prefect_url = f"http://localhost:{port}/api"
         await _wait_for_http(f"{prefect_url}/health", timeout=60.0)
         async with PrefectClient(api=prefect_url) as prefect:
-            for commit in commits:
-                deployments = await prefect.read_deployments(
-                    deployment_filter=DeploymentFilter(
-                        tags=DeploymentFilterTags(all_=[f"fingerprint/{commit[:7]}"])
-                    )
+            yield prefect
+
+
+async def _assert_actions_pinned(*, vcluster: dict, commits: list[str]) -> None:
+    """Each commit has its own action deployments, checking out that commit."""
+    async with _prefect(vcluster) as prefect:
+        for commit in commits:
+            deployments = await prefect.read_deployments(
+                deployment_filter=DeploymentFilter(
+                    tags=DeploymentFilterTags(all_=[f"fingerprint/{commit[:7]}"])
                 )
-                assert deployments, f"no action deployment for commit {commit[:7]}"
-                for deployment in deployments:
-                    clone = deployment.pull_steps[0][
-                        "prefect.deployments.steps.git_clone"
-                    ]
-                    assert clone.get("commit_sha") == commit, deployment.name
-                    assert not clone.get("branch"), deployment.name
+            )
+            assert deployments, f"no action deployment for commit {commit[:7]}"
+            for deployment in deployments:
+                clone = deployment.pull_steps[0]["prefect.deployments.steps.git_clone"]
+                assert clone.get("commit_sha") == commit, deployment.name
+                assert not clone.get("branch"), deployment.name
+
+
+async def _assert_actions_run_from_driver_directory(
+    *, vcluster: dict, commit: str, driver_directory: str
+) -> None:
+    """The actions of a driver directory version clone, then enter that folder."""
+    async with _prefect(vcluster) as prefect:
+        deployments = await prefect.read_deployments(
+            deployment_filter=DeploymentFilter(
+                tags=DeploymentFilterTags(
+                    all_=[f"fingerprint/{commit[:7]}", f"directory/{driver_directory}"]
+                )
+            )
+        )
+    assert deployments, (
+        f"no action deployment for commit {commit[:7]} in {driver_directory}"
+    )
+    for deployment in deployments:
+        steps = deployment.pull_steps or []
+        assert [next(iter(step)) for step in steps] == [
+            "prefect.deployments.steps.git_clone",
+            "prefect.deployments.steps.set_working_directory",
+        ], deployment.name
+        directory = steps[1]["prefect.deployments.steps.set_working_directory"][
+            "directory"
+        ]
+        assert directory.endswith(f"/{driver_directory}"), (deployment.name, directory)
 
 
 @pytest.mark.ci
@@ -145,6 +186,26 @@ async def test_driver_version_reselection(
     assert deployment.application_driver_version is not None
     original_commit = deployment.application_driver_version.source_commit_sha
     assert original_commit is not None
+
+    # The session driver version stores its driver directory, and its actions
+    # run from that folder of the clone.
+    raw = await client._transport.execute(  # type: ignore[attr-defined]
+        load_query("get_application_driver_versions"),
+        {"applicationDriverId": styrmin_resources["driver_id"]},
+    )
+    assert "errors" not in raw, raw
+    session_version = next(
+        version
+        for version in raw["data"]["applicationDriver"]["versions"]
+        if version["id"] == styrmin_resources["driver_version_id"]
+    )
+    assert session_version["sourcePath"] == SESSION_DRIVER_DIRECTORY, session_version
+    assert session_version["sourceCommitSha"] is not None, session_version
+    await _assert_actions_run_from_driver_directory(
+        vcluster=vcluster,
+        commit=session_version["sourceCommitSha"],
+        driver_directory=SESSION_DRIVER_DIRECTORY,
+    )
 
     # Publish the next driver version with the same supported range and load it.
     branch = await _publish_driver_version(

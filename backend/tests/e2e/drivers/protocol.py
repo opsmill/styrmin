@@ -72,7 +72,7 @@ class ScenarioDriver(Protocol):
     ) -> None: ...
 
     async def load_driver_version(
-        self, *, git_url: str, ref: str
+        self, *, git_url: str, ref: str, driver_directory: str | None = None
     ) -> DriverVersionRef: ...
 
     # --- Deployments ------------------------------------------------------

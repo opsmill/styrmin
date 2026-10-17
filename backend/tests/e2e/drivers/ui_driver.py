@@ -196,10 +196,12 @@ class UiScenarioDriver:
                 environment_id=environment_id, bsl_id=bsl_id
             )
 
-    async def load_driver_version(self, *, git_url: str, ref: str) -> DriverVersionRef:
+    async def load_driver_version(
+        self, *, git_url: str, ref: str, driver_directory: str | None = None
+    ) -> DriverVersionRef:
         async with _ui_errors(f"loading driver {git_url!r}@{ref!r}"):
             return await self._drivers_list.load_remote_version(
-                git_url=git_url, ref=ref
+                git_url=git_url, ref=ref, driver_directory=driver_directory
             )
 
     # --- Deployments ------------------------------------------------------

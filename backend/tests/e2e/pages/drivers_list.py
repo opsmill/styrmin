@@ -79,7 +79,9 @@ class DriversListPage:
             )
         return driver_id
 
-    async def load_remote_version(self, *, git_url: str, ref: str) -> DriverVersionRef:
+    async def load_remote_version(
+        self, *, git_url: str, ref: str, driver_directory: str | None = None
+    ) -> DriverVersionRef:
         """Drive the Load Driver drawer (Git tab) and return the new version ref.
 
         The drawer opens from the ``Load driver`` action on ``/drivers``. There
@@ -100,6 +102,8 @@ class DriversListPage:
         # Git repository is the default tab.
         await self._page.locator("#repositoryUrl").fill(git_url)
         await self._page.locator("#branch").fill(ref)
+        if driver_directory is not None:
+            await self._page.locator("#driverDirectory").fill(driver_directory)
 
         # The footer submit is the only button bound to the drawer form.
         await self._page.locator("button[form=load-driver-form]").click()

@@ -555,6 +555,28 @@ async def telemetry_sink(
 # ---------------------------------------------------------------------------
 # Fixture: git_server
 # ---------------------------------------------------------------------------
+def _prepare_driver(
+    dest: Path, name: str, info: dict[str, Path | str], chart_server: str
+) -> None:
+    """Copy a driver to ``dest``; point an embedded chart at the chart server."""
+    shutil.copytree(info["source"], dest, dirs_exist_ok=True)
+    if "chart_name" not in info:
+        return
+
+    driver_yaml_path = dest / "driver.styrmin.yml"
+    with open(driver_yaml_path) as f:
+        driver_config = yaml.safe_load(f)
+    driver_config["spec"]["helm"]["main"]["location"] = (
+        f"{chart_server}/{info['chart_name']}"
+    )
+    if name == "simple-app":
+        driver_info = driver_config["spec"].setdefault("info", {})
+        driver_info["icon"] = SIMPLE_APP_LOGO_URL
+        driver_info["links"] = [{"link": "Documentation", "url": SIMPLE_APP_DOCS_URL}]
+    with open(driver_yaml_path, "w") as f:
+        yaml.dump(driver_config, f, default_flow_style=False)
+
+
 @pytest.fixture(scope="session")
 async def git_server(
     vcluster: dict,
@@ -638,27 +660,18 @@ async def git_server(
 
     for name, info in drivers.items():
         dest = tmp_repo / name
-        shutil.copytree(info["source"], dest, dirs_exist_ok=True)
+        _prepare_driver(dest, name, info, chart_server)
+        repo_dirs[name] = str(dest)
 
-        # Update driver.styrmin.yml to point to the chart server
-        # (only for drivers that use an embedded chart)
-        if "chart_name" in info:
-            driver_yaml_path = dest / "driver.styrmin.yml"
-            with open(driver_yaml_path) as f:
-                driver_config = yaml.safe_load(f)
-            driver_config["spec"]["helm"]["main"]["location"] = (
-                f"{chart_server}/{info['chart_name']}"
-            )
-            if name == "simple-app":
-                driver_info = driver_config["spec"].setdefault("info", {})
-                driver_info["icon"] = SIMPLE_APP_LOGO_URL
-                driver_info["links"] = [
-                    {"link": "Documentation", "url": SIMPLE_APP_DOCS_URL}
-                ]
-            with open(driver_yaml_path, "w") as f:
-                yaml.dump(driver_config, f, default_flow_style=False)
+    # One repository holding two drivers, each in its own driver directory (spec 028).
+    collection = tmp_repo / "driver-collection"
+    for name in ("simple-app", "db-test"):
+        _prepare_driver(
+            collection / "drivers" / name, name, drivers[name], chart_server
+        )
+    repo_dirs["driver-collection"] = str(collection)
 
-        repo_dir = str(dest)
+    for repo_dir in repo_dirs.values():
         porcelain.init(repo_dir)
         porcelain.add(
             repo_dir,
@@ -674,7 +687,6 @@ async def git_server(
             author=b"test <test@test.com>",
             committer=b"test <test@test.com>",
         )
-        repo_dirs[name] = repo_dir
 
     # Port-forward git-daemon service for git push
     kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
@@ -691,7 +703,7 @@ async def git_server(
         # Yield cluster-internal git URLs
         git_urls = {
             name: f"git://git-server.default.svc.cluster.local/{name}.git"
-            for name in drivers
+            for name in repo_dirs
         }
         yield git_urls
 
@@ -1060,7 +1072,6 @@ async def styrmin_resources(
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
 ) -> AsyncGenerator[dict, None]:
     styrmin_url = styrmin_deployment
-    git_url = git_server["simple-app"]
 
     driver, client = session_scenario_driver
 
@@ -1104,7 +1115,12 @@ async def styrmin_resources(
 
     await driver.assign_bsl_to_environment(environment_id=environment.id, bsl_id=bsl.id)
 
-    driver_version = await driver.load_driver_version(git_url=git_url, ref="master")
+    # The session driver comes from a driver directory of a shared repository (spec 028).
+    driver_version = await driver.load_driver_version(
+        git_url=git_server["driver-collection"],
+        ref="master",
+        driver_directory="drivers/simple-app",
+    )
 
     yield {
         "cluster_id": cluster.id,
@@ -1112,6 +1128,7 @@ async def styrmin_resources(
         "bsl_id": bsl.id,
         "bsl_name": bsl.name,
         "driver_id": driver_version.application_driver_id,
+        "driver_version_id": driver_version.id,
         "styrmin_url": styrmin_url,
         "driver_mode": driver_mode,
         "client": client,
