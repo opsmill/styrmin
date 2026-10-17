@@ -39,7 +39,7 @@ description: "Tasks for 028: load an application driver from a driver directory 
 
 **Purpose**: a green baseline before any change.
 
-- [ ] T001 Run `uv sync` and `cd frontend && pnpm --ignore-workspace install`, then run `uv run pytest backend/tests/unit/services/driver backend/tests/unit/workflows/test_git_source_commit_pinning.py backend/tests/unit/workflows/test_user_action_registration.py backend/tests/unit/services/reconciliation/test_remediation.py backend/tests/functional/graphql/test_application_driver_version_propagation.py python_sdk/tests/test_drivers.py cli/tests/test_drivers.py -q` and note the results as the baseline (no file change)
+- [X] T001 Run `uv sync` and `cd frontend && pnpm --ignore-workspace install`, then run `uv run pytest backend/tests/unit/services/driver backend/tests/unit/workflows/test_git_source_commit_pinning.py backend/tests/unit/workflows/test_user_action_registration.py backend/tests/unit/services/reconciliation/test_remediation.py backend/tests/functional/graphql/test_application_driver_version_propagation.py python_sdk/tests/test_drivers.py cli/tests/test_drivers.py -q` and note the results as the baseline (no file change)
 
 ---
 
