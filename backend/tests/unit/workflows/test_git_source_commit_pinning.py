@@ -139,8 +139,8 @@ async def test_pull_step_without_commit_tracks_the_branch() -> None:
 @pytest.mark.parametrize(
     ("commit_sha", "expected_directory"),
     [
-        (REV2, "/opt/prefect/lab-driver-a-555d155/backend/"),
-        (None, "/opt/prefect/lab-driver-a-master/backend/"),
+        (REV2, "lab-driver-a-555d155/backend"),
+        (None, "lab-driver-a-master/backend"),
     ],
 )
 async def test_set_directory_step_follows_the_clone_directory(
@@ -156,6 +156,49 @@ async def test_set_directory_step_follows_the_clone_directory(
     assert set_directory_step[SET_DIRECTORY_STEP]["directory"] == expected_directory
     if clone_directory is not None:
         assert clone_directory in expected_directory
+
+
+# ---------------------------------------------------------------------------
+# Driver directory (spec 028): actions run from the driver directory
+# ---------------------------------------------------------------------------
+
+
+async def test_builder_with_driver_directory_adds_set_working_directory() -> None:
+    """``git_clone`` then ``set_working_directory`` into the driver directory."""
+    source = GitSource(
+        repository=REPOSITORY,
+        branch=BRANCH,
+        token="placeholder",
+        driver_directory="drivers/infrahub",
+    )
+    workflow = ActionsWorkflowBuilder(
+        source=source, commit_sha=REV2
+    ).build_user_action_workflow_definition(action=_action())
+
+    assert workflow.set_directory == "drivers/infrahub"
+    data = await workflow.to_deployment()
+    assert [next(iter(step)) for step in data["pull_steps"]] == [
+        GIT_CLONE_STEP,
+        SET_DIRECTORY_STEP,
+    ]
+    clone_step, set_directory_step = data["pull_steps"]
+    assert clone_step[GIT_CLONE_STEP]["clone_directory_name"] == "lab-driver-a-555d155"
+    assert set_directory_step[SET_DIRECTORY_STEP] == {
+        "directory": "lab-driver-a-555d155/drivers/infrahub"
+    }
+
+
+async def test_builder_without_driver_directory_keeps_one_pull_step() -> None:
+    """A load from the repository root keeps only the ``git_clone`` step."""
+    source = GitSource(repository=REPOSITORY, branch=BRANCH, token="placeholder")
+    workflow = ActionsWorkflowBuilder(
+        source=source, commit_sha=REV2
+    ).build_user_action_workflow_definition(action=_action())
+
+    assert workflow.set_directory is None
+    data = await workflow.to_deployment()
+    (clone_step,) = data["pull_steps"]
+    assert GIT_CLONE_STEP in clone_step
 
 
 def test_clone_directory_name_is_filesystem_safe_for_slashed_branches() -> None:

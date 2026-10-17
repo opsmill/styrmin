@@ -14,6 +14,7 @@ The helpers here are pure: the git driver provider calls them before the clone
 (to refuse a value) and after it (to keep every path inside the clone).
 """
 
+import hashlib
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -101,6 +102,24 @@ def resolve_inside(root: Path, relative: str | Path) -> Path | None:
     if resolved == resolved_root or resolved.is_relative_to(resolved_root):
         return resolved
     return None
+
+
+def driver_directory_digest(driver_directory: str) -> str:
+    """Return the first 7 hex characters of the SHA-256 of a driver directory.
+
+    Prefect refuses ``/`` in deployment names, so the digest stands for the
+    driver directory in the name of each action's deployment (research R-003).
+
+    Args:
+        driver_directory: The stored driver directory.
+
+    Returns:
+        The first 7 hex characters of the SHA-256 of the UTF-8 value.
+
+    >>> driver_directory_digest("drivers/infrahub")
+    'c8dc0c0'
+    """
+    return hashlib.sha256(driver_directory.encode("utf-8")).hexdigest()[:7]
 
 
 def redact_repository_url(url: str) -> str:

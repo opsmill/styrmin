@@ -63,8 +63,16 @@ def set_directory_pull_step(
 ) -> dict[str, Any]:
     """Set the working directory in a pull step.
 
+    The path is relative: Prefect resolves it against the working directory
+    at that point, which is the folder ``git_clone`` cloned into, whatever
+    the action's image is (spec 028, research R-002).
+
+    Examples:
+        >>> set_directory_pull_step("drivers/a/", "repo-555d155")
+        {'prefect.deployments.steps.set_working_directory': {'directory': 'repo-555d155/drivers/a'}}
+
     Args:
-        directory (str): The local directory to set, inside the clone.
+        directory (str): The directory to set, relative to the clone root.
         clone_directory_name (str): The directory the preceding ``git_clone``
             step checked the repository out into.
 
@@ -74,6 +82,6 @@ def set_directory_pull_step(
 
     return {
         "prefect.deployments.steps.set_working_directory": {
-            "directory": f"/opt/prefect/{clone_directory_name}/{directory}",
+            "directory": f"{clone_directory_name}/{directory.rstrip('/')}",
         }
     }

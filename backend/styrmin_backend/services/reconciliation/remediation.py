@@ -16,7 +16,10 @@ from styrmin_backend.agent.tasks.utils import (
 from pydantic import BaseModel
 
 from styrmin_backend.domain.models import Instance
-from styrmin_backend.services.driver.labels import short_fingerprint
+from styrmin_backend.services.driver.labels import (
+    driver_directory_of,
+    short_fingerprint,
+)
 from styrmin_backend.services.driver.models.resources.actions import HookKind
 from styrmin_backend.services.reconciliation.diffs.diffs import (
     ApplicationDriverVersionChange,
@@ -130,6 +133,11 @@ class InstanceCreationStrategy(RemediationStrategy):
             content_hash=driver_version.content_hash,
             source_commit_sha=driver_version.source_commit_sha,
         )
+        # Spec 028 — and the one registered for its driver directory.
+        driver_directory = driver_directory_of(
+            source_type=driver_version.source_type,
+            source_path=driver_version.source_path,
+        )
         prehook, posthook = await asyncio.gather(
             prefect_manager.get_user_action_deployment_id(
                 application=application.name,
@@ -137,6 +145,7 @@ class InstanceCreationStrategy(RemediationStrategy):
                 mode="pre",
                 version=driver_version.application_supported_versions,
                 fingerprint=instance_fingerprint,
+                driver_directory=driver_directory,
             ),
             prefect_manager.get_user_action_deployment_id(
                 application=application.name,
@@ -144,6 +153,7 @@ class InstanceCreationStrategy(RemediationStrategy):
                 mode="post",
                 version=driver_version.application_supported_versions,
                 fingerprint=instance_fingerprint,
+                driver_directory=driver_directory,
             ),
         )
 
@@ -234,6 +244,11 @@ class InstanceUpdateStrategy(RemediationStrategy):
             content_hash=driver_version.content_hash,
             source_commit_sha=driver_version.source_commit_sha,
         )
+        # Spec 028 — and the one registered for its driver directory.
+        driver_directory = driver_directory_of(
+            source_type=driver_version.source_type,
+            source_path=driver_version.source_path,
+        )
 
         # Look up the upgrade core hook from Prefect
         upgrade_hook = await prefect_manager.get_user_action_deployment_id(
@@ -242,6 +257,7 @@ class InstanceUpdateStrategy(RemediationStrategy):
             mode="core",
             version=driver_version.application_supported_versions,
             fingerprint=upgrade_fingerprint,
+            driver_directory=driver_directory,
         )
 
         # If no upgrade core hook is defined, fall back to regular update
@@ -269,6 +285,7 @@ class InstanceUpdateStrategy(RemediationStrategy):
                 mode="pre",
                 version=driver_version.application_supported_versions,
                 fingerprint=upgrade_fingerprint,
+                driver_directory=driver_directory,
             ),
             prefect_manager.get_user_action_deployment_id(
                 application=application.name,
@@ -276,6 +293,7 @@ class InstanceUpdateStrategy(RemediationStrategy):
                 mode="post",
                 version=driver_version.application_supported_versions,
                 fingerprint=upgrade_fingerprint,
+                driver_directory=driver_directory,
             ),
         )
         assert upgrade_instance_flow is not None, (

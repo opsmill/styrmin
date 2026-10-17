@@ -18,6 +18,7 @@ from prefect_github import GitHubCredentials
 from prefect.cache_policies import NO_CACHE
 
 from styrmin_backend import config
+from styrmin_backend.services.driver.driver_directory import driver_directory_digest
 from styrmin_backend.services.driver.models.resources.actions import HookKind
 from styrmin_backend.services.workflow.worker import StyrminWorkflowExecutor
 from styrmin_backend.workflows.bsl_credentials import (
@@ -33,6 +34,9 @@ from styrmin_backend.workflows.models import (
     WorkflowDefinition,
     WorkflowInfo,
 )
+
+# Tag of a user action's deployment whose driver version has a driver directory.
+DIRECTORY_TAG_PREFIX = "directory/"
 
 
 class PrefectManager:
@@ -74,6 +78,7 @@ class PrefectManager:
         hook: HookKind,
         mode: Literal["pre", "core", "post"],
         fingerprint: str | None = None,
+        driver_directory: str | None = None,
     ) -> None:
         """Register a user action in the Prefect catalogue.
 
@@ -91,6 +96,15 @@ class PrefectManager:
         (``<workflow> (<application>@<fingerprint>)``): Prefect upserts on
         ``(flow, name)``, so a shared name would let another driver (#373) or
         a reload of the same driver (#375) overwrite this deployment.
+
+        Spec 028 — when ``driver_directory`` is set (the driver version was
+        loaded from a driver directory of its repository), the deployment
+        gets the tag ``directory/<driver_directory>`` and the name ends with
+        the 7-character digest of the driver directory
+        (``<workflow> (<application>@<fingerprint> <digest>)``), so two
+        driver versions loaded from one commit keep separate deployments.
+        Prefect refuses ``/`` in deployment names, hence the digest. A load
+        from the repository root (``None``) keeps the name and tags above.
         """
         # Add tags to the workflow
         workflow.tags.append(f"application/{application}")
@@ -99,9 +113,13 @@ class PrefectManager:
         workflow.tags.append(f"mode/{mode}")
         if fingerprint:
             workflow.tags.append(f"fingerprint/{fingerprint}")
-            workflow.deployment_name = f"{workflow.name} ({application}@{fingerprint})"
+            label = f"{application}@{fingerprint}"
         else:
-            workflow.deployment_name = f"{workflow.name} ({application})"
+            label = application
+        if driver_directory:
+            workflow.tags.append(f"{DIRECTORY_TAG_PREFIX}{driver_directory}")
+            label = f"{label} {driver_directory_digest(driver_directory)}"
+        workflow.deployment_name = f"{workflow.name} ({label})"
         async with get_client(sync_client=False) as client:
             await workflow.save(
                 client=client,
@@ -115,6 +133,7 @@ class PrefectManager:
         hook: HookKind,
         mode: Literal["pre", "core", "post"],
         fingerprint: str | None = None,
+        driver_directory: str | None = None,
     ) -> UUID | None:
         """Get the workflow ID for a specific user action in the Prefect deployments.
 
@@ -124,6 +143,14 @@ class PrefectManager:
         registered before the fingerprint tag existed; for those rows the
         lookup omits the tag and continues to find the historical
         deployment.
+
+        Spec 028 — ``driver_directory`` must match the value used at
+        registration time. When set, the lookup also requires the tag
+        ``directory/<driver_directory>``. When ``None`` (a load from the
+        repository root, or a local driver), deployments with any
+        ``directory/`` tag are dropped, so a root driver version never runs
+        another driver directory's action: Prefect's tag filter cannot
+        exclude a tag, so the drop happens here.
         """
         tags = [
             f"application/{application}",
@@ -133,6 +160,8 @@ class PrefectManager:
         ]
         if fingerprint:
             tags.append(f"fingerprint/{fingerprint}")
+        if driver_directory:
+            tags.append(f"{DIRECTORY_TAG_PREFIX}{driver_directory}")
         async with get_client() as client:
             # Newest first: a pinned registration must outrank an older
             # branch-tip deployment carrying the same tags.
@@ -142,9 +171,17 @@ class PrefectManager:
                 ),
                 sort=DeploymentSort.CREATED_DESC,
             )
-            if not deployments:
-                return None
-            return deployments[0].id
+        if not driver_directory:
+            deployments = [
+                deployment
+                for deployment in deployments
+                if not any(
+                    tag.startswith(DIRECTORY_TAG_PREFIX) for tag in deployment.tags
+                )
+            ]
+        if not deployments:
+            return None
+        return deployments[0].id
 
     async def register_token(self, namespace: str, token: str) -> None:
         """Register a token in the Prefect catalogue."""
