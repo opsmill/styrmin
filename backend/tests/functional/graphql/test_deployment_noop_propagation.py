@@ -12,6 +12,12 @@ These tests pin the *behavioural* contract at the GraphQL ↔ DB boundary:
    config…" guard was removed in spec 014 phase A).
 4. ``updateDeploymentVersion`` same version → ``null``; no new instance/task.
 5. ``updateDeploymentVersion`` new version → non-null ``Task``.
+6. A config with an affinity term, read back and written with ``updateDeployment``
+   → ``null`` (027 US8 scenario 1).
+7. ``updateDeploymentVersion`` re-sending a term whose deployment reference gives
+   the name, as ``deployments apply`` does → ``null`` (027 US8 scenario 2).
+8. ``updateEnvironment`` re-sending such a term → every deployment is skipped as
+   already at config.
 
 Each test drives a *first* update through the real mutation to establish an
 active instance (so the candidate generated on the re-apply has a current
@@ -20,18 +26,28 @@ instance to compare against), then exercises the no-op / change path.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-from uuid import uuid4
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
+from styrmin_sdk.models import UpdateDeploymentInput
 
-from styrmin_backend.db.models import ApplicationInstance, Deployment
+from styrmin_backend.db.models import ApplicationInstance, Deployment, Task
+from styrmin_backend.services import environments
 
 from ._queries import load_query
-from .seeds import seed_deployment
+from .conftest import gql
+from .seeds import (
+    seed_application_driver_version,
+    seed_deployment,
+    seed_environment,
+)
+
+_TOPOLOGY_KEY = "kubernetes.io/hostname"
 
 
 def _flow_info_factory() -> AsyncMock:
@@ -257,3 +273,178 @@ async def test_update_deployment_version_new_version_returns_task(
     assert "errors" not in second, second
     assert second["data"]["updateDeploymentVersion"] is not None
     assert await _instance_count(session, deployment_id) == count_before + 1
+
+
+def _term_input(deployment_ref: dict[str, str]) -> dict[str, Any]:
+    return {
+        "preferred": [
+            {
+                "weight": 100,
+                "term": {"topologyKey": _TOPOLOGY_KEY, "deploymentRef": deployment_ref},
+            }
+        ]
+    }
+
+
+def _stored_term(deployment_id: UUID) -> dict[str, Any]:
+    return {
+        "preferred": [
+            {
+                "weight": 100,
+                "term": {
+                    "topology_key": _TOPOLOGY_KEY,
+                    "deployment_ref": {"deployment_id": str(deployment_id)},
+                },
+            }
+        ]
+    }
+
+
+async def _seed_a_and_b(session: AsyncSession) -> tuple[UUID, UUID, UUID]:
+    """Environment E with deployments ``a`` and ``b``; returns E's, A's and B's ids."""
+    environment = await seed_environment(session)
+    adv = await seed_application_driver_version(session)
+    a = await seed_deployment(session, environment=environment, adv=adv, name="a")
+    b = await seed_deployment(session, environment=environment, adv=adv, name="b")
+    return environment.id, a.id, b.id
+
+
+async def _stored_config(client: AsyncClient, deployment_id: UUID) -> dict[str, Any]:
+    data = await gql(
+        client, "get_deployment_config", {"deploymentId": str(deployment_id)}
+    )
+    return data["deployment"]["config"]
+
+
+async def _task_count(session: AsyncSession, deployment_id: UUID) -> int:
+    rows = await session.exec(select(Task).where(Task.deployment_id == deployment_id))
+    return len(rows.all())
+
+
+async def _update_version_with_input(
+    client: AsyncClient, deployment_id: UUID, version: str, input_var: dict
+) -> dict:
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("update_deployment_version_with_input"),
+            "variables": {
+                "deploymentId": str(deployment_id),
+                "version": version,
+                "input": input_var,
+            },
+        },
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def _fan_out_lines(log_info: MagicMock) -> list[dict[str, str]]:
+    """The fields of each ``env_config_fanout_dispatched`` line, in order."""
+    lines = [
+        call.args[0].format(*call.args[1:])
+        for call in log_info.call_args_list
+        if call.args
+    ]
+    return [
+        dict(part.split("=", 1) for part in line.split()[1:])
+        for line in lines
+        if line.startswith("env_config_fanout_dispatched ")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_writing_back_a_read_term_returns_null(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """027 US8 scenario 1 / FR-009: B's config, read from ``Deployment.config`` and
+    written back unchanged, is a no-op although the term was written with A's name."""
+    prefect_manager_mock.run_action = _flow_info_factory()
+    _, a_id, b_id = await _seed_a_and_b(session)
+    first = await _update_deployment(
+        client,
+        b_id,
+        {"scheduling": {"podAffinity": _term_input({"deploymentName": "a"})}},
+    )
+    assert "errors" not in first, first
+    assert first["data"]["updateDeployment"] is not None
+    stored = await _stored_config(client, b_id)
+    assert stored == {"scheduling": {"pod_affinity": _stored_term(a_id)}}
+    instances_before = await _instance_count(session, b_id)
+    tasks_before = await _task_count(session, b_id)
+
+    # The SDK model takes the snake_case read and sends the camelCase input.
+    written_back = UpdateDeploymentInput.model_validate(stored).model_dump(
+        by_alias=True, exclude_none=True
+    )
+    second = await _update_deployment(client, b_id, written_back)
+
+    assert "errors" not in second, second
+    assert second["data"]["updateDeployment"] is None
+    session.expire_all()
+    assert await _instance_count(session, b_id) == instances_before
+    assert await _task_count(session, b_id) == tasks_before
+    assert await _stored_config(client, b_id) == stored
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_version_re_sending_a_term_with_the_name_returns_null(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """027 US8 scenario 2 / SC-004: ``deployments apply`` sends the manifest's config
+    with the same version through ``updateDeploymentVersion(input:)``. Sent again, the
+    term that gives A's name compares equal to the stored term that gives A's id."""
+    prefect_manager_mock.run_action = _flow_info_factory()
+    _, a_id, b_id = await _seed_a_and_b(session)
+    manifest_input = {
+        "scheduling": {"podAffinity": _term_input({"deploymentName": "a"})}
+    }
+    first = await _update_version_with_input(client, b_id, "1.0.0", manifest_input)
+    assert "errors" not in first, first
+    assert first["data"]["updateDeploymentVersion"] is not None
+    stored = await _stored_config(client, b_id)
+    assert stored == {"scheduling": {"pod_affinity": _stored_term(a_id)}}
+    instances_before = await _instance_count(session, b_id)
+    tasks_before = await _task_count(session, b_id)
+
+    second = await _update_version_with_input(client, b_id, "1.0.0", manifest_input)
+
+    assert "errors" not in second, second
+    assert second["data"]["updateDeploymentVersion"] is None
+    session.expire_all()
+    assert await _instance_count(session, b_id) == instances_before
+    assert await _task_count(session, b_id) == tasks_before
+    assert await _stored_config(client, b_id) == stored
+
+
+@pytest.mark.asyncio
+async def test_update_environment_re_sending_a_term_with_the_name_skips_every_deployment(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock, mocker
+) -> None:
+    """027 FR-009: E's config re-sent with the term that gives A's name is the stored
+    config, so the fan-out finds A and B already at config and redeploys neither."""
+    prefect_manager_mock.run_action = _flow_info_factory()
+    environment_id, a_id, b_id = await _seed_a_and_b(session)
+    environment_input = {
+        "scheduling": {"podAntiAffinity": _term_input({"deploymentName": "a"})}
+    }
+    log_info = mocker.patch.object(environments.logger, "info")
+    variables = {"environmentId": str(environment_id), "input": environment_input}
+
+    await gql(client, "update_environment", variables)
+    tasks_before = {d: await _task_count(session, d) for d in (a_id, b_id)}
+    await gql(client, "update_environment", variables)
+
+    first, second = _fan_out_lines(log_info)
+    assert first["dispatched"] == "2"
+    assert second["evaluated"] == "2"
+    assert second["skipped_noop"] == "2"
+    assert second["dispatched"] == "0"
+    session.expire_all()
+    assert {d: await _task_count(session, d) for d in (a_id, b_id)} == tasks_before
+    data = await gql(
+        client, "get_environment_config", {"environmentId": str(environment_id)}
+    )
+    assert data["environment"]["config"] == {
+        "scheduling": {"pod_anti_affinity": _stored_term(a_id)}
+    }
