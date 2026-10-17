@@ -204,6 +204,18 @@ transaction so a restore either lands whole or not at all. Your
 application may log a few connection errors during that window; it should
 reconnect on its own once the restore finishes.
 
+A restore keeps the [service aliases](./ingress-and-networking.md#service-aliases)
+of the restored deployment in the other namespaces of its environment, and
+Velero restores the aliases in its own namespace. A deployment of the
+environment that is created, updated or upgraded while the restore runs
+skips the aliases between itself and the restored deployment, because the
+restored deployment's namespace is being deleted or does not exist yet.
+Nothing writes them after the restore, so the two applications cannot
+reach each other by short name. Once the restore has finished, make a
+change to either deployment, such as a change to its configuration or its
+parameters, to write the aliases. Saving the same values does not change
+the deployment, so it writes no alias.
+
 The database itself also starts on an empty data volume and needs some
 time before it accepts connections. The MariaDB and MongoDB restore hooks
 retry loading the dump every 2 seconds, for up to 2 minutes, until the
