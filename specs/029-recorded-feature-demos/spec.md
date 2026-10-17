@@ -39,6 +39,17 @@ The PRD left two questions open. They are answered here with the most direct opt
 - Q: Where do the playbook and the inventory file live? → A: Inside the demo Semaphore image, which Semaphore uses as a local repository. The PRD proposed this option. The Styrmin repository is private, so a Semaphore in the vCluster would need credentials to clone the playbook from it.
 - Q: Which Infrahub schema defines the devices that the inventory lists? → A: A small schema kept with the demos, which defines one device kind with a name. The demo setup loads it into each Infrahub it creates, before the recording starts. The PRD names no existing schema, and a schema kept with the demos does not depend on the schema library or on demo data that the `infrahub` driver turns off (`infrahubDemoData.enabled: false` in [`values.j2.yml`](../../driver/examples/infrahub/values.j2.yml)).
 
+### Session 2026-10-17 (planning research, [research.md](research.md))
+
+Two findings change what the PRD assumed. Both are flagged for the maintainer.
+
+- Q: Can the `infrahub` driver take the environment backup that demos 3 and 4 need? → A: No. Its Neo4j backup runs `neo4j-admin database backup`, an online backup that only Neo4j Enterprise has, and the `infrahub` driver deploys the community chart. Its backup E2E test is skipped with the reason "backup/restore not supported with community" (R-007). Demos 3 and 4 therefore deploy Infrahub with the existing `infrahub-enterprise` driver, which the Styrmin image already contains and whose backup test runs in CI. Demos 1 and 2 keep the `infrahub` driver.
+- Q: Does a clone's Semaphore reach the clone's Infrahub today? → A: Probably not. A clone restores each source namespace, including the `ExternalName` alias Services that point to the source's namespaces, and no step of the clone writes the clone's own aliases afterwards (R-013, from reading the code; not run). The FR-016 check is therefore the first implementation task. If it fails, the implementer reports the defect as a separate issue and stops for a maintainer decision, because a fix changes Styrmin's restore or clone flow, which the PRD keeps out of scope. Demo 4 cannot show three devices in the clone until the defect is fixed.
+- Q: Which Playwright version? → A: 1.64.0, the first version whose cursor stays visible after the page loads a new URL (R-001). The PRD asked for 1.61 or later.
+- Q: Which Infrahub versions does the versions file start with? → A: `1.10.11` and `1.11.7`. No document says chart 4.33.2 runs 1.10.x, so the first demo task checks it; if it does not, the developer sets the earlier version to the newest 1.11 release below 1.11.7 (R-015).
+- Q: How does the inventory read Infrahub? → A: With the admin token that both Infrahub charts preset, which Semaphore passes to Ansible as a secret of its environment. The inventory plugin requires a token even when Infrahub allows anonymous reads (R-008).
+- Q: Which version of the `opsmill.infrahub` collection? → A: 1.8.3. Version 1.9.0 requires ansible-core 2.19, and the Semaphore 2.16.47 image has 2.18.12 (R-009).
+
 ## User Scenarios & Testing *(mandatory)*
 
 Two people use this feature:
@@ -107,7 +118,7 @@ Covers need 1 for this demo.
 
 ### User Story 3 - Record the environment backup and restore demo (Priority: P1)
 
-The developer records demo 3. The setup creates an environment that contains Infrahub with devices and Semaphore with a task template. The recording shows:
+The developer records demo 3. The setup creates an environment that contains Infrahub with devices and Semaphore with a task template. Infrahub is deployed with the `infrahub-enterprise` driver (see Clarifications). The recording shows:
 
 - the creation of an environment backup, in the Styrmin UI;
 - the deletion of a device in Infrahub and of the task template in Semaphore, in their own web pages;
@@ -129,7 +140,7 @@ Covers need 1 for this demo.
 
 ### User Story 4 - Record the environment clone demo (Priority: P1)
 
-The developer records demo 4. The setup, which is not recorded, creates an environment with Infrahub and Semaphore, loads two devices into Infrahub, and creates a Semaphore task template that runs a playbook listing the hosts in the Infrahub inventory. The playbook only reads the inventory and connects to no device. The recording shows:
+The developer records demo 4. The setup, which is not recorded, creates an environment with Infrahub, deployed with the `infrahub-enterprise` driver, and Semaphore, loads two devices into Infrahub, and creates a Semaphore task template that runs a playbook listing the hosts in the Infrahub inventory. The playbook only reads the inventory and connects to no device. The recording shows:
 
 1. The template run in the source Semaphore. The output lists two devices.
 2. The environment cloned, in the Styrmin UI.
@@ -188,6 +199,7 @@ After a UI change, the developer runs the command for one demo and receives a ne
 - **A step fails during a recording**: the demo keeps no partial video, so a video in the output directory is always complete (FR-010).
 - **Environment names are unique on a cluster** ([`models.py`](../../backend/styrmin_backend/db/models.py)): a demo cannot create its environment while an earlier run's environment with the same name exists, which is why FR-009 deletes leftovers first.
 - **Two environments at once**: during demo 4, the source and the clone both run Infrahub and Semaphore. It is not known whether a laptop that runs the demo stack has enough memory for this.
+- **A clone's aliases point to the source**: a clone restores the source's alias Services, which point to the source's namespaces, and no step of the clone writes the clone's own aliases (research R-013). The FR-016 check finds out whether this happens; if it does, demo 4 shows two devices in the clone instead of three until the defect is fixed.
 - **A demo stack where the developer changed things by hand**: the demos create their own environments and deployments on top of what `uv run invoke start` creates, and touch nothing else. Environments with other names are left as they are.
 
 ## Requirements *(mandatory)*
@@ -215,18 +227,19 @@ After a UI change, the developer runs the command for one demo and receives a ne
 - **FR-016**: `test_environment_clone_lifecycle` MUST check, read-only, that each `ExternalName` alias in the clone points to a namespace of the clone and not of the source. The check MUST reuse the stack the test already deploys ([`test_backup_restore.py`](../../backend/tests/e2e/test_backup_restore.py)).
 - **FR-017**: The [local demo guide](../../dev/guides/local-demo.md) MUST gain a "Recording the demos" section that covers the prerequisites, the commands, the versions file, the output directory and what to do after a failed demo.
 - **FR-018**: The GraphQL API, SDK, `styrminctl`, frontend, database schema, drivers and error types MUST NOT change.
+- **FR-019**: Demos 3 and 4 MUST deploy Infrahub with the `infrahub-enterprise` driver, which their setup loads from the drivers that the Styrmin image contains, because the `infrahub` driver cannot take an environment backup (Clarifications, planning session).
 
 ### Key Entities
 
 All the entities are existing ones. The demos add no Styrmin entity.
 
 - **Environment**: each demo creates its own, with a fixed name, and deletes it after a successful recording. Environment names are unique on a cluster.
-- **Deployment**: each demo environment contains one Infrahub deployment and one Semaphore deployment, from the `infrahub` and `semaphore` drivers that the demo stack loads.
+- **Deployment**: each demo environment contains one Infrahub deployment and one Semaphore deployment. Demos 1 and 2 use the `infrahub` and `semaphore` drivers that the demo stack loads; demos 3 and 4 use the `infrahub-enterprise` driver, which their setup loads (FR-019).
 - **Service**: Semaphore reaches Infrahub's `infrahub` service on port 8000 ([`infrahub driver`](../../driver/examples/infrahub/driver.styrmin.yml)). Each deployment has its own namespace, and Styrmin creates `ExternalName` aliases so that deployments in the same environment reach each other by short service name. The docs say that applications in a clone reach each other in the clone and not in the source ([`ingress-and-networking.md`](../../docs/docs/concepts-and-architecture/ingress-and-networking.md#networking-between-applications)).
 - **Application version and application driver version**: the `infrahub` driver accepts Infrahub versions `>=1.5,<2.0` and pins the Infrahub Helm chart 4.33.2. The process for choosing a driver version is described in [Selecting a driver version](../../docs/docs/drivers/loading-drivers.md#selecting-a-driver-version-when-deploying-or-upgrading).
 - **Image override and replica override**: used in demo 2 ([`image-overrides.md`](../../docs/docs/concepts-and-architecture/image-overrides.md), [`replica-overrides.md`](../../docs/docs/concepts-and-architecture/replica-overrides.md)).
 - **Task and step**: shown in demo 1 ([`status-reporting.md`](../../docs/docs/concepts-and-architecture/status-reporting.md#steps-from-status-reports)).
-- **Environment backup and environment restore**: used in demo 3. The `infrahub` driver backs up its Neo4j database and its storage disk, and the `semaphore` driver backs up its Postgres database ([`backups-and-restores.md`](../../docs/docs/concepts-and-architecture/backups-and-restores.md#backing-up-a-whole-environment)).
+- **Environment backup and environment restore**: used in demo 3. The Infrahub drivers back up their Neo4j database and their storage disk, and the `semaphore` driver backs up its Postgres database. The Neo4j backup needs Neo4j Enterprise, which only the `infrahub-enterprise` driver deploys (research R-007) ([`backups-and-restores.md`](../../docs/docs/concepts-and-architecture/backups-and-restores.md#backing-up-a-whole-environment)).
 - **Environment clone and counterpart deployment**: used in demo 4 ([`backups-and-restores.md`](../../docs/docs/concepts-and-architecture/backups-and-restores.md#cloning-an-environment)).
 
 ## Success Criteria *(mandatory)*
@@ -243,7 +256,8 @@ All the entities are existing ones. The demos add no Styrmin entity.
 
 - The beta audience knows Infrahub.
 - A laptop that runs the demo stack has enough memory for two environments with Infrahub and Semaphore at the same time, which demo 4 needs during the clone. This has not been measured.
-- The Infrahub Helm chart 4.33.2 that the driver pins runs Infrahub 1.10.x and 1.11.7. This has not been verified.
+- The Infrahub Helm chart 4.33.2 that the `infrahub` driver pins runs Infrahub 1.10.11 and 1.11.7. Its own default is 1.11.2. This has not been verified (research R-015).
+- The Infrahub Enterprise Helm chart 4.19.2 that the `infrahub-enterprise` driver pins runs Infrahub 1.11.7. Its own default is 1.11.2. This has not been verified (research R-007).
 - Semaphore can use the `opsmill.infrahub` inventory plugin once its image contains the collection and `infrahub-sdk`. This has not been verified.
 - The vCluster can run a locally built Semaphore image the same way it runs the locally built Styrmin image. This has not been verified.
 
