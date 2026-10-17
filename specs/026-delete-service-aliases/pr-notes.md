@@ -116,11 +116,11 @@ Unit tests in [`backend/tests/unit/test_deployment_deletion_operator.py`](https:
 
 When the StyrminDeployment is already removed at the flow's second read, the read cannot tell a deletion from a restore, so it keeps the alias. An alias written after the delete handler's teardown listed the aliases, and before the StyrminDeployment was removed, can then remain, and nothing deletes it later (research R-004).
 
-## Follow-up issue to file: a deployment's own flow can create its namespace again after its deletion was requested
+## Follow-up issue [#527](https://github.com/opsmill/styrmin/issues/527): a deployment's own flow can create its namespace again after its deletion was requested
 
-Research R-010 records a case that this change does not fix, because the brief covers only the flows of other deployments. A create, update or upgrade flow of a deployment that runs after the deletion of that same deployment was requested calls `apply_kubernetes_namespace` on its own namespace in `_write_styrmin_deployment` ([`backend/styrmin_backend/agent/tasks/orchestration.py`](https://github.com/opsmill/styrmin/blob/fac/services-cleanup-zk1ti/backend/styrmin_backend/agent/tasks/orchestration.py)), so it can create that namespace again. It is not known how often this happens; no test of this change reproduces it. To file as a separate issue.
+Research R-010 records a case that this change does not fix, because the brief covers only the flows of other deployments. A create, update or upgrade flow of a deployment that runs after the deletion of that same deployment was requested calls `apply_kubernetes_namespace` on its own namespace in `_write_styrmin_deployment` ([`backend/styrmin_backend/agent/tasks/orchestration.py`](https://github.com/opsmill/styrmin/blob/fac/services-cleanup-zk1ti/backend/styrmin_backend/agent/tasks/orchestration.py)), so it can create that namespace again. It is not known how often this happens; no test of this change reproduces it. Filed as [#527](https://github.com/opsmill/styrmin/issues/527).
 
-## Follow-up issue to file: delete the aliases that stay
+## Follow-up issue [#526](https://github.com/opsmill/styrmin/issues/526): delete the aliases that stay
 
 The maintainer accepted the FR-007 exception and asked for a separate issue. It would cover a cleanup of aliases whose owner is no longer a deployment of the environment, which would also delete aliases left by failed teardowns and by deletions made before this version (FR-011 and decision 6 of the brief exclude this from #503).
 
