@@ -25,11 +25,13 @@ The feature changes no GraphQL, SDK or CLI surface. These are the internal inter
 
 ## Service alias flow (`agent/tasks/service_aliases.py`)
 
-### `find_departing_namespaces(namespaces: Iterable[str]) -> set[str]` (new, async)
+### `find_departing_namespaces(namespaces: Iterable[str], wait_for: Iterable[str] = ()) -> set[str]` (new, async)
 
 - For each namespace, reads the Namespace and the StyrminDeployment of the same name in it. The reads of all namespaces run concurrently.
 - Returns the departing ones, by the rule in [data-model.md](../data-model.md#departing-namespace-derived-new).
 - Propagates any read error other than 404.
+
+> Changed on 2026-10-17, after CI run [39030125607](https://github.com/opsmill/styrmin/actions/runs/39030125607) of PR #516: a namespace of `wait_for` that is missing is read again every `MISSING_NAMESPACE_POLL_SECONDS` (2 s), for at most `MISSING_NAMESPACE_WAIT_SECONDS` (60 s). When it appears, its Namespace and StyrminDeployment are read again, and it counts as departing only by that read. In that run, `executor`'s flow found the namespace of `intent`, created just before it, still missing, and skipped the aliases between the two. `intent`'s context did not list `executor`, so no flow wrote them. The flow passes the holder and owner namespaces of its aliases as `wait_for`.
 
 ### `find_deleted_deployment_namespaces(namespaces: Iterable[str]) -> set[str]` (new, async)
 
@@ -46,7 +48,7 @@ The feature changes no GraphQL, SDK or CLI surface. These are the internal inter
 
 The `namespace_labels` parameter is removed. The flow no longer calls `apply_namespace`.
 
-1. Collects the holder and owner namespaces of `aliases` and the namespaces of `stale_aliases`, and calls `find_departing_namespaces` on them.
+1. Collects the holder and owner namespaces of `aliases` and the namespaces of `stale_aliases`, and calls `find_departing_namespaces` on them, with the holder and owner namespaces as `wait_for`.
 2. Skips, and logs, each alias whose holder or owner namespace is departing, and each stale alias whose namespace is departing. The log names the departing namespace: the owner's when it matched, otherwise the holder's.
 3. Writes the remaining aliases with `apply_single_alias`.
 4. Deletes the remaining stale aliases, as today.
