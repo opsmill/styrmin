@@ -22,6 +22,7 @@ from styrmin_backend.context.models.config import (
 from styrmin_backend.services.exceptions import (
     UnresolvableAffinityReferenceError,
 )
+from styrmin_backend.services.scheduling.references import environment_name
 from styrmin_backend.services.unit_of_work import UnitOfWork
 
 if TYPE_CHECKING:
@@ -60,10 +61,12 @@ async def resolve_deployment_reference(
             )
         target_id = ref.deployment_id
         if target_id not in (upcoming_deployments or {}):
-            target = await uow.deployments.find(target_id)
+            target = await uow.deployments.find_reference_target(target_id)
             if target is None or target.environment_id != environment_id:
                 raise UnresolvableAffinityReferenceError(
-                    deployment_id=str(target_id), path=path
+                    deployment_id=str(target_id),
+                    path=path,
+                    environment_name=await environment_name(uow, environment_id),
                 )
             if target.deleted_at is not None:
                 raise UnresolvableAffinityReferenceError(

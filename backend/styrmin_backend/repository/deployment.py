@@ -14,6 +14,7 @@ from styrmin_backend.db.models import DeploymentState as DeploymentStateModel
 from styrmin_backend.db.models import InstanceStatus as InstanceStatusModel
 from styrmin_backend.domain.models import Component as ComponentEntity
 from styrmin_backend.domain.models import Deployment as DeploymentEntity
+from styrmin_backend.domain.models import DeploymentReferenceTarget
 from styrmin_backend.domain.models import DeploymentState as DeploymentStateEntity
 from styrmin_backend.domain.models import Instance as InstanceEntity
 from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
@@ -34,6 +35,13 @@ class DeploymentRepository(BaseRepository[DeploymentModel], ABC):
     async def find(self, id: UUID) -> DeploymentEntity | None:
         raise NotImplementedError(
             "The find method must be implemented in the subclass."
+        )
+
+    @abstractmethod
+    async def find_reference_target(self, id: UUID) -> DeploymentReferenceTarget | None:
+        """Return the id, name, environment and tombstone of a deployment, tombstones included."""
+        raise NotImplementedError(
+            "The find_reference_target method must be implemented in the subclass."
         )
 
     @abstractmethod
@@ -328,6 +336,27 @@ class SQLModelDeploymentRepository(
             return None
 
         return self._to_entity(entity)
+
+    async def find_reference_target(self, id: UUID) -> DeploymentReferenceTarget | None:
+        """Read only the four columns, without the components and the active instance."""
+        result = await self.session.exec(
+            select(
+                self.model_class.id,
+                self.model_class.name,
+                self.model_class.environment_id,
+                self.model_class.deleted_at,
+            ).where(self.model_class.id == id)
+        )
+        row = result.first()
+        if row is None:
+            return None
+        deployment_id, name, environment_id, deleted_at = row
+        return DeploymentReferenceTarget(
+            id=deployment_id,
+            name=name,
+            environment_id=environment_id,
+            deleted_at=deleted_at,
+        )
 
     async def find_all_by_environment(
         self,

@@ -30,6 +30,7 @@ from styrmin_backend.db.models import (
     Utility,
 )
 from styrmin_backend.domain.models import Deployment as DeploymentEntity
+from styrmin_backend.domain.models import DeploymentReferenceTarget
 from styrmin_backend.repository.backup_storage_location import (
     BackupStorageLocationRepository,
 )
@@ -699,6 +700,17 @@ class FakeDeploymentRepository(DeploymentRepository):
         for d in self._deployments:
             if d.id == id:
                 return d
+        return None
+
+    async def find_reference_target(self, id: UUID) -> DeploymentReferenceTarget | None:
+        for d in self._deployments:
+            if d.id == id:
+                return DeploymentReferenceTarget(
+                    id=d.id,
+                    name=d.name,
+                    environment_id=d.environment_id,
+                    deleted_at=d.deleted_at,
+                )
         return None
 
     async def get_by_name(

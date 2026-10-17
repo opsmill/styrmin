@@ -89,7 +89,9 @@ def referenced_deployment_ids(
     for site in iter_reference_sites(config, path_prefix):
         raw_id = site.deployment_ref.get("deployment_id")
         if raw_id is not None:
-            found.setdefault(_parse_id(raw_id, site.path), []).append(site.path)
+            found.setdefault(parse_deployment_id(raw_id, site.path), []).append(
+                site.path
+            )
     return found
 
 
@@ -112,7 +114,7 @@ def remap_deployment_references(
         raw_id = site.deployment_ref.get("deployment_id")
         if raw_id is None:
             continue
-        source_id = _parse_id(raw_id, site.path)
+        source_id = parse_deployment_id(raw_id, site.path)
         target_id = mapping.get(source_id)
         if target_id is None:
             unmapped.setdefault(source_id, []).append(site.path)
@@ -188,12 +190,15 @@ async def bind_deployment_references(
     return bound
 
 
-def _parse_id(raw_id: object, path: str) -> UUID:
+def parse_deployment_id(raw_id: object, path: str) -> UUID:
+    """Read the ``deployment_id`` of the term at ``path``, refusing one that is not a UUID."""
     try:
         return UUID(str(raw_id))
     except ValueError:
         raise UnresolvableAffinityReferenceError(
-            deployment_id=str(raw_id), path=path
+            f"Affinity term at {path} gives deployment id {str(raw_id)!r}, which is not a UUID.",
+            deployment_id=str(raw_id),
+            path=path,
         ) from None
 
 
@@ -233,7 +238,12 @@ async def _bind_reference(
         # A row found under a name that the same write changes is not a match.
         if target is not None and target.id not in upcoming:
             return target.id
-    raise UnresolvableAffinityReferenceError(deployment_name=name, path=path)
+    raise UnresolvableAffinityReferenceError(
+        deployment_name=name,
+        path=path,
+        environment_name=await environment_name(uow, environment_id),
+        new_environment=environment_id is None,
+    )
 
 
 async def _bind_id(
@@ -246,11 +256,16 @@ async def _bind_id(
     if target_id in upcoming:
         return target_id
     target = (
-        await uow.deployments.find(target_id) if environment_id is not None else None
+        await uow.deployments.find_reference_target(target_id)
+        if environment_id is not None
+        else None
     )
     if target is None or target.environment_id != environment_id:
         raise UnresolvableAffinityReferenceError(
-            deployment_id=str(target_id), path=path
+            deployment_id=str(target_id),
+            path=path,
+            environment_name=await environment_name(uow, environment_id),
+            new_environment=environment_id is None,
         )
     if target.deleted_at is not None:
         raise UnresolvableAffinityReferenceError(
@@ -260,3 +275,11 @@ async def _bind_id(
             deleted=True,
         )
     return target.id
+
+
+async def environment_name(uow: UnitOfWork, environment_id: UUID | None) -> str | None:
+    """The environment's name for an error message, or ``None`` when it does not exist yet."""
+    if environment_id is None:
+        return None
+    environment = await uow.environments.get(environment_id)
+    return environment.name if environment is not None else str(environment_id)

@@ -906,6 +906,16 @@ async def test_create_environment_refuses_a_term_that_names_a_deployment(
         == "environment.config.scheduling.pod_anti_affinity.preferred[0].term"
     )
     assert extensions.get(ref_field) == identifier
+    named = (
+        "deployment 'db'"
+        if ref_field == "deployment_name"
+        else f"deployment id {identifier}"
+    )
+    assert payload["errors"][0]["message"] == (
+        "Affinity term at environment.config.scheduling.pod_anti_affinity.preferred[0].term "
+        f"names {named}, but a new environment has no deployments yet. Add the term "
+        "with updateEnvironment once the deployment exists."
+    )
     session.expire_all()
     created = await session.exec(
         select(Environment).where(Environment.name == "new-env")
