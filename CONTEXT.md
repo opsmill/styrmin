@@ -103,11 +103,15 @@ A versioned, self-contained deployment specification that defines how an applica
 _Avoid_: "driver" alone when first introducing the term, "application spec", "deployment template".
 
 **Application driver version** (driver version):
-A specific version of an **application driver**, sourced from a git repository or a local directory. Owns its own `helm_chart` reference, `component_configs`, `parameters`, `services`, and `actions`. Selected per **deployment**.
+A specific version of an **application driver**, sourced from a **driver directory** in a git repository or on the server. Owns its own `helm_chart` reference, `component_configs`, `parameters`, `services`, and `actions`. Selected per **deployment**.
 _Avoid_: "version" alone (ambiguous with **application version**), "driver release".
 
+**Driver directory**:
+The folder that holds an **application driver**'s **driver specification file**, `values.j2.yml` and `actions.py`. For a load from a local directory, it is the path given on the server. For a load from git, it is the repository root or a folder of the repository, given as a path relative to the root. Stored on the **application driver version** as `source_path`, which is empty when it is the repository root. Driver **actions** run from it and can import only modules inside it. See [issue #517](https://github.com/opsmill/styrmin/issues/517).
+_Avoid_: "subfolder", "subpath", "driver root".
+
 **Driver specification file**:
-The `driver.styrmin.yml` file at the root of a driver directory. Single source of truth for driver metadata, supported application versions, Helm chart, components, parameters, services, and action declarations.
+The `driver.styrmin.yml` file at the root of a **driver directory**. Single source of truth for driver metadata, supported application versions, Helm chart, components, parameters, services, and action declarations.
 _Avoid_: "driver yaml", "driver manifest".
 
 **Driver logo**:
@@ -119,7 +123,7 @@ A message that a driver load returns for a `spec.info.icon` or `spec.info.links`
 _Avoid_: "load error" (the load did not fail), "validation warning".
 
 **Provenance fingerprint** (driver-version fingerprint):
-The content-addressable identifier carried by each **application driver version** that makes the row's identity stable across reloads with the same `version` string. Stored as two columns on `ApplicationDriverVersion` — `content_hash` (SHA-256 hex of the canonical local driver bytes) for `source_type = "local"`, and `source_commit_sha` (resolved git commit SHA) for `source_type = "git"`. Exactly one is non-null per row; the discriminator is `source_type`. Surfaced in the UI/CLI as `<version>@<short-fingerprint>` (first 7 chars). See [issue #262](https://github.com/opsmill/styrmin/issues/262).
+The content-addressable identifier carried by each **application driver version** that makes the row's identity stable across reloads with the same `version` string. Stored as two columns on `ApplicationDriverVersion` — `content_hash` (SHA-256 hex of the canonical local driver bytes) for `source_type = "local"`, and `source_commit_sha` (resolved git commit SHA) for `source_type = "git"`. Exactly one is non-null per row; the discriminator is `source_type`. For git, the commit covers the whole repository, so a commit that changes only files outside the **driver directory** also gives a reload a new fingerprint. Surfaced in the UI/CLI as `<version>@<short-fingerprint>` (first 7 chars). See [issue #262](https://github.com/opsmill/styrmin/issues/262).
 _Avoid_: "driver hash" alone (ambiguous across source types), "version hash" (conflates with **driver version**), "build id".
 
 **Application version**:
