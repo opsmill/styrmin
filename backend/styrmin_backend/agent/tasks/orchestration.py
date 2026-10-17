@@ -14,17 +14,18 @@ from prefect.states import Completed, format_exception
 from prefect.client.schemas.objects import State
 
 from styrmin_backend.agent.service.kubernetes.exceptions import (
-    CustomResourceNotFound,
     CustomResourceWriteConflictError,
     JobFailedError,
 )
 from styrmin_backend.agent.service.kubernetes.primitives import (
     create_event,
-    get_custom_resource,
     json_pointer_token,
     patch_custom_resource,
     replace_spec_keys_json_patch,
     run_kubernetes_job,
+)
+from styrmin_backend.agent.service.kubernetes.styrmin_deployment import (
+    read_styrmin_deployment,
 )
 from styrmin_backend.agent.steps.reporter import ReportedStep, StepReporter
 from styrmin_backend.agent.tasks.utils import (
@@ -43,6 +44,7 @@ from styrmin_backend.agent.tasks.service_aliases import (
     apply_service_aliases,
     compute_service_aliases,
     find_stale_service_aliases,
+    with_current_peer_services,
 )
 from styrmin_backend.agent.tasks.shared import (
     render_helm_chart_specifications,
@@ -125,7 +127,7 @@ async def _apply_styrmin_deployment_crd(
     """
     name = body["metadata"]["name"]
     for _ in range(_CRD_WRITE_ATTEMPTS):
-        live = await _read_styrmin_deployment(name=name, namespace=namespace)
+        live = await read_styrmin_deployment(name=name, namespace=namespace)
         if live is None:
             try:
                 await upsert_custom_resource(
@@ -170,23 +172,8 @@ async def _apply_styrmin_deployment_crd(
     )
 
 
-async def _read_styrmin_deployment(*, name: str, namespace: str) -> dict | None:
-    try:
-        live = await get_custom_resource(
-            plural=CRD_PLURAL,
-            name=name,
-            group=CRD_GROUP,
-            version=CRD_VERSION,
-            namespace=namespace,
-        )
-    except CustomResourceNotFound:
-        return None
-    assert isinstance(live, dict)
-    return live
-
-
 async def _changed_since(read_version: str, *, name: str, namespace: str) -> bool:
-    live = await _read_styrmin_deployment(name=name, namespace=namespace)
+    live = await read_styrmin_deployment(name=name, namespace=namespace)
     return live is None or live["metadata"]["resourceVersion"] != read_version
 
 
@@ -1089,6 +1076,7 @@ async def _apply_service_aliases_step(
     reporter: StepReporter, context: GlobalContext
 ) -> None:
     """Apply cross-namespace ExternalName service aliases and delete stale ones, if any."""
+    context = await with_current_peer_services(context)
     aliases = compute_service_aliases(context)
     stale_aliases = await find_stale_service_aliases(context)
     if not aliases and not stale_aliases:

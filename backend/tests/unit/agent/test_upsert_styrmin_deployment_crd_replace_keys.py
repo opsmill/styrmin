@@ -18,6 +18,7 @@ from uuid import uuid4
 import pytest
 from kubernetes_asyncio.client.api_client import ApiException
 
+from styrmin_backend.agent.service.kubernetes import styrmin_deployment
 from styrmin_backend.agent.service.kubernetes.primitives import (
     replace_spec_keys_json_patch,
     upsert_custom_resource,
@@ -164,7 +165,7 @@ async def test_agent_crd_apply_replaces_each_spec_key() -> None:
     body = _crd_body(None)
     with (
         patch.object(
-            orchestration, "get_custom_resource", AsyncMock(return_value=live)
+            styrmin_deployment, "get_custom_resource", AsyncMock(return_value=live)
         ),
         patch.object(orchestration, "patch_custom_resource", patch_cr),
     ):

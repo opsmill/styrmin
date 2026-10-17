@@ -1,5 +1,6 @@
 """Unit tests for cross-namespace service alias computation."""
 
+import asyncio
 import json
 from contextlib import ExitStack
 from typing import Any
@@ -436,6 +437,7 @@ class TestSelectStaleAliases:
 
 
 MODULE = "styrmin_backend.agent.tasks.service_aliases"
+CR_READS = "styrmin_backend.agent.service.kubernetes.styrmin_deployment"
 
 
 class TestOwnerNamespace:
@@ -535,7 +537,7 @@ class TestFindDepartingNamespaces:
         )
         with (
             patch(f"{MODULE}.get_namespace", get_namespace),
-            patch(f"{MODULE}.get_custom_resource", get_resource),
+            patch(f"{CR_READS}.get_custom_resource", get_resource),
         ):
             result = await find(["styrmin-x"])
         return result, get_namespace, get_resource
@@ -585,7 +587,7 @@ class TestFindDepartingNamespaces:
         get_namespace = AsyncMock(side_effect=read_namespace)
         with (
             patch(f"{MODULE}.get_namespace", get_namespace),
-            patch(f"{MODULE}.get_custom_resource", AsyncMock(side_effect=_ABSENT)),
+            patch(f"{CR_READS}.get_custom_resource", AsyncMock(side_effect=_ABSENT)),
         ):
             result = await find_departing_namespaces(
                 ["styrmin-gone", "styrmin-live", "styrmin-gone"]
@@ -613,7 +615,7 @@ class TestFindDepartingNamespaces:
         )
         with (
             patch(f"{MODULE}.get_namespace", get_namespace),
-            patch(f"{MODULE}.get_custom_resource", get_resource),
+            patch(f"{CR_READS}.get_custom_resource", get_resource),
             pytest.raises(ApiException) as raised,
         ):
             await find_departing_namespaces(["styrmin-x"])
@@ -648,7 +650,7 @@ REQUESTED_AND_TERMINATING: _State = (
     _styrmin_deployment(deletion_requested=True, deletion_timestamp=_TIMESTAMP),
 )
 DEPARTING_REASON = (
-    "is gone or terminating, or the deletion of its deployment was requested"
+    "does not exist or is terminating, or the deletion of its deployment was requested"
 )
 
 
@@ -702,13 +704,13 @@ class _Cluster:
         self, aliases: list[dict], stale: list[StaleAlias] | None = None
     ) -> None:
         with ExitStack() as stack:
-            for name, fake in (
-                ("get_namespace", self._get_namespace),
-                ("get_custom_resource", self._get_custom_resource),
-                ("apply_service", self.apply_service),
-                ("delete_service", self.delete_service),
+            for target, fake in (
+                (f"{MODULE}.get_namespace", self._get_namespace),
+                (f"{CR_READS}.get_custom_resource", self._get_custom_resource),
+                (f"{MODULE}.apply_service", self.apply_service),
+                (f"{MODULE}.delete_service", self.delete_service),
             ):
-                stack.enter_context(patch(f"{MODULE}.{name}", fake))
+                stack.enter_context(patch(target, fake))
             stack.enter_context(
                 patch(f"{MODULE}.get_run_logger", return_value=self.logger)
             )
@@ -849,65 +851,6 @@ class TestApplyServiceAliasesFlow:
             f"Keeping service alias old-intent in namespace {ns['b']}: "
             f"namespace {ns['b']} {DEPARTING_REASON}",
         } <= set(cluster.messages)
-
-    @pytest.mark.asyncio
-    async def test_apply_service_aliases_waits_for_a_peer_created_at_the_same_time(
-        self, aliases: list[dict], ns: dict[str, str]
-    ) -> None:
-        """FR-009: B was created just before A, and B's flow has not created B's namespace yet.
-
-        A's context lists B but B's context does not list A, so only A's flow writes the pair.
-        """
-        cluster = _Cluster(before={ns["b"]: (None, None)})
-        read_namespace = cluster._get_namespace
-
-        async def created_by_b_flow(*, name: str) -> V1Namespace | None:
-            if name == ns["b"] and (False, ns["b"]) in cluster.namespace_reads:
-                cluster.before[ns["b"]] = RUNNING
-            return await read_namespace(name=name)
-
-        cluster._get_namespace = created_by_b_flow  # type: ignore[method-assign]
-        with patch(f"{MODULE}.MISSING_NAMESPACE_POLL_SECONDS", 0):
-            await cluster.run(aliases)
-
-        assert cluster.written == {
-            (ns["a"], "executor"),
-            (ns["a"], "worker"),
-            (ns["b"], "intent"),
-            (ns["c"], "intent"),
-        }
-        assert sorted(
-            ns_ for after, ns_ in cluster.resource_reads if not after
-        ) == sorted([ns["a"], ns["b"], ns["b"], ns["c"]])
-        assert not any(m.startswith("Skipping service alias") for m in cluster.messages)
-
-    @pytest.mark.asyncio
-    async def test_apply_service_aliases_skips_a_namespace_still_missing_after_the_wait(
-        self, aliases: list[dict], ns: dict[str, str]
-    ) -> None:
-        """B was deleted, and its namespace and StyrminDeployment are gone; A creates no namespace."""
-        cluster = _Cluster(before={ns["b"]: (None, None)})
-        stale = [StaleAlias(namespace=ns["d"], name="old-intent", resource_version="5")]
-
-        with (
-            patch(f"{MODULE}.MISSING_NAMESPACE_POLL_SECONDS", 0),
-            patch(f"{MODULE}.MISSING_NAMESPACE_WAIT_SECONDS", 0.05),
-        ):
-            await cluster.run(aliases, stale)
-
-        assert cluster.written == {(ns["a"], "worker"), (ns["c"], "intent")}
-        assert cluster.deleted == {(ns["d"], "old-intent", "5")}
-        first_read = {name for after, name in cluster.namespace_reads if not after}
-        assert first_read == {ns["a"], ns["b"], ns["c"], ns["d"]}
-        # The flow waits only for the namespaces of its aliases, not for those of stale aliases.
-        assert [name for _, name in cluster.namespace_reads].count(ns["d"]) == 1
-        assert (
-            f"Namespaces {ns['b']} still do not exist after 0.05s" in cluster.messages
-        )
-        assert (
-            f"Skipping service alias executor in namespace {ns['a']}: "
-            f"namespace {ns['b']} {DEPARTING_REASON}"
-        ) in cluster.messages
 
     @pytest.mark.asyncio
     async def test_apply_service_aliases_skips_a_departing_owner_of_a_flow_without_services(
@@ -1064,3 +1007,141 @@ class TestApplyServiceAliasesFlow:
             await cluster.run(aliases)
 
         assert raised.value is rbac
+
+
+class TestReadNamespaceStates:
+    @pytest.mark.asyncio
+    async def test_reads_at_most_the_limit_of_namespaces_at_the_same_time(self) -> None:
+        """Review of PR #516: a flow with many peers does not open a client per read at once."""
+        running = 0
+        most = 0
+
+        async def read_namespace(*, name: str) -> V1Namespace | None:
+            nonlocal running, most
+            running += 1
+            most = max(most, running)
+            await asyncio.sleep(0)
+            running -= 1
+            return _namespace("Active")
+
+        namespaces = [f"styrmin-{index}" for index in range(7)]
+        with (
+            patch(f"{MODULE}.MAX_CONCURRENT_NAMESPACE_READS", 3),
+            patch(f"{MODULE}.get_namespace", AsyncMock(side_effect=read_namespace)),
+            patch(f"{CR_READS}.get_custom_resource", AsyncMock(side_effect=_ABSENT)),
+        ):
+            result = await find_departing_namespaces(namespaces)
+
+        assert result == set()
+        assert most == 3
+
+
+class TestWithCurrentPeerServices:
+    """The alias step reads the other deployments' services from the server (#503).
+
+    In CI run 39030125607, ``intent`` was requested just before ``executor``. Only
+    ``executor``'s context listed ``intent``, and ``executor``'s alias step ran before
+    ``intent``'s namespace existed, so it skipped both aliases.
+    """
+
+    @pytest.fixture
+    def ids(self) -> dict[str, UUID]:
+        return {"intent": uuid4(), "executor": uuid4()}
+
+    @pytest.fixture
+    def intent_context(self, ids: dict[str, UUID]) -> GlobalContext:
+        """Built when ``intent`` was requested, before ``executor`` existed."""
+        context = _make_context(
+            deployment_id=ids["intent"],
+            deployed_services=[_service("intent", ids["intent"])],
+        )
+        return context.model_copy(update={"labels": {"environment_id": "env-1"}})
+
+    @staticmethod
+    async def _run(
+        context: GlobalContext, read: AsyncMock
+    ) -> tuple[GlobalContext, MagicMock]:
+        logger = MagicMock()
+        with (
+            patch(f"{MODULE}.read_environment_services", read),
+            patch(f"{MODULE}.get_run_logger", return_value=logger),
+        ):
+            result = await service_aliases.with_current_peer_services(context)
+        return result, logger
+
+    @pytest.mark.asyncio
+    async def test_adds_a_peer_requested_after_the_context(
+        self, ids: dict[str, UUID], intent_context: GlobalContext
+    ) -> None:
+        read = AsyncMock(
+            return_value=[
+                {"resolved_name": "renamed", "deployment_id": str(ids["intent"])},
+                {"resolved_name": "executor", "deployment_id": str(ids["executor"])},
+            ]
+        )
+
+        result, logger = await self._run(intent_context, read)
+
+        read.assert_awaited_once_with("env-1")
+        # The deployment's own services stay as the context lists them.
+        assert result.deployed_services == [
+            _service("intent", ids["intent"]),
+            {"resolved_name": "executor", "deployment_id": str(ids["executor"])},
+        ]
+        intent_ns = get_kubernetes_reference(ids["intent"])
+        executor_ns = get_kubernetes_reference(ids["executor"])
+        assert {
+            (alias["metadata"]["namespace"], alias["metadata"]["name"])
+            for alias in compute_service_aliases(result)
+        } == {(intent_ns, "executor"), (executor_ns, "intent")}
+        logger.info.assert_called_once_with(
+            "The server lists services of deployments that the context does not list: %s",
+            str(ids["executor"]),
+        )
+        assert intent_context.deployed_services == [_service("intent", ids["intent"])]
+
+    @pytest.mark.asyncio
+    async def test_drops_a_peer_that_the_server_no_longer_lists(
+        self, ids: dict[str, UUID], intent_context: GlobalContext
+    ) -> None:
+        """A peer that reached ``DELETED`` has no DeployedService rows any more."""
+        context = intent_context.model_copy(
+            update={
+                "deployed_services": [
+                    _service("intent", ids["intent"]),
+                    _service("executor", ids["executor"]),
+                ]
+            }
+        )
+
+        result, logger = await self._run(context, AsyncMock(return_value=[]))
+
+        assert result.deployed_services == [_service("intent", ids["intent"])]
+        logger.info.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_keeps_the_context_when_the_server_cannot_be_read(
+        self, intent_context: GlobalContext
+    ) -> None:
+        read = AsyncMock(
+            side_effect=service_aliases.EnvironmentServicesReadError("timed out")
+        )
+
+        result, logger = await self._run(intent_context, read)
+
+        assert result is intent_context
+        logger.warning.assert_called_once()
+        assert "timed out" in str(logger.warning.call_args)
+
+    @pytest.mark.asyncio
+    async def test_keeps_the_context_without_an_environment_id(
+        self, intent_context: GlobalContext
+    ) -> None:
+        context = intent_context.model_copy(update={"labels": {}})
+        read = AsyncMock()
+
+        result, logger = await self._run(context, read)
+
+        assert result is context
+        read.assert_not_awaited()
+        logger.warning.assert_called_once()

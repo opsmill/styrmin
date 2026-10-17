@@ -20,6 +20,7 @@ from styrmin_backend.agent.service.kubernetes.exceptions import (
     CustomResourceNotFound,
     CustomResourceWriteConflictError,
 )
+from styrmin_backend.agent.service.kubernetes import styrmin_deployment
 from styrmin_backend.agent.tasks import orchestration
 from styrmin_backend.agent.tasks.orchestration import KeptInstance
 from styrmin_backend.operator.config import ANNOTATION_INSTANCE_SEQUENCE
@@ -86,7 +87,7 @@ class FakeApiServer:
         self.live["metadata"]["resourceVersion"] = str(self.version)
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(orchestration, "get_custom_resource", self.get)
+        monkeypatch.setattr(styrmin_deployment, "get_custom_resource", self.get)
         monkeypatch.setattr(orchestration, "upsert_custom_resource", self.create)
         monkeypatch.setattr(orchestration, "patch_custom_resource", self.patch)
 
@@ -342,7 +343,7 @@ async def test_a_resource_that_keeps_changing_fails_the_write_with_a_typed_error
         server.after_read = server.touch
         return await real_get(**kwargs)
 
-    monkeypatch.setattr(orchestration, "get_custom_resource", get_then_change)
+    monkeypatch.setattr(styrmin_deployment, "get_custom_resource", get_then_change)
 
     with pytest.raises(CustomResourceWriteConflictError) as raised:
         await _apply(_body(7))
