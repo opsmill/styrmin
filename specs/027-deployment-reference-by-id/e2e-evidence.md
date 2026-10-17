@@ -182,3 +182,56 @@ Checks run after the rebase, on `4153fc46` before this section was added:
 - `uv run invoke validate-graphql`: exit code 0, "277/277 .graphql files passed validation."
 
 No E2E test was run after the rebase.
+
+## Runs after the review of PR #519 on 2026-10-17
+
+The runs below were made on the working tree on top of commit `b54d6bd6`, with the review changes uncommitted (`git diff | sha256sum` began with `917902c9172e` when the runs started). After that, only Markdown files changed. The server image was built first with `STYRMIN_IMAGE_VER=review519-1792246976 docker compose build server`. Each variant ran in its own pytest session, with `--pdb` and a stdin held open by `sleep infinity`.
+
+`test_environment_clone_lifecycle` changed in this round: the SDK error message of the refused clone request now gives the reason and the term's path, and `extensions.deployments` gives `reason`.
+
+### `shard_env_backup`, `[api-chromium]`
+
+- Command: `uv run pytest backend/tests/e2e -m "ci and shard_env_backup" -k api-chromium -v -s --pdb`.
+- Started 2026-10-17T14:23:08+00:00, ended 2026-10-17T14:30:54+00:00, pytest exit code 0.
+- vCluster: `pytest-37963b8d-43ec-4e46-8461-416f5946b693`, deleted by the fixture at the end of the session.
+
+  ```text
+  backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[api-chromium] 14:23:10 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+  PASSED
+  backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[api-chromium] PASSED14:30:48 info Removing vCluster container vcluster.cp.pytest-37963b8d-43ec-4e46-8461-416f5946b693...
+  =========== 2 passed, 199 deselected, 1 warning in 463.25s (0:07:43) ===========
+  ```
+
+### `shard_env_backup`, `[ui-chromium]`
+
+- Command: `uv run pytest backend/tests/e2e -m "ci and shard_env_backup" -k ui-chromium -v -s --pdb`.
+- Started 2026-10-17T14:30:54+00:00, ended 2026-10-17T14:39:52+00:00, pytest exit code 0.
+- vCluster: `pytest-f936c9d7-5366-4d04-82a0-1144b0f5c461`, deleted by the fixture at the end of the session.
+
+  ```text
+  backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium] 14:30:56 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+  PASSED
+  backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium] PASSED14:39:47 info Removing vCluster container vcluster.cp.pytest-f936c9d7-5366-4d04-82a0-1144b0f5c461...
+  =========== 2 passed, 199 deselected, 1 warning in 536.15s (0:08:56) ===========
+  ```
+
+### `test_pod_anti_affinity_cross_deployment_via_graphql[api-chromium]` (`shard_compute`)
+
+Re-run because `updateDeployment` now resolves the terms of every level before it saves.
+
+- Command: `uv run pytest "backend/tests/e2e/test_pod_scheduling.py::test_pod_anti_affinity_cross_deployment_via_graphql" -k api-chromium -v -s --pdb`.
+- Started 2026-10-17T14:39:52+00:00, ended 2026-10-17T14:43:52+00:00, pytest exit code 0.
+- vCluster: `pytest-a25071ab-9b9b-4193-98ef-4d15c66b1234`, deleted by the fixture at the end of the session.
+
+  ```text
+  backend/tests/e2e/test_pod_scheduling.py::test_pod_anti_affinity_cross_deployment_via_graphql[api-chromium] 14:39:54 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+  PASSED14:43:46 info Removing vCluster container vcluster.cp.pytest-a25071ab-9b9b-4193-98ef-4d15c66b1234...
+  ============ 1 passed, 1 deselected, 1 warning in 237.18s (0:03:57) ============
+  ```
+
+### Other checks on the same working tree
+
+- `uv run pytest backend/tests/unit backend/tests/functional -q -p no:randomly`: `5012 passed, 3 skipped, 35 warnings in 129.49s (0:02:09)`, log written at 2026-10-17T14:19:24+00:00. The savepoint tests in `test_unit_of_work_savepoint.py` ran on SQLite and PostgreSQL.
+- `uv run pytest python_sdk/tests -q`: `298 passed in 0.40s`.
+- `npm_config_ignore_workspace=true uv run invoke format lint`: exit code 0 at 2026-10-17T14:22:24+00:00, "All checks passed!", "277/277 .graphql files passed validation." yamllint gave the two warnings in files that this change does not touch.
+- Frontend, in a `node:22-slim` container: `vitest run src/__tests__/environments/EnvironmentCloneDialog.test.tsx` (31 passed), `prettier --check` and `tsc -b` on the changed files passed; `eslint` gave only the `react-refresh/only-export-components` warnings that the file's other exports already give.
