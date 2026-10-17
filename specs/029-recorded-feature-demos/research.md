@@ -167,8 +167,11 @@ Quirks to handle: every body carries `project_id`; `AddRepository`, `AddEnvironm
 - **Consequences**:
   - The FR-016 check is expected to fail on the current code, and demo 4 to show two devices instead of three. The docs' statement that applications in a clone reach each other in the clone ([`ingress-and-networking.md`](../../docs/docs/concepts-and-architecture/ingress-and-networking.md#networking-between-applications)) would then be wrong.
   - Fixing it changes the agent's restore or clone flow, which the PRD keeps out of scope ("API or interface surface: none", "§I to §IV: no product code changes").
-- **Decision**: the first implementation task adds the FR-016 check and runs it. If it passes, the plan continues. If it fails, the implementer files a bug issue with the evidence and stops for a maintainer decision between: fixing the product first in its own change, or landing the check marked `xfail(strict=True)` with the issue link and recording demo 4 after the fix. The plan does not decide this, because it is a product change the PRD does not cover.
+- **Decision**: the first implementation task adds the FR-016 check and runs it.
+  - If it passes, the plan continues.
+  - If it fails, the implementer files a bug issue with the evidence and stops for a maintainer decision on the fix, which is a product change the PRD does not cover. Meanwhile the recorder and demos 1 to 3, which do not depend on the aliases, go on. The FR-016 check and demo 4 land after the fix, once the check passes. The check is not landed as an expected failure (`xfail`), because Constitution §V requires a modified E2E test to be observed to pass (critique X1).
 - **Check design**: after the first clone completes, list the Services labelled `styrmin.io/service-alias=true` in the counterpart's namespace and assert that the namespace part of each `spec.externalName` is a namespace of a deployment of the clone. It is read-only and adds no deployment (Constitution §V, "reuse before you boot").
+- **What the check proves**: the test's clone contains one deployment, so the check proves that no alias in the clone points to the source. It cannot prove that an alias points to another deployment of the clone, because the clone has no other deployment. Demo 4 proves that case, with two deployments (critique E5).
 
 ## R-014: Names, leftovers and deleting environments
 
