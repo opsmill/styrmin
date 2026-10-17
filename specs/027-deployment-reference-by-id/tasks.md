@@ -154,8 +154,8 @@ description: "Task list for storing the id of the deployment that an affinity te
 
 **Independent Test**: read B's config, write it back with `updateDeployment`, and get a null `Task`.
 
-- [ ] T033 [P] [US8] No-op tests in `backend/tests/functional/graphql/test_deployment_noop_propagation.py`: write back a config read from `Deployment.config` with `updateDeployment` gives a null `Task`; `updateDeploymentVersion` with the same version and a config whose term gives `deploymentName` of the already-named deployment gives a null `Task` (the path `deployments apply` takes); `updateEnvironment` re-sending a config whose term gives the name skips every deployment as already at config
-- [ ] T034 [P] [US8] SDK apply test in the existing SDK apply test module (find it with `grep -rln "def apply_files\|action=\"unchanged\"" T python_sdk`): a manifest whose `spec.config` term gives `deploymentName`, applied twice, reports `unchanged` the second time
+- [X] T033 [P] [US8] No-op tests in `backend/tests/functional/graphql/test_deployment_noop_propagation.py`: write back a config read from `Deployment.config` with `updateDeployment` gives a null `Task`; `updateDeploymentVersion` with the same version and a config whose term gives `deploymentName` of the already-named deployment gives a null `Task` (the path `deployments apply` takes); `updateEnvironment` re-sending a config whose term gives the name skips every deployment as already at config
+- [X] T034 [P] [US8] SDK apply test in the existing SDK apply test module (find it with `grep -rln "def apply_files\|action=\"unchanged\"" T python_sdk`): a manifest whose `spec.config` term gives `deploymentName`, applied twice, reports `unchanged` the second time
 
 **Checkpoint**: ADR-054 no-op detection holds for references.
 

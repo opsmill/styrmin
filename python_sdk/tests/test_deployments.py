@@ -1040,6 +1040,78 @@ async def test_apply_unchanged_against_failed_deployment(client: StyrminClient, 
     assert outcome.task_id is None
 
 
+_NAMED_REFERENCE_MANIFEST = """\
+apiVersion: styrmin/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  driver: my-app
+  version: "1.0.0"
+  environment: prod
+  config:
+    scheduling:
+      podAffinity:
+        preferred:
+          - weight: 100
+            term:
+              topologyKey: kubernetes.io/hostname
+              deploymentRef:
+                deploymentName: peer
+"""
+
+
+async def test_apply_files_twice_with_a_named_deployment_reference_reports_unchanged(
+    client: StyrminClient, mock_transport: AsyncMock, tmp_path: Path
+) -> None:
+    """027 US8 scenario 2: the server stores the peer's id, but the SDK compares nothing.
+
+    It sends the term with the name again, and the server's ``null`` gives ``unchanged``.
+    """
+    manifest_path = tmp_path / "app.yaml"
+    manifest_path.write_text(_NAMED_REFERENCE_MANIFEST, encoding="utf-8")
+    peer_id = "44444444-5555-6666-7777-888888888888"
+    stored_config = {
+        "scheduling": {
+            "pod_affinity": {
+                "preferred": [
+                    {
+                        "weight": 100,
+                        "term": {
+                            "topology_key": "kubernetes.io/hostname",
+                            "deployment_ref": {"deployment_id": peer_id},
+                        },
+                    }
+                ]
+            }
+        }
+    }
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0", config=stored_config),
+        _update_version_noop_response(),
+    ]
+
+    [first] = await client.deployments.apply_files([manifest_path])
+    [second] = await client.deployments.apply_files([manifest_path])
+
+    assert first.action == "updated"
+    assert second.action == "unchanged"
+    assert second.task_id is None
+    ops = _operation_names(mock_transport)
+    assert len(ops) == 6
+    assert ops[2].startswith("mutation UpdateDeploymentVersionWithInput(")
+    assert ops[5].startswith("mutation UpdateDeploymentVersionWithInput(")
+    sent_term = {"topologyKey": "kubernetes.io/hostname", "deploymentRef": {"deploymentName": "peer"}}
+    expected_input = {"scheduling": {"podAffinity": {"preferred": [{"weight": 100, "term": sent_term}]}}}
+    calls = mock_transport.execute.call_args_list
+    assert calls[2].args[1]["input"] == expected_input
+    assert calls[5].args[1]["input"] == expected_input
+
+
 async def test_apply_raises_driver_mismatch_when_existing_driver_differs(
     client: StyrminClient, mock_transport: AsyncMock
 ) -> None:
