@@ -424,6 +424,85 @@ async def test_update_of_b_is_refused_once_the_named_deployment_is_tombstoned(
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("patch_crd")
+@pytest.mark.parametrize("change", ["env_vars", "rename_only"])
+async def test_update_of_b_saves_nothing_when_e_s_term_names_the_tombstoned_deployment(
+    client: AsyncClient, session: AsyncSession, change: str
+) -> None:
+    """E's term gives tombstoned A's id, so ``updateDeployment`` on B is refused with
+    E's term path before anything is saved: B keeps its name, config, active instance
+    and tasks. The message says how to fix the term and which role can do it."""
+    ids = await _set_up(client, session, b_names_a=False)
+    await _tombstone(client, session, ids.a_id)
+    before = await session.get(Deployment, ids.b_id)
+    assert before is not None
+    state_before = (
+        before.name,
+        before.config,
+        before.active_application_instance_id,
+        await _task_count(session, ids.b_id),
+    )
+    update: dict[str, Any] = (
+        {"name": "b2"}
+        if change == "rename_only"
+        else {"envVars": [{"name": "FOO", "value": "bar"}]}
+    )
+
+    payload = await _post(
+        client, "update_deployment", {"deploymentId": str(ids.b_id), "input": update}
+    )
+
+    [error] = payload["errors"]
+    assert error["extensions"] == {
+        "code": "VALIDATION_ERROR",
+        **_names_tombstoned_a(ids.a_id, _E_TERM_PATH),
+    }
+    assert error["message"].startswith(
+        f"Affinity term at {_E_TERM_PATH} names deployment 'a' ({ids.a_id}), "
+        "which was deleted. To fix it, change or remove the term in the "
+        "environment's config with updateEnvironment, which needs the ADMIN role"
+    )
+    session.expire_all()
+    b = await session.get(Deployment, ids.b_id)
+    assert b is not None
+    assert (
+        b.name,
+        b.config,
+        b.active_application_instance_id,
+        await _task_count(session, ids.b_id),
+    ) == state_before
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_crd")
+async def test_b_discards_e_s_term_that_names_the_tombstoned_deployment_with_replace(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    """B's config sets ``replace: true`` on pod anti-affinity, which discards E's term
+    of that kind. The term gives tombstoned A's id but is dropped before it is
+    resolved, so the update is accepted and B's resolved scheduling has no such term."""
+    ids = await _set_up(client, session, b_names_a=False)
+    await _tombstone(client, session, ids.a_id)
+    tasks_before = await _task_count(session, ids.b_id)
+
+    await gql(
+        client,
+        "update_deployment",
+        {
+            "deploymentId": str(ids.b_id),
+            "input": {"scheduling": {"podAntiAffinity": {"replace": True}}},
+        },
+    )
+
+    session.expire_all()
+    assert await _task_count(session, ids.b_id) == tasks_before + 1
+    [entry] = await _resolved_scheduling(client, ids.b_id)
+    block = entry["config"]["pod_anti_affinity"]
+    assert (block["required"], block["preferred"]) == ([], [])
+    assert entry["provenance"]["pod_anti_affinity"] == "deployment"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("patch_crd")
 @pytest.mark.parametrize("b_redeploys", ["first", "last"])
 async def test_environment_fan_out_fails_b_s_redeploy_and_keeps_c_s(
     client: AsyncClient, session: AsyncSession, mocker, b_redeploys: str
@@ -701,6 +780,7 @@ async def test_environment_restore_puts_back_a_term_that_names_a_tombstoned_depl
     assert c.status == DeploymentState.DEPLOYING
     assert await _task_count(session, c_id) == tasks_before[c_id] + 1
 
+    b_config_before = b.config
     refused = await _post(
         client,
         "update_deployment",
@@ -715,3 +795,11 @@ async def test_environment_restore_puts_back_a_term_that_names_a_tombstoned_depl
         "code": "VALIDATION_ERROR",
         **_names_tombstoned_a(ids.a_id, _E_TERM_PATH),
     }
+    assert "updateEnvironment, which needs the ADMIN role" in error["message"]
+    # Refused before the first commit: B keeps its config, instance and tasks.
+    session.expire_all()
+    b = await session.get(Deployment, ids.b_id)
+    assert b is not None
+    assert b.config == b_config_before
+    assert b.active_application_instance_id == instances_before[ids.b_id]
+    assert await _task_count(session, ids.b_id) == tasks_before[ids.b_id]

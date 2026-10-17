@@ -8,6 +8,7 @@ from styrmin_backend.agent.service.kubernetes.utils import (
     get_kubernetes_reference,
 )
 from styrmin_backend.context.models.components import (
+    ProvenanceLevel,
     ResolvedComponentScheduling,
     driver_version_label,
 )
@@ -325,11 +326,9 @@ async def _populate_component_scheduling(
 ) -> None:
     """Populate ``ComponentContext.scheduling`` for each component.
 
-    Reads ``scheduling`` from each level's raw JSON config, expands each
-    level's affinity ``deployment_ref`` terms (so an error path names the
-    level that holds the term), merges the levels via
-    :func:`_resolve_scheduling_config`, and stores the resulting
-    :class:`ResolvedComponentScheduling` on the matching
+    Reads ``scheduling`` from each level's raw JSON config, resolves and merges
+    the levels of each component with :func:`resolve_component_scheduling`, and
+    stores the resulting :class:`ResolvedComponentScheduling` on the matching
     :class:`ComponentContext`. Deployment-level ``runtime_class``
     values are passed through without cluster-side validation — an unknown
     name surfaces later as a Pending pod with a scheduler error rather than
@@ -352,46 +351,125 @@ async def _populate_component_scheduling(
             path=f"component[{component.name}].config.scheduling",
         )
 
-    if not context.components.root:
-        return
-
-    env_scheduling = await _expand_scheduling(
-        uow,
-        environment_id,
-        env_scheduling,
-        path_prefix="environment.config.scheduling",
-        upcoming_deployments=upcoming_deployments,
-    )
-    dep_scheduling = await _expand_scheduling(
-        uow,
-        environment_id,
-        dep_scheduling,
-        path_prefix="deployment.config.scheduling",
-        upcoming_deployments=upcoming_deployments,
-    )
-
     for name, component_ctx in context.components.root.items():
-        comp_scheduling = await _expand_scheduling(
-            uow,
-            environment_id,
-            component_scheduling_by_name.get(name),
-            path_prefix=f"component[{name}].config.scheduling",
-            upcoming_deployments=upcoming_deployments,
-        )
+        comp_scheduling = component_scheduling_by_name.get(name)
         if (
             env_scheduling is None
             and dep_scheduling is None
             and comp_scheduling is None
         ):
             continue
-        resolved, provenance = _resolve_scheduling_config(
+        resolved, provenance = await resolve_component_scheduling(
+            uow,
+            environment_id,
             env=env_scheduling,
             dep=dep_scheduling,
             comp=comp_scheduling,
+            component_name=name,
+            upcoming_deployments=upcoming_deployments,
         )
         component_ctx.scheduling = ResolvedComponentScheduling(
             config=resolved, provenance=provenance
         )
+
+
+async def resolve_component_scheduling(
+    uow: UnitOfWork,
+    environment_id: UUID,
+    *,
+    env: SchedulingConfig | None,
+    dep: SchedulingConfig | None,
+    comp: SchedulingConfig | None,
+    component_name: str,
+    upcoming_deployments: Mapping[UUID, str] | None = None,
+) -> tuple[SchedulingConfig, dict[str, ProvenanceLevel]]:
+    """Resolve the deployment references of one component's three levels, then merge them.
+
+    A pod affinity block that a deeper level discards with ``replace: true`` is
+    dropped first, so its terms are not resolved: a deployment can discard a term of
+    the environment's config that names a deleted deployment. Every other term is
+    resolved in its own level, so an error path names the config that holds it.
+    """
+    env, dep, comp = _drop_replaced_affinity_blocks(env, dep, comp)
+    env = await _expand_scheduling(
+        uow,
+        environment_id,
+        env,
+        path_prefix="environment.config.scheduling",
+        upcoming_deployments=upcoming_deployments,
+    )
+    dep = await _expand_scheduling(
+        uow,
+        environment_id,
+        dep,
+        path_prefix="deployment.config.scheduling",
+        upcoming_deployments=upcoming_deployments,
+    )
+    comp = await _expand_scheduling(
+        uow,
+        environment_id,
+        comp,
+        path_prefix=f"component[{component_name}].config.scheduling",
+        upcoming_deployments=upcoming_deployments,
+    )
+    return _resolve_scheduling_config(env=env, dep=dep, comp=comp)
+
+
+async def check_deployment_scheduling(
+    uow: UnitOfWork,
+    deployment: Deployment,
+    environment_config: dict | None,
+) -> None:
+    """Raise the error that building the deployment's next instance would raise for its scheduling.
+
+    Lets a write refuse a term that names a deleted deployment, at any level,
+    before it saves anything.
+    """
+    env = _extract_scheduling(environment_config, path="environment.config.scheduling")
+    dep = _extract_scheduling(deployment.config, path="deployment.config.scheduling")
+    for component in deployment.components:
+        comp = _extract_scheduling(
+            component.config, path=f"component[{component.name}].config.scheduling"
+        )
+        if env is None and dep is None and comp is None:
+            continue
+        await resolve_component_scheduling(
+            uow,
+            deployment.environment_id,
+            env=env,
+            dep=dep,
+            comp=comp,
+            component_name=component.name,
+        )
+
+
+_POD_AFFINITY_FIELDS = ("pod_affinity", "pod_anti_affinity")
+
+
+def _drop_replaced_affinity_blocks(
+    *levels: SchedulingConfig | None,
+) -> list[SchedulingConfig | None]:
+    """Remove each pod affinity block that a deeper level discards with ``replace: true``.
+
+    ``levels`` run shallowest to deepest. The merge gives the same result with or
+    without the removed blocks.
+    """
+    trimmed = list(levels)
+    for field_name in _POD_AFFINITY_FIELDS:
+        replacing = [
+            index
+            for index, level in enumerate(levels)
+            if level is not None
+            and (block := getattr(level, field_name)) is not None
+            and block.replace
+        ]
+        if not replacing:
+            continue
+        for index in range(replacing[-1]):
+            level = trimmed[index]
+            if level is not None and getattr(level, field_name) is not None:
+                trimmed[index] = level.model_copy(update={field_name: None})
+    return trimmed
 
 
 async def _expand_scheduling(

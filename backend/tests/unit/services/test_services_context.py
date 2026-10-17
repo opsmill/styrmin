@@ -390,6 +390,120 @@ class TestPopulateComponentSchedulingReferencePaths:
         assert selector.match_labels == {"styrmin/deployment_id": str(upcoming_id)}
 
 
+def _replacing(config: dict | None = None, kind: str = "pod_anti_affinity") -> dict:
+    """``config`` with ``replace: true`` on its ``kind`` block, which it adds when absent."""
+    replaced = {"scheduling": {kind: {}}} if config is None else config
+    replaced["scheduling"][kind]["replace"] = True
+    return replaced
+
+
+class TestPopulateComponentSchedulingReplace:
+    """A term that a deeper level discards with ``replace: true`` is not resolved, so a
+    deployment can discard a term of the environment's config that names a missing
+    deployment (review of #508, finding 4)."""
+
+    @pytest.mark.anyio
+    async def test_component_replace_drops_the_terms_of_both_shallower_levels(
+        self, uow
+    ) -> None:  # type: ignore[no-untyped-def]
+        context = _make_context_with_component("server")
+
+        await _populate_component_scheduling(
+            context=context,
+            uow=uow,
+            environment_id=uuid4(),
+            environment_config=_anti_affinity_config(uuid4()),
+            deployment_config=_anti_affinity_config(uuid4()),
+            deployment_components=[
+                _FakeDeploymentComponent("server", config=_replacing())
+            ],
+        )
+
+        assert context.components is not None
+        scheduling = context.components.root["server"].scheduling
+        assert scheduling is not None
+        block = scheduling.config.pod_anti_affinity
+        assert block is not None
+        assert (block.required, block.preferred) == ([], [])
+        assert scheduling.provenance["pod_anti_affinity"] == "component"
+
+    @pytest.mark.anyio
+    async def test_deployment_replace_drops_the_environment_term_and_keeps_its_own(
+        self, uow
+    ) -> None:  # type: ignore[no-untyped-def]
+        env_id = uuid4()
+        target = await _save_deployment(uow, name="cache", environment_id=env_id)
+        context = _make_context_with_component("server")
+
+        await _populate_component_scheduling(
+            context=context,
+            uow=uow,
+            environment_id=env_id,
+            environment_config=_anti_affinity_config(uuid4()),
+            deployment_config=_replacing(_anti_affinity_config(target.id)),
+            deployment_components=[_FakeDeploymentComponent("server", None)],
+        )
+
+        assert context.components is not None
+        scheduling = context.components.root["server"].scheduling
+        assert scheduling is not None
+        block = scheduling.config.pod_anti_affinity
+        assert block is not None
+        [weighted] = block.preferred
+        assert weighted.term.label_selector is not None
+        assert weighted.term.label_selector.match_labels == {
+            "styrmin/deployment_id": str(target.id)
+        }
+
+    @pytest.mark.anyio
+    async def test_deployment_replace_still_resolves_the_component_term(
+        self, uow
+    ) -> None:  # type: ignore[no-untyped-def]
+        missing_id = uuid4()
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await _populate_component_scheduling(
+                context=_make_context_with_component("server"),
+                uow=uow,
+                environment_id=uuid4(),
+                environment_config=None,
+                deployment_config=_replacing(),
+                deployment_components=[
+                    _FakeDeploymentComponent(
+                        "server", config=_anti_affinity_config(missing_id)
+                    )
+                ],
+            )
+
+        assert exc.value.error_metadata["path"] == (
+            "component[server].config.scheduling.pod_anti_affinity.preferred[0].term"
+        )
+
+    @pytest.mark.anyio
+    async def test_replace_of_one_kind_keeps_the_terms_of_the_other_kind(
+        self, uow
+    ) -> None:  # type: ignore[no-untyped-def]
+        missing_id = uuid4()
+        environment_config = _anti_affinity_config(missing_id)
+        environment_config["scheduling"]["pod_affinity"] = environment_config[
+            "scheduling"
+        ].pop("pod_anti_affinity")
+
+        with pytest.raises(UnresolvableAffinityReferenceError) as exc:
+            await _populate_component_scheduling(
+                context=_make_context_with_component("server"),
+                uow=uow,
+                environment_id=uuid4(),
+                environment_config=environment_config,
+                deployment_config=_replacing(),
+                deployment_components=[_FakeDeploymentComponent("server", None)],
+            )
+
+        assert exc.value.error_metadata["path"] == (
+            "environment.config.scheduling.pod_affinity.preferred[0].term"
+        )
+
+
 class TestPopulateComponentContainerOverrides:
     """FR-005: container overrides reach the renderer via
     ``context.components[*].container_override``, and an orphaned block (whose
