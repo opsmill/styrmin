@@ -96,6 +96,23 @@ async def test_uncaught_failure_in_nested_blocks_inside_a_savepoint_rolls_back_e
     assert await _names(session) == set()
 
 
+async def test_failure_after_a_block_left_a_savepoint_normally_rolls_back_everything(
+    session: AsyncSession,
+) -> None:
+    """A block that exits normally inside a savepoint drops that savepoint from the stack,
+    so a later failure in the outer block rolls back the whole transaction."""
+    uow = SqlModelUnitOfWork(session)
+    with pytest.raises(RuntimeError):
+        async with uow:
+            await _add(session, "before")
+            async with session.begin_nested():
+                async with uow:
+                    await _add(session, "in-savepoint")
+            raise RuntimeError("simulated failure")
+
+    assert await _names(session) == set()
+
+
 async def test_failure_outside_a_savepoint_rolls_back_the_whole_transaction(
     session: AsyncSession,
 ) -> None:
