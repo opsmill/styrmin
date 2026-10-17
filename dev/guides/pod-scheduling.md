@@ -237,9 +237,11 @@ described in
 [A deleted deployment fails the terms that name it](#a-deleted-deployment-fails-the-terms-that-name-it).
 Each redeploy of the restore's fan-out runs in its own savepoint, so a
 failed redeploy keeps the others. The failure is written only to the
-server log (`env_restore_fanout_dispatch_error`, and `dispatch_failed`
-in `env_restore_fanout_dispatched`), not on the `EnvironmentRestore`
-record.
+server log, not on the `EnvironmentRestore` record:
+`env_restore_fanout_dispatch_error` gives the `environment_restore_id`,
+the `deployment_id`, the `error_code` and the term's `path`, and
+`env_restore_fanout_dispatched` counts the failure in
+`config_redeploy_failed` and in `dispatch_failed`.
 
 ## Per-feature opt-out
 

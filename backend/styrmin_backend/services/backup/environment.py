@@ -1079,13 +1079,16 @@ async def restore_environment_backup(
                 # rolls back only its savepoint: earlier redeploys stay and the session is not expired.
                 async with uow.session.begin_nested():
                     await redeploy_for_environment_update(deployment, uow)
-            except Exception:  # noqa: BLE001 — per-deployment isolation (ADR-0012)
+            except Exception as exc:  # noqa: BLE001 — per-deployment isolation (ADR-0012)
                 fanout_failed += 1
                 logger.exception(
                     "env_restore_fanout_dispatch_error environment_id={} "
-                    "deployment_id={}",
+                    "environment_restore_id={} deployment_id={} error_code={} path={}",
                     environment_id,
+                    environment_restore_id,
                     deployment.id,
+                    getattr(exc, "error_code", None),
+                    getattr(exc, "path", None),
                 )
                 continue
             fanout_dispatched += 1
@@ -1148,12 +1151,18 @@ async def restore_environment_backup(
             "fan-out was still running"
         )
 
+    for outcome, count in (
+        ("config_redeployed", fanout_dispatched),
+        ("config_redeploy_failed", fanout_failed),
+    ):
+        if count:
+            _emit_restore_fanout_metric(environment_id, outcome, count)
     # One audit entry per fan-out, matching ``env_backup_fanout_dispatched``
-    # (research.md D1 amendment).
+    # (research.md D1 amendment). ``dispatch_failed`` still adds both kinds of failure.
     logger.info(
         "env_restore_fanout_dispatched environment_id={} environment_backup_id={} "
         "environment_restore_id={} evaluated={} restored={} skipped={} "
-        "config_redeployed={} dispatch_failed={}",
+        "config_redeployed={} config_redeploy_failed={} dispatch_failed={}",
         environment_id,
         environment_backup_id,
         environment_restore_id,
@@ -1161,10 +1170,21 @@ async def restore_environment_backup(
         restored,
         len(skipped) + len(late_skips),
         fanout_dispatched,
+        fanout_failed,
         dispatch_failed + fanout_failed,
     )
 
     return refreshed
+
+
+def _emit_restore_fanout_metric(environment_id: UUID, outcome: str, count: int) -> None:
+    """Log the would-be counter, as ``_emit_fanout_metric`` does for ``updateEnvironment``."""
+    logger.info(
+        "metric=env_restore_fanout_deployments_total environment_id={} outcome={} count={}",
+        environment_id,
+        outcome,
+        count,
+    )
 
 
 def _skip(snapshot: DeploymentSnapshot, reason: str) -> SkippedConstituent:
