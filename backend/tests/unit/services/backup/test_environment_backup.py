@@ -7,6 +7,8 @@ never contradict the constituents it is derived from (spec FR-004 / SC-003).
 """
 
 import asyncio
+import contextlib
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -70,6 +72,7 @@ from styrmin_backend.services.exceptions import (
     EnvironmentOperationInProgressError,
     EnvironmentRestoreNotFoundError,
     RestoreAlreadyInProgressError,
+    UnresolvableAffinityReferenceError,
 )
 from styrmin_backend.workflows.models import PrefectAction
 from tests.unit.services.fakes import (
@@ -412,6 +415,7 @@ def _make_uow(
     environment_backups: list[EnvironmentBackup] | None = None,
     environment_restores: list[EnvironmentRestore] | None = None,
     deployed_services: list[DeployedService] | None = None,
+    uow_type: type[FakeUnitOfWork] = FakeUnitOfWork,
 ) -> FakeUnitOfWork:
     """Build a UoW whose repositories are consistent with each other.
 
@@ -433,7 +437,7 @@ def _make_uow(
             if deployment.active_instance is not None
         ]
     )
-    return FakeUnitOfWork(
+    return uow_type(
         clusters=FakeClusterRepository(),
         environments=FakeEnvironmentRepository([environment]),
         helm_repositories=FakeHelmRepositoryRepository(),
@@ -1516,6 +1520,125 @@ async def test_restore_survives_a_config_fanout_failure(
     # The config still reverted and the constituent restore still ran.
     assert environment.config == {"dns_zone": "captured.example.com"}
     assert len(uow.restores.models) == 1
+
+
+class _SavepointSession:
+    """Keeps writes pending until commit; a savepoint undoes only the writes made in it."""
+
+    def __init__(self) -> None:
+        self.pending: list[str] = []
+        self.committed: list[str] = []
+        self.savepoints: list[int] = []
+
+    async def refresh(self, obj: object) -> None:
+        pass
+
+    @contextlib.asynccontextmanager
+    async def begin_nested(self) -> AsyncIterator[None]:
+        self.savepoints.append(len(self.pending))
+        try:
+            yield
+        except BaseException:
+            del self.pending[self.savepoints[-1] :]
+            raise
+        finally:
+            self.savepoints.pop()
+
+
+class _SavepointUnitOfWork(FakeUnitOfWork):
+    """Rolls back as ``SqlModelUnitOfWork`` does: a failing block undoes the open
+    savepoint, or the whole transaction when no savepoint is open."""
+
+    def __init__(self, **repositories: object) -> None:
+        super().__init__(**repositories)  # type: ignore[arg-type]
+        self.transaction = _SavepointSession()
+        self.session = self.transaction  # type: ignore[assignment]
+
+    async def __aexit__(
+        self, exc_type: type[BaseException] | None, *args: object
+    ) -> None:
+        if exc_type is not None:
+            savepoints = self.transaction.savepoints
+            del self.transaction.pending[savepoints[-1] if savepoints else 0 :]
+
+    async def commit(self) -> None:
+        await super().commit()
+        self.transaction.committed.extend(self.transaction.pending)
+        self.transaction.pending.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("b_redeploys", ["first", "last"])
+async def test_restore_keeps_a_redeploy_when_another_names_a_tombstoned_deployment(
+    environment: Environment, prefect_manager_mock, no_config_fanout, b_redeploys: str
+) -> None:
+    """027 US7 (FR-006): B's redeploy is refused because the captured term names
+    tombstoned A. C's redeploy is committed, before or after B's, and the restore
+    returns normally."""
+    adv = _driver_version()
+    a = _deployment(
+        environment_id=environment.id,
+        adv=adv,
+        name="a",
+        deleted_at=datetime.now(timezone.utc),
+        status=DeploymentState.DELETED,
+    )
+    b = _deployment(environment_id=environment.id, adv=adv, name="b")
+    c = _deployment(environment_id=environment.id, adv=adv, name="c")
+    term_path = "environment.config.scheduling.pod_anti_affinity.preferred[0].term"
+    captured = {
+        "scheduling": {
+            "pod_anti_affinity": {
+                "preferred": [
+                    {
+                        "weight": 100,
+                        "term": {
+                            "topology_key": "kubernetes.io/hostname",
+                            "deployment_ref": {"deployment_id": str(a.id)},
+                        },
+                    }
+                ]
+            }
+        }
+    }
+    parent = _environment_backup(
+        environment=environment, snapshots=[], environment_config=captured
+    )
+    uow = _make_uow(
+        environment=environment,
+        deployments=[a, b, c] if b_redeploys == "first" else [a, c, b],
+        driver_versions=[adv],
+        environment_backups=[parent],
+        uow_type=_SavepointUnitOfWork,
+    )
+    assert isinstance(uow, _SavepointUnitOfWork)
+
+    async def _redeploy(
+        deployment: DeploymentEntity, uow: _SavepointUnitOfWork
+    ) -> None:
+        # The real redeploy expands the terms inside its own ``async with uow`` block.
+        async with uow:
+            uow.transaction.pending.append(deployment.name)
+            if deployment.id == b.id:
+                raise UnresolvableAffinityReferenceError(
+                    deployment_id=str(a.id),
+                    deployment_name="a",
+                    path=term_path,
+                    deleted=True,
+                )
+
+    no_config_fanout.side_effect = _redeploy
+
+    environment_restore = await restore_environment_backup(
+        environment_backup_id=parent.id, uow=uow
+    )
+
+    assert environment_restore.environment_backup_id == parent.id
+    assert environment.config == captured
+    redeployed = [call.args[0].name for call in no_config_fanout.await_args_list]
+    assert redeployed == (["b", "c"] if b_redeploys == "first" else ["c", "b"])
+    assert uow.transaction.committed == ["c"]
+    assert uow.transaction.pending == []
 
 
 # ---------------------------------------------------------------------------
