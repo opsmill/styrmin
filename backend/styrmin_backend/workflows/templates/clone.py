@@ -12,7 +12,8 @@ Sequence:
 1. poll the backing capture's **derived** status until terminal;
 2. gate: ``FAILED`` capture → one fatal ``capture_failed`` entry and nothing
    materialises; ``COMPLETED``/``PARTIAL`` → proceed with the usable
-   constituents (FR-002);
+   constituents (FR-002). A constituent whose affinity terms name a deployment
+   whose capture failed fails too (027 FR-005);
 3. create the environment from the captured config with the clone's override
    merged over it and capabilities recomputed (FR-006, ADR-0027);
 4. create one counterpart deployment per usable constituent, pinned to the
@@ -53,12 +54,15 @@ from styrmin_backend.services.backup.clone import (
     CLONE_REASON_CAPTURE_FAILED,
     CLONE_REASON_CAPTURE_UNUSABLE,
     CLONE_REASON_DRIVER_VERSION_GONE,
+    CLONE_REASON_REFERENCED_DEPLOYMENT_NOT_CLONED,
     CLONE_STEP_CAPTURE_FAILED,
     CLONE_STEP_ENVIRONMENT_CREATION_FAILED,
+    CLONE_STEP_REFERENCED_DEPLOYMENT_NOT_CLONED,
     CLONE_STEP_TARGET_NAME_TAKEN,
     CloneDeploymentResult,
     CloneError,
     EnvironmentCloneDeploymentOutcome,
+    cascade_reference_failures,
     derive_clone_capture_status,
     merge_environment_config,
     order_counterparts,
@@ -83,7 +87,10 @@ from styrmin_backend.services.exceptions import (
     UnclonedDeploymentReferenceError,
     UnclonedReference,
 )
-from styrmin_backend.services.scheduling.references import remap_deployment_references
+from styrmin_backend.services.scheduling.references import (
+    referenced_deployment_ids,
+    remap_deployment_references,
+)
 from styrmin_backend.services.unit_of_work import UnitOfWork, get_unit_of_work
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.models import PrefectAction
@@ -391,6 +398,37 @@ async def _resolve_pinned_driver_version(
         return candidates[0].id if candidates else None
 
 
+def _reference_not_cloned_reason(
+    named_id: UUID, source_names: Mapping[UUID, str]
+) -> str:
+    return CLONE_REASON_REFERENCED_DEPLOYMENT_NOT_CLONED.format(
+        name=source_names.get(named_id, str(named_id))
+    )
+
+
+def _reference_not_cloned_error(
+    unmapped: Mapping[UUID, list[str]], source_names: Mapping[UUID, str]
+) -> CloneError:
+    """The fatal error for an environment config that names a deployment the clone lost."""
+    return CloneError(
+        step=CLONE_STEP_REFERENCED_DEPLOYMENT_NOT_CLONED,
+        error=str(_uncloned_reference_error(unmapped, source_names)),
+        fatal=True,
+    )
+
+
+def _log_reference_not_cloned(
+    clone_id: UUID, deployment_id: UUID, named_deployment_id: UUID
+) -> None:
+    get_run_logger().warning(
+        "env_clone_reference_not_cloned environment_clone_id=%s deployment_id=%s "
+        "named_deployment_id=%s",
+        clone_id,
+        deployment_id,
+        named_deployment_id,
+    )
+
+
 def _uncloned_reference_error(
     unmapped: Mapping[UUID, list[str]], source_names: Mapping[UUID, str]
 ) -> UnclonedDeploymentReferenceError:
@@ -620,6 +658,8 @@ async def _create_cloned_environment(
     term of the merged config then names the counterpart that ``counterpart_ids``
     gives the deployment it named, and ``upcoming_deployments`` (the
     counterparts, by id with their names) lets ``create_environment`` accept it.
+    A term that names a deployment with no counterpart, because its capture
+    failed, writes the fatal ``referenced_deployment_not_cloned`` error instead.
 
     Returns:
         The created environment's id and the merged config with the source ids,
@@ -669,16 +709,15 @@ async def _create_cloned_environment(
         merged_config, counterpart_ids, path_prefix="environment.config"
     )
     if unmapped:
-        # T027: replace with the fatal referenced_deployment_not_cloned step.
+        # A term names a deployment whose capture failed: no environment (027 FR-005).
         source_names = {r.deployment_id: r.deployment_name for r in results}
         await _save_progress(
             clone.id,
-            results=_fail_pending(results, CLONE_REASON_CAPTURE_UNUSABLE),
-            error=CloneError(
-                step=CLONE_STEP_ENVIRONMENT_CREATION_FAILED,
-                error=str(_uncloned_reference_error(unmapped, source_names)),
-                fatal=True,
+            results=_fail_pending(
+                results,
+                _reference_not_cloned_reason(next(iter(unmapped)), source_names),
             ),
+            error=_reference_not_cloned_error(unmapped, source_names),
         )
         return None
 
@@ -788,6 +827,12 @@ async def _run_environment_clone(clone_id: UUID) -> None:
     usable, failures = _classify_captured_constituents(
         clone, datetime.now(timezone.utc)
     )
+    source_names = {result.deployment_id: result.deployment_name for result in results}
+    cascaded = cascade_reference_failures([c.snapshot for c in usable], failures)
+    for deployment_id, named_id in cascaded.items():
+        _log_reference_not_cloned(clone_id, deployment_id, named_id)
+        failures[deployment_id] = _reference_not_cloned_reason(named_id, source_names)
+    usable = [c for c in usable if c.snapshot.deployment_id not in cascaded]
 
     # A capture that ended PARTIAL contributes its failed constituents here:
     # they are attributed and the clone proceeds with the rest (FR-002).
@@ -819,8 +864,10 @@ async def _run_environment_clone(clone_id: UUID) -> None:
     if created is None:
         return
     created_environment_id = created.environment_id
+    environment_terms = referenced_deployment_ids(
+        created.merged_config, "environment.config"
+    )
 
-    source_names = {result.deployment_id: result.deployment_name for result in results}
     by_source_id = {c.snapshot.deployment_id: c for c in usable}
     ordered = [
         by_source_id[snapshot.deployment_id]
@@ -830,72 +877,109 @@ async def _run_environment_clone(clone_id: UUID) -> None:
     ]
 
     cloned = 0
-    failed = 0
+    failed_ids: set[UUID] = set()
+    stopped_by: UUID | None = None
     for constituent in ordered:
         deployment_id = constituent.snapshot.deployment_id
         entry = by_deployment.get(deployment_id)
-        counterpart_deployment_id: UUID | None = None
-        restore_id: UUID | None = None
-        try:
-            counterpart_deployment_id = await _create_counterpart(
-                clone,
-                created_environment_id,
-                constituent,
-                counterpart_ids=counterpart_ids,
-                upcoming_deployments=upcoming,
-                source_names=source_names,
-            )
-            restore_id = await _dispatch_cross_target_restore(
-                constituent, counterpart_deployment_id
-            )
-        except Exception as exc:  # noqa: BLE001 — per-deployment isolation (D5)
-            failed += 1
-            # A failed counterpart is no longer upcoming for the ones created after it (critique E2).
-            upcoming.pop(counterpart_ids[deployment_id], None)
-            if isinstance(exc, _CounterpartError):
-                counterpart_deployment_id = (
-                    exc.counterpart_deployment_id or counterpart_deployment_id
+        named_failed = next(
+            (
+                named_id
+                for named_id in referenced_deployment_ids(
+                    constituent.snapshot.config, ""
                 )
-                restore_id = exc.restore_id or restore_id
-            logger.exception(
-                "env_clone_counterpart_error environment_clone_id=%s deployment_id=%s "
-                "counterpart_deployment_id=%s restore_id=%s",
-                clone_id,
-                deployment_id,
-                counterpart_deployment_id,
-                restore_id,
-            )
+                if named_id in failed_ids
+            ),
+            None,
+        )
+        if named_failed is not None:
+            # Fails without being created, as the capture cascade does (critique E4).
+            _log_reference_not_cloned(clone_id, deployment_id, named_failed)
             if entry is not None:
-                # The ids go on the entry even though the outcome is a failure:
-                # whatever this step managed to create is real, and the
-                # attribution entry is the only place an operator can find it.
                 by_deployment[deployment_id] = entry.model_copy(
                     update={
                         "outcome": EnvironmentCloneDeploymentOutcome.FAILED,
-                        "reason": str(exc),
-                        "counterpart_deployment_id": counterpart_deployment_id,
-                        "restore_id": restore_id,
+                        "reason": _reference_not_cloned_reason(
+                            named_failed, source_names
+                        ),
                     }
                 )
-            continue
+        else:
+            counterpart_deployment_id: UUID | None = None
+            restore_id: UUID | None = None
+            try:
+                counterpart_deployment_id = await _create_counterpart(
+                    clone,
+                    created_environment_id,
+                    constituent,
+                    counterpart_ids=counterpart_ids,
+                    upcoming_deployments=upcoming,
+                    source_names=source_names,
+                )
+                restore_id = await _dispatch_cross_target_restore(
+                    constituent, counterpart_deployment_id
+                )
+            except Exception as exc:  # noqa: BLE001 — per-deployment isolation (D5)
+                if isinstance(exc, _CounterpartError):
+                    counterpart_deployment_id = (
+                        exc.counterpart_deployment_id or counterpart_deployment_id
+                    )
+                    restore_id = exc.restore_id or restore_id
+                logger.exception(
+                    "env_clone_counterpart_error environment_clone_id=%s "
+                    "deployment_id=%s counterpart_deployment_id=%s restore_id=%s",
+                    clone_id,
+                    deployment_id,
+                    counterpart_deployment_id,
+                    restore_id,
+                )
+                if entry is not None:
+                    # The ids go on the entry even though the outcome is a failure:
+                    # whatever this step managed to create is real, and the
+                    # attribution entry is the only place an operator can find it.
+                    by_deployment[deployment_id] = entry.model_copy(
+                        update={
+                            "outcome": EnvironmentCloneDeploymentOutcome.FAILED,
+                            "reason": str(exc),
+                            "counterpart_deployment_id": counterpart_deployment_id,
+                            "restore_id": restore_id,
+                        }
+                    )
+            else:
+                cloned += 1
+                if entry is not None:
+                    by_deployment[deployment_id] = entry.model_copy(
+                        update={
+                            "outcome": EnvironmentCloneDeploymentOutcome.CLONED,
+                            "reason": None,
+                            "counterpart_deployment_id": counterpart_deployment_id,
+                            "restore_id": restore_id,
+                        }
+                    )
+                continue
 
-        cloned += 1
-        if entry is not None:
-            by_deployment[deployment_id] = entry.model_copy(
-                update={
-                    "outcome": EnvironmentCloneDeploymentOutcome.CLONED,
-                    "reason": None,
-                    "counterpart_deployment_id": counterpart_deployment_id,
-                    "restore_id": restore_id,
-                }
-            )
+        failed_ids.add(deployment_id)
+        # A failed counterpart is no longer upcoming for the ones created after it (critique E2).
+        upcoming.pop(counterpart_ids[deployment_id], None)
+        if deployment_id in environment_terms:
+            # The environment config names it: attempt no further counterpart (027 FR-005).
+            stopped_by = deployment_id
+            break
 
     results = [by_deployment.get(result.deployment_id, result) for result in results]
+    fatal_error: CloneError | None = None
+    if stopped_by is not None:
+        fatal_error = _reference_not_cloned_error(
+            {stopped_by: environment_terms[stopped_by]}, source_names
+        )
+        results = _fail_pending(
+            results, _reference_not_cloned_reason(stopped_by, source_names)
+        )
     # Any entry still PENDING here names a deployment the capture never
     # snapshotted, so it will never be attempted; attribute it rather than
     # leaving the clone pinned non-terminal forever.
     results = _fail_pending(results, CLONE_REASON_CAPTURE_UNUSABLE)
-    await _save_progress(clone_id, results=results)
+    await _save_progress(clone_id, results=results, error=fatal_error)
 
     logger.info(
         "env_clone_materialised environment_clone_id=%s created_environment_id=%s "
@@ -905,5 +989,5 @@ async def _run_environment_clone(clone_id: UUID) -> None:
         capture_status.value,
         len(usable),
         cloned,
-        failed,
+        len(failed_ids),
     )

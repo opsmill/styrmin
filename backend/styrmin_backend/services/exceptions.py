@@ -720,9 +720,13 @@ class UnresolvableAffinityReferenceError(ServiceError):
 
 @dataclass
 class UnclonedReference:
-    """A deployment that affinity terms of a clone name but the clone does not copy."""
+    """A deployment that affinity terms of a clone name but the clone does not copy.
 
-    deployment_id: UUID
+    ``deployment_id`` is ``None`` for a name, given by a driver version, that no
+    deployment of the source environment has.
+    """
+
+    deployment_id: UUID | None
     deployment_name: str | None
     paths: list[str] = field(default_factory=list)
 
@@ -752,7 +756,9 @@ class UnclonedDeploymentReferenceError(ServiceError):
         return {
             "deployments": [
                 {
-                    "deployment_id": str(d.deployment_id),
+                    "deployment_id": (
+                        str(d.deployment_id) if d.deployment_id is not None else None
+                    ),
                     "deployment_name": d.deployment_name,
                     "paths": list(d.paths),
                 }

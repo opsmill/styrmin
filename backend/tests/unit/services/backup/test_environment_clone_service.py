@@ -52,6 +52,7 @@ from styrmin_backend.db.models import (
     Backup,
     BackupStatus,
     Cluster,
+    ComponentConfig,
     Environment,
     EnvironmentBackup,
     EnvironmentClone,
@@ -64,24 +65,29 @@ from styrmin_backend.domain.models import DeploymentState
 from styrmin_backend.domain.models import Instance as InstanceEntity
 from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
 from styrmin_backend.services.backup.clone import (
+    CLONE_REASON_BACKUP_NOT_COMPLETED,
     CLONE_REASON_CAPTURE_FAILED,
     CLONE_REASON_CAPTURE_UNUSABLE,
     CLONE_REASON_DRIVER_VERSION_GONE,
     CLONE_REASON_INTERNAL,
     CLONE_REASON_NOT_ELIGIBLE,
     CLONE_REASON_NOT_SELECTED,
+    CLONE_REASON_REFERENCED_DEPLOYMENT_NOT_CLONED,
     CLONE_REASON_TOMBSTONED,
     CLONE_STEP_CAPTURE_FAILED,
     CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
     CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
     CLONE_STEP_ENVIRONMENT_CREATION_FAILED,
+    CLONE_STEP_REFERENCED_DEPLOYMENT_NOT_CLONED,
     CLONE_STEP_TARGET_NAME_TAKEN,
     TERMINAL_ENVIRONMENT_CLONE_STATUSES,
     EnvironmentCloneDeploymentOutcome,
     EnvironmentCloneStatus,
+    cascade_reference_failures,
     clone_environment,
     derive_environment_clone_status_from_record,
     find_clone_occupying_environment,
+    find_uncloned_references,
     order_counterparts,
 )
 from styrmin_backend.services.backup.environment import (
@@ -102,8 +108,12 @@ from styrmin_backend.services.exceptions import (
     EnvironmentOperationInProgressError,
     InvalidCloneDeploymentSelectionError,
     InvalidContextError,
+    UnclonedDeploymentReferenceError,
+    UnclonedReference,
     UnknownEnvironmentConfigFieldError,
+    UnresolvableAffinityReferenceError,
 )
+from styrmin_backend.services.scheduling.references import iter_reference_sites
 from styrmin_backend.workflows.models import PrefectAction
 from styrmin_backend.workflows.templates import clone as clone_flow
 from tests.helpers.unit_of_work import yield_unit_of_work
@@ -2605,3 +2615,521 @@ def test_order_counterparts_breaks_first_the_cycle_that_names_no_other() -> None
     )
 
     assert _ordered_names(snapshots, ["a", "b", "c", "d"]) == ["c", "d", "a", "b"]
+
+
+# ---------------------------------------------------------------------------
+# 027 T028 — affinity terms that name a deployment the clone does not copy
+# ---------------------------------------------------------------------------
+
+_TERM_PATH = "scheduling.pod_affinity.preferred[0].term"
+
+
+def _named_affinity_config(names: list[str]) -> dict[str, Any]:
+    """A config with one pod affinity term per deployment name, as an operator writes it."""
+    return {
+        "scheduling": {
+            "pod_affinity": {
+                "preferred": [
+                    {
+                        "weight": 1,
+                        "term": {
+                            "topology_key": "kubernetes.io/hostname",
+                            "deployment_ref": {"deployment_name": name},
+                        },
+                    }
+                    for name in names
+                ]
+            }
+        }
+    }
+
+
+def _assert_nothing_registered(scenario: _Scenario, prefect_manager_mock) -> None:
+    """FR-005: a refused request leaves no clone row, no backup and no dispatch."""
+    assert scenario.uow.environment_clones.models == []
+    assert scenario.uow.environment_backups.models == []
+    assert scenario.uow.backups.models == []
+    assert scenario.uow.commit_count == 0
+    prefect_manager_mock.run_action.assert_not_called()
+
+
+async def _add_deployment(scenario: _Scenario, name: str) -> DeploymentEntity:
+    """A third running deployment of the source, with the instance its capture reads."""
+    deployment = _deployment(
+        environment_id=scenario.source.id, adv=scenario.adv, name=name
+    )
+    assert deployment.active_instance is not None
+    await scenario.uow.deployments.save(deployment)
+    scenario.deployments.append(deployment)
+    scenario.uow.instances.models.append(
+        ApplicationInstance(
+            id=deployment.active_instance.id,
+            name=deployment.active_instance.name,
+            application_version=deployment.active_instance.application_version,
+            status=InstanceStatus.RUNNING,
+            deployment_id=deployment.id,
+            application_driver_version_id=scenario.adv.id,
+        )
+    )
+    return deployment
+
+
+async def _drop_captured_driver_version(
+    scenario: _Scenario, clone: EnvironmentClone, deployment_name: str
+) -> None:
+    """Make one counterpart's creation fail: its captured driver version is gone."""
+    environment_backup = await scenario.uow.environment_backups.get(
+        clone.environment_backup_id
+    )
+    assert environment_backup is not None
+    rewritten: list[dict[str, Any]] = []
+    for raw in environment_backup.deployment_snapshots or []:
+        snapshot = DeploymentSnapshot.model_validate(raw)
+        if snapshot.deployment_name == deployment_name:
+            snapshot = snapshot.model_copy(
+                update={"driver_fingerprint": "fingerprint-gone"}
+            )
+        rewritten.append(snapshot.model_dump(mode="json"))
+    environment_backup.deployment_snapshots = rewritten
+
+
+def _reference_not_cloned_logs(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("env_clone_reference_not_cloned")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_clone_request_is_refused_when_a_term_names_an_unselected_deployment(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """US6 scenario 1: api names postgres-main, and only api is selected."""
+    scenario.second.config = _affinity_config([scenario.first.id])
+
+    with pytest.raises(UnclonedDeploymentReferenceError) as excinfo:
+        await scenario.clone(deployment_ids=[scenario.second.id])
+
+    assert excinfo.value.deployments == [
+        UnclonedReference(
+            deployment_id=scenario.first.id,
+            deployment_name="postgres-main",
+            paths=[f"deployment[api].config.{_TERM_PATH}"],
+        )
+    ]
+    _assert_nothing_registered(scenario, prefect_manager_mock)
+
+
+@pytest.mark.asyncio
+async def test_clone_request_is_refused_when_the_named_deployment_is_not_eligible(
+    prefect_manager_mock,
+) -> None:
+    """FR-005: a selected deployment with no active instance is not copied."""
+    cluster = Cluster(name="c1")
+    source = Environment(name="prod", cluster_id=cluster.id)
+    driver = ApplicationDriver(name="test-driver")
+    adv = _driver_version(driver=driver)
+    never_deployed = _deployment(
+        environment_id=source.id, adv=adv, name="cache", with_instance=False
+    )
+    api = _deployment(environment_id=source.id, adv=adv, name="api")
+    api.config = _affinity_config([never_deployed.id])
+    uow = _make_uow(
+        cluster=cluster,
+        environments=[source],
+        deployments=[never_deployed, api],
+        drivers=[driver],
+        driver_versions=[adv],
+    )
+
+    with pytest.raises(UnclonedDeploymentReferenceError) as excinfo:
+        await clone_environment(
+            uow=uow,
+            name="prod-copy",
+            created_by_user_id=USER_ID,
+            environment_id=source.id,
+            deployment_ids=[never_deployed.id, api.id],
+        )
+
+    assert [
+        (d.deployment_id, d.deployment_name) for d in excinfo.value.deployments
+    ] == [(never_deployed.id, "cache")]
+    assert uow.environment_clones.models == []
+    assert uow.environment_backups.models == []
+    prefect_manager_mock.run_action.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_clone_request_lists_a_tombstoned_deployment_by_its_last_name(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """FR-005: a tombstoned deployment is never copied; the roster gives its last name."""
+    scenario.first.deleted_at = datetime.now(timezone.utc)
+    scenario.second.config = _affinity_config([scenario.first.id])
+
+    with pytest.raises(UnclonedDeploymentReferenceError) as excinfo:
+        await scenario.clone()
+
+    assert [
+        (d.deployment_id, d.deployment_name) for d in excinfo.value.deployments
+    ] == [(scenario.first.id, "postgres-main")]
+    _assert_nothing_registered(scenario, prefect_manager_mock)
+
+
+@pytest.mark.asyncio
+async def test_clone_request_is_refused_when_the_environment_config_names_a_left_out_deployment(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """US6 scenario 2: E's term names postgres-main, and only api is selected."""
+    scenario.source.config = {
+        "fqdn_suffix": "prod.example.com",
+        **_affinity_config([scenario.first.id]),
+    }
+
+    with pytest.raises(UnclonedDeploymentReferenceError) as excinfo:
+        await scenario.clone(deployment_ids=[scenario.second.id])
+
+    assert excinfo.value.deployments == [
+        UnclonedReference(
+            deployment_id=scenario.first.id,
+            deployment_name="postgres-main",
+            paths=[f"environment.config.{_TERM_PATH}"],
+        )
+    ]
+    _assert_nothing_registered(scenario, prefect_manager_mock)
+
+
+@pytest.mark.asyncio
+async def test_clone_request_is_refused_when_the_override_names_a_left_out_deployment(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """FR-005: a name in the override is bound against the source, then checked."""
+    with pytest.raises(UnclonedDeploymentReferenceError) as excinfo:
+        await scenario.clone(
+            deployment_ids=[scenario.second.id],
+            config_override=_named_affinity_config(["postgres-main"]),
+        )
+
+    assert excinfo.value.deployments == [
+        UnclonedReference(
+            deployment_id=scenario.first.id,
+            deployment_name="postgres-main",
+            paths=[f"environment.config.{_TERM_PATH}"],
+        )
+    ]
+    _assert_nothing_registered(scenario, prefect_manager_mock)
+
+
+@pytest.mark.asyncio
+async def test_clone_request_refuses_an_override_that_names_no_deployment_of_the_source(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """FR-005: an override name that matches no source deployment is refused with its path."""
+    with pytest.raises(UnresolvableAffinityReferenceError) as excinfo:
+        await scenario.clone(config_override=_named_affinity_config(["ghost"]))
+
+    assert excinfo.value.deployment_name == "ghost"
+    assert excinfo.value.path == f"config_override.{_TERM_PATH}"
+    _assert_nothing_registered(scenario, prefect_manager_mock)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("driver_name", "selected", "expected"),
+    [
+        # Critique X1: the driver still gives the name the deployment had before a rename.
+        ("postgres", "all", (None, "postgres")),
+        ("postgres-main", "api", ("first", "postgres-main")),
+    ],
+)
+async def test_clone_request_refuses_a_driver_term_that_no_copied_deployment_has_by_name(
+    scenario: _Scenario,
+    prefect_manager_mock,
+    driver_name: str,
+    selected: str,
+    expected: tuple[str | None, str],
+) -> None:
+    """FR-005: a driver component term is checked by name against the copied deployments."""
+    api_adv = _driver_version(
+        driver=scenario.driver, version="2.0.0", content_hash="fingerprint-2"
+    )
+    api_adv.component_configs = [
+        ComponentConfig(
+            name="server",
+            config=_named_affinity_config([driver_name]),
+            application_driver_version_id=api_adv.id,
+        )
+    ]
+    scenario.uow.application_driver_versions.models.append(api_adv)
+    scenario.second.application_driver_version_id = api_adv.id
+
+    with pytest.raises(UnclonedDeploymentReferenceError) as excinfo:
+        await scenario.clone(
+            deployment_ids=[scenario.second.id] if selected == "api" else None
+        )
+
+    expected_id = scenario.first.id if expected[0] == "first" else None
+    assert excinfo.value.deployments == [
+        UnclonedReference(
+            deployment_id=expected_id,
+            deployment_name=expected[1],
+            paths=[f"deployment[api].component[server].config.{_TERM_PATH}"],
+        )
+    ]
+    _assert_nothing_registered(scenario, prefect_manager_mock)
+
+
+@pytest.mark.asyncio
+async def test_clone_request_accepts_a_driver_term_that_names_a_copied_deployment(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """FR-005: the flow binds this name to the counterpart named postgres-main."""
+    scenario.adv.component_configs = [
+        ComponentConfig(
+            name="server",
+            config=_named_affinity_config(["postgres-main"]),
+            application_driver_version_id=scenario.adv.id,
+        )
+    ]
+
+    clone = await scenario.clone()
+
+    assert clone.environment_backup_id is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "request_kwargs",
+    [
+        {"clear_config_fields": ["scheduling"]},
+        {"config_override": _named_affinity_config(["api"])},
+    ],
+    ids=["cleared", "replaced"],
+)
+async def test_clone_request_is_accepted_when_the_environment_term_is_cleared_or_replaced(
+    scenario: _Scenario, prefect_manager_mock, request_kwargs: dict[str, Any]
+) -> None:
+    """US6 scenario 3: the request removes or replaces E's term that names postgres-main."""
+    scenario.source.config = {
+        "fqdn_suffix": "prod.example.com",
+        **_affinity_config([scenario.first.id]),
+    }
+
+    clone = await scenario.clone(deployment_ids=[scenario.second.id], **request_kwargs)
+
+    assert clone.environment_backup_id is not None
+    assert len(scenario.uow.backups.models) == 1
+
+
+@pytest.mark.asyncio
+async def test_clone_request_stores_the_override_with_the_id_of_the_named_deployment(
+    scenario: _Scenario, prefect_manager_mock
+) -> None:
+    """Plan D-006: the bound override is the one the clone record keeps."""
+    clone = await scenario.clone(config_override=_named_affinity_config(["api"]))
+
+    assert [
+        site.deployment_ref for site in iter_reference_sites(clone.config_override, "")
+    ] == [{"deployment_id": str(scenario.second.id)}]
+
+
+def test_find_uncloned_references_groups_the_paths_of_each_deployment() -> None:
+    """One entry per left-out deployment, with every path that names it, in order."""
+    environment_id = uuid4()
+    driver = ApplicationDriver(name="test-driver")
+    adv = _driver_version(driver=driver)
+    left_out = _deployment(environment_id=environment_id, adv=adv, name="postgres")
+    copied = _deployment(environment_id=environment_id, adv=adv, name="api")
+    copied.config = _affinity_config([left_out.id])
+
+    found = find_uncloned_references(
+        _affinity_config([left_out.id]),
+        [copied],
+        {copied.id: {"server": _named_affinity_config(["postgres", "api"])}},
+        [left_out, copied],
+    )
+
+    assert found == [
+        UnclonedReference(
+            deployment_id=left_out.id,
+            deployment_name="postgres",
+            paths=[
+                f"environment.config.{_TERM_PATH}",
+                f"deployment[api].config.{_TERM_PATH}",
+                f"deployment[api].component[server].config.{_TERM_PATH}",
+            ],
+        )
+    ]
+
+
+@pytest.mark.parametrize("input_order", [["a", "b", "c", "d"], ["d", "c", "b", "a"]])
+def test_cascade_reference_failures_follows_a_chain(input_order: list[str]) -> None:
+    """c names b and b names a: a's failure fails b, then c; d names no failed one."""
+    snapshots = _ordering_snapshots(
+        ["a", "b", "c", "d"], {"b": ["a"], "c": ["b"], "d": ["outside"]}
+    )
+    ids = {name: snapshot.deployment_id for name, snapshot in snapshots.items()}
+
+    cascaded = cascade_reference_failures(
+        [snapshots[name] for name in input_order], {ids["a"]}
+    )
+
+    assert cascaded == {ids["b"]: ids["a"], ids["c"]: ids["b"]}
+
+
+@pytest.mark.asyncio
+async def test_a_failed_capture_fails_the_counterparts_whose_terms_name_it(
+    scenario: _Scenario,
+    prefect_manager_mock,
+    flow_harness,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """US6 scenario 4: api names postgres-main, whose capture fails; cache is cloned."""
+    cache = await _add_deployment(scenario, "cache")
+    scenario.second.config = _affinity_config([scenario.first.id])
+    clone = await scenario.clone()
+    await _complete_capture(scenario, failed_deployment=scenario.first)
+
+    with caplog.at_level(logging.WARNING, logger="test"):
+        await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.created_environment_id is not None
+    assert refreshed.clone_errors is None
+    entries = _results(refreshed)
+    assert entries["postgres-main"]["outcome"] == "failed"
+    assert entries["postgres-main"]["reason"] == CLONE_REASON_BACKUP_NOT_COMPLETED
+    assert entries["api"]["outcome"] == "failed"
+    assert entries["api"]["reason"] == (
+        CLONE_REASON_REFERENCED_DEPLOYMENT_NOT_CLONED.format(name="postgres-main")
+    )
+    assert entries["api"]["counterpart_deployment_id"] is None
+    assert entries["cache"]["outcome"] == "cloned"
+    assert [call["deployment_name"] for call in flow_harness["deploy"]] == ["cache"]
+    assert _reference_not_cloned_logs(caplog) == [
+        f"env_clone_reference_not_cloned environment_clone_id={clone.id} "
+        f"deployment_id={scenario.second.id} named_deployment_id={scenario.first.id}"
+    ]
+    assert entries["cache"]["deployment_id"] == str(cache.id)
+
+    restores = {restore.id: restore for restore in scenario.uow.restores.models}
+    for restore in restores.values():
+        restore.status = RestoreStatus.COMPLETED
+    assert (
+        derive_environment_clone_status_from_record(refreshed, restores)
+        is EnvironmentCloneStatus.PARTIAL
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_environment_term_that_names_a_failed_capture_fails_the_clone(
+    scenario: _Scenario, prefect_manager_mock, flow_harness
+) -> None:
+    """US6 scenario 5: E's term names postgres-main, whose capture fails."""
+    scenario.source.config = {
+        "fqdn_suffix": "prod.example.com",
+        **_affinity_config([scenario.first.id]),
+    }
+    clone = await scenario.clone()
+    await _complete_capture(scenario, failed_deployment=scenario.first)
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.created_environment_id is None
+    assert [env.name for env in scenario.uow.environments.models] == ["prod"]
+    assert flow_harness["deploy"] == []
+    assert refreshed.clone_errors is not None
+    assert [entry["step"] for entry in refreshed.clone_errors] == [
+        CLONE_STEP_REFERENCED_DEPLOYMENT_NOT_CLONED
+    ]
+    assert refreshed.clone_errors[0]["fatal"] is True
+    assert "postgres-main" in refreshed.clone_errors[0]["error"]
+    entries = _results(refreshed)
+    assert entries["postgres-main"]["reason"] == CLONE_REASON_BACKUP_NOT_COMPLETED
+    assert entries["api"]["outcome"] == "failed"
+    assert entries["api"]["reason"] == (
+        CLONE_REASON_REFERENCED_DEPLOYMENT_NOT_CLONED.format(name="postgres-main")
+    )
+    assert (
+        derive_environment_clone_status_from_record(refreshed)
+        is EnvironmentCloneStatus.FAILED
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failed_counterpart_fails_the_counterparts_whose_terms_name_it(
+    scenario: _Scenario,
+    prefect_manager_mock,
+    flow_harness,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Critique E4: api names postgres-main, whose counterpart creation fails."""
+    scenario.second.config = _affinity_config([scenario.first.id])
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+    await _drop_captured_driver_version(scenario, clone, "postgres-main")
+
+    with caplog.at_level(logging.WARNING, logger="test"):
+        await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.created_environment_id is not None
+    assert refreshed.clone_errors is None
+    entries = _results(refreshed)
+    assert entries["postgres-main"]["reason"] == CLONE_REASON_DRIVER_VERSION_GONE
+    assert entries["api"]["outcome"] == "failed"
+    assert entries["api"]["reason"] == (
+        CLONE_REASON_REFERENCED_DEPLOYMENT_NOT_CLONED.format(name="postgres-main")
+    )
+    assert flow_harness["deploy"] == [], "api's counterpart was created anyway"
+    assert _reference_not_cloned_logs(caplog) == [
+        f"env_clone_reference_not_cloned environment_clone_id={clone.id} "
+        f"deployment_id={scenario.second.id} named_deployment_id={scenario.first.id}"
+    ]
+    assert (
+        derive_environment_clone_status_from_record(refreshed)
+        is EnvironmentCloneStatus.FAILED
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failed_counterpart_that_the_environment_names_stops_the_clone(
+    scenario: _Scenario, prefect_manager_mock, flow_harness
+) -> None:
+    """Plan D-007: E's term names postgres-main, whose counterpart creation fails."""
+    scenario.source.config = {
+        "fqdn_suffix": "prod.example.com",
+        **_affinity_config([scenario.first.id]),
+    }
+    clone = await scenario.clone()
+    await _complete_capture(scenario)
+    await _drop_captured_driver_version(scenario, clone, "postgres-main")
+
+    await clone_flow.execute_environment_clone_workflow.fn(str(clone.id))
+
+    refreshed = await scenario.uow.environment_clones.get(clone.id)
+    assert refreshed is not None
+    assert refreshed.created_environment_id is not None
+    assert refreshed.clone_errors is not None
+    assert [entry["step"] for entry in refreshed.clone_errors] == [
+        CLONE_STEP_REFERENCED_DEPLOYMENT_NOT_CLONED
+    ]
+    assert refreshed.clone_errors[0]["fatal"] is True
+    assert "postgres-main" in refreshed.clone_errors[0]["error"]
+    entries = _results(refreshed)
+    assert entries["postgres-main"]["reason"] == CLONE_REASON_DRIVER_VERSION_GONE
+    # The environment-named counterpart comes first, so api is never attempted.
+    assert entries["api"]["outcome"] == "failed"
+    assert entries["api"]["reason"] == (
+        CLONE_REASON_REFERENCED_DEPLOYMENT_NOT_CLONED.format(name="postgres-main")
+    )
+    assert flow_harness["deploy"] == []
+    assert (
+        derive_environment_clone_status_from_record(refreshed)
+        is EnvironmentCloneStatus.FAILED
+    )
