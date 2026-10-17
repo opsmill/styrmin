@@ -98,16 +98,23 @@ request that renames the deployment is looked up by the new name.
 
 A write is refused with `VALIDATION_ERROR`, and saves nothing, when a
 term names a deployment that the environment does not have: a name that
-no deployment of the environment has, an id of a deployment of another
-environment, or a tombstoned deployment. The error's `extensions` give
+no live deployment of the environment has, an id that matches no
+deployment, an id of a deployment of another environment, or the id of a
+tombstoned deployment. The error's `extensions` give
 the term's `path` and the `deployment_name` or `deployment_id` that the
 term gives. The path starts with the config that holds the term:
 `environment.config`, `deployment.config` or `component[<name>].config`,
 for example `environment.config.scheduling.pod_anti_affinity.preferred[0].term`.
 
-The same error, with the term's path, refuses a `deployment_ref` that
-gives both or neither of `deployment_id` and `deployment_name`, or a
-`deployment_id` that is not a UUID. The API checks the environment and
+The same error, with the term's path, refuses a `deployment_ref` that:
+
+- gives both or neither of `deployment_id` and `deployment_name`;
+- has a key other than `deployment_id`, `deployment_name` and
+  `components`;
+- gives a `components` value that is not a list of strings;
+- gives a `deployment_id` that is not a UUID.
+
+The API checks the environment and
 deployment configs for these before it looks names up; for the
 component configs that a driver version gives, this check is the first.
 
@@ -178,8 +185,10 @@ its name. The terms still give the old id and fail as above. Write each
 term again with the name, for example by applying the unchanged manifest
 whose term gives `deployment_name`: the name now gives the new
 deployment, and Styrmin stores its id. `styrminctl deployments apply`
-changes the driver of a deployment only by delete and re-create, so this
-applies to that case too.
+refuses a manifest whose driver differs from the existing deployment's
+driver (`DriverMismatchError`). To change the driver, you delete the
+deployment and apply the manifest again, which creates a new deployment,
+so this applies to that case too.
 
 ### Re-applying an unchanged manifest starts no reconcile
 
@@ -229,7 +238,8 @@ and of the component definitions of its driver version. The error is
 `VALIDATION_ERROR`, and `extensions.deployments` lists each such
 deployment with `deployment_id`, `deployment_name` and the `paths` of the
 terms that name it. `deployment_id` is `null` for a name, given by a
-driver version, that no source deployment has. A name in the clone's
+driver version, that no live deployment of the source environment has.
+A name in the clone's
 `configOverride` is looked up among the source environment's
 deployments. The details of the clone flow are in
 [backup-restore.md](../knowledge/backend/backup-restore.md#affinity-terms-in-a-clone).

@@ -12,8 +12,8 @@ Sequence:
 1. poll the backing capture's **derived** status until terminal;
 2. gate: ``FAILED`` capture → one fatal ``capture_failed`` entry and nothing
    materialises; ``COMPLETED``/``PARTIAL`` → proceed with the usable
-   constituents (FR-002). A constituent whose affinity terms name a deployment
-   whose capture failed fails too (027 FR-005);
+   constituents (FR-002). A constituent whose config's affinity terms name a
+   deployment whose captured data cannot be used fails too (027 FR-005);
 3. create the environment from the captured config with the clone's override
    merged over it and capabilities recomputed (FR-006, ADR-0027);
 4. create one counterpart deployment per usable constituent, pinned to the
@@ -475,6 +475,9 @@ async def _create_counterpart(
     Raises:
         UnclonedDeploymentReferenceError: When an affinity term names a
             deployment that has no counterpart.
+        UnresolvableAffinityReferenceError: From ``deploy_application``, when a
+            term of the driver version's component definitions gives a name that
+            no counterpart has, for example the name of a counterpart that failed.
         RuntimeError: When the captured driver version no longer resolves.
     """
     snapshot = constituent.snapshot
@@ -658,8 +661,9 @@ async def _create_cloned_environment(
     term of the merged config then names the counterpart that ``counterpart_ids``
     gives the deployment it named, and ``upcoming_deployments`` (the
     counterparts, by id with their names) lets ``create_environment`` accept it.
-    A term that names a deployment with no counterpart, because its capture
-    failed, writes the fatal ``referenced_deployment_not_cloned`` error instead.
+    A term that names a deployment with no counterpart, because its captured data
+    cannot be used or its terms name such a deployment, writes the fatal
+    ``referenced_deployment_not_cloned`` error instead.
 
     Returns:
         The created environment's id and the merged config with the source ids,
@@ -709,7 +713,7 @@ async def _create_cloned_environment(
         merged_config, counterpart_ids, path_prefix="environment.config"
     )
     if unmapped:
-        # A term names a deployment whose capture failed: no environment (027 FR-005).
+        # A term names a deployment that has no counterpart: no environment (027 FR-005).
         logger.error(
             "env_clone_environment_reference_not_cloned environment_clone_id=%s "
             "named_deployment_ids=%s",
