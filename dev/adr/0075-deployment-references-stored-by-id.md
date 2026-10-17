@@ -7,7 +7,7 @@
 [PRD comment](https://github.com/opsmill/styrmin/issues/508#issuecomment-6226052128);
 [issue #492](https://github.com/opsmill/styrmin/issues/492) (the failure);
 [PR #504](https://github.com/opsmill/styrmin/pull/504) (closed: the option rejected);
-`specs/027-deployment-reference-by-id/` (spec, research R-001 to R-015, critique)
+[specs/archive/027-deployment-reference-by-id/](../../specs/archive/027-deployment-reference-by-id/) (spec, research R-001 to R-015, critique)
 **Related**: [ADR-034](0034-affinity-by-deployment-reference-via-label.md) (amended here: a
 stored reference gives an id, so a reconcile looks up no name),
 [ADR-054](0054-backend-authoritative-noop-detection.md) (a write-back or a re-apply must start
@@ -131,7 +131,7 @@ name source deployments. Option 3 keeps the failure of #492 and the clone failur
 - Good, because a rename changes no stored term and no resolved selector, so it restarts no pod
   of the deployments whose terms name the renamed deployment, and their later updates and
   fan-out redeploys succeed. `test_pod_anti_affinity_cross_deployment_via_graphql` checks this in
-  a cluster (`specs/027-deployment-reference-by-id/e2e-evidence.md`).
+  a cluster ([`specs/archive/027-deployment-reference-by-id/e2e-evidence.md`](../../specs/archive/027-deployment-reference-by-id/e2e-evidence.md)).
 - Good, because an environment restore brings back ids, which name the same deployments as at
   backup time, because a restore creates and deletes no deployment.
 - Good, because a term that names a missing deployment is refused when it is written, with its
@@ -197,7 +197,7 @@ name source deployments. Option 3 keeps the failure of #492 and the clone failur
   re-create, restore) and `backend/tests/functional/graphql/test_environment_clone.py`.
 - E2E: `test_pod_anti_affinity_cross_deployment_via_graphql` (`shard_compute`) and
   `test_environment_clone_lifecycle` (`shard_env_backup`), with local evidence in
-  `specs/027-deployment-reference-by-id/e2e-evidence.md`.
+  [`specs/archive/027-deployment-reference-by-id/e2e-evidence.md`](../../specs/archive/027-deployment-reference-by-id/e2e-evidence.md).
 
 ## More information
 
