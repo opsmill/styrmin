@@ -41,7 +41,8 @@ plus the load failure for ``singleton: true`` with ``replicas`` above 1.
 normalised driver directory in ``source_path``, and ``applicationDriver.versions`` returns it
 as ``sourcePath``. T038 adds the failed loads: a refused driver directory returns
 ``VALIDATION_ERROR``, and a missing one names the driver directory and the commit SHA; neither
-stores a row.
+stores a row. T039 adds the root load: no driver directory stores ``source_path`` as NULL,
+and reloads at the same commit without one, with ``""`` or with ``"."`` return the same row.
 
 Test location note: the task list specifies
 ``backend/tests/unit/api/schema/test_application_driver_version_propagation.py``
@@ -867,6 +868,42 @@ async def test_driver_directory_projects_through_application_driver_query(
     ]
     assert read_back["sourceType"] == "git"
     assert read_back["sourcePath"] == "drivers/a"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_root_load_stores_null_and_reloads_return_the_same_version(
+    client: AsyncClient,
+    session: AsyncSession,
+    driver_repository: tuple[str, str, str],
+) -> None:
+    """028 T039 (FR-002, SC-002, US4-1, US4-2): a load without ``driverDirectory`` reads
+    the driver from the repository root and stores ``source_path`` as NULL. Reloads at
+    the same commit with no driver directory, ``""`` or ``"."`` return the same version."""
+    repository, branch, sha = driver_repository
+    # An omitted nullable variable leaves ``driverDirectory`` unset, as if not written.
+    root = {"repositoryUrl": repository, "branch": branch}
+
+    loaded = await gql(client, "load_remote_driver_directory", root)
+    version = loaded["loadRemoteApplicationDriverVersion"]
+    assert version["sourceType"] == "git"
+    assert version["sourcePath"] is None
+    assert version["sourceCommitSha"] == sha
+
+    row = await session.get(
+        ApplicationDriverVersion, UUID(version["id"]), populate_existing=True
+    )
+    assert row is not None
+    assert row.source_path is None
+    assert row.source_commit_sha == sha
+
+    for extra in ({}, {"driverDirectory": ""}, {"driverDirectory": "."}):
+        reloaded = await gql(client, "load_remote_driver_directory", root | extra)
+        reloaded_id = reloaded["loadRemoteApplicationDriverVersion"]["id"]
+        assert reloaded_id == version["id"], extra
+
+    rows = (await session.exec(select(ApplicationDriverVersion))).all()
+    assert [r.id for r in rows] == [UUID(version["id"])]
 
 
 async def _load_driver_directory_payload(

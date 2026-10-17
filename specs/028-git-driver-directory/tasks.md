@@ -149,8 +149,8 @@ description: "Tasks for 028: load an application driver from a driver directory 
 
 **Independent Test**: the tests below plus the unchanged root-loading E2E fixtures (`semaphore`, `generic-app`, `infrahub`, the test drivers) in CI.
 
-- [ ] T039 [P] [US4] In `backend/tests/functional/graphql/test_application_driver_version_propagation.py` add: a root load of the T009 repository without `driverDirectory` stores `source_path IS NULL`; reloads at the same commit with no argument, `driverDirectory: ""` and `driverDirectory: "."` return the same `id` (US4-1, US4-2)
-- [ ] T040 [P] [US4] In `backend/tests/unit/workflows/test_user_action_registration.py` add: a registration without a driver directory keeps the name `User Action: <action> (<driver>@<fingerprint>)` and the five existing tags, with no `directory/` tag (US4-3)
+- [X] T039 [P] [US4] In `backend/tests/functional/graphql/test_application_driver_version_propagation.py` add: a root load of the T009 repository without `driverDirectory` stores `source_path IS NULL`; reloads at the same commit with no argument, `driverDirectory: ""` and `driverDirectory: "."` return the same `id` (US4-1, US4-2)
+- [X] T040 [P] [US4] In `backend/tests/unit/workflows/test_user_action_registration.py` add: a registration without a driver directory keeps the name `User Action: <action> (<driver>@<fingerprint>)` and the five existing tags, with no `directory/` tag (US4-3)
 
 **Checkpoint**: root loads verified unchanged.
 

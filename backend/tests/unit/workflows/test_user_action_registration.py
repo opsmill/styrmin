@@ -215,11 +215,19 @@ async def test_two_driver_directories_at_one_commit_register_distinct_deployment
 async def test_registration_without_driver_directory_has_no_directory_tag(
     manager: PrefectManager, client
 ) -> None:
+    """US4-3: a root registration keeps its name and its five tags."""
     await _register(manager, fingerprint="555d155")
 
     kwargs = client.create_deployment.await_args.kwargs
     assert kwargs["name"] == "User Action: post_setup (lab-driver-a@555d155)"
-    assert not any(tag.startswith("directory/") for tag in kwargs["tags"])
+    assert len(kwargs["tags"]) == 5, kwargs["tags"]
+    assert set(kwargs["tags"]) == {
+        "application/lab-driver-a",
+        "version/>=1.0.0",
+        "hook/setup",
+        "mode/post",
+        "fingerprint/555d155",
+    }
 
 
 async def test_lookup_with_driver_directory_filters_on_its_tag(
