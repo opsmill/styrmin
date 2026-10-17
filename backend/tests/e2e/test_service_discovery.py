@@ -21,6 +21,7 @@ from styrmin_sdk import StyrminClient
 
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.helpers.ingress import wait_for_deployment_status
 
 pytestmark = [
     pytest.mark.shard_general,
@@ -213,7 +214,7 @@ async def test_deleted_deployment_leaves_no_alias(
     )
 
     await client.deployments.delete(intent_id)
-    await _wait_for_deleted(client, intent_id)
+    await wait_for_deployment_status(client, intent_id, "deleted", timeout=300.0)
 
     remaining = [
         f"{svc.name} (externalName={svc.spec.get('externalName')})"
@@ -230,23 +231,6 @@ async def test_deleted_deployment_leaves_no_alias(
         f"deployment {intent_id}: {remaining}. Deleting a deployment must "
         "delete its service aliases (#503)."
     )
-
-
-async def _wait_for_deleted(
-    client: StyrminClient, deployment_id: str, timeout: float = 300.0
-) -> None:
-    """Poll the deployment every 5 seconds until its status is ``deleted``."""
-    deadline = time.time() + timeout
-    while True:
-        status = (await client.deployments.get(deployment_id)).status
-        if status == "deleted":
-            return
-        if time.time() >= deadline:
-            raise AssertionError(
-                f"Deployment {deployment_id} not deleted after {timeout}s; "
-                f"last status: {status!r}"
-            )
-        await asyncio.sleep(5)
 
 
 async def _wait_for_alias_names(
