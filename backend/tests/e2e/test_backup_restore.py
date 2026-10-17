@@ -2460,8 +2460,8 @@ async def test_environment_clone_lifecycle(
 
         # 3. A request that selects only the peer leaves out the primary its term
         #    names, so it is refused before any clone record or backup (027 US6;
-        #    step 7 checks that the source gained no backup). The SDK drops the
-        #    GraphQL extensions, so the same request is sent raw to read the path.
+        #    step 7 checks that the source gained no backup). The SDK gives only the
+        #    message, which names the term's path; the raw request reads the extensions.
         clones_before = {
             str(c.id)
             for c in await client.environment_clones.list(scenario_environment_id)
@@ -2473,8 +2473,13 @@ async def test_environment_clone_lifecycle(
                 deployment_ids=[peer_deployment_id],
             )
         assert refused.value.typename == "VALIDATION_ERROR", refused.value
-        assert str(refused.value) == (
-            f"{CLONE_REFUSED_UNCLONED_REFERENCE}: {primary_name}"
+        peer_term_path = (
+            f"deployment[{peer_name}].config.scheduling.pod_affinity.preferred[0].term"
+        )
+        assert str(refused.value).startswith(
+            f"{CLONE_REFUSED_UNCLONED_REFERENCE}: {primary_name!r} "
+            f"(not included in the requested deployment selection), named at "
+            f"{peer_term_path}. Add the deployment to the selection"
         ), str(refused.value)
         raw_refusal = await client._transport.execute(
             load_query("clone_environment"),
@@ -2489,10 +2494,8 @@ async def test_environment_clone_lifecycle(
             {
                 "deployment_id": primary_deployment_id,
                 "deployment_name": primary_name,
-                "paths": [
-                    f"deployment[{peer_name}].config.scheduling.pod_affinity"
-                    ".preferred[0].term"
-                ],
+                "paths": [peer_term_path],
+                "reason": "not included in the requested deployment selection",
             }
         ], raw_refusal
         assert {
