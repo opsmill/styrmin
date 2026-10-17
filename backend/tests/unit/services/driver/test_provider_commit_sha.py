@@ -19,6 +19,9 @@ from styrmin_backend.services.driver.provider import GitDriverProvider
 def local_git_repo(tmp_path: Path) -> tuple[str, str, str]:
     """Create a tiny local git repo with one commit.
 
+    The root holds a ``driver.styrmin.yml``: the provider refuses a root load
+    without one (spec 028, FR-009). The provider does not parse it.
+
     Returns:
         (file_url, commit_sha, branch_name) tuple.
     """
@@ -26,7 +29,11 @@ def local_git_repo(tmp_path: Path) -> tuple[str, str, str]:
     repo_path.mkdir()
     Repo.init(str(repo_path))
     (repo_path / "README.md").write_text("hi")
-    porcelain.add(str(repo_path), paths=[str(repo_path / "README.md")])
+    (repo_path / "driver.styrmin.yml").write_text("{}\n")
+    porcelain.add(
+        str(repo_path),
+        paths=[str(repo_path / "README.md"), str(repo_path / "driver.styrmin.yml")],
+    )
     sha_bytes = porcelain.commit(
         str(repo_path),
         message=b"init",

@@ -39,7 +39,9 @@ plus the load failure for ``singleton: true`` with ``replicas`` above 1.
 028-git-driver-directory (T009) adds the ``driverDirectory`` argument of
 ``loadRemoteApplicationDriverVersion``: a load from a local git repository stores the
 normalised driver directory in ``source_path``, and ``applicationDriver.versions`` returns it
-as ``sourcePath``.
+as ``sourcePath``. T038 adds the failed loads: a refused driver directory returns
+``VALIDATION_ERROR``, and a missing one names the driver directory and the commit SHA; neither
+stores a row.
 
 Test location note: the task list specifies
 ``backend/tests/unit/api/schema/test_application_driver_version_propagation.py``
@@ -865,3 +867,69 @@ async def test_driver_directory_projects_through_application_driver_query(
     ]
     assert read_back["sourceType"] == "git"
     assert read_back["sourcePath"] == "drivers/a"
+
+
+async def _load_driver_directory_payload(
+    client: AsyncClient, repository: str, branch: str, driver_directory: str
+) -> dict[str, Any]:
+    """Post ``load_remote_driver_directory`` and return the whole payload, errors included."""
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("load_remote_driver_directory"),
+            "variables": {
+                "repositoryUrl": repository,
+                "branch": branch,
+                "driverDirectory": driver_directory,
+            },
+        },
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_refused_driver_directory_returns_validation_error_and_stores_nothing(
+    client: AsyncClient,
+    session: AsyncSession,
+    driver_repository: tuple[str, str, str],
+) -> None:
+    """028 T038 (FR-007): a refused driver directory fails with ``VALIDATION_ERROR``
+    and no driver version row is stored."""
+    repository, branch, _sha = driver_repository
+
+    payload = await _load_driver_directory_payload(client, repository, branch, "../x")
+
+    assert payload["data"] == {"loadRemoteApplicationDriverVersion": None}, payload
+    [error] = payload["errors"]
+    assert error["extensions"]["code"] == "VALIDATION_ERROR"
+    assert error["message"].startswith(
+        "Driver directory '../x' is refused: it contains a '..' segment."
+    )
+    assert (await session.exec(select(ApplicationDriverVersion))).all() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_missing_driver_directory_error_names_directory_and_commit(
+    client: AsyncClient,
+    session: AsyncSession,
+    driver_repository: tuple[str, str, str],
+) -> None:
+    """028 T038 (FR-009): the error for a missing driver directory names the driver
+    directory, the repository, the branch and the full commit SHA."""
+    repository, branch, sha = driver_repository
+
+    payload = await _load_driver_directory_payload(
+        client, repository, branch, "drivers/missing"
+    )
+
+    assert payload["data"] == {"loadRemoteApplicationDriverVersion": None}, payload
+    [error] = payload["errors"]
+    assert error["extensions"]["code"] == "VALIDATION_ERROR"
+    assert error["message"] == (
+        f"Driver directory 'drivers/missing' does not exist in repository "
+        f"{repository!r} (branch {branch!r}, commit {sha})."
+    )
+    assert (await session.exec(select(ApplicationDriverVersion))).all() == []
