@@ -122,19 +122,22 @@ async def _set_up(
     b_names_a: bool = True,
     e_names_a: bool = True,
 ) -> _Environment:
-    """Write B's and E's terms with A's name, through the mutations an operator uses."""
+    """Write B's and E's terms with A's name, through the mutations an operator uses.
+
+    A and B each have a component, so every rebuild of A or B expands E's term."""
     environment = await seed_environment(session)
     adv = await seed_application_driver_version(session)
     a = await seed_deployment(session, environment=environment, adv=adv, name="a")
     b = await seed_deployment(session, environment=environment, adv=adv, name="b")
-    session.add(
-        Component(
-            name="server",
-            config={"identifier": {"label": {"app": "server"}}},
-            enabled=True,
-            deployment_id=b.id,
+    for deployment_id in (a.id, b.id):
+        session.add(
+            Component(
+                name="server",
+                config={"identifier": {"label": {"app": "server"}}},
+                enabled=True,
+                deployment_id=deployment_id,
+            )
         )
-    )
     await session.commit()
     ids = _Environment(environment.id, a.id, b.id)
 
@@ -271,18 +274,21 @@ async def test_rename_of_a_named_deployment_succeeds_and_changes_no_stored_term(
     """US1 scenario 1 and FR-010: the rename succeeds, and B's and E's stored terms
     still give A's id."""
     ids = await _set_up(client, session)
-    b_config, e_config = await _configs(client, ids)
-    assert b_config == {"scheduling": {"pod_affinity": _stored_term(ids.a_id)}}
-    assert e_config == {"scheduling": {"pod_anti_affinity": _stored_term(ids.a_id)}}
+    before = await _configs(client, ids)
 
-    # ``gql`` asserts that the response has no error.
+    # ``gql`` asserts that the response has no error. Before 027 the rename was
+    # refused here, because A's rebuild looked E's term up by A's old name (#492).
     await _rename_a(client, ids)
 
     session.expire_all()
     a = await session.get(Deployment, ids.a_id)
     assert a is not None
     assert a.name == "a2"
-    assert await _configs(client, ids) == (b_config, e_config)
+    assert before == (
+        {"scheduling": {"pod_affinity": _stored_term(ids.a_id)}},
+        {"scheduling": {"pod_anti_affinity": _stored_term(ids.a_id)}},
+    )
+    assert await _configs(client, ids) == before
 
 
 @pytest.mark.asyncio
