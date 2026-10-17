@@ -6,9 +6,18 @@ from typing import Any, Generator
 
 from dulwich import porcelain
 from dulwich.repo import Repo
+from loguru import logger
 
-from styrmin_backend.services.driver.driver_directory import normalise_driver_directory
-from styrmin_backend.services.driver.exceptions import DriverLoadingError
+from styrmin_backend import config
+from styrmin_backend.services.driver.driver_directory import (
+    normalise_driver_directory,
+    redact_repository_url,
+    resolve_inside,
+)
+from styrmin_backend.services.driver.exceptions import (
+    DriverLoadingError,
+    MissingDriverSpecificationError,
+)
 from styrmin_backend.services.driver.models.structure.source import (
     DriverSource,
     GitSource,
@@ -71,7 +80,17 @@ class GitDriverProvider(DriverProvider):
 
     @contextmanager
     def provide(self) -> Generator[Path, None, None]:
-        """Provide the driver directory of a temporary clone of the repository."""
+        """Provide the driver directory of a temporary clone of the repository.
+
+        Raises:
+            DriverLoadingError: The clone fails, the driver directory or one of the
+                driver files leads outside the clone, or the driver directory does
+                not exist.
+            MissingDriverSpecificationError: The driver directory holds no driver
+                specification file.
+        """
+        repository = redact_repository_url(self.source.repository)
+        driver_directory = self.source.driver_directory
         with tempfile.TemporaryDirectory() as tempdir:
             tempdir_path = Path(tempdir)
             # Clone the git repository
@@ -83,27 +102,111 @@ class GitDriverProvider(DriverProvider):
                     username=self.source.token,
                 )
             except Exception as exc:  # noqa: BLE001 — wrap any clone failure
+                for_directory = (
+                    ""
+                    if driver_directory is None
+                    else f", driver directory {driver_directory!r}"
+                )
+                # Some clone errors repeat the URL as given, with its user info.
+                detail = str(exc)
+                if repository != self.source.repository:
+                    detail = detail.replace(self.source.repository, repository)
                 raise DriverLoadingError(
-                    f"Failed to clone git repository "
-                    f"{self.source.repository!r} (branch={self.source.branch!r}): {exc}"
+                    f"Failed to clone git repository {repository!r} "
+                    f"(branch={self.source.branch!r}{for_directory}): {detail}"
                 ) from exc
             # Resolve the HEAD commit SHA from the freshly cloned repo and stash
             # it on the provider so the caller can read it after the context
             # manager exits (the tempdir is gone by then).
             try:
                 with Repo(str(tempdir_path)) as repo:
-                    self._resolved_commit_sha = repo.head().decode("ascii")
+                    commit_sha = repo.head().decode("ascii")
             except Exception as exc:  # noqa: BLE001
                 raise DriverLoadingError(
-                    f"Failed to resolve HEAD commit SHA for "
-                    f"{self.source.repository!r}: {exc}"
+                    f"Failed to resolve HEAD commit SHA for {repository!r}: {exc}"
                 ) from exc
-            driver_directory = self.source.driver_directory
-            yield (
-                tempdir_path
-                if driver_directory is None
-                else tempdir_path / driver_directory
+            self._resolved_commit_sha = commit_sha
+            yield self._check_driver_directory(tempdir_path, repository, commit_sha)
+
+    def _check_driver_directory(
+        self, clone: Path, repository: str, commit_sha: str
+    ) -> Path:
+        """Return the real path of the driver directory once every check passes.
+
+        Checks, before any driver file is read, that the driver directory and the
+        three driver files stay inside the clone (FR-008), and that the driver
+        directory holds the driver specification file (FR-009).
+
+        Args:
+            clone: The root of the temporary clone.
+            repository: The repository URL without user info, for messages.
+            commit_sha: The commit SHA of the clone.
+
+        Returns:
+            The resolved driver directory, or the resolved clone root.
+        """
+        driver_directory = self.source.driver_directory
+        shown = "the repository root" if driver_directory is None else driver_directory
+        where = (
+            f"repository {repository!r} "
+            f"(branch {self.source.branch!r}, commit {commit_sha})"
+        )
+
+        def leads_outside(relative: str) -> DriverLoadingError:
+            return DriverLoadingError(
+                f"Driver directory {shown!r} of {where} leads outside the "
+                f"repository: {relative!r} is a symlink to a path outside it."
             )
+
+        resolved = resolve_inside(clone, driver_directory or ".")
+        if resolved is None:
+            raise leads_outside(_first_link_outside(clone, driver_directory or "."))
+        if not resolved.is_dir():
+            raise DriverLoadingError(
+                f"Driver directory {shown!r} does not exist in {where}."
+            )
+        settings = config.SETTINGS.driver
+        for name in (
+            settings.spec_file,
+            settings.values_template,
+            settings.actions_code_file,
+        ):
+            relative = (
+                name if driver_directory is None else f"{driver_directory}/{name}"
+            )
+            if resolve_inside(clone, relative) is None:
+                raise leads_outside(relative)
+        if not (resolved / settings.spec_file).is_file():
+            if driver_directory is None:
+                raise MissingDriverSpecificationError(
+                    f"No {settings.spec_file} at the root of {where}."
+                )
+            raise MissingDriverSpecificationError(
+                f"No {settings.spec_file} in driver directory {shown!r} of {where}."
+            )
+        logger.info(
+            "Checked git driver source: repository={} branch={} commit={} "
+            "driver_directory={}",
+            repository,
+            self.source.branch,
+            commit_sha,
+            driver_directory,
+        )
+        return resolved
+
+
+def _first_link_outside(root: Path, relative: str) -> str:
+    """Return the shortest leading part of ``relative`` that resolves outside ``root``.
+
+    The driver directory has no ``..`` segment, so that part is the symlink that
+    leaves the clone.
+    """
+    parts = relative.split("/")
+    for end in range(1, len(parts) + 1):
+        prefix = "/".join(parts[:end])
+        if resolve_inside(root, prefix) is None:
+            return prefix
+    return relative
 
 
 class LocalDriverProvider(DriverProvider):
