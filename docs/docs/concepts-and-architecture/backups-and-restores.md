@@ -614,6 +614,15 @@ may still be propagating to the deployments that *didn't* receive a
 restore. That propagation is tracked by those deployments' own
 reconciliations — watch their status, not the restore's.
 
+When the redeploy of one of those deployments cannot start, the other
+redeploys still run and the restore returns normally. The failure is
+written only to the server log (`env_restore_fanout_dispatch_error`),
+not on the restore. One case: the captured config has an affinity term
+that names a deployment you deleted after the backup. The restore puts
+the config back as captured, and the next update of each deployment that
+the term applies to fails with the deleted deployment's last name and
+`deleted: true` until you write the term again.
+
 #### One environment operation at a time
 
 An environment runs at most one environment-level operation — backup or
@@ -702,14 +711,22 @@ is how you leave a heavyweight analytics stack out of a rehearsal. The
 selection filters the capture too, so excluded deployments are not backed
 up at all.
 
-Three different things happen to a deployment you name, and the
-difference matters:
+What happens depends on what you name, and the difference matters:
 
 | What you named | What happens |
 |----------------|--------------|
 | A deployment that doesn't exist, or belongs to a different environment | The whole request is **rejected up front**. Nothing is created and no backup is taken. |
 | A deployment that exists but isn't eligible | It's **skipped**, by name, with a reason. Not an error. |
 | An eligible deployment | It's included. |
+| A selection that leaves out a deployment, or includes one that isn't eligible, when an affinity term that the clone copies names that deployment | The whole request is **rejected up front** with `VALIDATION_ERROR`. The error lists each such deployment and the path of every term that names it. Nothing is created and no backup is taken. Add the deployment to the selection, leave out the deployment whose term names it, or, for a term in the environment's config, clear or override `scheduling`. |
+
+An affinity term can name another deployment of the same environment, in
+`scheduling.pod_affinity` or `scheduling.pod_anti_affinity`. Styrmin stores
+the id of the deployment it names. The clone checks the terms of the new
+environment's config, of each deployment it copies, and of the component
+definitions of that deployment's driver version. Each copied term names
+the counterpart of the deployment it named, so the clone's pods are
+placed relative to each other and not to the source's pods.
 
 Every source deployment you could have selected is accounted for on the
 clone record — cloned, skipped with a reason, or failed with a reason.
@@ -792,6 +809,14 @@ Two things surprise people:
 driver version the capture recorded no longer exists by the time the
 counterpart is created. That deployment is attributed as failed, its
 neighbours are cloned, and the clone reports the mix.
+
+A failure also reaches the deployments whose affinity terms name the
+failed one. Each is attributed as failed with the reason
+`an affinity term names deployment <name>, which was not cloned`. When the new
+environment's config names it, the clone reports `FAILED` with a
+`referenced_deployment_not_cloned` event: after a failed capture, no
+environment is created; after a failed counterpart, no further
+counterpart is created.
 
 #### Discarding a clone
 

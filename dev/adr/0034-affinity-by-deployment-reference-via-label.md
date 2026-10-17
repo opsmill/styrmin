@@ -1,6 +1,6 @@
 # ADR-034: Affinity-by-deployment-reference resolves to `styrmin/deployment_id` pod label
 
-**Status**: Accepted
+**Status**: Accepted — amended 2026-10-16 (#508): a stored deployment reference gives the deployment's id, so a reconcile looks up no name ([ADR-075](0075-deployment-references-stored-by-id.md))
 **Date**: 2026-05-17
 **Source**: specs/archive/001-pod-scheduling-config/research.md (Decision 6)
 
@@ -26,6 +26,8 @@ Effective per-pod labels (managed by the platform, on every workload pod):
 Scheduling rules that reference a deployment by platform-id are expanded at resolve time into a `labelSelector: { matchLabels: { styrmin/deployment_id: <target-uuid> } }`. The expansion happens for the **referencing** deployment's namespace/environment by default (matching FR-001d's visibility rule). Raw `labelSelector`-based affinity rules remain supported as the escape hatch for targeting pods the platform did not render (driver-owned pods that arrived through some other path).
 
 The reference is re-expanded on every reconcile, so a target deployment's UUID is always current — no stale selectors.
+
+Amended 2026-10-16 ([#508](https://github.com/opsmill/styrmin/issues/508)): a reference that gave a name was stored as written and looked up again at every reconcile, so a rename of the named deployment made the term fail ([#492](https://github.com/opsmill/styrmin/issues/492)). Every write that stores a config now replaces a name with the id of the named deployment, and a reconcile resolves ids only. A reference to a tombstoned deployment is refused instead of giving a selector that matches no pod. See [ADR-075](0075-deployment-references-stored-by-id.md).
 
 ## Consequences
 

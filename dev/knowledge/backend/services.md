@@ -62,6 +62,8 @@ styrmin_backend/services/
 ├── ingress_controller/            # Ingress controller lifecycle
 │
 ├── scheduling/                    # Pod scheduling helpers
+│   ├── references.py              # find, bind and remap deployment references in stored configs
+│   └── validator.py               # reconcile-time resolution of deployment references
 │
 ├── env_vars/                      # Free-form deployment env vars (post-render injection, ADR-057)
 │   ├── validator.py               # name regex + size caps + risky-name warning
@@ -197,10 +199,10 @@ Manages environments within clusters.
 | Function | Description |
 |----------|-------------|
 | `resolve_environment(uow, environment_id?, environment_name?, cluster_id?, cluster_name?)` | Resolve environment by ID or name with cluster context |
-| `create_environment(name, cluster_id, uow, config=None)` | Create environment in cluster (name unique per cluster). Computes and persists capabilities. |
+| `create_environment(name, cluster_id, uow, config=None, upcoming_deployments=None)` | Create environment in cluster (name unique per cluster). Computes and persists capabilities. Binds the deployment references of `config` with no environment, so it refuses every reference except one to a deployment in `upcoming_deployments` (`{id: name}`), which only the environment clone flow passes, for its counterparts. |
 | `get_environment(environment_id, uow)` | Retrieve environment by ID |
 | `get_environments(uow)` | List all environments |
-| `update_environment(environment_id, uow, config, *, acting_user_id)` | Validate + persist env-config row, then fan out a redeploy Task to every live, non-internal deployment in the environment whose active instance is not already at the new config, and create or redeploy the environment's dedicated ingress controller for `acting_user_id`. See "Environment-config fanout" below + [ADR-012](../../adr/0012-environment-config-fanout.md). Raises `EnvironmentOperationInProgressError` while an environment clone occupies the environment (`guard_no_clone_occupying_environment`). Only the clone part of the environment-level guard applies: an environment backup or restore in progress does not block the update. The check runs before the `config is None` no-op path, so a no-op update is also refused while a clone occupies the environment. |
+| `update_environment(environment_id, uow, config, *, acting_user_id)` | Validate, bind the deployment references against the environment (a refused reference saves nothing), persist the env-config row, then fan out a redeploy Task to every live, non-internal deployment in the environment whose active instance is not already at the new config, and create or redeploy the environment's dedicated ingress controller for `acting_user_id`. See "Environment-config fanout" below + [ADR-012](../../adr/0012-environment-config-fanout.md). Raises `EnvironmentOperationInProgressError` while an environment clone occupies the environment (`guard_no_clone_occupying_environment`). Only the clone part of the environment-level guard applies: an environment backup or restore in progress does not block the update. The check runs before the `config is None` no-op path, so a no-op update is also refused while a clone occupies the environment. |
 | `delete_environment(environment_id, uow)` | Delete an environment and everything that depends on it, in four steps (see "Deleting an environment" below). |
 
 <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
@@ -269,7 +271,7 @@ Orchestrates application deployments.
 
 | Function | Description |
 |----------|-------------|
-| `deploy_application(driver_name, version, environment_id, uow, created_by_user_id, deployment_config=None, deployment_parameters=None, deployment_name=None, service_name_overrides=None, driver_version_id=None, skip_initial_reconcile=False, release_reference=None) -> Task \| UUID` | Deploy an application. `driver_version_id` pins a driver version instead of the latest one. With `skip_initial_reconcile`, the deployment starts in `RESTORING`, its services and active instance are still created, `apply_state` is not called, the call logs `deploy_application_reconcile_skipped` and returns the deployment's id. The clone flow keeps its counterpart deployment by this id, because a user can rename the deployment as soon as it is committed ([#493](https://github.com/opsmill/styrmin/issues/493)). `release_reference` fixes the Helm release name instead of `styrmin-<deployment id>`. Only the environment clone flow passes the last two, for its counterpart deployments ([ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md)). <!-- Extracted from specs/010-environment-clone on 2026-10-13 --> |
+| `deploy_application(driver_name, version, environment_id, uow, created_by_user_id, deployment_config=None, deployment_parameters=None, deployment_name=None, service_name_overrides=None, driver_version_id=None, skip_initial_reconcile=False, release_reference=None, deployment_id=None, upcoming_deployments=None) -> Task \| UUID` | Deploy an application. `driver_version_id` pins a driver version instead of the latest one. With `skip_initial_reconcile`, the deployment starts in `RESTORING`, its services and active instance are still created, `apply_state` is not called, the call logs `deploy_application_reconcile_skipped` and returns the deployment's id. The clone flow keeps its counterpart deployment by this id, because a user can rename the deployment as soon as it is committed ([#493](https://github.com/opsmill/styrmin/issues/493)). `release_reference` fixes the Helm release name instead of `styrmin-<deployment id>`. `deployment_id` gives the new deployment the id the caller chose; otherwise it gets a new one. `upcoming_deployments` (`{id: name}`) lists the other deployments the caller is about to create, which an affinity term may name; the new deployment is added to it, so a term may also name the new deployment. Only the environment clone flow passes the last four, for its counterpart deployments ([ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md), [ADR-075](../../adr/0075-deployment-references-stored-by-id.md)). <!-- Extracted from specs/010-environment-clone on 2026-10-13 and specs/027-deployment-reference-by-id on 2026-10-17 --> |
 | `get_deployment(deployment_id, uow)` | Get deployment by ID |
 | `update_deployment(deployment_id, config, uow)` | Update deployment configuration. Returns `Task \| None` — a no-op update (resolved desired state equals the current instance) returns `None` with no new instance and no reconcile dispatched. |
 | `update_deployment_version(deployment_id, version, uow)` | Change application version. Returns `Task \| None` — requesting the current version is a no-op (`None`, no instance, no reconcile). |
@@ -285,6 +287,17 @@ Replica overrides and retired parameters (023, [ADR-070](../../adr/0070-replica-
 
 - `_validate_replica_overrides` returns at once when the config sets no `replicas` (`has_replica_overrides`). Otherwise it builds the component declarations of a driver version with `parse_stored_replica_declaration` and calls `validate_replica_overrides` with the server setting `max_replica_count`. `_validate_config_write` calls it after `validate_deployment_config`, so `INVALID_REPLICA_COUNT` comes first, and before `_validate_component_container_targets`. `deploy_application` calls it with no stored config. `update_deployment_version` without a submitted config calls it on the stored config against the target driver version.
 - `update_deployment_version` calls `drop_retired_parameters` on the merged parameter map only when the target driver version differs from the bound one, before `validate_parameter_values` runs against the target driver version and before any ingress dispatch or task.
+
+<!-- Extracted from specs/027-deployment-reference-by-id on 2026-10-17 -->
+
+Deployment references in affinity terms (027, [ADR-075](../../adr/0075-deployment-references-stored-by-id.md)):
+
+- Every write binds the deployment references of the config it stores with `bind_deployment_references(uow, environment_id, config, *, path_prefix, upcoming_deployments=None)` (`services/scheduling/references.py`): each `deployment_ref` of a pod affinity or pod anti-affinity term becomes `{"deployment_id": "<lowercase uuid>"}`, plus `components` when given. A name matches a deployment in `upcoming_deployments` first, then a non-tombstoned deployment of the environment, unless that row is in `upcoming_deployments` under its old name. An id must be in `upcoming_deployments` or be a deployment of the environment that is not tombstoned. The first reference that fails raises `UnresolvableAffinityReferenceError` with the term's full path. The function opens no `async with uow` of its own, so a refusal inside a caller's savepoint rolls back only that savepoint.
+- `deploy_application` binds the deployment config (`deployment.config`) and each component config it copies from the driver version (`component[<name>].config`) with `{**upcoming_deployments, new id: resolved name}`, after the name is resolved and before the ingress controller is dispatched, so a refused term starts nothing.
+- `update_deployment` binds the whole `deployment.config` on every call, after the rename and the new config are set and before phase 1 saves anything, with `{deployment.id: name after the request}`. A stored id of a tombstoned deployment is therefore refused in phase 1, also on a call that changes only the name.
+- `update_deployment_version` binds the effective config after the name is validated, and the component configs that it copies again only when the target driver version differs from the bound one, before the no-op comparison.
+- `create_environment` binds with no environment (`environment_id=None`), and `update_environment` binds against the environment before it saves the config.
+- At reconcile, `_populate_component_scheduling` (`services/context.py`) and the `resolvedScheduling` resolver expand each level before the merge, with the prefixes `environment.config.scheduling`, `deployment.config.scheduling` and `component[<name>].config.scheduling`. `resolve_deployment_reference` (`services/scheduling/validator.py`) reads ids only: a reference that gives a name, an id of another environment and a tombstoned deployment (`deleted=True`, last name) are refused, and an id in `upcoming_deployments` resolves without a lookup. `generate_instance_from_deployment` and `generate_context_from_deployment` take `upcoming_deployments` and pass it down.
 
 **Deployment Flow:**
 
@@ -737,7 +750,8 @@ ServiceError (base)
 ├── BackupStorageLocationInUseError
 ├── InvalidSchedulingConfigError
 ├── UnknownComponentInConfigError
-├── UnresolvableAffinityReferenceError
+├── UnresolvableAffinityReferenceError      # VALIDATION_ERROR; deleted=True for a tombstoned deployment
+├── UnclonedDeploymentReferenceError        # VALIDATION_ERROR; metadata deployments[]
 ├── SchedulingPatchRenderingError
 ├── InvalidEnvVarNameError                  # services/env_vars/exceptions.py
 ├── DuplicateEnvVarNameError
@@ -832,6 +846,8 @@ The resolver hands the user-supplied list straight in; normalisation (dedup, ord
 |------|---------|
 | [services/unit_of_work.py](backend/styrmin_backend/services/unit_of_work.py) | Repository coordination |
 | [services/deployment.py](backend/styrmin_backend/services/deployment.py) | Deployment orchestration |
+| [services/scheduling/references.py](backend/styrmin_backend/services/scheduling/references.py) | Find, bind and remap the deployment references of a stored config |
+| [services/scheduling/validator.py](backend/styrmin_backend/services/scheduling/validator.py) | Reconcile-time resolution of deployment references to label selectors |
 | [services/applications.py](backend/styrmin_backend/services/applications.py) | Driver management |
 | [services/reconciliation/remediation.py](backend/styrmin_backend/services/reconciliation/remediation.py) | State reconciliation |
 | [services/driver/provider.py](backend/styrmin_backend/services/driver/provider.py) | Git-based driver loading |
