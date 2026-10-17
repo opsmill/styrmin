@@ -47,7 +47,7 @@ All errors are GraphQL errors with `extensions.code: "VALIDATION_ERROR"` (existi
 | Missing or not a folder | `Driver directory '<dir>' does not exist in repository '<url>' (branch '<branch>', commit <sha>).` |
 | No driver specification file | `No driver.styrmin.yml in driver directory '<dir>' of repository '<url>' (branch '<branch>', commit <sha>).` For a root load: `No driver.styrmin.yml at the root of repository '<url>' (branch '<branch>', commit <sha>).` |
 
-`<sha>` is the full 40-character commit SHA. The message never contains the temporary clone path or the target of a symlink.
+`<sha>` is the full 40-character commit SHA. `<url>` is the repository URL without user info. The message never contains the temporary clone path or the target of a symlink.
 
 ## Propagation test
 

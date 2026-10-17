@@ -74,6 +74,18 @@ A refused or failed load prints the server's message through the existing error 
 - For a git driver version with a `sourcePath`, a row **Driver directory** follows the **Source** row, shows the value in monospace and has a copy button, like the Source row.
 - No row for a git driver version without `sourcePath`. Local driver versions keep their **Path** row and get no new row.
 
+## Frontend — drivers list Source cell
+
+[`frontend/src/pages/drivers/lib/driverList.ts`](../../../frontend/src/pages/drivers/lib/driverList.ts), `versionSource`
+
+| Version | Source cell |
+| --- | --- |
+| Local | `<sourcePath>` (unchanged) |
+| Git, no `sourcePath` | `<repository> @ <branch>` (unchanged) |
+| Git, `sourcePath` set | `<repository> @ <branch> · <sourcePath>` |
+
+The list's search matches the same text, so searching for a driver directory finds its versions.
+
 ## E2E page objects and scenario driver
 
 - `ScenarioDriver.load_driver_version(*, git_url, ref, driver_directory=None)` on the protocol, the API driver and the UI driver ([`backend/tests/e2e/drivers/`](../../../backend/tests/e2e/drivers/)).

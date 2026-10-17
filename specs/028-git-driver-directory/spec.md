@@ -71,6 +71,7 @@ An admin opens the "Load a driver" drawer on the drivers page, chooses a load fr
 3. **Given** a git driver version loaded from `drivers/infrahub`, **When** the admin opens its Overview tab, **Then** a "Driver directory" row shows `drivers/infrahub`.
 4. **Given** a git driver version loaded from the repository root, **When** the admin opens its Overview tab, **Then** no "Driver directory" row is shown.
 5. **Given** the drawer, **When** the server refuses the driver directory, **Then** the drawer shows the server's error message and keeps the values the admin entered.
+6. **Given** two driver versions of one driver, loaded from `drivers/infrahub` and `drivers/infrahub-next` of the same repository, **When** the admin opens the drivers list, **Then** each version's Source cell shows its driver directory.
 
 ---
 
@@ -84,7 +85,7 @@ An admin who types a wrong driver directory gets an error that says what to corr
 
 **Acceptance Scenarios**:
 
-1. **Given** a driver directory `/etc`, `../other`, `drivers/../../etc` or `drivers\infrahub`, **When** an admin loads it, **Then** Styrmin refuses the load before it clones the repository, and creates no driver version.
+1. **Given** a driver directory `/etc`, `../other`, `drivers/../../etc`, `drivers\infrahub` or a value with a NUL character, **When** an admin loads it, **Then** Styrmin refuses the load before it clones the repository, and creates no driver version.
 2. **Given** a repository in which `drivers/infrahub` is a symlink to a folder outside the repository, **When** an admin loads that driver directory, **Then** Styrmin refuses the load and reads no file outside the clone.
 3. **Given** a repository whose root `driver.styrmin.yml`, `values.j2.yml` or `actions.py` is a symlink to a file outside the repository, **When** an admin loads it from the repository root, **Then** Styrmin refuses the load.
 4. **Given** a driver directory `drivers/missing` that does not exist in the repository, **When** an admin loads it, **Then** the error names `drivers/missing`, the repository, the branch and the commit.
@@ -127,9 +128,9 @@ An admin who loads drivers from the root of their own repository keeps doing so 
 - **FR-002**: When no driver directory is given, Styrmin MUST read the driver from the repository root, as it does today.
 - **FR-003**: Styrmin MUST read `driver.styrmin.yml`, `values.j2.yml` and `actions.py` from the driver directory.
 - **FR-004**: Styrmin MUST run each driver action with the driver directory as the working directory, and MUST add no other folder of the repository to the import path.
-- **FR-005**: The driver version MUST record the driver directory in `source_path`, the GraphQL field `sourcePath` MUST return it, and the driver version's Overview tab MUST show it in a "Driver directory" row. A git driver version loaded from the repository root records no value and shows no row.
+- **FR-005**: The driver version MUST record the driver directory in `source_path`, the GraphQL field `sourcePath` MUST return it, the driver version's Overview tab MUST show it in a "Driver directory" row, and the drivers list MUST show it in the version's Source cell. A git driver version loaded from the repository root records no value and shows no row and no directory in the Source cell.
 - **FR-006**: Styrmin MUST store a driver directory in one form. It removes surrounding whitespace, a leading `./`, a trailing `/`, empty segments and `.` segments. It treats an empty value or `.` the same as a load without a driver directory.
-- **FR-007**: Styrmin MUST refuse, before it clones, a driver directory that is an absolute path or that contains a `..` segment or a backslash.
+- **FR-007**: Styrmin MUST refuse, before it clones, a driver directory that is an absolute path or that contains a `..` segment, a backslash or a NUL character.
 - **FR-008**: Styrmin MUST refuse a load when the driver directory, or one of the three driver files, has a real path outside the cloned repository. This applies to loads from the repository root too.
 - **FR-009**: When the driver directory does not exist, is not a folder, or holds no `driver.styrmin.yml`, the load error MUST name the driver directory, the repository, the branch and the commit.
 - **FR-010**: Two driver versions loaded from different driver directories of one repository at the same commit MUST each run the actions of their own driver directory, also when their drivers have the same name. A load MUST NOT replace the actions of another driver version.
