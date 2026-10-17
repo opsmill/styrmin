@@ -102,6 +102,10 @@ def test_resolve_inside_refuses_paths_that_leave_the_root(
         ("git://git-server/x.git", "git://git-server/x.git"),
         ("/tmp/repo", "/tmp/repo"),
         ("git@github.com:o/r.git", "git@github.com:o/r.git"),
+        # urlsplit raises ValueError ("Invalid IPv6 URL") on these.
+        ("https://[bad/x.git", "https://[bad/x.git"),
+        ("https://user:token@[bad/x.git", "https://[bad/x.git"),
+        ("https://user:tok@en@[bad", "https://[bad"),
     ],
 )
 def test_redact_repository_url_removes_user_info(url: str, redacted: str) -> None:

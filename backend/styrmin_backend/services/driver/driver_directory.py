@@ -130,16 +130,30 @@ def redact_repository_url(url: str) -> str:
 
     Returns:
         For a URL with ``://``, the URL without ``user:password@``; any other
-        string unchanged.
+        string unchanged. Never raises, so a malformed URL that ``urlsplit``
+        refuses still loses its user info.
 
     >>> redact_repository_url("https://user:token@host/x.git")
     'https://host/x.git'
     >>> redact_repository_url("git@github.com:o/r.git")
     'git@github.com:o/r.git'
+    >>> redact_repository_url("https://user:token@[bad/x.git")
+    'https://[bad/x.git'
+    >>> redact_repository_url("https://[bad/x.git")
+    'https://[bad/x.git'
     """
     if "://" not in url:
         return url
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        # Such as "Invalid IPv6 URL". The user info ends at the last "@"
+        # before the first "/" after "://".
+        scheme, rest = url.split("://", 1)
+        authority, slash, path = rest.partition("/")
+        if "@" not in authority:
+            return url
+        return f"{scheme}://{authority.rsplit('@', 1)[1]}{slash}{path}"
     if "@" not in parts.netloc:
         return url
     host = parts.netloc.rsplit("@", 1)[1]

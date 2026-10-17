@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 import pytest
 from dulwich import porcelain
-from dulwich.errors import GitProtocolError
+from dulwich.errors import GitProtocolError, HangupException
 from dulwich.repo import Repo
 
 from styrmin_backend.services.driver import ApplicationDriver
@@ -169,47 +169,37 @@ def test_driver_directory_symlinked_outside_is_refused(
 
 
 @pytest.mark.usefixtures("no_driver_file_read")
-def test_root_driver_specification_symlinked_outside_is_refused_on_a_root_load(
+@pytest.mark.parametrize(
+    "driver_directory", [None, "drivers/a"], ids=["root", "driver-directory"]
+)
+@pytest.mark.parametrize("name", ["driver.styrmin.yml", "values.j2.yml", "actions.py"])
+def test_driver_file_symlinked_outside_is_refused(
     make_repository: Callable[[Callable[[Path], None]], _Repository],
     clone_paths: list[str],
+    driver_directory: str | None,
+    name: str,
 ) -> None:
+    relative = name if driver_directory is None else f"{driver_directory}/{name}"
+
     def setup(root: Path) -> None:
-        (root / "driver.styrmin.yml").symlink_to(root.parent / "outside" / "secret.yml")
+        driver_file = root / relative
+        driver_file.unlink(missing_ok=True)
+        driver_file.symlink_to(root.parent / "outside" / "secret.yml")
 
     repository = make_repository(setup)
 
     with pytest.raises(DriverLoadingError) as excinfo:
-        _load(repository, None)
+        _load(repository, driver_directory)
 
+    shown = driver_directory or "the repository root"
     message = str(excinfo.value)
     assert message == (
-        f"Driver directory 'the repository root' of {_where(repository)} leads "
-        "outside the repository: 'driver.styrmin.yml' is a symlink to a path "
-        "outside it."
+        f"Driver directory {shown!r} of {_where(repository)} leads outside the "
+        f"repository: {relative!r} is a symlink to a path outside it."
     )
     [clone] = clone_paths
     assert clone not in message
     assert str(repository.outside) not in message
-
-
-@pytest.mark.usefixtures("no_driver_file_read")
-def test_values_template_symlinked_outside_is_refused(
-    make_repository: Callable[[Callable[[Path], None]], _Repository],
-) -> None:
-    def setup(root: Path) -> None:
-        values = root / "drivers" / "a" / "values.j2.yml"
-        values.unlink()
-        values.symlink_to(root.parent / "outside" / "secret.yml")
-
-    repository = make_repository(setup)
-
-    with pytest.raises(DriverLoadingError) as excinfo:
-        _load(repository, "drivers/a")
-
-    assert str(excinfo.value) == (
-        f"Driver directory 'drivers/a' of {_where(repository)} leads outside the "
-        "repository: 'drivers/a/values.j2.yml' is a symlink to a path outside it."
-    )
 
 
 def test_driver_directory_symlinked_inside_is_accepted(
@@ -334,3 +324,26 @@ def test_clone_failure_message_has_no_user_info(
         "(branch='main', driver directory 'drivers/a'): unable to reach "
         "https://invalid.example/x.git"
     )
+
+
+@pytest.mark.parametrize("url", ["https://[bad/x.git", "https://user:token@[bad/x.git"])
+def test_malformed_repository_url_fails_with_a_driver_loading_error(
+    monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    def hang_up(source: str, **kwargs: Any) -> None:  # noqa: ARG001
+        # dulwich 1.1 reads such a URL as an SSH host named "https" and raises this.
+        raise HangupException()
+
+    monkeypatch.setattr(porcelain, "clone", hang_up)
+    provider = GitDriverProvider(repository=url, branch="main", token="")
+
+    with pytest.raises(DriverLoadingError) as excinfo:
+        DriverLoader(provider=provider).load_driver()
+
+    message = str(excinfo.value)
+    assert message.startswith(
+        "Failed to clone git repository 'https://[bad/x.git' (branch='main'): "
+    )
+    assert "token" not in message
+    # api/errors.py shows a ServiceError's error_code, not INTERNAL_ERROR.
+    assert excinfo.value.error_code == "VALIDATION_ERROR"
