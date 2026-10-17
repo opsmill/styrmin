@@ -85,6 +85,7 @@ from styrmin_backend.services.replicas.validator import (
     has_replica_overrides,
     validate_replica_overrides,
 )
+from styrmin_backend.services.context import check_deployment_scheduling
 from styrmin_backend.services.scheduling.references import bind_deployment_references
 from deepdiff import DeepDiff
 
@@ -566,8 +567,9 @@ async def update_deployment(
             of 1 or more, or the pinned driver version cannot apply it.
         DeploymentNameValidationError: If the provided name is invalid.
         DeploymentNameConflictError: If the provided name is already in use.
-        UnresolvableAffinityReferenceError: If an affinity term in the config
-            names a deployment that is not a live deployment of the environment.
+        UnresolvableAffinityReferenceError: If an affinity term of the deployment's
+            config, of the environment's config or of a component's config names a
+            deployment that is not a live deployment of the environment. Nothing is saved.
 
     Returns:
         Task | None: The task created for the deployment update, or ``None``
@@ -629,6 +631,12 @@ async def update_deployment(
             deployment.config,
             path_prefix="deployment.config",
             upcoming_deployments={deployment.id: deployment.name},
+        )
+        # Phase 2 resolves every level's terms; a term of the environment's config or of
+        # a component that names a deleted deployment must refuse the update before the save.
+        environment = await uow.environments.get(deployment.environment_id)
+        await check_deployment_scheduling(
+            uow, deployment, environment.config if environment is not None else None
         )
 
         await _ensure_ingress_controller(
