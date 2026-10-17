@@ -148,6 +148,47 @@ async def _wait_for_job_succeeded(
         await asyncio.sleep(RECONCILE_POLL_INTERVAL)
 
 
+def _rolled_out(dep: Any) -> bool:
+    """True when the Deployment runs only pods of its current template, all ready."""
+    want = dep.spec.replicas if dep.spec.replicas is not None else 1
+    status = dep.status
+    return (status.observed_generation or 0) >= (dep.metadata.generation or 0) and (
+        (status.replicas or 0)
+        == (status.updated_replicas or 0)
+        == (status.ready_replicas or 0)
+        == want
+    )
+
+
+async def _workload_pod_uids(
+    vcluster: dict, *, namespace: str, timeout: float = RECONCILE_TIMEOUT_SECONDS
+) -> set[str]:
+    """Uids of the namespace's pods once every Deployment has rolled out.
+
+    Hook Job pods and pods being deleted are left out, so a restart shows as a changed set.
+    """
+    apps = kubeclient.AppsV1Api(vcluster["api"])
+    core = kubeclient.CoreV1Api(vcluster["api"])
+    deadline = time.time() + timeout
+    while True:
+        deployments = (await apps.list_namespaced_deployment(namespace=namespace)).items
+        if deployments and all(_rolled_out(dep) for dep in deployments):
+            pods = (await core.list_namespaced_pod(namespace=namespace)).items
+            return {
+                pod.metadata.uid
+                for pod in pods
+                if pod.metadata.deletion_timestamp is None
+                and not any(
+                    owner.kind == "Job" for owner in pod.metadata.owner_references or []
+                )
+            }
+        if time.time() >= deadline:
+            raise TimeoutError(
+                f"Deployments in {namespace} did not roll out in {timeout}s"
+            )
+        await asyncio.sleep(RECONCILE_POLL_INTERVAL)
+
+
 async def _update_scheduling_and_wait(
     scenario_driver: ScenarioDriver,
     deployment_id: str,
@@ -705,10 +746,10 @@ async def test_scheduling_end_to_end(
 
 @pytest.mark.ci
 @pytest.mark.api_only(
-    reason="scenario coordinates mutations across two deployments; the UI's "
-    "scheduling dialog is single-deployment scoped, so driving this flow "
-    "through the UI would require a bespoke two-deployment page-object "
-    "helper that does not yet exist"
+    reason="the UI cannot show or edit a deployment reference (AffinityTermEditor), so the "
+    "terms that name another deployment, by name or by id, can only be written through the "
+    "SDK or GraphQL; the scenario also coordinates mutations and pod checks across two "
+    "deployments, which the single-deployment configuration drawer does not cover"
 )
 async def test_pod_anti_affinity_cross_deployment_via_graphql(
     scheduling_environment: dict,
@@ -716,9 +757,15 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
     scheduling_deployment_b: dict,
     vcluster: dict,
 ) -> None:
-    """US1 / T037: two deployments under the same environment each set
+    """US1 / T037 and 027 US1: two deployments under the same environment each set
     pod-anti-affinity pointing at the other via the ``styrmin/deployment_id``
     label. Both rendered pod templates must carry the cross-targeting term.
+
+    A's affinity term names B by name and B's names A by id; Styrmin stores B's id
+    in A's config (027 FR-001). Renaming B then restarts no pod of A and changes no
+    stored term (FR-010), writing A's config back as read starts no reconcile
+    (FR-009), and a later update of A still selects ``styrmin/deployment_id=<B's id>``
+    (#492). B is renamed back to ``scheduling-b`` afterwards.
 
     We use ``preferred`` (not ``required``) anti-affinity: on a single-node
     vcluster a required anti-affinity with ``kubernetes.io/hostname`` topology
@@ -732,6 +779,7 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
         AffinityBlockInput,
         AffinityTermInput,
         DeploymentReferenceInput,
+        EnvVarInput,
         SchedulingInput,
         UpdateDeploymentInput,
         WeightedAffinityTermInput,
@@ -740,8 +788,13 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
     client: StyrminClient = scheduling_environment["client"]
     dep_a_id = scheduling_deployment["deployment_id"]
     dep_b_id = scheduling_deployment_b["deployment_id"]
+    b_name = (await client.deployments.get(dep_b_id)).name
+    b_new_name = f"{b_name}-renamed"
+    b_renamed = False
 
-    def _anti_affinity_input(target_deployment_id: str) -> UpdateDeploymentInput:
+    def _anti_affinity_input(
+        deployment_ref: DeploymentReferenceInput,
+    ) -> UpdateDeploymentInput:
         return UpdateDeploymentInput(
             scheduling=SchedulingInput(
                 podAntiAffinity=AffinityBlockInput(
@@ -750,9 +803,7 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
                             weight=100,
                             term=AffinityTermInput(
                                 topologyKey="kubernetes.io/hostname",
-                                deploymentRef=DeploymentReferenceInput(
-                                    deploymentId=target_deployment_id,
-                                ),
+                                deploymentRef=deployment_ref,
                             ),
                         )
                     ]
@@ -761,8 +812,31 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
         )
 
     try:
-        await client.deployments.update(dep_a_id, input=_anti_affinity_input(dep_b_id))
-        await client.deployments.update(dep_b_id, input=_anti_affinity_input(dep_a_id))
+        await client.deployments.update(
+            dep_a_id,
+            input=_anti_affinity_input(DeploymentReferenceInput(deploymentName=b_name)),
+        )
+        await client.deployments.update(
+            dep_b_id,
+            input=_anti_affinity_input(DeploymentReferenceInput(deploymentId=dep_a_id)),
+        )
+        # The name A's term gives is stored as B's id (027 FR-001).
+        a_config = (await client.deployments.get(dep_a_id)).config
+        assert a_config == {
+            "scheduling": {
+                "pod_anti_affinity": {
+                    "preferred": [
+                        {
+                            "weight": 100,
+                            "term": {
+                                "topology_key": "kubernetes.io/hostname",
+                                "deployment_ref": {"deployment_id": dep_b_id},
+                            },
+                        }
+                    ]
+                }
+            }
+        }, a_config
 
         async def _wait_running(deployment_id: str) -> None:
             # Scoped to this test's api-only path — we drive the SDK
@@ -818,9 +892,75 @@ async def test_pod_anti_affinity_cross_deployment_via_graphql(
             predicate=_anti_affinity_targets(dep_a_id),
             description=f"deployment B anti-affinity against {dep_a_id}",
         )
+
+        # Renaming B restarts no pod of A and changes no stored term (027 FR-010).
+        a_instance = (await client.deployments.get(dep_a_id)).application_instance
+        assert a_instance is not None
+        a_pods = await _workload_pod_uids(
+            vcluster, namespace=scheduling_deployment["namespace"]
+        )
+        b_renamed = True
+        await client.deployments.update(
+            dep_b_id, input=UpdateDeploymentInput(name=b_new_name)
+        )
+        await _wait_running(dep_b_id)
+        assert (await client.deployments.get(dep_b_id)).name == b_new_name
+        a_after_rename = await client.deployments.get(dep_a_id)
+        assert a_after_rename.config == a_config
+        assert a_after_rename.application_instance is not None
+        assert a_after_rename.application_instance.id == a_instance.id
+        assert (
+            await _workload_pod_uids(
+                vcluster, namespace=scheduling_deployment["namespace"]
+            )
+            == a_pods
+        )
+
+        # A's config written back as read starts no reconcile (027 FR-009).
+        unchanged = await client.deployments.update(
+            dep_a_id, input=UpdateDeploymentInput.model_validate(a_config)
+        )
+        assert unchanged is None, unchanged
+
+        # A later update of A still selects B's id (#492).
+        env_var = EnvVarInput(name="SCHEDULING_E2E_RENAME", value=b_new_name)
+        task = await client.deployments.update(
+            dep_a_id,
+            input=UpdateDeploymentInput(
+                env_vars=[env_var],
+                scheduling=SchedulingInput.model_validate(a_config["scheduling"]),
+            ),
+        )
+        assert task is not None
+        await _wait_running(dep_a_id)
+
+        def _has_env_var(dep: Any) -> bool:
+            return any(
+                entry.name == env_var.name and entry.value == env_var.value
+                for container in dep.spec.template.spec.containers
+                for entry in container.env or []
+            )
+
+        await _wait_for_pod_template(
+            vcluster,
+            namespace=scheduling_deployment["namespace"],
+            label_selector="app.kubernetes.io/name=simple-app",
+            predicate=lambda dep: (
+                _has_env_var(dep) and _anti_affinity_targets(dep_b_id)(dep)
+            ),
+            description=f"deployment A, updated after B's rename, against {dep_b_id}",
+        )
     finally:
         # This test touches two deployments — clean both up so the
-        # post-test state matches what other tests expect.
+        # post-test state matches what other tests expect; the
+        # module-scoped fixtures name B ``scheduling-b``.
+        if b_renamed:
+            try:
+                await client.deployments.update(
+                    dep_b_id, input=UpdateDeploymentInput(name=b_name)
+                )
+            except Exception:  # noqa: BLE001
+                pass
         cleanup_input = UpdateDeploymentInput(scheduling=SchedulingInput())
         for did in (dep_a_id, dep_b_id):
             try:
