@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from functools import partial
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID
 
 from prefect import flow, task
@@ -42,7 +42,9 @@ from styrmin_backend.agent.steps.backup_components import (
     PodComponents,
 )
 from styrmin_backend.agent.steps.reporter import StepReporter
+from styrmin_backend.agent.tasks.service_aliases import apply_service_aliases_step
 from styrmin_backend.agent.tasks.utils import action_job_variables
+from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.db.models import BackupStatus, RestoreStatus
 from styrmin_backend.domain import steps
 from styrmin_backend.domain.models import StepParent
@@ -257,6 +259,7 @@ async def execute_velero_restore_flow(
     timeout: int = 7200,
     restored_crd_name: str | None = None,
     counterpart_crd_body: dict[str, Any] | None = None,
+    counterpart_context: GlobalContext | None = None,
 ) -> dict[str, Any]:
     """Create a Velero Restore CRD and poll until completion.
 
@@ -284,6 +287,10 @@ async def execute_velero_restore_flow(
             restore, where the restored CR carries the source's identity and
             must be replaced (research D2.4). Built by the INTERNAL flow,
             which is the side with database access.
+        counterpart_context: The counterpart's stored context. Present only
+            for a cross-target restore, which restores none of the source's
+            service aliases and writes the counterpart's aliases after the
+            recovery (#530).
 
     Returns:
         The final Velero Restore resource dict from the K8s API.
@@ -423,6 +430,8 @@ async def execute_velero_restore_flow(
                 recovery_status["error"] = error_msg
             else:
                 await reporter.succeed_step(steps.RESTORE_RECOVERY.key)
+                if counterpart_context is not None:
+                    await apply_service_aliases_step(reporter, counterpart_context)
         else:
             failure_reason = velero_status.get("failureReason") or (
                 f"Velero restore phase: {velero_phase}"
@@ -766,8 +775,18 @@ async def execute_backup_workflow(
         raise
 
 
-async def _build_counterpart_crd_body(deployment_id: UUID, uow: Any) -> dict[str, Any]:
+class _Counterpart(NamedTuple):
+    """A cross-target counterpart's CR body and the context it is rendered from."""
+
+    crd_body: dict[str, Any]
+    context: GlobalContext
+
+
+async def _build_counterpart_crd_body(deployment_id: UUID, uow: Any) -> _Counterpart:
     """Render the ``StyrminDeployment`` CR body for a cross-target counterpart.
+
+    Returns the body together with the active instance's context, which the
+    restore's alias step reads the new environment from (#530).
 
     The counterpart deployment already has its service rows and an active
     instance (``deploy_application(skip_initial_reconcile=True)`` still runs
@@ -798,11 +817,14 @@ async def _build_counterpart_crd_body(deployment_id: UUID, uow: Any) -> dict[str
                 "no active instance to build its StyrminDeployment CR from"
             )
         context = instance.context
-        return build_styrmin_deployment_body(
+        return _Counterpart(
+            crd_body=build_styrmin_deployment_body(
+                context=context,
+                release_reference=context.instance.release_reference,
+                namespace=context.instance.namespace,
+                internal=deployment.internal,
+            ),
             context=context,
-            release_reference=context.instance.release_reference,
-            namespace=context.instance.namespace,
-            internal=deployment.internal,
         )
 
 
@@ -917,11 +939,13 @@ async def execute_restore_workflow(
         # (research D2.4). Built here because the INTERNAL flow is the side
         # with database access; the USER flow only applies it.
         counterpart_crd_body: dict[str, Any] | None = None
+        counterpart_context: GlobalContext | None = None
         if is_cross_target:
             async with get_unit_of_work() as uow:
-                counterpart_crd_body = await _build_counterpart_crd_body(
+                counterpart = await _build_counterpart_crd_body(
                     deployment_id=UUID(deployment_id), uow=uow
                 )
+            counterpart_crd_body, counterpart_context = counterpart
 
         # Determine timeout
         timeout = 7200
@@ -941,6 +965,7 @@ async def execute_restore_workflow(
                     "timeout": timeout,
                     "restored_crd_name": restored_crd_name,
                     "counterpart_crd_body": counterpart_crd_body,
+                    "counterpart_context": counterpart_context,
                 },
                 job_variables=action_job_variables(api_token, restore_id=restore_uuid),
                 poll_interval=config.SETTINGS.agent.poll_interval,

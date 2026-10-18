@@ -3,13 +3,14 @@
 The USER flow ``execute_velero_restore`` records "Delete the namespace", "Run
 the Velero restore" and "Run the recovery". The INTERNAL flow
 ``execute_restore_workflow`` gives it an action token and the restore id, and
-fails its open steps when it dies.
+fails its open steps when it dies. A cross-target restore also runs the alias
+step after the recovery (#530).
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
@@ -19,10 +20,12 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import SecretStr
 from kubernetes_asyncio.client import ApiException
+from prefect.client.schemas.actions import DeploymentFlowRunCreate
 from prefect.client.schemas.objects import StateType
 
 from styrmin_backend import config
 from styrmin_backend.agent.service.kubernetes.velero.client import VeleroClientError
+from styrmin_backend.agent.steps.reporter import StepReporter
 from styrmin_backend.agent.tasks.utils import (
     API_TOKEN_ENV,
     BACKUP_ID_ENV,
@@ -30,13 +33,20 @@ from styrmin_backend.agent.tasks.utils import (
     STEP_ID_ENV,
     TASK_ID_ENV,
 )
-from styrmin_backend.domain.models import StepParent
+from styrmin_backend.context.models.contexts import GlobalContext
+from styrmin_backend.domain.models import Deployment, StepParent
 from styrmin_backend.workflows.templates.backup import (
     execute_restore_workflow,
     execute_velero_restore_flow,
 )
 from tests.helpers.step_api import FakeStepApi
 from tests.helpers.unit_of_work import yield_unit_of_work
+from tests.unit.counterpart_crd_fixtures import (
+    COUNTERPART_NAMESPACE,
+    SOURCE_RELEASE_REFERENCE,
+    counterpart_context,
+    counterpart_deployment,
+)
 
 MODULE = "styrmin_backend.workflows.templates.backup"
 SERVICE_MODULE = "styrmin_backend.services.backup.service"
@@ -81,6 +91,19 @@ def api(
     return fake
 
 
+@pytest.fixture
+def alias_step(events: list[Event]) -> Iterator[AsyncMock]:
+    """Stand in for the alias step, which records ``("alias step", context)``."""
+
+    async def _record(reporter: StepReporter, context: GlobalContext) -> None:
+        assert isinstance(reporter, StepReporter)
+        events.append(("alias step", context))
+
+    step = AsyncMock(side_effect=_record)
+    with patch(f"{MODULE}.apply_service_aliases_step", step):
+        yield step
+
+
 def _velero_restore(phase: str, **status: Any) -> dict[str, Any]:
     return {
         "metadata": {"name": "styrmin-restore-1"},
@@ -95,6 +118,7 @@ async def _user_flow(
     poll_error: Exception | None = None,
     namespace_stays: bool = False,
     recovery_error: Exception | None = None,
+    counterpart_recovery_error: Exception | None = None,
 ) -> AsyncIterator[SimpleNamespace]:
     """Fake the cluster, Velero and the recovery around ``execute_velero_restore``."""
     api_client = MagicMock()
@@ -112,7 +136,9 @@ async def _user_flow(
     recovery = SimpleNamespace(
         mark_restoring=AsyncMock(),
         reapply_and_finalize=AsyncMock(side_effect=recovery_error),
-        reapply_with_counterpart_identity=AsyncMock(),
+        reapply_with_counterpart_identity=AsyncMock(
+            side_effect=counterpart_recovery_error
+        ),
         mark_failed=AsyncMock(),
     )
     variable = MagicMock()
@@ -142,14 +168,24 @@ async def _user_flow(
         yield SimpleNamespace(velero=velero, recovery=recovery, variable=variable)
 
 
-async def _restore() -> dict[str, Any]:
+async def _restore(**cross_target: Any) -> dict[str, Any]:
     return await execute_velero_restore_flow.fn(
         crd_body={"kind": "Restore"},
         velero_restore_name="styrmin-restore-1",
         velero_namespace="styrmin",
         target_namespace=TARGET_NAMESPACE,
         timeout=60,
+        **cross_target,
     )
+
+
+def _cross_target(context: GlobalContext) -> dict[str, Any]:
+    """The parameters the INTERNAL flow adds for a cross-target restore."""
+    return {
+        "restored_crd_name": SOURCE_RELEASE_REFERENCE,
+        "counterpart_crd_body": {"metadata": {"name": COUNTERPART_NAMESPACE}},
+        "counterpart_context": context,
+    }
 
 
 def _stored_result(variable: MagicMock) -> dict[str, Any]:
@@ -294,6 +330,74 @@ async def test_a_failed_recovery_fails_the_recovery_step(
     }
 
 
+async def test_a_cross_target_restore_writes_the_aliases_after_the_recovery(
+    api: FakeStepApi, events: list[Event], alias_step: AsyncMock
+) -> None:
+    del api
+    context = counterpart_context()
+
+    async with _user_flow() as cluster:
+        await _restore(**_cross_target(context))
+
+    assert events == [*ALL_STEPS_SUCCEEDED, ("alias step", context)]
+    alias_step.assert_awaited_once()
+    cluster.recovery.reapply_with_counterpart_identity.assert_awaited_once()
+    assert _stored_result(cluster.variable)["recovery"] == {
+        "recovered": True,
+        "error": None,
+    }
+
+
+async def test_an_in_place_restore_writes_no_aliases(
+    api: FakeStepApi, events: list[Event], alias_step: AsyncMock
+) -> None:
+    """Velero writes back the deployment's own aliases (FR-006)."""
+    del api
+    async with _user_flow():
+        await _restore()
+
+    assert events == ALL_STEPS_SUCCEEDED
+    alias_step.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("restore", "counterpart_recovery_error", "last_events"),
+    [
+        pytest.param(
+            None,
+            RuntimeError("CR is gone"),
+            [("STARTED", "restore:recovery"), ("FAILED", "restore:recovery")],
+            id="recovery-failed",
+        ),
+        pytest.param(
+            _velero_restore(
+                "Failed", failureReason="found a backup with status Failed"
+            ),
+            None,
+            [("STARTED", "restore:velero"), ("FAILED", "restore:velero")],
+            id="velero-failed",
+        ),
+    ],
+)
+async def test_a_cross_target_restore_that_fails_before_its_end_writes_no_aliases(
+    api: FakeStepApi,
+    events: list[Event],
+    alias_step: AsyncMock,
+    restore: dict[str, Any] | None,
+    counterpart_recovery_error: Exception | None,
+    last_events: list[Event],
+) -> None:
+    del api
+    async with _user_flow(
+        restore=restore, counterpart_recovery_error=counterpart_recovery_error
+    ) as cluster:
+        await _restore(**_cross_target(counterpart_context()))
+
+    assert events[-2:] == last_events
+    alias_step.assert_not_awaited()
+    assert _stored_result(cluster.variable)["recovery"]["recovered"] is False
+
+
 # execute_restore_workflow (INTERNAL) -----------------------------------------
 
 
@@ -305,6 +409,7 @@ async def _internal_restore_flow(
     state_message: str = "",
     token_error: Exception | None = None,
     velero_result: dict[str, Any] | None = None,
+    counterpart: Deployment | None = None,
 ) -> AsyncIterator[SimpleNamespace]:
     backup = MagicMock()
     backup.name = "styrmin-backup-1"
@@ -347,13 +452,15 @@ async def _internal_restore_flow(
     variable.unset = AsyncMock()
     built = MagicMock()
     built.render.return_value = {"kind": "Restore"}
+    uow = MagicMock()
+    uow.deployments.find = AsyncMock(return_value=counterpart)
 
     dispatch = AsyncMock(side_effect=_dispatch)
     status = AsyncMock()
     fail_open = AsyncMock(side_effect=_fail_open_steps)
     with (
         patch(f"{MODULE}.get_run_logger", return_value=MagicMock()),
-        patch(f"{MODULE}.get_unit_of_work", yield_unit_of_work(MagicMock())),
+        patch(f"{MODULE}.get_unit_of_work", yield_unit_of_work(uow)),
         patch(f"{MODULE}.get_backup", AsyncMock(return_value=backup)),
         patch(f"{SERVICE_MODULE}.get_restore", AsyncMock(return_value=restore)),
         patch(f"{MODULE}.update_restore_status", status),
@@ -368,13 +475,21 @@ async def _internal_restore_flow(
         yield SimpleNamespace(dispatch=dispatch, status=status, fail_open=fail_open)
 
 
-async def _run_restore_workflow(restore_id: UUID) -> None:
-    deployment_id = uuid4()
+async def _run_restore_workflow(
+    restore_id: UUID,
+    *,
+    deployment_id: UUID | None = None,
+    source_deployment_id: UUID | None = None,
+) -> None:
+    deployment_id = deployment_id or uuid4()
     await execute_restore_workflow.fn(
         restore_id=str(restore_id),
         backup_id=str(uuid4()),
         deployment_id=str(deployment_id),
         target_namespace=f"styrmin-{deployment_id}",
+        source_deployment_id=(
+            str(source_deployment_id) if source_deployment_id is not None else None
+        ),
     )
 
 
@@ -467,3 +582,52 @@ async def test_restore_runs_without_steps_when_no_token_can_be_created(
         "env": {RESTORE_ID_ENV: str(restore_id)}
     }
     assert flow.status.await_args.kwargs["status"].name == "COMPLETED"
+
+
+async def test_restore_workflow_gives_a_cross_target_restore_the_counterpart_context(
+    events: list[Event],
+) -> None:
+    counterpart = counterpart_deployment()
+    assert counterpart.active_instance is not None
+
+    async with _internal_restore_flow(events, counterpart=counterpart) as flow:
+        await _run_restore_workflow(
+            uuid4(), deployment_id=counterpart.id, source_deployment_id=uuid4()
+        )
+
+    parameters = flow.dispatch.await_args.kwargs["parameters"]
+    assert parameters["counterpart_context"] == counterpart.active_instance.context
+    assert parameters["counterpart_crd_body"]["metadata"]["name"] == (
+        COUNTERPART_NAMESPACE
+    )
+
+
+async def test_restore_workflow_gives_an_in_place_restore_no_counterpart_context(
+    events: list[Event],
+) -> None:
+    async with _internal_restore_flow(events) as flow:
+        await _run_restore_workflow(uuid4())
+
+    parameters = flow.dispatch.await_args.kwargs["parameters"]
+    assert parameters["counterpart_context"] is None
+    assert parameters["counterpart_crd_body"] is None
+
+
+async def test_the_counterpart_context_reaches_the_user_flow_as_a_context(
+    events: list[Event],
+) -> None:
+    """Prefect sends the parameters as JSON; the USER flow validates them back."""
+    counterpart = counterpart_deployment()
+    assert counterpart.active_instance is not None
+
+    async with _internal_restore_flow(events, counterpart=counterpart) as flow:
+        await _run_restore_workflow(
+            uuid4(), deployment_id=counterpart.id, source_deployment_id=uuid4()
+        )
+
+    sent = DeploymentFlowRunCreate(
+        parameters=flow.dispatch.await_args.kwargs["parameters"]
+    ).model_dump(mode="json", exclude_unset=True)["parameters"]
+    received = execute_velero_restore_flow.validate_parameters(sent)
+    assert isinstance(received["counterpart_context"], GlobalContext)
+    assert received["counterpart_context"] == counterpart.active_instance.context

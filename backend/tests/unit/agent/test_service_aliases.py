@@ -1145,3 +1145,65 @@ class TestWithCurrentPeerServices:
         assert result is context
         read.assert_not_awaited()
         logger.warning.assert_called_once()
+
+
+def _alias_row(alias: dict) -> tuple[str, str, str, str]:
+    """The holder namespace, name, target namespace and owner id of *alias*."""
+    return (
+        alias["metadata"]["namespace"],
+        alias["metadata"]["name"],
+        alias["spec"]["externalName"].split(".")[1],
+        alias["metadata"]["labels"]["styrmin.io/deployment-id"],
+    )
+
+
+class TestCounterpartAliases:
+    """A clone counterpart's restore writes aliases with the new environment only (#530).
+
+    The restore runs the alias step with the counterpart's stored context, and the server
+    lists the services of the new environment. A counterpart whose restore failed keeps its
+    services there, so it gets its aliases.
+    """
+
+    @pytest.mark.asyncio
+    async def test_aliases_join_the_counterparts_and_name_no_source_namespace(
+        self,
+    ) -> None:
+        environment_id = uuid4()
+        counterpart, peer, failed, source = uuid4(), uuid4(), uuid4(), uuid4()
+        context = _make_context(
+            deployment_id=counterpart,
+            deployed_services=[_service("a", counterpart), _service("s", source)],
+        ).model_copy(update={"labels": {"environment_id": str(environment_id)}})
+        read = AsyncMock(
+            return_value=[
+                {"resolved_name": "a", "deployment_id": str(counterpart)},
+                {"resolved_name": "p", "deployment_id": str(peer)},
+                {"resolved_name": "f", "deployment_id": str(failed)},
+            ]
+        )
+
+        with (
+            patch(f"{MODULE}.read_environment_services", read),
+            patch(f"{MODULE}.get_run_logger", return_value=MagicMock()),
+        ):
+            aliases = compute_service_aliases(
+                await service_aliases.with_current_peer_services(context)
+            )
+
+        read.assert_awaited_once_with(str(environment_id))
+        counterpart_ns = get_kubernetes_reference(counterpart)
+        peer_ns = get_kubernetes_reference(peer)
+        failed_ns = get_kubernetes_reference(failed)
+        assert sorted(map(_alias_row, aliases)) == sorted(
+            [
+                (counterpart_ns, "p", peer_ns, str(peer)),
+                (counterpart_ns, "f", failed_ns, str(failed)),
+                (peer_ns, "a", counterpart_ns, str(counterpart)),
+                (failed_ns, "a", counterpart_ns, str(counterpart)),
+            ]
+        )
+        source_ns = get_kubernetes_reference(source)
+        assert [
+            row for row in map(_alias_row, aliases) if source_ns in (row[0], row[2])
+        ] == []
