@@ -216,6 +216,12 @@ change to either deployment, such as a change to its configuration or its
 parameters, to write the aliases. Saving the same values does not change
 the deployment, so it writes no alias.
 
+The restore that an [environment clone](#cloning-an-environment) runs
+into each counterpart deployment does not restore the source's service
+aliases, because they point to the namespaces of the source environment.
+At its end, after "Run the recovery", it writes the aliases between the
+counterpart and the other deployments of the new environment.
+
 The database itself also starts on an empty data volume and needs some
 time before it accepts connections. The MariaDB and MongoDB restore hooks
 retry loading the dump every 2 seconds, for up to 2 minutes, until the
@@ -243,6 +249,12 @@ A restore has three steps, in this order:
 3. "Run the recovery": Styrmin prepares the restored `StyrminDeployment`
    so that the operator takes it over again. This step runs only after
    Velero completed the restore.
+
+The restore that an environment clone runs into a counterpart deployment
+has a fourth step, "Create and delete service aliases", which runs after
+"Run the recovery" succeeded. Styrmin writes the service aliases between
+the counterpart and the other deployments of the new environment. The
+step is left out when there is no alias to write or delete.
 
 "Delete the namespace" fails with `Namespace <namespace> was not deleted
 within 600s` when the namespace is still `Terminating` after 600
@@ -751,6 +763,14 @@ definitions of that deployment's driver version. Each copied term names
 the counterpart of the deployment it named, so the clone's pods are
 placed relative to each other and not to the source's pods.
 
+An application in the clone reaches the clone's other deployments by
+short service name, through the
+[service aliases](./ingress-and-networking.md#service-aliases) of the new
+environment. A deployment that you leave out of the clone cannot be
+reached by short service name from the clone: the clone has no alias for
+that deployment's services, so a call to it by short name fails instead
+of reaching the source environment.
+
 Every source deployment you could have selected is accounted for on the
 clone record — cloned, skipped with a reason, or failed with a reason.
 Styrmin's **internal** deployments are the exception: they are left off
@@ -838,6 +858,24 @@ Two things surprise people:
 driver version the capture recorded no longer exists by the time the
 counterpart is created. That deployment is attributed as failed, its
 neighbours are cloned, and the clone reports the mix.
+
+A deployment whose restore failed is also attributed as failed, with the
+reason `the restore failed`, followed by the restore's error when it has
+one. The clone records a deployment as cloned when it starts the restore,
+and reports it as failed once the restore has failed. One cause is the step
+"Create and delete service aliases": when Styrmin cannot write the
+counterpart's service aliases, the restore fails with the error
+`Service alias step failed: <error>`.
+
+The failed restore sets the counterpart to `FAILED`. When only the alias
+step failed, the counterpart's workloads run, so its status then follows
+them and can read `RUNNING`. The clone's attribution and the failed
+restore record the failure. To write
+the missing aliases, make a change to the counterpart's configuration or
+parameters, or upgrade it. The update or upgrade writes the counterpart's
+aliases and the aliases of its services in the namespaces of the other
+deployments. Saving the same values does not always run an update, so it
+might write no alias.
 
 A failure also reaches the deployments whose affinity terms name the
 failed one. A deployment fails this way when its captured data cannot be
