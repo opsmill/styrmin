@@ -183,16 +183,18 @@ When a driver is loaded via `load_application_driver_from_object()` in `services
 
 A driver version loaded from the repository root has one pull step, `prefect.deployments.steps.git_clone`, which clones the repository at the recorded commit into `<repository name>-<short commit>` and leaves the working directory at the root of the clone.
 
-A driver version loaded from a driver directory has a second pull step, `prefect.deployments.steps.set_working_directory`, with the relative path `<repository name>-<short commit>/<driver directory>` (`set_directory_pull_step` in `workflows/utils.py`). Prefect resolves the path against the folder that `git_clone` cloned into. That folder is not the image's working directory: `prefect flow-run execute`, the command of each action's Kubernetes Job, creates a temporary `prefect-flow-run-*` folder and changes into it before it runs the pull steps, so `git_clone` clones there. The entrypoint stays `actions.py:<function>`, so Prefect's script loader puts only the driver directory on `sys.path`: `actions.py` imports modules from the driver directory and not from other folders of the repository ([ADR-076](../../adr/0076-driver-actions-import-only-from-their-driver-directory.md)).
+A driver version loaded from a driver directory has a second pull step, `prefect.deployments.steps.set_working_directory`, with the relative path `<repository name>-<short commit>/<driver directory>` (`set_directory_pull_step` in `workflows/utils.py`). Prefect resolves the path against the folder that `git_clone` cloned into. That folder is not the image's working directory: `prefect flow-run execute`, the command of each action's Kubernetes Job, creates a temporary `prefect-flow-run-*` folder and changes into it before it runs the pull steps, so `git_clone` clones there. The entrypoint stays `actions.py:<function>`, so Prefect's script loader puts only the driver directory on `sys.path`: `actions.py` imports modules from the driver directory and not from other folders of the repository ([ADR-076](../../adr/0076-driver-actions-import-only-from-their-driver-directory.md)). The loader puts the folder of the resolved script on `sys.path`, so the git load refuses an `actions.py`, `driver.styrmin.yml` or `values.j2.yml` that is a symlink to a path outside the driver directory (`GitDriverProvider._check_driver_directory` in `services/driver/provider.py`).
+
+The pull steps need Prefect 3.6.9 or later in the action's image: `git_clone` accepts `clone_directory_name` from that release on. An action with its own `image` must hold such a Prefect. The driver directory is refused when it contains `{` or `}`, because Prefect fills in `{{ ... }}` templates (blocks, variables, environment variables) in the `set_working_directory` step before it runs it.
 
 ### Deployment names
 
-Prefect replaces a deployment with the same flow and deployment name, and refuses `/` in deployment names. The name therefore carries the driver name, the short fingerprint and, for a driver version loaded from a driver directory, the first 7 hex characters of the SHA-256 of the driver directory (`driver_directory_digest` in `services/driver/driver_directory.py`):
+Prefect replaces a deployment with the same flow and deployment name, and refuses `/` in deployment names. The name therefore carries the driver name, the short fingerprint and, for a driver version loaded from a driver directory, the first 12 hex characters of the SHA-256 of the driver directory (`driver_directory_digest` in `services/driver/driver_directory.py`):
 
 | Driver version | Deployment name | Extra tag |
 |----------------|-----------------|-----------|
 | Loaded from the repository root | `User Action: setup (infrahub@0123456)` | none |
-| Loaded from `drivers/infrahub` | `User Action: setup (infrahub@0123456 c8dc0c0)` | `directory/drivers/infrahub` |
+| Loaded from `drivers/infrahub` | `User Action: setup (infrahub@0123456 c8dc0c0d9f46)` | `directory/drivers/infrahub` |
 
 Two driver versions loaded from different driver directories at one commit, also with the same driver name, keep separate deployments. Driver versions loaded from the repository root keep the names and tags they had before spec 028.
 
@@ -209,8 +211,9 @@ async def get_user_action_deployment_id(
     version: str,                # e.g., ">=1.5,<1.7"
     hook: HookKind,              # e.g., HookKind.SETUP
     mode: Literal["pre", "core", "post"],
-    fingerprint: str | None = None,       # short fingerprint of the driver version
-    driver_directory: str | None = None,  # source_path of a git driver version
+    fingerprint: str | None = None,  # short fingerprint of the driver version
+    *,
+    driver_directory: str | None,    # no default: source_path of a git driver version, or None
 ) -> UUID | None:
     """Query Prefect deployments by tag combination. Returns None if not found."""
 ```

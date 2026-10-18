@@ -55,7 +55,8 @@ For the paths a git load may read (decision 2):
 
 1. Turn off symlink checkout in dulwich.
 2. After the clone, resolve the real path of the driver directory and of the three driver files,
-   and refuse the load when one is outside the clone. Run the check for every git load.
+   and refuse the load when the driver directory is outside the clone or a driver file is outside
+   the driver directory. Run the check for every git load.
 3. As option 2, and apply the same check to loads from a local directory.
 
 ## Decision
@@ -75,10 +76,19 @@ test can check only as a string.
 
 Decision 2: we chose option 2. After the clone and before reading any file, the git driver
 provider resolves the driver directory and `driver.styrmin.yml`, `values.j2.yml` and `actions.py`
-with `Path.resolve()`, and refuses the load when a resolved path is not inside the resolved clone
-root. The check runs for loads from the repository root too. A symlink whose target is inside the
-clone is accepted. Before the clone, Styrmin also refuses a driver directory that is an absolute
-path or that contains a `..` segment, a backslash or a NUL character.
+with `Path.resolve()`. It refuses the load when the resolved driver directory is not inside the
+resolved clone root, or when a resolved driver file is not inside the resolved driver directory:
+Prefect's script loader puts the folder of the resolved `actions.py` on `sys.path`, so an
+`actions.py` that is a symlink to `../../shared/actions.py` would let the action import from
+`shared/`. It also refuses the load when the driver directory or a driver file cannot be followed,
+such as a symlink loop: Python 3.14 `Path.resolve()` does not raise on a loop. The check runs for
+loads from the repository root too, where the driver directory is the clone root. A symlink whose
+target is inside the driver directory is accepted. Before the clone, Styrmin also refuses a driver
+directory that is an absolute path, that contains a `..` segment, a backslash, `{`, `}` or a
+control character, or that is longer than 255 characters once stored. Prefect fills in
+`{{ ... }}` templates (blocks, variables, environment variables) in the `set_working_directory`
+step before it runs it, so a driver directory with a template could move the action to another
+folder or write a secret into a log.
 
 Option 1 is not available through `porcelain.clone`: only the lower-level `build_index_from_tree`
 takes a `symlink_fn`, so Styrmin would have to replace `porcelain.clone` with dulwich internals.
@@ -111,13 +121,14 @@ Kubernetes ConfigMap or Secret volume exposes every file as a symlink.
 - `backend/tests/unit/workflows/test_git_source_commit_pinning.py` checks the two pull steps of a
   driver directory version and the single step of a root version.
 - `backend/tests/unit/services/driver/test_provider.py` loads from local repositories with
-  symlinks: a driver directory, a root `driver.styrmin.yml` and a `values.j2.yml` that lead
-  outside the clone are refused, and a driver directory that is a symlink inside the clone is
-  accepted.
+  symlinks: a driver directory that leads outside the clone, a driver file that leads outside the
+  driver directory (also to another folder of the repository) and a symlink loop are refused, and
+  a driver directory or a driver file that is a symlink inside the driver directory is accepted.
 - `backend/tests/unit/services/driver/test_driver_directory.py` covers the values refused before
   the clone.
 - Every E2E session loads its `simple-app` driver from the driver directory `drivers/simple-app`
-  and runs its setup actions.
+  and runs its setup actions, whose `actions.py` imports a module next to it;
+  `test_driver_version_reselection.py` checks that those setup actions completed.
 
 ## More information
 
