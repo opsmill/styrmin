@@ -1,0 +1,71 @@
+# Internal Interfaces: A Clone Writes Its Own Service Aliases and Restores None of the Source's
+
+The fix changes no GraphQL schema, CLI command or SDK method. These are the internal interfaces that change. Paths are under `backend/styrmin_backend/`.
+
+## Velero Restore model (`agent/service/kubernetes/velero/resources.py`)
+
+### `VeleroRestore.label_selector: dict[str, Any] | None = None` (new field)
+
+`render()` writes it as `spec.labelSelector` when it is not `None`, and leaves the key out otherwise.
+
+## Restore builder (`agent/service/kubernetes/resources/builders/backup.py`)
+
+### `build_velero_restore(...) -> VeleroRestore` (changed)
+
+Signature unchanged. When `source_namespace != target_namespace`, the result also has:
+
+```python
+label_selector = {
+    "matchExpressions": [
+        {"key": SERVICE_ALIAS_LABEL, "operator": "NotIn", "values": ["true"]}
+    ]
+}
+```
+
+A new module constant names the selector, next to `CROSS_TARGET_EXCLUDED_RESOURCES`, with a one-line comment giving the reason (#530).
+
+## Alias step (`agent/tasks/service_aliases.py`)
+
+### `apply_service_aliases_step(reporter: StepReporter, context: GlobalContext) -> None` (moved, async)
+
+Moved from `agent/tasks/orchestration.py` (`_apply_service_aliases_step`), behaviour unchanged:
+
+1. `context = await with_current_peer_services(context)`;
+2. `aliases = compute_service_aliases(context)`, `stale = await find_stale_service_aliases(context)`;
+3. returns without a step when both are empty;
+4. otherwise runs `apply_service_aliases(aliases=aliases, stale_aliases=stale)` inside `reporter.step(*steps.SERVICE_ALIASES)`, which records the step and re-raises a failure.
+
+Callers: `create_instance_crd`, `update_instance_crd`, `upgrade_instance_crd` (`agent/tasks/orchestration.py`) and `execute_velero_restore_flow` (`workflows/templates/backup.py`).
+
+## Restore flows (`workflows/templates/backup.py`)
+
+### `execute_restore_workflow(restore_id, backup_id, deployment_id, target_namespace, source_deployment_id=None)` (INTERNAL, changed)
+
+Signature unchanged. For a cross-target restore, it loads the counterpart's active instance once and passes `counterpart_crd_body` and `counterpart_context` (the instance's `GlobalContext`) to the USER flow. For an in-place restore both stay `None`.
+
+### `execute_velero_restore_flow(..., counterpart_crd_body=None, counterpart_context: GlobalContext | None = None) -> dict` (USER, changed)
+
+New parameter `counterpart_context`. After "Run the recovery" succeeds and when `counterpart_context` is not `None`:
+
+- calls `apply_service_aliases_step(reporter, counterpart_context)`;
+- on an exception: calls `mark_failed(api_client, target_namespace, <counterpart CR name>, error)` and stores `recovery = {"recovered": False, "error": "Service alias step failed: <error>"}` in the result variable.
+
+The result variable keeps its shape: `{"status": {...}, "recovery": {"recovered": bool, "error": str | None}}`.
+
+## Clone entry fold (`services/backup/clone.py`)
+
+### `CLONE_REASON_RESTORE_FAILED = "the restore failed"` (new constant)
+
+### `resolve_deployment_result(result: CloneDeploymentResult, restores: Mapping[UUID, Restore]) -> CloneDeploymentResult` (new, pure)
+
+Returns `result` unchanged unless `result.outcome` is `cloned`, `result.restore_id` is in `restores` and that row's status is `RestoreStatus.FAILED`. Then it returns a copy with `outcome=failed` and `reason=f"{CLONE_REASON_RESTORE_FAILED}: {error_message}"`, or `CLONE_REASON_RESTORE_FAILED` when the row has no error message.
+
+### `derive_environment_clone_status(...)` (changed internally)
+
+Counts failures through `resolve_deployment_result`. The rules and the result for every input stay the same.
+
+## GraphQL type (`api/definitions/backup/environment_clone.py`)
+
+### `EnvironmentClone.deployment_results` (changed resolver, same schema)
+
+Projects each readable stored entry through `resolve_deployment_result(entry, self.referenced_restores)` before `EnvironmentCloneDeploymentResult.from_model`. Unreadable entries keep their current projection. The descriptions of `EnvironmentCloneDeploymentResult.outcome` and `reason` say that an entry whose restore failed reads `FAILED` with the restore's error.
