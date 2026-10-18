@@ -582,7 +582,7 @@ COLLECTION_HELPER_MODULE = "collection_helper"
 
 def _import_sibling_module(driver_dir: Path) -> None:
     """Make ``actions.py`` import a module next to it: every action then fails to
-    load unless it runs from its driver directory (ADR-076)."""
+    load unless it runs from its driver directory (ADR-079)."""
     (driver_dir / f"{COLLECTION_HELPER_MODULE}.py").write_text(
         '"""Module next to actions.py in the driver-collection repository."""\n'
     )

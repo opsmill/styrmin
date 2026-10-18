@@ -49,7 +49,7 @@ Decisions and surprises the chunks reported:
 - Chunk 8: T040 extends the chunk 3 test instead of adding a duplicate.
 - Chunk 9:
   - The changelog fragment is in the past tense, as `dev/guidelines/changelog.md` asks. It also names the new refusal of root loads whose driver files are symlinks to paths outside the repository.
-  - ADR-076 was free on all 142 refs.
+  - ADR-076 was free on all 142 refs. On 2026-10-18 develop took ADR-0076, so the rebase renumbered this ADR to ADR-079.
   - `CONTEXT.md` had one drift, now fixed: only git loads register actions.
   - The "Key Files" table in `hooks-and-actions.md` has 15 links that were already broken before this change.
 - Chunks 11 and 12: the logs went to the session scratchpad, not to `/tmp/e2e-028-*.log`. The `shard_general` API run took 8 minutes 11 seconds and the UI run 6 minutes 40 seconds.
