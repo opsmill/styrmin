@@ -4,7 +4,7 @@ The USER flow ``execute_velero_restore`` records "Delete the namespace", "Run
 the Velero restore" and "Run the recovery". The INTERNAL flow
 ``execute_restore_workflow`` gives it an action token and the restore id, and
 fails its open steps when it dies. A cross-target restore also runs the alias
-step after the recovery (#530).
+step after the recovery, and a refused alias write fails the restore (#530).
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from prefect.client.schemas.objects import StateType
 from styrmin_backend import config
 from styrmin_backend.agent.service.kubernetes.velero.client import VeleroClientError
 from styrmin_backend.agent.steps.reporter import StepReporter
+from styrmin_backend.agent.tasks import service_aliases
 from styrmin_backend.agent.tasks.utils import (
     API_TOKEN_ENV,
     BACKUP_ID_ENV,
@@ -34,6 +35,7 @@ from styrmin_backend.agent.tasks.utils import (
     TASK_ID_ENV,
 )
 from styrmin_backend.context.models.contexts import GlobalContext
+from styrmin_backend.db.models import RestoreStatus
 from styrmin_backend.domain.models import Deployment, StepParent
 from styrmin_backend.workflows.templates.backup import (
     execute_restore_workflow,
@@ -102,6 +104,35 @@ def alias_step(events: list[Event]) -> Iterator[AsyncMock]:
     step = AsyncMock(side_effect=_record)
     with patch(f"{MODULE}.apply_service_aliases_step", step):
         yield step
+
+
+def _alias_write_error() -> ApiException:
+    return ApiException(status=500, reason="Internal Server Error")
+
+
+#: The recovery error that a refused alias write stores for the INTERNAL flow.
+ALIAS_ERROR = f"Service alias step failed: {_alias_write_error()}"
+
+
+@pytest.fixture
+def refused_alias_write(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Run the real alias step with one alias to write, which the API refuses."""
+    monkeypatch.setattr(
+        service_aliases,
+        "with_current_peer_services",
+        AsyncMock(side_effect=lambda context: context),
+    )
+    monkeypatch.setattr(
+        service_aliases,
+        "compute_service_aliases",
+        lambda _context: [{"metadata": {"name": "db"}}],
+    )
+    monkeypatch.setattr(
+        service_aliases, "find_stale_service_aliases", AsyncMock(return_value=[])
+    )
+    write = AsyncMock(side_effect=_alias_write_error())
+    monkeypatch.setattr(service_aliases, "apply_service_aliases", write)
+    return write
 
 
 def _velero_restore(phase: str, **status: Any) -> dict[str, Any]:
@@ -398,6 +429,39 @@ async def test_a_cross_target_restore_that_fails_before_its_end_writes_no_aliase
     assert _stored_result(cluster.variable)["recovery"]["recovered"] is False
 
 
+async def test_a_refused_alias_write_fails_the_alias_step_and_the_recovery(
+    api: FakeStepApi,
+    events: list[Event],
+    restore_id: UUID,
+    refused_alias_write: AsyncMock,
+) -> None:
+    """SC-004: the step and the stored result carry the error; no CR is marked failed."""
+    async with _user_flow() as cluster:
+        await _restore(**_cross_target(counterpart_context()))
+
+    assert events == [
+        *ALL_STEPS_SUCCEEDED,
+        ("STARTED", "resource:service-aliases"),
+        ("FAILED", "resource:service-aliases"),
+    ]
+    started = api.record("STARTED", "resource:service-aliases")
+    assert (started["name"], started["restoreId"]) == (
+        "Create and delete service aliases",
+        str(restore_id),
+    )
+    assert api.record("FAILED", "resource:service-aliases")["error"] == (
+        "ApiException: (500)\nReason: Internal Server Error\n"
+    )
+    refused_alias_write.assert_awaited_once_with(
+        aliases=[{"metadata": {"name": "db"}}], stale_aliases=[]
+    )
+    assert _stored_result(cluster.variable)["recovery"] == {
+        "recovered": False,
+        "error": ALIAS_ERROR,
+    }
+    cluster.recovery.mark_failed.assert_not_awaited()
+
+
 # execute_restore_workflow (INTERNAL) -----------------------------------------
 
 
@@ -458,6 +522,8 @@ async def _internal_restore_flow(
     dispatch = AsyncMock(side_effect=_dispatch)
     status = AsyncMock()
     fail_open = AsyncMock(side_effect=_fail_open_steps)
+    deployment_running = AsyncMock()
+    deployment_failed = AsyncMock()
     with (
         patch(f"{MODULE}.get_run_logger", return_value=MagicMock()),
         patch(f"{MODULE}.get_unit_of_work", yield_unit_of_work(uow)),
@@ -467,12 +533,18 @@ async def _internal_restore_flow(
         patch(f"{MODULE}.build_velero_restore", MagicMock(return_value=built)),
         patch(f"{MODULE}.arun_deployment", dispatch),
         patch(f"{MODULE}.Variable", variable),
-        patch(f"{MODULE}._set_deployment_status_running", AsyncMock()),
-        patch(f"{MODULE}._set_deployment_status_failed", AsyncMock()),
+        patch(f"{MODULE}._set_deployment_status_running", deployment_running),
+        patch(f"{MODULE}._set_deployment_status_failed", deployment_failed),
         patch(f"{MODULE}.action_api_token", _action_api_token),
         patch(f"{MODULE}.fail_open_steps", fail_open),
     ):
-        yield SimpleNamespace(dispatch=dispatch, status=status, fail_open=fail_open)
+        yield SimpleNamespace(
+            dispatch=dispatch,
+            status=status,
+            fail_open=fail_open,
+            deployment_running=deployment_running,
+            deployment_failed=deployment_failed,
+        )
 
 
 async def _run_restore_workflow(
@@ -566,6 +638,38 @@ async def test_failed_velero_restore_gives_the_restore_an_error_message(
 
     kwargs = flow.status.await_args.kwargs
     assert (kwargs["status"].name, kwargs["error_message"]) == ("FAILED", message)
+
+
+async def test_a_refused_alias_write_fails_the_restore_and_the_counterpart(
+    events: list[Event],
+) -> None:
+    """Critique E4: the restore's error is the alias error that the clone entry shows."""
+    counterpart = counterpart_deployment()
+    velero_result = {
+        "status": {"phase": "Completed", "failureReason": ""},
+        "recovery": {"recovered": False, "error": ALIAS_ERROR},
+    }
+
+    async with _internal_restore_flow(
+        events, velero_result=velero_result, counterpart=counterpart
+    ) as flow:
+        await _run_restore_workflow(
+            uuid4(), deployment_id=counterpart.id, source_deployment_id=uuid4()
+        )
+
+    kwargs = flow.status.await_args.kwargs
+    assert (kwargs["status"], kwargs["error_message"]) == (
+        RestoreStatus.FAILED,
+        ALIAS_ERROR,
+    )
+    flow.deployment_failed.assert_awaited_once()
+    failed = flow.deployment_failed.await_args.kwargs
+    assert (failed["deployment_id"], failed["error_message"]) == (
+        counterpart.id,
+        ALIAS_ERROR,
+    )
+    flow.deployment_running.assert_not_awaited()
+    flow.fail_open.assert_not_awaited()
 
 
 async def test_restore_runs_without_steps_when_no_token_can_be_created(
