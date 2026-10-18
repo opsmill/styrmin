@@ -736,6 +736,7 @@ async def test_environment_restore_puts_back_a_term_that_names_a_tombstoned_depl
         SQLModelDeploymentRepository, "find_all_by_environment", _in_name_order
     )
     log_info = mocker.patch.object(cluster_config_fanout.logger, "info")
+    log_error = mocker.patch.object(cluster_config_fanout.logger, "error")
     logged = _capture_logged_errors(mocker)
 
     data = await gql(
@@ -748,7 +749,16 @@ async def test_environment_restore_puts_back_a_term_that_names_a_tombstoned_depl
     environment = await session.get(Environment, ids.environment_id)
     assert environment is not None
     assert environment.config == captured
-    fields, failure = _dispatch_error(logged, "env_restore_fanout")
+    # The fan-out logs B's failure with its traceback; the restore logs it again with
+    # the restore's id, the error code and the term path (#467).
+    fanout_fields, failure = _dispatch_error(logged, "env_config_fanout")
+    assert fanout_fields["deployment_id"] == str(ids.b_id)
+    [restore_line] = [
+        line
+        for line in _logged(log_error)
+        if line.startswith("env_restore_fanout_dispatch_error ")
+    ]
+    fields = _fields(restore_line)
     assert fields["environment_restore_id"] == restore["id"]
     assert fields["deployment_id"] == str(ids.b_id)
     assert (fields["error_code"], fields["path"]) == ("VALIDATION_ERROR", _E_TERM_PATH)

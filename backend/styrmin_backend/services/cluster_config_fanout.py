@@ -67,13 +67,17 @@ class ControllerAction(StrEnum):
 
 @dataclass(frozen=True)
 class FanOutDeployment:
-    """A deployment the fan-out redeployed, skipped or failed to start; ``task_id`` is set once started."""
+    """A deployment the fan-out redeployed, skipped or failed to start; ``task_id`` is set once started.
+
+    ``error`` is the exception of a deployment that failed to start.
+    """
 
     deployment_id: UUID
     deployment_name: str
     environment_id: UUID
     environment_name: str
     task_id: UUID | None = None
+    error: Exception | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -220,7 +224,10 @@ def _resolved_ingress_values(
 
 
 def _entry(
-    deployment: Deployment, environment: _EnvironmentRef, task_id: UUID | None = None
+    deployment: Deployment,
+    environment: _EnvironmentRef,
+    task_id: UUID | None = None,
+    error: Exception | None = None,
 ) -> FanOutDeployment:
     return FanOutDeployment(
         deployment_id=deployment.id,
@@ -228,6 +235,7 @@ def _entry(
         environment_id=environment.id,
         environment_name=environment.name,
         task_id=task_id,
+        error=error,
     )
 
 
@@ -254,9 +262,9 @@ def _changed_applications(
         try:
             converged = at_config(application)
             moves = not converged and moves_onto_controller(application)
-        except Exception:  # noqa: BLE001 — one deployment must not stop the others (FR-002)
+        except Exception as exc:  # noqa: BLE001 — one deployment must not stop the others (FR-002)
             result.evaluation_failed += 1
-            result.failed_to_start.append(_entry(application, environment))
+            result.failed_to_start.append(_entry(application, environment, error=exc))
             logger.exception(
                 f"{environment.fan_out}_evaluation_error environment_id={{}} deployment_id={{}}",
                 environment.id,
@@ -411,9 +419,9 @@ async def _redeploy_application(
     try:
         async with uow.session.begin_nested():
             task = await redeploy_for_environment_update(deployment, uow)
-    except Exception:  # noqa: BLE001 — one deployment must not stop the others (FR-002)
+    except Exception as exc:  # noqa: BLE001 — one deployment must not stop the others (FR-002)
         result.dispatch_failed += 1
-        result.failed_to_start.append(_entry(deployment, environment))
+        result.failed_to_start.append(_entry(deployment, environment, error=exc))
         logger.exception(
             f"{environment.fan_out}_dispatch_error environment_id={{}} deployment_id={{}}",
             environment.id,
