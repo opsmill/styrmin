@@ -37,13 +37,13 @@ Changes:
 
 ```text
 recovery succeeded ──► alias step succeeded ──► restore COMPLETED, deployment RUNNING
-                   └─► alias step failed ─────► StyrminDeployment marked failed,
-                                                restore FAILED (error "Service alias step failed: …"),
-                                                deployment FAILED
+                   └─► alias step failed ─────► restore FAILED (error "Service alias step failed: …"),
+                                                deployment FAILED, then the status reported by its
+                                                StyrminDeployment (DEPLOYING, then RUNNING)
 recovery failed ───────────────────────────────► unchanged: restore FAILED, deployment FAILED
 ```
 
-A `FAILED` counterpart leaves `FAILED` through an update or an upgrade that changes it (research R-005).
+After an alias failure, the counterpart reads `RUNNING` again once its StyrminDeployment is `Ready`, but its aliases are missing until an update or an upgrade that changes it runs the alias step (research R-004, R-005).
 
 ## Clone deployment result (`EnvironmentClone.deployment_results[]`, existing JSON)
 

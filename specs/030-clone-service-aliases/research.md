@@ -74,16 +74,21 @@ The selector keeps the aliases out for the whole restore, so FR-001 holds while 
 **Decision**: When the alias step raises, the USER flow:
 
 - leaves the step "Create and delete service aliases" failed with the error (`StepReporter.step` records the failure and re-raises);
-- calls `mark_failed` on the counterpart's StyrminDeployment with the error, as a failed recovery does;
 - returns `recovery: {"recovered": false, "error": "Service alias step failed: <error>"}`.
 
-The INTERNAL flow then sets the restore to `FAILED` with that error and the counterpart to `FAILED`, as for any failed recovery (`execute_restore_workflow`). The clone's derived status counts the failed restore (`derive_environment_clone_status`), and the entry reads `failed` (R-006).
+The INTERNAL flow then sets the restore to `FAILED` with that error and the counterpart to `FAILED`, as for any failed recovery (`execute_restore_workflow`). The clone's derived status counts the failed restore (`derive_environment_clone_status`), and the entry reads `failed` with the restore's error (R-006).
 
-The errors that fail the step are those that fail it in the other flows: any Kubernetes API error on a write or a deletion, except a 404 or a 409 for a namespace that is gone or terminating (`apply_single_alias`). A failed read of the server's list does not fail it (R-002).
+The flow does not mark the counterpart's StyrminDeployment failed. Its workloads run, and its status then follows the StyrminDeployment: the status reporter reads it within one poll of about 5 seconds and reports `DEPLOYING` or `RUNNING` (`agent/status/reporter.py` L297-L324, `services/deployment_status.py` L171-L251).
 
-**Rationale**: Without `mark_failed`, the status reporter reads the counterpart's StyrminDeployment, which recovery left `Running`, and moves the deployment back to `RUNNING` within one poll of about 5 seconds (`agent/status/reporter.py` L297-L324, `services/deployment_status.py` L171-L251). The restore would read `FAILED` while the deployment reads `RUNNING`. A StyrminDeployment in the `Error` state reports `FAILED`, and the operator's timer does not move a `Failed` StyrminDeployment forward (`operator/handlers/styrmin_deployment.py` L1002-L1031), so the deployment stays `FAILED` until its next change (R-005).
+The errors that fail the step are those that fail it in the other flows: any Kubernetes API error on a write or a deletion, except a 404 or a 409 for a namespace that is gone or terminating (`apply_single_alias`). The step stops at the first refused write, so the aliases after it in the list are not written; the repair writes the full set again (R-005). A failed read of the server's list does not fail it (R-002).
 
-**Alternatives considered**: keeping the deployment `RUNNING` because its workloads run. Rejected: it hides from the admin that the counterpart cannot reach its peers (user story 3).
+**Rationale**: The recovery creates the counterpart's StyrminDeployment with the kopf annotations of the restored one, so kopf runs the update handler for the changed spec (`_roll_out_spec_update`, `operator/handlers/styrmin_deployment.py` L485-L540) after the recovery returns. That handler sets `displayState` to `Deploying`, and the timer moves the StyrminDeployment to `Ready`. A failed status written by `mark_failed` during the alias step can be replaced by that handler, so the deployment would read `FAILED` in some runs and `RUNNING` in others (critique E1). The restore and the clone entry keep the failure in every run.
+
+**Alternatives considered**:
+
+- `mark_failed` on the counterpart's StyrminDeployment, as a failed recovery does. Rejected: it races with the operator's rollout, as above.
+- Waiting for the StyrminDeployment to reach `Ready` before the alias step, so that a failed status stays. Rejected: it adds the rollout's duration to every counterpart restore, to keep a status that does not describe the workloads.
+- Running the alias step before the recovery creates the counterpart's StyrminDeployment. Rejected: the PRD places the step after the recovery, and a failed recovery would then leave aliases written for a counterpart whose recovery did not run.
 
 ## R-005: Repairing a counterpart whose alias step failed (FR-005)
 
@@ -98,7 +103,12 @@ The errors that fail the step are those that fail it in the other flows: any Kub
 
 ## R-006: The clone entry of a counterpart whose restore failed (FR-007)
 
-**Decision**: A new pure function in `services/backup/clone.py`, `resolve_deployment_result(result, restores)`, returns the entry as users view it: a `cloned` entry whose restore row is `FAILED` becomes `failed`, with the reason `the restore failed: <restore error message>`, or `the restore failed` when the restore has no error message. Every other entry is returned unchanged. `EnvironmentClone.deployment_results` (`api/definitions/backup/environment_clone.py`) applies it with the `referenced_restores` that the query resolvers already load. `derive_environment_clone_status` uses the same function to count failures, so the status and the entries cannot disagree.
+**Decision**: Two pure functions in `services/backup/clone.py`:
+
+- `failed_restore(restore_id, restores) -> Restore | None` returns the restore row when it is `FAILED`. `derive_environment_clone_status` already makes this test inline for a `cloned` entry; it calls the function instead, with no other change, because it reads entries leniently and must keep counting an unreadable entry as it does today (critique E2).
+- `resolve_deployment_result(result, restores) -> CloneDeploymentResult` returns the entry as users view it: a `cloned` entry for which `failed_restore` returns a row becomes `failed`, with the reason `the restore failed: <restore error message>`, or `the restore failed` when the restore has no error message. Every other entry is returned unchanged.
+
+`EnvironmentClone.deployment_results` (`api/definitions/backup/environment_clone.py`) applies `resolve_deployment_result` with the `referenced_restores` that the query resolvers already load. A unit test checks that, for the same entries and restores, the entries read and the derived status agree.
 
 **Rationale**:
 
@@ -134,7 +144,7 @@ The #503 rule for in-place restores stays: a peer created or changed during the 
 
 `test_environment_clone_lifecycle` and `test_environment_backup_and_restore_lifecycle` (`backend/tests/e2e/test_backup_restore.py`) both carry `ci` and `shard_env_backup` and run in both variants. Both use simple-app deployments with one service each, so aliases exist between the primary and the second deployment.
 
-- First clone of `test_environment_clone_lifecycle` (both selected): after step 9, where both counterparts run, poll the alias Services of each counterpart's namespace until they equal the expected set (SC-001). The expected set for a counterpart is one alias for each service of every other deployment of the new environment, internal ones included, named after the service's resolved name and pointing to that deployment's namespace. The test reads each deployment of the new environment with `client.deployments.list(created_environment_id, include_internal=True)` and its services from `deployment.deployed_services[].resolved_name`, as the test's state snapshot already does.
+- First clone of `test_environment_clone_lifecycle` (both selected): right after the clone reports `COMPLETED`, poll the alias Services of each counterpart's namespace, with a short timeout, until they equal the expected set (SC-001). Each counterpart's alias step ends before its restore is `COMPLETED`, and the clone reports `COMPLETED` only when every restore has ended, so a later check could pass because of a later flow (critique E5). The expected set for a counterpart is one alias for each service of every other deployment of the new environment, internal ones included, named after the service's resolved name and pointing to that deployment's namespace. The test reads each deployment of the new environment with `client.deployments.list(created_environment_id, include_internal=True)` and its services from `deployment.deployed_services[].resolved_name`, as the test's state snapshot already does.
 - Re-clone (step at the end): select only the primary instead of no deployment, wait with `ENVIRONMENT_CLONE_TIMEOUT_SECONDS`, keep the `SKIPPED` and not-selected assertions for the peer, and check that no alias in the new environment names a namespace of the source environment and that the primary's counterpart has no alias named after the peer's service (SC-002). The comment that explains the empty selection (research D12 of spec 010) changes. This adds one counterpart restore, a few minutes per variant, to `shard_env_backup`.
 - `test_environment_backup_and_restore_lifecycle`: after the environment restore and the deployment-count check, check that the primary's namespace still holds the alias for the second deployment's service, labelled with its id and pointing to its namespace (SC-003). Only the primary is restored there, in place.
 - The helper `service_alias_external_names` of commit `472fe403` applies to the current file. Its second hunk does not, because the first clone now selects both deployments; the check is rewritten as above.
@@ -144,12 +154,12 @@ The #503 rule for in-place restores stays: a peer created or changed during the 
 - `docs/docs/concepts-and-architecture/backups-and-restores.md`:
   - "Choosing which deployments come along": the paragraph from the PRD.
   - "What happens when you restore": the paragraph of #503 describes in-place restores; add that a clone's restore writes the aliases of the new environment instead.
-  - "Watching a clone, and what its status means": a deployment whose restore failed is reported failed, with the restore's error.
+  - "Watching a clone, and what its status means": a deployment whose restore failed is reported failed, with the restore's error. A counterpart whose alias step failed can read `Running`, because its workloads run. The admin repairs it with a change to its configuration or parameters, or an upgrade; saving the same values can run no flow (R-005).
 - `docs/docs/concepts-and-architecture/ingress-and-networking.md`, "Service aliases": a clone writes the aliases of the new environment after each counterpart's restore.
-- `dev/knowledge/backend/orchestration-flows.md`: the alias step also runs at the end of a cross-target restore; the sentence "After a restore, the namespace holds the aliases that Velero restored" applies to in-place restores.
+- `dev/knowledge/backend/orchestration-flows.md`: the alias step also runs at the end of a cross-target restore; the sentence "After a restore, the namespace holds the aliases that Velero restored" applies to in-place restores. Record that the clone relies on Velero applying `labelSelector` only to the items it reads from the backup (R-001, with the source link), so that a Velero upgrade review checks it (critique E6).
 - `dev/adr/0056-environment-clone-record-and-cross-target-restore.md`: a dated amendment to decision 2.
 - `CONTEXT.md`: extend the entry "Service alias".
-- `changelog/530.fixed.md`.
+- `changelog/530.fixed.md`, naming both changes: the clone's aliases, and the clone entry of a failed restore (critique P3).
 
 ## R-011: Governance gates
 
