@@ -6,6 +6,7 @@ Constitution §V definition-of-done record for the E2E tasks of spec 030. Each s
 |---|---|---|---|
 | `api-chromium`, first attempt | T035 | `e2e-530-1792325479` | `1 failed, 1 passed, 2 deselected` (test defect, fixed in `73d9d4bf`) |
 | `api-chromium`, second attempt | T035 | `e2e-530-1792325479` | `2 passed, 2 deselected` |
+| `ui-chromium` | T036 | `e2e-530-1792325479` | `2 passed, 2 deselected` |
 
 ## Styrmin image under test
 
@@ -104,3 +105,69 @@ The source environment's own aliases, `simple-app` in the peer's namespace and `
 The 15-second loop saw the first clone's counterpart aliases in one read only (`12:32:44`), because the test deletes that environment soon after it checks it.
 
 Each clone's environment also held a third namespace with an alias: `styrmin-01ee308d-…` (`envclone5d1b7442` to `styrmin-7a0896f1-…`) and `styrmin-3e83a69e-…` (`simple-app` to `styrmin-d2339d2e-…`). Both targets are inside the same clone. In the first attempt, the worker log showed that this namespace belongs to the clone's internal `styrmin-ingress-controller`. Its deployment records no service, so it receives aliases only from its own create flow. That flow skipped the alias of a counterpart whose namespace did not exist yet ("Skipping service alias envcloneb32e1c05 … namespace styrmin-0bf35a41-… does not exist"). SC-001 covers only the counterparts' namespaces, so this namespace is outside its scope. For run 2, the deployment that owns this namespace is not confirmed, because the cluster was deleted after the pass.
+
+## ui-chromium (T036)
+
+The session ran at commit `b364b819`. After `73d9d4bf`, that commit changes only `specs/030-clone-service-aliases/`, so the E2E test and the backend code are the same as in the passing `api-chromium` session.
+
+| Item | Value |
+|---|---|
+| pytest node IDs | `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium]`, `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium]` |
+| Exact command | see below |
+| Start (UTC) | `2026-10-18T12:37:33+00:00` |
+| End, pytest exited (UTC) | `2026-10-18T12:46:44+00:00` (exit code 0) |
+| vcluster name | `pytest-cd1a98bd-0f3d-44ec-abac-44aec202970b` (deleted by the fixture teardown after the pass) |
+| Kubeconfig path during the run | `/tmp/pytest-of-root/pytest-2022/vcluster0/kubeconfig` |
+| Image tag | `e2e-530-1792325479` |
+| HEAD commit tested | `b364b819c5120260e169eaca1d40b0172682a1aa` |
+| Summary line | `============ 2 passed, 2 deselected, 1 warning in 547.90s (0:09:07) ============` |
+
+Exact command:
+
+```bash
+export STYRMIN_IMAGE_VER=e2e-530-1792325479
+exec 3< <(sleep infinity); spid=$!
+uv run pytest "backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle" "backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle" -k ui-chromium -v -s --pdb <&3 > chunk11-e2e-ui.log 2>&1
+exec 3<&-; kill "$spid"
+```
+
+The full pytest log is `/tmp/claude-0/-root-emdash-worktrees-styrmin-55123dec-fac-alias-clone-fix-l1vzt/0f67dc9b-63dd-4768-b324-c77b8a758d6f/scratchpad/chunk11-e2e-ui.log`. The 2 deselected items are the `api-chromium` variants.
+
+In this variant the scenario driver runs its steps through the web UI with Playwright. The environment backup and the environment restore run from the Backups tab of the environment, and the clone and the re-clone run from the Clones tab of the source environment.
+
+Verbatim `PASSED` lines (ANSI color codes removed). With `-s`, the fixture output appears between the first node ID and its `PASSED`, and the vcluster teardown log shares the last line:
+
+```text
+backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium] 12:37:35 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+...
+PASSED
+backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium] PASSED12:46:38 info Removing vCluster container vcluster.cp.pytest-cd1a98bd-0f3d-44ec-abac-44aec202970b...
+```
+
+The one warning is the same `DeprecationWarning` for `asyncio.iscoroutinefunction` raised in `kr8s/_vendored/asyncache`. It is not related to this change.
+
+### Observer data of the ui-chromium session
+
+The same 15-second loop as in the `api-chromium` sessions read the Velero Restores and the alias services 35 times, from `12:37:57` to `12:46:44`. Its log is `/tmp/claude-0/-root-emdash-worktrees-styrmin-55123dec-fac-alias-clone-fix-l1vzt/0f67dc9b-63dd-4768-b324-c77b8a758d6f/scratchpad/chunk11-observer.log`. The first two reads ran before Velero was installed and returned `the server doesn't have a resource type "restores"`.
+
+In this session, the primary deployment was `f4b68bb0` (service `simple-app`), the second deployment of the backup test was `320ff969` (service `envsnap360d73bb`), and the peer of the clone test was `c295c515` (service `envclone9bbc2c97`).
+
+| Restore | Kind | Namespace mapping | Selector |
+|---|---|---|---|
+| `styrmin-8531f746-6ef4-4242-a646-bdacfd1b58b0` | in place (environment restore) | none | none |
+| `styrmin-3f90f94f-32de-40b0-887d-89a05cc195f3` | cross-target (first clone, primary) | `styrmin-f4b68bb0-…` to `styrmin-c2653e30-…` | `NotIn` |
+| `styrmin-6990087f-a88f-4f20-af97-a783465a823f` | cross-target (first clone, peer) | `styrmin-c295c515-…` to `styrmin-86a4174e-…` | `NotIn` |
+| `styrmin-66c45d76-9a30-41bd-a14b-96facf65214e` | cross-target (re-clone, primary) | `styrmin-f4b68bb0-…` to `styrmin-2470d23f-…` | `NotIn` |
+
+`NotIn` stands for `{"matchExpressions":[{"key":"styrmin.io/service-alias","operator":"NotIn","values":["true"]}]}`.
+
+Aliases that the observer read:
+
+- Environment restore: the aliases `simple-app` in `styrmin-320ff969-…` (target `styrmin-f4b68bb0-…`) and `envsnap360d73bb` in `styrmin-f4b68bb0-…` (target `styrmin-320ff969-…`) were present in every read from `12:40:13` to `12:42:44`, including the reads at `12:42:28` and `12:42:44`, after the in-place Restore appeared at `12:42:13`. The next read, at `12:42:59`, held no alias.
+- First clone, primary's counterpart `styrmin-c2653e30-…`: `envclone9bbc2c97`, owner `86a4174e`, target `styrmin-86a4174e-…`, the peer's counterpart. Seen in one read (`12:45:14`).
+- First clone, peer's counterpart `styrmin-86a4174e-…`: `simple-app`, owner `c2653e30`, target `styrmin-c2653e30-…`, the primary's counterpart. Seen in one read (`12:45:14`).
+- Re-clone, primary's counterpart `styrmin-2470d23f-…`: no alias in the reads at `12:45:59`, `12:46:14` and `12:46:29`. The peer was not cloned, so the namespace has no alias for the peer's service `envclone9bbc2c97` (SC-002).
+- No alias in a namespace of either clone pointed to `styrmin-f4b68bb0-…`, `styrmin-c295c515-…` or `styrmin-320ff969-…`, the namespaces of the source environment.
+- The source environment's own aliases, `simple-app` in `styrmin-c295c515-…` and `envclone9bbc2c97` in `styrmin-f4b68bb0-…`, stayed in place in every read from `12:43:14` to `12:46:29`.
+
+Each clone's environment also held a third namespace with an alias, as in the `api-chromium` session: `styrmin-a7c51807-…` (`simple-app` to `styrmin-c2653e30-…`, reads at `12:44:59` and `12:45:14`) and `styrmin-fa9e3b81-…` (`simple-app` to `styrmin-2470d23f-…`, reads at `12:45:59` and `12:46:14`). Both targets are inside the same clone. The deployment that owns these namespaces is not confirmed for this session, because the cluster was deleted after the pass and the pytest log does not name them.
