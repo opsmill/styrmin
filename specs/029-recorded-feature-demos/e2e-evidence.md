@@ -160,4 +160,10 @@ All seven tests of the file carry `shard_general` (module-level `pytestmark`), s
 
 ## Decision on the defect (T008)
 
-Not known yet. T008 files the issue and asks the maintainer how the product fix will be made. Until the check passes, the T005 commit stays on the branch and is not pushed, and the check is not marked `xfail` (critique X1).
+The defect is filed as [#530](https://github.com/opsmill/styrmin/issues/530), "a clone keeps the source's service aliases, which point to the source environment's namespaces". The maintainer decided on 2026-10-18:
+
+- The product fix is made in its own issue and pull request, not in spec 029.
+- In a clone of some of the deployments, an alias for a peer that was not cloned is removed, not left pointing to the source. So the FR-016 assertion stays as written: no alias in the clone may point outside the clone.
+- Phase 6 (demo 4, the environment clone) waits for the fix. Phases 3, 4, 5, 7 (for demos 1 to 3), 8 and 9 go on.
+
+Until the check passes, the T005 commit `472fe403` stays on the branch and is not pushed, and the check is not marked `xfail` (critique X1). Before the branch is pushed, `472fe403` must be moved off it, because later commits sit on top of it.
