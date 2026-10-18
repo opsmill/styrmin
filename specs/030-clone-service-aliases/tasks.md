@@ -139,8 +139,8 @@ description: "Tasks for 030: a clone writes its own service aliases and restores
 
 ## Phase 8: Polish & verification
 
-- [ ] T033 Run `uv run invoke format lint` and `uv run invoke test`; fix failures
-- [ ] T034 Build the server image: `docker compose build server`
+- [X] T033 Run `uv run invoke format lint` and `uv run invoke test`; fix failures
+- [X] T034 Build the server image: `docker compose build server`
 - [ ] T035 Run `test_environment_clone_lifecycle` and `test_environment_backup_and_restore_lifecycle` in the `api-chromium` variant in one session (`-k "api-chromium"`, E2E run rules); on a failure, debug on the paused session with `kubectl` (quickstart, "Manual check on a paused session"); record the pass in `specs/030-clone-service-aliases/e2e-evidence.md`
 - [ ] T036 Run the same two nodes in the `ui-chromium` variant in a separate session; record the pass in `e2e-evidence.md`
 - [ ] T037 Walk through `specs/030-clone-service-aliases/quickstart.md`, including the `kubectl get restores.velero.io` check of the label selector on a paused session, and note any result that differs in `e2e-evidence.md`
