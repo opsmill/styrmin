@@ -48,6 +48,15 @@ The spec flags these answers, which the PRD did not give. Each one can be confir
 - Commit `73d9d4bf`: the first `api-chromium` session failed in the SC-001 check, because the `deployment` query returns null for an internal deployment, such as the new environment's `styrmin-ingress-controller`. The check now reads the new environment's services with the `environmentServices` query, which also lists internal deployments. Source: [e2e-evidence.md](e2e-evidence.md), "First attempt", and the commit message.
 - The SC-003 check in `test_environment_backup_and_restore_lifecycle` cannot tell whether Velero restored the alias or the second deployment's update flow rewrote it, because the environment restore also redeploys the second deployment. Source: the report of the implementation step that wrote the check (T025, commit `28b1bfc8`).
 
+## Changes made after the review, including one to the create, update and upgrade flows
+
+The review of the whole change ([opsmill-implement-report.md](opsmill-implement-report.md)) added three commits after `3a3c6982`:
+
+- `f7bb114f`: the alias step reads the peers' services and the cluster's aliases before it opens. A read that failed in a clone's restore failed the restore, but no step held the error, which FR-004 and SC-004 require. The step now records a failed read as the failed step "Create and delete service aliases".
+  - The create, update and upgrade flows call the same step, so in those flows too a failed read is now recorded as the failed alias step. Before, those flows failed with no alias step recorded.
+  - The E2E sessions in [e2e-evidence.md](e2e-evidence.md) ran before this commit. The commit adds a path only for a failed read, and the successful path runs the same calls in the same order.
+- `8da6967e` and `e52c8600`: documentation that the change had made false, the description of `counterpartDeploymentId` above, and `CONTEXT.md`, which said that a restore has at most three steps.
+
 ## Effect on the demo branch `fac/demo-beta-presentation-bhshh`
 
 This change carries the alias check of commit `472fe403` (FR-016 of [#518](https://github.com/opsmill/styrmin/issues/518)), extended for SC-001 of this spec. That commit is on `fac/demo-beta-presentation-bhshh` only, so the demo branch drops it when it is rebased onto a `develop` that holds this change.
