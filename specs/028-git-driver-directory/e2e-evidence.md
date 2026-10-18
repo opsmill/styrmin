@@ -166,3 +166,35 @@ The local runs above cover `shard_general` only. CI runs the other shards (`.git
 - The CI matrix crosses the API and UI variants with the nine shards and leaves out three combinations that select no test: UI with `shard_infrahub`, UI with `shard_apply` and API with `shard_configuration`. That leaves 15 CI jobs.
 - In each of those 15 jobs, every test that the variant does not skip uses `styrmin_resources`. This was counted on 2026-10-17 by collecting each combination with `--collect-only` and a small plugin that checks each test's fixture closure; no test ran.
 - So a CI run of this branch exercises the driver directory load in every E2E job, the API variant through the SDK and the UI variant through the drawer's "Driver directory" field. The results of the other shards on this branch are not known until CI runs them.
+
+## Review round of PR #529: `shard_general`, both variants
+
+These runs check the review fixes of PR #529 on `shard_general`. The image was built from the working tree at the code of commit `c8200ab6` (backend, SDK, CLI and frontend fixes) plus the E2E changes committed with this section. Commit `22ce5be8` between them changes only documentation.
+
+- Command, from the repository root, one pytest session per variant:
+
+  ```bash
+  export STYRMIN_IMAGE_VER=e2e517r-1792318648
+  docker compose build server
+  exec 3< <(sleep infinity); spid=$!
+  uv run pytest backend/tests/e2e -m "ci and shard_general" -k api-chromium -v -s --pdb <&3 > e2e-api-chromium.log 2>&1
+  exec 3<&-; kill "$spid"
+  # then the same with -k ui-chromium
+  ```
+
+- Collected in each run: `collected 203 items / 175 deselected / 28 selected`.
+- `[api-chromium]`: 2026-10-18T10:17:41+00:00 to 10:26:31+00:00, vCluster `pytest-1c57ecc5-9050-4804-a374-b3fd4196917e`, `==== 18 passed, 10 skipped, 175 deselected, 1 warning in 527.68s (0:08:47) =====`.
+- `[ui-chromium]`: 2026-10-18T10:26:31+00:00 to 10:33:17+00:00, vCluster `pytest-7e66d44c-9067-4251-9ce7-53e1bc20601b`, `===== 22 passed, 6 skipped, 175 deselected, 1 warning in 403.13s (0:06:43) =====`.
+- Both runs passed on the first attempt. The new and changed nodes:
+
+  ```text
+  test_driver_version_reselection.py::test_driver_version_reselection[api-chromium] PASSED
+  test_driver_version_reselection.py::test_drivers_of_one_repository_keep_their_own_actions[api-chromium] PASSED
+  test_driver_version_reselection.py::test_driver_version_reselection[ui-chromium] PASSED
+  test_driver_version_reselection.py::test_drivers_of_one_repository_keep_their_own_actions[ui-chromium] PASSED
+  ```
+
+- What the runs show:
+  - The `actions.py` of `drivers/simple-app` in `driver-collection` imports `collection_helper.py` next to it, and the pre and post setup actions of the session driver version completed (`_assert_setup_actions_completed`).
+  - The action deployments of the session driver version carry `application/simple-app` and names that end with `(simple-app@<short commit> <12-character digest>)`.
+  - `drivers/failing-actions`, loaded from the same commit through the SDK and through the drawer, stores its driver directory and registers its own action deployments with `directory/drivers/failing-actions`; the session driver's deployments stay in place.

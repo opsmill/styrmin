@@ -25,13 +25,18 @@ from (#375).
 
 The session driver version comes from the driver directory
 ``drivers/simple-app`` of the ``driver-collection`` repository: the test checks
-that it stores that driver directory and that its actions run from it (#517).
+that it stores that driver directory, that its actions run from it, and that its
+setup actions completed although its ``actions.py`` imports a module next to it
+(#517). A second test loads ``drivers/failing-actions`` from the same commit and
+checks that each driver keeps its own action deployments.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -43,7 +48,11 @@ import yaml
 from dulwich import porcelain
 from kr8s.asyncio.objects import Service as AsyncService
 from prefect.client.orchestration import PrefectClient
-from prefect.client.schemas.filters import DeploymentFilter, DeploymentFilterTags
+from prefect.client.schemas.filters import (
+    DeploymentFilter,
+    DeploymentFilterId,
+    DeploymentFilterTags,
+)
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
 from playwright.async_api import expect
@@ -59,6 +68,12 @@ pytestmark = [
 ]
 
 SESSION_DRIVER_DIRECTORY = "drivers/simple-app"
+SECOND_DRIVER_DIRECTORY = "drivers/failing-actions"
+
+
+def _digest(driver_directory: str) -> str:
+    """The driver directory digest that ends an action deployment's name."""
+    return hashlib.sha256(driver_directory.encode()).hexdigest()[:12]
 
 
 async def _publish_driver_version(
@@ -136,9 +151,13 @@ async def _assert_actions_pinned(*, vcluster: dict, commits: list[str]) -> None:
 
 
 async def _assert_actions_run_from_driver_directory(
-    *, vcluster: dict, commit: str, driver_directory: str
+    *, vcluster: dict, commit: str, driver_directory: str, application: str
 ) -> None:
-    """The actions of a driver directory version clone, then enter that folder."""
+    """The actions of a driver directory version clone, then enter that folder.
+
+    Each deployment carries the driver's tags and a name that ends with the
+    commit and the driver directory digest.
+    """
     async with _prefect(vcluster) as prefect:
         deployments = await prefect.read_deployments(
             deployment_filter=DeploymentFilter(
@@ -160,6 +179,49 @@ async def _assert_actions_run_from_driver_directory(
             "directory"
         ]
         assert directory.endswith(f"/{driver_directory}"), (deployment.name, directory)
+        assert f"application/{application}" in deployment.tags, deployment.tags
+        assert deployment.name.endswith(
+            f" ({application}@{commit[:7]} {_digest(driver_directory)})"
+        ), deployment.name
+
+
+async def _assert_setup_actions_completed(
+    *, vcluster: dict, commit: str, driver_directory: str, timeout: float = 180.0
+) -> None:
+    """The pre and post setup actions of a driver directory version completed.
+
+    The session driver's ``actions.py`` imports a module next to it, so a
+    completed run also shows that an action imports from its driver directory.
+    """
+    async with _prefect(vcluster) as prefect:
+        for mode in ("pre", "post"):
+            deployments = await prefect.read_deployments(
+                deployment_filter=DeploymentFilter(
+                    tags=DeploymentFilterTags(
+                        all_=[
+                            f"fingerprint/{commit[:7]}",
+                            f"directory/{driver_directory}",
+                            "hook/setup",
+                            f"mode/{mode}",
+                        ]
+                    )
+                )
+            )
+            assert len(deployments) == 1, [d.name for d in deployments]
+            deadline = time.monotonic() + timeout
+            while True:
+                runs = await prefect.read_flow_runs(
+                    deployment_filter=DeploymentFilter(
+                        id=DeploymentFilterId(any_=[deployments[0].id])
+                    )
+                )
+                if any(run.state and run.state.is_completed() for run in runs):
+                    break
+                assert time.monotonic() < deadline, (
+                    f"no completed {mode}-setup run of {deployments[0].name}: "
+                    f"{[(run.name, run.state_type) for run in runs]}"
+                )
+                await asyncio.sleep(5)
 
 
 @pytest.mark.ci
@@ -205,6 +267,12 @@ async def test_driver_version_reselection(
         vcluster=vcluster,
         commit=session_version["sourceCommitSha"],
         driver_directory=SESSION_DRIVER_DIRECTORY,
+        application="simple-app",
+    )
+    await _assert_setup_actions_completed(
+        vcluster=vcluster,
+        commit=session_version["sourceCommitSha"],
+        driver_directory=SESSION_DRIVER_DIRECTORY,
     )
 
     # Publish the next driver version with the same supported range and load it.
@@ -247,6 +315,56 @@ async def test_driver_version_reselection(
     deployment = await client.deployments.get(deployment_id)
     assert str(deployment.application_driver_version_id) == original_binding
     assert deployment.application_version == app_version
+
+
+@pytest.mark.ci
+async def test_drivers_of_one_repository_keep_their_own_actions(
+    scenario_driver: ScenarioDriver,
+    styrmin_resources: dict,
+    git_server: dict[str, str],
+    vcluster: dict,
+) -> None:
+    """FR-010: a second driver loaded from another driver directory of the session
+    driver's commit stores its own driver directory and registers its own action
+    deployments, and the session driver's deployments stay as they were."""
+    client: StyrminClient = styrmin_resources["client"]
+
+    loaded = await scenario_driver.load_driver_version(
+        git_url=git_server["driver-collection"],
+        ref="master",
+        driver_directory=SECOND_DRIVER_DIRECTORY,
+    )
+    assert loaded.driver_name == "failing-actions"
+    assert loaded.application_driver_id != styrmin_resources["driver_id"]
+
+    versions: dict[str, dict] = {}
+    for driver_id in (styrmin_resources["driver_id"], loaded.application_driver_id):
+        raw = await client._transport.execute(  # type: ignore[attr-defined]
+            load_query("get_application_driver_versions"),
+            {"applicationDriverId": driver_id},
+        )
+        assert "errors" not in raw, raw
+        versions |= {v["id"]: v for v in raw["data"]["applicationDriver"]["versions"]}
+    session_version = versions[styrmin_resources["driver_version_id"]]
+    second_version = versions[loaded.id]
+    assert second_version["sourcePath"] == SECOND_DRIVER_DIRECTORY, second_version
+    commit = session_version["sourceCommitSha"]
+    assert commit is not None
+    assert second_version["sourceCommitSha"] == commit, (
+        session_version,
+        second_version,
+    )
+
+    for driver_directory, application in (
+        (SECOND_DRIVER_DIRECTORY, "failing-actions"),
+        (SESSION_DRIVER_DIRECTORY, "simple-app"),
+    ):
+        await _assert_actions_run_from_driver_directory(
+            vcluster=vcluster,
+            commit=commit,
+            driver_directory=driver_directory,
+            application=application,
+        )
 
 
 @pytest.mark.ci
