@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from packaging.version import InvalidVersion, Version
 
-from tests.e2e.demos.scenarios import component_overrides
+from tests.e2e.demos.scenarios import backup_restore, component_overrides
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -125,6 +125,13 @@ DEMOS: tuple[Demo[Any], ...] = (
         environment_names=(component_overrides.ENVIRONMENT_NAME,),
         setup=component_overrides.setup,
         record=component_overrides.record,
+    ),
+    Demo(
+        slug="backup-restore",
+        number=3,
+        environment_names=(backup_restore.ENVIRONMENT_NAME,),
+        setup=backup_restore.setup,
+        record=backup_restore.record,
     ),
 )
 check_catalog(DEMOS)

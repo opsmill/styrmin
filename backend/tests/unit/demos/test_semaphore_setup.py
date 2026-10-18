@@ -271,3 +271,35 @@ def test_the_playbook_prints_the_device_count_once_without_connecting() -> None:
     assert task["ansible.builtin.debug"]["msg"][0] == (
         "Devices in the inventory: {{ groups['all'] | length }}"
     )
+
+
+async def test_wait_until_ready_returns_once_semaphore_answers_the_ping() -> None:
+    answers = iter(
+        [httpx.ConnectError("refused"), httpx.Response(503), httpx.Response(200)]
+    )
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    await semaphore_setup.wait_until_ready(
+        URL, timeout=30, transport=httpx.MockTransport(handler), poll_interval=0
+    )
+
+    assert paths == ["/api/ping"] * 3
+
+
+async def test_wait_until_ready_names_the_last_answer_after_the_timeout() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(502)
+
+    with pytest.raises(
+        SemaphoreSetupError, match=r"within 0 s \(last answer: HTTP 502\)"
+    ):
+        await semaphore_setup.wait_until_ready(
+            URL, timeout=0, transport=httpx.MockTransport(handler), poll_interval=0
+        )

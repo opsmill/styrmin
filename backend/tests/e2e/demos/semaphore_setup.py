@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +22,7 @@ REPOSITORY_PATH = "/opt/demo/ansible"
 INVENTORY_PATH = "inventory/infrahub.yml"
 PLAYBOOK = "list_hosts.yml"
 TOKEN_VARIABLE = "INFRAHUB_API_TOKEN"  # noqa: S105
+POLL_INTERVAL = 3.0
 
 
 class SemaphoreSetupError(RuntimeError):
@@ -221,3 +224,32 @@ def check_token_secret(environment: Mapping[str, Any]) -> None:
             f"Semaphore created the environment without the secret {TOKEN_VARIABLE}; "
             f"its secrets: {found}"
         )
+
+
+async def wait_until_ready(
+    url: str,
+    timeout: float,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    poll_interval: float = POLL_INTERVAL,
+) -> None:
+    """Wait until the Semaphore at ``url`` answers ``GET /api/ping`` with 200."""
+    deadline = time.monotonic() + timeout
+    last = "no answer"
+    async with httpx.AsyncClient(
+        base_url=url, timeout=10.0, transport=transport
+    ) as http:
+        while True:
+            try:
+                response = await http.get("/api/ping")
+            except httpx.HTTPError as exc:
+                last = type(exc).__name__
+            else:
+                if response.status_code == httpx.codes.OK:
+                    return
+                last = f"HTTP {response.status_code}"
+            if time.monotonic() >= deadline:
+                raise SemaphoreSetupError(
+                    f"Semaphore at {url} did not answer within {timeout:.0f} s (last answer: {last})"
+                )
+            await asyncio.sleep(poll_interval)

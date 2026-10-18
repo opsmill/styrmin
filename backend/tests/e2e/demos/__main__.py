@@ -54,6 +54,9 @@ LONGEST_VIDEO_SECONDS = 180
 EXIT_RECORDED = 0
 EXIT_FAILED = 1
 EXIT_PREREQUISITES = 2
+# The demo stack's names resolve to 127.0.0.1 (dev/guides/local-demo.md); mapping them in the browser
+# keeps a public DNS timeout from failing a recording.
+BROWSER_ARGS = ("--host-resolver-rules=MAP *.local.styrmin.io 127.0.0.1",)
 MEMORY_NOTE = (
     "Kept environments still use the cluster's memory until the next run of their demo deletes them, "
     "which can make later demos of the same run fail."
@@ -105,7 +108,9 @@ async def launch_browser(
 ) -> AsyncIterator[tuple[BrowserContext, Page]]:
     """Yield a headless Chromium context with a 1920×1080 viewport and ``styrmin_url`` as ``base_url``."""
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True)
+        browser = await playwright.chromium.launch(
+            headless=True, args=list(BROWSER_ARGS)
+        )
         try:
             context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080}, base_url=styrmin_url
