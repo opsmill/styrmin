@@ -462,6 +462,41 @@ async def test_a_refused_alias_write_fails_the_alias_step_and_the_recovery(
     cluster.recovery.mark_failed.assert_not_awaited()
 
 
+async def test_a_failed_alias_read_fails_the_alias_step_and_the_recovery(
+    api: FakeStepApi,
+    events: list[Event],
+    refused_alias_write: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SC-004: a read that fails before the step opens is still a failed step."""
+    monkeypatch.setattr(
+        service_aliases,
+        "find_stale_service_aliases",
+        AsyncMock(side_effect=_alias_write_error()),
+    )
+
+    async with _user_flow() as cluster:
+        await _restore(**_cross_target(counterpart_context()))
+
+    assert events == [
+        *ALL_STEPS_SUCCEEDED,
+        ("STARTED", "resource:service-aliases"),
+        ("FAILED", "resource:service-aliases"),
+    ]
+    assert api.record("STARTED", "resource:service-aliases")["name"] == (
+        "Create and delete service aliases"
+    )
+    assert api.record("FAILED", "resource:service-aliases")["error"] == (
+        "ApiException: (500)\nReason: Internal Server Error\n"
+    )
+    refused_alias_write.assert_not_awaited()
+    assert _stored_result(cluster.variable)["recovery"] == {
+        "recovered": False,
+        "error": ALIAS_ERROR,
+    }
+    cluster.recovery.mark_failed.assert_not_awaited()
+
+
 # execute_restore_workflow (INTERNAL) -----------------------------------------
 
 

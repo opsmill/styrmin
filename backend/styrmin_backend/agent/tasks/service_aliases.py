@@ -478,10 +478,20 @@ async def apply_service_aliases(
 async def apply_service_aliases_step(
     reporter: StepReporter, context: GlobalContext
 ) -> None:
-    """Apply cross-namespace ExternalName service aliases and delete stale ones, if any."""
-    context = await with_current_peer_services(context)
-    aliases = compute_service_aliases(context)
-    stale_aliases = await find_stale_service_aliases(context)
+    """Apply cross-namespace ExternalName service aliases and delete stale ones, if any.
+
+    The step is recorded only when it has aliases to write or delete. A read
+    that fails before then is recorded as the failed step, so the error of the
+    flow it fails is on a step (FR-004 of spec 030).
+    """
+    try:
+        context = await with_current_peer_services(context)
+        aliases = compute_service_aliases(context)
+        stale_aliases = await find_stale_service_aliases(context)
+    except Exception:
+        # Re-raised inside the step, which records it as failed and raises it again.
+        async with reporter.step(*steps.SERVICE_ALIASES):
+            raise
     if not aliases and not stale_aliases:
         return
     async with reporter.step(*steps.SERVICE_ALIASES):
