@@ -53,11 +53,13 @@ from styrmin_backend.agent.service.kubernetes.styrmin_deployment import (
     read_styrmin_deployment,
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
+from styrmin_backend.agent.steps.reporter import StepReporter
 from styrmin_backend.agent.tasks.environment_services import (
     EnvironmentServicesReadError,
     read_environment_services,
 )
 from styrmin_backend.context.models.contexts import GlobalContext
+from styrmin_backend.domain import steps
 from styrmin_backend import config
 
 #: Bounds how many namespaces a flow reads at the same time.
@@ -471,3 +473,16 @@ async def apply_service_aliases(
         )
 
     await _delete_writes_of_deleted_deployments(written)
+
+
+async def apply_service_aliases_step(
+    reporter: StepReporter, context: GlobalContext
+) -> None:
+    """Apply cross-namespace ExternalName service aliases and delete stale ones, if any."""
+    context = await with_current_peer_services(context)
+    aliases = compute_service_aliases(context)
+    stale_aliases = await find_stale_service_aliases(context)
+    if not aliases and not stale_aliases:
+        return
+    async with reporter.step(*steps.SERVICE_ALIASES):
+        await apply_service_aliases(aliases=aliases, stale_aliases=stale_aliases)
