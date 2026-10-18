@@ -6,6 +6,12 @@ query ListApplicationDrivers {
             id
             version
             supportedVersions
+            sourceType
+            sourceRepository
+            sourceBranch
+            sourcePath
+            contentHash
+            sourceCommitSha
         }
     }
 }

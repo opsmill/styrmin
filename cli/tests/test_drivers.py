@@ -38,6 +38,7 @@ def test_drivers_load_version(mock_client: MagicMock, capsys: pytest.CaptureFixt
         version="1.0.0",
         application_driver_id="d-1",
         supported_versions=">=14",
+        driver_directory=None,
         component_configs=[],
         actions=[],
         helm_chart=None,
@@ -66,6 +67,7 @@ def test_drivers_load_version_with_driver_directory(mock_client: MagicMock, caps
         source_repository="https://github.com/example/drivers.git",
         source_branch="main",
         source_path="drivers/a",
+        driver_directory="drivers/a",
         load_warnings=[],
         component_configs=[],
         actions=[],
@@ -106,6 +108,7 @@ def test_drivers_load_local_version(mock_client: MagicMock, capsys: pytest.Captu
         version="2.0.0",
         application_driver_id="d-1",
         supported_versions=">=14",
+        driver_directory=None,
         component_configs=[],
         actions=[],
         helm_chart=None,
@@ -118,6 +121,7 @@ def test_drivers_load_local_version(mock_client: MagicMock, capsys: pytest.Captu
     mock_client.drivers.load_local_version.assert_called_once_with(path=str(tmp_path))
     output = capsys.readouterr().out
     assert "2.0.0" in output
+    assert "Driver directory:" not in output
 
 
 def test_drivers_create_error(mock_client: MagicMock) -> None:
@@ -140,6 +144,7 @@ def test_drivers_load_local_version_renders_label_and_full_content_hash(
         supported_versions=">=14",
         content_hash=full_hash,
         source_commit_sha=None,
+        driver_directory=None,
         component_configs=[],
         actions=[],
         helm_chart=None,
@@ -169,8 +174,7 @@ def test_drivers_load_version_renders_label_and_full_commit_sha(
         supported_versions=">=14",
         content_hash=None,
         source_commit_sha=full_sha,
-        source_repository="https://github.com/example/driver.git",
-        source_path=None,
+        driver_directory=None,
         component_configs=[],
         actions=[],
         helm_chart=None,
@@ -205,6 +209,7 @@ def test_drivers_load_local_version_prints_load_warnings(
         content_hash=None,
         source_commit_sha=None,
         load_warnings=[warning],
+        driver_directory=None,
         component_configs=[],
         actions=[],
         helm_chart=None,

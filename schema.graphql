@@ -48,9 +48,19 @@ type ApplicationDriverVersion {
   version: String!
   supportedVersions: String!
   defaultVersion: String
+
+  """Where the driver version was loaded from: `git` or `local`."""
   sourceType: String!
+
+  """URL of the git repository of a `git` version. Empty for `local`."""
   sourceRepository: String!
+
+  """Branch of a `git` version. Null for `local`."""
   sourceBranch: String
+
+  """
+  For a `local` version, the absolute path of the driver folder on the Styrmin server. For a `git` version, the driver directory, or null for a load from the repository root. To read the driver directory, use `driverDirectory`.
+  """
   sourcePath: String
   contentHash: String
   sourceCommitSha: String
@@ -71,6 +81,11 @@ type ApplicationDriverVersion {
   Values of `spec.info` that the load left out of this driver version, with the reason, such as an icon that is not an https URL. The load still succeeds. Filled only in the result of `loadLocalApplicationDriverVersion` and `loadRemoteApplicationDriverVersion`; empty everywhere else.
   """
   loadWarnings: [String!]!
+
+  """
+  Folder of the git repository that holds the driver, relative to the repository root, as given in the `driverDirectory` argument of `loadRemoteApplicationDriverVersion` in its stored form. Null for a load from the repository root and for a `local` version.
+  """
+  driverDirectory: String
   applicationDriver: ApplicationDriver!
   services: [ServiceDefinition!]!
   parameters: [ParameterDefinition!]!
@@ -991,7 +1006,15 @@ type Mutation {
   assignBackupStorageLocation(environmentId: UUID!, backupStorageLocationId: UUID!): Environment @requiresRole
   unassignBackupStorageLocation(environmentId: UUID!): Environment @requiresRole
   loadLocalApplicationDriverVersion(path: String!): ApplicationDriverVersion @requiresRole
-  loadRemoteApplicationDriverVersion(repositoryUrl: String!, branch: String!, driverDirectory: String = null): ApplicationDriverVersion @requiresRole
+  loadRemoteApplicationDriverVersion(
+    repositoryUrl: String!
+    branch: String!
+
+    """
+    Folder of the repository that holds `driver.styrmin.yml`, relative to the repository root, such as `drivers/infrahub`. Null, empty or `.` loads from the repository root. Refused when it starts with `/`, contains a `..` segment, a backslash, `{`, `}` or a control character, or is longer than 255 characters.
+    """
+    driverDirectory: String = null
+  ): ApplicationDriverVersion @requiresRole
   deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: DeploymentConfigInput = null, parameters: [ParameterValueInput!] = null, serviceNameOverrides: [ServiceNameOverride!] = null, driverVersionId: UUID = null): Task @requiresRole
   updateDeployment(deploymentId: UUID!, input: UpdateDeploymentInput!): Task @requiresRole
   deleteDeployment(deploymentId: UUID!): Task! @requiresRole

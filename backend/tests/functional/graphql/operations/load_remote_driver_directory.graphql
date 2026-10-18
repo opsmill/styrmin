@@ -8,6 +8,7 @@ mutation LoadRemoteDriverDirectory($repositoryUrl: String!, $branch: String!, $d
         applicationDriverId
         sourceType
         sourcePath
+        driverDirectory
         sourceCommitSha
     }
 }

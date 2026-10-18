@@ -1,0 +1,8 @@
+mutation LoadLocalDriverDirectory($path: String!) {
+    loadLocalApplicationDriverVersion(path: $path) {
+        id
+        sourceType
+        sourcePath
+        driverDirectory
+    }
+}

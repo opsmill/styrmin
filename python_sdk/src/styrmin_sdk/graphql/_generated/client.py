@@ -94,6 +94,7 @@ from .list_tasks import ListTasks
 from .list_users import ListUsers
 from .load_local_application_driver_version import LoadLocalApplicationDriverVersion
 from .load_remote_application_driver_version import LoadRemoteApplicationDriverVersion
+from .load_version_with_driver_directory import LoadVersionWithDriverDirectory
 from .login import Login
 from .logout import Logout
 from .report_deployment_statuses import ReportDeploymentStatuses
@@ -1953,6 +1954,12 @@ class Client(AsyncBaseClient):
                   id
                   version
                   supportedVersions
+                  sourceType
+                  sourceRepository
+                  sourceBranch
+                  sourcePath
+                  contentHash
+                  sourceCommitSha
                 }
               }
             }
@@ -2434,18 +2441,13 @@ class Client(AsyncBaseClient):
         return LoadLocalApplicationDriverVersion.model_validate(data)
 
     async def load_remote_application_driver_version(
-        self,
-        repository_url: str,
-        branch: str,
-        driver_directory: Union[Optional[str], UnsetType] = UNSET,
-        **kwargs: Any,
+        self, repository_url: str, branch: str, **kwargs: Any
     ) -> LoadRemoteApplicationDriverVersion:
         query = gql("""
-            mutation LoadRemoteApplicationDriverVersion($repositoryUrl: String!, $branch: String!, $driverDirectory: String = null) {
+            mutation LoadRemoteApplicationDriverVersion($repositoryUrl: String!, $branch: String!) {
               loadRemoteApplicationDriverVersion(
                 repositoryUrl: $repositoryUrl
                 branch: $branch
-                driverDirectory: $driverDirectory
               ) {
                 id
                 applicationDriverId
@@ -2485,7 +2487,6 @@ class Client(AsyncBaseClient):
         variables: dict[str, object] = {
             "repositoryUrl": repository_url,
             "branch": branch,
-            "driverDirectory": driver_directory,
         }
         response = await self.execute(
             query=query,
@@ -2495,6 +2496,66 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return LoadRemoteApplicationDriverVersion.model_validate(data)
+
+    async def load_version_with_driver_directory(
+        self, repository_url: str, branch: str, driver_directory: str, **kwargs: Any
+    ) -> LoadVersionWithDriverDirectory:
+        query = gql("""
+            mutation LoadVersionWithDriverDirectory($repositoryUrl: String!, $branch: String!, $driverDirectory: String!) {
+              loadRemoteApplicationDriverVersion(
+                repositoryUrl: $repositoryUrl
+                branch: $branch
+                driverDirectory: $driverDirectory
+              ) {
+                id
+                applicationDriverId
+                applicationDriver {
+                  name
+                }
+                version
+                contentHash
+                sourceCommitSha
+                sourceRepository
+                sourceBranch
+                sourcePath
+                driverDirectory
+                loadWarnings
+                supportedVersions
+                components
+                componentConfigs {
+                  id
+                  name
+                  config
+                  container
+                }
+                actions {
+                  name
+                  location
+                  image
+                }
+                helmChart {
+                  id
+                  name
+                  version
+                  repository
+                  valueTemplate
+                }
+              }
+            }
+            """)
+        variables: dict[str, object] = {
+            "repositoryUrl": repository_url,
+            "branch": branch,
+            "driverDirectory": driver_directory,
+        }
+        response = await self.execute(
+            query=query,
+            operation_name="LoadVersionWithDriverDirectory",
+            variables=variables,
+            **kwargs,
+        )
+        data = self.get_data(response)
+        return LoadVersionWithDriverDirectory.model_validate(data)
 
     async def login(self, username: str, password: str, **kwargs: Any) -> Login:
         query = gql("""
