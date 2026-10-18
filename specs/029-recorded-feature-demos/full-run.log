@@ -1,0 +1,196 @@
+Full run of the recorded demos (feature 029)
+============================================
+
+Host: Linux 7.0.0-1014-aws, branch fac/demo-beta-presentation-bhshh at 11a4b58b.
+Terminal colour codes are removed from the outputs below.
+
+T041: prerequisites check (quickstart section 6)
+------------------------------------------------
+
+Check 1: ffmpeg is not on the PATH
+
+ffmpeg was not installed on this host ('which ffmpeg' printed 'ffmpeg not found'), so the PATH did not need changing.
+The vCluster container was stopped at the same time. The ffmpeg check runs first, so the ffmpeg message is the one printed.
+The first run, at 2026-10-18T22:23:22Z, also built the missing demo Semaphore image (11 s) before the check, because 'uv run invoke record' builds that image before it starts the recorder. It exited with code 2 and the same ffmpeg message. The run below is the second one, with the image present.
+
+Started 2026-10-18T22:23:42Z, ended 2026-10-18T22:23:43Z. Command: uv run invoke record. Exit code: 2.
+
+```text
+✓ Reusing existing image styrmin-demo/semaphore:v2.16.47 (pass --build-image to 
+rebuild)
+ffmpeg is not on the PATH. Install it (for example 'brew install ffmpeg' or 'apt
+install ffmpeg') and run the command again.
+
+Demo                 Result   Video  Length
+component-overrides  skipped  -      -     
+backup-restore       skipped  -      -     
+```
+
+Check 2: the demo stack is paused
+
+ffmpeg was installed with 'apt-get install -y ffmpeg' (now /usr/bin/ffmpeg). Then the stack was paused.
+
+Started 2026-10-18T22:24:02Z. Command: uv run invoke stop. Exit code: 0.
+
+```text
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ ▶ Pausing the styrmin cluster...                                             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+22:24:02 info vCluster styrmin is already paused (container stopped)
+```
+
+Started 2026-10-18T22:24:03Z, ended 2026-10-18T22:24:04Z. Command: uv run invoke record. Exit code: 2.
+
+```text
+✓ Reusing existing image styrmin-demo/semaphore:v2.16.47 (pass --build-image to 
+rebuild)
+The demo stack does not respond at http://styrmin.local.styrmin.io:8080. Run 'uv
+run invoke start' first.
+
+Demo                 Result   Video  Length
+component-overrides  skipped  -      -     
+backup-restore       skipped  -      -     
+```
+
+Both runs exited with code 2 and printed the message the contract gives, before any demo setup. No environment was created. The demos are listed as 'skipped' in the summary.
+The stack was then restarted as part of T042, by 'uv run invoke reset', which destroys the stack and runs 'uv run invoke start'.
+
+T042: all registered demos on a fresh demo stack
+------------------------------------------------
+
+Which demos run
+
+Only demos 2 (component-overrides) and 3 (backup-restore) are registered in backend/tests/e2e/demos/catalog.py, so 'uv run invoke record' runs those two. Two demos are not registered yet:
+
+- Demo 1 (deploy-upgrade) waits for issue #372 (see spike-notes.md).
+- Demo 4 (clone) waits for issue #530, the product fix decided in T008 (see e2e-evidence.md).
+
+The expected result is therefore two 'recorded' lines and two videos, not four. The plain command was used instead of '--demo' runs one after the other, because it runs every registered demo.
+
+Fresh demo stack
+
+Three attempts at 'uv run invoke reset' were needed. The first two failed for host reasons outside the demo code:
+
+- 2026-10-18T22:24:18Z, exit code 1: Traefik never became ready. Flannel inside the vCluster crashed with 'Failed to check br_netfilter: stat /proc/sys/net/bridge/bridge-nf-call-iptables: no such file or directory', because the host kernel had not loaded the br_netfilter module. Fixed on the host with 'sudo modprobe br_netfilter'.
+- 2026-10-18T22:30:13Z, exit code 1: 'helm upgrade --install styrmin helm/styrmin' failed with 'found in Chart.yaml, but missing in charts/ directory: postgresql, prefect-server, styrmin-agent, velero'. The Styrmin image already existed, so 'uv run invoke start' skipped 'uv run invoke build', which is the task that runs 'helm dependency update'. Fixed by running 'uv run invoke build' (exit code 0).
+- 2026-10-18T22:31:56Z, exit code 0, ended 2026-10-18T22:34:48Z: the stack started and printed 'Styrmin demo is ready'.
+
+First recording attempt
+
+Started 2026-10-18T22:34:56Z. Command: uv run invoke record. Exit code: 1.
+Both demos failed in step "setup" with 'BrowserType.launch: Executable doesn't exist at /home/ubuntu/.cache/ms-playwright/chromium_headless_shell-1248/...', because the Chromium build for Playwright 1.64 was not installed on this host (quickstart prerequisite 'uv run playwright install chromium'). The summary table of that run, without the two tracebacks:
+
+```text
+Demo                 Result  Video                                        Length
+component-overrides  failed  step "setup": Error: BrowserType.launch:     -     
+                             Executable doesn't exist at                        
+                             /home/ubuntu/.cache/ms-playwright/chromium_        
+                             headless_shell-1248/chrome-headless-shell-l        
+                             inux64/chrome-headless-shell …                     
+                             ╚══════════════════════════════════════════        
+                             ══════════════════╝                                
+backup-restore       failed  step "setup": Error: BrowserType.launch:     -     
+                             Executable doesn't exist at                        
+                             /home/ubuntu/.cache/ms-playwright/chromium_        
+                             headless_shell-1248/chrome-headless-shell-l        
+                             inux64/chrome-headless-shell …                     
+                             ╚══════════════════════════════════════════        
+                             ══════════════════╝                                
+```
+
+Fixed with 'uv run playwright install chromium'. No demo code was changed.
+
+Recording run
+
+Started 2026-10-18T22:35:28Z, ended 2026-10-18T22:57:43Z (22 min 15 s). Command: uv run invoke record. Exit code: 0.
+
+```text
+✓ Reusing existing image styrmin-demo/semaphore:v2.16.47 (pass --build-image to 
+rebuild)
+───────────────────────── Demo 2: component-overrides ──────────────────────────
+Setting up component-overrides
+Step: Use an image with the Infrahub Ansible collection
+Wait: Semaphore restarts with the new image took 51 s
+Step: Run two Infrahub servers
+Wait: A second Infrahub server starts took 1 min 13 s
+Encoding demo-videos/2-component-overrides.mp4
+Deleting the environments of component-overrides
+Deleting environment network-lab-overrides
+/home/ubuntu/emdash/worktrees/styrmin-fatih2-ef968ca0/fac-demo-beta-presentation-bhshh/.venv/lib/python3.14/site-packages/kr8s/_api.py:91: UserWarning: Kubernetes version v1.36.0 is not supported. Supported versions for kr8s 0.20.15 are 1.28 to 1.35.
+  await self._check_version()
+──────────────────────────── Demo 3: backup-restore ────────────────────────────
+Setting up backup-restore
+Step: Back up the whole environment
+Wait: Backup in progress took 1 min 9 s
+Step: Delete a device in Infrahub
+Step: Delete the task template in Semaphore
+Step: Restore the backup
+Wait: Restore in progress took 5 min 19 s
+Wait: Infrahub restarts took 0 s
+Wait: Semaphore restarts took 0 s
+Step: The device and the template are back
+Encoding demo-videos/3-backup-restore.mp4
+Deleting the environments of backup-restore
+Deleting environment network-lab-backup
+
+Demo                 Result    Video                                  Length
+component-overrides  recorded  demo-videos/2-component-overrides.mp4  0:45  
+backup-restore       recorded  demo-videos/3-backup-restore.mp4       1:03  
+```
+
+The kr8s warning about Kubernetes v1.36.0 comes from the vCluster version and did not affect the run.
+
+Video checks (quickstart section 3)
+
+```text
+2026-10-18T22:57:53Z
+total 7444
+-rw-r--r-- 1 ubuntu ubuntu 4220166 Oct 18 22:41 2-component-overrides.mp4
+-rw-r--r-- 1 ubuntu ubuntu 3396527 Oct 18 22:54 3-backup-restore.mp4
+== demo-videos/2-component-overrides.mp4
+$ ffprobe -v error -show_entries stream=codec_name,width,height,pix_fmt -of csv=p=0 demo-videos/2-component-overrides.mp4
+h264,1920,1080,yuv420p
+$ ffprobe -v error -show_entries format=duration:stream=codec_type,r_frame_rate -of default=nw=1 demo-videos/2-component-overrides.mp4
+codec_type=video
+r_frame_rate=30/1
+duration=45.133008
+faststart (moov before mdat):
+ftyp moov free mdat
+== demo-videos/3-backup-restore.mp4
+$ ffprobe -v error -show_entries stream=codec_name,width,height,pix_fmt -of csv=p=0 demo-videos/3-backup-restore.mp4
+h264,1920,1080,yuv420p
+$ ffprobe -v error -show_entries format=duration:stream=codec_type,r_frame_rate -of default=nw=1 demo-videos/3-backup-restore.mp4
+codec_type=video
+r_frame_rate=30/1
+duration=63.333333
+faststart (moov before mdat):
+ftyp moov free mdat
+```
+
+Both videos are H.264, yuv420p, 1920x1080, 30 frames per second, with no audio stream, and have the moov atom before mdat (faststart). Lengths: 2-component-overrides.mp4 0:45 (45.1 s), 3-backup-restore.mp4 1:03 (63.3 s), both 3:00 or less (SC-002).
+
+Environments and namespaces left after the run (SC-005)
+
+Checked at 2026-10-18T22:58:06Z with a throwaway StyrminClient script that lists the environments and their deployments, and with kubectl on the demo vCluster:
+
+```text
+environments: local
+deployments: []
+$ kubectl get ns
+NAME                 STATUS   AGE
+default              Active   26m
+kube-flannel         Active   26m
+kube-node-lease      Active   26m
+kube-public          Active   26m
+kube-system          Active   26m
+local-path-storage   Active   26m
+styrmin              Active   26m
+$ kubectl get ns --no-headers | grep -c styrmin-
+0
+```
+
+Only the 'local' environment remains, with no deployment, and no namespace of a demo deployment remains.
+
+Result
+
+Exit code 0, two 'recorded' lines, two videos of 3:00 or less with the expected ffprobe values, and only the 'local' environment left. Demos 1 and 4 were not run because they are not registered (issues #372 and #530).

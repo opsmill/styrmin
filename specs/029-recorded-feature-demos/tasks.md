@@ -181,8 +181,8 @@ description: "Task list for the recorded demos of four Styrmin features"
 
 **Independent Test**: quickstart §3 and §6.
 
-- [ ] T041 [US5] Check the prerequisites messages (quickstart §6): run `uv run invoke record` with ffmpeg removed from the PATH and with the demo stack paused (`uv run invoke stop`), and confirm exit code 2 and the contract's messages before any setup; paste both outputs into `specs/029-recorded-feature-demos/full-run.log`. Restart with `uv run invoke start`
-- [ ] T042 [US5] Run all demos on a fresh demo stack: `uv run invoke reset`, then `uv run invoke record 2>&1 | tee specs/029-recorded-feature-demos/full-run.log`. Confirm exit code 0, four `recorded` lines, four videos of 3:00 or less, `ffprobe` values as in quickstart §3, and that only the `local` environment and no demo namespace remain (SC-001, SC-002, SC-005). If demo 4 waits for the product fix (T008), run the three other demos with `--demo` one after the other in the same session instead, and say so in the log
+- [X] T041 [US5] Check the prerequisites messages (quickstart §6): run `uv run invoke record` with ffmpeg removed from the PATH and with the demo stack paused (`uv run invoke stop`), and confirm exit code 2 and the contract's messages before any setup; paste both outputs into `specs/029-recorded-feature-demos/full-run.log`. Restart with `uv run invoke start`
+- [X] T042 [US5] Run all demos on a fresh demo stack: `uv run invoke reset`, then `uv run invoke record 2>&1 | tee specs/029-recorded-feature-demos/full-run.log`. Confirm exit code 0, four `recorded` lines, four videos of 3:00 or less, `ffprobe` values as in quickstart §3, and that only the `local` environment and no demo namespace remain (SC-001, SC-002, SC-005). If demo 4 waits for the product fix (T008), run the three other demos with `--demo` one after the other in the same session instead, and say so in the log
 
 ---
 
