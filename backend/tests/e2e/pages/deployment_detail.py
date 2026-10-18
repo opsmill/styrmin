@@ -723,6 +723,19 @@ class DeploymentDetailPage:
         )
         return dict(pairs)
 
+    async def show_component_overrides(self, *, component: str) -> str:
+        """Open the Settings tab, scroll ``component``'s row of the Component
+        Overrides card to the middle of the page and return the row's text."""
+        await self._page.get_by_role("button", name="Settings", exact=True).click()
+        row = self._page.locator(
+            f"[data-testid=component-override-row][data-component='{component}']"
+        )
+        await expect(row).to_be_visible()
+        await row.evaluate(
+            "row => row.scrollIntoView({block: 'center', behavior: 'smooth'})"
+        )
+        return await row.inner_text()
+
     async def set_component_container_override(
         self, *, component: str, command: list[str] | None, args: list[str] | None
     ) -> None:

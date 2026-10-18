@@ -8,6 +8,7 @@ Results of the checks of tasks T009 and T010 ([tasks.md](tasks.md)), run on 2026
 - On the demo stack, that upgrade does not run the `infrahub` driver's upgrade action, so Infrahub 1.11.7 runs on a database that `infrahub upgrade` has not migrated. Demo 1 waits for the fix to issue [#372](https://github.com/opsmill/styrmin/issues/372), as the maintainer decided on 2026-10-18. See "The upgrade does not run the driver's upgrade action".
 - `infrahub-enterprise` 1.11.7 starts, and an environment backup and its restore both reach `COMPLETED` (research [R-007](research.md#r-007-environment-backups-need-the-infrahub-enterprise-driver)). Demos 3 and 4 can go on.
 - One screencast records the whole run, including a navigation to a second origin, with the cursor still visible after it. The recorder does not need one recorded page per web application (research [R-001](research.md#r-001-playwright-version-and-the-screencast-api)).
+- Demo 2 (`component-overrides`) records end to end on a fresh demo stack: a video of 0:45, and the whole command takes 8 min 15 s. Watching the first recordings showed that Playwright draws no highlight unless the recorder gives it a style, so the recorder now sets one (FR-004). See "Demo 2 recorded (tasks T035 and T036)".
 
 The throwaway scripts that ran the checks stayed in the session scratchpad and are not committed.
 
@@ -139,3 +140,40 @@ Checked on 2026-10-18 in the environment `spike-chunk7` on the demo stack, which
 - Semaphore marks a task "Success" when the inventory cannot reach Infrahub: the play prints "skipping: no hosts matched". A demo checks the device count in the output, not only the task status.
 - The Infrahub device list can show its footer ("2 counts") a moment before it shows the rows, so `InfrahubDevicesPage.goto` waits until the number of rows equals the count.
 - Times: deploying `infrahub-enterprise` 91 s, then `semaphore` 91 s; `semaphore_setup.configure` under 1 s; deleting the environment 51 s.
+
+## Demo 2 recorded (tasks T035 and T036)
+
+Recorded on 2026-10-18 with `uv run invoke record --demo component-overrides` on a demo stack that `uv run invoke reset` had just created (12:24:37 to 12:26:37 UTC). The run lasted from 12:26:59 to 12:35:14 UTC and printed one `recorded` line.
+
+The video `demo-videos/2-component-overrides.mp4`:
+
+- `ffprobe` gives `h264,1920,1080,yuv420p` at 30 frames per second and a length of 44.9 s, which the summary shows as 0:45.
+- It shows the two chapter titles, the cursor and a blue outline on each element the script clicks or types into, the image reference typed one key at a time, and each wait sped up with its label.
+- It ends on the Component Overrides card of the Infrahub deployment with `server` `replicas 2 (override)` and the badge "applied". The step before shows the Semaphore card with `image styrmin-demo/semaphore:v2.16.47` and "applied".
+- No password, token or login form is on screen.
+
+Checked with `kubectl` while the run was in its second step, before the cleanup deleted the environment:
+
+- The Semaphore pod ran `styrmin-demo/semaphore:v2.16.47` (`kubectl get pod -n styrmin-<semaphore id> -o jsonpath='{.items[*].spec.containers[*].image}'` printed `bitnamilegacy/postgresql:17.6.0-debian-12-r4 styrmin-demo/semaphore:v2.16.47`). Before the override, the Semaphore pod of the setup ran `semaphoreui/semaphore:v2.16.47`.
+- The Infrahub server Deployment had `replicas=2` and two ready pods once the second wait ended.
+
+After the run, only the `local` environment existed, and no `styrmin-<deployment id>` namespace was left.
+
+### Real duration of each wait
+
+| Wait | Fresh stack (the recorded run) | Earlier trial runs |
+| --- | --- | --- |
+| "Semaphore restarts with the new image" | 51 s, shown 13 times faster | 53 s and 51 s |
+| "A second Infrahub server starts" | 1 min 13 s, shown 19 times faster | 1 min 35 s and 1 min 13 s |
+
+`DeploymentDetailPage.wait_for_new_task` ran against a real browser for the first time in these runs. Each time it returned when the timeline showed the `update_instance` task as succeeded.
+
+### What changed after watching the first recordings
+
+- Playwright 1.64 draws a highlight only when `show_actions` gets a `style.highlight`, and its action title shows the Playwright locator, for example `Click locator("[data-testid=section-nav-componentOverrides]")`. The recorder now passes a highlight style (a blue outline) and hides the title with `display: none`, as the Playwright reference for screencasts suggests. The cursor stays. Each action now stays on screen for 800 ms instead of 500 ms, so a viewer can follow the clicks. This applies to every demo.
+- The first recording opened the Timeline tab at the start of each step to read the task ids, and the next action reloaded the page at once. The setup now reads the task ids of both deployments before the recording starts.
+- The first recording ended on the timeline, which shows the succeeded task but not the result of the override. After each wait, the demo now holds 1.5 s on the succeeded task, then opens the Settings tab, scrolls the component's row of the Component Overrides card into view (new page-object method `DeploymentDetailPage.show_component_overrides`) and holds 3 s. The demo fails unless the row shows the image reference or `2 (override)`.
+- The demo opens the Timeline tab before each wait starts, so the click on the tab plays at normal speed.
+
+Not changed: the mouse stays where the last click was, so after the page scrolls it rests on an unrelated element (the Infrahub service link in the last frame). The video is 45 s long and has no dead time longer than the 3 s holds.
+
