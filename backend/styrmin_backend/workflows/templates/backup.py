@@ -290,7 +290,8 @@ async def execute_velero_restore_flow(
         counterpart_context: The counterpart's stored context. Present only
             for a cross-target restore, which restores none of the source's
             service aliases and writes the counterpart's aliases after the
-            recovery (#530).
+            recovery (#530). When that write fails, the stored result reports
+            the recovery as failed with the error, which fails the restore.
 
     Returns:
         The final Velero Restore resource dict from the K8s API.
@@ -431,7 +432,14 @@ async def execute_velero_restore_flow(
             else:
                 await reporter.succeed_step(steps.RESTORE_RECOVERY.key)
                 if counterpart_context is not None:
-                    await apply_service_aliases_step(reporter, counterpart_context)
+                    try:
+                        await apply_service_aliases_step(reporter, counterpart_context)
+                    except Exception as exc:
+                        # No mark_failed: the operator's rollout of the recovered
+                        # spec would replace the failed status.
+                        error_msg = f"Service alias step failed: {exc}"
+                        logger.error(error_msg)
+                        recovery_status = {"recovered": False, "error": error_msg}
         else:
             failure_reason = velero_status.get("failureReason") or (
                 f"Velero restore phase: {velero_phase}"
