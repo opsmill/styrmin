@@ -143,7 +143,7 @@ description: "Task list for the recorded demos of four Styrmin features"
 
 **Independent Test**: `uv run invoke record --demo backup-restore` on a fresh demo stack writes `demo-videos/3-backup-restore.mp4`; this is also the FR-002 check.
 
-- [ ] T037 [US3] Create `demos/scenarios/backup_restore.py`: setup creates `network-lab-backup`, calls `stack.load_enterprise_driver`, deploys `infrahub-enterprise` at `latest` and `semaphore` with parameter `docker_image=styrmin-demo/semaphore` (so the template's local repository exists), loads devices `sw1` and `sw2` with `infrahub_setup.load_devices`, and runs `semaphore_setup.configure`. Before recording, log in to Infrahub (`admin`/`infrahub`) and Semaphore on `recorder.unrecorded()` pages or before `start`. Recorded steps:
+- [X] T037 [US3] Create `demos/scenarios/backup_restore.py`: setup creates `network-lab-backup`, calls `stack.load_enterprise_driver`, deploys `infrahub-enterprise` at `latest` and `semaphore` with parameter `docker_image=styrmin-demo/semaphore` (so the template's local repository exists), loads devices `sw1` and `sw2` with `infrahub_setup.load_devices`, and runs `semaphore_setup.configure`. Before recording, log in to Infrahub (`admin`/`infrahub`) and Semaphore on `recorder.unrecorded()` pages or before `start`. Recorded steps:
   1. step "Back up the whole environment": `create_environment_backup`, `wait("Backup in progress")` around `wait_for_environment_backup`;
   2. step "Delete a device in Infrahub": `InfrahubDevicesPage.delete_device("sw2")`;
   3. step "Delete the task template in Semaphore": `SemaphoreTemplatesPage.delete_template()`;
@@ -151,7 +151,7 @@ description: "Task list for the recorded demos of four Styrmin features"
   5. step "The device and the template are back": show the Infrahub device list and the Semaphore template list, and fail the demo unless `sw2` and "List network devices" are listed.
 
   Register it with environment names `("network-lab-backup",)`
-- [ ] T038 [US3] Record demo 3 alone on a fresh demo stack and check it as in T034, plus the acceptance scenario of User Story 3 (both items back); note the length in `specs/029-recorded-feature-demos/spike-notes.md`
+- [X] T038 [US3] Record demo 3 alone on a fresh demo stack and check it as in T034, plus the acceptance scenario of User Story 3 (both items back); note the length in `specs/029-recorded-feature-demos/spike-notes.md`
 
 ---
 

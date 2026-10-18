@@ -25,6 +25,8 @@ _ANSI_PATTERN = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")
 _FINISHED_PATTERN = re.compile(rf"^\s*({'|'.join(FINISHED_STATUSES)})\s*$")
 # The message Semaphore shows after a deletion, next to its "Close" button.
 _DELETED_PATTERN = re.compile(r'Template ".*" deleted')
+# The template list; a template's own page also holds a table, of its tasks.
+_LIST_URL_PATTERN = re.compile(r"/project/\d+/templates/?$")
 
 
 def strip_ansi(text: str) -> str:
@@ -136,10 +138,25 @@ class SemaphoreTemplatesPage:
     async def template_names(self, base_url: str, project_id: int) -> list[str]:
         """Open the project's template list and return the template names."""
         await self._page.goto(f"{base_url}/project/{project_id}/templates")
+        return await self.listed_template_names()
+
+    async def listed_template_names(self) -> list[str]:
+        """Return the names in the template list on screen, such as the one Semaphore opens after a deletion."""
+        await self._page.wait_for_url(_LIST_URL_PATTERN, timeout=TIMEOUT_MS)
+        # Semaphore renders the table only once the list has loaded.
         table = self._page.get_by_role("table")
         await table.wait_for(timeout=TIMEOUT_MS)
         names = await table.get_by_role("link").all_inner_texts()
         return [name.strip() for name in names]
+
+    async def open_template(self, name: str) -> None:
+        """Click template ``name`` in the template list on screen; ends when its page shows "Run"."""
+        await (
+            self._page.get_by_role("table")
+            .get_by_role("link", name=name, exact=True)
+            .click()
+        )
+        await self._run_button.wait_for(timeout=TIMEOUT_MS)
 
     @property
     def _run_button(self) -> Locator:

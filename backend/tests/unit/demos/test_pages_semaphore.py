@@ -1,9 +1,10 @@
-"""The pure helpers of the Semaphore page object: log cleaning and the task status check."""
+"""The pure helpers of the Semaphore page object: log cleaning, the task status check and the list address."""
 
 from __future__ import annotations
 
 import pytest
 
+from tests.e2e.demos.pages import semaphore
 from tests.e2e.demos.pages.semaphore import check_task_status, strip_ansi
 from tests.e2e.drivers.errors import ScenarioActionError
 
@@ -42,3 +43,21 @@ def test_check_task_status_raises_with_the_last_lines_of_the_log(status: str) ->
     assert f"status {status!r}" in message
     assert message.endswith("\n".join(f"line {number}" for number in range(3, 13)))
     assert "line 2\n" not in message
+
+
+@pytest.mark.parametrize(
+    ("path", "is_list"),
+    [
+        ("/project/1/templates", True),
+        ("/project/12/templates/", True),
+        ("/project/1/templates/1", False),
+        ("/project/1/templates/1/tasks", False),
+        ("/project/1/history", False),
+    ],
+)
+def test_the_list_address_excludes_a_template_page_with_its_task_table(
+    path: str, *, is_list: bool
+) -> None:
+    url = f"http://semaphore-lab.local.styrmin.io:8080{path}"
+
+    assert bool(semaphore._LIST_URL_PATTERN.search(url)) is is_list  # noqa: SLF001

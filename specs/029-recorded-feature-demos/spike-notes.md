@@ -9,6 +9,7 @@ Results of the checks of tasks T009 and T010 ([tasks.md](tasks.md)), run on 2026
 - `infrahub-enterprise` 1.11.7 starts, and an environment backup and its restore both reach `COMPLETED` (research [R-007](research.md#r-007-environment-backups-need-the-infrahub-enterprise-driver)). Demos 3 and 4 can go on.
 - One screencast records the whole run, including a navigation to a second origin, with the cursor still visible after it. The recorder does not need one recorded page per web application (research [R-001](research.md#r-001-playwright-version-and-the-screencast-api)).
 - Demo 2 (`component-overrides`) records end to end on a fresh demo stack: a video of 0:45, and the whole command takes 8 min 15 s. Watching the first recordings showed that Playwright draws no highlight unless the recorder gives it a style, so the recorder now sets one (FR-004). See "Demo 2 recorded (tasks T035 and T036)".
+- Demo 3 (`backup-restore`) records end to end on a fresh demo stack: a video of 1:06, and the whole command takes 13 min. After the restore, Infrahub lists `sw2` again and Semaphore lists the template "List network devices" again, so User Story 3's acceptance scenario passes. The `semaphore` driver backs up Semaphore's PostgreSQL database, and that is where the template is stored. See "Demo 3 recorded (tasks T037 and T038)".
 
 The throwaway scripts that ran the checks stayed in the session scratchpad and are not committed.
 
@@ -176,4 +177,40 @@ After the run, only the `local` environment existed, and no `styrmin-<deployment
 - The demo opens the Timeline tab before each wait starts, so the click on the tab plays at normal speed.
 
 Not changed: the mouse stays where the last click was, so after the page scrolls it rests on an unrelated element (the Infrahub service link in the last frame). The video is 45 s long and has no dead time longer than the 3 s holds.
+
+## Demo 3 recorded (tasks T037 and T038)
+
+Recorded on 2026-10-18 with `uv run invoke record --demo backup-restore` on a demo stack that `uv run invoke reset` had just created (13:01:54 to 13:04:06 UTC). The run lasted from 13:04:27 to 13:17:27 UTC and printed one `recorded` line.
+
+Before writing the scenario, the `semaphore` driver was read: its `database` component has `backup: {enabled: true, kind: postgres, database_name: semaphore}` ([`driver/examples/semaphore/driver.styrmin.yml`](../../driver/examples/semaphore/driver.styrmin.yml)). The template is stored in that database. The PostgreSQL restore hook runs `pg_restore --clean --if-exists --single-transaction` ([`velero/hooks.py`](../../backend/styrmin_backend/agent/service/kubernetes/velero/hooks.py)), so the restore brings back the template the demo deletes. No driver change was needed.
+
+The video `demo-videos/3-backup-restore.mp4`:
+
+- `ffprobe` gives `h264,1920,1080,yuv420p` at 30 frames per second and a length of 66.2 s, which the summary shows as 1:06.
+- Each of the five steps starts with its chapter title.
+- The cursor and the blue outline are on each element the demo clicks: the Backups tab, "Create Backup", the row menu of `sw2` and "Delete" in Infrahub, the template link, the delete icon and "Yes" in Semaphore, "Restore" and the "Restore" button of the confirmation dialog. Demo 3 types into no text field during the recording, because both logins happen during the setup.
+- The three long waits are sped up with their labels: "Sped up 16×: Backup in progress took 1 min", "Sped up 43×: Restore in progress took 2 min 48 s" and "Sped up 5×: Infrahub restarts took 18 s".
+- Infrahub lists `sw1` and `sw2`, then only `sw1` with the message "Object sw2 deleted", and after the restore `sw1` and `sw2` with "2 counts". Semaphore lists "List network devices", then no template with the message `Template "List network devices" deleted`, and after the restore the template again.
+- No password, token or login page is on screen. The Semaphore template list shows the name of the variable group, "Infrahub token", but not its value; the variable group page is never opened.
+
+After the run, only the `local` environment existed, and no `styrmin-<deployment id>` namespace was left.
+
+The Infrahub and Semaphore sessions of the setup still worked after the restore, so the last step needs no new login. Both logins happen before the backup, so the restored databases still hold them.
+
+### Real duration of each wait
+
+| Wait | Fresh stack (the recorded run) | Earlier trial runs on a kept environment |
+| --- | --- | --- |
+| "Backup in progress" | 1 min, shown 16 times faster | 48 s and 39 s |
+| "Restore in progress" | 2 min 48 s, shown 43 times faster | 1 min 9 s and 5 min 19 s |
+| "Infrahub restarts" | 18 s, shown 5 times faster | 27 s and 3 s |
+| "Semaphore restarts" | 0 s, not sped up | 0 s and 0 s |
+
+The restore recreates the pods of both deployments. When the recorded restore completed, the Semaphore pods were 2 min 11 s old and had not restarted, and the Infrahub pods were 32 s old; the Infrahub server and task-manager pods had each restarted twice before Infrahub answered. The duration of the restore varied between 1 min 9 s and 5 min 19 s over three runs; the cause of the variation was not investigated. Another session's E2E vCluster was running on the host when the trial runs started and was gone before the recorded run.
+
+### What changed after the first trial runs
+
+- The first trial stopped in the setup: Chromium could not resolve `infrahub-network-lab-backup.local.styrmin.io` (`net::ERR_NAME_NOT_RESOLVED`), although the Infrahub SDK had just reached the same address and the same name resolved a minute later. `resolvectl statistics` reported one timeout and one failure response. The recorder's browser now maps `*.local.styrmin.io` to `127.0.0.1` with `--host-resolver-rules`, which is the address the wildcard DNS record gives ([local demo guide](../../dev/guides/local-demo.md)). This applies to every demo.
+- The first recording opened each Semaphore page from its address, so the video showed three white pages while Semaphore loaded. The demo now clicks the template in the list (new page-object method `SemaphoreTemplatesPage.open_template`) and reads the list that Semaphore opens after the deletion (new method `listed_template_names`, which first waits for the list address, because a template's own page also holds a table, of its tasks). Only the switch from Infrahub to Semaphore still shows a white page.
+- The Semaphore wait (new helper `semaphore_setup.wait_until_ready`, which polls `GET /api/ping`) took 0 s in all three runs, so it never shows a label. It stays, so that a Semaphore restart after a restore cannot make the last step fail.
 
