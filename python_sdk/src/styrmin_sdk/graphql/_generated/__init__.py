@@ -356,6 +356,14 @@ from .load_remote_application_driver_version import (
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionComponentConfigs,
     LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart,
 )
+from .load_version_with_driver_directory import (
+    LoadVersionWithDriverDirectory,
+    LoadVersionWithDriverDirectoryLoadRemoteApplicationDriverVersion,
+    LoadVersionWithDriverDirectoryLoadRemoteApplicationDriverVersionActions,
+    LoadVersionWithDriverDirectoryLoadRemoteApplicationDriverVersionApplicationDriver,
+    LoadVersionWithDriverDirectoryLoadRemoteApplicationDriverVersionComponentConfigs,
+    LoadVersionWithDriverDirectoryLoadRemoteApplicationDriverVersionHelmChart,
+)
 from .login import Login, LoginLogin, LoginLoginUser
 from .logout import Logout
 from .report_deployment_statuses import (
@@ -672,6 +680,12 @@ __all__ = [
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionApplicationDriver",
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionComponentConfigs",
     "LoadRemoteApplicationDriverVersionLoadRemoteApplicationDriverVersionHelmChart",
+    "LoadVersionWithDriverDirectory",
+    "LoadVersionWithDriverDirectoryLoadRemoteApplicationDriverVersion",
+    "LoadVersionWithDriverDirectoryLoadRemoteApplicationDriverVersionActions",
+    "LoadVersionWithDriverDirectoryLoadRemoteApplicationDriverVersionApplicationDriver",
+    "LoadVersionWithDriverDirectoryLoadRemoteApplicationDriverVersionComponentConfigs",
+    "LoadVersionWithDriverDirectoryLoadRemoteApplicationDriverVersionHelmChart",
     "Login",
     "LoginLogin",
     "LoginLoginUser",

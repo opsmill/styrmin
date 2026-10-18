@@ -34,9 +34,8 @@ def _print_version_details(version: Any) -> None:  # noqa: ANN401
         console.print(f"  Content hash: {content_hash}")
     elif source_commit_sha:
         console.print(f"  Commit SHA: {source_commit_sha}")
-    # Local versions keep their folder in source_path too; only a git version has a repository.
-    driver_directory = getattr(version, "source_path", None)
-    if driver_directory and getattr(version, "source_repository", None):
+    driver_directory = getattr(version, "driver_directory", None)
+    if driver_directory:
         console.print(f"  Driver directory: {driver_directory}")
 
     if version.component_configs:

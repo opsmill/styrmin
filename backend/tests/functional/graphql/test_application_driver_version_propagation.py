@@ -39,7 +39,7 @@ plus the load failure for ``singleton: true`` with ``replicas`` above 1.
 028-git-driver-directory (T009) adds the ``driverDirectory`` argument of
 ``loadRemoteApplicationDriverVersion``: a load from a local git repository stores the
 normalised driver directory in ``source_path``, and ``applicationDriver.versions`` returns it
-as ``sourcePath``. T038 adds the failed loads: a refused driver directory returns
+as ``sourcePath`` and ``driverDirectory``; a local version has a null ``driverDirectory``. T038 adds the failed loads: a refused driver directory returns
 ``VALIDATION_ERROR``, and a missing one names the driver directory and the commit SHA; neither
 stores a row. T039 adds the root load: no driver directory stores ``source_path`` as NULL,
 and reloads at the same commit without one, with ``""`` or with ``"."`` return the same row.
@@ -827,6 +827,7 @@ async def test_driver_directory_propagates_from_git_load_to_db(
     version = loaded["loadRemoteApplicationDriverVersion"]
     assert version["sourceType"] == "git"
     assert version["sourcePath"] == "drivers/a"
+    assert version["driverDirectory"] == "drivers/a"
     assert version["sourceCommitSha"] == sha
 
     row = await session.get(
@@ -868,6 +869,7 @@ async def test_driver_directory_projects_through_application_driver_query(
     ]
     assert read_back["sourceType"] == "git"
     assert read_back["sourcePath"] == "drivers/a"
+    assert read_back["driverDirectory"] == "drivers/a"
 
 
 @pytest.mark.asyncio
@@ -888,6 +890,7 @@ async def test_root_load_stores_null_and_reloads_return_the_same_version(
     version = loaded["loadRemoteApplicationDriverVersion"]
     assert version["sourceType"] == "git"
     assert version["sourcePath"] is None
+    assert version["driverDirectory"] is None
     assert version["sourceCommitSha"] == sha
 
     row = await session.get(
@@ -904,6 +907,29 @@ async def test_root_load_stores_null_and_reloads_return_the_same_version(
 
     rows = (await session.exec(select(ApplicationDriverVersion))).all()
     assert [r.id for r in rows] == [UUID(version["id"])]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("prefect_manager_mock")
+async def test_local_load_has_no_driver_directory(
+    client: AsyncClient, session: AsyncSession, tmp_path: Path
+) -> None:
+    """028 review item 10: a local version keeps its server path in ``sourcePath``, and its
+    ``driverDirectory`` is null."""
+    driver = tmp_path / "driver"
+    shutil.copytree(_FIXTURE_DRIVER, driver)
+
+    loaded = await gql(client, "load_local_driver_directory", {"path": str(driver)})
+    version = loaded["loadLocalApplicationDriverVersion"]
+
+    assert version["sourceType"] == "local"
+    assert version["sourcePath"] == str(driver)
+    assert version["driverDirectory"] is None
+    row = await session.get(
+        ApplicationDriverVersion, UUID(version["id"]), populate_existing=True
+    )
+    assert row is not None
+    assert row.source_path == str(driver)
 
 
 async def _load_driver_directory_payload(

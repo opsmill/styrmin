@@ -71,6 +71,8 @@ export type ApplicationDriverVersion = {
   defaultVersion?: Maybe<Scalars['String']['output']>;
   /** Description of the application, from `spec.info.description`. Null when the driver does not set it. */
   description?: Maybe<Scalars['String']['output']>;
+  /** Folder of the git repository that holds the driver, relative to the repository root, as given in the `driverDirectory` argument of `loadRemoteApplicationDriverVersion` in its stored form. Null for a load from the repository root and for a `local` version. */
+  driverDirectory?: Maybe<Scalars['String']['output']>;
   /** Doc-only env var declarations from the driver's spec.env_vars block. Empty when the driver omits the block. */
   envVars: Array<DriverEnvVarDoc>;
   helmChart: HelmChart;
@@ -83,10 +85,14 @@ export type ApplicationDriverVersion = {
   loadWarnings: Array<Scalars['String']['output']>;
   parameters: Array<ParameterDefinition>;
   services: Array<ServiceDefinition>;
+  /** Branch of a `git` version. Null for `local`. */
   sourceBranch?: Maybe<Scalars['String']['output']>;
   sourceCommitSha?: Maybe<Scalars['String']['output']>;
+  /** For a `local` version, the absolute path of the driver folder on the Styrmin server. For a `git` version, the driver directory, or null for a load from the repository root. To read the driver directory, use `driverDirectory`. */
   sourcePath?: Maybe<Scalars['String']['output']>;
+  /** URL of the git repository of a `git` version. Empty for `local`. */
   sourceRepository: Scalars['String']['output'];
+  /** Where the driver version was loaded from: `git` or `local`. */
   sourceType: Scalars['String']['output'];
   supportedVersions: Scalars['String']['output'];
   version: Scalars['String']['output'];

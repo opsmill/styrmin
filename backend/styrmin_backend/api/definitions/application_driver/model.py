@@ -26,6 +26,7 @@ from styrmin_backend.context.models.components import (
     parse_stored_replica_declaration,
 )
 from styrmin_backend.domain.models import ComponentConfig as DomainComponentConfig
+from styrmin_backend.services.driver.labels import driver_directory_of
 from styrmin_backend.services.driver.models.resources.env_vars import (
     DriverEnvVarLevel as DriverEnvVarLevelPydantic,
 )
@@ -187,10 +188,23 @@ class ApplicationDriverVersion:
     supported_versions: str
     default_version: str | None = None
 
-    source_type: str
-    source_repository: str
-    source_branch: str | None
-    source_path: str | None
+    source_type: str = strawberry.field(
+        description="Where the driver version was loaded from: `git` or `local`."
+    )
+    source_repository: str = strawberry.field(
+        description="URL of the git repository of a `git` version. Empty for `local`."
+    )
+    source_branch: str | None = strawberry.field(
+        description="Branch of a `git` version. Null for `local`."
+    )
+    source_path: str | None = strawberry.field(
+        description=(
+            "For a `local` version, the absolute path of the driver folder on the "
+            "Styrmin server. For a `git` version, the driver directory, or null for "
+            "a load from the repository root. To read the driver directory, use "
+            "`driverDirectory`."
+        )
+    )
     content_hash: str | None = None
     source_commit_sha: str | None = None
 
@@ -227,6 +241,19 @@ class ApplicationDriverVersion:
     )
 
     instance: strawberry.Private[ApplicationDriverVersionModel]
+
+    @strawberry.field(
+        description=(
+            "Folder of the git repository that holds the driver, relative to the "
+            "repository root, as given in the `driverDirectory` argument of "
+            "`loadRemoteApplicationDriverVersion` in its stored form. Null for a "
+            "load from the repository root and for a `local` version."
+        )
+    )
+    def driver_directory(self) -> str | None:
+        return driver_directory_of(
+            source_type=self.source_type, source_path=self.source_path
+        )
 
     @strawberry.field
     async def application_driver(self, info: strawberry.Info) -> ApplicationDriver:

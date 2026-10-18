@@ -127,6 +127,7 @@ from styrmin_backend.services.deployment import (
     update_deployment,
     update_deployment_version,
 )
+from styrmin_backend.services.driver.driver_directory import MAX_DRIVER_DIRECTORY_LENGTH
 from styrmin_backend.services.environments import (
     create_environment,
     delete_environment,
@@ -796,7 +797,18 @@ class Mutation:
         repository_url: str,
         branch: str,
         info: strawberry.Info,
-        driver_directory: str | None = None,
+        driver_directory: Annotated[
+            str | None,
+            strawberry.argument(
+                description=(
+                    "Folder of the repository that holds `driver.styrmin.yml`, relative "
+                    "to the repository root, such as `drivers/infrahub`. Null, empty "
+                    "or `.` loads from the repository root. Refused when it starts "
+                    "with `/`, contains a `..` segment, a backslash, `{`, `}` or a "
+                    f"control character, or is longer than {MAX_DRIVER_DIRECTORY_LENGTH} characters."
+                )
+            ),
+        ] = None,
     ) -> ApplicationDriverVersion | None:
         uow = info.context["uow"]
         loaded = await load_application_driver_from_git_repository(

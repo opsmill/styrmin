@@ -5,6 +5,7 @@ query GetDriverVersionSourcePath($applicationDriverId: UUID!) {
             id
             sourceType
             sourcePath
+            driverDirectory
         }
     }
 }
