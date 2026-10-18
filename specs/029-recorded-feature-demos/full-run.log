@@ -194,3 +194,146 @@ Only the 'local' environment remains, with no deployment, and no namespace of a 
 Result
 
 Exit code 0, two 'recorded' lines, two videos of 3:00 or less with the expected ffprobe values, and only the 'local' environment left. Demos 1 and 4 were not run because they are not registered (issues #372 and #530).
+
+T043: re-record demo 3 after a failed run (quickstart section 5)
+-----------------------------------------------------------------
+
+Same demo stack as T042, right after its recording run. Branch fac/demo-beta-presentation-bhshh at 4c31ee69. No demo code was changed for this task.
+
+Video files before the first run:
+
+```text
+demo-videos/2-component-overrides.mp4 2026-10-18 22:41:13.821653392 +0000
+demo-videos/3-backup-restore.mp4 2026-10-18 22:54:44.237101447 +0000
+```
+
+Run 1: Velero stopped, so the backup cannot finish
+
+At 2026-10-18T23:00:30Z, 'kubectl -n styrmin scale deploy/velero --replicas=0' set the Velero server deployment to 0/0 before the run. The node-agent DaemonSet kept running; only the Velero server was stopped.
+The setup does not need the Velero server: it creates the environment, assigns the backup storage location and deploys Infrahub and Semaphore. So the setup passed, and the run failed inside the backup step as quickstart section 5 intends. At 2026-10-18T23:06:03Z, when the step "Back up the whole environment" started, Velero was still at 0/0.
+Styrmin created two Velero Backup objects at 2026-10-18T23:06:19Z. They stayed without a phase because no Velero server processed them, so the environment backup stayed IN_PROGRESS until the demo's 600 s backup wait ended.
+
+Started 2026-10-18T23:02:39Z, ended 2026-10-18T23:16:07Z. Command: uv run invoke record --demo backup-restore. Exit code: 1.
+
+```text
+✓ Reusing existing image styrmin-demo/semaphore:v2.16.47 (pass --build-image to 
+rebuild)
+──────────────────────────── Demo 3: backup-restore ────────────────────────────
+Setting up backup-restore
+Step: Back up the whole environment
+Demo backup-restore failed in step "Back up the whole environment":
+Traceback (most recent call last):
+  File "/home/ubuntu/emdash/worktrees/styrmin-fatih2-ef968ca0/fac-demo-beta-presentation-bhshh/backend/tests/e2e/demos/__main__.py", line 180, in execute
+    seconds = await self._record(output_path)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/emdash/worktrees/styrmin-fatih2-ef968ca0/fac-demo-beta-presentation-bhshh/backend/tests/e2e/demos/__main__.py", line 226, in _record
+    await demo.record(context, state)
+  File "/home/ubuntu/emdash/worktrees/styrmin-fatih2-ef968ca0/fac-demo-beta-presentation-bhshh/backend/tests/e2e/demos/scenarios/backup_restore.py", line 151, in record
+    backup = await driver.wait_for_environment_backup(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        environment_backup_id=created.id, max_wait=BACKUP_TIMEOUT
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/ubuntu/emdash/worktrees/styrmin-fatih2-ef968ca0/fac-demo-beta-presentation-bhshh/backend/tests/e2e/drivers/ui_driver.py", line 634, in wait_for_environment_backup
+    return await self._environment_backups.wait_for_backup_status(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/home/ubuntu/emdash/worktrees/styrmin-fatih2-ef968ca0/fac-demo-beta-presentation-bhshh/backend/tests/e2e/pages/environments.py", line 711, in wait_for_backup_status
+    raise ScenarioTimeout(
+    ...<2 lines>...
+    )
+tests.e2e.drivers.errors.ScenarioTimeout: environment backup 1642d2e4-ef3f-4ca0-9200-585985b10688 did not reach a terminal derived status within 600.0s (last seen: IN_PROGRESS)
+
+Demo            Result  Video                                             Length
+backup-restore  failed  step "Back up the whole environment":             -     
+                        ScenarioTimeout: environment backup                     
+                        1642d2e4-ef3f-4ca0-9200-585985b10688 did not            
+                        reach a terminal derived status within 600.0s           
+                        (last seen: IN_PROGRESS)                                
+                        kept environments: network-lab-backup                   
+Kept environments still use the cluster's memory until the next run of their 
+demo deletes them, which can make later demos of the same run fail.
+```
+
+Checks after run 1, at 2026-10-18T23:16:25Z:
+
+- Exit code 1, as the contract gives for a failed demo.
+- The summary names the failing step, "Back up the whole environment", and the error, 'ScenarioTimeout: environment backup 1642d2e4-ef3f-4ca0-9200-585985b10688 did not reach a terminal derived status within 600.0s (last seen: IN_PROGRESS)'.
+- The summary lists network-lab-backup as kept, and the environment still existed with both deployments running:
+
+```text
+environments: local, network-lab-backup
+  local: deployments: []
+  network-lab-backup: deployments: [('semaphore', 'running'), ('infrahub', 'running')]
+```
+
+- No new video. Both files kept their modification times, and the output directory holds only the two MP4 files, with no raw recording, label image or temporary file. No styrmin-demo-* temporary directory was left in /tmp.
+
+```text
+demo-videos/2-component-overrides.mp4 2026-10-18 22:41:13.821653392 +0000
+demo-videos/3-backup-restore.mp4 2026-10-18 22:54:44.237101447 +0000
+$ ls -la demo-videos/
+-rw-r--r--  1 ubuntu ubuntu 4220166 2026-10-18 22:41:13.821653392 +0000 2-component-overrides.mp4
+-rw-r--r--  1 ubuntu ubuntu 3396527 2026-10-18 22:54:44.237101447 +0000 3-backup-restore.mp4
+```
+
+Run 2: Velero restored
+
+From 2026-10-18T23:16:30Z to 2026-10-18T23:17:03Z, 'kubectl -n styrmin scale deploy/velero --replicas=1' and 'kubectl -n styrmin rollout status deploy/velero' brought Velero back to 1/1. The run started right after.
+When the Velero server started, it processed the two Backup objects left by run 1, from 23:16:47Z to 23:17:11Z: one ended Completed and the other PartiallyFailed, with 1 of its 4 backup hooks failed. The cause of the hook failure was not investigated. Run 1's environment backup was not used again, and this did not affect run 2.
+
+Started 2026-10-18T23:17:07Z, ended 2026-10-18T23:37:47Z (20 min 40 s). Command: uv run invoke record --demo backup-restore. Exit code: 0.
+
+```text
+✓ Reusing existing image styrmin-demo/semaphore:v2.16.47 (pass --build-image to 
+rebuild)
+──────────────────────────── Demo 3: backup-restore ────────────────────────────
+Deleting environment network-lab-backup
+/home/ubuntu/emdash/worktrees/styrmin-fatih2-ef968ca0/fac-demo-beta-presentation-bhshh/.venv/lib/python3.14/site-packages/kr8s/_api.py:91: UserWarning: Kubernetes version v1.36.0 is not supported. Supported versions for kr8s 0.20.15 are 1.28 to 1.35.
+  await self._check_version()
+Setting up backup-restore
+Step: Back up the whole environment
+Wait: Backup in progress took 1 min 18 s
+Step: Delete a device in Infrahub
+Step: Delete the task template in Semaphore
+Step: Restore the backup
+Wait: Restore in progress took 5 min 19 s
+Wait: Infrahub restarts took 15 s
+Wait: Semaphore restarts took 0 s
+Step: The device and the template are back
+Encoding demo-videos/3-backup-restore.mp4
+Deleting the environments of backup-restore
+Deleting environment network-lab-backup
+
+Demo            Result    Video                             Length
+backup-restore  recorded  demo-videos/3-backup-restore.mp4  1:09  
+```
+
+Checks after run 2:
+
+- The command deleted the leftover network-lab-backup before the setup: 'Deleting environment network-lab-backup' is printed before 'Setting up backup-restore'. The command waits until the environment's namespaces are gone before it starts the setup. At 2026-10-18T23:22:52Z, when the setup started, 'kubectl get ns' listed no styrmin- namespace. The deletion took about 5 min 45 s (from 23:17:07Z to 23:22:52Z, including the prerequisites check).
+- Only 3-backup-restore.mp4 was written. 2-component-overrides.mp4 kept its modification time:
+
+```text
+2026-10-18T23:38:03Z
+demo-videos/2-component-overrides.mp4 2026-10-18 22:41:13.821653392 +0000
+demo-videos/3-backup-restore.mp4 2026-10-18 23:33:59.594775448 +0000
+$ ls -la demo-videos/
+-rw-r--r--  1 ubuntu ubuntu 4220166 2026-10-18 22:41:13.821653392 +0000 2-component-overrides.mp4
+-rw-r--r--  1 ubuntu ubuntu 3325624 2026-10-18 23:33:59.594775448 +0000 3-backup-restore.mp4
+$ ffprobe -v error -show_entries stream=codec_name,width,height,pix_fmt -of csv=p=0 demo-videos/3-backup-restore.mp4
+h264,1920,1080,yuv420p
+$ ffprobe -v error -show_entries format=duration:stream=codec_type,r_frame_rate -of default=nw=1 demo-videos/3-backup-restore.mp4
+codec_type=video
+r_frame_rate=30/1
+duration=68.766016
+```
+
+- After the run, only the 'local' environment remains, with no deployment, 'kubectl get ns --no-headers | grep -c styrmin-' prints 0, no styrmin-demo-* temporary directory was left in /tmp, and Velero is at 1/1.
+
+Result
+
+Run 1 exited with code 1, named the failing step and its error, kept network-lab-backup and wrote no video. Run 2 exited with code 0, deleted network-lab-backup before its setup, and replaced only 3-backup-restore.mp4 (1:09, 3:00 or less).
