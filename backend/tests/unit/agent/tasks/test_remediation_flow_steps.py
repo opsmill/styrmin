@@ -16,7 +16,7 @@ from kubernetes_asyncio.client.api_client import ApiException
 from pydantic import SecretStr
 
 from styrmin_backend import config
-from styrmin_backend.agent.tasks import orchestration
+from styrmin_backend.agent.tasks import orchestration, service_aliases
 from styrmin_backend.agent.tasks.orchestration import (
     KeptInstance,
     create_instance_crd,
@@ -150,12 +150,15 @@ def cluster(monkeypatch: pytest.MonkeyPatch, events: list[Event]) -> Cluster:
         ("_apply_styrmin_deployment_crd", fake.crd),
         ("create_event", fake.k8s_event),
         ("patch_custom_resource_status", fake.status_reset),
-        ("apply_service_aliases", fake.aliases),
-        ("find_stale_service_aliases", fake.find_stale),
-        ("with_current_peer_services", fake.current_services),
         ("run_driver_action_or_fail", fake.action),
     ):
         monkeypatch.setattr(orchestration, name, AsyncMock(side_effect=mock))
+    for name, mock in (
+        ("apply_service_aliases", fake.aliases),
+        ("find_stale_service_aliases", fake.find_stale),
+        ("with_current_peer_services", fake.current_services),
+    ):
+        monkeypatch.setattr(service_aliases, name, AsyncMock(side_effect=mock))
 
     def build_body(**kwargs: Any) -> dict[str, Any]:
         fake.crd_bodies.append(kwargs)
@@ -173,13 +176,13 @@ def cluster(monkeypatch: pytest.MonkeyPatch, events: list[Event]) -> Cluster:
 @pytest.fixture
 def with_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        orchestration, "compute_service_aliases", lambda _context: ["alias"]
+        service_aliases, "compute_service_aliases", lambda _context: ["alias"]
     )
 
 
 @pytest.fixture
 def without_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(orchestration, "compute_service_aliases", lambda _context: [])
+    monkeypatch.setattr(service_aliases, "compute_service_aliases", lambda _context: [])
 
 
 def _instance() -> Instance:
@@ -250,8 +253,8 @@ async def test_alias_step_uses_the_services_that_the_server_lists_now(
         computed.append(context)
         return ["alias"]
 
-    monkeypatch.setattr(orchestration, "with_current_peer_services", read)
-    monkeypatch.setattr(orchestration, "compute_service_aliases", compute)
+    monkeypatch.setattr(service_aliases, "with_current_peer_services", read)
+    monkeypatch.setattr(service_aliases, "compute_service_aliases", compute)
 
     await create_instance_crd(instance=instance, prehook=None, posthook=None)
 

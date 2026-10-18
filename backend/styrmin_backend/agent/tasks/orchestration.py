@@ -42,9 +42,9 @@ from styrmin_backend.agent.tasks.extra import (
 )
 from styrmin_backend.agent.tasks.service_aliases import (
     apply_service_aliases,
+    apply_service_aliases_step,
     compute_service_aliases,
     find_stale_service_aliases,
-    with_current_peer_services,
 )
 from styrmin_backend.agent.tasks.shared import (
     render_helm_chart_specifications,
@@ -938,7 +938,7 @@ async def create_instance_crd(
             namespace,
             release_reference,
         )
-        await _apply_service_aliases_step(reporter, context)
+        await apply_service_aliases_step(reporter, context)
 
     # Run post-hook after CRD creation (imperative action)
     if posthook:
@@ -979,7 +979,7 @@ async def update_instance_crd(
         )
 
     if written:
-        await _apply_service_aliases_step(reporter, context)
+        await apply_service_aliases_step(reporter, context)
         logger.info(
             "StyrminDeployment CRD updated: %s/%s", namespace, release_reference
         )
@@ -1056,7 +1056,7 @@ async def upgrade_instance_crd(
         )
 
     if written:
-        await _apply_service_aliases_step(reporter, context)
+        await apply_service_aliases_step(reporter, context)
 
     if posthook:
         async with reporter.step(*steps.UPGRADE_POST_HOOK) as step:
@@ -1070,19 +1070,6 @@ async def upgrade_instance_crd(
     logger.info(
         "Upgrade CRD updated: %s:%s in %s", context.app.name, target_version, namespace
     )
-
-
-async def _apply_service_aliases_step(
-    reporter: StepReporter, context: GlobalContext
-) -> None:
-    """Apply cross-namespace ExternalName service aliases and delete stale ones, if any."""
-    context = await with_current_peer_services(context)
-    aliases = compute_service_aliases(context)
-    stale_aliases = await find_stale_service_aliases(context)
-    if not aliases and not stale_aliases:
-        return
-    async with reporter.step(*steps.SERVICE_ALIASES):
-        await apply_service_aliases(aliases=aliases, stale_aliases=stale_aliases)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────
