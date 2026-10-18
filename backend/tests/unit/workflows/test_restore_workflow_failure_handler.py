@@ -38,8 +38,12 @@ import pytest
 from prefect.client.schemas.objects import StateType
 
 from styrmin_backend.services.exceptions import RestoreNotFoundError
-from styrmin_backend.workflows.templates.backup import execute_restore_workflow
+from styrmin_backend.workflows.templates.backup import (
+    _Counterpart,
+    execute_restore_workflow,
+)
 from tests.helpers.unit_of_work import yield_unit_of_work
+from tests.unit.counterpart_crd_fixtures import counterpart_context
 
 
 @asynccontextmanager
@@ -201,7 +205,11 @@ async def _run_restore_workflow(
         ),
         patch(
             f"{MODULE}._build_counterpart_crd_body",
-            AsyncMock(return_value=counterpart_crd_body),
+            AsyncMock(
+                return_value=_Counterpart(
+                    crd_body=counterpart_crd_body, context=counterpart_context()
+                )
+            ),
         ),
     ):
         if capture_exception:
