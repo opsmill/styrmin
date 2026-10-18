@@ -9,14 +9,18 @@ pieces into a single happy-path experience:
     invoke destroy   # tear down
     invoke reset     # destroy + start
 
+``invoke record`` then records the feature demos as MP4 videos on the running stack.
+
 The Cloudflare wildcard zone *.local.styrmin.io resolves to 127.0.0.1,
 so no /etc/hosts manipulation is needed.
 """
 
 from __future__ import annotations
 
+import shlex
 import socket
 import time
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -43,14 +47,17 @@ DEMO_PORT = 8080
 DEMO_VALUES = MAIN_DIRECTORY_PATH / "dev" / "local" / "demo-values.yaml"
 HELM_STYRMIN_DIR = MAIN_DIRECTORY_PATH / "helm" / "styrmin"
 PORT_FORWARD_PID_FILE = MAIN_DIRECTORY_PATH / ".vcluster" / "traefik.pid"
+SEMAPHORE_DEMO_IMAGE = "styrmin-demo/semaphore:v2.16.47"
+SEMAPHORE_DEMO_DIR = MAIN_DIRECTORY_PATH / "backend" / "tests" / "e2e" / "demos" / "semaphore"
+DEMO_VIDEOS_DIR = MAIN_DIRECTORY_PATH / "demo-videos"
 
 
 def _demo_url() -> str:
     return f"http://{DEMO_HOSTNAME}:{DEMO_PORT}"
 
 
-def _image_exists(context: Context) -> bool:
-    result = context.run(f"docker image inspect {DEMO_IMAGE}", warn=True, hide=True)
+def _image_exists(context: Context, image: str = DEMO_IMAGE) -> bool:
+    result = context.run(f"docker image inspect {image}", warn=True, hide=True)
     return result is not None and result.ok
 
 
@@ -196,6 +203,45 @@ def reset(context: Context) -> None:
     """Destroy and re-create the demo environment from scratch."""
     destroy(context, yes=True)
     start(context)
+
+
+def build_semaphore_image(context: Context) -> None:
+    """Build the demo Semaphore image with the Infrahub Ansible collection; it is never pushed (FR-015)."""
+    print_header(f"Building {SEMAPHORE_DEMO_IMAGE}...")
+    context.run(f"docker build -t {SEMAPHORE_DEMO_IMAGE} {SEMAPHORE_DEMO_DIR}", pty=True)
+
+
+@task(
+    help={
+        "demo": "Record only this demo: deploy-upgrade, component-overrides, backup-restore or clone. "
+        "Default: every available demo.",
+        "output_dir": "Where to write the MP4 files. Default: demo-videos/ at the repository root.",
+        "build_image": f"Rebuild {SEMAPHORE_DEMO_IMAGE} even if it already exists.",
+    }
+)
+def record(context: Context, demo: str = "", output_dir: str = "", build_image: bool = False) -> None:
+    """Record the feature demos as MP4 videos on the running demo stack."""
+    if build_image or not _image_exists(context, SEMAPHORE_DEMO_IMAGE):
+        build_semaphore_image(context)
+    else:
+        Console().print(
+            f"[green]✓[/green] Reusing existing image {SEMAPHORE_DEMO_IMAGE} (pass --build-image to rebuild)"
+        )
+    target = Path(output_dir).resolve() if output_dir else DEMO_VIDEOS_DIR
+    arguments = ["--output-dir", shlex.quote(str(target))]
+    if demo:
+        arguments += ["--demo", shlex.quote(demo)]
+    username, password = _admin_credentials()
+    # The password goes through the environment so it never shows in a command line or a log.
+    environment = {
+        "STYRMIN_DEMO_URL": _demo_url(),
+        "STYRMIN_DEMO_USERNAME": username,
+        "STYRMIN_DEMO_PASSWORD": password,
+    }
+    with context.cd(MAIN_DIRECTORY_PATH / "backend"):
+        result = context.run(f"python -m tests.e2e.demos {' '.join(arguments)}", env=environment, pty=True, warn=True)
+    if result is not None and result.exited != 0:
+        raise SystemExit(result.exited)
 
 
 def _admin_credentials() -> tuple[str, str]:
