@@ -150,7 +150,8 @@ class CloneDeploymentResult(BaseModel):
     deployment_name: str
     outcome: EnvironmentCloneDeploymentOutcome
     reason: str | None = None
-    #: The deployment created in the cloned environment; null unless ``CLONED``.
+    #: The deployment created in the cloned environment; null when the clone
+    #: created no counterpart deployment for this source deployment.
     counterpart_deployment_id: UUID | None = None
     #: The cross-target restore that carries this deployment's data; null until
     #: one is dispatched.

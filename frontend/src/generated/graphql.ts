@@ -628,7 +628,7 @@ export type EnvironmentCloneDeploymentOutcome =
   | 'PENDING'
   | 'SKIPPED';
 
-/** One source deployment's outcome in the clone. Every source deployment considered appears exactly once (SC-003). ``reason`` is set for SKIPPED and FAILED and is open text — render it, do not switch on it. ``counterpartDeploymentId`` is the deployment created in the cloned environment (null unless CLONED); ``restoreId`` is the cross-target restore carrying the data (null until one is dispatched). An entry whose restore failed reads FAILED, with the restore's error as the reason, and keeps its ``counterpartDeploymentId`` and ``restoreId``. */
+/** One source deployment's outcome in the clone. Every source deployment considered appears exactly once (SC-003). ``reason`` is set for SKIPPED and FAILED and is open text — render it, do not switch on it. ``counterpartDeploymentId`` is the deployment created in the cloned environment (null when the clone created no counterpart deployment for this source deployment); ``restoreId`` is the cross-target restore carrying the data (null until one is dispatched). An entry whose restore failed reads FAILED, with the reason ``the restore failed: <the restore's error>``, or ``the restore failed`` when the restore has no error message, and keeps its ``counterpartDeploymentId`` and ``restoreId``. */
 export type EnvironmentCloneDeploymentResult = {
   __typename?: 'EnvironmentCloneDeploymentResult';
   counterpartDeploymentId?: Maybe<Scalars['UUID']['output']>;
@@ -636,7 +636,7 @@ export type EnvironmentCloneDeploymentResult = {
   deploymentName: Scalars['String']['output'];
   /** What became of the source deployment. An entry whose restore failed reads FAILED. */
   outcome: EnvironmentCloneDeploymentOutcome;
-  /** Why the deployment was skipped or failed, as open text; null otherwise. For an entry whose restore failed, it gives the restore's error. */
+  /** Why the deployment was skipped or failed, as open text; null otherwise. For an entry whose restore failed, it reads ``the restore failed: <the restore's error>``, or ``the restore failed`` when the restore has no error message. */
   reason?: Maybe<Scalars['String']['output']>;
   restoreId?: Maybe<Scalars['UUID']['output']>;
 };

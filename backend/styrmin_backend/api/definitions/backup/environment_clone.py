@@ -126,10 +126,13 @@ class EnvironmentCloneDeploymentOutcome(str, Enum):
         "considered appears exactly once (SC-003). ``reason`` is set for "
         "SKIPPED and FAILED and is open text — render it, do not switch on it. "
         "``counterpartDeploymentId`` is the deployment created in the cloned "
-        "environment (null unless CLONED); ``restoreId`` is the cross-target "
+        "environment (null when the clone created no counterpart deployment "
+        "for this source deployment); ``restoreId`` is the cross-target "
         "restore carrying the data (null until one is dispatched). An entry "
-        "whose restore failed reads FAILED, with the restore's error as the "
-        "reason, and keeps its ``counterpartDeploymentId`` and ``restoreId``."
+        "whose restore failed reads FAILED, with the reason ``the restore "
+        "failed: <the restore's error>``, or ``the restore failed`` when the "
+        "restore has no error message, and keeps its "
+        "``counterpartDeploymentId`` and ``restoreId``."
     )
 )
 class EnvironmentCloneDeploymentResult:
@@ -144,8 +147,9 @@ class EnvironmentCloneDeploymentResult:
     reason: str | None = strawberry.field(
         description=(
             "Why the deployment was skipped or failed, as open text; null "
-            "otherwise. For an entry whose restore failed, it gives the "
-            "restore's error."
+            "otherwise. For an entry whose restore failed, it reads ``the "
+            "restore failed: <the restore's error>``, or ``the restore "
+            "failed`` when the restore has no error message."
         )
     )
     counterpart_deployment_id: UUID | None

@@ -336,7 +336,7 @@ Results are passed between workers via **Prefect Variables** (a cross-worker com
 **Restore:**
 
 1. `execute_restore_workflow` (INTERNAL) — marks restore IN_PROGRESS, builds Velero CRD, creates an action token, dispatches to USER flow with the token and `STYRMIN_RESTORE_ID`, transitions `deployment.status` between `RESTORING` and `RUNNING` / `FAILED` based on the result.
-2. `execute_velero_restore_flow` (USER) — deletes target namespace first, creates Velero Restore CRD, polls completion, then runs the post-velero recovery (see [Restore Lifecycle](#restore-lifecycle) below), records the three restore steps, stores result in Prefect Variable.
+2. `execute_velero_restore_flow` (USER) — deletes target namespace first, creates Velero Restore CRD, polls completion, then runs the post-velero recovery (see [Restore Lifecycle](#restore-lifecycle) below), records the restore steps (three, and a cross-target restore can record a fourth, `resource:service-aliases`; see [Backup and restore steps](#backup-and-restore-steps)), stores result in Prefect Variable.
 
 **Cross-target restore.** `execute_restore_workflow` takes an optional `source_deployment_id`: the deployment the backup was taken from. When it is omitted or equals `deployment_id`, the restore is in place, as before. When it differs (an environment clone restoring into a counterpart):
 
@@ -345,7 +345,7 @@ Results are passed between workers via **Prefect Variables** (a cross-worker com
 - It passes `restored_crd_name` and `counterpart_crd_body` to `execute_velero_restore_flow`. That flow then runs `reapply_with_counterpart_identity` instead of `reapply_and_finalize`, and on a failure marks both the restored CR and the counterpart CR failed.
 - It also passes `counterpart_context`, the context of the counterpart's active instance. After the recovery succeeds, the USER flow runs the alias step with it, and a failed alias write fails the restore with "Service alias step failed: <error>" ([#530](https://github.com/opsmill/styrmin/issues/530); see [Aliases of a cross-target restore](orchestration-flows.md#aliases-of-a-cross-target-restore)).
 
-See `workflows/templates/backup.py:242-273`, `:376-425`, `:761-800` and `:802-935`, and [Cross-target restore](#cross-target-restore).
+See `workflows/templates/backup.py:254-298` (the parameters of `execute_velero_restore_flow`), `:392-453` (the recovery and the alias step in `execute_velero_restore_flow`), `:793-836` (`_build_counterpart_crd_body`) and `:840-980` (`execute_restore_workflow`, up to the dispatch of the USER flow), and [Cross-target restore](#cross-target-restore).
 
 <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 
@@ -364,7 +364,7 @@ Backups and restores record steps, like tasks, so users can view each stage and 
 | `restore:namespace` | Delete the namespace | Around the namespace deletion and the wait for it to disappear; fails with "Namespace <name> was not deleted within 600s" or the Kubernetes error. |
 | `restore:velero` | Run the Velero restore | Started before the Velero `Restore` is created. Succeeds on phase `Completed`. Fails when creating or polling raises, and on any other final phase with `failure_message("restore", status)`: "Velero restore failed validation: <validationErrors joined by "; ">", else Velero's `failureReason`, else "Velero restore phase: <phase> (<n> errors)". |
 | `restore:recovery` | Run the recovery | Only after a `Completed` Velero restore, around `mark_restoring` and `reapply_and_finalize` (or `reapply_with_counterpart_identity`). Fails with "Restore reapply failed: <error>". |
-| `resource:service-aliases` | Create and delete service aliases | Cross-target restore only, after `restore:recovery` succeeded, when there are aliases to write or delete (`apply_service_aliases_step`). A failure fails the restore with "Service alias step failed: <error>". |
+| `resource:service-aliases` | Create and delete service aliases | Cross-target restore only, after `restore:recovery` succeeded, when there are aliases to write or delete (`apply_service_aliases_step`). When the read of the environment's services or of the stale aliases fails before then, the step is recorded as failed with that error. A failure, of the read or of the write, fails the restore with "Service alias step failed: <error>". |
 
 A step is created when it starts, so a restore that fails while deleting the namespace has only `restore:namespace`.
 
@@ -1694,7 +1694,7 @@ Backups and restores track status at the component level. The overall status is 
   - sets `labelSelector` to `CROSS_TARGET_LABEL_SELECTOR`, which leaves out the service aliases (`styrmin.io/service-alias` `NotIn` `["true"]`), because they point to the source's namespaces ([#530](https://github.com/opsmill/styrmin/issues/530));
   - labels the Restore with `styrmin.io/instance` set to the counterpart's instance (`target_instance_id`) and `styrmin.io/source-instance` set to the source's instance.
 
-  Every restore sets `restore_pvs=False` (`builders/backup.py:58-106`). Restored data therefore comes from the file-system (kopia) pod volume restore, and the `resourceModifier` rule that removes `spec.volumeName` lets the restored PVCs be provisioned again in the target namespace. Research D1 of the environment clone records the constraint: if the platform moves to CSI snapshot restores, this setting would restore no volume data and must be changed with the data mover.
+  Every restore sets `restore_pvs=False` (`build_velero_restore`, `builders/backup.py:70-126`). Restored data therefore comes from the file-system (kopia) pod volume restore, and the `resourceModifier` rule that removes `spec.volumeName` lets the restored PVCs be provisioned again in the target namespace. Research D1 of the environment clone records the constraint: if the platform moves to CSI snapshot restores, this setting would restore no volume data and must be changed with the data mover.
 
 <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 

@@ -140,9 +140,11 @@ each restored alias kept its `spec.externalName`, which names a namespace of the
 environment. So an application in the clone that called a peer by short service name
 reached the source's deployment. Now the cross-target Velero `Restore` carries a
 `spec.labelSelector` that matches every object except the Services labelled
-`styrmin.io/service-alias=true` (`CROSS_TARGET_LABEL_SELECTOR`). Velero 1.18.1 checks the
-selector only on the items it reads from the backup, so the namespace, the pods, their
-volumes and the other Services are restored as before (research R-001 of spec 030).
+`styrmin.io/service-alias=true` (`CROSS_TARGET_LABEL_SELECTOR`). The pods, the other
+Services and the other objects of the backup carry no `styrmin.io/service-alias` label, and
+the `NotIn` expression matches an object without that label, so Velero 1.18.1 restores them
+as before. It creates the namespace and restores the volumes of each restored pod without
+checking the selector (research R-001 of spec 030).
 After the recovery succeeds, the restore runs the alias step of the create, update and
 upgrade flows with the counterpart's context. That step reads the new environment's
 services from the server when it runs, so it writes no alias to a source namespace and
