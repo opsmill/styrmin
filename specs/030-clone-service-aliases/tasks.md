@@ -32,7 +32,7 @@ description: "Tasks for 030: a clone writes its own service aliases and restores
 
 **Purpose**: a green baseline before any change.
 
-- [ ] T001 Run `uv sync`, then `uv run pytest backend/tests/unit/agent/test_service_aliases.py backend/tests/unit/agent/test_backup_builders.py backend/tests/unit/workflows/test_restore_steps.py backend/tests/unit/agent/tasks/test_remediation_flow_steps.py backend/tests/unit/services/backup/test_environment_clone_status.py backend/tests/unit/test_restore_recovery_cross_target.py backend/tests/functional/graphql/test_environment_clone.py -q`, and note the result as the baseline (no file change)
+- [X] T001 Run `uv sync`, then `uv run pytest backend/tests/unit/agent/test_service_aliases.py backend/tests/unit/agent/test_backup_builders.py backend/tests/unit/workflows/test_restore_steps.py backend/tests/unit/agent/tasks/test_remediation_flow_steps.py backend/tests/unit/services/backup/test_environment_clone_status.py backend/tests/unit/test_restore_recovery_cross_target.py backend/tests/functional/graphql/test_environment_clone.py -q`, and note the result as the baseline (no file change)
 
 ---
 
