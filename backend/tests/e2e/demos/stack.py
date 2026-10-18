@@ -35,15 +35,33 @@ def namespace_name(deployment_id: object) -> str:
     return f"styrmin-{deployment_id}"
 
 
-async def connect(api_url: str, username: str, password: str) -> StyrminClient:
+async def connect(
+    api_url: str, username: str, password: str, *, timeout: float = 60.0
+) -> StyrminClient:
     """Return a client logged in to the Styrmin server at ``api_url`` (without ``/graphql``)."""
-    client = StyrminClient(server_address=api_url, timeout=60.0)
+    client = StyrminClient(server_address=api_url, timeout=timeout)
     try:
         await client.auth.login(username, password)
     except BaseException:
         await client.close()
         raise
     return client
+
+
+async def existing_environments(
+    client: StyrminClient, names: Sequence[str]
+) -> list[str]:
+    """Return the environments of ``names`` that exist on the ``local`` cluster, in the given order."""
+    found: list[str] = []
+    for name in names:
+        try:
+            await client.environments.get(
+                environment_name=name, cluster_name=CLUSTER_NAME
+            )
+        except ResourceNotFoundError:
+            continue
+        found.append(name)
+    return found
 
 
 async def delete_environments(

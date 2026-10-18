@@ -1,0 +1,7 @@
+---
+# The Infrahub versions the demos deploy (FR-006). Someone updates this file by hand.
+# Demo 1 deploys `previous` and upgrades it to `latest`; the other demos deploy `latest`.
+# A new Infrahub release may need a newer chart in the `infrahub` driver (and in `infrahub-enterprise`):
+# `spec.helm.main.version` in driver/examples/<driver>/driver.styrmin.yml.
+previous: "1.10.11"
+latest: "1.11.7"

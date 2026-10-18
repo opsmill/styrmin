@@ -17,6 +17,7 @@ from tests.e2e.demos.stack import (
     create_environment,
     delete_environments,
     deploy,
+    existing_environments,
     load_enterprise_driver,
     service_url,
 )
@@ -225,6 +226,21 @@ async def test_delete_environments_deletes_existing_ones_in_order_then_waits_for
     assert waited == [
         (["styrmin-c1", "styrmin-c2", "styrmin-s1"], 600.0, "vcluster-docker_styrmin")
     ]
+
+
+async def test_existing_environments_keeps_the_given_order_and_skips_missing_ones() -> (
+    None
+):
+    calls: list[tuple] = []
+    client = _client(
+        calls,
+        environments={"network-lab": "env-source", "network-lab-clone": "env-clone"},
+    )
+
+    assert await existing_environments(
+        client, ["network-lab-clone", "never-created", "network-lab"]
+    ) == ["network-lab-clone", "network-lab"]
+    assert ("get", "never-created", "local") in calls
 
 
 async def test_wait_for_namespaces_gone_returns_once_each_namespace_is_gone(
