@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import copy
+from typing import Any
+
+from styrmin_backend.agent.service.kubernetes.service_alias_rules import (
+    SERVICE_ALIAS_LABEL,
+)
 from styrmin_backend.agent.service.kubernetes.velero.resources import (
     VeleroBackup,
     VeleroBackupHook,
@@ -15,6 +21,14 @@ VELERO_RESTORE_PVC_PATCH_CONFIGMAP = "velero-restore-pvc-patch"
 # at once from the source's release storage and prune the source's objects.
 # Recovery re-renders it after retargeting that storage.
 CROSS_TARGET_EXCLUDED_RESOURCES = ["helmreleases.helm.toolkit.fluxcd.io"]
+
+# Left out of a cross-target restore: the aliases point to the source's namespaces,
+# and the restore writes the new environment's aliases after its recovery (#530).
+CROSS_TARGET_LABEL_SELECTOR: dict[str, Any] = {
+    "matchExpressions": [
+        {"key": SERVICE_ALIAS_LABEL, "operator": "NotIn", "values": ["true"]}
+    ]
+}
 
 # Left out of every backup and restore: Cilium writes a CiliumEndpoint for each pod
 # when the pod starts. A restored copy still holds the source pod's addresses, and the
@@ -78,13 +92,16 @@ def build_velero_restore(
     Every restore leaves out ``ALWAYS_EXCLUDED_RESOURCES``, which also covers
     backups taken before backups left them out. A cross-target restore also
     leaves out the HelmRelease (``CROSS_TARGET_EXCLUDED_RESOURCES``); recovery
-    re-renders it.
+    re-renders it. It also leaves out the service aliases
+    (``CROSS_TARGET_LABEL_SELECTOR``), which point to the source's namespaces.
     """
     namespace_mapping = None
     excluded_resources = list(ALWAYS_EXCLUDED_RESOURCES)
+    label_selector = None
     if source_namespace != target_namespace:
         namespace_mapping = {source_namespace: target_namespace}
         excluded_resources += CROSS_TARGET_EXCLUDED_RESOURCES
+        label_selector = copy.deepcopy(CROSS_TARGET_LABEL_SELECTOR)
 
     labels = {
         "styrmin.io/instance": target_instance_id or instance_id,
@@ -105,4 +122,5 @@ def build_velero_restore(
         preserve_node_ports=False,
         resource_modifier_ref=VELERO_RESTORE_PVC_PATCH_CONFIGMAP,
         excluded_resources=excluded_resources,
+        label_selector=label_selector,
     )
