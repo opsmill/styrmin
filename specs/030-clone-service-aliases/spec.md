@@ -45,6 +45,11 @@ These answers were not in the PRD. They are flagged for the maintainer to confir
 - Q: The PRD asks that the clone report the counterpart's entry as failed, with the reason given, when its restore fails (user story 4, P3, FR-004). Today a counterpart whose restore failed keeps the entry outcome `cloned`: the clone's status counts the failed restore, but the entry does not show it ([`services/backup/clone.py`](../../backend/styrmin_backend/services/backup/clone.py), `derive_environment_clone_status`; [`environment_clone.py`](../../backend/styrmin_backend/api/definitions/backup/environment_clone.py)). Does the fix change this? → A: Yes. The clone record reports the entry of a counterpart whose restore failed as `failed`, with the restore's error as the reason. This applies to any failed counterpart restore, because an alias write failure is reported as a restore failure. It changes what the existing fields return, not the GraphQL schema.
 - Q: `develop` now has a "Service alias" entry in `CONTEXT.md` (#503). The PRD says the fix adds one. → A: The fix extends that entry with what a clone does with aliases.
 
+### Session 2026-10-18 (critique, [critique-20261018-1.md](critiques/critique-20261018-1.md))
+
+- Q: Does the counterpart stay `FAILED` after its alias step failed? → A: No. The plan first marked the counterpart's StyrminDeployment failed. The operator's rollout of the recovered spec can run after that write and replace the failed status, and the status reporter then reports `RUNNING` (critique E1). The restore still sets the counterpart to `FAILED`, as any failed restore does, and its status then follows its workloads. The signals that last are the restore, `FAILED` with the error and the failed step, and the clone, `PARTIAL` with the entry `failed` and the reason (FR-004, FR-007).
+- Q: Does FR-007 apply to a restore that failed for a cause other than the alias step? → A: Yes, for one rule across causes. It stays flagged for the maintainer (critique P1).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Clone every deployment, and each counterpart reaches the other counterparts (Priority: P1)
@@ -88,7 +93,7 @@ The alias write of one counterpart fails. The admin views the failure on the clo
 
 **Acceptance Scenarios**:
 
-1. **Given** a clone in progress, **When** the Kubernetes API refuses the alias write of counterpart A, **Then** A's restore fails, its step "Create and delete service aliases" records the error, and A's deployment is `FAILED`.
+1. **Given** a clone in progress, **When** the Kubernetes API refuses the alias write of counterpart A, **Then** A's restore fails with the error, and its step "Create and delete service aliases" records the error.
 2. **Given** that failure and another counterpart whose restore completed, **When** the admin views the clone, **Then** the clone reports `PARTIAL`, A's entry is `failed`, and its reason gives the restore's error.
 3. **Given** that failure, **When** the admin lists the aliases in A's counterpart namespace, **Then** no alias points to a namespace of the source environment.
 4. **Given** a counterpart whose alias step failed, **When** the admin updates or redeploys it, **Then** its flow writes its aliases and the aliases of its services in the other counterparts' namespaces.
@@ -116,6 +121,7 @@ An admin restores a deployment or an environment. Each restored namespace keeps 
 - A peer's alias step writes into a counterpart's namespace while Velero restores it: the restore no longer writes aliases, so it does not replace the alias that the peer wrote.
 - A clone of a clone: the same rule applies. The source's aliases point to its own environment and are not restored.
 - Internal deployments of the new environment, such as its ingress controller: they get aliases like any deployment of the environment that has recorded services.
+- A counterpart whose alias step failed: its workloads run, so its status follows its StyrminDeployment and can read `RUNNING` a few seconds after the restore failed. The failed restore and the clone entry give the failure, and the user documentation says so.
 - The server's list of the environment's services cannot be read during the alias step: the step uses the services that the counterpart's context lists, as the create, update and upgrade flows do since #503 (ADR-078). That list holds the counterparts created before this one.
 
 ## Requirements *(mandatory)*
@@ -125,7 +131,7 @@ An admin restores a deployment or an environment. Each restored namespace keeps 
 - **FR-001**: System MUST never write into a counterpart's namespace an alias that points to a namespace of the source environment, including during the restore. Until the correct alias exists, a call by short service name fails.
 - **FR-002**: System MUST, after a cross-target restore's recovery step, write into the counterpart's namespace one alias for each service of every other deployment of the new environment that has recorded services, whatever that deployment's state, and into those deployments' namespaces one alias for each of the counterpart's services. The rule of #503 that skips a namespace that is missing or terminating, or whose deployment is being deleted, still applies (ADR-077).
 - **FR-003**: System MUST NOT write an alias for a source deployment that has no counterpart (not selected, skipped, or never created).
-- **FR-004**: System MUST, when the alias write fails, fail the counterpart's restore, record the error on the step "Create and delete service aliases", set the counterpart to `FAILED`, and report the clone as `PARTIAL`, or `FAILED` when no other counterpart succeeded, with the counterpart's entry set to `failed` and the restore's error as the reason.
+- **FR-004**: System MUST, when the alias write fails, fail the counterpart's restore with the error, record the error on the step "Create and delete service aliases", and report the clone as `PARTIAL`, or `FAILED` when no other counterpart succeeded, with the counterpart's entry set to `failed` and the restore's error as the reason. The restore sets the counterpart to `FAILED`, as any failed restore does. Its status then follows its StyrminDeployment, whose workloads run, so it can read `RUNNING` again.
 - **FR-005**: Users MUST be able to repair a counterpart whose alias step failed by updating or redeploying it. A failed restore sets the deployment to `FAILED` ([`workflows/templates/backup.py`](../../backend/styrmin_backend/workflows/templates/backup.py), `_set_deployment_status_failed`). Whether every update and redeploy path accepts a `FAILED` counterpart is not verified yet; the planning step checks it.
 - **FR-006**: System MUST leave an in-place restore and an environment restore writing back the same aliases as today, with no step "Create and delete service aliases".
 - **FR-007**: The clone record MUST report the entry of a counterpart whose restore failed as `failed`, with the restore's error as the reason, for any cause of the restore failure. The clone's status does not change: it already counts such a restore as a failure.
@@ -167,9 +173,10 @@ All entities exist already; no new entity is needed.
 The change ships with:
 
 - a paragraph in [`backups-and-restores.md`, "Choosing which deployments come along"](../../docs/docs/concepts-and-architecture/backups-and-restores.md): an application in the clone reaches the clone's other deployments by short service name, and a deployment that was not cloned cannot be reached by short service name from the clone;
+- in the same page, "Watching a clone, and what its status means": a deployment whose restore failed is reported `failed` with the restore's error; a counterpart whose alias step failed can read `Running`, because its workloads run; the admin repairs it with a change to its configuration or parameters, or an upgrade;
 - a dated amendment to ADR-056 that records the alias decision and its reason;
 - the extension of the `CONTEXT.md` entry "Service alias";
-- the changelog fragment `changelog/530.fixed.md`.
+- the changelog fragment `changelog/530.fixed.md`, which names both changes: the clone's aliases, and the clone entry of a failed restore.
 
 ## Governance Gates
 

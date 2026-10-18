@@ -48,7 +48,7 @@ Signature unchanged. For a cross-target restore, it loads the counterpart's acti
 New parameter `counterpart_context`. After "Run the recovery" succeeds and when `counterpart_context` is not `None`:
 
 - calls `apply_service_aliases_step(reporter, counterpart_context)`;
-- on an exception: calls `mark_failed(api_client, target_namespace, <counterpart CR name>, error)` and stores `recovery = {"recovered": False, "error": "Service alias step failed: <error>"}` in the result variable.
+- on an exception: stores `recovery = {"recovered": False, "error": "Service alias step failed: <error>"}` in the result variable. It does not call `mark_failed` (research R-004).
 
 The result variable keeps its shape: `{"status": {...}, "recovery": {"recovered": bool, "error": str | None}}`.
 
@@ -56,13 +56,17 @@ The result variable keeps its shape: `{"status": {...}, "recovery": {"recovered"
 
 ### `CLONE_REASON_RESTORE_FAILED = "the restore failed"` (new constant)
 
+### `failed_restore(restore_id: UUID | None, restores: Mapping[UUID, Restore]) -> Restore | None` (new, pure)
+
+The row of `restore_id` when it is in `restores` and its status is `RestoreStatus.FAILED`; otherwise `None`.
+
 ### `resolve_deployment_result(result: CloneDeploymentResult, restores: Mapping[UUID, Restore]) -> CloneDeploymentResult` (new, pure)
 
-Returns `result` unchanged unless `result.outcome` is `cloned`, `result.restore_id` is in `restores` and that row's status is `RestoreStatus.FAILED`. Then it returns a copy with `outcome=failed` and `reason=f"{CLONE_REASON_RESTORE_FAILED}: {error_message}"`, or `CLONE_REASON_RESTORE_FAILED` when the row has no error message.
+Returns `result` unchanged unless `result.outcome` is `cloned` and `failed_restore(result.restore_id, restores)` returns a row. Then it returns a copy with `outcome=failed` and `reason=f"{CLONE_REASON_RESTORE_FAILED}: {error_message}"`, or `CLONE_REASON_RESTORE_FAILED` when the row has no error message.
 
 ### `derive_environment_clone_status(...)` (changed internally)
 
-Counts failures through `resolve_deployment_result`. The rules and the result for every input stay the same.
+Calls `failed_restore` where it now tests the row inline. The rules, the lenient reading of entries, and the result for every input stay the same.
 
 ## GraphQL type (`api/definitions/backup/environment_clone.py`)
 
