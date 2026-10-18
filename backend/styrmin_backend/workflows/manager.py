@@ -78,7 +78,8 @@ class PrefectManager:
         hook: HookKind,
         mode: Literal["pre", "core", "post"],
         fingerprint: str | None = None,
-        driver_directory: str | None = None,
+        *,
+        driver_directory: str | None,
     ) -> None:
         """Register a user action in the Prefect catalogue.
 
@@ -100,11 +101,12 @@ class PrefectManager:
         Spec 028 — when ``driver_directory`` is set (the driver version was
         loaded from a driver directory of its repository), the deployment
         gets the tag ``directory/<driver_directory>`` and the name ends with
-        the 7-character digest of the driver directory
+        the 12-character digest of the driver directory
         (``<workflow> (<application>@<fingerprint> <digest>)``), so two
         driver versions loaded from one commit keep separate deployments.
         Prefect refuses ``/`` in deployment names, hence the digest. A load
         from the repository root (``None``) keeps the name and tags above.
+        ``driver_directory`` has no default, so every caller states it.
         """
         # Add tags to the workflow
         workflow.tags.append(f"application/{application}")
@@ -133,7 +135,8 @@ class PrefectManager:
         hook: HookKind,
         mode: Literal["pre", "core", "post"],
         fingerprint: str | None = None,
-        driver_directory: str | None = None,
+        *,
+        driver_directory: str | None,
     ) -> UUID | None:
         """Get the workflow ID for a specific user action in the Prefect deployments.
 
@@ -145,7 +148,7 @@ class PrefectManager:
         deployment.
 
         Spec 028 — ``driver_directory`` must match the value used at
-        registration time. When set, the lookup also requires the tag
+        registration time, and has no default. When set, the lookup also requires the tag
         ``directory/<driver_directory>``. When ``None`` (a load from the
         repository root, or a local driver), deployments with any
         ``directory/`` tag are dropped, so a root driver version never runs

@@ -140,6 +140,7 @@ async def test_lookup_prefers_the_newest_matching_deployment(
         hook=HookKind.SETUP,
         mode="post",
         fingerprint="555d155",
+        driver_directory=None,
     )
 
     assert found == newest.id
@@ -164,6 +165,7 @@ async def test_lookup_returns_none_when_nothing_matches(
             hook=HookKind.SETUP,
             mode="post",
             fingerprint="555d155",
+            driver_directory=None,
         )
         is None
     )
@@ -185,7 +187,7 @@ async def test_registration_with_driver_directory_is_tagged_and_named(
         f"User Action: post_setup (lab-driver-a@555d155 "
         f"{driver_directory_digest('drivers/a')})"
     )
-    assert kwargs["name"].endswith("@555d155 99a4d0e)")
+    assert kwargs["name"].endswith("@555d155 99a4d0ee170e)")
 
 
 async def test_registration_with_driver_directory_and_no_fingerprint(
@@ -194,7 +196,7 @@ async def test_registration_with_driver_directory_and_no_fingerprint(
     await _register(manager, fingerprint=None, driver_directory="drivers/a")
 
     assert client.create_deployment.await_args.kwargs["name"] == (
-        "User Action: post_setup (lab-driver-a 99a4d0e)"
+        "User Action: post_setup (lab-driver-a 99a4d0ee170e)"
     )
 
 
@@ -264,6 +266,7 @@ async def test_lookup_without_driver_directory_skips_driver_directory_deployment
         hook=HookKind.SETUP,
         mode="post",
         fingerprint="555d155",
+        driver_directory=None,
     )
 
     assert found == older_root.id
@@ -285,6 +288,7 @@ async def test_lookup_without_driver_directory_returns_none_when_only_tagged_mat
             hook=HookKind.SETUP,
             mode="post",
             fingerprint="555d155",
+            driver_directory=None,
         )
         is None
     )
