@@ -598,6 +598,7 @@ For debugging, prefer `-v -s --pdb` (see `dev/CLAUDE.md`).
 | [tests/e2e/drivers/api_driver.py](backend/tests/e2e/drivers/api_driver.py) | `ApiScenarioDriver` (SDK driver) |
 | [tests/e2e/drivers/ui_driver.py](backend/tests/e2e/drivers/ui_driver.py) | `UiScenarioDriver` (Playwright driver) |
 | [tests/e2e/pages/](backend/tests/e2e/pages/) | Playwright page objects (deploy form, deployment detail, etc.) |
+| [tests/e2e/demos/](backend/tests/e2e/demos/) | Recorded feature demos that reuse the page objects (`uv run invoke record`) |
 | [tests/e2e/fixtures/](backend/tests/e2e/fixtures/) | Chart-server, git-server, test drivers, and Helm values |
 | [dev/local/garage.yaml](dev/local/garage.yaml) | Single-node Garage (S3 store for Velero); shared with the local demo |
 | [tests/e2e/test_deploy_app.py](backend/tests/e2e/test_deploy_app.py) | Canonical end-to-end deploy test |
@@ -646,6 +647,14 @@ Page objects use the two helpers in `tests/e2e/pages/_dom.py`:
 
 - `wait_for_dialog_open(dialog)` waits until the dialog is visible and holds focus. Call it after opening a dialog and before its first `fill()`.
 - `submit_dialog(dialog, button="Create")` clicks the submit button and waits for the dialog to close. When the dialog stays open, it raises `ScenarioTimeout` with the dialog's text (submit and field errors included), the inputs that fail native validation, and the empty inputs.
+
+## Page objects shared with the recorded demos
+
+The recorded demos in `backend/tests/e2e/demos/` (`uv run invoke record`, see [Recording the demos](../../guides/local-demo.md#recording-the-demos)) perform every Styrmin action through `UiScenarioDriver` and the page objects in `tests/e2e/pages/`, and contain no selector for a Styrmin page. A fix to a page object therefore repairs the E2E tests and the demos in one change (spec 029, SC-004). CI does not run the demos, so a page-object change that breaks a demo shows only when someone records that demo. The page objects have this setting, helper and method for the demos:
+
+- Every page-object class and `UiScenarioDriver` take a keyword-only `keystroke_delay_ms: int | None = None`, and a page object or driver that creates another page object passes its value on. The E2E suite keeps the default `None`: the two places in `tests/e2e/conftest.py` that create `UiScenarioDriver` do not pass the argument.
+- Page objects enter text with `enter_text(locator, text, *, keystroke_delay_ms)` from `tests/e2e/pages/_dom.py`, not with `fill()`. With `None`, it calls `locator.fill(text)`, as before. With a number, it clears the field with `fill("")` and types the text with `press_sequentially(text, delay=keystroke_delay_ms)`, so the video shows the text appear one key at a time. The demos pass 45 ms.
+- `DeploymentDetailPage.wait_for_new_task(task_type, *, known_task_ids, timeout)` waits until the Timeline tab lists a task of type `task_type` (a `TaskType` value such as `update_instance` or `upgrade_instance`) whose id is not in `known_task_ids` and whose result is `succeeded`, and returns its id. It raises `ScenarioActionError` when that task fails or is superseded, and `ScenarioTimeout` after `timeout` seconds. A caller reads `known_task_ids` with `read_task_ids()` before it submits the change. `wait_for_deployment_running` is not enough for this, because the deployment header can still show Running before the task starts.
 
 <!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
 
