@@ -577,6 +577,21 @@ def _prepare_driver(
         yaml.dump(driver_config, f, default_flow_style=False)
 
 
+COLLECTION_HELPER_MODULE = "collection_helper"
+
+
+def _import_sibling_module(driver_dir: Path) -> None:
+    """Make ``actions.py`` import a module next to it: every action then fails to
+    load unless it runs from its driver directory (ADR-076)."""
+    (driver_dir / f"{COLLECTION_HELPER_MODULE}.py").write_text(
+        '"""Module next to actions.py in the driver-collection repository."""\n'
+    )
+    actions = driver_dir / "actions.py"
+    actions.write_text(
+        f"import {COLLECTION_HELPER_MODULE}  # noqa: F401\n" + actions.read_text()
+    )
+
+
 @pytest.fixture(scope="session")
 async def git_server(
     vcluster: dict,
@@ -663,12 +678,14 @@ async def git_server(
         _prepare_driver(dest, name, info, chart_server)
         repo_dirs[name] = str(dest)
 
-    # One repository holding two drivers, each in its own driver directory (spec 028).
+    # One repository holding two drivers with actions, each in its own driver
+    # directory (spec 028).
     collection = tmp_repo / "driver-collection"
-    for name in ("simple-app", "db-test"):
+    for name in ("simple-app", "failing-actions"):
         _prepare_driver(
             collection / "drivers" / name, name, drivers[name], chart_server
         )
+    _import_sibling_module(collection / "drivers" / "simple-app")
     repo_dirs["driver-collection"] = str(collection)
 
     for repo_dir in repo_dirs.values():
