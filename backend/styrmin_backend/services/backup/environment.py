@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
+from functools import partial
 from typing import NamedTuple, Sequence
 from uuid import UUID, uuid4
 
@@ -25,6 +26,7 @@ from fast_depends import Depends, inject
 from loguru import logger
 from pydantic import BaseModel
 
+from styrmin_backend.context.models.config import EnvironmentConfig
 from styrmin_backend.db.models import (
     Backup,
     BackupStatus,
@@ -44,7 +46,10 @@ from styrmin_backend.services.backup.service import (
     settle_undispatched_restore,
 )
 from styrmin_backend.services.capabilities import compute_environment_capabilities
-from styrmin_backend.services.deployment import redeploy_for_environment_update
+from styrmin_backend.services.cluster_config_fanout import (
+    FanOutResult,
+    fan_out_environment_config,
+)
 from styrmin_backend.services.exceptions import (
     BackupNotFoundError,
     EnvironmentBackupNotFoundError,
@@ -876,6 +881,7 @@ class _PendingRestoreDispatch(NamedTuple):
 async def restore_environment_backup(
     environment_backup_id: UUID,
     uow: UnitOfWork,
+    acting_user_id: UUID,
     prefect_manager: PrefectManager = Depends(get_manager),
 ) -> EnvironmentRestore:
     """Revert an environment to a snapshot and restore its constituents in place.
@@ -890,10 +896,14 @@ async def restore_environment_backup(
        capabilities, create one constituent ``Restore`` row per usable
        constituent (recording any late skip discovered while doing so), and
        **commit all of it once, before any dispatch** (ADR-0012);
-    4. fan the reverted config out to the eligible deployments that are
-       *not* receiving a constituent restore — restored deployments come
-       back with their backup-time state, so redeploying them concurrently
-       would race the Velero restore on the same namespace;
+    4. apply the reverted config with the fan-out of ``update_environment``
+       (:func:`_fan_out_restored_config`, #467): it creates, redeploys or
+       removes the environment's dedicated ingress controller, and the
+       applications that move onto the controller wait until it is
+       ``RUNNING``. The deployments receiving a constituent restore are
+       ``RESTORING`` since step 3, so the fan-out skips them: they come back
+       with their backup-time state, and a redeploy would race the Velero
+       restore on the same namespace;
     5. dispatch one ``EXECUTE_RESTORE`` per created constituent restore.
 
     Steps 2, 3 and the row creation of step 5 share **one** transaction for the
@@ -909,12 +919,17 @@ async def restore_environment_backup(
     as an idempotent no-op, which would silently make a captured ``None``
     config unrestorable (critique E3).
 
-    No deployment is ever created or deleted (spec FR-008) — topology drift is
-    reported as skips, never repaired.
+    No application deployment is ever created or deleted (spec FR-008) —
+    topology drift is reported as skips, never repaired. Only the dedicated
+    ingress controller, an internal deployment, is created or removed to match
+    the reverted config.
 
     Args:
         environment_backup_id: The snapshot to restore.
         uow: Unit of work supplying the repositories.
+        acting_user_id: The administrator who restores the snapshot; a
+            dedicated ingress controller that the restore creates is
+            attributed to them.
         prefect_manager: Injected dispatcher for the per-constituent
             ``EXECUTE_RESTORE`` flows.
 
@@ -981,8 +996,6 @@ async def restore_environment_backup(
         # treat as "no change requested".
         environment.config = environment_backup.environment_config
         environment.capabilities = compute_environment_capabilities(environment)
-
-        deployments = await uow.deployments.find_all_by_environment(environment_id)
 
         # Step 5, creation half — one constituent restore per usable
         # constituent, in the same transaction as the revert and the parent row.
@@ -1056,43 +1069,23 @@ async def restore_environment_backup(
         await uow.commit()
         await uow.session.refresh(environment_restore)
 
-    # Every classified-usable constituent, not just the ones that got a row: a
-    # late skip means the deployment began its own restore, so redeploying it
-    # would race that restore for the same reason.
-    restoring_deployment_ids = {
-        constituent.snapshot.deployment_id for constituent in usable
-    }
-
-    # Step 4 — exclusion-aware config fan-out. Deployments receiving a
-    # constituent restore are excluded: their in-cluster state is about to be
-    # replaced wholesale by Velero, and a concurrent redeploy would race it.
-    fanout_dispatched = 0
-    fanout_failed = 0
-    async with uow:
-        for deployment in deployments:
-            if not is_eligible_for_environment_backup(deployment):
-                continue
-            if deployment.id in restoring_deployment_ids:
-                continue
-            try:
-                # A failed redeploy, such as one whose affinity term names a tombstoned deployment,
-                # rolls back only its savepoint: earlier redeploys stay and the session is not expired.
-                async with uow.session.begin_nested():
-                    await redeploy_for_environment_update(deployment, uow)
-            except Exception as exc:  # noqa: BLE001 — per-deployment isolation (ADR-0012)
-                fanout_failed += 1
-                logger.exception(
-                    "env_restore_fanout_dispatch_error environment_id={} "
-                    "environment_restore_id={} deployment_id={} error_code={} path={}",
-                    environment_id,
-                    environment_restore_id,
-                    deployment.id,
-                    getattr(exc, "error_code", None),
-                    getattr(exc, "path", None),
-                )
-                continue
-            fanout_dispatched += 1
-        await uow.commit()
+    # Step 4: the reverted config reaches the deployments and the dedicated
+    # ingress controller as it does on an environment update.
+    fanout = await _fan_out_restored_config(environment_id, uow, acting_user_id)
+    failed_redeploys = fanout.failed_to_start if fanout is not None else []
+    for failed in failed_redeploys:
+        # The fan-out logged the traceback; this line ties the failure to the restore.
+        logger.error(
+            "env_restore_fanout_dispatch_error environment_id={} "
+            "environment_restore_id={} deployment_id={} error_code={} path={}",
+            environment_id,
+            environment_restore_id,
+            failed.deployment_id,
+            getattr(failed.error, "error_code", None),
+            getattr(failed.error, "path", None),
+        )
+    fanout_dispatched = fanout.dispatched if fanout is not None else 0
+    fanout_failed = len(failed_redeploys)
 
     # Step 5, dispatch half — the rows already exist and are committed.
     restored = 0
@@ -1162,7 +1155,8 @@ async def restore_environment_backup(
     logger.info(
         "env_restore_fanout_dispatched environment_id={} environment_backup_id={} "
         "environment_restore_id={} evaluated={} restored={} skipped={} "
-        "config_redeployed={} config_redeploy_failed={} dispatch_failed={}",
+        "config_redeployed={} config_redeploy_failed={} dispatch_failed={} "
+        "config_fanout_failed={} {}",
         environment_id,
         environment_backup_id,
         environment_restore_id,
@@ -1172,6 +1166,8 @@ async def restore_environment_backup(
         fanout_dispatched,
         fanout_failed,
         dispatch_failed + fanout_failed,
+        int(fanout is None),
+        _format_config_fanout(fanout or FanOutResult()),
     )
 
     return refreshed
@@ -1184,6 +1180,55 @@ def _emit_restore_fanout_metric(environment_id: UUID, outcome: str, count: int) 
         environment_id,
         outcome,
         count,
+    )
+
+
+async def _fan_out_restored_config(
+    environment_id: UUID, uow: UnitOfWork, acting_user_id: UUID
+) -> FanOutResult | None:
+    """Apply the reverted config with the fan-out of ``update_environment`` (ADR-066, #467).
+
+    The fan-out runs in a savepoint and commits on its own. Each redeploy runs in
+    a savepoint of its own, so a failed one, such as one whose affinity term
+    names a tombstoned deployment, rolls back only its writes. When the fan-out
+    fails as a whole, for example on a captured config that no longer
+    validates, it is logged and ``None`` is returned, so the constituent
+    restores are still dispatched.
+    """
+    # Deferred: ``services.environments`` imports this module.
+    from styrmin_backend.services.environments import _deployment_already_at_config
+
+    async with uow:
+        environment = await uow.environments.get(environment_id)
+        if environment is None:
+            return None
+        try:
+            async with uow.session.begin_nested():
+                restored = EnvironmentConfig.model_validate(environment.config or {})
+                result = await fan_out_environment_config(
+                    environment,
+                    uow,
+                    acting_user_id,
+                    at_config=partial(
+                        _deployment_already_at_config, new_config=restored
+                    ),
+                )
+        except Exception:  # noqa: BLE001 — the constituent restores must still be dispatched
+            logger.exception(
+                "env_restore_config_fanout_error environment_id={}", environment_id
+            )
+            return None
+        # The redeploys and controller actions are saved but not committed.
+        await uow.commit()
+    return result
+
+
+def _format_config_fanout(result: FanOutResult) -> str:
+    """The fan-out counts that ``config_redeployed`` and ``config_redeploy_failed`` do not give."""
+    return " ".join(
+        f"config_{name}={value}"
+        for name, value in result.counts().items()
+        if name != "dispatched" and not name.startswith("environments")
     )
 
 

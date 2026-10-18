@@ -202,7 +202,7 @@ async def test_create_environment_backup_persists_parent_snapshots_and_links(
 ) -> None:
     """The mutation's capture and constituent links must reach the database."""
     environment = await seed_environment(session)
-    environment.config = {"dns_zone": "staging.example.com"}
+    environment.config = {"fqdn_suffix": "staging.example.com"}
     session.add(environment)
     await session.commit()
     adv = await seed_application_driver_version(
@@ -232,7 +232,7 @@ async def test_create_environment_backup_persists_parent_snapshots_and_links(
     assert persisted is not None
     assert persisted.name == "pre-upgrade"
     assert persisted.environment_id == environment.id
-    assert persisted.environment_config == {"dns_zone": "staging.example.com"}
+    assert persisted.environment_config == {"fqdn_suffix": "staging.example.com"}
     assert persisted.constituent_errors is None
 
     # --- The captured declared state reached the database (FR-002/FR-003)
@@ -660,7 +660,7 @@ async def seed_environment_backup(
 
 @pytest.fixture(name="no_config_fanout")
 def no_config_fanout_fixture(mocker):
-    """Patch the exclusion-aware config fan-out at its call site.
+    """Patch the fan-out's redeploy at its call site.
 
     The fan-out drives the full reconciliation chain
     (``generate_instance_from_deployment`` + ``apply_state``), which needs a
@@ -669,7 +669,7 @@ def no_config_fanout_fixture(mocker):
     reconciler does with it — that is covered by the env-config fan-out tests.
     """
     return mocker.patch(
-        "styrmin_backend.services.backup.environment.redeploy_for_environment_update",
+        "styrmin_backend.services.cluster_config_fanout.redeploy_for_environment_update",
         autospec=True,
     )
 
@@ -683,7 +683,7 @@ async def test_restore_environment_backup_persists_record_links_and_config_rever
 ) -> None:
     """FR-006/SC-005: the revert and the constituent links must reach the DB."""
     environment = await seed_environment(session)
-    environment.config = {"dns_zone": "drifted.example.com"}
+    environment.config = {"fqdn_suffix": "drifted.example.com"}
     session.add(environment)
     await session.commit()
     adv = await seed_application_driver_version(session)
@@ -700,7 +700,7 @@ async def test_restore_environment_backup_persists_record_links_and_config_rever
             (deployment_a, instance_a, BackupStatus.COMPLETED),
             (deployment_b, instance_b, BackupStatus.COMPLETED),
         ],
-        environment_config={"dns_zone": "captured.example.com"},
+        environment_config={"fqdn_suffix": "captured.example.com"},
     )
 
     data = await gql(
@@ -718,7 +718,7 @@ async def test_restore_environment_backup_persists_record_links_and_config_rever
 
     # --- The config revert reached the database (SC-005) ---------------
     await session.refresh(environment)
-    assert environment.config == {"dns_zone": "captured.example.com"}
+    assert environment.config == {"fqdn_suffix": "captured.example.com"}
 
     # --- The constituent FK reached the database -----------------------
     result = await session.exec(
@@ -730,6 +730,8 @@ async def test_restore_environment_backup_persists_record_links_and_config_rever
         f"styrmin-{deployment_b.id}",
     }
     assert all(restore.status == RestoreStatus.PENDING for restore in constituents)
+    # Both deployments are RESTORING when the config fan-out reads them (#467).
+    no_config_fanout.assert_not_awaited()
 
     # --- The response projects the same state --------------------------
     assert payload["status"] == "PENDING"
@@ -882,7 +884,7 @@ async def test_restore_environment_backup_rejects_a_non_restorable_snapshot(
 ) -> None:
     """FR-006: a FAILED snapshot is refused with OPERATION_DENIED."""
     environment = await seed_environment(session)
-    environment.config = {"dns_zone": "drifted.example.com"}
+    environment.config = {"fqdn_suffix": "drifted.example.com"}
     session.add(environment)
     await session.commit()
     adv = await seed_application_driver_version(session)
@@ -893,7 +895,7 @@ async def test_restore_environment_backup_rejects_a_non_restorable_snapshot(
         session,
         environment=environment,
         entries=[(deployment, instance, BackupStatus.FAILED)],
-        environment_config={"dns_zone": "captured.example.com"},
+        environment_config={"fqdn_suffix": "captured.example.com"},
     )
 
     response = await fresh_client.post(
@@ -915,7 +917,7 @@ async def test_restore_environment_backup_rejects_a_non_restorable_snapshot(
     )
     assert list(result.all()) == []
     await session.refresh(environment)
-    assert environment.config == {"dns_zone": "drifted.example.com"}
+    assert environment.config == {"fqdn_suffix": "drifted.example.com"}
 
 
 @pytest.mark.asyncio

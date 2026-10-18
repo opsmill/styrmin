@@ -1051,11 +1051,20 @@ class Mutation:
         ``Environment.config``, which is exactly what ``updateEnvironment``
         does, and granting config mutation by way of a restore to a lower role
         would be a privilege bypass (research.md D7).
+
+        The reverted config creates, redeploys or removes the environment's
+        dedicated ingress controller as ``updateEnvironment`` does; a created
+        controller is attributed to the calling user (#467).
         """
         uow = info.context["uow"]
+        current_user = info.context["current_user"]
+        assert current_user is not None, (
+            "RequiresAuthentication should have rejected this request"
+        )
         environment_restore = await restore_environment_backup_service(
             environment_backup_id=environment_backup_id,
             uow=uow,
+            acting_user_id=current_user.id,
         )
         return EnvironmentRestoreType.from_instance(environment_restore)
 
