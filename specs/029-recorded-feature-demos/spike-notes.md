@@ -128,3 +128,14 @@ The action annotation shows the Playwright locator expression, for example `Clic
 - Calling `client.drivers.load_local_version("/styrmin/drivers/infrahub-enterprise")` again on a stack that has the version returned the same driver version id and raised no error. `stack.load_enterprise_driver` (task T021) does not need to catch an error for an already-loaded version.
 - The `infrahub-enterprise` driver stays loaded on the demo stack after the spike. Only the `local` environment is left, and no `styrmin-<deployment id>` namespace remains.
 - The SDK methods that task T009 names exist with these names: `client.deployments.update_version`, `client.backup_storage_locations.list` and `assign`, `client.environment_backups.create`, `wait_for_backup`, `restore` and `wait_for_restore`.
+
+## Semaphore reads the devices from Infrahub (tasks T023 to T026)
+
+Checked on 2026-10-18 in the environment `spike-chunk7` on the demo stack, which was deleted afterwards. Semaphore was deployed with the parameter `docker_image=styrmin-demo/semaphore` and the driver's default version 2.16.47.
+
+- The vCluster ran the image `styrmin-demo/semaphore:v2.16.47` that `docker build` had put on the host, with no other step. Task T030's `build_semaphore_image` only needs to run `docker build`.
+- A deployment gets an alias Service only for the services of the deployments that exist when it is deployed. When `infrahub-enterprise` and `semaphore` were deployed at the same time, neither namespace had an alias Service, so `http://infrahub:8000` did not resolve in Semaphore. When Semaphore was deployed after Infrahub was running, its namespace had the aliases `infrahub` and `task-manager`. So the setups of demos 3 and 4 (tasks T037 and T039) deploy Infrahub, wait until it runs, and then deploy Semaphore. Not checked: whether a later change to the Infrahub deployment adds the missing alias.
+- With the alias in place, the template "List network devices" printed `Devices in the inventory: 2` and `Device names: sw1, sw2` 1.5 s after the run started. Ansible also prints the warning `Found variable using reserved name: name`, because the inventory adds the attribute `name` as a host variable.
+- Semaphore marks a task "Success" when the inventory cannot reach Infrahub: the play prints "skipping: no hosts matched". A demo checks the device count in the output, not only the task status.
+- The Infrahub device list can show its footer ("2 counts") a moment before it shows the rows, so `InfrahubDevicesPage.goto` waits until the number of rows equals the count.
+- Times: deploying `infrahub-enterprise` 91 s, then `semaphore` 91 s; `semaphore_setup.configure` under 1 s; deleting the environment 51 s.
