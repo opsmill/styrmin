@@ -296,3 +296,63 @@ class TestBuildVeleroRestore:
         assert restore.render()["spec"]["excludedResources"] == [
             "ciliumendpoints.cilium.io"
         ]
+
+    def test_cross_target_restore_leaves_out_the_service_aliases(self) -> None:
+        """The source's aliases point to the source's namespaces (#530)."""
+        restore = build_velero_restore(
+            name="test-restore",
+            velero_namespace="velero",
+            backup_name="test-backup",
+            source_namespace="styrmin-source",
+            target_namespace="styrmin-counterpart",
+            instance_id="source-inst",
+            driver_name="mydriver",
+        )
+        assert restore.render()["spec"]["labelSelector"] == {
+            "matchExpressions": [
+                {
+                    "key": "styrmin.io/service-alias",
+                    "operator": "NotIn",
+                    "values": ["true"],
+                }
+            ]
+        }
+
+    def test_in_place_restore_has_no_label_selector(self) -> None:
+        """An in-place restore writes back the deployment's own aliases."""
+        restore = build_velero_restore(
+            name="test-restore",
+            velero_namespace="velero",
+            backup_name="test-backup",
+            source_namespace="app-ns",
+            target_namespace="app-ns",
+            instance_id="inst-123",
+            driver_name="mydriver",
+        )
+        assert "labelSelector" not in restore.render()["spec"]
+
+    def test_restores_do_not_share_the_label_selector(self) -> None:
+        """Changing one restore's selector must not change the next one's."""
+        first = build_velero_restore(
+            name="clone-restore-1",
+            velero_namespace="velero",
+            backup_name="test-backup",
+            source_namespace="styrmin-source",
+            target_namespace="styrmin-counterpart",
+            instance_id="source-inst",
+            driver_name="mydriver",
+        )
+        assert first.label_selector is not None
+        first.label_selector["matchExpressions"][0]["values"].append("false")
+        second = build_velero_restore(
+            name="clone-restore-2",
+            velero_namespace="velero",
+            backup_name="test-backup",
+            source_namespace="styrmin-source",
+            target_namespace="styrmin-counterpart",
+            instance_id="source-inst",
+            driver_name="mydriver",
+        )
+        assert second.render()["spec"]["labelSelector"]["matchExpressions"][0][
+            "values"
+        ] == ["true"]
