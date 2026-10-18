@@ -1,0 +1,15 @@
+---
+# The network devices that the demos load into Infrahub and that Semaphore's inventory lists (research R-008).
+version: "1.0"
+nodes:
+  - name: Device
+    namespace: Infra
+    label: Network device
+    icon: mdi:router-network
+    display_label: "{{ name__value }}"
+    human_friendly_id:
+      - name__value
+    attributes:
+      - name: name
+        kind: Text
+        unique: true
