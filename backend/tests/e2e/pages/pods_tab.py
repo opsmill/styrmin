@@ -18,8 +18,9 @@ if TYPE_CHECKING:
 class PodsTabPage:
     """Pods tab — sections, expand, kubectl Copy helpers."""
 
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     async def open(self) -> None:
         """Click the Pods tab in the deployment-detail tab strip."""

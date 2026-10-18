@@ -15,15 +15,16 @@ from playwright.async_api import expect
 
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.refs import ClusterRef
-from tests.e2e.pages._dom import submit_dialog, wait_for_dialog_open
+from tests.e2e.pages._dom import enter_text, submit_dialog, wait_for_dialog_open
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
 
 class SettingsPage:
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     async def goto(self) -> None:
         await self._page.goto("/clusters")
@@ -57,27 +58,41 @@ class SettingsPage:
         dialog = self._page.get_by_role("dialog", name="Create Cluster")
         await wait_for_dialog_open(dialog)
 
-        await dialog.locator("#cluster-name").fill(name)
+        await enter_text(
+            dialog.locator("#cluster-name"),
+            name,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
 
         if _needs_advanced(config):
             await dialog.get_by_role("button", name="Advanced Configuration").click()
             if config.get("ingress_class"):
-                await dialog.locator("#cluster-ingress-class").fill(
-                    config["ingress_class"]
+                await enter_text(
+                    dialog.locator("#cluster-ingress-class"),
+                    config["ingress_class"],
+                    keystroke_delay_ms=self._keystroke_delay_ms,
                 )
             if config.get("fqdn_suffix"):
-                await dialog.locator("#cluster-fqdn-suffix").fill(config["fqdn_suffix"])
+                await enter_text(
+                    dialog.locator("#cluster-fqdn-suffix"),
+                    config["fqdn_suffix"],
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
             if config.get("runtime_class"):
-                await dialog.locator("#cluster-runtime-class").fill(
-                    config["runtime_class"]
+                await enter_text(
+                    dialog.locator("#cluster-runtime-class"),
+                    config["runtime_class"],
+                    keystroke_delay_ms=self._keystroke_delay_ms,
                 )
             if config.get("external_url_scheme"):
                 await dialog.locator("#cluster-external-url-scheme").select_option(
                     config["external_url_scheme"]
                 )
             if config.get("external_url_port") is not None:
-                await dialog.locator("#cluster-external-url-port").fill(
-                    str(config["external_url_port"])
+                await enter_text(
+                    dialog.locator("#cluster-external-url-port"),
+                    str(config["external_url_port"]),
+                    keystroke_delay_ms=self._keystroke_delay_ms,
                 )
             if config.get("external_dns_endpoints_type"):
                 await dialog.locator(
@@ -91,14 +106,22 @@ class SettingsPage:
                 # backdrop, so drive it through the associated <label>.
                 await dialog.locator("label[for='cluster-dedicated-ingress']").click()
                 if di.get("implementation"):
-                    await dialog.locator("#cluster-di-impl").fill(di["implementation"])
+                    await enter_text(
+                        dialog.locator("#cluster-di-impl"),
+                        di["implementation"],
+                        keystroke_delay_ms=self._keystroke_delay_ms,
+                    )
                 if di.get("type"):
                     await dialog.locator("#cluster-di-type").select_option(di["type"])
             ss = config.get("standard_storage")
             if ss:
                 await dialog.locator("label[for='cluster-standard-storage']").click()
                 if ss.get("storage_class"):
-                    await dialog.locator("#cluster-sc").fill(ss["storage_class"])
+                    await enter_text(
+                        dialog.locator("#cluster-sc"),
+                        ss["storage_class"],
+                        keystroke_delay_ms=self._keystroke_delay_ms,
+                    )
 
         await submit_dialog(dialog, button="Create")
 
@@ -133,8 +156,9 @@ def _needs_advanced(config: dict[str, Any]) -> bool:
 class BackupStorageLocationsListPage:
     """``/backup-storage-locations`` — list + create-BSL dialog."""
 
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     async def goto(self) -> None:
         await self._page.goto("/backup-storage-locations")
@@ -154,12 +178,36 @@ class BackupStorageLocationsListPage:
         await self._page.get_by_role("button", name="New Storage Location").click()
         dialog = self._page.get_by_role("dialog", name="Create Backup Storage Location")
         await wait_for_dialog_open(dialog)
-        await dialog.locator("#bsl-name").fill(name)
-        await dialog.locator("#bsl-endpoint").fill(endpoint)
-        await dialog.locator("#bsl-bucket").fill(bucket)
-        await dialog.locator("#bsl-region").fill(region)
-        await dialog.locator("#bsl-access-key").fill(access_key_id)
-        await dialog.locator("#bsl-secret-key").fill(secret_access_key)
+        await enter_text(
+            dialog.locator("#bsl-name"),
+            name,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
+        await enter_text(
+            dialog.locator("#bsl-endpoint"),
+            endpoint,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
+        await enter_text(
+            dialog.locator("#bsl-bucket"),
+            bucket,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
+        await enter_text(
+            dialog.locator("#bsl-region"),
+            region,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
+        await enter_text(
+            dialog.locator("#bsl-access-key"),
+            access_key_id,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
+        await enter_text(
+            dialog.locator("#bsl-secret-key"),
+            secret_access_key,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
         await submit_dialog(dialog, button="Create")
 
         card = self._page.locator(

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -25,6 +26,7 @@ from tests.e2e.drivers.refs import (
 # Shared with ``pages/environments.py`` — both read their state off ``data-*``
 # test hooks and must fail identically when one is missing.
 from tests.e2e.pages._dom import (
+    enter_text,
     required_attr as _required_attr,
     submit_dialog,
     wait_for_dialog_open,
@@ -64,6 +66,61 @@ _STEP_REQUIRED_ATTRS = ("stepId", "stepKey", "stepKind", "stepStatus", "stepAtte
 _READ_STARTED_TASKS_JS = """
 items => items.map(item => ({ ...item.dataset }))
 """
+
+
+_TIMELINE_EMPTY_TEXT = "No operations have been recorded for this deployment."
+_TIMELINE_POLL_SECONDS = 2.0
+
+# One round trip for the id, type and result of every timeline entry.
+_READ_TIMELINE_TASKS_JS = """
+rows => rows.map(row => ({
+  id: row.dataset.taskId ?? '',
+  type: row.dataset.taskType ?? '',
+  result: row.dataset.taskResult ?? '',
+}))
+"""
+
+# ``TaskResult`` values; the timeline renders them as GraphQL enum names
+# (``SUCCEEDED``), so they are compared in lower case.
+_TASK_SUCCEEDED = "succeeded"
+_TASK_UNSUCCESSFUL = frozenset({"failed", "superseded"})
+
+
+@dataclass(frozen=True)
+class _TimelineTask:
+    id: str
+    type: str
+    result: str
+
+
+def _timeline_task_from_row(row: dict[str, str]) -> _TimelineTask:
+    task = _TimelineTask(id=row["id"], type=row["type"], result=row["result"])
+    if not (task.id and task.type and task.result):
+        raise ScenarioActionError(
+            f"timeline entry {task.id or '?'} rendered without data-task-id, "
+            "data-task-type or data-task-result "
+            "(frontend test-hook may have been removed or renamed)"
+        )
+    return task
+
+
+def _succeeded_new_task(
+    tasks: list[_TimelineTask], *, task_type: str, known_task_ids: set[str]
+) -> str | None:
+    """Return the id of a new ``task_type`` task that succeeded, or ``None``.
+
+    Raises ``ScenarioActionError`` naming a new task that failed or was superseded.
+    """
+    new = [t for t in tasks if t.type == task_type and t.id not in known_task_ids]
+    for task in new:
+        if task.result.lower() in _TASK_UNSUCCESSFUL:
+            raise ScenarioActionError(
+                f"{task_type} task {task.id} ended with result {task.result}"
+            )
+    for task in new:
+        if task.result.lower() == _TASK_SUCCEEDED:
+            return task.id
+    return None
 
 
 def _iso_or_none(value: str | None) -> str | None:
@@ -134,8 +191,9 @@ async def _read_started_tasks(
 class DeploymentDetailPage:
     """Deployment detail — status, Upgrade, Timeline tab, Backups tab, Restores tab."""
 
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     async def goto(self, *, environment_id: str, deployment_id: str) -> None:
         await self._page.goto(
@@ -177,7 +235,11 @@ class DeploymentDetailPage:
         the dialog's picker instead of the default "Latest (auto)" option.
         """
         dialog = self._page.get_by_role("dialog", name="Upgrade Deployment")
-        await dialog.get_by_label("New Version").fill(version)
+        await enter_text(
+            dialog.get_by_label("New Version"),
+            version,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
         if driver_version_id is not None:
             await dialog.get_by_test_id("upgrade-driver-version-select").click()
             # SelectItem mirrors its value to data-value; the popup renders in
@@ -191,7 +253,11 @@ class DeploymentDetailPage:
         it is absent); cancels without upgrading."""
         await self.open_upgrade_dialog()
         dialog = self._page.get_by_role("dialog", name="Upgrade Deployment")
-        await dialog.get_by_label("New Version").fill(target_version)
+        await enter_text(
+            dialog.get_by_label("New Version"),
+            target_version,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
         # The notice renders from the same query as the page header, so it is
         # already settled once the dialog is open.
         entries = await dialog.get_by_test_id("pinned-image-override").all()
@@ -264,7 +330,11 @@ class DeploymentDetailPage:
 
         runtime_class = scheduling.get("runtime_class")
         if isinstance(runtime_class, str):
-            await dialog.get_by_label("Runtime class name").fill(runtime_class)
+            await enter_text(
+                dialog.get_by_label("Runtime class name"),
+                runtime_class,
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
 
     async def _reset_scheduling_form(self, dialog: Locator) -> None:
         # Clear every list-based section by clicking each row's remove
@@ -295,8 +365,16 @@ class DeploymentDetailPage:
         # create/remove rows.
         for variant in ("requests", "limits"):
             for field in ("cpu", "memory", "ephemeral_storage"):
-                await dialog.locator(f"#res-{variant}-{field}").fill("")
-        await dialog.get_by_label("Runtime class name").fill("")
+                await enter_text(
+                    dialog.locator(f"#res-{variant}-{field}"),
+                    "",
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
+        await enter_text(
+            dialog.get_by_label("Runtime class name"),
+            "",
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
 
     async def _fill_scheduling_resources(
         self, dialog: Locator, resources: dict
@@ -309,21 +387,37 @@ class DeploymentDetailPage:
                 value = spec.get(field)
                 if value is None:
                     continue
-                await dialog.locator(f"#res-{variant}-{field}").fill(str(value))
+                await enter_text(
+                    dialog.locator(f"#res-{variant}-{field}"),
+                    str(value),
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
 
     async def _add_scheduling_toleration(self, dialog: Locator, entry: dict) -> None:
         await dialog.get_by_role("button", name="Add toleration", exact=True).click()
         row = dialog.locator("[data-testid=toleration-row]").last
         if (key := entry.get("key")) is not None:
-            await row.get_by_label("Key").fill(str(key))
+            await enter_text(
+                row.get_by_label("Key"),
+                str(key),
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
         if (operator := entry.get("operator")) is not None:
             await self._select_value(row, "Operator", str(operator))
         if (value := entry.get("value")) is not None:
-            await row.get_by_label("Value").fill(str(value))
+            await enter_text(
+                row.get_by_label("Value"),
+                str(value),
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
         if (effect := entry.get("effect")) is not None:
             await self._select_value(row, "Effect", str(effect))
         if (seconds := entry.get("toleration_seconds")) is not None:
-            await row.get_by_label("Toleration seconds (optional)").fill(str(seconds))
+            await enter_text(
+                row.get_by_label("Toleration seconds (optional)"),
+                str(seconds),
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
 
     async def _add_scheduling_topology_spread(
         self, dialog: Locator, entry: dict
@@ -333,9 +427,17 @@ class DeploymentDetailPage:
         ).click()
         row = dialog.locator("[data-testid=topology-spread-row]").last
         if (skew := entry.get("max_skew")) is not None:
-            await row.get_by_label("Max skew").fill(str(skew))
+            await enter_text(
+                row.get_by_label("Max skew"),
+                str(skew),
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
         if (topology_key := entry.get("topology_key")) is not None:
-            await row.get_by_label("Topology key").fill(str(topology_key))
+            await enter_text(
+                row.get_by_label("Topology key"),
+                str(topology_key),
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
         if (when := entry.get("when_unsatisfiable")) is not None:
             await self._select_value(row, "When unsatisfiable", str(when))
         label_selector = entry.get("label_selector")
@@ -368,7 +470,11 @@ class DeploymentDetailPage:
             ).click()
             row = section.locator(f"[data-testid={kind}-preferred-row]").last
             if (weight := weighted.get("weight")) is not None:
-                await row.get_by_label("Weight (1–100)").fill(str(weight))
+                await enter_text(
+                    row.get_by_label("Weight (1–100)"),
+                    str(weight),
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
             term = weighted.get("term")
             if isinstance(term, dict):
                 await self._fill_affinity_term(row, kind, term)
@@ -376,7 +482,11 @@ class DeploymentDetailPage:
     async def _fill_affinity_term(self, row: Locator, kind: str, term: dict) -> None:
         topology_key = term.get("topology_key")
         if kind != "node_affinity" and topology_key is not None:
-            await row.get_by_label("Topology key").fill(str(topology_key))
+            await enter_text(
+                row.get_by_label("Topology key"),
+                str(topology_key),
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
 
         if kind in ("pod_affinity", "pod_anti_affinity"):
             # The target-mode selector only appears on pod-affinity rows.
@@ -384,10 +494,16 @@ class DeploymentDetailPage:
                 await self._select_value(row, "Target by", "Deployment")
                 dep_ref = term["deployment_ref"]
                 if dep_id := dep_ref.get("deployment_id"):
-                    await row.get_by_label("Deployment ID").fill(str(dep_id))
+                    await enter_text(
+                        row.get_by_label("Deployment ID"),
+                        str(dep_id),
+                        keystroke_delay_ms=self._keystroke_delay_ms,
+                    )
                 if dep_name := dep_ref.get("deployment_name"):
-                    await row.get_by_label("Deployment name (alternative)").fill(
-                        str(dep_name)
+                    await enter_text(
+                        row.get_by_label("Deployment name (alternative)"),
+                        str(dep_name),
+                        keystroke_delay_ms=self._keystroke_delay_ms,
                     )
                 return
             # Fall through to label_selector (the default mode).
@@ -405,8 +521,16 @@ class DeploymentDetailPage:
             # aria-label ends with the row's 1-based ordinal; targeting the
             # last row by its aria-label would require knowing the count, so
             # we fill the first empty key/value pair inside it.
-            await ml_row.locator("input[placeholder='key']").fill(str(key))
-            await ml_row.locator("input[placeholder='value']").fill(str(value))
+            await enter_text(
+                ml_row.locator("input[placeholder='key']"),
+                str(key),
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
+            await enter_text(
+                ml_row.locator("input[placeholder='value']"),
+                str(value),
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
 
         match_expressions = label_selector.get("match_expressions") or []
         for expr in match_expressions:
@@ -415,7 +539,11 @@ class DeploymentDetailPage:
             ).click()
             expr_row = row.locator("[data-testid=match-expression-row]").last
             if (k := expr.get("key")) is not None:
-                await expr_row.locator("input[placeholder='key']").fill(str(k))
+                await enter_text(
+                    expr_row.locator("input[placeholder='key']"),
+                    str(k),
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
             if (op := expr.get("operator")) is not None:
                 # Each expression row contains exactly one combobox (the
                 # operator Select); scope to the row and click it.
@@ -423,9 +551,11 @@ class DeploymentDetailPage:
                 await self._page.get_by_role("option", name=op, exact=True).click()
             values = expr.get("values") or []
             if values:
-                await expr_row.locator(
-                    "input[placeholder='values (comma-separated)']"
-                ).fill(",".join(str(v) for v in values))
+                await enter_text(
+                    expr_row.locator("input[placeholder='values (comma-separated)']"),
+                    ",".join(str(v) for v in values),
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
 
     # ------------------------------------------------------------------
     # Settings drawer — component overrides (017 env vars, 018 image, 022 command/args)
@@ -468,13 +598,17 @@ class DeploymentDetailPage:
         for index, (name, value) in enumerate(desired):
             if index >= len(current):
                 await add_row.click()
-            await block.locator(
-                f"[data-testid=comp-env-name-{component}-{index}]"
-            ).fill(name)
+            await enter_text(
+                block.locator(f"[data-testid=comp-env-name-{component}-{index}]"),
+                name,
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
             value_input = block.locator(
                 f"[data-testid=comp-env-value-{component}-{index}]"
             )
-            await value_input.fill(value)
+            await enter_text(
+                value_input, value, keystroke_delay_ms=self._keystroke_delay_ms
+            )
             await value_input.press("Tab")
         for index in range(len(current) - 1, len(desired) - 1, -1):
             await block.locator(
@@ -507,7 +641,9 @@ class DeploymentDetailPage:
 
         if await add_block.is_visible():
             await add_block.click()
-        await image_input.fill(desired)
+        await enter_text(
+            image_input, desired, keystroke_delay_ms=self._keystroke_delay_ms
+        )
         await image_input.press("Tab")
         error = block.locator(f"[data-testid=comp-image-error-{component}]")
         if await error.count() > 0:
@@ -545,7 +681,9 @@ class DeploymentDetailPage:
             return
 
         # Typing into a component without a block creates the block and re-renders the field.
-        await replicas_input.fill(desired)
+        await enter_text(
+            replicas_input, desired, keystroke_delay_ms=self._keystroke_delay_ms
+        )
         await expect(replicas_input).to_have_value(desired)
         await replicas_input.press("Tab")
         error = block.locator(f"[data-testid=comp-replicas-error-{component}]")
@@ -645,7 +783,9 @@ class DeploymentDetailPage:
                 await block.locator(
                     f"[data-testid=comp-{field}-add-{component}]"
                 ).click()
-            await element(index).fill(value)
+            await enter_text(
+                element(index), value, keystroke_delay_ms=self._keystroke_delay_ms
+            )
         for index in range(len(current) - 1, len(values) - 1, -1):
             await block.locator(
                 f"[data-testid=comp-{field}-remove-{component}-{index}]"
@@ -735,6 +875,56 @@ class DeploymentDetailPage:
         await trigger.click()
         await self._page.get_by_role("option", name=option, exact=True).click()
 
+    async def open_timeline(self) -> None:
+        """Click the Timeline tab and wait for an entry or the empty placeholder."""
+        # The shared Tabs component renders each tab as a plain <button>,
+        # not role="tab" — target by role=button + accessible name.
+        await self._page.get_by_role("button", name="Timeline", exact=True).click()
+        entries = self._page.locator("[data-testid=timeline-entry]")
+        placeholder = self._page.get_by_text(_TIMELINE_EMPTY_TEXT)
+        await expect(entries.first.or_(placeholder)).to_be_visible()
+
+    async def read_task_ids(self) -> set[str]:
+        """Open the Timeline tab and return the id of every task it lists."""
+        await self.open_timeline()
+        return {task.id for task in await self._read_timeline_tasks()}
+
+    async def wait_for_new_task(
+        self, task_type: str, *, known_task_ids: set[str], timeout: float
+    ) -> str:
+        """Wait until a ``task_type`` task missing from ``known_task_ids`` succeeds
+        and return its id; raise when it fails or is superseded.
+
+        Opens the Timeline tab once, then reads it every 2 s without clicking;
+        the page refreshes the timeline every 10 s.
+        """
+        await self.open_timeline()
+        deadline = time.monotonic() + timeout
+        tasks: list[_TimelineTask] = []
+        while time.monotonic() < deadline:
+            tasks = await self._read_timeline_tasks()
+            task_id = _succeeded_new_task(
+                tasks, task_type=task_type, known_task_ids=known_task_ids
+            )
+            if task_id is not None:
+                return task_id
+            await asyncio.sleep(_TIMELINE_POLL_SECONDS)
+        seen = [
+            f"{task.id} ({task.result})"
+            for task in tasks
+            if task.type == task_type and task.id not in known_task_ids
+        ]
+        raise ScenarioTimeout(
+            f"no new {task_type} task succeeded within {timeout}s; "
+            f"new {task_type} tasks in the timeline: {', '.join(seen) or 'none'}"
+        )
+
+    async def _read_timeline_tasks(self) -> list[_TimelineTask]:
+        rows = await self._page.locator("[data-testid=timeline-entry]").evaluate_all(
+            _READ_TIMELINE_TASKS_JS
+        )
+        return [_timeline_task_from_row(row) for row in rows]
+
     async def read_timeline(self) -> list[TimelineEntry]:
         """Click the Timeline tab and read every entry from the rendered DOM.
 
@@ -742,16 +932,8 @@ class DeploymentDetailPage:
         ``DeploymentTimeline`` so we don't have to reverse-map the
         human-readable type labels the UI shows to users.
         """
-        # The shared Tabs component renders each tab as a plain <button>,
-        # not role="tab" — target by role=button + accessible name.
-        await self._page.get_by_role("button", name="Timeline", exact=True).click()
-        # Wait for either at least one entry OR the "No operations" placeholder
+        await self.open_timeline()
         entries_loc = self._page.locator("[data-testid=timeline-entry]")
-        placeholder = self._page.get_by_text(
-            "No operations have been recorded for this deployment."
-        )
-        await expect(entries_loc.first.or_(placeholder)).to_be_visible()
-
         count = await entries_loc.count()
         results: list[TimelineEntry] = []
         for i in range(count):
@@ -1096,7 +1278,11 @@ class DeploymentDetailPage:
 
     async def fill_delete_confirm(self, text: str) -> None:
         """Type *text* into the type-to-confirm input."""
-        await self._delete_confirm_input().fill(text)
+        await enter_text(
+            self._delete_confirm_input(),
+            text,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
 
     async def confirm_delete(self) -> None:
         """Click the dialog's destructive Delete button. Dialog must close."""

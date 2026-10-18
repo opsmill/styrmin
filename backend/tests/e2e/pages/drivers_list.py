@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.refs import DriverVersionRef
-from tests.e2e.pages._dom import wait_for_dialog_open
+from tests.e2e.pages._dom import enter_text, wait_for_dialog_open
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
@@ -16,8 +16,9 @@ if TYPE_CHECKING:
 class DriversListPage:
     """Drivers list + the Load Driver drawer (remote Git flow)."""
 
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     async def goto(self) -> None:
         await self._page.goto("/drivers")
@@ -100,10 +101,22 @@ class DriversListPage:
         )
 
         # Git repository is the default tab.
-        await self._page.locator("#repositoryUrl").fill(git_url)
-        await self._page.locator("#branch").fill(ref)
+        await enter_text(
+            self._page.locator("#repositoryUrl"),
+            git_url,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
+        await enter_text(
+            self._page.locator("#branch"),
+            ref,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
         if driver_directory is not None:
-            await self._page.locator("#driverDirectory").fill(driver_directory)
+            await enter_text(
+                self._page.locator("#driverDirectory"),
+                driver_directory,
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
 
         # The footer submit is the only button bound to the drawer form.
         await self._page.locator("button[form=load-driver-form]").click()

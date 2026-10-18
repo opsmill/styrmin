@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 from playwright.async_api import expect
 
+from tests.e2e.pages._dom import enter_text
+
 if TYPE_CHECKING:
     from playwright.async_api import Page
 
@@ -19,8 +21,9 @@ if TYPE_CHECKING:
 class LoginPage:
     """Drive the login form on the ``/login`` route."""
 
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     async def goto(self) -> None:
         """Navigate to ``/login`` and wait for the form to render.
@@ -37,10 +40,18 @@ class LoginPage:
         ).to_be_visible(timeout=15_000)
 
     async def fill_username(self, value: str) -> None:
-        await self._page.locator("#login-username").fill(value)
+        await enter_text(
+            self._page.locator("#login-username"),
+            value,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
 
     async def fill_password(self, value: str) -> None:
-        await self._page.locator("#login-password").fill(value)
+        await enter_text(
+            self._page.locator("#login-password"),
+            value,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
 
     async def submit(self) -> None:
         """Click the Sign-in button and wait for the navigation away.

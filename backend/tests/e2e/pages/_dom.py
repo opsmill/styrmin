@@ -41,6 +41,19 @@ async def required_attr(locator: Locator, attr: str, *, context: str) -> str:
     return value
 
 
+async def enter_text(
+    locator: Locator, text: str, *, keystroke_delay_ms: int | None
+) -> None:
+    """Replace the value of ``locator`` with ``text``: in one step with no delay,
+    or by clearing it and typing one key every ``keystroke_delay_ms``."""
+    if keystroke_delay_ms is None:
+        await locator.fill(text)
+        return
+    await locator.fill("")
+    if text:
+        await locator.press_sequentially(text, delay=keystroke_delay_ms)
+
+
 async def wait_for_dialog_open(dialog: Locator) -> None:
     """Wait for ``dialog`` to open and take keyboard focus.
 
