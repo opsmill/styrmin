@@ -267,6 +267,9 @@ CLONE_REASON_CAPTURE_UNUSABLE = "environment backup capture did not succeed"
 CLONE_REASON_REFERENCED_DEPLOYMENT_NOT_CLONED = (
     "an affinity term names deployment {name}, which was not cloned"
 )
+#: The restore of a ``cloned`` entry ended ``FAILED``. Never stored: read
+#: entries carry it, followed by the restore's error (#530, FR-007).
+CLONE_REASON_RESTORE_FAILED = "the restore failed"
 
 
 # ---------------------------------------------------------------------------
@@ -762,6 +765,43 @@ def derive_clone_capture_status(
     )
 
 
+def failed_restore(
+    restore_id: UUID | None, restores: Mapping[UUID, Restore]
+) -> Restore | None:
+    """The row of ``restore_id`` when it is in ``restores`` and ``FAILED``; otherwise ``None``."""
+    if restore_id is None:
+        return None
+    restore = restores.get(restore_id)
+    if restore is not None and restore.status is RestoreStatus.FAILED:
+        return restore
+    return None
+
+
+def resolve_deployment_result(
+    result: CloneDeploymentResult, restores: Mapping[UUID, Restore]
+) -> CloneDeploymentResult:
+    """The entry as users read it: a ``cloned`` entry whose restore failed reads ``failed``.
+
+    The clone flow records ``cloned`` when it dispatches the restore and does
+    not wait for it, so the restore row gives the outcome that the entry does
+    not. The reason carries the restore's error; the ids stay as stored. Every
+    other entry is returned unchanged. Pure: the caller loads the rows.
+    """
+    if result.outcome is not EnvironmentCloneDeploymentOutcome.CLONED:
+        return result
+    restore = failed_restore(result.restore_id, restores)
+    if restore is None:
+        return result
+    reason = (
+        f"{CLONE_REASON_RESTORE_FAILED}: {restore.error_message}"
+        if restore.error_message
+        else CLONE_REASON_RESTORE_FAILED
+    )
+    return result.model_copy(
+        update={"outcome": EnvironmentCloneDeploymentOutcome.FAILED, "reason": reason}
+    )
+
+
 def derive_environment_clone_status(
     *,
     capture_status: EnvironmentOperationStatus | None,
@@ -867,8 +907,7 @@ def derive_environment_clone_status(
         if result.outcome == EnvironmentCloneDeploymentOutcome.SKIPPED.value:
             continue
         if result.outcome == EnvironmentCloneDeploymentOutcome.CLONED.value:
-            restore = rows.get(result.restore_id) if result.restore_id else None
-            if restore is not None and restore.status is RestoreStatus.FAILED:
+            if failed_restore(result.restore_id, rows) is not None:
                 failed += 1
             else:
                 # No restore row means the recorded outcome stands (resolution
