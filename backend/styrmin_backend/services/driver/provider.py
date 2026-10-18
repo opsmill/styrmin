@@ -11,7 +11,8 @@ from loguru import logger
 from styrmin_backend import config
 from styrmin_backend.services.driver.driver_directory import (
     normalise_driver_directory,
-    redact_repository_url,
+    quoted,
+    redact_user_info,
     resolve_inside,
 )
 from styrmin_backend.services.driver.exceptions import (
@@ -89,7 +90,7 @@ class GitDriverProvider(DriverProvider):
             MissingDriverSpecificationError: The driver directory holds no driver
                 specification file.
         """
-        repository = redact_repository_url(self.source.repository)
+        repository = redact_user_info(self.source.repository)
         driver_directory = self.source.driver_directory
         with tempfile.TemporaryDirectory() as tempdir:
             tempdir_path = Path(tempdir)
@@ -105,15 +106,13 @@ class GitDriverProvider(DriverProvider):
                 for_directory = (
                     ""
                     if driver_directory is None
-                    else f", driver directory {driver_directory!r}"
+                    else f", driver directory {quoted(driver_directory)}"
                 )
-                # Some clone errors repeat the URL as given, with its user info.
-                detail = str(exc)
-                if repository != self.source.repository:
-                    detail = detail.replace(self.source.repository, repository)
+                # Some clone errors repeat a URL with its user info.
                 raise DriverLoadingError(
-                    f"Failed to clone git repository {repository!r} "
-                    f"(branch={self.source.branch!r}{for_directory}): {detail}"
+                    f"Failed to clone git repository {quoted(repository)} "
+                    f"(branch={quoted(self.source.branch)}{for_directory}): "
+                    f"{redact_user_info(str(exc))}"
                 ) from exc
             # Resolve the HEAD commit SHA from the freshly cloned repo and stash
             # it on the provider so the caller can read it after the context
@@ -123,7 +122,7 @@ class GitDriverProvider(DriverProvider):
                     commit_sha = repo.head().decode("ascii")
             except Exception as exc:  # noqa: BLE001
                 raise DriverLoadingError(
-                    f"Failed to resolve HEAD commit SHA for {repository!r}: {exc}"
+                    f"Failed to resolve HEAD commit SHA for {quoted(repository)}: {exc}"
                 ) from exc
             self._resolved_commit_sha = commit_sha
             yield self._check_driver_directory(tempdir_path, repository, commit_sha)
@@ -133,9 +132,10 @@ class GitDriverProvider(DriverProvider):
     ) -> Path:
         """Return the real path of the driver directory once every check passes.
 
-        Checks, before any driver file is read, that the driver directory and the
-        three driver files stay inside the clone (FR-008), and that the driver
-        directory holds the driver specification file (FR-009).
+        Checks, before any driver file is read, that the driver directory stays
+        inside the clone and the three driver files stay inside the driver
+        directory (FR-008), that each of them can be followed, and that the
+        driver directory holds the driver specification file (FR-009).
 
         Args:
             clone: The root of the temporary clone.
@@ -146,25 +146,40 @@ class GitDriverProvider(DriverProvider):
             The resolved driver directory, or the resolved clone root.
         """
         driver_directory = self.source.driver_directory
-        shown = "the repository root" if driver_directory is None else driver_directory
         where = (
-            f"repository {repository!r} "
-            f"(branch {self.source.branch!r}, commit {commit_sha})"
+            f"repository {quoted(repository)} "
+            f"(branch {quoted(self.source.branch)}, commit {commit_sha})"
         )
 
-        def leads_outside(relative: str) -> DriverLoadingError:
+        def unreadable(relative: str, exc: OSError) -> DriverLoadingError:
+            # ``strerror`` leaves out the path, which is in the temporary clone.
             return DriverLoadingError(
-                f"Driver directory {shown!r} of {where} leads outside the "
-                f"repository: {relative!r} is a symlink to a path outside it."
+                f"{quoted(relative)} in {where} cannot be read: {exc.strerror}."
             )
 
         resolved = resolve_inside(clone, driver_directory or ".")
         if resolved is None:
-            raise leads_outside(_first_link_outside(clone, driver_directory or "."))
-        if not resolved.is_dir():
+            # Only a driver directory can lead outside: the clone root cannot.
+            shown = driver_directory or "."
+            link = _first_link_outside(clone, shown)
             raise DriverLoadingError(
-                f"Driver directory {shown!r} does not exist in {where}."
+                f"Driver directory {quoted(shown)} of {where} leads "
+                f"outside the repository: {quoted(link)} is a symlink to a path "
+                "outside it."
             )
+        if driver_directory is not None:
+            if error := _follow_error(resolved):
+                raise unreadable(driver_directory, error)
+            if not resolved.is_dir():
+                raise DriverLoadingError(
+                    f"Driver directory {quoted(driver_directory)} does not exist "
+                    f"in {where}."
+                )
+        outside = (
+            "the repository"
+            if driver_directory is None
+            else f"driver directory {quoted(driver_directory)}"
+        )
         settings = config.SETTINGS.driver
         for name in (
             settings.spec_file,
@@ -174,15 +189,21 @@ class GitDriverProvider(DriverProvider):
             relative = (
                 name if driver_directory is None else f"{driver_directory}/{name}"
             )
-            if resolve_inside(clone, relative) is None:
-                raise leads_outside(relative)
+            if resolve_inside(resolved, name) is None:
+                raise DriverLoadingError(
+                    f"{quoted(relative)} in {where} is a symlink to a path "
+                    f"outside {outside}."
+                )
+            if error := _follow_error(resolved / name):
+                raise unreadable(relative, error)
         if not (resolved / settings.spec_file).is_file():
             if driver_directory is None:
                 raise MissingDriverSpecificationError(
                     f"No {settings.spec_file} at the root of {where}."
                 )
             raise MissingDriverSpecificationError(
-                f"No {settings.spec_file} in driver directory {shown!r} of {where}."
+                f"No {settings.spec_file} in driver directory "
+                f"{quoted(driver_directory)} of {where}."
             )
         logger.info(
             "Checked git driver source: repository={} branch={} commit={} "
@@ -207,6 +228,20 @@ def _first_link_outside(root: Path, relative: str) -> str:
         if resolve_inside(root, prefix) is None:
             return prefix
     return relative
+
+
+def _follow_error(path: Path) -> OSError | None:
+    """Return the error of following ``path``, such as a symlink loop.
+
+    A missing path gives ``None``: the callers report it in their own words.
+    """
+    try:
+        path.stat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return exc
+    return None
 
 
 class LocalDriverProvider(DriverProvider):

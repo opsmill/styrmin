@@ -85,6 +85,7 @@ async def _load_driver(
             hook=hook,
             mode=mode,
             fingerprint=fingerprint,
+            driver_directory=None,
         )
 
 
@@ -98,6 +99,7 @@ async def _lookup(
             hook=hook,
             mode=mode,
             fingerprint=fingerprint,
+            driver_directory=None,
         )
         for name, hook, mode in ACTIONS
     }

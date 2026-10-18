@@ -191,15 +191,120 @@ def test_driver_file_symlinked_outside_is_refused(
     with pytest.raises(DriverLoadingError) as excinfo:
         _load(repository, driver_directory)
 
-    shown = driver_directory or "the repository root"
+    outside = (
+        "the repository"
+        if driver_directory is None
+        else f"driver directory {driver_directory!r}"
+    )
     message = str(excinfo.value)
     assert message == (
-        f"Driver directory {shown!r} of {_where(repository)} leads outside the "
-        f"repository: {relative!r} is a symlink to a path outside it."
+        f"{relative!r} in {_where(repository)} is a symlink to a path outside "
+        f"{outside}."
     )
     [clone] = clone_paths
     assert clone not in message
     assert str(repository.outside) not in message
+
+
+@pytest.mark.usefixtures("no_driver_file_read")
+@pytest.mark.parametrize("name", ["driver.styrmin.yml", "values.j2.yml", "actions.py"])
+def test_driver_file_symlinked_to_another_folder_of_the_repository_is_refused(
+    make_repository: Callable[[Callable[[Path], None]], _Repository],
+    name: str,
+) -> None:
+    """Review item 14: a driver file must stay inside its driver directory, so an
+    action cannot import from a folder next to it."""
+
+    def setup(root: Path) -> None:
+        (root / "shared").mkdir()
+        (root / "drivers" / "a" / name).rename(root / "shared" / name)
+        (root / "drivers" / "a" / name).symlink_to(Path("..", "..", "shared", name))
+
+    repository = make_repository(setup)
+
+    with pytest.raises(DriverLoadingError) as excinfo:
+        _load(repository, "drivers/a")
+
+    assert str(excinfo.value) == (
+        f"'drivers/a/{name}' in {_where(repository)} is a symlink to a path outside "
+        "driver directory 'drivers/a'."
+    )
+
+
+def test_driver_file_symlinked_inside_its_driver_directory_is_accepted(
+    make_repository: Callable[[Callable[[Path], None]], _Repository],
+) -> None:
+    def setup(root: Path) -> None:
+        (root / "drivers" / "a" / "templates").mkdir()
+        (root / "drivers" / "a" / "values.j2.yml").rename(
+            root / "drivers" / "a" / "templates" / "values.j2.yml"
+        )
+        (root / "drivers" / "a" / "values.j2.yml").symlink_to(
+            Path("templates", "values.j2.yml")
+        )
+
+    repository = make_repository(setup)
+
+    driver = _load(repository, "drivers/a")
+
+    assert driver.source_commit_sha == repository.sha
+
+
+@pytest.mark.usefixtures("no_driver_file_read")
+@pytest.mark.parametrize(
+    ("driver_directory", "looped"),
+    [
+        (None, "values.j2.yml"),
+        ("drivers/a", "drivers/a/values.j2.yml"),
+        ("drivers/a", "drivers/a/actions.py"),
+        ("drivers/loop", "drivers/loop"),
+    ],
+)
+def test_symlink_loop_is_a_driver_loading_error(
+    make_repository: Callable[[Callable[[Path], None]], _Repository],
+    clone_paths: list[str],
+    driver_directory: str | None,
+    looped: str,
+) -> None:
+    """Review item 13: a symlink loop fails the load with a message that names the
+    path in the repository, not the temporary clone."""
+
+    def setup(root: Path) -> None:
+        if driver_directory is None:
+            shutil.copytree(root / "drivers" / "a", root, dirs_exist_ok=True)
+        path = root / looped
+        path.unlink(missing_ok=True)
+        path.symlink_to(path.name)
+
+    repository = make_repository(setup)
+
+    with pytest.raises(DriverLoadingError) as excinfo:
+        _load(repository, driver_directory)
+
+    message = str(excinfo.value)
+    assert message == (
+        f"{looped!r} in {_where(repository)} cannot be read: "
+        "Too many levels of symbolic links."
+    )
+    [clone] = clone_paths
+    assert clone not in message
+
+
+@pytest.mark.usefixtures("no_driver_file_read")
+def test_parent_folder_symlinked_outside_is_named(
+    make_repository: Callable[[Callable[[Path], None]], _Repository],
+) -> None:
+    repository = make_repository(
+        lambda root: (root / "vendor").symlink_to("/etc", target_is_directory=True)
+    )
+
+    with pytest.raises(DriverLoadingError) as excinfo:
+        _load(repository, "vendor/drivers/a")
+
+    assert str(excinfo.value) == (
+        f"Driver directory 'vendor/drivers/a' of {_where(repository)} leads outside "
+        "the repository: 'vendor' is a symlink to a path outside it."
+    )
 
 
 def test_driver_directory_symlinked_inside_is_accepted(

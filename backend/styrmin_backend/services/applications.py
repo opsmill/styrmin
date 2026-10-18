@@ -408,7 +408,11 @@ async def load_application_driver_from_git_repository(
         LoadedDriverVersion: The stored driver version and the load warnings.
 
     Raises:
-        DriverLoadingError: The driver directory is refused, before any clone.
+        DriverLoadingError: The driver directory is refused (before any clone),
+            the clone fails, or the driver directory or a driver file cannot be
+            followed or leads outside the repository or the driver directory.
+        MissingDriverSpecificationError: The driver directory holds no
+            driver specification file.
     """
 
     # TODO: Token setup
@@ -425,7 +429,8 @@ async def load_application_driver_from_git_repository(
         token=token,
         driver_directory=driver_directory,
     )
-    application_driver = driver_loader.load_driver()
+    # The clone blocks, so it runs off the event loop.
+    application_driver = await asyncio.to_thread(driver_loader.load_driver)
 
     # Create the application driver objects in database
     return await _store_loaded_driver(application_driver, uow)
