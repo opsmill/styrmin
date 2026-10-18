@@ -28,6 +28,7 @@ from styrmin_backend.db.models import (
     RestoreStatus,
 )
 from styrmin_backend.services.backup.clone import (
+    CLONE_REASON_RESTORE_FAILED,
     CLONE_STEP_CAPTURE_FAILED,
     CLONE_STEP_CREATED_ENVIRONMENT_DELETED,
     CLONE_STEP_ENVIRONMENT_BACKUP_DELETED,
@@ -44,6 +45,7 @@ from styrmin_backend.services.backup.clone import (
     derive_clone_capture_status,
     derive_environment_clone_status,
     derive_environment_clone_status_from_record,
+    resolve_deployment_result,
 )
 from styrmin_backend.services.backup.environment import EnvironmentOperationStatus
 
@@ -75,10 +77,11 @@ def _error(step: str, *, fatal: bool, error: str = "boom") -> dict:
     return CloneError(step=step, error=error, fatal=fatal).model_dump(mode="json")
 
 
-def _restore(status: RestoreStatus) -> Restore:
+def _restore(status: RestoreStatus, *, error_message: str | None = None) -> Restore:
     return Restore(
         name=f"restore-{uuid4().hex[:8]}",
         status=status,
+        error_message=error_message,
         target_namespace="styrmin-counterpart",
         backup_id=uuid4(),
     )
@@ -867,4 +870,135 @@ def test_deriving_from_a_record_reads_the_same_inputs() -> None:
     assert (
         derive_environment_clone_status_from_record(clone)
         == EnvironmentCloneStatus.FAILED
+    )
+
+
+# ---------------------------------------------------------------------------
+# The entry of a failed restore, as users read it (spec 030, FR-007)
+# ---------------------------------------------------------------------------
+
+ALIAS_ERROR = "Service alias step failed: (500)"
+
+
+def _entry(outcome: str, *, restore: Restore | None = None) -> CloneDeploymentResult:
+    """One entry as the GraphQL projection validates it from the stored JSON."""
+    cloned = outcome == "cloned"
+    return CloneDeploymentResult.model_validate(
+        _result(
+            outcome,
+            reason=None if cloned else "constituent backup did not complete",
+            counterpart_deployment_id=uuid4() if cloned else None,
+            restore_id=restore.id if restore is not None else None,
+        )
+    )
+
+
+def test_a_cloned_entry_whose_restore_failed_reads_failed_with_the_error() -> None:
+    restore = _restore(RestoreStatus.FAILED, error_message=ALIAS_ERROR)
+    entry = _entry("cloned", restore=restore)
+
+    read = resolve_deployment_result(entry, _restores(restore))
+
+    assert read.outcome is EnvironmentCloneDeploymentOutcome.FAILED
+    assert read.reason == f"the restore failed: {ALIAS_ERROR}"
+    assert read.model_dump(exclude={"outcome", "reason"}) == entry.model_dump(
+        exclude={"outcome", "reason"}
+    )
+    assert read.counterpart_deployment_id is not None
+    assert read.restore_id == restore.id
+    # The stored entry is not changed.
+    assert entry.outcome is EnvironmentCloneDeploymentOutcome.CLONED
+
+
+def test_a_failed_restore_without_an_error_gives_the_reason_alone() -> None:
+    restore = _restore(RestoreStatus.FAILED)
+
+    read = resolve_deployment_result(
+        _entry("cloned", restore=restore), _restores(restore)
+    )
+
+    assert (read.outcome, read.reason) == (
+        EnvironmentCloneDeploymentOutcome.FAILED,
+        CLONE_REASON_RESTORE_FAILED,
+    )
+    assert CLONE_REASON_RESTORE_FAILED == "the restore failed"
+
+
+IN_PROGRESS_RESTORE = _restore(RestoreStatus.IN_PROGRESS)
+COMPLETED_RESTORE = _restore(RestoreStatus.COMPLETED)
+FAILED_RESTORE = _restore(RestoreStatus.FAILED, error_message=ALIAS_ERROR)
+ROWS = _restores(IN_PROGRESS_RESTORE, COMPLETED_RESTORE, FAILED_RESTORE)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "restore", "rows"),
+    [
+        pytest.param(
+            "cloned", IN_PROGRESS_RESTORE, ROWS, id="cloned-restore-in-progress"
+        ),
+        pytest.param("cloned", COMPLETED_RESTORE, ROWS, id="cloned-restore-completed"),
+        pytest.param("cloned", FAILED_RESTORE, {}, id="cloned-restore-missing"),
+        pytest.param("cloned", None, ROWS, id="cloned-no-restore"),
+        pytest.param("skipped", FAILED_RESTORE, ROWS, id="skipped"),
+        pytest.param("failed", FAILED_RESTORE, ROWS, id="failed"),
+    ],
+)
+def test_every_other_entry_is_read_as_stored(
+    outcome: str, restore: Restore | None, rows: dict[UUID, Restore]
+) -> None:
+    entry = _entry(outcome, restore=restore)
+
+    assert resolve_deployment_result(entry, rows) == entry
+
+
+@pytest.mark.parametrize(
+    ("statuses", "failures", "expected"),
+    [
+        pytest.param(
+            (RestoreStatus.FAILED, RestoreStatus.COMPLETED),
+            1,
+            EnvironmentCloneStatus.PARTIAL,
+            id="one-failed-one-completed",
+        ),
+        pytest.param(
+            (RestoreStatus.FAILED, RestoreStatus.FAILED),
+            2,
+            EnvironmentCloneStatus.FAILED,
+            id="both-failed",
+        ),
+        pytest.param(
+            (RestoreStatus.COMPLETED, RestoreStatus.COMPLETED),
+            0,
+            EnvironmentCloneStatus.COMPLETED,
+            id="both-completed",
+        ),
+    ],
+)
+def test_the_entries_read_agree_with_the_derived_status(
+    statuses: tuple[RestoreStatus, ...],
+    failures: int,
+    expected: EnvironmentCloneStatus,
+) -> None:
+    """Critique E2: the entries read count the failures that the derivation counts."""
+    restores = [_restore(status, error_message="boom") for status in statuses]
+    rows = _restores(*restores)
+    stored = [_result("cloned", restore_id=restore.id) for restore in restores]
+
+    read = [
+        resolve_deployment_result(CloneDeploymentResult.model_validate(entry), rows)
+        for entry in stored
+    ]
+
+    assert [entry.outcome for entry in read].count(
+        EnvironmentCloneDeploymentOutcome.FAILED
+    ) == failures
+    assert (
+        derive_environment_clone_status(
+            capture_status=COMPLETED_CAPTURE,
+            created_environment_id=uuid4(),
+            deployment_results=stored,
+            clone_errors=None,
+            restores=rows,
+        )
+        == expected
     )

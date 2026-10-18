@@ -188,6 +188,7 @@ async def _seed_restore(
     *,
     instance: ApplicationInstance,
     status: RestoreStatus,
+    error_message: str | None = None,
 ) -> Restore:
     """Seed a constituent cross-target ``Restore`` (with the backup it needs)."""
     backup = Backup(
@@ -200,6 +201,7 @@ async def _seed_restore(
     restore = Restore(
         name=f"restore-{uuid4().hex[:8]}",
         status=status,
+        error_message=error_message,
         target_namespace=f"ns-{uuid4().hex[:6]}",
         backup_id=backup.id,
     )
@@ -1914,6 +1916,117 @@ async def test_environment_clone_projects_links_attribution_and_errors(
     assert by_name["never-deployed"]["reason"] == CLONE_REASON_NOT_ELIGIBLE
     assert by_name["never-deployed"]["counterpartDeploymentId"] is None
     assert by_name["never-deployed"]["restoreId"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_cloned_entry_whose_restore_failed_reads_failed_on_every_read(
+    fresh_client: AsyncClient, session: AsyncSession
+) -> None:
+    """Spec 030 FR-007: the entry reads FAILED with the restore's error.
+
+    The stored entry still says ``cloned``; the resolvers fold the restore row
+    into it on ``environmentClone``, ``environmentClones`` and
+    ``Environment.clonedFrom``. The ids stay as stored.
+    """
+    source, instance = await _seed_source_with_instance(session)
+    created = await _sibling_environment(session, source, "restore-failed-read")
+    alias_error = "Service alias step failed: (500)\nReason: Internal Server Error\n"
+    failed = await _seed_restore(
+        session,
+        instance=instance,
+        status=RestoreStatus.FAILED,
+        error_message=alias_error,
+    )
+    completed = await _seed_restore(
+        session, instance=instance, status=RestoreStatus.COMPLETED
+    )
+    capture = await _seed_capture(
+        session,
+        environment=source,
+        instance=instance,
+        constituent_statuses=[BackupStatus.COMPLETED, BackupStatus.COMPLETED],
+    )
+    failed_source_id = uuid4()
+    failed_counterpart_id = uuid4()
+    completed_counterpart_id = uuid4()
+    clone = EnvironmentClone(
+        name="restore-failed-read",
+        source_environment_id=source.id,
+        source_environment_name=source.name,
+        environment_backup_id=capture.id,
+        created_environment_id=created.id,
+        deployment_results=[
+            _result_entry(
+                deployment_id=failed_source_id,
+                deployment_name="frontend",
+                outcome="cloned",
+                counterpart_deployment_id=failed_counterpart_id,
+                restore_id=failed.id,
+            ),
+            _result_entry(
+                deployment_id=uuid4(),
+                deployment_name="database",
+                outcome="cloned",
+                counterpart_deployment_id=completed_counterpart_id,
+                restore_id=completed.id,
+            ),
+        ],
+    )
+    session.add(clone)
+    await session.commit()
+
+    detail = (
+        await gql(
+            fresh_client,
+            "get_environment_clone",
+            {"environmentCloneId": str(clone.id)},
+        )
+    )["environmentClone"]
+
+    assert detail["status"] == "PARTIAL"
+    by_name = {entry["deploymentName"]: entry for entry in detail["deploymentResults"]}
+    assert by_name["frontend"] == {
+        "deploymentId": str(failed_source_id),
+        "deploymentName": "frontend",
+        "outcome": "FAILED",
+        "reason": f"the restore failed: {alias_error}",
+        "counterpartDeploymentId": str(failed_counterpart_id),
+        "restoreId": str(failed.id),
+    }
+    assert (by_name["database"]["outcome"], by_name["database"]["reason"]) == (
+        "CLONED",
+        None,
+    )
+    assert by_name["database"]["counterpartDeploymentId"] == str(
+        completed_counterpart_id
+    )
+
+    listed = (
+        await gql(
+            fresh_client, "list_environment_clones", {"environmentId": str(source.id)}
+        )
+    )["environmentClones"]
+    assert [row["id"] for row in listed] == [str(clone.id)]
+    assert listed[0]["status"] == "PARTIAL"
+    assert listed[0]["deploymentResults"] == [
+        {key: entry[key] for key in entry if key != "deploymentId"}
+        for entry in detail["deploymentResults"]
+    ]
+
+    cloned_from = (
+        await gql(
+            fresh_client,
+            "get_environment_cloned_from",
+            {"environmentId": str(created.id)},
+        )
+    )["environment"]["clonedFrom"]
+    assert [
+        (entry["deploymentName"], entry["outcome"], entry["reason"])
+        for entry in cloned_from["deploymentResults"]
+    ] == [
+        (entry["deploymentName"], entry["outcome"], entry["reason"])
+        for entry in detail["deploymentResults"]
+    ]
 
 
 @pytest.mark.asyncio

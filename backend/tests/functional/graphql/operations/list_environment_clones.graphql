@@ -14,6 +14,8 @@ query ListEnvironmentClones($environmentId: UUID!) {
             deploymentName
             outcome
             reason
+            counterpartDeploymentId
+            restoreId
         }
         cloneErrors
     }

@@ -58,6 +58,7 @@ from styrmin_backend.services.backup.clone import (
     CloneDeploymentResult as CloneDeploymentResultModel,
     derive_environment_clone_status_from_record,
     read_clone_errors,
+    resolve_deployment_result,
 )
 
 #: Stand-in ``deploymentId`` for an entry whose own id could not be read.
@@ -126,14 +127,27 @@ class EnvironmentCloneDeploymentOutcome(str, Enum):
         "SKIPPED and FAILED and is open text — render it, do not switch on it. "
         "``counterpartDeploymentId`` is the deployment created in the cloned "
         "environment (null unless CLONED); ``restoreId`` is the cross-target "
-        "restore carrying the data (null until one is dispatched)."
+        "restore carrying the data (null until one is dispatched). An entry "
+        "whose restore failed reads FAILED, with the restore's error as the "
+        "reason, and keeps its ``counterpartDeploymentId`` and ``restoreId``."
     )
 )
 class EnvironmentCloneDeploymentResult:
     deployment_id: UUID
     deployment_name: str
-    outcome: EnvironmentCloneDeploymentOutcome
-    reason: str | None
+    outcome: EnvironmentCloneDeploymentOutcome = strawberry.field(
+        description=(
+            "What became of the source deployment. An entry whose restore "
+            "failed reads FAILED."
+        )
+    )
+    reason: str | None = strawberry.field(
+        description=(
+            "Why the deployment was skipped or failed, as open text; null "
+            "otherwise. For an entry whose restore failed, it gives the "
+            "restore's error."
+        )
+    )
     counterpart_deployment_id: UUID | None
     restore_id: UUID | None
 
@@ -151,8 +165,15 @@ class EnvironmentCloneDeploymentResult:
         )
 
     @classmethod
-    def from_stored(cls, raw: Any, index: int) -> EnvironmentCloneDeploymentResult:
+    def from_stored(
+        cls, raw: Any, index: int, restores: Mapping[UUID, RestoreModel]
+    ) -> EnvironmentCloneDeploymentResult:
         """Project one stored entry, degrading instead of failing the query.
+
+        A readable entry passes through
+        :func:`~styrmin_backend.services.backup.clone.resolve_deployment_result`
+        first, so a ``cloned`` entry whose restore failed reads ``FAILED``
+        (#530).
 
         The wire type is stricter than the column: ``outcome`` is a closed enum
         here and free JSON there, and the derivation deliberately tolerates both
@@ -169,7 +190,7 @@ class EnvironmentCloneDeploymentResult:
         read is a source deployment nobody can account for, not a success.
         """
         try:
-            return cls.from_model(CloneDeploymentResultModel.model_validate(raw))
+            result = CloneDeploymentResultModel.model_validate(raw)
         except Exception as exc:  # noqa: BLE001 — one bad row must stay readable
             logger.warning(
                 "Projecting unreadable deployment_results[{}] entry as FAILED: "
@@ -178,6 +199,12 @@ class EnvironmentCloneDeploymentResult:
                 raw,
                 exc,
             )
+            return cls._from_unreadable(raw, index)
+        return cls.from_model(resolve_deployment_result(result, restores))
+
+    @classmethod
+    def _from_unreadable(cls, raw: Any, index: int) -> EnvironmentCloneDeploymentResult:
+        """Project an entry that does not validate, keeping what can be read."""
         entry = raw if isinstance(raw, dict) else {}
         return cls(
             deployment_id=_read_optional_uuid(entry.get("deployment_id"))
@@ -319,7 +346,9 @@ class EnvironmentClone:
     )
     def deployment_results(self) -> list[EnvironmentCloneDeploymentResult]:
         return [
-            EnvironmentCloneDeploymentResult.from_stored(raw, index)
+            EnvironmentCloneDeploymentResult.from_stored(
+                raw, index, self.referenced_restores
+            )
             for index, raw in enumerate(self.db_model.deployment_results or [])
         ]
 
