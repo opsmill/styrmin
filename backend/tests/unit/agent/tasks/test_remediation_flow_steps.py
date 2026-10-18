@@ -345,6 +345,35 @@ async def test_create_failing_resource_write_records_failed(
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("with_aliases")
+async def test_create_failing_alias_read_records_the_alias_step_failed(
+    api: FakeStepApi,
+    cluster: Cluster,
+    events: list[Event],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The alias step reads before it opens; a failed read is still a failed step."""
+    monkeypatch.setattr(
+        service_aliases,
+        "find_stale_service_aliases",
+        AsyncMock(side_effect=ApiException(status=503, reason="Service Unavailable")),
+    )
+    posthook = uuid4()
+
+    with pytest.raises(ApiException):
+        await create_instance_crd(instance=_instance(), prehook=None, posthook=posthook)
+
+    assert events == [
+        *_step("resource:styrmindeployment", ("namespace",), ("crd",)),
+        ("STARTED", "resource:service-aliases"),
+        ("FAILED", "resource:service-aliases"),
+    ]
+    assert api.failed("resource:service-aliases")["error"] == (
+        "ApiException: (503)\nReason: Service Unavailable\n"
+    )
+
+
 # update_instance_crd
 
 
