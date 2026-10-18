@@ -26,7 +26,7 @@ export function versionSource(v: DriverListVersion): string {
   if (v.sourceType === "local") return v.sourcePath ?? "local";
   const repo = v.sourceRepository || "";
   const source = v.sourceBranch ? `${repo} @ ${v.sourceBranch}` : repo;
-  return v.sourcePath ? `${source} · ${v.sourcePath}` : source;
+  return v.driverDirectory ? `${source} · ${v.driverDirectory}` : source;
 }
 
 /** Versions ordered "latest first" per the backend latest-wins rule. */

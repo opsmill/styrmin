@@ -58,9 +58,14 @@ import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
 import type { StepListItem } from "@/components/deployment/StepList";
 import { TaskResultBadge } from "@/components/deployment/TaskResultBadge";
 import { PinnedImageOverridesNotice } from "@/components/deployment/PinnedImageOverridesNotice";
+import { DriverDirectoryChangeNotice } from "@/components/deployment/DriverDirectoryChangeNotice";
 import { IfRole } from "@/auth/IfRole";
 import { PodsTab } from "./PodsTab";
-import { formatDriverVersionLabel } from "@/lib/driverVersion";
+import {
+  driverDirectoriesOf,
+  formatDriverVersionLabel,
+  withDriverDirectory,
+} from "@/lib/driverVersion";
 import { taskResultDisplay } from "@/lib/task-display";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
@@ -131,6 +136,10 @@ export default function DeploymentDetailPage() {
     ...(upgradeDriverData?.applicationDriver?.versions ?? []),
   ].sort(
     (a, b) => new Date(b.createdOn).getTime() - new Date(a.createdOn).getTime(),
+  );
+  const upgradeDriverDirectories = driverDirectoriesOf(
+    upgradeDriverVersions,
+    deployment?.applicationDriverVersionId,
   );
 
   // Deployment-deletion state (spec 008).
@@ -907,7 +916,7 @@ export default function DeploymentDetailPage() {
                 <SelectItem value="latest">Latest (auto)</SelectItem>
                 {upgradeDriverVersions.map((v) => (
                   <SelectItem key={v.id} value={v.id}>
-                    {formatDriverVersionLabel(v)}
+                    {withDriverDirectory(formatDriverVersionLabel(v), v)}
                     {v.id === deployment.applicationDriverVersionId
                       ? " (current)"
                       : ""}
@@ -920,6 +929,12 @@ export default function DeploymentDetailPage() {
               the new application version; pick one to pin it explicitly.
             </p>
           </div>
+          {selectedDriverVersionId === "latest" && upgradeDriverDirectories && (
+            <DriverDirectoryChangeNotice
+              current={upgradeDriverDirectories.current}
+              others={upgradeDriverDirectories.others}
+            />
+          )}
           <PinnedImageOverridesNotice
             overrides={deployment.componentImageOverrides}
           />

@@ -10,6 +10,7 @@ query ListDrivers {
       sourceRepository
       sourceBranch
       sourcePath
+      driverDirectory
       sourceCommitSha
       contentHash
       createdOn

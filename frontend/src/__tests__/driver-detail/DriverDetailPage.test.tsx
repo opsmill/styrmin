@@ -103,6 +103,7 @@ function makeVersion(
     sourceRepository: "https://github.com/example/repo.git",
     sourceBranch: "main" as string | null,
     sourcePath: null as string | null,
+    driverDirectory: null as string | null,
     sourceCommitSha: "abcdef1234567890" as string | null,
     contentHash: null as string | null,
     icon: null as string | null,
@@ -308,6 +309,78 @@ describe("DriverDetailPage", () => {
     expect(
       screen.getByText("Searching all 3 loaded versions"),
     ).toBeInTheDocument();
+  });
+
+  it("shows the driver directory of each version in the picker and searches on it", async () => {
+    // Two drivers of one name, loaded from two driver directories at one commit.
+    useGetDriverQueryMock.mockReturnValue(
+      makeQueryResult(
+        makeDriver([
+          makeVersion({
+            id: "vb",
+            version: "1.0.0",
+            createdOn: "2026-03-02T00:00:00Z",
+            sourcePath: "drivers/b",
+            driverDirectory: "drivers/b",
+          }),
+          makeVersion({
+            id: "va",
+            version: "1.0.0",
+            createdOn: "2026-03-01T00:00:00Z",
+            sourcePath: "drivers/a",
+            driverDirectory: "drivers/a",
+          }),
+        ]),
+      ),
+    );
+    await renderPage();
+    const user = userEvent.setup();
+
+    const trigger = screen.getByLabelText("Switch version");
+    expect(trigger).toHaveTextContent("1.0.0@abcdef1 · drivers/b");
+
+    await user.click(trigger);
+    await user.type(
+      await screen.findByLabelText("Search versions"),
+      "drivers/a",
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("option", { name: /drivers\/b/ }),
+      ).not.toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("option", { name: /1\.0\.0@abcdef1 · drivers\/a/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("names each copy button of the Overview tab by the value it copies", async () => {
+    useGetDriverQueryMock.mockReturnValue(
+      makeQueryResult(
+        makeDriver([
+          makeVersion({
+            id: "v1",
+            version: "1.0.0",
+            createdOn: "2026-03-01T00:00:00Z",
+            sourcePath: "drivers/a",
+            driverDirectory: "drivers/a",
+          }),
+        ]),
+      ),
+    );
+
+    await renderPage();
+
+    const names = within(screen.getByTestId("driver-overview"))
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"));
+    expect(names).toEqual([
+      "Copy source",
+      "Copy driver directory",
+      "Copy full commit SHA",
+      "Copy chart repository",
+    ]);
   });
 
   it("selects the ?version version and flags Update available on an older one", async () => {
@@ -608,6 +681,7 @@ describe("DriverDetailPage", () => {
             version: "1.0.0",
             createdOn: "2026-03-01T00:00:00Z",
             sourcePath: "drivers/a",
+            driverDirectory: "drivers/a",
           }),
         ]),
       ),
@@ -619,7 +693,7 @@ describe("DriverDetailPage", () => {
     expect(within(row).getByText("Driver directory")).toBeInTheDocument();
     expect(within(row).getByText("drivers/a")).toBeInTheDocument();
     expect(
-      within(row).getByRole("button", { name: "Copy to clipboard" }),
+      within(row).getByRole("button", { name: "Copy driver directory" }),
     ).toBeInTheDocument();
     // The row follows the Source row.
     expect(row.previousElementSibling).toHaveTextContent("Source");

@@ -30,6 +30,7 @@ import {
   compareVersionsLatestFirst,
   displayDriverVersion,
   LOADED_SCOPE_NOTE,
+  withDriverDirectory,
 } from "@/lib/driverVersion";
 import { isPlainObject } from "./driver-detail/json-guards";
 import type { DriverVersionDetail } from "./driver-detail/types";
@@ -79,10 +80,13 @@ export default function DriverDetailPage() {
   const colliding = collidingVersions(versions);
 
   // `label` is what the search matches on, so it carries the displayed string
-  // including the `@<short>` suffix added when two versions collide.
+  // including the `@<short>` suffix added when two versions collide and the
+  // driver directory.
+  const versionLabel = (v: (typeof versions)[number]) =>
+    withDriverDirectory(displayDriverVersion(v, colliding), v);
   const versionOptions = versions.map((v) => ({
     value: v.id,
-    label: displayDriverVersion(v, colliding),
+    label: versionLabel(v),
     loaded: formatRelativeTime(v.createdOn),
   }));
 
@@ -100,7 +104,7 @@ export default function DriverDetailPage() {
       breadcrumbs={[
         { label: "Drivers", href: "/drivers" },
         {
-          label: `${driver.name} ${displayDriverVersion(selected, colliding)}`,
+          label: `${driver.name} ${versionLabel(selected)}`,
         },
       ]}
     >
@@ -128,9 +132,9 @@ export default function DriverDetailPage() {
                   aria-label="Switch version"
                   className="h-8 w-auto gap-2 px-2.5 font-mono text-base font-medium"
                 >
-                  {displayDriverVersion(selected, colliding)}
+                  {versionLabel(selected)}
                 </ComboboxTrigger>
-                <ComboboxContent className="w-72">
+                <ComboboxContent className="w-96">
                   <ComboboxSearch
                     placeholder={`Search ${versions.length} versions…`}
                     aria-label="Search versions"
@@ -164,7 +168,7 @@ export default function DriverDetailPage() {
               </Combobox>
             ) : (
               <span className="font-mono text-base font-medium">
-                {displayDriverVersion(selected, colliding)}
+                {versionLabel(selected)}
               </span>
             )}
             {isLatest && <LatestBadge />}
@@ -275,25 +279,33 @@ function OverviewPanel({ version }: { version: DriverVersionDetail }) {
       ? `${version.sourceRepository} @ ${version.sourceBranch}`
       : version.sourceRepository;
 
-  const driverDirectory = isLocal ? null : version.sourcePath;
+  const driverDirectory = version.driverDirectory;
 
   const rows: Array<{
     label: string;
     value: React.ReactNode;
     copy?: string;
+    // Names the copy button by the value it copies.
+    copyLabel?: string;
     testId?: string;
   }> = [
     {
       label: "Supports app versions",
       value: mono(version.supportedVersions || "—"),
     },
-    { label: isLocal ? "Path" : "Source", value: mono(source), copy: source },
+    {
+      label: isLocal ? "Path" : "Source",
+      value: mono(source),
+      copy: source,
+      copyLabel: isLocal ? "Copy path" : "Copy source",
+    },
     ...(driverDirectory
       ? [
           {
             label: "Driver directory",
             value: mono(driverDirectory),
             copy: driverDirectory,
+            copyLabel: "Copy driver directory",
             testId: "driver-overview-driver-directory",
           },
         ]
@@ -302,6 +314,7 @@ function OverviewPanel({ version }: { version: DriverVersionDetail }) {
       label: isLocal ? "Content hash" : "Commit",
       value: fingerprint ? mono(fingerprint.slice(0, 12)) : "—",
       copy: fingerprint ?? undefined,
+      copyLabel: isLocal ? "Copy full content hash" : "Copy full commit SHA",
     },
   ];
   if (version.helmChart) {
@@ -316,6 +329,7 @@ function OverviewPanel({ version }: { version: DriverVersionDetail }) {
         label: "Chart repository",
         value: mono(version.helmChart.repository),
         copy: version.helmChart.repository,
+        copyLabel: "Copy chart repository",
       });
     }
   }
@@ -340,7 +354,12 @@ function OverviewPanel({ version }: { version: DriverVersionDetail }) {
                 <td className="px-4 py-2.5">
                   <span className="inline-flex items-center gap-2">
                     {row.value}
-                    {row.copy && <CopyButton text={row.copy} />}
+                    {row.copy && (
+                      <CopyButton
+                        text={row.copy}
+                        label={row.copyLabel ?? `Copy ${row.label}`}
+                      />
+                    )}
                   </span>
                 </td>
               </tr>
@@ -398,13 +417,13 @@ function linkHost(url: string): string {
   }
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, label }: { text: string; label: string }) {
   const { copied, copy } = useCopyToClipboard();
   return (
     <button
       type="button"
       onClick={() => copy(text)}
-      aria-label="Copy to clipboard"
+      aria-label={label}
       className="text-muted-foreground transition-colors hover:text-foreground"
     >
       {copied ? (

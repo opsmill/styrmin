@@ -26,6 +26,38 @@ export function formatDriverVersionLabel(v: {
 }
 
 /**
+ * A driver version label followed by ` · <driver directory>` when the version
+ * was loaded from a driver directory of its repository, so drivers that share
+ * a name in one repository read apart in every picker and its search.
+ */
+export function withDriverDirectory(
+  label: string,
+  v: { driverDirectory?: string | null },
+): string {
+  return v.driverDirectory ? `${label} · ${v.driverDirectory}` : label;
+}
+
+/**
+ * The driver directory of the current version and the other driver directories
+ * the driver's versions come from (`null` stands for the repository root).
+ * The latest-wins rule ignores the driver directory, so when `others` is not
+ * empty, "Latest (auto)" can move a deployment to another driver directory.
+ * Returns `null` while the current version is not in `versions`.
+ */
+export function driverDirectoriesOf(
+  versions: ReadonlyArray<{ id: string; driverDirectory?: string | null }>,
+  currentId: string | null | undefined,
+): { current: string | null; others: Array<string | null> } | null {
+  const currentVersion = versions.find((v) => v.id === currentId);
+  if (!currentVersion) return null;
+  const current = currentVersion.driverDirectory ?? null;
+  const others = [
+    ...new Set(versions.map((v) => v.driverDirectory ?? null)),
+  ].filter((d) => d !== current);
+  return { current, others };
+}
+
+/**
  * "Latest / newest" is always scoped to the versions loaded into this Styrmin
  * instance — Styrmin can't see versions in the driver's source that haven't
  * been loaded, so a newer one may exist upstream. Shown as a tooltip on the

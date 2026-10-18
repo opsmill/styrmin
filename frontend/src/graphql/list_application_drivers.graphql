@@ -10,6 +10,7 @@ query ListApplicationDrivers {
       createdOn
       contentHash
       sourceCommitSha
+      driverDirectory
       parameters {
         name
         label
