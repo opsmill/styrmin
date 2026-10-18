@@ -25,6 +25,7 @@ Suggested title: `test(e2e): record demos of Styrmin features for the beta prese
 - The demo package `backend/tests/e2e/demos/`: run loop and summary, prerequisites check, catalog, recorder, video planning and ffmpeg encoding, SDK helpers for the demo stack, Infrahub and Semaphore setup and page objects, the demo Semaphore image (`semaphore/Dockerfile`), the Infrahub versions file, and the scenarios of demos 2 and 3.
 - Unit tests in `backend/tests/unit/demos/`, `backend/tests/unit/test_e2e_page_typing.py` and `backend/tests/unit/test_e2e_timeline_wait.py`.
 - The `record` task in `tasks/demo.py`, registered in `tasks/__init__.py`, and `demo-videos/` in `.gitignore`.
+- The line `Active plan: [specs/029-recorded-feature-demos/plan.md](specs/029-recorded-feature-demos/plan.md)` in `CLAUDE.md`, which the speckit plan step added.
 - Documentation: "Recording the demos" and two troubleshooting items in [`dev/guides/local-demo.md`](../../dev/guides/local-demo.md), and "Page objects shared with the recorded demos" in [`dev/knowledge/backend/e2e-testing.md`](../../dev/knowledge/backend/e2e-testing.md).
 - The FR-016 alias check in `test_environment_clone_lifecycle` (commit `472fe403`), which must leave the branch before it is pushed (see [Steps before the branch is pushed](#steps-before-the-branch-is-pushed)).
 
@@ -53,7 +54,7 @@ Checks run for the pull request on 2026-10-18:
 
 ## Approved exception to Constitution §V
 
-The demo scripts have no E2E test. The grilling session of 2026-10-17 approved this exception ([spec Clarifications](spec.md)). The agreed proof is one run of all four demos on a demo stack that `uv run invoke start` just created, with the command output attached to the pull request. Because demos 1 and 4 are not available, the run covered demos 2 and 3 only ([full-run.log](full-run.log)). The output above and the log are that proof.
+The demo scripts have no E2E test. The grilling session of 2026-10-17 approved this exception ([spec Clarifications](spec.md)). The agreed proof is one run of all four demos on a demo stack that `uv run invoke start` just created, with the command output attached to the pull request. Because demos 1 and 4 are not available, the run covered demos 2 and 3 only ([full-run.log](full-run.log)). The output above and the log are the proof for the two demos this pull request adds. Demos 1 and 4 need their own run when they land. Whether a run of two demos is enough for the exception is a question for the maintainer (see [Questions for the maintainer](#questions-for-the-maintainer)).
 
 ## Governance gates crossed
 
@@ -66,6 +67,10 @@ The constitution's gate "New dependencies" applies to three items, all approved 
 No other gate is crossed: no database schema, GraphQL schema, CI workflow, or authentication change.
 
 ## Questions for the maintainer
+
+### The approved exception asked for a run of all four demos
+
+The exception to Constitution §V asked for one run of all four demos ([spec Clarifications](spec.md)). The run in [full-run.log](full-run.log) covered demos 2 and 3, because demos 1 and 4 wait for [#372](https://github.com/opsmill/styrmin/issues/372) and [#530](https://github.com/opsmill/styrmin/issues/530). The maintainer has not yet confirmed that this run is enough for this pull request.
 
 ### Demos 3 and 4 show the `infrahub-enterprise` driver
 
@@ -119,6 +124,6 @@ The run of task T042 hit three problems on the host, outside the demo code ([ful
 
 Also, `uv run invoke record` builds the demo Semaphore image when it is missing before it runs the prerequisites check, so a first run can spend time on the image build (11 s on this host) even when the check then fails.
 
-## Changelog fragment
+## No towncrier fragment, because only development tooling changes
 
-This pull request adds no towncrier fragment. [`dev/guidelines/changelog.md`](../../dev/guidelines/changelog.md) asks for a fragment in a pull request that changes user-visible behaviour, and nothing changes for Styrmin users: the record command, the page objects and the demo files are development tooling. The grilling session of 2026-10-17 also decided on no towncrier fragment ([spec Clarifications](spec.md)). The guideline's `housekeeping` type covers development scripts and earlier pull requests used it for them (for example `+e2e-pdb-wrapper.housekeeping.md`), so the maintainer can still ask for one.
+This pull request adds no towncrier fragment. [`dev/guidelines/changelog.md`](../../dev/guidelines/changelog.md) asks for a fragment in a pull request that changes user-visible behaviour, and nothing changes for Styrmin users: the record command, the page objects and the demo files are development tooling. The grilling session of 2026-10-17 also decided on no towncrier fragment ([spec Clarifications](spec.md)). The guideline's `housekeeping` type covers development scripts and earlier pull requests used it for them (for example `+e2e-pdb-wrapper.housekeeping.md`), so the maintainer can still ask for one. The guideline records dependency-version bumps as `changed`; the Playwright upgrade needs no fragment because Playwright is in the root `dev` dependency group only, so a Styrmin installation does not include it.

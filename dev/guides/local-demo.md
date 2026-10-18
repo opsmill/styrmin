@@ -85,8 +85,8 @@ writes one MP4 video for each demo. It runs on a demo stack that
 3. performs the feature in the Styrmin UI with the E2E page objects, and in
    Infrahub and Semaphore when the demo uses them, while Playwright records
    the browser page;
-4. shows each wait for the cluster at a higher speed in the video, with a
-   label that gives the real duration, and encodes the video with ffmpeg;
+4. shows each wait for the cluster that lasts longer than 6 s at a higher
+   speed in the video, with a label that gives the real duration, and encodes the video with ffmpeg;
 5. deletes the demo's environments.
 
 The requirements are in [spec 029](../../specs/029-recorded-feature-demos/spec.md),
@@ -130,9 +130,10 @@ Styrmin image, and the driver stays loaded after the demo.
 ### Prerequisites for recording
 
 - The tools in [Prerequisites](#prerequisites) and a demo stack that
-  `uv run invoke start` created. The command deletes namespaces through the
-  kube context `vcluster-docker_styrmin`, which `vcluster connect` writes
-  during `uv run invoke start`.
+  `uv run invoke start` created. The command deletes the demo's environments
+  through the Styrmin API, and reads the namespaces through the kube context
+  `vcluster-docker_styrmin` to wait until they are gone. `vcluster connect`
+  writes that context during `uv run invoke start`.
 - `ffmpeg` on the PATH, any build with libx264, for example from
   `brew install ffmpeg` or `apt install ffmpeg`.
 - The Chromium build of the Playwright version in `uv.lock` (1.64): run
