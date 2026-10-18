@@ -4,6 +4,8 @@ import {
   formatDriverVersionLabel,
   collidingVersions,
   displayDriverVersion,
+  driverDirectoriesOf,
+  withDriverDirectory,
 } from "@/lib/driverVersion";
 
 describe("formatDriverVersionLabel", () => {
@@ -90,5 +92,51 @@ describe("displayDriverVersion", () => {
 
   it("appends the fingerprint only when the version collides", () => {
     expect(displayDriverVersion(v, new Set(["1"]))).toBe("1@aaaaaaa");
+  });
+});
+
+describe("withDriverDirectory", () => {
+  it("appends the driver directory", () => {
+    expect(
+      withDriverDirectory("1.0.0@abc1234", { driverDirectory: "drivers/a" }),
+    ).toBe("1.0.0@abc1234 · drivers/a");
+  });
+
+  it.each([null, undefined])("keeps the label when it is %s", (dir) => {
+    expect(withDriverDirectory("1.0.0", { driverDirectory: dir })).toBe(
+      "1.0.0",
+    );
+  });
+});
+
+describe("driverDirectoriesOf", () => {
+  const versions = [
+    { id: "a1", driverDirectory: "drivers/a" },
+    { id: "a2", driverDirectory: "drivers/a" },
+    { id: "b1", driverDirectory: "drivers/b" },
+    { id: "root", driverDirectory: null },
+  ];
+
+  it("lists the other driver directories once each", () => {
+    expect(driverDirectoriesOf(versions, "a1")).toEqual({
+      current: "drivers/a",
+      others: ["drivers/b", null],
+    });
+  });
+
+  it("treats the repository root as a driver directory of its own", () => {
+    expect(driverDirectoriesOf(versions, "root")).toEqual({
+      current: null,
+      others: ["drivers/a", "drivers/b"],
+    });
+  });
+
+  it("lists none when every version shares the driver directory", () => {
+    expect(driverDirectoriesOf(versions.slice(0, 2), "a2")?.others).toEqual([]);
+  });
+
+  it("returns null while the current version is not loaded", () => {
+    expect(driverDirectoriesOf(versions, "gone")).toBeNull();
+    expect(driverDirectoriesOf([], undefined)).toBeNull();
   });
 });

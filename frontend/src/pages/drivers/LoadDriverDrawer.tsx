@@ -18,13 +18,28 @@ import { AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { fieldError } from "@/lib/field-error";
+import { repositoryOfFolderLink } from "./lib/repositoryUrl";
 
 const localSchema = z.object({
   path: z.string().min(1, "Path is required"),
 });
 
 const remoteSchema = z.object({
-  repositoryUrl: z.string().min(1, "Repository URL is required"),
+  repositoryUrl: z
+    .string()
+    .min(1, "Repository URL is required")
+    .superRefine((url, ctx) => {
+      const repository = repositoryOfFolderLink(url);
+      if (repository) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            `This is the address of a folder or a file in the repository. ` +
+            `Enter the repository URL ${repository}, its branch, and the ` +
+            `folder as the driver directory.`,
+        });
+      }
+    }),
   branch: z.string().min(1, "Branch is required"),
   driverDirectory: z.string(),
 });
@@ -32,6 +47,9 @@ const remoteSchema = z.object({
 type SourceTab = "git" | "local";
 
 const FORM_ID = "load-driver-form";
+
+// The backend names the field first in every error about the driver directory.
+const DRIVER_DIRECTORY_ERROR_PREFIX = "Driver directory ";
 
 interface LoadDriverDrawerProps {
   open: boolean;
@@ -57,6 +75,9 @@ export function LoadDriverDrawer({
   const toast = useToast();
   const [tab, setTab] = useState<SourceTab>("git");
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [driverDirectoryError, setDriverDirectoryError] = useState<
+    string | null
+  >(null);
 
   const loadLocalMutation = useLoadLocalDriverMutation();
   const loadRemoteMutation = useLoadRemoteDriverMutation();
@@ -98,6 +119,7 @@ export function LoadDriverDrawer({
     validators: { onSubmit: remoteSchema },
     onSubmit: async ({ value }) => {
       setSubmitError(null);
+      setDriverDirectoryError(null);
       const driverDirectory = value.driverDirectory.trim();
       try {
         const data = await loadRemoteMutation.mutateAsync({
@@ -108,7 +130,13 @@ export function LoadDriverDrawer({
         const v = data.loadRemoteApplicationDriverVersion;
         if (v) handleLoaded(v);
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : "Unknown error");
+        const message = err instanceof Error ? err.message : "Unknown error";
+        // Shown under the field it is about, not in the alert at the top.
+        if (message.startsWith(DRIVER_DIRECTORY_ERROR_PREFIX)) {
+          setDriverDirectoryError(message);
+        } else {
+          setSubmitError(message);
+        }
       }
     },
   });
@@ -136,6 +164,7 @@ export function LoadDriverDrawer({
     if (open) {
       setTab("git");
       setSubmitError(null);
+      setDriverDirectoryError(null);
       remoteForm.reset();
       localForm.reset();
     }
@@ -204,6 +233,7 @@ export function LoadDriverDrawer({
               onTabChange={(id) => {
                 setTab(id as SourceTab);
                 setSubmitError(null);
+                setDriverDirectoryError(null);
               }}
             />
 
@@ -272,19 +302,41 @@ export function LoadDriverDrawer({
                     {(field) => (
                       <div className="space-y-2">
                         <Label htmlFor="driverDirectory">
-                          Driver directory
+                          Driver directory (optional)
                         </Label>
                         <Input
                           id="driverDirectory"
                           placeholder="drivers/my-driver"
                           className="font-mono text-xs"
+                          aria-describedby={
+                            driverDirectoryError
+                              ? "driverDirectory-error driverDirectory-help"
+                              : "driverDirectory-help"
+                          }
+                          aria-invalid={driverDirectoryError ? true : undefined}
                           value={field.state.value}
-                          onChange={(e) => field.handleChange(e.target.value)}
+                          onChange={(e) => {
+                            field.handleChange(e.target.value);
+                            setDriverDirectoryError(null);
+                          }}
                           onBlur={field.handleBlur}
                         />
-                        <p className="text-xs text-muted-foreground">
+                        {driverDirectoryError && (
+                          <p
+                            id="driverDirectory-error"
+                            data-testid="driver-directory-error"
+                            className="whitespace-pre-line text-sm text-destructive"
+                          >
+                            {driverDirectoryError}
+                          </p>
+                        )}
+                        <p
+                          id="driverDirectory-help"
+                          className="text-xs text-muted-foreground"
+                        >
                           Folder that holds driver.styrmin.yml, relative to the
-                          repository root. Leave empty for the root.
+                          repository root, such as drivers/my-driver. Leave
+                          empty for the root.
                         </p>
                       </div>
                     )}
@@ -334,7 +386,11 @@ export function LoadDriverDrawer({
               className="flex-1"
               disabled={isSubmitting}
             >
-              {isSubmitting ? "Loading..." : "Load driver"}
+              {isSubmitting
+                ? tab === "git"
+                  ? "Cloning repository…"
+                  : "Loading…"
+                : "Load driver"}
             </Button>
           </footer>
         </Dialog.Popup>

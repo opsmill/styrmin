@@ -1969,7 +1969,7 @@ export type GetDriverQueryVariables = Exact<{
 }>;
 
 
-export type GetDriverQuery = { __typename?: 'Query', applicationDriver?: { __typename?: 'ApplicationDriver', id: string, name: string, createdOn: any, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, sourceCommitSha?: string | null, contentHash?: string | null, components?: Record<string, unknown> | null, createdOn: any, icon?: string | null, description?: string | null, links: Array<{ __typename?: 'DriverLink', label: string, url: string }>, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', id: string, name: string, config?: Record<string, unknown> | null, container?: string | null, replicas?: number | null, singleton: boolean }>, helmChart: { __typename?: 'HelmChart', id: string, name: string, version: string, repository: string, valueTemplate: string }, actions: Array<{ __typename?: 'Action', id: string, name: string, description: string, location: string }> }> } | null };
+export type GetDriverQuery = { __typename?: 'Query', applicationDriver?: { __typename?: 'ApplicationDriver', id: string, name: string, createdOn: any, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, driverDirectory?: string | null, sourceCommitSha?: string | null, contentHash?: string | null, components?: Record<string, unknown> | null, createdOn: any, icon?: string | null, description?: string | null, links: Array<{ __typename?: 'DriverLink', label: string, url: string }>, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', id: string, name: string, config?: Record<string, unknown> | null, container?: string | null, replicas?: number | null, singleton: boolean }>, helmChart: { __typename?: 'HelmChart', id: string, name: string, version: string, repository: string, valueTemplate: string }, actions: Array<{ __typename?: 'Action', id: string, name: string, description: string, location: string }> }> } | null };
 
 export type GetEnvironmentQueryVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
@@ -2015,7 +2015,7 @@ export type GetTaskQuery = { __typename?: 'Query', task?: { __typename?: 'Task',
 export type ListApplicationDriversQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type ListApplicationDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, defaultVersion?: string | null, createdOn: any, contentHash?: string | null, sourceCommitSha?: string | null, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', name: string, replicas?: number | null, singleton: boolean }> }> }> };
+export type ListApplicationDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, defaultVersion?: string | null, createdOn: any, contentHash?: string | null, sourceCommitSha?: string | null, driverDirectory?: string | null, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', name: string, replicas?: number | null, singleton: boolean }> }> }> };
 
 export type ListBackupStorageLocationsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2037,7 +2037,7 @@ export type ListClustersQuery = { __typename?: 'Query', clusters: Array<{ __type
 export type ListDriversQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type ListDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, sourceCommitSha?: string | null, contentHash?: string | null, createdOn: any, icon?: string | null, description?: string | null }> }> };
+export type ListDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, sourceType: string, sourceRepository: string, sourceBranch?: string | null, sourcePath?: string | null, driverDirectory?: string | null, sourceCommitSha?: string | null, contentHash?: string | null, createdOn: any, icon?: string | null, description?: string | null }> }> };
 
 export type ListEnvironmentBackupsQueryVariables = Exact<{
   environmentId: Scalars['UUID']['input'];
@@ -3041,6 +3041,7 @@ export const GetDriverDocument = `
       sourceRepository
       sourceBranch
       sourcePath
+      driverDirectory
       sourceCommitSha
       contentHash
       components
@@ -3358,6 +3359,7 @@ export const ListApplicationDriversDocument = `
       createdOn
       contentHash
       sourceCommitSha
+      driverDirectory
       parameters {
         name
         label
@@ -3522,6 +3524,7 @@ export const ListDriversDocument = `
       sourceRepository
       sourceBranch
       sourcePath
+      driverDirectory
       sourceCommitSha
       contentHash
       createdOn

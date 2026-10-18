@@ -26,6 +26,7 @@ function mkVersion(
     sourceRepository: "opsmill/drivers",
     sourceBranch: "main",
     sourcePath: null,
+    driverDirectory: null,
     sourceCommitSha: "abc1234",
     contentHash: null,
     icon: null,
@@ -69,6 +70,7 @@ describe("versionSource", () => {
           version: "1",
           createdOn: "2026-01-01",
           sourcePath: "drivers/simple-app",
+          driverDirectory: "drivers/simple-app",
         }),
       ),
     ).toBe("opsmill/drivers @ main · drivers/simple-app");
@@ -83,9 +85,37 @@ describe("versionSource", () => {
           createdOn: "2026-01-01",
           sourceBranch: null,
           sourcePath: "drivers/simple-app",
+          driverDirectory: "drivers/simple-app",
         }),
       ),
     ).toBe("opsmill/drivers · drivers/simple-app");
+  });
+});
+
+describe("filterDrivers by driver directory", () => {
+  it("keeps the versions whose driver directory matches the query", () => {
+    const drivers = [
+      mkDriver("infrahub", [
+        mkVersion({
+          id: "a",
+          version: "1.0.0",
+          createdOn: "2026-01-01",
+          sourcePath: "drivers/infrahub-a",
+          driverDirectory: "drivers/infrahub-a",
+        }),
+        mkVersion({
+          id: "b",
+          version: "1.0.0",
+          createdOn: "2026-01-02",
+          sourcePath: "drivers/infrahub-b",
+          driverDirectory: "drivers/infrahub-b",
+        }),
+      ]),
+    ];
+
+    const [group] = filterDrivers(drivers, "infrahub-b");
+
+    expect(group.versions.map((v) => v.id)).toEqual(["b"]);
   });
 });
 

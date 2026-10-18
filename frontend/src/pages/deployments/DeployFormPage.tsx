@@ -30,6 +30,7 @@ import { ReplicasField } from "@/components/deployment/configuration/ReplicasFie
 import {
   compareVersionsLatestFirst,
   formatDriverVersionLabel,
+  withDriverDirectory,
 } from "@/lib/driverVersion";
 import { replicaFieldError, replicaParameterFor } from "@/lib/replicas";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -309,7 +310,10 @@ export default function DeployFormPage() {
                   {selectedVersion ? (
                     <span>
                       {selectedVersion.driverName} v
-                      {formatDriverVersionLabel(selectedVersion)}
+                      {withDriverDirectory(
+                        formatDriverVersionLabel(selectedVersion),
+                        selectedVersion,
+                      )}
                     </span>
                   ) : (
                     <SelectValue placeholder="Select a driver version" />
@@ -318,7 +322,8 @@ export default function DeployFormPage() {
                 <SelectContent>
                   {allVersions.map((v) => (
                     <SelectItem key={v.id} value={v.id}>
-                      {v.driverName} v{formatDriverVersionLabel(v)}
+                      {v.driverName} v
+                      {withDriverDirectory(formatDriverVersionLabel(v), v)}
                     </SelectItem>
                   ))}
                 </SelectContent>

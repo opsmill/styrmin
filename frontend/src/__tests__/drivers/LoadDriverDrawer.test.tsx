@@ -136,7 +136,10 @@ describe("LoadDriverDrawer", () => {
       screen.getByLabelText("Repository URL"),
       "https://github.com/org/repo",
     );
-    await user.type(screen.getByLabelText("Driver directory"), "drivers/a");
+    await user.type(
+      screen.getByLabelText("Driver directory (optional)"),
+      "drivers/a",
+    );
     await user.click(screen.getByRole("button", { name: /^load driver$/i }));
     await waitFor(() => {
       expect(loadRemoteMutateAsync).toHaveBeenCalledTimes(1);
@@ -167,7 +170,10 @@ describe("LoadDriverDrawer", () => {
         "https://github.com/org/repo",
       );
       if (entered) {
-        await user.type(screen.getByLabelText("Driver directory"), entered);
+        await user.type(
+          screen.getByLabelText("Driver directory (optional)"),
+          entered,
+        );
       }
       await user.click(screen.getByRole("button", { name: /^load driver$/i }));
       await waitFor(() => {
@@ -194,16 +200,126 @@ describe("LoadDriverDrawer", () => {
     );
     await user.clear(screen.getByLabelText("Branch"));
     await user.type(screen.getByLabelText("Branch"), "release");
-    await user.type(screen.getByLabelText("Driver directory"), "drivers/a");
+    await user.type(
+      screen.getByLabelText("Driver directory (optional)"),
+      "drivers/a",
+    );
     await user.click(screen.getByRole("button", { name: /^load driver$/i }));
 
-    expect(await screen.findByText(error)).toBeInTheDocument();
-    expect(screen.getByText("Couldn't load the driver")).toBeInTheDocument();
+    // An error about the driver directory shows under its field.
+    const fieldMessage = await screen.findByTestId("driver-directory-error");
+    expect(fieldMessage).toHaveTextContent(error);
+    const input = screen.getByLabelText("Driver directory (optional)");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription(expect.stringContaining(error));
+    expect(
+      screen.queryByText("Couldn't load the driver"),
+    ).not.toBeInTheDocument();
     expect(screen.getByLabelText("Repository URL")).toHaveValue(
       "https://github.com/org/repo",
     );
     expect(screen.getByLabelText("Branch")).toHaveValue("release");
-    expect(screen.getByLabelText("Driver directory")).toHaveValue("drivers/a");
+    expect(screen.getByLabelText("Driver directory (optional)")).toHaveValue(
+      "drivers/a",
+    );
+  });
+
+  it("shows a refused driver directory as entered, under the field", async () => {
+    const error =
+      "Driver directory 'drivers\\{{ x }}' is refused: it contains a backslash. " +
+      "Give a path relative to the repository root, such as 'drivers/infrahub'.";
+    loadRemoteMutateAsync.mockRejectedValue(new Error(error));
+    await renderDrawer();
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText("Repository URL"),
+      "https://github.com/org/repo",
+    );
+    await user.type(
+      screen.getByLabelText("Driver directory (optional)"),
+      "drivers\\{{{{ x }}",
+    );
+    await user.click(screen.getByRole("button", { name: /^load driver$/i }));
+
+    expect(
+      await screen.findByTestId("driver-directory-error"),
+    ).toHaveTextContent(error);
+
+    // Editing the field clears its error.
+    await user.type(screen.getByLabelText("Driver directory (optional)"), "a");
+    expect(
+      screen.queryByTestId("driver-directory-error"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps other load errors in the alert at the top", async () => {
+    const error =
+      "Failed to clone git repository 'https://github.com/org/repo'";
+    loadRemoteMutateAsync.mockRejectedValue(new Error(error));
+    await renderDrawer();
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText("Repository URL"),
+      "https://github.com/org/repo",
+    );
+    await user.click(screen.getByRole("button", { name: /^load driver$/i }));
+
+    expect(await screen.findByText(error)).toBeInTheDocument();
+    expect(screen.getByText("Couldn't load the driver")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("driver-directory-error"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("describes the driver directory field and marks it optional", async () => {
+    await renderDrawer();
+
+    expect(
+      screen.getByLabelText("Driver directory (optional)"),
+    ).toHaveAccessibleDescription(
+      expect.stringContaining("Folder that holds driver.styrmin.yml"),
+    );
+  });
+
+  it.each([
+    [
+      "https://github.com/org/repo/tree/main/drivers/infrahub",
+      "https://github.com/org/repo",
+    ],
+    [
+      "https://gitlab.com/group/sub/repo/-/tree/main/drivers/x",
+      "https://gitlab.com/group/sub/repo",
+    ],
+  ])(
+    "refuses the folder link %s before the load and names the repository URL",
+    async (link, repository) => {
+      await renderDrawer();
+      const user = userEvent.setup();
+      await user.type(screen.getByLabelText("Repository URL"), link);
+      await user.click(screen.getByRole("button", { name: /^load driver$/i }));
+
+      expect(
+        await screen.findByText(
+          new RegExp(`Enter the repository URL ${repository}, its branch`),
+        ),
+      ).toBeInTheDocument();
+      expect(loadRemoteMutateAsync).not.toHaveBeenCalled();
+    },
+  );
+
+  it("says the repository is being cloned while a Git load runs", async () => {
+    loadRemoteMutateAsync.mockReturnValue(new Promise(() => {}));
+    await renderDrawer();
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText("Repository URL"),
+      "https://github.com/org/repo",
+    );
+    await user.click(screen.getByRole("button", { name: /^load driver$/i }));
+
+    expect(
+      await screen.findByRole("button", { name: "Cloning repository…" }),
+    ).toBeDisabled();
   });
 
   it("navigates to the new version's detail page and toasts on success", async () => {
