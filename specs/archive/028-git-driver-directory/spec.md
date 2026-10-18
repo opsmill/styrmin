@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-17
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: PRD "Load an application driver from a driver directory of a git repository" — [opsmill/styrmin#517 (comment)](https://github.com/opsmill/styrmin/issues/517#issuecomment-6236268970). Seed issue: [#517](https://github.com/opsmill/styrmin/issues/517).
 

@@ -353,6 +353,25 @@ which the load drops instead of failing. Styrmin does not store the warnings, so
 file again prints them again. See
 [ADR-068](../../adr/0068-invalid-driver-info-dropped-with-load-warning.md).
 
+## Loading a driver from a driver directory
+
+<!-- Extracted from specs/028-git-driver-directory on 2026-10-18 -->
+
+`styrminctl drivers load-version REPOSITORY_URL BRANCH --driver-directory PATH` loads the driver
+from a folder of the repository, given relative to the repository root. Without
+`--driver-directory`, the load reads the repository root. The server stores the value in one form
+and refuses unsafe values; the CLI does not check it and prints the server's message through
+`styrmin_error_handler`. After the `Commit SHA:` line, `_print_version_details` prints
+`Driver directory: <path>` when the loaded version has one.
+
+**Server compatibility.** `drivers.load_version()` in the SDK sends `driverDirectory` in its own
+operation, `load_version_with_driver_directory.graphql`, and only when a driver directory is
+given. A load from the repository root still uses `load_version.graphql`, so it works with a
+server that predates #517. A server that predates #517 answers a driver directory with
+`Unknown argument 'driverDirectory'`, and the SDK raises `IncompatibleServerError`, which says to
+upgrade the server or to load from the repository root. `update_version()` does the same for #388
+(see "Server compatibility" above).
+
 ## Cluster config update
 
 <!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->

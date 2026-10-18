@@ -62,6 +62,27 @@ Use brace-style placeholders `{}` (not f-strings or `%`-formatting) in log messa
 Log whether a user-supplied override is set, not its value. Container `args` often carry flags
 such as `--password=...`, so the patch builder logs `command_set` and `args_set` as booleans.
 
+<!-- Extracted from specs/028-git-driver-directory on 2026-10-18 -->
+
+### Remove the user info from repository URLs in messages and logs
+
+A repository URL can carry credentials, such as `https://user:token@host/x.git`. Pass every
+repository URL through `redact_user_info` (`services/driver/driver_directory.py`) before it goes
+into an error message or a log line. Pass the text of an exception that a clone raised through it
+too, because some clone errors repeat the URL with its user info.
+
+```python
+repository = redact_user_info(self.source.repository)
+...
+raise DriverLoadingError(
+    f"Failed to clone git repository {quoted(repository)}: {redact_user_info(str(exc))}"
+) from exc
+```
+
+`redact_user_info` removes the user info of every `scheme://` URL in the text. An scp-style address
+such as `git@github.com:o/r.git` has no scheme and is kept as it is. Reference:
+`GitDriverProvider.provide` in `services/driver/provider.py`.
+
 ## Service Layer
 
 Services are **module-level async functions**, not classes:
@@ -367,6 +388,41 @@ Raise with exception chaining:
 ```python
 raise InvalidContextError() from e
 ```
+
+### Check the real path of each file you read from a repository a user controls
+
+<!-- Extracted from specs/028-git-driver-directory on 2026-10-18 -->
+
+dulwich checks out symlinks as symlinks, so a cloned repository can hold a file that points at a
+file of the Styrmin server, such as `driver.styrmin.yml -> /etc/hostname`. Before you read a file
+from a clone, resolve its real path and refuse it when it is outside the folder it must stay in:
+the clone root for a folder, the driver directory for a driver file. Run the check after the clone
+and before the first read.
+
+```python
+resolved = resolve_inside(clone, driver_directory or ".")
+if resolved is None:
+    raise DriverLoadingError("... leads outside the repository ...")
+for name in (spec_file, values_template, actions_code_file):
+    if resolve_inside(resolved, name) is None:
+        raise DriverLoadingError("... is a symlink to a path outside ...")
+    if error := _follow_error(resolved / name):
+        raise unreadable(name, error)
+```
+
+- Use `resolve_inside` (`services/driver/driver_directory.py`). It follows symlinks at every
+  depth, and a dangling symlink resolves to its target path.
+- Also check that each path can be followed. In Python 3.14, `Path.resolve()` does not raise on a
+  symlink loop, so call `stat()` and report the `OSError` (`_follow_error` in
+  `services/driver/provider.py`).
+- Accept a symlink whose target is inside the allowed folder: authors may rely on such links.
+- Name the path relative to the repository in the message, never the temporary clone path or the
+  target of the symlink.
+- Do not apply this check to a local path that the admin gives on the server. A Kubernetes
+  ConfigMap or Secret volume exposes every file as a symlink.
+
+Reference: `GitDriverProvider._check_driver_directory` in `services/driver/provider.py`
+([ADR-079](../../adr/0079-driver-actions-import-only-from-their-driver-directory.md)).
 
 ### Retiring a driver-facing template surface
 
@@ -1355,6 +1411,27 @@ Reference: `apply_service_aliases` and `with_current_peer_services` in
 ([ADR-077](../../adr/0077-alias-flow-reads-deletion-state-at-write-time.md),
 [ADR-078](../../adr/0078-alias-step-reads-current-services-from-server.md)).
 
+### Refuse `{` and `}` in a user value that goes into a Prefect pull step
+
+<!-- Extracted from specs/028-git-driver-directory on 2026-10-18 -->
+
+Before Prefect runs a deployment's pull steps, it fills in every `{{ ... }}` template in their
+inputs: blocks such as `prefect.blocks.secret.x`, variables and environment variables. A user
+value that Styrmin writes into a pull step can therefore change the step or write a secret into a
+log. Refuse `{` and `}` in such a value when you validate it, before anything is cloned or
+registered.
+
+```python
+if "{" in stripped or "}" in stripped:
+    raise _refuse(value, "it contains '{' or '}'")
+```
+
+Reference: `normalise_driver_directory` in `services/driver/driver_directory.py`, which checks the
+driver directory that goes into the `set_working_directory` step
+([ADR-079](../../adr/0079-driver-actions-import-only-from-their-driver-directory.md)). Spec 028
+did not check whether the repository URL that goes into the `git_clone` step needs the same
+check.
+
 ## Outbound HTTP requests
 
 <!-- Extracted from specs/020-backend-telemetry on 2026-10-10 -->
@@ -1373,6 +1450,39 @@ async with asyncio.timeout(SEND_TIMEOUT_SECONDS):
 `services/telemetry/sender.py` does this for the daily telemetry report. `styrminctl`, which
 is synchronous, gets the same limit by running the request on a daemon thread and joining it
 with a budget ([ADR-047](../../adr/0047-styrminctl-anonymous-fire-and-forget-telemetry.md)).
+
+## Python SDK
+
+### Send a new optional GraphQL argument in its own operation
+
+<!-- Extracted from specs/028-git-driver-directory on 2026-10-18 -->
+
+A GraphQL server refuses an operation that passes a field an argument the server does not know,
+even when the variable is `null`. When an SDK method gets a new optional argument, keep the old operation for
+calls without it, and add a second operation that declares the argument. Send the second operation
+only when the caller gives a value. Calls without the value then keep working against servers that
+predate the argument.
+
+When a server answers the second operation with `Unknown argument '<name>' on field '<field>'`,
+raise `IncompatibleServerError` with a message that says which change added the argument and what
+to do: upgrade the server, or call without the argument.
+
+```python
+if driver_directory is None:
+    result = await self._transport.execute(load_query("load_version"), variables)
+    ...
+variables["driverDirectory"] = driver_directory
+result = await self._transport.execute(
+    load_query("load_version_with_driver_directory"), variables
+)
+_raise_if_server_lacks_driver_directory(result)
+self._check_graphql_errors(result)
+```
+
+Use `@overload` so the return type follows the argument, because the two operations generate two
+result types. References: `DriverResource.load_version` in
+`python_sdk/src/styrmin_sdk/resources/drivers.py` (#517), and `update_version()` with
+`update_deployment_version_with_input.graphql` in `resources/deployments.py` (#388).
 
 ## Invoke Tasks
 

@@ -115,7 +115,9 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     source_type: str = "git"                     # "git", "local", ...
     source_repository: str
     source_branch: str | None = None
-    source_path: str | None = None               # Path within the source repo/dir
+    source_path: str | None = None               # git: driver directory, NULL for the
+                                                 # repository root (spec 028); local:
+                                                 # the folder on the server
 
     # Provenance fingerprint (spec 013). Exactly one is non-null on rows
     # created by the load path; the discriminator is ``source_type``.
@@ -153,6 +155,15 @@ class ApplicationDriverVersion(StyrminModel, table=True):
 - The three columns are not part of `uq_application_driver_version_identity`. A load whose identity matches a stored row writes them when they differ from the file ([ADR-053](../../adr/0053-driver-version-provenance-fingerprint.md)).
 
 <!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->
+
+<!-- Extracted from specs/028-git-driver-directory on 2026-10-18 -->
+
+`source_path` means two things, chosen by `source_type`:
+
+- `git`: the driver directory, the folder of the repository that holds the driver, relative to the repository root and stored in one form (`./drivers/a/` is stored as `drivers/a`). It is `NULL` for a load from the repository root, which is the value of every git row loaded before spec 028, so reloads of those drivers find their rows.
+- `local`: the folder on the Styrmin server that the admin gave.
+
+`source_path` is part of `uq_application_driver_version_identity`, so two driver directories of one repository loaded at the same commit make two rows, also when the driver name and `version` are the same. No schema change was needed. The GraphQL field `ApplicationDriverVersion.driverDirectory` returns the git value only, and `null` for a local row (`driver_directory_of` in `services/driver/labels.py`). The UI, the CLI and the Prefect action lookup read this value instead of reading `source_path` by itself ([ADR-079](../../adr/0079-driver-actions-import-only-from-their-driver-directory.md), [ADR-080](../../adr/0080-action-deployments-keyed-by-driver-directory.md)).
 
 The table no longer has a `container_overrides` column. The column held the `spec.container_overrides` block of the driver specification file, which only documented which components accepted a `command` or `args` override. Spec 022 removed the block, and the Alembic revision `faf47e166160` drops the column; its downgrade adds the column back, nullable and empty. Which components accept a `command` or `args` override now follows from the component container in `components` ([ADR-069](../../adr/0069-container-command-args-by-post-render.md)).
 
