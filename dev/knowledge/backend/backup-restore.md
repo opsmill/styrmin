@@ -343,6 +343,7 @@ Results are passed between workers via **Prefect Variables** (a cross-worker com
 - The source namespace and the name of the restored `StyrminDeployment` CR are both `styrmin-<source_deployment_id>`, because Velero's `namespaceMapping` keeps object names.
 - The INTERNAL flow builds the counterpart's own CR body with `_build_counterpart_crd_body`, because the USER flow has no database access. It raises `RuntimeError` when the counterpart deployment or its active instance is missing.
 - It passes `restored_crd_name` and `counterpart_crd_body` to `execute_velero_restore_flow`. That flow then runs `reapply_with_counterpart_identity` instead of `reapply_and_finalize`, and on a failure marks both the restored CR and the counterpart CR failed.
+- It also passes `counterpart_context`, the context of the counterpart's active instance. After the recovery succeeds, the USER flow runs the alias step with it, and a failed alias write fails the restore with "Service alias step failed: <error>" ([#530](https://github.com/opsmill/styrmin/issues/530); see [Aliases of a cross-target restore](orchestration-flows.md#aliases-of-a-cross-target-restore)).
 
 See `workflows/templates/backup.py:242-273`, `:376-425`, `:761-800` and `:802-935`, and [Cross-target restore](#cross-target-restore).
 
@@ -363,6 +364,7 @@ Backups and restores record steps, like tasks, so users can view each stage and 
 | `restore:namespace` | Delete the namespace | Around the namespace deletion and the wait for it to disappear; fails with "Namespace <name> was not deleted within 600s" or the Kubernetes error. |
 | `restore:velero` | Run the Velero restore | Started before the Velero `Restore` is created. Succeeds on phase `Completed`. Fails when creating or polling raises, and on any other final phase with `failure_message("restore", status)`: "Velero restore failed validation: <validationErrors joined by "; ">", else Velero's `failureReason`, else "Velero restore phase: <phase> (<n> errors)". |
 | `restore:recovery` | Run the recovery | Only after a `Completed` Velero restore, around `mark_restoring` and `reapply_and_finalize` (or `reapply_with_counterpart_identity`). Fails with "Restore reapply failed: <error>". |
+| `resource:service-aliases` | Create and delete service aliases | Cross-target restore only, after `restore:recovery` succeeded, when there are aliases to write or delete (`apply_service_aliases_step`). A failure fails the restore with "Service alias step failed: <error>". |
 
 A step is created when it starts, so a restore that fails while deleting the namespace has only `restore:namespace`.
 
@@ -1281,7 +1283,11 @@ Four points worth internalising, all pinned by the unit matrix:
   with `clearConfigFields` or replace it with `configOverride`.
 - **A missing `Restore` row does not retract a recorded outcome.** A restore that cascaded
   away leaves its `cloned` entry standing; only a `FAILED` restore turns it into a
-  failure (`RestoreStatus` has no `PARTIAL` member).
+  failure (`RestoreStatus` has no `PARTIAL` member). The GraphQL `deploymentResults`
+  field applies the same test (`failed_restore`) through `resolve_deployment_result`: a
+  `cloned` entry whose restore is `FAILED` reads `FAILED`, with the reason
+  `the restore failed: <restore error>`. The stored entry does not change
+  ([#530](https://github.com/opsmill/styrmin/issues/530)).
 - **`NULL` FKs are disambiguated by markers, not by absence.** `created_environment_id IS
   NULL` means "not created yet" *unless* a `created_environment_deleted` entry says
   otherwise, which is why every cascade appends one.
@@ -1685,6 +1691,7 @@ Backups and restores track status at the component level. The overall status is 
 - `build_velero_restore()` — Creates Velero Restore CRD spec with namespace mapping and hooks. When the source and target namespaces differ (a cross-target restore), it:
   - sets `namespaceMapping` from the source namespace to the target namespace;
   - adds `CROSS_TARGET_EXCLUDED_RESOURCES` (the Flux HelmRelease) to the excluded resources;
+  - sets `labelSelector` to `CROSS_TARGET_LABEL_SELECTOR`, which leaves out the service aliases (`styrmin.io/service-alias` `NotIn` `["true"]`), because they point to the source's namespaces ([#530](https://github.com/opsmill/styrmin/issues/530));
   - labels the Restore with `styrmin.io/instance` set to the counterpart's instance (`target_instance_id`) and `styrmin.io/source-instance` set to the source's instance.
 
   Every restore sets `restore_pvs=False` (`builders/backup.py:58-106`). Restored data therefore comes from the file-system (kopia) pod volume restore, and the `resourceModifier` rule that removes `spec.volumeName` lets the restored PVCs be provisioned again in the target namespace. Research D1 of the environment clone records the constraint: if the platform moves to CSI snapshot restores, this setting would restore no volume data and must be changed with the data mover.

@@ -133,6 +133,25 @@ Amended 2026-10-13 (recorded at extraction from research D1 and D5):
     `styrmin-<deployment id>`. A clone of a clone needs it, because its source already
     carries a release name adopted from an earlier source.
 
+Amended 2026-10-18 ([#530](https://github.com/opsmill/styrmin/issues/530), spec 030):
+a cross-target restore leaves out the service aliases and writes the counterpart's
+aliases itself. The deployment's backup holds its whole namespace, aliases included, and
+each restored alias kept its `spec.externalName`, which names a namespace of the source
+environment. So an application in the clone that called a peer by short service name
+reached the source's deployment. Now the cross-target Velero `Restore` carries a
+`spec.labelSelector` that matches every object except the Services labelled
+`styrmin.io/service-alias=true` (`CROSS_TARGET_LABEL_SELECTOR`). Velero 1.18.1 checks the
+selector only on the items it reads from the backup, so the namespace, the pods, their
+volumes and the other Services are restored as before (research R-001 of spec 030).
+After the recovery succeeds, the restore runs the alias step of the create, update and
+upgrade flows with the counterpart's context. That step reads the new environment's
+services from the server when it runs, so it writes no alias to a source namespace and
+none for a deployment that was not cloned (research R-002). A failed alias write fails
+the restore with the error, as a failed recovery does. A clone entry recorded `cloned`
+whose restore failed reads `failed`, with the reason `the restore failed: <restore
+error>`; the stored entry does not change. In-place restores and environment restores
+send no selector and restore the aliases from the backup as before.
+
 ### 3. The counterpart adopts the source's Helm release identity
 
 This is the least obvious decision and the one with a visible operator consequence.

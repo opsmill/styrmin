@@ -338,6 +338,14 @@ deployment. Deleting a deployment through Styrmin, from the UI,
 `styrminctl` or the SDK, deletes its aliases in the other namespaces, so
 the names of its services stop resolving in the other applications.
 
+An [environment clone](./backups-and-restores.md#cloning-an-environment)
+restores none of the source's aliases, because they point to the
+namespaces of the source environment. At the end of each counterpart
+deployment's restore, Styrmin writes the aliases between that counterpart
+and the other deployments of the new environment. A deployment that was
+not cloned gets no alias in the new environment, so the clone cannot
+reach it by short service name.
+
 These aliases are not deleted:
 
 - the aliases of deployments deleted with a Styrmin release earlier than
