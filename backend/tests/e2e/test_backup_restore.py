@@ -7,7 +7,7 @@ import json
 from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
-from typing import Any, AsyncIterator, Sequence
+from typing import Any, AsyncIterator, NamedTuple, Sequence
 
 import httpx
 import kr8s.asyncio
@@ -204,6 +204,10 @@ CLONE_PODS_READY_TIMEOUT_SECONDS = 300.0
 # clone causes has run by then, so a prune of the source's objects has happened too.
 COUNTERPART_HELMRELEASE_SETTLED_TIMEOUT_SECONDS = 300.0
 
+# Listing a counterpart's aliases. Its restore writes them before it completes, so
+# the wait covers the read only, never a later flow (spec 030, critique E5).
+SERVICE_ALIASES_TIMEOUT_SECONDS = 60.0
+
 
 @asynccontextmanager
 async def portforward_simple_app(
@@ -287,6 +291,62 @@ async def workload_object_names(kubeconfig_path: str, namespace: str) -> set[str
         | {f"statefulset/{item.metadata.name}" for item in stateful_sets.items}
         | {f"service/{item.metadata.name}" for item in services.items}
     )
+
+
+class ServiceAlias(NamedTuple):
+    """An alias Service: name, owner deployment id, namespace that it points to."""
+
+    name: str
+    deployment_id: str
+    target_namespace: str
+
+
+async def service_aliases(kubeconfig_path: str, namespace: str) -> set[ServiceAlias]:
+    """Each Service labelled ``styrmin.io/service-alias=true`` in *namespace*."""
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=kubeconfig_path)
+    aliases: set[ServiceAlias] = set()
+    async for svc in AsyncService.list(
+        namespace=namespace,
+        label_selector={"styrmin.io/service-alias": "true"},
+        api=kr8s_api,
+    ):
+        if not isinstance(svc, AsyncService):
+            continue
+        # ``externalName`` is ``<name>.<namespace>.svc.<cluster domain>``.
+        external_name = svc.spec.get("externalName") or ""
+        aliases.add(
+            ServiceAlias(
+                name=svc.name,
+                deployment_id=svc.labels.get("styrmin.io/deployment-id", ""),
+                target_namespace=(external_name.split(".") + [""])[1],
+            )
+        )
+    return aliases
+
+
+async def wait_for_service_aliases(
+    kubeconfig_path: str,
+    namespace: str,
+    expected: set[ServiceAlias],
+    timeout: float,
+    *,
+    include: Callable[[ServiceAlias], bool] = lambda _: True,
+) -> set[ServiceAlias]:
+    """The aliases in *namespace* that *include* keeps, once they equal *expected*.
+
+    Reads every 5 seconds and returns the last set read when *timeout* runs out.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        aliases = {
+            alias
+            for alias in await service_aliases(kubeconfig_path, namespace)
+            if include(alias)
+        }
+        if aliases == expected or loop.time() >= deadline:
+            return aliases
+        await asyncio.sleep(5)
 
 
 async def wait_for_helmreleases_settled(
@@ -2633,6 +2693,34 @@ async def test_environment_clone_lifecycle(
             counterpart_ids[deployment_id] = cloned_result.counterpart_deployment_id
         counterpart_deployment_id = counterpart_ids[primary_deployment_id]
         peer_counterpart_deployment_id = counterpart_ids[peer_deployment_id]
+
+        # SC-001 of spec 030, FR-016 of #518: each counterpart holds its peers' aliases.
+        created_services: dict[str, list[str]] = {}
+        for deployment in await client.deployments.list(
+            created_environment_id, include_internal=True
+        ):
+            services = (await client.deployments.get(deployment.id)).deployed_services
+            created_services[str(deployment.id)] = [s.resolved_name for s in services]
+        for counterpart_id in counterpart_ids.values():
+            expected_aliases = {
+                ServiceAlias(resolved_name, deployment_id, f"styrmin-{deployment_id}")
+                for deployment_id, resolved_names in created_services.items()
+                if deployment_id != counterpart_id
+                for resolved_name in resolved_names
+            }
+            aliases = await wait_for_service_aliases(
+                kubeconfig_path,
+                f"styrmin-{counterpart_id}",
+                expected_aliases,
+                timeout=SERVICE_ALIASES_TIMEOUT_SECONDS,
+            )
+            assert aliases == expected_aliases, (
+                f"the aliases in the namespace of counterpart {counterpart_id} must "
+                "be those of the services of the new environment's other "
+                "deployments (SC-001 of spec 030); "
+                f"unexpected: {sorted(aliases - expected_aliases)!r}; "
+                f"missing: {sorted(expected_aliases - aliases)!r}"
+            )
 
         # 7. SC-002 — the source is untouched. Read through the SDK on both
         #    entrypoints: this is the source's *state*, not a UI affordance, and
