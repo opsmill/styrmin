@@ -77,7 +77,8 @@ frontend/src/
 
 ### Backup and restore rows (`BackupRestoreSteps.tsx`)
 
-A backup has one step per component; a restore has its three restore steps. The list is
+A backup has one step per component; a restore has its three restore steps, and a cross-target
+restore can have a fourth, "Create and delete service aliases". The list is
 collapsible and starts expanded for a backup or restore that is pending, in progress or failed.
 Its content stays mounted while collapsed. An empty list shows "No steps recorded for this
 backup." (or restore) when the status is `completed` or `failed`, and "Waiting for the first

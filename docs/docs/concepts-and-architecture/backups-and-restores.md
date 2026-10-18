@@ -204,9 +204,12 @@ transaction so a restore either lands whole or not at all. Your
 application may log a few connection errors during that window; it should
 reconnect on its own once the restore finishes.
 
-A restore keeps the [service aliases](./ingress-and-networking.md#service-aliases)
-of the restored deployment in the other namespaces of its environment, and
-Velero restores the aliases in its own namespace. A deployment of the
+The restore of a deployment, and each restore that the
+[restore of an environment](#restoring-an-environment) runs, keeps the
+[service aliases](./ingress-and-networking.md#service-aliases) of the
+restored deployment in the other namespaces of its environment, and Velero
+restores the aliases in the restored deployment's namespace from the
+backup. A deployment of the
 environment that is created, updated or upgraded while the restore runs
 skips the aliases between itself and the restored deployment, because the
 restored deployment's namespace is being deleted or does not exist yet.
@@ -877,10 +880,13 @@ aliases and the aliases of its services in the namespaces of the other
 deployments. Saving the same values does not always run an update, so it
 might write no alias.
 
-A failure also reaches the deployments whose affinity terms name the
-failed one. A deployment fails this way when its captured data cannot be
-used (its capture failed, or its backup was deleted, did not complete or
-expired) or when its counterpart fails:
+A restore that fails after it has started changes only the attribution of
+the deployment it restores. A deployment that fails before its restore
+starts also fails the deployments whose affinity terms name it. A
+deployment fails this way when its captured data cannot be used (its
+capture failed, or its backup was deleted, did not complete or expired),
+or when its counterpart cannot be created or its restore cannot be
+started:
 
 - A deployment whose own config has such a term is attributed as failed,
   and no counterpart is created for it. The reason is

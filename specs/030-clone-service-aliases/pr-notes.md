@@ -41,7 +41,7 @@ The spec flags these answers, which the PRD did not give. Each one can be confir
 
 - The diff adds sentences to the descriptions of the type `EnvironmentCloneDeploymentResult` and its fields `outcome` and `reason`. No type, field, argument or enum value changes. `frontend/src/generated/graphql.ts` changes the same comments.
 - The spec treats this as no GraphQL schema change for the "Ask first" list of `AGENTS.md`, because FR-007 changes only what `outcome` and `reason` return for an entry whose restore failed.
-- The type's description still says that `counterpartDeploymentId` is "null unless CLONED". The added sentence says that an entry whose restore failed reads `FAILED` and keeps its `counterpartDeploymentId` and `restoreId`.
+- The type's description said that `counterpartDeploymentId` is "null unless CLONED", but the clone flow also stores the ids on a `FAILED` entry. After the review, it says that the id is null when the clone created no counterpart deployment for the source deployment. The added sentence says that an entry whose restore failed reads `FAILED`, with the reason `the restore failed: <the restore's error>`, or `the restore failed` when the restore has no error message, and keeps its `counterpartDeploymentId` and `restoreId`.
 
 ## A fix to the SC-001 check and a limit of the SC-003 check
 

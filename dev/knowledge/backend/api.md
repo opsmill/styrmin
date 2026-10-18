@@ -993,7 +993,7 @@ A representative subset:
 | `Step` | `supersededBy` | `Task` | Yes | Via `superseded_by_task_id` |
 | `Step` | `startedTasks` | `[Task!]!` | No | Tasks whose `started_by_step_id` is the step |
 | `Backup` | `steps` | `[Step!]!` | No | One step per component |
-| `Restore` | `steps` | `[Step!]!` | No | The three restore steps |
+| `Restore` | `steps` | `[Step!]!` | No | The three restore steps; a cross-target restore can have a fourth, "Create and delete service aliases" |
 | `BackupSchedule` | `deployment` | `Deployment` | No | Via `deployment_id` FK |
 | `Backup` | `instance` | `ApplicationInstance` | No | Via `instance_id` FK |
 | `Restore` | `backup` | `Backup` | No | Via `backup_id` FK |
