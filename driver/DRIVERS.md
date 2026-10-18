@@ -550,7 +550,7 @@ Drivers are loaded from Git repositories, or from a directory on the Styrmin ser
 
 Each action runs with the driver directory as its working directory. `actions.py` can import modules from the driver directory, such as a `helpers.py` next to it, but not modules from other folders of the repository. Packages installed in the action's image, such as `prefect` and `styrmin_backend`, import as before. Code that several drivers share goes into each driver directory, or is installed in the action's image.
 
-See [Loading a Driver](../docs/docs/drivers/loading-drivers.md#from-a-git-repository) for the CLI, SDK, GraphQL and UI options and the values refused as a driver directory, and [ADR-076](../dev/adr/0076-driver-actions-import-only-from-their-driver-directory.md) for the reasons behind the import rule and the symlink check.
+See [Loading a Driver](../docs/docs/drivers/loading-drivers.md#from-a-git-repository) for the CLI, SDK, GraphQL and UI options and the values refused as a driver directory, and [ADR-079](../dev/adr/0079-driver-actions-import-only-from-their-driver-directory.md) for the reasons behind the import rule and the symlink check.
 
 ## Examples
 

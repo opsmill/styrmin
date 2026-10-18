@@ -160,7 +160,7 @@ Constitution §VII requires these updates in the same change:
 - [`docs/docs/drivers/loading-drivers.md`](../../docs/docs/drivers/loading-drivers.md), section "From a git repository": the driver directory on each surface, the reload rule, the import rule for actions, and the correct mutation name.
 - The CLI reference for `styrminctl drivers load-version`.
 - [`CONTEXT.md`](../../CONTEXT.md): the new **Driver directory** entry, and edits to **Application driver version**, **Driver specification file** and **Provenance fingerprint**.
-- A new ADR for the import rule (FR-004) and the symlink refusal (FR-008): [ADR-076](../../dev/adr/0076-driver-actions-import-only-from-their-driver-directory.md).
+- A new ADR for the import rule (FR-004) and the symlink refusal (FR-008): [ADR-079](../../dev/adr/0079-driver-actions-import-only-from-their-driver-directory.md).
 - A towncrier fragment for #517.
 
 ## Assumptions

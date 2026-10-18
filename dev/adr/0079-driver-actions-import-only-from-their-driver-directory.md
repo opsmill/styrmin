@@ -1,4 +1,4 @@
-# ADR-076: Driver Actions Import Only from Their Driver Directory, and Git Loads Stay Inside the Clone
+# ADR-079: Driver Actions Import Only from Their Driver Directory, and Git Loads Stay Inside the Clone
 
 **Status**: Accepted
 **Date**: 2026-10-17
