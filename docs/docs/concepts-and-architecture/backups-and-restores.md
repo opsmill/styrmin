@@ -243,7 +243,8 @@ effect.
 On the deployment page, each backup and each restore row lists its steps
 under "Steps", with their status, times and errors.
 
-A restore has three steps, in this order:
+The restore of a deployment or of an environment has three steps, in this
+order:
 
 1. "Delete the namespace": Styrmin deletes the target namespace and waits
    until it is gone, so the restore starts from a clean namespace.
@@ -257,7 +258,9 @@ The restore that an environment clone runs into a counterpart deployment
 has a fourth step, "Create and delete service aliases", which runs after
 "Run the recovery" succeeded. Styrmin writes the service aliases between
 the counterpart and the other deployments of the new environment. The
-step is left out when there is no alias to write or delete.
+step is left out when there is no alias to write or delete. When Styrmin
+cannot read the services or the aliases that the step needs, the step is
+recorded as failed with the error.
 
 "Delete the namespace" fails with `Namespace <namespace> was not deleted
 within 600s` when the namespace is still `Terminating` after 600
