@@ -10,7 +10,12 @@ import pytest
 
 from tests.e2e.demos import recorder as recorder_module
 from tests.e2e.demos.encode import FfmpegError
-from tests.e2e.demos.recorder import DemoRecorder, probe_duration
+from tests.e2e.demos.recorder import (
+    ACTION_MS,
+    ACTION_STYLE,
+    DemoRecorder,
+    probe_duration,
+)
 from tests.e2e.demos.video import Cut, Wait
 
 RAW_DURATION = 42.5
@@ -86,13 +91,19 @@ async def started(clock: FakeClock, calls: list[tuple]) -> DemoRecorder:
     return recorder
 
 
-async def test_start_records_at_1920x1080_with_the_pointer_and_actions_at_the_top(
+async def test_start_records_at_1920x1080_with_the_pointer_and_a_highlight(
     started: DemoRecorder, calls: list[tuple]
 ) -> None:
     assert calls == [
         ("start", {"path": Path("raw.webm"), "size": {"width": 1920, "height": 1080}}),
-        ("show_actions", {"cursor": "pointer", "position": "top"}),
+        (
+            "show_actions",
+            {"cursor": "pointer", "duration": ACTION_MS, "style": ACTION_STYLE},
+        ),
     ]
+    # FR-004: a highlight on each element; no title naming the locator.
+    assert "outline" in ACTION_STYLE["highlight"]
+    assert ACTION_STYLE["title"] == "display: none"
 
 
 async def test_waits_are_recorded_in_seconds_since_start_and_printed(

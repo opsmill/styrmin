@@ -19,6 +19,16 @@ if TYPE_CHECKING:
     from playwright.async_api import Page
 
 CHAPTER_MS = 2500
+# How long the highlight of each action stays on screen; Playwright waits this long after each action.
+ACTION_MS = 800
+# Playwright draws no highlight unless it gets a style, and its action title shows the locator.
+ACTION_STYLE = {
+    "highlight": (
+        "outline: 3px solid rgba(37, 99, 235, 0.9); outline-offset: 2px;"
+        " border-radius: 4px; background: rgba(37, 99, 235, 0.12)"
+    ),
+    "title": "display: none",
+}
 
 
 def probe_duration(path: Path) -> float:
@@ -69,7 +79,9 @@ class DemoRecorder:
         if self._page is not None:
             raise RuntimeError("The recorder has already started")
         await page.screencast.start(path=raw_path, size={"width": 1920, "height": 1080})
-        await page.screencast.show_actions(cursor="pointer", position="top")
+        await page.screencast.show_actions(
+            cursor="pointer", duration=ACTION_MS, style=ACTION_STYLE
+        )
         self._t0 = self._clock()
         self._page = page
         self._raw_path = raw_path

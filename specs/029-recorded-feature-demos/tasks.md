@@ -128,12 +128,12 @@ description: "Task list for the recorded demos of four Styrmin features"
 
 **Independent Test**: `uv run invoke record --demo component-overrides` on a fresh demo stack writes `demo-videos/2-component-overrides.mp4` showing both overrides.
 
-- [ ] T035 [US2] Create `demos/scenarios/component_overrides.py`: setup creates `network-lab-overrides` and deploys `infrahub` at `latest` and `semaphore` with the default image, both named after their driver; recorded steps:
+- [X] T035 [US2] Create `demos/scenarios/component_overrides.py`: setup creates `network-lab-overrides` and deploys `infrahub` at `latest` and `semaphore` with the default image, both named after their driver; recorded steps:
   1. step "Use an image with the Infrahub Ansible collection": `read_task_ids()`, `set_component_image(deployment_id=<semaphore>, component="server", image="styrmin-demo/semaphore:v2.16.47")`, then `wait("Semaphore restarts with the new image")` around `wait_for_new_task("update_instance", ...)`;
   2. step "Run two Infrahub servers": `read_task_ids()` on the Infrahub deployment, `set_component_replicas(deployment_id=<infrahub>, component="server", replicas=2)`, then `wait("A second Infrahub server starts")` around `wait_for_new_task("update_instance", ...)`.
 
   Register it with environment names `("network-lab-overrides",)`
-- [ ] T036 [US2] Record demo 2 alone on a fresh demo stack and check it as in T034, plus: the Semaphore pod runs `styrmin-demo/semaphore:v2.16.47` (`kubectl get pod -n styrmin-<id> -o jsonpath`) before the cleanup deletes it; note the length in `specs/029-recorded-feature-demos/spike-notes.md`
+- [X] T036 [US2] Record demo 2 alone on a fresh demo stack and check it as in T034, plus: the Semaphore pod runs `styrmin-demo/semaphore:v2.16.47` (`kubectl get pod -n styrmin-<id> -o jsonpath`) before the cleanup deletes it; note the length in `specs/029-recorded-feature-demos/spike-notes.md`
 
 ---
 

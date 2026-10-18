@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from packaging.version import InvalidVersion, Version
 
+from tests.e2e.demos.scenarios import component_overrides
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
 
@@ -116,5 +118,13 @@ def check_catalog(demos: Sequence[Demo[Any]]) -> None:
         )
 
 
-DEMOS: tuple[Demo[Any], ...] = ()
+DEMOS: tuple[Demo[Any], ...] = (
+    Demo(
+        slug="component-overrides",
+        number=2,
+        environment_names=(component_overrides.ENVIRONMENT_NAME,),
+        setup=component_overrides.setup,
+        record=component_overrides.record,
+    ),
+)
 check_catalog(DEMOS)
