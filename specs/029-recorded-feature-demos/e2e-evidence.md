@@ -116,6 +116,48 @@ The `kubectl` output taken while pdb was paused shows the clone namespaces as `T
 
 - Logs: `<scratchpad>/e2e-ui-chromium.log` and `<scratchpad>/aliases-ui-chromium.log`.
 
+## UI smoke tests pass with Playwright 1.64 (T011)
+
+Spec 029 does not change `test_ui_smoke.py`. This run checks that the upgrade from Playwright 1.58.0 to 1.64.0 (task T002), which changes the Chromium build of the UI variant, does not break the UI E2E suite. The installed version during the run was `playwright` 1.64.0.
+
+All seven tests of the file carry `shard_general` (module-level `pytestmark`), so the filter selected all seven `ui-chromium` variants and left out the seven `api-chromium` variants.
+
+- Node IDs, all in `backend/tests/e2e/test_ui_smoke.py`:
+  - `test_deployment_header_shows_driver_name[ui-chromium]`
+  - `test_deploy_form_shows_driver_label_after_selection[ui-chromium]`
+  - `test_pods_tab_copy_logs_command[ui-chromium]`
+  - `test_driver_detail_inspects_versions_via_tabs[ui-chromium]`
+  - `test_driver_logo_description_and_links_render[ui-chromium]`
+  - `test_browser_tab_title_names_page_and_product[ui-chromium]`
+  - `test_cluster_detail_shows_full_configuration[ui-chromium]`
+- Server image: `STYRMIN_IMAGE_VER=spec029-alias-check`, the image built for runs 1 and 2 above. The backend has not changed since that build.
+- Command, from the repository root, with `STYRMIN_IMAGE_VER=spec029-alias-check` exported, where `<scratchpad>` is `/tmp/claude-0/-root-emdash-worktrees-styrmin-55123dec-fac-demo-beta-presentation-bhshh/c3d2eae7-0490-4cdf-a9f4-4b6551ffd707/scratchpad`:
+
+  ```bash
+  exec 3< <(sleep infinity); spid=$!
+  uv run pytest backend/tests/e2e/test_ui_smoke.py -m "ci and shard_general" -k ui-chromium \
+    -v -s --pdb --basetemp=<scratchpad>/pt-ui-smoke <&3 > <scratchpad>/e2e-ui-smoke.log 2>&1
+  rc=$?; exec 3<&-; kill "$spid"
+  ```
+
+- Start: `2026-10-18T10:04:45Z`. End: `2026-10-18T10:07:20Z` (pytest exit code 0).
+- vCluster: `pytest-da1a29b4-fcc3-40f3-9e7f-6ecec17b56a8`, deleted by the session teardown at 10:07:18.
+- Kubeconfig: `<scratchpad>/pt-ui-smoke/vcluster0/kubeconfig`
+- Result lines, verbatim. The `PASSED` of the first test is printed on its own line, because the session fixtures write their output between the node ID and the result:
+
+  ```text
+  backend/tests/e2e/test_ui_smoke.py::test_deploy_form_shows_driver_label_after_selection[ui-chromium] PASSED
+  backend/tests/e2e/test_ui_smoke.py::test_pods_tab_copy_logs_command[ui-chromium] PASSED
+  backend/tests/e2e/test_ui_smoke.py::test_driver_detail_inspects_versions_via_tabs[ui-chromium] PASSED
+  backend/tests/e2e/test_ui_smoke.py::test_driver_logo_description_and_links_render[ui-chromium] PASSED
+  backend/tests/e2e/test_ui_smoke.py::test_browser_tab_title_names_page_and_product[ui-chromium] PASSED
+  backend/tests/e2e/test_ui_smoke.py::test_cluster_detail_shows_full_configuration[ui-chromium] PASSED
+  ============ 7 passed, 7 deselected, 1 warning in 152.46s (0:02:32) ============
+  ```
+
+- The one warning is a `DeprecationWarning` from `kr8s` (`asyncio.iscoroutinefunction`), not from Playwright.
+- Log: `<scratchpad>/e2e-ui-smoke.log`.
+
 ## Decision on the defect (T008)
 
 Not known yet. T008 files the issue and asks the maintainer how the product fix will be made. Until the check passes, the T005 commit stays on the branch and is not pushed, and the check is not marked `xfail` (critique X1).
