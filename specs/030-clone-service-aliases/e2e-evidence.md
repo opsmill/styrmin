@@ -171,3 +171,70 @@ Aliases that the observer read:
 - The source environment's own aliases, `simple-app` in `styrmin-c295c515-…` and `envclone9bbc2c97` in `styrmin-f4b68bb0-…`, stayed in place in every read from `12:43:14` to `12:46:29`.
 
 Each clone's environment also held a third namespace with an alias, as in the `api-chromium` session: `styrmin-a7c51807-…` (`simple-app` to `styrmin-c2653e30-…`, reads at `12:44:59` and `12:45:14`) and `styrmin-fa9e3b81-…` (`simple-app` to `styrmin-2470d23f-…`, reads at `12:45:59` and `12:46:14`). Both targets are inside the same clone. The deployment that owns these namespaces is not confirmed for this session, because the cluster was deleted after the pass and the pytest log does not name them.
+
+## Quickstart walk-through (T037)
+
+Each part of [quickstart.md](quickstart.md) was checked at commit `405813a7`. The unit and functional tests ran again. The E2E tests did not run again. The manual check used the observer logs of the E2E sessions instead of a paused session.
+
+### Unit and functional tests: every expectation is met
+
+The quickstart's command ran as written, with its output saved to a log:
+
+```bash
+uv run pytest backend/tests/unit/agent/test_backup_builders.py \
+  backend/tests/unit/agent/test_service_aliases.py \
+  backend/tests/unit/workflows/test_restore_steps.py \
+  backend/tests/unit/services/backup/test_environment_clone_status.py \
+  backend/tests/functional/graphql/test_environment_clone.py -v 2>&1 | tee chunk12-quickstart-tests.log
+```
+
+| Item | Value |
+|---|---|
+| Start (UTC) | `2026-10-18T12:49:45+00:00` |
+| End (UTC) | `2026-10-18T12:49:56+00:00` (exit code 0) |
+| Summary line | `============================= 268 passed in 5.63s ==============================` |
+| Log | `/tmp/claude-0/-root-emdash-worktrees-styrmin-55123dec-fac-alias-clone-fix-l1vzt/0f67dc9b-63dd-4768-b324-c77b8a758d6f/scratchpad/chunk12-quickstart-tests.log` |
+
+The tests that check each expectation of the quickstart:
+
+- A cross-target restore renders the label selector and an in-place restore does not: `test_cross_target_restore_leaves_out_the_service_aliases`, `test_in_place_restore_has_no_label_selector` and `test_restores_do_not_share_the_label_selector` in `test_backup_builders.py`.
+- The restore steps include "Create and delete service aliases" for a cross-target restore only. The quickstart uses the same title as `SERVICE_ALIASES` in `backend/styrmin_backend/domain/steps.py` (key `resource:service-aliases`).
+  - `test_a_cross_target_restore_writes_the_aliases_after_the_recovery` and `test_an_in_place_restore_writes_no_aliases` in `test_restore_steps.py` check when the step runs. They replace the step with a mock.
+  - `test_a_cross_target_restore_that_fails_before_its_end_writes_no_aliases` (cases `recovery-failed` and `velero-failed`) checks that a restore that fails before its recovery succeeds does not run the step.
+  - `test_a_refused_alias_write_fails_the_alias_step_and_the_recovery` runs the real step and checks that its record is named "Create and delete service aliases".
+- A refused alias write fails the restore: `test_a_refused_alias_write_fails_the_alias_step_and_the_recovery` (the step fails with the error, and the stored result reads `recovered: False` with the alias error) and `test_a_refused_alias_write_fails_the_restore_and_the_counterpart` (the restore and the counterpart are set to `FAILED` with the alias error).
+- An entry whose restore failed reads `FAILED` with the restore's error: `test_a_cloned_entry_whose_restore_failed_reads_failed_with_the_error`, `test_a_failed_restore_without_an_error_gives_the_reason_alone`, `test_every_other_entry_is_read_as_stored` and `test_the_entries_read_agree_with_the_derived_status` in `test_environment_clone_status.py`, and, through the GraphQL resolver, `test_a_cloned_entry_whose_restore_failed_reads_failed_on_every_read` in `backend/tests/functional/graphql/test_environment_clone.py`.
+
+### E2E tests: both variants passed in T035 and T036
+
+The E2E tests did not run again; see the sessions above. Two details of those sessions differ from the quickstart's command. Neither changes what the tests check:
+
+- The sessions set `STYRMIN_IMAGE_VER` to a tag built before the first session.
+- The sessions kept the standard input of pytest open with a private `sleep infinity` file descriptor instead of `sleep infinity |`, and wrote their logs to the scratchpad instead of `/tmp/e2e-030-api.log`.
+
+### Manual check: the observer logs match the expected aliases and selectors
+
+No session paused after the first clone. `--pdb` pauses only on a failure, and the two passing sessions had none. The first attempt paused after its failure, but the test's cleanup had already deleted the clone's environment by then. The check used instead the observer loop described in "Observer data for T037" above. That loop ran the quickstart's two reads every 15 seconds during each session, with `-A` instead of `-n`, and also printed the namespace mapping of each Restore.
+
+The results compared with the quickstart's "Expected" paragraph:
+
+- Label selector: as expected in all three sessions. Every cross-target Restore had a namespace mapping and the `NotIn` selector, and every in-place Restore had neither (tables above).
+- `TARGET` and `OWNER` in the counterparts' namespaces: as expected in both passing sessions. Each alias pointed to the namespace of the other counterpart, and its owner was that counterpart's id.
+  - `api-chromium`, read at `12:32:44`: `envclone5d1b7442` in `styrmin-4df2ee8a-…`, owner and target `7a0896f1`; `simple-app` in `styrmin-7a0896f1-…`, owner and target `4df2ee8a`.
+  - `ui-chromium`, read at `12:45:14`: `envclone9bbc2c97` in `styrmin-c2653e30-…`, owner and target `86a4174e`; `simple-app` in `styrmin-86a4174e-…`, owner and target `c2653e30`.
+  - The re-clone's counterpart held no alias in either session (SC-002).
+- First attempt: the observer read no alias in the counterparts' namespaces. Its read at `12:20:31` came before the alias writes, which the agent log records at `12:20:35` and `12:20:42`. Its read at `12:20:46` came after the test's cleanup, which the agent log records at `12:20:43` ("Deleted 2 service aliases of 97eb25a5-…" and "Deleted 1 service aliases of 0bf35a41-…"). For that session, the alias writes are known from the agent log only: `/tmp/claude-0/-root-emdash-worktrees-styrmin-55123dec-fac-alias-clone-fix-l1vzt/0f67dc9b-63dd-4768-b324-c77b8a758d6f/scratchpad/chunk10-diag-styrmin-styrmin-agent-agent-66749f8f4d-q4wzs.log`.
+
+Observer logs:
+
+- `api-chromium`, second attempt: `/tmp/claude-0/-root-emdash-worktrees-styrmin-55123dec-fac-alias-clone-fix-l1vzt/0f67dc9b-63dd-4768-b324-c77b8a758d6f/scratchpad/chunk10-observer.log`
+- `api-chromium`, first attempt: `/tmp/claude-0/-root-emdash-worktrees-styrmin-55123dec-fac-alias-clone-fix-l1vzt/0f67dc9b-63dd-4768-b324-c77b8a758d6f/scratchpad/chunk10-observer-run1.log`
+- `ui-chromium`: `/tmp/claude-0/-root-emdash-worktrees-styrmin-55123dec-fac-alias-clone-fix-l1vzt/0f67dc9b-63dd-4768-b324-c77b8a758d6f/scratchpad/chunk11-observer.log`
+
+### Differences from the quickstart, and the two fixes to it
+
+- The manual check used observer logs taken during the runs, not a paused session.
+- The quickstart did not say how to pause a passing run. In each passing session, the observer read the first clone's counterpart aliases in one read only, so they existed for less than 30 seconds. Fixed in `quickstart.md`: a paragraph says that `--pdb` pauses only on a failure, and that a temporary `breakpoint()` after the SC-001 check pauses a passing run.
+- The quickstart's Restore read printed only the name and the selector, so it could not show which Restore is cross-target. Fixed in `quickstart.md`: the read also prints `spec.namespaceMapping`, as the observer did, and the "Expected" paragraph says that the cross-target Restores are the ones with a namespace mapping.
+- The Velero namespace `-n styrmin` is correct. Every Restore that the observer read with `-A` was in the namespace `styrmin`, and `execute_restore_workflow` sets `velero_namespace = "styrmin"` in `backend/styrmin_backend/workflows/templates/backup.py`. Not changed.
+- The kubeconfig glob matched the sessions' files, for example `/tmp/pytest-of-root/pytest-2021/vcluster0/kubeconfig`. `ls … | tail -1` returns the last path in alphabetical order. That path is the current session's only when no other pytest session runs on the host and the `pytest-<N>` numbers have the same number of digits. The observer instead picked the kubeconfig that names the session's vcluster. Not changed, because `AGENTS.md` gives the same command.

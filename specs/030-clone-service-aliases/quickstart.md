@@ -40,7 +40,9 @@ export KUBECONFIG=$(ls /tmp/pytest-of-*/pytest-*/vcluster0/kubeconfig | tail -1)
 kubectl get svc -n styrmin-<counterpart id> -l styrmin.io/service-alias=true \
   -o custom-columns=NAME:.metadata.name,OWNER:.metadata.labels.styrmin\\.io/deployment-id,TARGET:.spec.externalName
 # The Velero Restore of a counterpart has the label selector.
-kubectl get restores.velero.io -n styrmin -o jsonpath='{range .items[*]}{.metadata.name} {.spec.labelSelector}{"\n"}{end}'
+kubectl get restores.velero.io -n styrmin -o jsonpath='{range .items[*]}{.metadata.name} mapping={.spec.namespaceMapping} selector={.spec.labelSelector}{"\n"}{end}'
 ```
 
-Expected: every `TARGET` names `styrmin-<id>` of a deployment of the new environment, and `OWNER` is that id. The cross-target Restores show the `NotIn` selector; in-place Restores show none.
+`--pdb` pauses only on a failure. To pause a passing run, add a temporary `breakpoint()` right after the SC-001 check of the first clone. The test deletes the first clone's environment soon after that check, so without a pause the counterparts' aliases exist for less than 30 seconds.
+
+Expected: every `TARGET` names `styrmin-<id>` of a deployment of the new environment, and `OWNER` is that id. The cross-target Restores, which have a namespace mapping, show the `NotIn` selector; in-place Restores show neither a mapping nor a selector.
