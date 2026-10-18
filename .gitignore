@@ -215,6 +215,7 @@ e2e-logs/
 
 # Local demo runtime state (port-forward PID, etc.)
 .vcluster/
+demo-videos/
 
 # Speckit per-checkout pointer to the active feature directory
 .specify/feature.json
