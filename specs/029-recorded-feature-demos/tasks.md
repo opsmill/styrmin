@@ -35,10 +35,10 @@ description: "Task list for the recorded demos of four Styrmin features"
 
 **Purpose**: dependencies, the package skeleton, and a green baseline.
 
-- [ ] T001 Run `uv sync` and `uv run pytest backend/tests/unit -q -x --ignore=backend/tests/unit/cli` and note the result as the baseline (no file change). Check that `docker`, `vcluster`, `helm`, `kubectl` and `ffmpeg` are on the PATH; install ffmpeg if it is missing
-- [ ] T002 Upgrade Playwright (research R-001): add `"playwright>=1.64,<1.65",` to the `dev` dependency group in `pyproject.toml`, run `uv lock --upgrade-package playwright` so `uv.lock` pins 1.64.x, then `uv sync` and `uv run playwright install chromium`. Check that `uv run python -c "import playwright; from playwright.async_api import Page; print(Page.screencast)"` works
-- [ ] T003 [P] Add `demo-videos/` under the "Local demo runtime state" comment in `.gitignore`
-- [ ] T004 [P] Create the package skeleton with empty modules that only hold a one-line docstring: `backend/tests/e2e/demos/__init__.py`, `demos/pages/__init__.py`, `demos/scenarios/__init__.py`, and `backend/tests/unit/demos/__init__.py`
+- [X] T001 Run `uv sync` and `uv run pytest backend/tests/unit -q -x --ignore=backend/tests/unit/cli` and note the result as the baseline (no file change). Check that `docker`, `vcluster`, `helm`, `kubectl` and `ffmpeg` are on the PATH; install ffmpeg if it is missing
+- [X] T002 Upgrade Playwright (research R-001): add `"playwright>=1.64,<1.65",` to the `dev` dependency group in `pyproject.toml`, run `uv lock --upgrade-package playwright` so `uv.lock` pins 1.64.x, then `uv sync` and `uv run playwright install chromium`. Check that `uv run python -c "import playwright; from playwright.async_api import Page; print(Page.screencast)"` works
+- [X] T003 [P] Add `demo-videos/` under the "Local demo runtime state" comment in `.gitignore`
+- [X] T004 [P] Create the package skeleton with empty modules that only hold a one-line docstring: `backend/tests/e2e/demos/__init__.py`, `demos/pages/__init__.py`, `demos/scenarios/__init__.py`, and `backend/tests/unit/demos/__init__.py`
 
 ---
 
