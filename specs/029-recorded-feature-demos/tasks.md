@@ -192,7 +192,7 @@ description: "Task list for the recorded demos of four Styrmin features"
 
 **Independent Test**: quickstart §5.
 
-- [ ] T043 [US6] Follow quickstart §5: make demo 3 fail during its backup by scaling `deploy/velero` in namespace `styrmin` to 0, run `uv run invoke record --demo backup-restore`, and confirm exit code 1, the failing step and error in the summary, `network-lab-backup` kept, and no new video. Scale Velero back to 1, run it again, and confirm the leftover environment was deleted before the setup and only `3-backup-restore.mp4` was written. Append both outputs to `specs/029-recorded-feature-demos/full-run.log`
+- [X] T043 [US6] Follow quickstart §5: make demo 3 fail during its backup by scaling `deploy/velero` in namespace `styrmin` to 0, run `uv run invoke record --demo backup-restore`, and confirm exit code 1, the failing step and error in the summary, `network-lab-backup` kept, and no new video. Scale Velero back to 1, run it again, and confirm the leftover environment was deleted before the setup and only `3-backup-restore.mp4` was written. Append both outputs to `specs/029-recorded-feature-demos/full-run.log`
 
 ---
 
