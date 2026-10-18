@@ -5,7 +5,7 @@
 Results of the checks of tasks T009 and T010 ([tasks.md](tasks.md)), run on 2026-10-18 on a fresh local demo stack. Each finding names the research item it confirms or changes.
 
 - Infrahub 1.10.11 starts on chart 4.33.2 and upgrades to 1.11.7, so demo 1 keeps `previous: "1.10.11"` (research [R-015](research.md#r-015-infrahub-versions-for-demo-1)).
-- On the demo stack, that upgrade does not run the `infrahub` driver's upgrade action, so Infrahub 1.11.7 runs on a database that `infrahub upgrade` has not migrated. Demo 1 cannot show the driver's upgrade action until the maintainer decides how to resolve it. See "The upgrade does not run the driver's upgrade action".
+- On the demo stack, that upgrade does not run the `infrahub` driver's upgrade action, so Infrahub 1.11.7 runs on a database that `infrahub upgrade` has not migrated. Demo 1 waits for the fix to issue [#372](https://github.com/opsmill/styrmin/issues/372), as the maintainer decided on 2026-10-18. See "The upgrade does not run the driver's upgrade action".
 - `infrahub-enterprise` 1.11.7 starts, and an environment backup and its restore both reach `COMPLETED` (research [R-007](research.md#r-007-environment-backups-need-the-infrahub-enterprise-driver)). Demos 3 and 4 can go on.
 - One screencast records the whole run, including a navigation to a second origin, with the cursor still visible after it. The recorder does not need one recorded page per web application (research [R-001](research.md#r-001-playwright-version-and-the-screencast-api)).
 
@@ -51,7 +51,9 @@ Effect on the plan:
 - Demo 1 step 3 (task T033) expects "the expanded task and its steps, including the driver's upgrade action". On the demo stack the timeline shows the six steps above and no upgrade action.
 - Research R-015 says the upgrade from 1.10 to 1.11 "runs the driver's upgrade action with Infrahub's migrations, which is what demo 1 shows". On the demo stack it does not, and Infrahub runs on graph version 75 instead of 79.
 
-How to resolve it is not decided. The code offers one route without a product change: load the driver from a Git source, which registers its actions. The demo stack has no Git server today, and whether the recorder may reach a remote repository is not known. The other route is a product change so that locally loaded drivers register their actions. This needs a maintainer decision before task T033.
+How to resolve it is not decided. The code offers one route without a product change: load the driver from a Git source, which registers its actions. The demo stack has no Git server today, and whether the recorder may reach a remote repository is not known. The other route is a product change so that locally loaded drivers register their actions. The code gap is already filed as [#372](https://github.com/opsmill/styrmin/issues/372), "actions of drivers loaded from a local directory are never registered and never run".
+
+Decision (maintainer, 2026-10-18): demo 1 (tasks T033 and T034) waits for the fix to #372. Loading the driver from a Git server inside the demo stack, and recording the upgrade without the action, were both rejected. Task T032 (the versions file) still lands, because demos 2 and 3 deploy the `latest` version.
 
 ## infrahub-enterprise 1.11.7 backs up and restores
 
