@@ -1,0 +1,13 @@
+---
+# Prints the devices that the inventory plugin reads from Infrahub; it connects to no device.
+- name: List the network devices
+  hosts: all
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Print the devices in the inventory
+      run_once: true
+      ansible.builtin.debug:
+        msg:
+          - "Devices in the inventory: {{ groups['all'] | length }}"
+          - "Device names: {{ groups['all'] | sort | join(', ') }}"

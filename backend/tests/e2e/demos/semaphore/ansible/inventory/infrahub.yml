@@ -1,0 +1,11 @@
+---
+# Reads the devices from the Infrahub of the same environment through its short service name (FR-013).
+# The token comes from the INFRAHUB_API_TOKEN secret of the Semaphore environment.
+plugin: opsmill.infrahub.inventory
+api_endpoint: http://infrahub:8000
+hostnames:
+  - name
+nodes:
+  InfraDevice:
+    include:
+      - name
