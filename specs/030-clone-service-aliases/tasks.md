@@ -117,7 +117,7 @@ description: "Tasks for 030: a clone writes its own service aliases and restores
 
 **Independent Test**: the SC-003 check of T025 passes; T007(b) and T011(b) cover the in-place request and steps.
 
-- [ ] T025 [US4] In `test_environment_backup_and_restore_lifecycle` (`backend/tests/e2e/test_backup_restore.py`), after the environment restore's deployment-count check and before step 10 (the cascade delete), check SC-003 of spec 030: the primary's namespace holds the alias named after the second deployment's resolved service name (`envsnap{suffix}`), labelled with the second deployment's id and pointing to its namespace. Use `wait_for_service_aliases` from T014 with a 60-second timeout, filtered to that alias, because other deployments of the shared environment can add aliases
+- [X] T025 [US4] In `test_environment_backup_and_restore_lifecycle` (`backend/tests/e2e/test_backup_restore.py`), after the environment restore's deployment-count check and before step 10 (the cascade delete), check SC-003 of spec 030: the primary's namespace holds the alias named after the second deployment's resolved service name (`envsnap{suffix}`), labelled with the second deployment's id and pointing to its namespace. Use `wait_for_service_aliases` from T014 with a 60-second timeout, filtered to that alias, because other deployments of the shared environment can add aliases
 
 **Checkpoint**: in-place restores are unchanged.
 
