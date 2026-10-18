@@ -196,8 +196,8 @@ CLONE_PODS_READY_TIMEOUT_SECONDS = 300.0
 # clone causes has run by then, so a prune of the source's objects has happened too.
 COUNTERPART_HELMRELEASE_SETTLED_TIMEOUT_SECONDS = 300.0
 
-# Listing a counterpart's aliases. Its restore writes them before it completes, so
-# the wait covers the read only, never a later flow (spec 030, critique E5).
+# Listing the aliases of a restored namespace. Its restore writes them before it
+# completes, so the wait covers the read only, never a later flow (spec 030, critique E5).
 SERVICE_ALIASES_TIMEOUT_SECONDS = 60.0
 
 
@@ -1300,6 +1300,8 @@ async def test_environment_backup_and_restore_lifecycle(
       and reason. Zero silent skips.
     * **SC-005** — after the restore, the environment's config equals the config
       captured at backup time (an env-config write happens in between).
+    * **SC-003 of spec 030** — after the restore, the primary's namespace still
+      holds its alias for the second deployment's service.
 
     The environment is session-shared, so the config write is deliberately the
     retention policy (a Helm-level no-op that still walks the whole reconcile
@@ -1317,13 +1319,14 @@ async def test_environment_backup_and_restore_lifecycle(
     # restore something to skip. The shared environment enforces per-env service
     # name uniqueness, hence the override (see ``scenario_environment_id``).
     suffix = uuid4().hex[:8]
+    secondary_service_name = f"envsnap{suffix}"
     secondary = await scenario_driver.create_deployment(
         driver="simple-app",
         version="0.1.0",
         environment_id=scenario_environment_id,
         name=f"env-snapshot-{suffix}",
         service_name_overrides=[
-            {"driverServiceName": "simple-app", "overrideName": f"envsnap{suffix}"}
+            {"driverServiceName": "simple-app", "overrideName": secondary_service_name}
         ],
     )
     secondary_deployment_id = secondary.id
@@ -1565,6 +1568,29 @@ async def test_environment_backup_and_restore_lifecycle(
             await instanced_deployment_ids(client, scenario_environment_id)
         ) == instanced_before, (
             "an environment restore must not create or delete deployments (FR-008)"
+        )
+
+        # SC-003 of spec 030: the primary keeps its alias for the second deployment's
+        # service. Only that alias is compared, because other deployments of the
+        # shared environment add their own.
+        expected_aliases = {
+            ServiceAlias(
+                secondary_service_name,
+                secondary_deployment_id,
+                f"styrmin-{secondary_deployment_id}",
+            )
+        }
+        aliases = await wait_for_service_aliases(
+            kubeconfig_path,
+            primary_namespace,
+            expected_aliases,
+            timeout=SERVICE_ALIASES_TIMEOUT_SECONDS,
+            include=lambda alias: alias.name == secondary_service_name,
+        )
+        assert aliases == expected_aliases, (
+            "after the environment restore, the primary's namespace must hold the "
+            f"alias {secondary_service_name!r} of deployment {secondary_deployment_id}, "
+            f"pointing to its namespace (SC-003 of spec 030); got {sorted(aliases)!r}"
         )
 
         # 10. US3 — deleting the snapshot cascades through its constituents and
