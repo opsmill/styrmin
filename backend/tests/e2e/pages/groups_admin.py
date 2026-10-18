@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from playwright.async_api import expect
 
-from tests.e2e.pages._dom import submit_dialog, wait_for_dialog_open
+from tests.e2e.pages._dom import enter_text, submit_dialog, wait_for_dialog_open
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
@@ -26,8 +26,9 @@ if TYPE_CHECKING:
 class GroupsAdminPage:
     """Drive the ``/groups`` admin list, create-group dialog, and detail page."""
 
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     # ------------------------------------------------------------------
     # List page + create dialog
@@ -59,7 +60,11 @@ class GroupsAdminPage:
         the multi-select; matching is by the visible label which starts
         with the username (see ``CreateGroupDialog.tsx``).
         """
-        await self._page.locator("#create-group-name").fill(name)
+        await enter_text(
+            self._page.locator("#create-group-name"),
+            name,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
 
         await self._page.locator("#create-group-role").click()
         label = {

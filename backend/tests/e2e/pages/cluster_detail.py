@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, expect
 
 from tests.e2e.drivers.errors import ScenarioActionError
+from tests.e2e.pages._dom import enter_text
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
@@ -21,8 +22,9 @@ _EDIT_DIALOG_TITLE = "Edit Cluster Configuration"
 
 
 class ClusterDetailPage:
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     async def goto(self, *, cluster_id: str) -> None:
         await self._page.goto(f"/clusters/{cluster_id}")
@@ -51,7 +53,11 @@ class ClusterDetailPage:
         await expect(self._edit_dialog()).to_be_visible()
 
     async def set_fqdn_suffix(self, value: str) -> None:
-        await self._edit_dialog().get_by_label("FQDN suffix", exact=True).fill(value)
+        await enter_text(
+            self._edit_dialog().get_by_label("FQDN suffix", exact=True),
+            value,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
 
     async def _alert_text(self) -> str:
         alert = self._edit_dialog().get_by_role("alert").last

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from playwright.async_api import expect
 
-from tests.e2e.pages._dom import submit_dialog, wait_for_dialog_open
+from tests.e2e.pages._dom import enter_text, submit_dialog, wait_for_dialog_open
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
@@ -26,8 +26,9 @@ class UsersAdminPage:
     open detail → mutate / delete) flows through the same wrapper.
     """
 
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     # ------------------------------------------------------------------
     # List page
@@ -59,9 +60,21 @@ class UsersAdminPage:
         The role select uses Radix's combobox primitive; the option's
         ``value`` attribute is the role string itself.
         """
-        await self._page.locator("#create-user-username").fill(username)
-        await self._page.locator("#create-user-display-name").fill(display_name)
-        await self._page.locator("#create-user-password").fill(password)
+        await enter_text(
+            self._page.locator("#create-user-username"),
+            username,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
+        await enter_text(
+            self._page.locator("#create-user-display-name"),
+            display_name,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
+        await enter_text(
+            self._page.locator("#create-user-password"),
+            password,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
 
         # Open the role select trigger and click the matching option.
         # SelectItem renders the human label (``roleLabel``) as visible
@@ -134,7 +147,11 @@ class UsersAdminPage:
         await self._page.locator("[data-testid=user-reset-password-trigger]").click()
         dialog = self._page.get_by_role("dialog", name="Reset password")
         await wait_for_dialog_open(dialog)
-        await self._page.locator("#reset-password-new").fill(new_password)
+        await enter_text(
+            self._page.locator("#reset-password-new"),
+            new_password,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
         await submit_dialog(dialog, button="Reset", timeout=10_000)
 
     async def delete_user(self) -> None:
@@ -160,7 +177,7 @@ class UsersAdminPage:
         Saving is asserted by the inline success banner.
         """
         field = self._page.locator("#user-display-name")
-        await field.fill(value)
+        await enter_text(field, value, keystroke_delay_ms=self._keystroke_delay_ms)
         await self._page.locator("[data-testid=user-edit-save]").click()
         await expect(
             self._page.locator("[data-testid=user-detail-success]")

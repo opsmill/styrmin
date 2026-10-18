@@ -6,6 +6,7 @@ from typing import Any, TYPE_CHECKING
 
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.refs import DeploymentRef
+from tests.e2e.pages._dom import enter_text
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -14,8 +15,9 @@ if TYPE_CHECKING:
 class DeployFormPage:
     """Deploy form — driver selection, version, name, parameters, service-name overrides."""
 
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     async def goto(self, *, environment_id: str) -> None:
         await self._page.goto(f"/environments/{environment_id}/deploy")
@@ -38,7 +40,11 @@ class DeployFormPage:
                 "UiScenarioDriver does not yet support create_deployment(parameters=...); "
                 "mark the scenario as api_only"
             )
-        await self._page.get_by_label("Deployment Name").fill(name)
+        await enter_text(
+            self._page.get_by_label("Deployment Name"),
+            name,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
 
         # Base UI SelectTrigger has no id, so get_by_label doesn't match it —
         # target by its data-testid.
@@ -51,14 +57,20 @@ class DeployFormPage:
 
         # Application version input — explicitly set so we do not rely on a
         # driver-provided default.
-        await self._page.get_by_label("Application Version").fill(version)
+        await enter_text(
+            self._page.get_by_label("Application Version"),
+            version,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
 
         # One field per component of the selected driver version, labelled with its name.
         if component_replicas:
             group = self._page.get_by_role("group", name="Component replicas")
             for component, replicas in component_replicas.items():
-                await group.get_by_label(f"Replicas for {component}").fill(
-                    str(replicas)
+                await enter_text(
+                    group.get_by_label(f"Replicas for {component}"),
+                    str(replicas),
+                    keystroke_delay_ms=self._keystroke_delay_ms,
                 )
 
         if service_name_overrides:
@@ -70,8 +82,16 @@ class DeployFormPage:
                 row = rows.last
                 driver_service = override.get("driverServiceName", "")
                 override_name = override.get("overrideName", "")
-                await row.get_by_label("Driver service").fill(driver_service)
-                await row.get_by_label("Override name").fill(override_name)
+                await enter_text(
+                    row.get_by_label("Driver service"),
+                    driver_service,
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
+                await enter_text(
+                    row.get_by_label("Override name"),
+                    override_name,
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
 
     async def read_selected_driver_label(self) -> str:
         """Return the text currently displayed inside the driver-version trigger.

@@ -99,18 +99,34 @@ async def _ui_errors(action: str) -> AsyncIterator[None]:
 
 
 class UiScenarioDriver:
-    def __init__(self, *, page: Page, base_url: str) -> None:
+    def __init__(
+        self, *, page: Page, base_url: str, keystroke_delay_ms: int | None = None
+    ) -> None:
         self._page = page
         self._base_url = base_url.rstrip("/")
-        self._deploy_form = DeployFormPage(page)
-        self._deployment_detail = DeploymentDetailPage(page)
-        self._settings = SettingsPage(page)
-        self._bsl_list = BackupStorageLocationsListPage(page)
-        self._drivers_list = DriversListPage(page)
-        self._environments_list = EnvironmentsListPage(page)
-        self._environment_detail = EnvironmentDetailPage(page)
-        self._environment_backups = EnvironmentBackupsTabPage(page)
-        self._environment_clones = EnvironmentClonesTabPage(page)
+        self._deploy_form = DeployFormPage(page, keystroke_delay_ms=keystroke_delay_ms)
+        self._deployment_detail = DeploymentDetailPage(
+            page, keystroke_delay_ms=keystroke_delay_ms
+        )
+        self._settings = SettingsPage(page, keystroke_delay_ms=keystroke_delay_ms)
+        self._bsl_list = BackupStorageLocationsListPage(
+            page, keystroke_delay_ms=keystroke_delay_ms
+        )
+        self._drivers_list = DriversListPage(
+            page, keystroke_delay_ms=keystroke_delay_ms
+        )
+        self._environments_list = EnvironmentsListPage(
+            page, keystroke_delay_ms=keystroke_delay_ms
+        )
+        self._environment_detail = EnvironmentDetailPage(
+            page, keystroke_delay_ms=keystroke_delay_ms
+        )
+        self._environment_backups = EnvironmentBackupsTabPage(
+            page, keystroke_delay_ms=keystroke_delay_ms
+        )
+        self._environment_clones = EnvironmentClonesTabPage(
+            page, keystroke_delay_ms=keystroke_delay_ms
+        )
         # environment_id passed into create_deployment — stashed so
         # wait_for_deployment_running can build the detail URL without
         # re-receiving it (matches ApiScenarioDriver's signature).

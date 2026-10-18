@@ -24,6 +24,7 @@ from tests.e2e.drivers.refs import (
     EnvironmentRestoreSkipRef,
 )
 from tests.e2e.pages._dom import (
+    enter_text,
     required_attr as _required_attr,
     submit_dialog,
     wait_for_dialog_open,
@@ -72,8 +73,9 @@ _CLONE_SUBMIT_TIMEOUT_SECONDS = 300.0
 
 
 class EnvironmentsListPage:
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     async def goto(self) -> None:
         await self._page.goto("/")
@@ -100,7 +102,11 @@ class EnvironmentsListPage:
         dialog = self._page.get_by_role("dialog", name="Create Environment")
         await wait_for_dialog_open(dialog)
 
-        await dialog.locator("#env-name").fill(name)
+        await enter_text(
+            dialog.locator("#env-name"),
+            name,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
 
         # The cluster select renders items by cluster name; map cluster_id
         # back to a name by reading the list on the settings page would be
@@ -118,23 +124,45 @@ class EnvironmentsListPage:
         if _needs_advanced(config):
             await dialog.get_by_role("button", name="Advanced Configuration").click()
             if config.get("ingress_class"):
-                await dialog.locator("#env-ingress-class").fill(config["ingress_class"])
+                await enter_text(
+                    dialog.locator("#env-ingress-class"),
+                    config["ingress_class"],
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
             if config.get("db_size"):
-                await dialog.locator("#env-db-size").fill(config["db_size"])
+                await enter_text(
+                    dialog.locator("#env-db-size"),
+                    config["db_size"],
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
             if config.get("backup_ttl"):
-                await dialog.locator("#env-backup-ttl").fill(config["backup_ttl"])
+                await enter_text(
+                    dialog.locator("#env-backup-ttl"),
+                    config["backup_ttl"],
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
             if config.get("fqdn_suffix"):
-                await dialog.locator("#env-fqdn-suffix").fill(config["fqdn_suffix"])
+                await enter_text(
+                    dialog.locator("#env-fqdn-suffix"),
+                    config["fqdn_suffix"],
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
             ip_list = config.get("ip_whitelist")
             if ip_list:
-                await dialog.locator("#env-ip-whitelist").fill(
-                    ", ".join(ip_list) if isinstance(ip_list, list) else str(ip_list)
+                await enter_text(
+                    dialog.locator("#env-ip-whitelist"),
+                    ", ".join(ip_list) if isinstance(ip_list, list) else str(ip_list),
+                    keystroke_delay_ms=self._keystroke_delay_ms,
                 )
             di = config.get("dedicated_ingress")
             if di:
                 await dialog.locator("#env-dedicated-ingress").click()
                 if di.get("implementation"):
-                    await dialog.locator("#env-di-impl").fill(di["implementation"])
+                    await enter_text(
+                        dialog.locator("#env-di-impl"),
+                        di["implementation"],
+                        keystroke_delay_ms=self._keystroke_delay_ms,
+                    )
                 if di.get("type"):
                     await dialog.locator("#env-di-type").select_option(di["type"])
 
@@ -164,8 +192,9 @@ class EnvironmentsListPage:
 
 
 class EnvironmentDetailPage:
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     async def goto(self, *, environment_id: str) -> None:
         await self._page.goto(f"/environments/{environment_id}")
@@ -294,8 +323,16 @@ class EnvironmentDetailPage:
             new_row = self._page.locator("[data-testid=env-vars-form-row]").nth(
                 new_row_index
             )
-            await new_row.locator("[data-testid=env-var-name-input]").fill(name)
-            await new_row.locator("[data-testid=env-var-value-input]").fill(value)
+            await enter_text(
+                new_row.locator("[data-testid=env-var-name-input]"),
+                name,
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
+            await enter_text(
+                new_row.locator("[data-testid=env-var-value-input]"),
+                value,
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
 
         save = self._page.locator("[data-testid=env-vars-form-save-button]")
         await save.click()
@@ -347,7 +384,11 @@ class EnvironmentDetailPage:
                 f"{environment_id!r}: {(await blocked.inner_text()).strip()}"
             )
 
-        await form.locator("[data-testid=backup-retention-input]").fill(ttl or "")
+        await enter_text(
+            form.locator("[data-testid=backup-retention-input]"),
+            ttl or "",
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
 
         # Client-side validation renders on keystroke (no blur needed) and
         # disables Save, so an invalid duration must fail loudly here rather
@@ -450,8 +491,9 @@ class EnvironmentBackupsTabPage:
       snapshot id, so React does not remount it).
     """
 
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     # ------------------------------------------------------------------
     # Navigation
@@ -983,8 +1025,9 @@ class EnvironmentClonesTabPage:
       …) the API driver reads off the generated enums.
     """
 
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
+        self._keystroke_delay_ms = keystroke_delay_ms
 
     # ------------------------------------------------------------------
     # Navigation
@@ -1313,7 +1356,11 @@ class EnvironmentClonesTabPage:
         dialog = self._page.locator("[data-testid=clone-environment-dialog]").first
         await wait_for_dialog_open(dialog)
 
-        await dialog.locator("[data-testid=clone-environment-name-input]").fill(name)
+        await enter_text(
+            dialog.locator("[data-testid=clone-environment-name-input]"),
+            name,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
         await self._fill_selection(dialog, deployment_ids=deployment_ids)
         await self._fill_config_override(dialog, config_override=config_override)
         await self._fill_clear_fields(dialog, clear_config_fields=clear_config_fields)
@@ -1430,8 +1477,10 @@ class EnvironmentClonesTabPage:
         """
         if config_override is None:
             return
-        await dialog.locator("[data-testid=clone-config-override-input]").fill(
-            json.dumps(config_override)
+        await enter_text(
+            dialog.locator("[data-testid=clone-config-override-input]"),
+            json.dumps(config_override),
+            keystroke_delay_ms=self._keystroke_delay_ms,
         )
         error = dialog.locator("[data-testid=clone-config-override-error]")
         if await error.count() > 0:
