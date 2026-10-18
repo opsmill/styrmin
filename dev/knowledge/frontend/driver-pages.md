@@ -112,6 +112,22 @@ When a load returns `loadWarnings`, the drawer shows a notification of type `war
 Styrmin does not store the warnings. A load without warnings shows a `success` notification that
 closes on its own.
 
+## Driver directory
+
+<!-- Extracted from specs/028-git-driver-directory on 2026-10-18 -->
+
+A git driver version can be loaded from a driver directory, a folder of the repository relative to its root (spec 028). Every page reads the computed GraphQL field `driverDirectory`, which is `null` for a load from the repository root and for a local driver version. No page reads `sourceType` and `sourcePath` to decide this.
+
+- **Load drawer** (`LoadDriverDrawer.tsx`), git tab:
+  - The third field is "Driver directory (optional)" (`id="driverDirectory"`). Its help text is linked with `aria-describedby`. The drawer sends the trimmed value only when it is not empty, so an empty field loads from the repository root. The drawer does not check the value: the server applies the rules, so all load surfaces share one rule.
+  - A server error whose message starts with "Driver directory " shows under the field, with `aria-invalid`. Other errors show in the alert at the top. The form keeps the values the admin entered.
+  - The form refuses a repository URL that is a GitHub `/tree/` or `/blob/` link, or a GitLab `/-/tree/` or `/-/blob/` link, before any request. The message gives the repository URL to enter (`repositoryOfFolderLink` in `lib/repositoryUrl.ts`).
+  - While a git load runs, the submit button reads "Cloning repository…".
+- **Overview tab**: a "Driver directory" row follows the "Source" row when `driverDirectory` is set. Its copy button is named "Copy driver directory". There is no row for a load from the repository root.
+- **Drivers list**: the Source cell shows `<repository> @ <branch> · <driver directory>` (`versionSource` in `lib/driverList.ts`). The list filter matches the same text, so searching for a driver directory finds its versions.
+- **Version pickers**: the version switcher of the driver detail page, the deploy form and the upgrade dialog end each label with ` · <driver directory>` (`withDriverDirectory` in `lib/driverVersion.ts`). Two drivers with the same name and commit in one repository therefore have different labels. The version switcher's search matches the driver directory.
+- **Upgrade dialog** (`DeploymentDetailPage.tsx`): the latest-wins rule ignores the driver directory, so "Latest (auto)" can move a deployment to a driver version from another driver directory. While "Latest (auto)" is selected and the driver's versions come from more than one driver directory (the repository root counts as one), `DriverDirectoryChangeNotice` warns about this and tells the admin to pick a version to stay in the current driver directory (`driverDirectoriesOf` in `lib/driverVersion.ts`). The frontend cannot evaluate the PEP 440 ranges, so the notice says that the move can happen, not that it will.
+
 ## Attributes for E2E tests
 
 | Element | Attributes |
@@ -121,6 +137,9 @@ closes on its own.
 | Links list | `data-testid="driver-links"`; each host as `data-testid="driver-link-host"` |
 | Driver group | `data-testid="driver-group"`, `data-driver-name` |
 | Component replicas and singleton rows | `data-testid="driver-component-replicas"`, `data-testid="driver-component-singleton"` |
+| Overview "Driver directory" row | `data-testid="driver-overview-driver-directory"` |
+| Driver directory error in the load drawer | `data-testid="driver-directory-error"` |
+| Upgrade dialog driver directory warning | `data-testid="driver-directory-change-notice"` |
 
 `backend/tests/e2e/test_ui_smoke.py::test_driver_logo_description_and_links_render` reads these
 attributes. See [e2e-testing.md](../backend/e2e-testing.md#serving-external-urls-to-the-ui-browser)
@@ -130,7 +149,7 @@ for how it serves the logo without internet access.
 
 Vitest tests live in `frontend/src/__tests__/drivers/` (`DriverLogo.test.tsx`,
 `DriverListPage.test.tsx`, `driverList.test.ts`, `LoadDriverDrawer.test.tsx`,
-`ComponentsTab.test.tsx`) and `frontend/src/__tests__/driver-detail/DriverDetailPage.test.tsx`.
+`ComponentsTab.test.tsx`, `repositoryUrl.test.ts`) and `frontend/src/__tests__/driver-detail/DriverDetailPage.test.tsx`. The driver directory labels and the upgrade warning are tested in `frontend/src/__tests__/lib/driverVersion.test.ts` and `frontend/src/__tests__/deployment-detail/UpgradeDialogDriverDirectory.test.tsx`.
 
 ## Key Files
 
@@ -141,5 +160,8 @@ Vitest tests live in `frontend/src/__tests__/drivers/` (`DriverLogo.test.tsx`,
 | [frontend/src/pages/drivers/DriverDetailPage.tsx](../../../frontend/src/pages/drivers/DriverDetailPage.tsx) | Driver detail: header logo, description, links |
 | [frontend/src/pages/drivers/lib/driverList.ts](../../../frontend/src/pages/drivers/lib/driverList.ts) | Filter and latest-version helpers |
 | [frontend/src/pages/drivers/LoadDriverDrawer.tsx](../../../frontend/src/pages/drivers/LoadDriverDrawer.tsx) | Load driver drawer and the load-warning notification |
+| [frontend/src/pages/drivers/lib/repositoryUrl.ts](../../../frontend/src/pages/drivers/lib/repositoryUrl.ts) | Repository URL of a GitHub or GitLab folder or file link, which the load drawer refuses |
+| [frontend/src/lib/driverVersion.ts](../../../frontend/src/lib/driverVersion.ts) | Driver version labels, with the driver directory, and the driver directories of a driver's versions |
+| [frontend/src/components/deployment/DriverDirectoryChangeNotice.tsx](../../../frontend/src/components/deployment/DriverDirectoryChangeNotice.tsx) | Upgrade dialog warning that "Latest (auto)" can change the driver directory |
 | [frontend/src/components/ClampedText.tsx](../../../frontend/src/components/ClampedText.tsx) | Clamped description with "Show more" |
 | [frontend/src/pages/drivers/driver-detail/tabs/ComponentsTab.tsx](../../../frontend/src/pages/drivers/driver-detail/tabs/ComponentsTab.tsx) | Components tab: container, replicas and singleton per component |

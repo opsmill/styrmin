@@ -5,8 +5,8 @@
 **Decision-makers**: Fatih Acar
 **Source**: [issue #517](https://github.com/opsmill/styrmin/issues/517);
 [PRD](https://github.com/opsmill/styrmin/issues/517#issuecomment-6236268970);
-[spec 028](../../specs/028-git-driver-directory/spec.md) (FR-004, FR-008);
-[research R-001 and R-004](../../specs/028-git-driver-directory/research.md)
+[spec 028](../../specs/archive/028-git-driver-directory/spec.md) (FR-004, FR-008);
+[research R-001 and R-004](../../specs/archive/028-git-driver-directory/research.md)
 **Related**: [ADR-053](0053-driver-version-provenance-fingerprint.md) (a git driver version is identified by the commit of the whole repository)
 
 ## Context

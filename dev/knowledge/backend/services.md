@@ -351,7 +351,7 @@ When the identity matches, the load first compares the `icon`, `description` and
 | Function | Description |
 |----------|-------------|
 | `load_application_driver_from_object(driver_spec, uow, ...)` | Load a driver from an in-memory `DriverSpec` |
-| `load_application_driver_from_git_repository(repository_url, branch, uow) -> LoadedDriverVersion` | Clone a driver from Git and load it |
+| `load_application_driver_from_git_repository(repository_url, branch, uow, driver_directory=None) -> LoadedDriverVersion` | Clone a driver from Git and load it from the driver directory, or from the repository root when `driver_directory` is `None` (spec 028). The stored driver directory goes into `source_path`, which is part of the identity |
 | `load_application_driver_from_local_directory(path, uow) -> LoadedDriverVersion` | Load a driver from a local filesystem path |
 | `instantiate_application(...)` | Instantiate an application from a loaded driver |
 
@@ -447,11 +447,35 @@ Handles loading and parsing of application driver specifications from Git reposi
 
 ```python
 class DriverProvider(ABC):
-    async def get(self, repository_url: str, branch: str) -> Path:
-        """Clone repository and return local path"""
+    @contextmanager
+    def provide(self) -> Generator[Path, None, None]:
+        """Yield the folder that holds the driver files."""
+
+    def get_source(self) -> DriverSource:
+        """Return the source of the driver (GitSource or LocalSource)."""
 ```
 
 **GitDriverProvider**: Clones Git repositories using Dulwich, optionally with GitHub credentials.
+
+<!-- Extracted from specs/028-git-driver-directory on 2026-10-18 -->
+
+`GitDriverProvider(repository, branch, token, driver_directory=None)` loads a driver from the repository root or from a driver directory of the repository. The helpers it uses are in `services/driver/driver_directory.py`.
+
+1. **Before the clone**, the constructor calls `normalise_driver_directory`, which returns the stored form or `None` for the repository root:
+   - It removes surrounding whitespace, empty segments and `.` segments.
+   - It refuses an absolute path, a `..` segment, a backslash, `{` or `}`, a control character, and a stored value longer than 255 characters (`MAX_DRIVER_DIRECTORY_LENGTH`).
+   - The stored value goes on `GitSource.driver_directory`. That field carries the driver directory to storage (`source_path`) and to `ActionsWorkflowBuilder`, which adds the `set_working_directory` pull step ([hooks-and-actions.md](hooks-and-actions.md#pull-steps)).
+2. **The clone** is the whole repository at the branch. The provider records the HEAD commit SHA as the fingerprint ([ADR-053](../../adr/0053-driver-version-provenance-fingerprint.md)).
+3. **After the clone**, before any driver file is read, `_check_driver_directory` runs, for loads from the repository root too:
+   - The resolved driver directory must be inside the resolved clone root (`resolve_inside`). The error names the first part of the path that is a symlink leading outside the repository (`_first_link_outside`).
+   - `driver.styrmin.yml`, `values.j2.yml` and `actions.py` must resolve inside the driver directory. Prefect puts the folder of the resolved `actions.py` on `sys.path`, so a link to another folder of the repository is refused too.
+   - Each path must be readable. `Path.resolve()` does not raise on a symlink loop in Python 3.14, so `_follow_error` calls `stat()` and reports the error.
+   - The driver directory must be a folder that holds `driver.styrmin.yml`.
+4. The provider logs the repository, branch, commit and driver directory at info level, and yields the resolved driver directory.
+
+Every refusal and failure raises `DriverLoadingError`, or `MissingDriverSpecificationError` when `driver.styrmin.yml` is missing. Both have the code `VALIDATION_ERROR`. The messages after the clone name the driver directory (or "the repository root"), the repository, the branch and the full commit SHA. They never contain the temporary clone path or the target of a symlink. `redact_user_info` removes the user info of every `scheme://` URL from the repository URL and from the text of clone errors. `quoted` escapes control characters in the values the messages show. See [ADR-079](../../adr/0079-driver-actions-import-only-from-their-driver-directory.md).
+
+`LocalDriverProvider` is not changed: the path the admin gives is the driver directory, and no real-path check runs, because a Kubernetes ConfigMap or Secret volume exposes every file as a symlink.
 
 ### Loaders (`loaders.py`)
 
