@@ -325,6 +325,10 @@ spec:
       image: <string>      # Optional container image for execution
 ```
 
+An action's own `image` must hold Prefect 3.6.9 or later: the action's Job
+runs Prefect's `git_clone` step with `clone_directory_name`, which earlier
+releases refuse.
+
 ### Hooks and Modes
 
 | Hook | Description |

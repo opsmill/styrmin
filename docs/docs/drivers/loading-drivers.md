@@ -93,11 +93,14 @@ async with StyrminClient(server_address="https://styrmin.example") as client:
         "main",
         driver_directory="drivers/infrahub",
     )
-    print(version.source_path)  # drivers/infrahub
+    print(version.driver_directory)  # drivers/infrahub
 ```
 
 A refused or failed load raises `OperationFailedError` with the server's
-message.
+message. A load with a driver directory needs a Styrmin server that
+accepts the `driverDirectory` argument; an older server makes the SDK
+raise `IncompatibleServerError`, and `styrminctl` prints it as an error.
+A load without a driver directory works against older servers too.
 
 From the GraphQL API, pass the `driverDirectory` argument:
 
@@ -110,24 +113,35 @@ mutation {
   ) {
     id
     sourceCommitSha
-    sourcePath
+    driverDirectory
   }
 }
 ```
 
 In the UI, open the Drivers page, select "Load driver", and on the
 "Git repository" tab fill in "Repository URL", "Branch" and
-"Driver directory". Leave "Driver directory" empty to load from the
-repository root. When the server refuses the load, the drawer shows the
-server's message and keeps the values you entered.
+"Driver directory (optional)". Leave the driver directory empty to load
+from the repository root. While the server clones the repository, the
+button reads "Cloning repository…". When the server refuses the load, the
+drawer keeps the values you entered and shows the server's message: under
+the "Driver directory" field when the message is about the driver
+directory, and at the top of the drawer otherwise. The drawer refuses the
+web address of a folder or a file, such as
+`https://github.com/your-org/styrmin-drivers/tree/main/drivers/infrahub`
+or a GitLab `/-/tree/` link, before it calls the server, and names the
+repository URL to enter instead; enter the folder as the driver
+directory.
 
-The application driver version stores the driver directory in its
-`sourcePath` field. The Overview tab of the driver version shows it in a
+The `driverDirectory` field of the application driver version returns
+the driver directory, or null for a load from the repository root and for
+a local driver version. The `sourcePath` field holds the same value for a
+git driver version, but holds the folder on the server for a local one.
+The Overview tab of the driver version shows the driver directory in a
 "Driver directory" row after the "Source" row, and the Source cell of the
 drivers list shows it after the repository and branch, as
 `<repository> @ <branch> · drivers/infrahub`. A driver version loaded
-from the repository root has no `sourcePath`, no "Driver directory" row
-and no driver directory in its Source cell.
+from the repository root has no "Driver directory" row and no driver
+directory in its Source cell.
 
 Styrmin stores every way of writing the same folder in one form, so a
 reload at the same commit returns the existing driver version:
@@ -139,23 +153,44 @@ repository root, the same as a load without a driver directory.
 
 Styrmin refuses these values before it clones the repository:
 
-- an absolute path, such as `/etc`;
+- an absolute path, such as `/etc` or `/drivers/infrahub`;
 - a path with a `..` segment, such as `../other` or `drivers/../../etc`;
 - a path with a backslash, such as `drivers\infrahub`;
-- a value with a NUL character.
+- a path with `{` or `}`, such as `drivers/{{ name }}`, because the
+  Prefect step that sets the working directory of the actions fills in
+  `{{ ... }}` templates;
+- a value with a control character, such as a NUL character, a tab or a
+  line break;
+- a path longer than 255 characters once it is stored.
 
-The error message names the value and the rule, for example:
+The error message names the value as you entered it, with control
+characters written as escapes such as `\x00`, and the rule, for example:
 
 ```text
 Driver directory '../other' is refused: it contains a '..' segment. Give a path relative to the repository root, such as 'drivers/infrahub'.
 ```
 
-After the clone, Styrmin refuses the load, and reads no file, when the
-driver directory, or its `driver.styrmin.yml`, `values.j2.yml` or
-`actions.py`, is a symlink to a path outside the repository. This check
-also applies to loads from the repository root. A symlink to a path
-inside the repository is accepted. The message names the part of the path
-that is a symlink leading outside the repository.
+After the clone, and before it reads any file, Styrmin refuses the load
+when:
+
+- the driver directory is a symlink, or is inside a symlink, to a path
+  outside the repository. The message names the part of the path that is
+  the symlink;
+- the driver directory's `driver.styrmin.yml`, `values.j2.yml` or
+  `actions.py` is a symlink to a path outside the driver directory, also
+  when that path is another folder of the repository. For a load from the
+  repository root, the driver directory is the whole repository;
+- the driver directory or one of these files cannot be followed, such as
+  a symlink loop. The message names the path in the repository and the
+  reason, such as `Too many levels of symbolic links`.
+
+A symlink to a path inside the driver directory is accepted. These checks
+also apply to loads from the repository root, for example:
+
+```text
+'values.j2.yml' in repository 'https://github.com/your-org/styrmin-drivers.git' (branch 'main', commit 0123456789abcdef0123456789abcdef01234567) is a symlink to a path outside the repository.
+'drivers/infrahub/actions.py' in repository 'https://github.com/your-org/styrmin-drivers.git' (branch 'main', commit 0123456789abcdef0123456789abcdef01234567) is a symlink to a path outside driver directory 'drivers/infrahub'.
+```
 
 When the driver directory does not exist, is not a folder, or holds no
 `driver.styrmin.yml`, the message names the driver directory, the
@@ -166,7 +201,9 @@ Driver directory 'drivers/missing' does not exist in repository 'https://github.
 No driver.styrmin.yml in driver directory 'drivers/infrahub' of repository 'https://github.com/your-org/styrmin-drivers.git' (branch 'main', commit 0123456789abcdef0123456789abcdef01234567).
 ```
 
-Messages show the repository URL without a username or token.
+Messages show every URL without the user info that follows `scheme://`,
+such as `user:token@`. An address without a scheme, such as
+`git@github.com:your-org/styrmin-drivers.git`, keeps its `git@`.
 
 #### Actions run from the driver directory
 
@@ -180,6 +217,13 @@ folders of the repository. Packages installed in the action's image, such
 as `prefect` and `styrmin_backend`, import as before. Put code that
 several drivers share into each driver directory, or install it in the
 image that the actions run in.
+
+The load does not import `actions.py`, so an import that fails, such as
+`import shared` for a module outside the driver directory, shows only when
+an action runs: the step of the hook that runs the action fails with the
+action's error, on the deployment page and in `styrminctl tasks get` (see
+[Steps of a hook](../concepts-and-architecture/hooks-and-actions.md#steps-of-a-hook)),
+and the logs of the action's flow run in Prefect show the import error.
 
 Actions of a driver version loaded from the repository root run from the
 repository root, as before.
@@ -197,10 +241,22 @@ driver version (see
 [Selecting a driver version](#selecting-a-driver-version-when-deploying-or-upgrading)).
 
 Two driver directories of one repository, loaded at the same commit, give
-two driver versions, also when their drivers have the same name. The
-version picker labels both `<version>@<short commit>`; the "Driver
-directory" row of the Overview tab tells them apart. Each driver version
-runs the actions of its own driver directory.
+two driver versions, also when their drivers have the same name. Each
+driver version runs the actions of its own driver directory. The deploy
+form, the Upgrade dialog and the version picker of the driver page label
+each one `<version>@<short commit> · <driver directory>`, and the search
+of the version picker matches the driver directory.
+
+Drivers with the same name are one application driver, whatever their
+driver directory. The latest-wins rule that binds a deployment does not
+look at the driver directory, so an upgrade with "Latest (auto)" can move
+a deployment from `drivers/a` to `drivers/b` when `drivers/b` holds the
+newest matching version. The Upgrade dialog warns about this while
+"Latest (auto)" is selected and the driver's versions come from more than
+one driver directory. To keep a deployment in one driver directory, give
+each driver directory its own driver name in `metadata.name`, or pin the
+driver version with `--driver-version-id` (see
+[Selecting a driver version](#selecting-a-driver-version-when-deploying-or-upgrading)).
 
 #### Private repositories
 
@@ -261,7 +317,8 @@ resolved git commit SHA for git drivers. Detail surfaces show the full
 control. The corresponding GraphQL fields on `ApplicationDriverVersion`
 are `contentHash` (populated for `sourceType == "local"`) and
 `sourceCommitSha` (populated for `sourceType == "git"`); exactly one is
-non-null per row.
+non-null per row. The UI pickers add the driver directory to the
+label of a version loaded from one, as in `1.0.0@0123456 · drivers/infrahub`.
 
 ### Warnings about spec.info values
 
@@ -361,6 +418,9 @@ cross-driver moves are rejected. The UI's **Upgrade** dialog exposes the
 same choice through a driver-version picker that defaults to
 **Latest (auto)**. The pin applies to that call only: a later upgrade
 without an explicit pin re-resolves to the latest matching build again.
+Latest-wins does not look at the driver directory: see
+[A new commit to the repository creates a new driver version](#a-new-commit-to-the-repository-creates-a-new-driver-version)
+for drivers with the same name in several driver directories.
 
 ### Where to put your own drivers
 

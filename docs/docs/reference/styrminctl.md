@@ -877,11 +877,20 @@ The server refuses these values before it clones the repository:
 - an absolute path, such as `/etc`;
 - a path with a `..` segment, such as `../other`;
 - a path with a backslash, such as `drivers\infrahub`;
-- a value with a NUL character.
+- a path with `{` or `}`;
+- a value with a control character, such as a NUL character or a tab;
+- a path longer than 255 characters once it is stored.
 
-The server also refuses the load when the driver directory, or its
-`driver.styrmin.yml`, `values.j2.yml` or `actions.py`, is a symlink to a
-path outside the repository, for loads from the repository root too.
+The server also refuses the load when the driver directory is a symlink
+to a path outside the repository, when its `driver.styrmin.yml`,
+`values.j2.yml` or `actions.py` is a symlink to a path outside the driver
+directory, or when one of them cannot be followed, such as a symlink
+loop. These checks apply to loads from the repository root too.
+
+`--driver-directory` needs a Styrmin server that accepts a driver
+directory. Against an older server, the command prints `Error:` and a
+message that asks you to upgrade the server. Without
+`--driver-directory`, the command works against older servers too.
 
 When the server refuses the load or the load fails, the command prints
 `Error:` and the server's message, and exits with code 1. When the driver
