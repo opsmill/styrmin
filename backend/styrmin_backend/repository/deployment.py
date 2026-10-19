@@ -408,7 +408,8 @@ class SQLModelDeploymentRepository(
           the instances go.
         * ``restore.target_instance_id`` names the instance a restore restored
           into: every restore created since #532 records it, in-place or
-          cross-target. An in-place restore's row is deleted with its
+          cross-target, and records none when the deployment had no active
+          instance. An in-place restore's row is deleted with its
           ``Backup``. A **cross-target** restore's row (an environment clone's
           constituent — 010 research D2) must survive, because its ``Backup``
           belongs to a *different* environment; it is detached rather than
@@ -455,10 +456,11 @@ class SQLModelDeploymentRepository(
         )
 
         if instance_ids:
-            # Every restore records the instance it restored into (#532). The
-            # rows of this environment's own backups are deleted below; a
-            # cross-target restore's row, whose backup belongs to another
-            # environment, keeps its history and loses only the pointer.
+            # Every restore records the instance it restored into (#532), or
+            # none when the deployment had no active instance. The rows of this
+            # environment's own backups are deleted below; a cross-target
+            # restore's row, whose backup belongs to another environment, keeps
+            # its history and loses only the pointer.
             await self.session.execute(
                 sa_update(RestoreModel)
                 .where(RestoreModel.target_instance_id.in_(instance_ids))  # type: ignore[attr-defined]
