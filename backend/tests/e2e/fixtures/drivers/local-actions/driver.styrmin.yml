@@ -1,0 +1,60 @@
+---
+# E2E test driver for spec 029 (backend/tests/e2e/test_local_driver_actions.py):
+# the simple-app chart with setup and upgrade actions that only log a marker
+# (see actions.py). The test loads it with `load-local-version` from its path
+# in the Styrmin image (/source/backend/tests/e2e/fixtures/drivers/local-actions),
+# so `helm.main.location` names the in-cluster chart server directly.
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: local-actions
+spec:
+  version: "1"
+  supported_versions: ">=0.1,<1.0"
+  info:
+    description: "Test driver loaded from a local directory: its actions log a marker (#372)"
+    authors: [opsmill]
+    license: Apache-2.0
+  helm:
+    main:
+      location: http://chart-server.default.svc.cluster.local:8080/simple-app
+      version: 0.1.0
+
+  components:
+    server:
+      container: simple-app
+      identifier:
+        label:
+          app.kubernetes.io/name: simple-app
+
+    database:
+      container: postgresql
+      identifier:
+        label:
+          app.kubernetes.io/name: postgresql
+
+  services:
+    - name: simple-app
+      kind: http
+      scope: internal
+      port: 8000
+      component: server
+
+  actions:
+    - name: pre_setup
+      hook: setup
+      mode: pre
+      description: Log a marker before the deployment is created
+      location: "actions.py::pre_setup"
+
+    - name: post_setup
+      hook: setup
+      mode: post
+      description: Log a marker after the deployment is created
+      location: "actions.py::post_setup"
+
+    - name: upgrade
+      hook: upgrade
+      mode: core
+      description: Log a marker for the target version
+      location: "actions.py::upgrade"
