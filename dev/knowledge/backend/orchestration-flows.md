@@ -1,6 +1,6 @@
 # Orchestration Flows
 
-> **Where this runs.** Prefect spans both processes. The **server** registers workflows and submits flow runs through `PrefectManager` (this doc). The **agent** runs the Prefect *worker* that picks up internal flow runs and executes them — see [`../agent/overview.md`](../agent/overview.md). User-defined driver actions execute as separate Kubernetes Jobs in the user work pool, not on the agent's worker.
+> **Where this runs.** Prefect spans both processes. The **server** registers workflows and submits flow runs through `PrefectManager` (this doc). The **agent** runs the Prefect *worker* that picks up internal flow runs and executes them — see [`../agent/overview.md`](../agent/overview.md). User-defined driver actions run in the user work pool, which the agent polls with a Prefect `ProcessWorker` (`entrypoint/combined.py`), so each action runs as a process in the agent pod; see [hooks-and-actions.md](hooks-and-actions.md#work-pools).
 
 ## Overview
 
@@ -498,7 +498,7 @@ Located in `workflows/catalogue.py`. Maps `PrefectAction` enums to `WorkflowDefi
 | `CLEANUP_EXPIRED_SESSIONS` | `cleanup_expired_sessions_flow` | `workflows.templates.session_cleanup` | INTERNAL |
 | `SEND_TELEMETRY_REPORT` | `send_telemetry_report_flow` | `workflows.templates.telemetry` | INTERNAL |
 
-The `WorkflowType` distinction (`INTERNAL` vs `USER`) controls which Prefect work pool the flow runs on (`styrmin-work-pool` vs `user-work-pool`). User-defined driver actions, registered separately at driver-load time, use `GitSourceWorkflowDefinition` so the worker pulls the driver's repo at runtime.
+The `WorkflowType` distinction (`INTERNAL` vs `USER`) controls which Prefect work pool the flow runs on (`styrmin-work-pool` vs `user-work-pool`). User-defined driver actions are registered separately at driver-load time. A driver version loaded from git uses `GitSourceWorkflowDefinition`, so the worker clones the driver's repository at the recorded commit when the action runs. A driver version loaded from a local directory uses `LocalDriverActionWorkflowDefinition`, whose only pull step checks that the driver files at the driver version's path have its provenance fingerprint before the action is imported from that path ([hooks-and-actions.md](hooks-and-actions.md#pull-step-of-a-local-driver-version-the-check-of-the-driver-files)).
 
 Two INTERNAL entries also carry a cron schedule, which Prefect reads as UTC, so they run without a caller: `CLEANUP_EXPIRED_SESSIONS` at 03:17 (`17 3 * * *`, [ADR-016](../../adr/0016-authentication-and-sessions.md)) and `SEND_TELEMETRY_REPORT` at 02:43 (`43 2 * * *`). `SEND_TELEMETRY_REPORT` reads the telemetry settings when it runs, sends nothing when telemetry is off or when the run starts more than one hour after its scheduled time, logs one INFO line that says whether the report was sent, and never raises, so its run always ends `Completed`. See [ADR-061](../../adr/0061-server-anonymous-daily-telemetry.md).
 

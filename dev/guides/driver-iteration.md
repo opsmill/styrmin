@@ -18,10 +18,15 @@ See [`CONTEXT.md`](../../CONTEXT.md) for the canonical glossary entry
   re-run `styrminctl drivers load-local-version <path>`, and Styrmin
   records a new `ApplicationDriverVersion` row.
 - Re-run the same command on **unchanged** files and Styrmin returns the
-  existing row instead of creating a new one. The one write it can make:
-  a row stored before Styrmin kept the driver's logo, description and
-  links (`spec.info`, spec `020-driver-info-display`) gets those three values from the file.
+  existing row instead of creating a new one. The one write it can make
+  to the row: a row stored before Styrmin kept the driver's logo,
+  description and links (`spec.info`, spec `020-driver-info-display`)
+  gets those three values from the file. The load also registers in
+  Prefect the declared actions that hooks cannot resolve.
   See [How identity works](#how-identity-works).
+- After editing `actions.py` on the dev stack, load the driver again and
+  use the new driver version. No `docker compose build` is needed. See
+  [Iterating on the actions of a local driver](#iterating-on-the-actions-of-a-local-driver).
 - Every label that mentions a driver version now reads
   `<version>@<short-fingerprint>` (the first 7 hex chars of either the
   content hash or the resolved git commit SHA).
@@ -50,11 +55,20 @@ fingerprint — creates a new row.
 Before it returns the existing row, the load compares the `icon`,
 `description` and `links` it parsed from `spec.info` with the stored
 values. When any of them differs, it writes all three and commits; no
-other column changes and no actions are registered again. Because the
-identity tuple pins the file content, this changes only rows stored
-before these columns existed (spec `020-driver-info-display`, research R5). See
-`load_application_driver_from_object` in
-`backend/styrmin_backend/services/applications.py`.
+other column changes. Because the identity tuple pins the file content,
+this changes only rows stored before these columns existed (spec
+`020-driver-info-display`, research R5).
+
+Before it returns the existing row, the load also registers the declared
+actions that hooks cannot resolve (spec `029-local-driver-actions`,
+FR-006): `ensure_action_registrations` looks up each declared hook and
+mode with the lookup that hooks use, and registers the actions of each
+pair that has no registered flow, for example after their Prefect
+deployments were deleted. A pair that the lookup finds is left as it is,
+so a repeated load of a driver whose actions are all registered makes no
+Prefect write. See `load_application_driver_from_object` in
+`backend/styrmin_backend/services/applications.py` and
+[ADR-081](../adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md).
 
 The tuple is also enforced as a `UNIQUE` composite index in Postgres,
 using `IS NOT DISTINCT FROM` nullability semantics so that the two
@@ -67,17 +81,24 @@ breaking uniqueness. See `backend/styrmin_backend/db/models.py`
 For local drivers, three files contribute to the content hash:
 
 1. `driver.styrmin.yml` — the driver spec.
-2. The values template referenced by `spec.helm.main.values_template`
-   (e.g. `values.j2.yml`).
+2. The values template, whose file name comes from the server setting
+   `STYRMIN_DRIVER_VALUES_TEMPLATE` (default `values.j2.yml`). A missing
+   values template is hashed as empty bytes.
 3. `actions.py`, **only when** `spec.actions` is non-empty. When the
    spec declares no actions, the file is omitted from the hash even if
    it exists on disk.
 
-The three byte streams are length-framed (`<u32 LE length><bytes>`)
-before concatenation, so a byte that moves between files cannot collide
-across boundaries. The helper lives in
-`backend/styrmin_backend/services/driver/hash.py` and is exercised by
-`backend/tests/unit/services/driver/test_hash.py`.
+Each part is framed as its name (`driver.styrmin.yml`,
+`values_template` or `actions.py`), a zero byte, and the length of its
+bytes as an 8-byte big-endian integer, followed by the bytes. The framed
+parts are concatenated and hashed with SHA-256, so a byte that moves
+between files cannot give the same hash. The helpers live in
+`backend/styrmin_backend/services/driver/hash.py`
+(`compute_driver_content_hash`, and `compute_driver_directory_fingerprint`,
+which reads the files of a driver directory) and are exercised by
+`backend/tests/unit/services/driver/test_hash.py`. The loader and the
+check that runs before each action of a local driver version both call
+`compute_driver_directory_fingerprint`.
 
 ## What it does **not** track
 
@@ -117,6 +138,50 @@ another driver declaring the same action, registers alongside it. A push to the 
 never changes what an existing deployment runs — load the new commit and
 upgrade the deployment to move it. Rows loaded before this shipped keep
 following the branch tip until a new commit is loaded.
+
+## Iterating on the actions of a local driver
+
+Each action of a local driver version runs the `actions.py` at the
+driver version's path (`source_path`), in the Styrmin agent, after a
+check that the files at that path have the driver version's
+`content_hash`
+([ADR-081](../adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md)).
+The agent runs each action as a process in its own container, with a
+Prefect `ProcessWorker` (`backend/styrmin_backend/entrypoint/combined.py`),
+so it reads the driver from its own file system at the same path as the
+server.
+
+On the dev stack (`docker compose up`, which `uv run invoke dev` runs),
+the `server` and `agent-operator` services of `docker-compose.yml` both
+bind-mount `./driver/examples` at `/styrmin/drivers` (read-only) and
+`./backend` at `/source/backend`. After you edit an action:
+
+1. Load the driver again, for example
+   `uv run styrminctl drivers load-local-version /styrmin/drivers/my-app`.
+   The edit changes the fingerprint, so the load creates a new driver
+   version and registers its actions.
+2. Create or upgrade a deployment with the new driver version.
+
+You do not need `docker compose build`: the agent reads the edited file
+through the bind mount. A driver version loaded before the edit fails
+the check when one of its actions runs, because the files at its path
+are no longer its files. Its hook step shows the fingerprint error ("The
+driver files at … are not the files of this driver version").
+
+A driver at a path that only the `server` service mounts is not in the
+agent container, and its actions fail with the missing-files error ("The
+driver files are not at …"). Mount such a driver at the same path into
+both services.
+
+On the local demo and in any other Helm install, the server and the
+agent read the driver from their image. After an edit, rebuild the
+image, roll out the server and the agent, then load the driver again.
+
+The errors name an image: the action's `image:` when it sets one,
+otherwise the default image of the work pool `user-work-pool`. On the
+dev stack, the server does not set `STYRMIN_K8S_WORKER_IMAGE`, so that
+default is `registry.opsmill.io/opsmill/styrmin`. The action still ran
+in the agent container: an action's `image:` has no effect today.
 
 ## Row accumulation
 

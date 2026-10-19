@@ -246,7 +246,7 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
 
 **Purpose**: every page in the plan's documentation table, in the same change.
 
-- [ ] T037 [P] Update `docs/docs/drivers/loading-drivers.md` ("From a local directory" and "Reloading a local driver while you iterate"):
+- [X] T037 [P] Update `docs/docs/drivers/loading-drivers.md` ("From a local directory" and "Reloading a local driver while you iterate"):
   - the actions of a local driver run from the same path in the action's image, so the image must hold the driver there;
   - what a custom `image:` must hold: the driver at the path, Prefect 3.6.9 or later, and a `styrmin_backend` with the check step;
   - the three errors with an example of each and how to fix each: rebuild the image or load again; put the driver in the image; load again and request the change again, and delete and create again a failed create;
@@ -254,12 +254,16 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
   - a local path with `{` or `}` is refused for a driver with actions;
   - how to recover when an action's check fails during an upgrade (spec Edge Cases);
   - actions must not log secrets, because the first error log of a crashed action appears on its hook step.
-- [ ] T038 [P] Update `dev/guides/driver-iteration.md`:
+
+  Written instead (user decision of 2026-10-19): actions run as processes in the Styrmin agent pod (the agent's `ProcessWorker` polls `user-work-pool`), not in a Job of the action's image. The page says that the agent pod must hold the driver at the same path as the server (its image, or a volume at that path), that an action's `image:` has no effect today, how to read the image that the check errors name (the action's `image:`, otherwise the default image of `user-work-pool`, which in a standard install is the Styrmin image the agent runs), and what to fix in the agent pod. A custom agent image is built `FROM` the Styrmin image of the server's release, so it holds the check step.
+- [X] T038 [P] Update `dev/guides/driver-iteration.md`:
   - after editing an action on the dev stack, run `docker compose build` and load the driver again, because action Jobs read the image and not the bind mount;
   - fix line ~69: the values template name comes from `STYRMIN_DRIVER_VALUES_TEMPLATE`, not from `spec.helm.main.values_template`;
   - fix line ~76: each part is framed as its name, a zero byte and an 8-byte big-endian length;
   - fix line ~53: a repeated load registers the actions that hooks cannot resolve.
-- [ ] T039 [P] Update `dev/knowledge/backend/hooks-and-actions.md`:
+
+  Written instead (user decision of 2026-10-19): on the dev stack, the `server` and `agent-operator` services of `docker-compose.yml` both bind-mount `./driver/examples` at `/styrmin/drivers` and `./backend` at `/source/backend`, and the agent runs actions as processes in its container. So after editing an action, the author loads the driver again and uses the new driver version; `docker compose build` is not needed. The guide says that a Helm install (the local demo included) reads the driver from the image, so there the image is rebuilt and rolled out first.
+- [X] T039 [P] Update `dev/knowledge/backend/hooks-and-actions.md`:
   - the registration pipeline for local and git versions;
   - the check pull step and its errors;
   - `action_directory_of` in the lookup section;
@@ -269,21 +273,31 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
   - the first error log of a crashed action in the hook step error, and that every signed-in user can read it.
 
   Replace "local loads register no actions" and the `driver_directory_of` caller list
-- [ ] T040 [P] Update `dev/knowledge/backend/data-models.md` (line ~166: the Prefect action lookup reads `action_directory_of`), `dev/knowledge/backend/orchestration-flows.md` (line ~491: `GitSourceWorkflowDefinition` or `LocalDriverActionWorkflowDefinition`), `dev/knowledge/backend/services.md` (line ~347: a repeated load registers missing actions) and `dev/knowledge/backend/api.md` (`loadLocalApplicationDriverVersion` row: registers actions, also for an existing version; refuses a path with `{` or `}` for a driver with actions)
-- [ ] T041 [P] Update `driver/DRIVERS.md` "Actions" section, next to the Prefect 3.6.9 rule: for a driver loaded from a local directory, the action's `image` must hold the driver at the same path and a `styrmin_backend` with the check step
-- [ ] T042 [P] Create `dev/adr/0081-local-driver-actions-run-from-the-path-in-the-job-image.md` in the format of `dev/adr/0080-action-deployments-keyed-by-driver-directory.md`:
+
+  Also corrected (user decision of 2026-10-19): "Work Pools" now says that `user-work-pool` is polled by a `ProcessWorker` in the agent, that no Kubernetes Job is created for an action, and that an action's `image` has no effect; the pull-step and execution paragraphs no longer say that actions run in Jobs.
+- [X] T040 [P] Update `dev/knowledge/backend/data-models.md` (line ~166: the Prefect action lookup reads `action_directory_of`), `dev/knowledge/backend/orchestration-flows.md` (line ~491: `GitSourceWorkflowDefinition` or `LocalDriverActionWorkflowDefinition`), `dev/knowledge/backend/services.md` (line ~347: a repeated load registers missing actions) and `dev/knowledge/backend/api.md` (`loadLocalApplicationDriverVersion` row: registers actions, also for an existing version; refuses a path with `{` or `}` for a driver with actions)
+- [X] T041 [P] Update `driver/DRIVERS.md` "Actions" section, next to the Prefect 3.6.9 rule: for a driver loaded from a local directory, the action's `image` must hold the driver at the same path and a `styrmin_backend` with the check step
+
+  Written instead (user decision of 2026-10-19): the agent pod must hold the driver at the same path as the server and a `styrmin_backend` with the check step; the `image` field has no effect today. The Prefect 3.6.9 rule is kept as it was.
+- [X] T042 [P] Create `dev/adr/0081-local-driver-actions-run-from-the-path-in-the-job-image.md` in the format of `dev/adr/0080-action-deployments-keyed-by-driver-directory.md`:
   - the decisions of the spec's "Decisions and Rejected Alternatives";
   - research R-001 (pull step), R-002 (crash log), R-003 (key), R-005 (brace refusal), R-007 and R-008 (hook resolution and recording) and R-009 (request check), with the rejected alternatives;
   - a Confirmation section naming the tests of T014, T017, T021, T025, T027, T034 and T035.
 
   Add its entry to the ADR index in `dev/README.md`
-- [ ] T043 [P] Add an amendment note dated 2026-10-19 to `dev/adr/0053-driver-version-provenance-fingerprint.md`, after the paragraph that says a repeated load does not register actions again and that a historical deployment resolves its actions to its bytes: a repeated load now registers missing actions, and a local version's action checks the files at its path against its fingerprint (link ADR-081)
-- [ ] T044 [P] Update `CONTEXT.md`. **Action**: actions of a local driver version run from its path in the action's image after a provenance fingerprint check; a declared action without a registered flow fails its hook. **Provenance fingerprint**: also checked in a local action's Job. Keep the "_Avoid_" lines
-- [ ] T045 [P] Run `uv run towncrier create -c "<text>" 372.fixed.md` to create `changelog/372.fixed.md`, following `dev/guidelines/changelog.md`. The text says that:
+
+  Written instead (user decision of 2026-10-19): the file is `dev/adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md`, because actions do not run in a Job image. The ADR records that actions run in the agent pod through a `ProcessWorker`, that `image:` has no effect, the decision to keep the image text in the errors, and the T052 delete fix as a related change.
+- [X] T043 [P] Add an amendment note dated 2026-10-19 to `dev/adr/0053-driver-version-provenance-fingerprint.md`, after the paragraph that says a repeated load does not register actions again and that a historical deployment resolves its actions to its bytes: a repeated load now registers missing actions, and a local version's action checks the files at its path against its fingerprint (link ADR-081)
+- [X] T044 [P] Update `CONTEXT.md`. **Action**: actions of a local driver version run from its path in the action's image after a provenance fingerprint check; a declared action without a registered flow fails its hook. **Provenance fingerprint**: also checked in a local action's Job. Keep the "_Avoid_" lines
+
+  Written instead (user decision of 2026-10-19): "run in the agent pod from the driver version's path" and "checked when an action runs, before the action's code is imported".
+- [X] T045 [P] Run `uv run towncrier create -c "<text>" 372.fixed.md` to create `changelog/372.fixed.md`, following `dev/guidelines/changelog.md`. The text says that:
   - the actions of drivers loaded with `load-local-version` now run, and a declared action without a registered flow fails its hook instead of being skipped;
   - operators should load their local drivers again;
   - deployments created from them before the fix never ran their setup actions;
   - `deleteDeployment` now deletes a deployment whose create failed before its `StyrminDeployment` was written, instead of returning "An internal error occurred" (T052). The changelog guide names fragments by issue and type, so this fix goes in the same `372.fixed.md`.
+
+  The fragment also says that the agent runs these actions from the same path as the server, so a driver that only the server container holds now fails its actions.
 
 ---
 

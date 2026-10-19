@@ -1,6 +1,6 @@
 # ADR-053: Driver-version identity via provenance fingerprint; loads are non-destructive
 
-**Status**: Accepted — amended by [ADR-067](0067-driver-logos-loaded-by-the-viewer-browser.md) (a reload fills in the driver info columns)
+**Status**: Accepted — amended by [ADR-067](0067-driver-logos-loaded-by-the-viewer-browser.md) (a reload fills in the driver info columns) and [ADR-081](0081-local-driver-actions-check-their-files-at-the-driver-path.md) (a reload registers missing actions; a local row's actions check their files against its fingerprint)
 **Date**: 2026-08-04
 **Source**: specs/archive/013-driver-fingerprint/research.md (D-001 – D-007), data-model.md
 **Related**: [ADR-001](0001-alembic-database-migrations.md) (which D-008 violated — see
@@ -113,6 +113,20 @@ fingerprint are part of the Prefect deployment *name* — Prefect upserts on
 declaring the same action (#373), overwrite the deployment. Rows
 registered before #375 keep their branch-tip deployment: a repeated load is a
 no-op, so nothing re-registers them.
+
+Amended 2026-10-19 (specs/029-local-driver-actions,
+[ADR-081](0081-local-driver-actions-check-their-files-at-the-driver-path.md)):
+a repeated load is no longer a no-op for actions. When the identity matches,
+the load registers the declared actions whose hook and mode have no registered
+flow, found with the lookup that hooks use; a deployment that this lookup
+already finds is left as it is, and a load with nothing missing makes no
+Prefect write. Local rows now register their actions too, keyed by their path,
+and each action of a local row runs the `actions.py` at that path. Before it
+runs, a pull step checks that the files at the path have the row's
+`content_hash`, and fails the action without importing the files when they
+are missing or differ. A historical deployment of a local row therefore runs
+the bytes it was deployed from, or fails with an error that names both
+fingerprints.
 
 ### 5. Cascade on children, deliberately not on deployments
 

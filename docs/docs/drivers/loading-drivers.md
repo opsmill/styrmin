@@ -15,7 +15,7 @@ There are two ways to load a driver:
 
 | Source | Use it when… |
 |--------|--------------|
-| **Local directory** | The driver is mounted into the Styrmin server container (the bundled examples, drivers you're iterating on locally, or anything you ship in your own image). |
+| **Local directory** | The driver is at a path in the Styrmin server container, and in the agent pod when it declares actions (the bundled examples, drivers you're iterating on locally, or anything you ship in your own image). |
 | **Git repository** | The driver lives in a git repo — public or private — at its root or in a driver directory, and you want Styrmin to fetch it directly. Each load creates a new version pinned to the requested branch's tip. |
 
 Both paths produce the same end result: a new Application Driver Version
@@ -33,14 +33,211 @@ uv run styrminctl drivers load-local-version /styrmin/drivers/infrahub
 uv run styrminctl drivers load-local-version /styrmin/drivers/semaphore
 ```
 
-To load a driver you've authored, mount the directory into the server
-container at a stable path and point `load-local-version` at it. The
-local-demo Helm values mount everything under `driver/examples/` at
-`/styrmin/drivers/`; production installs typically either bake drivers
-into a custom image or mount a PVC.
+To load a driver you wrote, put it at a stable path in the server
+container and give that path to `load-local-version`. When the driver
+declares actions, the Styrmin agent must hold the driver at the same path
+(see
+[Actions of a driver loaded from a local directory](#actions-of-a-driver-loaded-from-a-local-directory)).
+The Styrmin Helm charts have no value that mounts a volume of drivers
+into the server or the agent. In a Helm install, build an image `FROM`
+the Styrmin image with your drivers copied into `/styrmin/drivers/`, and
+run the server and the agent with it. The local demo
+builds the Styrmin image from the working tree, so it holds everything
+under `driver/examples/` at `/styrmin/drivers/`. The `docker compose`
+dev stack mounts `driver/examples/` at `/styrmin/drivers/` into the
+server container and the agent container.
 
 Under the hood this calls the `loadLocalApplicationDriverVersion` GraphQL
 mutation with the in-container path.
+
+#### Actions of a driver loaded from a local directory
+
+When a driver that declares actions is loaded from a local directory,
+Styrmin registers one Prefect flow for each action, as it does for a
+driver loaded from git. Each action runs the `actions.py` at the path you
+gave to `load-local-version`, with that path as its working directory, so
+`actions.py` can import modules next to it, such as a `helpers.py`.
+
+The Styrmin agent runs each action as a process in the agent pod, and
+reads the driver from the same path as the server. The agent pod must
+therefore hold the driver files at that path, in the agent's image or on
+a volume mounted at that path. In a standard install, the server and the
+agent run the same Styrmin image, which holds the bundled drivers at
+`/styrmin/drivers/<name>`, so the bundled drivers need no other setup. A
+driver that only the server container holds is not in the agent pod, and
+its actions fail with the
+[error for missing driver files](#the-driver-files-are-not-at-the-path).
+
+If the agent runs an image of your own, build it `FROM` the Styrmin image
+of the server's release and copy the driver to the same path as on the
+server. The image then holds the driver and the `styrmin_backend` package
+that checks the driver files before each action runs.
+
+An action's `image:` field has no effect today, for a driver loaded from
+a local directory or from git: the agent runs every action as a process
+in its own pod, not in a container of that image. A follow-up issue
+records this.
+
+When the driver declares actions, Styrmin refuses a path that contains
+`{` or `}`. Prefect fills in `{{ ... }}` templates in the path before the
+action checks the driver files, so such a path could write a value of the
+action's environment, such as the action's API token, into the error of
+the check. A driver without actions loads from such a path. The refusal
+reads:
+
+```text
+Driver path '/srv/drivers/{{ name }}' is refused: it contains '{' or '}', and the driver declares actions. Prefect fills in '{{ ... }}' templates in the path before the action checks the driver files. Load the driver from a path without '{' or '}'.
+```
+
+#### Check of the driver files before an action runs
+
+Before an action of a driver loaded from a local directory runs, Styrmin
+checks the files at the path in the agent pod:
+
+1. The path is a folder that holds `driver.styrmin.yml` and `actions.py`.
+2. The provenance fingerprint of `driver.styrmin.yml`, the values template
+   and `actions.py` at the path equals the provenance fingerprint that the
+   driver version was loaded with.
+
+When the check fails, the action does not import or run `actions.py`, and
+the hook step and the task fail with one of the errors below. A change to
+any of the three files, also to the values template only, makes the check
+fail for every driver version loaded from the path before the change.
+
+#### Errors when an action of a driver version cannot run
+
+Each error appears on the failed hook step, such as "Run the setup
+pre-hook", on the deployment page and in `styrminctl tasks get` (see
+[Steps of a hook](../concepts-and-architecture/hooks-and-actions.md#steps-of-a-hook)).
+The two errors of the check appear inside an error that starts with
+`RuntimeError: Deployment flow run <id> crashed:` and ends with Prefect's
+state message in parentheses. The logs of the action's flow run in
+Prefect show the same error.
+
+The two errors of the check name an image after the path:
+
+- `the image <name>`: the action's `image:` when it sets one, otherwise
+  the default image of the work pool `user-work-pool`. In a standard
+  install, that default is the Styrmin image of the server's release,
+  which the agent also runs.
+- `the default image of the work pool user-work-pool`, or
+  `the image of this action's Job`: the check could not read the image
+  from Prefect.
+
+In every case, the action ran in the agent pod and not in a container of
+the named image. To fix the error, change the files at the path in the
+agent pod, or load the driver again, as described for each error.
+
+##### The driver files are not at the path
+
+```text
+The driver files are not at /srv/drivers/my-app in the image registry.opsmill.io/opsmill/styrmin:latest: /srv/drivers/my-app not found. An action's image must hold the driver at the same path as the Styrmin server. Add the driver to the image at /srv/drivers/my-app, or load the driver from a path that the image holds.
+```
+
+The path, `driver.styrmin.yml` or `actions.py` is not in the agent pod.
+The error names the missing path or files. To fix it, do one of the
+following:
+
+- Put the driver at the path in the agent pod: rebuild the image that the
+  agent runs with the driver at that path, or mount a volume at that path
+  into the agent pod.
+- Load the driver from a path that the agent pod holds, and use the new
+  driver version.
+
+##### The driver files at the path are not the files of the driver version
+
+```text
+The driver files at /styrmin/drivers/my-app in the image registry.opsmill.io/opsmill/styrmin:latest are not the files of this driver version: their provenance fingerprint is e9f0a1b, and the driver version was loaded with a1b2c3d. The files changed after the driver was loaded. Rebuild the image with the files you loaded and load the driver again, or load the driver again from /styrmin/drivers/my-app and use the new driver version.
+```
+
+The files at the path in the agent pod changed after the driver version
+was loaded. This happens when:
+
+- someone edited `driver.styrmin.yml`, the values template or `actions.py`
+  at the path;
+- a Styrmin upgrade installed an image with a newer bundled driver at the
+  same path;
+- the image that the agent runs was built before an edit of the files that
+  the server loaded.
+
+To fix it, do one of the following:
+
+- To use the files that are now at the path, load the driver again from
+  the path. The load creates a new driver version. Create or upgrade the
+  deployment with it; pass `--driver-version-id` to pin it (see
+  [Selecting a driver version](#selecting-a-driver-version-when-deploying-or-upgrading)).
+- To use the driver version you loaded, rebuild the image that the agent
+  runs with the files you loaded, and load the driver again.
+
+After a Styrmin upgrade that ships a newer bundled driver, load the
+bundled drivers again. A create or an upgrade that uses a driver version
+loaded before the Styrmin upgrade fails with this error when one of that
+version's actions runs.
+
+##### A declared action has no registered flow
+
+```text
+Driver version my-app 1.0.0@a1b2c3d declares the action upgrade for the upgrade hook, mode core, but no flow is registered for it, so the hook cannot run. Load the driver again to register its actions: styrminctl drivers load-local-version /styrmin/drivers/my-app. Then request the change again; a deployment whose creation failed must be deleted and created again. If the driver's files or commit changed since it was loaded, the load creates a new driver version; use that version instead.
+```
+
+This error applies to driver versions loaded from git and from a local
+directory. The driver version declares an action, and Prefect holds no
+flow for it, for example because the driver version was loaded by a
+Styrmin release that did not register the actions of local drivers, or
+because its Prefect deployments were deleted. The hook step fails; the
+hook is never skipped. The message gives the command that loads the
+driver again: `load-local-version` with the path, or `load-version` with
+the repository, the branch and the driver directory.
+
+An upgrade request finds this error before it changes the deployment. It
+returns a failed task whose "Run the upgrade hook" step holds the error,
+and the deployment keeps its application version and driver version.
+
+To fix it:
+
+1. Run the command in the message. The load registers the missing actions.
+   When the driver's files or commit changed since the driver version was
+   loaded, the load creates a new driver version instead; use that version.
+2. Request the change again. For an upgrade, send the same request. For a
+   create that failed, delete the deployment and create it again.
+
+#### Loading a driver again registers its missing actions
+
+Each load of a driver that declares actions, from git or from a local
+directory, registers the actions whose hook and mode have no registered
+flow, also when the load returns an existing driver version. Styrmin
+decides that a flow is missing with the same lookup that hooks use, so it
+leaves the flows that hooks already find as they are. A load with nothing
+to register makes no change in Prefect.
+
+#### When an action's check fails during an upgrade
+
+The upgrade writes the new application version to the deployment's
+`StyrminDeployment` before it runs the upgrade actions, so the cluster can
+roll out the new application version although the upgrade action did not
+run. The task fails, and the new version stays the deployment's active
+version, as after any failed upgrade. Then:
+
+- a second request for the same application version and the same driver
+  version starts no task;
+- a request for the same application version with another driver version,
+  such as the one you get when you load the driver again, runs as an
+  update: Styrmin applies the new driver version and runs no upgrade
+  action.
+
+Styrmin cannot run the upgrade action of that application version again;
+only a change to another application version runs an upgrade action. A
+follow-up issue records this. To avoid the case, load the target driver
+version right before you request an upgrade, so its files at the path are
+the files the check expects.
+
+#### Logs of a crashed action are shown on its hook step
+
+When the flow run of an action crashes, for example because the check of
+the driver files failed, the error of its hook step holds the first log
+line of level `ERROR` of that flow run, cut to 4,000 characters. Every
+signed-in user who can read the task can read this error, so actions must
+not write secrets to their logs.
 
 ### From a git repository
 
@@ -208,15 +405,15 @@ such as `user:token@`. An address without a scheme, such as
 #### Actions run from the driver directory
 
 Each action of a driver version loaded from a driver directory runs with
-the driver directory as its working directory: the action's Job clones
-the repository at the recorded commit, then changes to the driver
-directory.
+the driver directory as its working directory: the action clones the
+repository at the recorded commit into a temporary folder in the agent
+pod, then changes to the driver directory.
 `actions.py` can import modules from the driver directory, such as a
 `helpers.py` next to it with `import helpers`, but not modules from other
-folders of the repository. Packages installed in the action's image, such
+folders of the repository. Packages installed in the agent's image, such
 as `prefect` and `styrmin_backend`, import as before. Put code that
 several drivers share into each driver directory, or install it in the
-image that the actions run in.
+image that the agent runs.
 
 The load does not import `actions.py`, so an import that fails, such as
 `import shared` for a module outside the driver directory, shows only when
@@ -353,11 +550,26 @@ same path:
   `driver.styrmin.yml`, the values template, or `actions.py` have
   changed (the three files that feed the content hash);
 - is a no-op when those three files are byte-identical to the existing
-  row — any number of repeated loads produces a single row.
+  row — any number of repeated loads produces a single row;
+- registers the declared actions that have no registered flow, also when
+  it returns the existing row (see
+  [Loading a driver again registers its missing actions](#loading-a-driver-again-registers-its-missing-actions)).
 
 Edits to other files in the driver directory (`README.md`, examples,
 screenshots) are invisible to the fingerprint and never produce a new
 row.
+
+After you edit `driver.styrmin.yml`, the values template or `actions.py`,
+the driver versions loaded from the path before the edit no longer pass
+the [check of the driver files](#check-of-the-driver-files-before-an-action-runs):
+their actions fail with the fingerprint error. Load the driver again and
+create or upgrade your deployments with the new driver version. The
+agent reads the files from the same path as the server: on the
+`docker compose` dev stack, both containers mount `driver/examples/`, so
+the agent reads your edit without an image build; in a Helm install, the
+server and the agent read the driver from their image, so rebuild the
+image and roll out the server and the agent before you load the driver
+again.
 
 For git-sourced drivers, the fingerprint is the resolved commit SHA on
 the requested branch — loading the same repository, branch, commit and
@@ -473,7 +685,9 @@ For your own drivers, the typical layouts are:
   [Loading a driver from a driver directory](#loading-a-driver-from-a-driver-directory)).
 - **In your own container image** — fork or extend the Styrmin server
   image, copy your driver directories into `/styrmin/drivers/`, and use
-  `load-local-version` against the baked-in paths.
+  `load-local-version` against the baked-in paths. Run the server and the
+  agent with that image, because the agent runs the driver's actions from
+  the same paths.
 
 See [Creating a Driver](./creating-a-driver.md) for the authoring
 walkthrough, and the
