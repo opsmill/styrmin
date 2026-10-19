@@ -42,10 +42,12 @@ def _make_completed_backup(
     instance_id: str = INSTANCE_UUID,
     application_version: str = APP_VERSION,
     expires_at: datetime | None = None,
+    deployment_id: str = DEPLOYMENT_UUID,
 ):
-    """A completed backup as ``list_backups`` returns it, with real expiry and version values."""
+    """A completed backup as ``list_backups`` returns it, with real expiry, version and deployment values."""
     backup = MagicMock(id=backup_id, status="completed", instance_id=instance_id, expires_at=expires_at)
     backup.instance.application_version = application_version
+    backup.instance.deployment_id = deployment_id
     return backup
 
 
@@ -478,6 +480,7 @@ def test_backups_restore_last_by_deployment(
 def test_backups_restore_last_by_instance_id(mock_client: MagicMock) -> None:
     """``--last --target-instance-id`` needs no namespace option and sends only the chosen backup's id."""
     newest = _make_completed_backup()
+    mock_client.deployments.get = AsyncMock(return_value=_make_deployment(name="demo"))
     mock_client.backups.list_backups = AsyncMock(return_value=[newest])
     mock_client.backups.create_restore = AsyncMock(return_value=MagicMock(id=RESTORE_UUID, status="pending"))
 
@@ -768,6 +771,63 @@ def test_backups_restore_last_into_a_deleted_deployment_is_refused(
     output = capsys.readouterr().out
     assert "Deployment 'demo' was deleted" in output
     assert f"styrminctl backups list --id {DEPLOYMENT_UUID}" in output
+
+
+# --- restore --last --target-instance-id: earlier instances (#532 review) --
+
+
+def _restore_last_of_instance(instance_id: str, *extra: str) -> int | str | None:
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "restore", "--last", "--target-instance-id", instance_id, *extra])
+    return exc.value.code
+
+
+def test_backups_restore_last_of_an_earlier_instance_id_needs_yes_without_a_terminal(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A raw instance id that is an earlier instance of its deployment asks like ``--target-deployment-id`` does."""
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(backups_commands, "_stdin_is_terminal", lambda: False)
+    _arm_restore_last(
+        mock_client, [_make_completed_backup(instance_id=PREVIOUS_INSTANCE_UUID, application_version="1.4.1")]
+    )
+
+    assert _restore_last_of_instance(PREVIOUS_INSTANCE_UUID) == 1
+    mock_client.backups.list_backups.assert_called_once_with(instance_id=PREVIOUS_INSTANCE_UUID, status="completed")
+    mock_client.backups.create_restore.assert_not_called()
+    output = capsys.readouterr().out
+    assert "earlier instance of deployment 'demo'" in output
+    assert "application version 1.4.1" in output
+    assert f"runs application version {APP_VERSION} now" in output
+    assert "Pass --yes" in output
+
+
+def test_backups_restore_last_of_an_earlier_instance_id_with_yes_restores(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(backups_commands, "_stdin_is_terminal", lambda: False)
+    _arm_restore_last(
+        mock_client, [_make_completed_backup(instance_id=PREVIOUS_INSTANCE_UUID, application_version="1.4.1")]
+    )
+
+    assert _restore_last_of_instance(PREVIOUS_INSTANCE_UUID, "--yes") == 0
+    mock_client.deployments.get.assert_awaited_with(DEPLOYMENT_UUID)
+    mock_client.backups.create_restore.assert_called_once_with(backup_id=BACKUP_UUID)
+    assert "earlier instance of deployment 'demo'" in capsys.readouterr().out
+
+
+def test_backups_restore_last_of_the_active_instance_id_does_not_ask(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(backups_commands, "_stdin_is_terminal", lambda: False)
+    _arm_restore_last(mock_client, [_make_completed_backup()])
+
+    assert _restore_last_of_instance(INSTANCE_UUID) == 0
+    # The command looks up the deployment the backup was taken of, to compare its active instance.
+    mock_client.deployments.get.assert_awaited_with(DEPLOYMENT_UUID)
+    mock_client.backups.create_restore.assert_called_once_with(backup_id=BACKUP_UUID)
+    assert "Warning" not in capsys.readouterr().out
 
 
 # --- list: pointing to --id for a deleted deployment (#304 review) -------

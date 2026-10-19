@@ -348,7 +348,14 @@ async def _prepare_restore(
             f"(application version {backup.instance.application_version})"
         )
         if target.deployment_id is not None:
-            await _confirm_backup_of_earlier_instance(sdk, target.deployment_id, target.instance_id, backup, yes=yes)
+            deployment_id, active_instance_id = target.deployment_id, target.instance_id
+        else:
+            # A raw --target-instance-id names no deployment. The server restores the backup into
+            # the deployment its instance belongs to, so compare against that deployment's active
+            # instance: the instance given can be an earlier one.
+            deployment_id = str(backup.instance.deployment_id)
+            active_instance_id = (await resolve_active_instance(sdk, deployment_id=deployment_id)).instance_id
+        await _confirm_backup_of_earlier_instance(sdk, deployment_id, active_instance_id, backup, yes=yes)
 
     if backup_id is None:
         raise ValueError("backup_id is required (or use --last with a target deployment/instance)")
