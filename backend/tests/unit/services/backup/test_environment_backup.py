@@ -1420,9 +1420,16 @@ async def test_restore_reverts_config_and_restores_every_usable_constituent(
     assert {restore.environment_restore_id for restore in uow.restores.models} == {
         environment_restore.id
     }
-    assert {restore.target_namespace for restore in uow.restores.models} == {
-        f"styrmin-{infrahub.id}",
-        f"styrmin-{netbox.id}",
+    # FR-001/FR-004 (#532): each row records its own deployment's namespace and
+    # that deployment's active instance; a dict, so a swap between the two fails.
+    assert infrahub.active_instance is not None
+    assert netbox.active_instance is not None
+    assert {
+        restore.target_namespace: restore.target_instance_id
+        for restore in uow.restores.models
+    } == {
+        f"styrmin-{infrahub.id}": infrahub.active_instance.id,
+        f"styrmin-{netbox.id}": netbox.active_instance.id,
     }
     assert environment_restore.skipped_constituents is None
 
