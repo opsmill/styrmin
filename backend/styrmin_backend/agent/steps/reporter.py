@@ -1,8 +1,8 @@
 """Record the steps of a USER flow or a driver action through ``recordStep``.
 
 See specs/archive/019-task-steps/contracts/flow-step-reporter.md. The reporter calls the
-API with the action token (ADR-059) for the step parent named in the Job's
-environment (research D3). A failed write logs a warning and never fails the
+API with the action token (ADR-059) for the step parent named in the
+environment of the flow run's process (research D3). A failed write logs a warning and never fails the
 work (research D2).
 """
 

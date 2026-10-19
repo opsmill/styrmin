@@ -148,7 +148,7 @@ Backend (server) architecture documentation in [knowledge/backend/](knowledge/ba
 - [services.md](knowledge/backend/services.md) - Service layer, unit of work, business logic
 - [reconciliation.md](knowledge/backend/reconciliation.md) - Reconciliation engine, diff computation, remediation strategies
 - [hooks-and-actions.md](knowledge/backend/hooks-and-actions.md) - Hook system, driver actions, setup/upgrade hooks
-- [orchestration-flows.md](knowledge/backend/orchestration-flows.md) - Prefect orchestration flows, callbacks, execution patterns (the agent runs the Prefect worker that executes these flows)
+- [orchestration-flows.md](knowledge/backend/orchestration-flows.md) - Prefect orchestration flows, callbacks, execution patterns (the server chart's task-worker runs the INTERNAL flows; the agent's Prefect worker runs the USER flows and driver actions)
 - [backup-restore.md](knowledge/backend/backup-restore.md) - Backup/restore system, Velero integration, strategies, retention TTL, environment-level backup and restore, environment clone and the cross-target restore
 - [deployment-env-vars.md](knowledge/backend/deployment-env-vars.md) - Deployment env vars: when to use them, three-scope precedence, post-render injection into the component container
 - [e2e-testing.md](knowledge/backend/e2e-testing.md) - E2E testing architecture, vCluster fixture graph, markers, debugging workflow

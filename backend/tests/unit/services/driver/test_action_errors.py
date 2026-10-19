@@ -78,7 +78,7 @@ def test_driver_fingerprint_mismatch_error_shows_both_short_fingerprints() -> No
     }
 
 
-# The image of the action's Job is named in a sentence that reads correctly
+# The errors name the image in a sentence that reads correctly
 # whether the image, only its work pool, or neither is known (research R-006).
 IMAGE_CASES = [
     pytest.param(IMAGE, "user-work-pool", f"the image {IMAGE}", id="image-known"),
@@ -180,7 +180,7 @@ def test_action_not_registered_error_names_actions_hook_mode_and_load_command(
 
 
 def test_exceptions_module_imports_with_an_empty_environment() -> None:
-    """The action's Job imports the errors without server settings or a database."""
+    """The action's process imports the errors without server settings or a database."""
     result = subprocess.run(
         [
             sys.executable,

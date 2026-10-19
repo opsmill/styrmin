@@ -106,7 +106,7 @@ class PrefectCatalogue:
                 "STYRMIN_URL_API"
             ] = config.SETTINGS.url.api_k8s
 
-        # Forward agent poll settings to K8s jobs
+        # Forward agent poll settings to the flow runs of the user work pool
         agent = config.SETTINGS.agent
         job_template_variables["properties"]["env"]["default"].update(
             {

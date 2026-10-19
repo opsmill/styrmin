@@ -7,7 +7,7 @@ location's S3 keys from its Prefect Secret block, never from flow-run
 parameters (#497).
 
 INTERNAL flows (styrmin-work-pool): DB lookups, dispatching USER flows.
-USER flows (user-work-pool / K8s Job): K8s operations only.
+USER flows (user-work-pool, a process in the agent pod): K8s operations only.
 """
 
 from __future__ import annotations

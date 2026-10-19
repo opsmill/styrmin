@@ -40,7 +40,7 @@ class MissingDriverSpecificationError(DriverError):
 
 
 def describe_action_image(image: str | None, work_pool: str | None) -> str:
-    """The words that name the image of an action's Job in the errors of the local driver check.
+    """The words that name the action's image in the errors of the local driver check.
 
     ``the image <image>`` when the image is known; otherwise ``the default image
     of the work pool <work_pool>`` when the work pool is known; otherwise
@@ -54,7 +54,7 @@ def describe_action_image(image: str | None, work_pool: str | None) -> str:
 
 
 class DriverFilesNotFoundError(DriverError):
-    """The driver files of a local driver version are not in the image of its action's Job.
+    """The driver files of a local driver version are not at its path where its action runs.
 
     Raised by the check that runs before an action of a driver version loaded
     from a local directory (spec 029, FR-004). ``missing`` holds the missing
@@ -97,7 +97,7 @@ class DriverFilesNotFoundError(DriverError):
 
 
 class DriverFingerprintMismatchError(DriverError):
-    """The driver files in the image of an action's Job are not those of the driver version.
+    """The driver files at the path where an action runs are not those of the driver version.
 
     Raised by the check that runs before an action of a driver version loaded
     from a local directory (spec 029, FR-003). ``expected`` and ``actual`` are

@@ -6,9 +6,9 @@ poll status, and update Styrmin records.
 INTERNAL flows (styrmin-work-pool): DB operations, CRD spec building,
 dispatching USER flows, and updating status from results.
 
-USER flows (user-work-pool / K8s Job): K8s operations only (create CRD,
-poll Velero status, return result). They record their steps with the action
-token that the INTERNAL flow passes them (spec 019, research D13).
+USER flows (user-work-pool, a process in the agent pod): K8s operations only
+(create CRD, poll Velero status, return result). They record their steps with
+the action token that the INTERNAL flow passes them (spec 019, research D13).
 """
 
 from __future__ import annotations
@@ -157,7 +157,7 @@ def build_component_restore_hooks(
 
 
 # ---------------------------------------------------------------------------
-# USER flows (user-work-pool, K8s Job — has in-cluster access)
+# USER flows (user-work-pool, a process in the agent pod — has in-cluster access)
 # ---------------------------------------------------------------------------
 
 
@@ -172,7 +172,7 @@ async def execute_velero_backup_flow(
 ) -> dict[str, Any]:
     """Create a Velero Backup CRD and poll until completion.
 
-    Runs in the user-work-pool (K8s Job) with in-cluster access.
+    Runs in the user-work-pool (a process in the agent pod) with in-cluster access.
 
     Args:
         crd_body: Pre-rendered Velero Backup CRD dict.
@@ -289,7 +289,7 @@ async def execute_velero_restore_flow(
     Deletes the target namespace first (if it exists) to ensure a clean
     deployment state, then creates the Velero Restore CRD.
 
-    Runs in the user-work-pool (K8s Job) with in-cluster access.
+    Runs in the user-work-pool (a process in the agent pod) with in-cluster access.
 
     Args:
         crd_body: Pre-rendered Velero Restore CRD dict.
@@ -715,7 +715,7 @@ async def execute_backup_workflow(
             if isinstance(data, dict)
         ]
 
-        # Dispatch to USER flow (K8s Job with in-cluster access), which records
+        # Dispatch to USER flow (agent pod, with in-cluster access), which records
         # one step per component with the action token.
         async with _step_token() as api_token:
             flow_run = await arun_deployment(
@@ -1007,7 +1007,7 @@ async def execute_restore_workflow(
         if restore.metadata_ and isinstance(restore.metadata_, dict):
             timeout = restore.metadata_.get("timeout", 7200)
 
-        # Dispatch to USER flow (K8s Job with in-cluster access), which records
+        # Dispatch to USER flow (agent pod, with in-cluster access), which records
         # the restore steps with the action token.
         async with _step_token() as api_token:
             flow_run = await arun_deployment(

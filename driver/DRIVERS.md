@@ -325,9 +325,10 @@ spec:
       image: <string>      # Optional container image; no effect today (see below)
 ```
 
-An action's own `image` must hold Prefect 3.6.9 or later: the action's Job
-runs Prefect's `git_clone` step with `clone_directory_name`, which earlier
-releases refuse.
+The pull steps of an action from git run Prefect's `git_clone` step with
+`clone_directory_name`, which releases before Prefect 3.6.9 refuse. Today
+the agent's Prefect runs them; an action's own `image` must also hold
+Prefect 3.6.9 or later.
 
 The `image` field has no effect today: the Styrmin agent runs every action
 as a process in the agent pod, not in a container of that image. A

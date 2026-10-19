@@ -8,8 +8,9 @@ Prefect imports the action from it. These tests run Prefect's own pull-step
 runner and flow loader against a copy of the ``simple-app`` example driver.
 
 User story 2 (FR-003, FR-004, research R-006): when the files are missing or
-differ, the check raises an error that names the path, the image of the
-action's Job and, for changed files, both short provenance fingerprints
+differ, the check raises an error that names the path, the action's image
+(otherwise the default image of its work pool) and, for changed files, both
+short provenance fingerprints
 (contracts/errors.md, "Must contain").
 """
 
@@ -157,7 +158,7 @@ def test_check_returns_the_driver_directory_and_logs_the_fingerprint(
 def test_check_logs_the_fingerprint_in_the_flow_run_of_the_job(
     driver: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """In the action's Job, the line belongs to the flow run, so it shows in the run's logs."""
+    """In the action's flow run, the line belongs to the flow run, so it shows in the run's logs."""
     inputs = _check_inputs(driver)
     flow_run_id = uuid.uuid4()
     monkeypatch.setenv(FLOW_RUN_ID_ENV, str(flow_run_id))
@@ -244,7 +245,7 @@ def test_get_function_imports_the_action_from_the_path(driver: Path) -> None:
 # Missing driver files (FR-004)
 # ---------------------------------------------------------------------------
 
-# Outside an action's Job, no flow run tells which image runs the check.
+# Outside an action's flow run, no flow run tells which image the error names.
 UNKNOWN_IMAGE_WORDS = "in the image of this action's Job"
 
 
@@ -380,7 +381,7 @@ WORK_POOL_IMAGE = "registry.opsmill.io/opsmill/styrmin:1.4.0"
 
 
 class FakePrefectClient:
-    """The synchronous Prefect client of the action's Job, with one flow run.
+    """The synchronous Prefect client of the action's process, with one flow run.
 
     The flow run belongs to a deployment whose job variables hold
     ``job_variables`` and to the work pool ``work_pool``, whose base job
@@ -443,7 +444,7 @@ class FakePrefectClient:
 
 @pytest.fixture
 def job_flow_run_id(monkeypatch: pytest.MonkeyPatch):
-    """The check runs in an action's Job: ``PREFECT__FLOW_RUN_ID`` is set.
+    """The check runs in an action's flow run: ``PREFECT__FLOW_RUN_ID`` is set.
 
     Flow run logs stay local, because no Prefect API takes them.
     """
@@ -552,7 +553,7 @@ def test_failed_image_read_is_logged_and_the_error_still_raises(
 
     (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert record.getMessage() == (
-        "Could not read the image of this action's Job from the Prefect API; the "
+        "Could not read from the Prefect API the image to name in the error; the "
         f"error names the default image of the work pool {WORK_POOL} instead."
     )
     assert record.flow_run_id == str(job_flow_run_id)
@@ -674,7 +675,7 @@ def test_get_function_raises_the_fingerprint_error_before_it_imports(
 
 
 # ---------------------------------------------------------------------------
-# The action's Job has no server settings and no database (critique E1)
+# The agent pod, where the action runs, has no server settings and no database (critique E1)
 # ---------------------------------------------------------------------------
 
 

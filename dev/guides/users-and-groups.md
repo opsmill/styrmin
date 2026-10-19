@@ -74,8 +74,9 @@ the first time it needs a token for it (`ensure_actions_service_account` in
   - `resetUserPassword` and `changePassword` refuse it with `FORBIDDEN`;
   - `createUser` refuses the username `styrmin-actions` with `FORBIDDEN`.
 - Styrmin creates a session for it that expires after 24 hours, passes the
-  token to the Kubernetes Job that does the work in `STYRMIN_TOKEN`, and
-  deletes the session when the work ends. This happens once for each:
+  token in `STYRMIN_TOKEN` to the flow that does the work, which the agent
+  runs as a process in the agent pod, and deletes the session when the work
+  ends. This happens once for each:
   - reconcile (`apply_state`), whose actions also receive the token;
   - `run_job` task;
   - backup;

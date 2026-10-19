@@ -1,10 +1,10 @@
 # Orchestration Flows
 
-> **Where this runs.** Prefect spans both processes. The **server** registers workflows and submits flow runs through `PrefectManager` (this doc). The **agent** runs the Prefect *worker* that picks up internal flow runs and executes them — see [`../agent/overview.md`](../agent/overview.md). User-defined driver actions run in the user work pool, which the agent polls with a Prefect `ProcessWorker` (`entrypoint/combined.py`), so each action runs as a process in the agent pod; see [hooks-and-actions.md](hooks-and-actions.md#work-pools).
+> **Where this runs.** Prefect spans both processes. The **server** registers workflows and submits flow runs through `PrefectManager` (this doc). The server chart's **task-worker** polls `styrmin-work-pool` and runs the INTERNAL flows. The **agent** polls `user-work-pool` with a Prefect `ProcessWorker` (`entrypoint/combined.py`) and runs the USER flows and the user-defined driver actions, each as a process in the agent pod — see [`../agent/overview.md`](../agent/overview.md) and [hooks-and-actions.md](hooks-and-actions.md#work-pools).
 
 ## Overview
 
-Orchestration flows are Prefect `@flow` functions that execute multi-step deployment operations. They live in `agent/tasks/orchestration.py` (executed by the agent's Prefect worker) and are submitted via the `PrefectManager` (server-side).
+Orchestration flows are Prefect `@flow` functions that execute multi-step deployment operations. They live in `agent/tasks/orchestration.py` (`apply_state` and `run_job` run on the task-worker, the CRD flows and `run_job_command` on the agent's Prefect worker) and are submitted via the `PrefectManager` (server-side).
 
 ```text
                         PrefectManager.run_action(APPLY_STATE)
@@ -100,21 +100,21 @@ When the callback sets a task to `FAILED`, `update_task_state` (`services/tasks.
 Each flow records its units of work as steps of its task, backup or restore, so users can view what ran, how long it took and why it failed without access to Prefect. The step recorder (`services/steps/recorder.py`) is the only code that creates or changes a step. Flows reach it in two ways, depending on the work pool they run on. See [ADR-060](../../adr/0060-steps-and-derived-task-result.md).
 
 - **INTERNAL flows** (`styrmin-work-pool`, database access) call the recorder directly through `services/steps/internal_flows.py`: `open_task_step`, `end_step` and `fail_open_steps`. Each write runs in its own transaction.
-- **USER flows and driver actions** (`user-work-pool`, no database access) use the flow step reporter (`agent/steps/reporter.py`). `StepReporter.from_env()` reads the action token from `config.SETTINGS.agent.api_token` (loaded from `STYRMIN_TOKEN`) and the step parent from the Job's environment, and sends `recordStep` events to the API with `Authorization: Bearer <STYRMIN_TOKEN>`. `reporter.step(key, name, kind)` is an async context manager: it records `STARTED`, then `SUCCEEDED`, or `FAILED` with the formatted exception before it re-raises. Each event carries `occurredAt`, the writer's clock.
+- **USER flows and driver actions** (`user-work-pool`, no database access) use the flow step reporter (`agent/steps/reporter.py`). `StepReporter.from_env()` reads the action token from `config.SETTINGS.agent.api_token` (loaded from `STYRMIN_TOKEN`) and the step parent from the environment of the flow run's process, and sends `recordStep` events to the API with `Authorization: Bearer <STYRMIN_TOKEN>`. `reporter.step(key, name, kind)` is an async context manager: it records `STARTED`, then `SUCCEEDED`, or `FAILED` with the formatted exception before it re-raises. Each event carries `occurredAt`, the writer's clock.
 
 A step write never fails the work. When the token or the parent variable is missing, the reporter does nothing. When a write fails (network error, GraphQL error, timeout after 10 seconds), the reporter or the INTERNAL helper logs a warning and the flow continues.
 
 ### Job variables
 
-`action_job_variables(token, *, task_id=None, backup_id=None, restore_id=None, step_id=None)` (`agent/tasks/utils.py`) builds the Prefect job variables that put these values in the `env` of the flow run's Job. Prefect adds them to the work pool's default `env`. Values that are `None` are left out, and the function returns `{}` when all are `None`.
+`action_job_variables(token, *, task_id=None, backup_id=None, restore_id=None, step_id=None)` (`agent/tasks/utils.py`) builds the Prefect job variables that put these values in the `env` of the flow run. Prefect adds them to the work pool's default `env`, and the agent's process worker sets them in the environment of the flow run's process. Values that are `None` are left out, and the function returns `{}` when all are `None`.
 
 | Variable | Meaning |
 |---|---|
 | `STYRMIN_TOKEN` | The action token (ADR-059). |
-| `STYRMIN_TASK_ID`, `STYRMIN_BACKUP_ID`, `STYRMIN_RESTORE_ID` | The parent of the steps the Job records. The caller sets one of them. |
-| `STYRMIN_STEP_ID` | Set only for a driver action's Job: the hook step that runs the action. |
+| `STYRMIN_TASK_ID`, `STYRMIN_BACKUP_ID`, `STYRMIN_RESTORE_ID` | The parent of the steps the flow run records. The caller sets one of them. |
+| `STYRMIN_STEP_ID` | Set only for a driver action's flow run: the hook step that runs the action. |
 
-`Remediation.apply(api_token, task_id)` passes the token and `STYRMIN_TASK_ID` to the remediation flow's Job. `run_driver_action_or_fail(step_id=..., **kwargs)` forwards `STYRMIN_TOKEN` and `STYRMIN_TASK_ID` from the current Job's environment and adds `STYRMIN_STEP_ID`. See [hooks-and-actions.md](hooks-and-actions.md) for what an action does with it.
+`Remediation.apply(api_token, task_id)` passes the token and `STYRMIN_TASK_ID` to the remediation flow's run. `run_driver_action_or_fail(step_id=..., **kwargs)` forwards `STYRMIN_TOKEN` and `STYRMIN_TASK_ID` from the environment of the current flow run and adds `STYRMIN_STEP_ID`. See [hooks-and-actions.md](hooks-and-actions.md) for what an action does with it.
 
 ### Task types of reconcile tasks
 
@@ -182,7 +182,7 @@ The flow applies the remediation after the unit of work closes, so the session's
 
 The `remediation.apply()` method calls `arun_deployment(name=self.flow_id, parameters=self.parameters, job_variables=...)`, which triggers one of the inner flows below.
 
-`action_api_token()` creates a session for the built-in `styrmin-actions` user and deletes it when the remediation ends. The token reaches the inner flow's Job as `STYRMIN_TOKEN` through the flow run's `env` job variable, together with `STYRMIN_TASK_ID`, and the inner flow passes both on to each driver action with `run_driver_action_or_fail`. The inner flow records its steps with the token, and the action primitives send it as a bearer token. See [ADR-059](../../adr/0059-driver-action-api-tokens.md).
+`action_api_token()` creates a session for the built-in `styrmin-actions` user and deletes it when the remediation ends. The token reaches the inner flow's process as `STYRMIN_TOKEN` through the flow run's `env` job variable, together with `STYRMIN_TASK_ID`, and the inner flow passes both on to each driver action with `run_driver_action_or_fail`. The inner flow records its steps with the token, and the action primitives send it as a bearer token. See [ADR-059](../../adr/0059-driver-action-api-tokens.md).
 
 **Key**: Only `apply_state` has callbacks. Inner flows do NOT register callbacks because they run as sub-flows within `apply_state`.
 
@@ -356,7 +356,7 @@ The three CRD flows record their steps with `StepReporter.from_env()`. Keys, nam
 | `hook:setup:post` | Run the setup post-hook | `HOOK` | `create_instance_crd`, when the driver has a setup post-hook |
 | `hook:upgrade:post` | Run the upgrade post-hook | `HOOK` | `upgrade_instance_crd`, when the driver has an upgrade post-hook |
 
-A hook step covers one run of a hook mode. The flow passes the hook step's id to `run_driver_action_or_fail(step_id=...)`, which sends it to the action's Job as `STYRMIN_STEP_ID`.
+A hook step covers one run of a hook mode. The flow passes the hook step's id to `run_driver_action_or_fail(step_id=...)`, which sends it to the action's flow run as `STYRMIN_STEP_ID`.
 
 The flows do not record the operator's work. When `resource:styrmindeployment` succeeds, the recorder:
 

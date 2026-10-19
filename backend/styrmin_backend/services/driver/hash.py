@@ -31,7 +31,8 @@ directory and hashes them with :func:`compute_driver_content_hash`. The local
 loader and the check that runs before a local driver version's action both
 call it, so the two cannot compute the fingerprint differently (spec 029,
 research R-004). This module must stay importable without server settings or
-a database, because the action's Job imports it.
+a database, because the check that runs before an action imports it in the
+agent pod.
 """
 
 import hashlib
