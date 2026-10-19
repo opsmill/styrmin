@@ -14,6 +14,16 @@ All notable changes to the Styrmin Python SDK will be documented in this file.
   `ValueError` before any request. With `dry_run=True`, nothing is saved. The call waits
   up to 600 seconds.
 
+### Fixed
+
+- **`StyrminAPIError.extensions`** gives all the extensions of the GraphQL error that
+  the server returned, `code` included, in every subclass (`OperationFailedError`,
+  `ResourceNotFoundError` and the others). Before, the exception kept only the message
+  and `extensions.code` (`typename`), so a program had to parse the message to read,
+  for example, the `path` of a refused affinity term or the `deployments` of a refused
+  `environment_clones.create()` request. An error without extensions gives an empty
+  dict. ([#522](https://github.com/opsmill/styrmin/issues/522))
+
 ### Breaking changes
 
 - **`client.deployments.update(...)` signature change.** The method no longer

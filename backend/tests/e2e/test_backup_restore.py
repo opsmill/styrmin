@@ -2558,8 +2558,8 @@ async def test_environment_clone_lifecycle(
 
         # 3. A request that selects only the peer leaves out the primary its term
         #    names, so it is refused before any clone record or backup (027 US6;
-        #    step 7 checks that the source gained no backup). The SDK gives only the
-        #    message, which names the term's path; the raw request reads the extensions.
+        #    step 7 checks that the source gained no backup). The message names the
+        #    term's path, and the SDK exception gives the error's extensions (#522).
         clones_before = {
             str(c.id)
             for c in await client.environment_clones.list(scenario_environment_id)
@@ -2579,23 +2579,14 @@ async def test_environment_clone_lifecycle(
             f"(not included in the requested deployment selection), named at "
             f"{peer_term_path}. Add the deployment to the selection"
         ), str(refused.value)
-        raw_refusal = await client._transport.execute(
-            load_query("clone_environment"),
-            {
-                "name": clone_name,
-                "environmentId": scenario_environment_id,
-                "deploymentIds": [peer_deployment_id],
-            },
-        )
-        [refusal_error] = raw_refusal.get("errors") or [{}]
-        assert (refusal_error.get("extensions") or {}).get("deployments") == [
+        assert refused.value.extensions.get("deployments") == [
             {
                 "deployment_id": primary_deployment_id,
                 "deployment_name": primary_name,
                 "paths": [peer_term_path],
                 "reason": "not included in the requested deployment selection",
             }
-        ], raw_refusal
+        ], refused.value.extensions
         assert {
             str(c.id)
             for c in await client.environment_clones.list(scenario_environment_id)

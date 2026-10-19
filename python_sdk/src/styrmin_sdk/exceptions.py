@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 class StyrminError(Exception):
@@ -23,10 +26,16 @@ class StyrminGraphQLError(StyrminError):
 
 
 class StyrminAPIError(StyrminError):
-    """Server returned an error union type via __typename."""
+    """The server answered with a GraphQL error; the subclass depends on its ``extensions.code``.
 
-    def __init__(self, message: str, typename: str) -> None:
+    ``typename`` is the ``extensions.code`` of the error. ``extensions`` holds all the
+    extensions of the error, ``code`` included: for example the ``path`` of a refused
+    affinity term, or the ``deployments`` of a refused ``cloneEnvironment`` request.
+    """
+
+    def __init__(self, message: str, typename: str, extensions: Mapping[str, Any] | None = None) -> None:
         self.typename = typename
+        self.extensions: dict[str, Any] = dict(extensions or {})
         super().__init__(message)
 
 
