@@ -200,7 +200,7 @@ ensure_action_registrations(driver_object, prefect_manager):
           - "directory/{driver_directory}"  (driver directory and local versions)
 ```
 
-`ensure_action_registrations` decides that a flow is missing with the lookup that hooks use, so a repeated load registers only what hooks cannot resolve and never replaces a deployment that hooks already find (FR-006). A local path with `{` or `}` is refused only for a driver that declares actions, because only such a driver gets the check pull step whose inputs Prefect templates (see [Pull steps](#pull-steps)). `ActionsWorkflowBuilder` refuses a `LocalSource` without a `content_hash` with `DriverLoadingError`.
+`ensure_action_registrations` decides that a flow is missing with the lookup that hooks use, so a repeated load registers only what hooks cannot resolve and never replaces a deployment that hooks already find (FR-006). A local path with `{` or `}` is refused only for a driver that declares actions, because only such a driver gets the check pull step whose inputs Prefect templates (see [Pull steps](#pull-steps)). `ActionsWorkflowBuilder` refuses a `LocalSource` without a `content_hash` with `DriverLoadingError`, and keeps the path with the checked `content_hash` (`CheckedLocalSource`). `LocalDriverActionWorkflowDefinition` also refuses, with a pydantic `ValidationError`, a `directory` that contains `{` or `}` and an empty `content_hash`, so no other caller can build such a pull step; the `DriverLoadingError` of `ensure_action_registrations` comes first and gives the message for the user.
 
 ### Pull steps
 

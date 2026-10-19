@@ -15,7 +15,7 @@ from prefect.client.schemas.schedules import CronSchedule
 from prefect.runner.storage import GitRepository
 from prefect.utilities.importtools import import_object
 from prefect_github import GitHubCredentials
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing_extensions import Self
 
 from styrmin_backend import __version__
@@ -228,6 +228,10 @@ class LocalDriverActionWorkflowDefinition(WorkflowDefinition):
     the provenance fingerprint of the driver files at ``directory`` and returns
     the directory. Prefect then changes into it and imports the
     entrypoint ``<module>:<function>`` (research R-001).
+
+    The definition refuses a ``directory`` that contains ``{`` or ``}`` and an
+    empty ``content_hash``. ``ensure_action_registrations`` refuses such a path
+    first, with the message for the user.
     """
 
     # The path that the driver version was loaded from (``source_path``).
@@ -238,6 +242,34 @@ class LocalDriverActionWorkflowDefinition(WorkflowDefinition):
     spec_file: str
     values_template: str
     actions_file: str
+
+    @field_validator("directory")
+    @classmethod
+    def _refuse_template_braces(cls, directory: str) -> str:
+        """Refuse ``{`` and ``}``: Prefect fills in templates in pull-step inputs (research R-005).
+
+        A template in the path would be filled in before the check reads it,
+        so the check could write a value of the action's environment, such as
+        the action token, into its error.
+        """
+        if "{" in directory or "}" in directory:
+            raise ValueError(
+                f"The driver path {directory!r} contains '{{' or '}}'. Prefect fills "
+                "in '{{ ... }}' templates in the inputs of the pull step that checks "
+                "the driver files, so the path cannot be an input of that step."
+            )
+        return directory
+
+    @field_validator("content_hash")
+    @classmethod
+    def _refuse_empty_content_hash(cls, content_hash: str) -> str:
+        """Refuse an empty provenance fingerprint, which no driver files can match."""
+        if not content_hash:
+            raise ValueError(
+                "The provenance fingerprint (content_hash) is empty. The check before "
+                "each action compares the driver files with it, so it must be set."
+            )
+        return content_hash
 
     @property
     def entrypoint(self) -> str:

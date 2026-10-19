@@ -55,9 +55,9 @@ from styrmin_backend.services.reconciliation.diffs.diffs import (
 from styrmin_backend.workflows.manager import PrefectManager
 from tests.unit.services.fakes import (
     FakeActionRepository,
+    FakeApplicationDriverRepository,
     FakeApplicationDriverVersionRepository,
     FakeApplicationInstanceRepository,
-    FakeApplicationRepository,
     FakeClusterRepository,
     FakeDeployedServiceRepository,
     FakeDeploymentRepository,
@@ -182,7 +182,7 @@ async def _seed(
         tasks=FakeTaskRepository(),
         deployed_services=FakeDeployedServiceRepository(),
         deployments=FakeDeploymentRepository(),
-        application_drivers=FakeApplicationRepository(),
+        application_drivers=FakeApplicationDriverRepository(),
     )
     steps = _FakeSteps()
     uow.steps = steps  # type: ignore[assignment]
