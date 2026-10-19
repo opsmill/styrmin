@@ -64,9 +64,12 @@ def check_local_driver_files(
 
     Raises:
         DriverFilesNotFoundError: ``directory`` is not a directory, or the driver
-            specification file or the actions file is missing in it.
+            specification file or the actions file is missing in it, also when
+            the file is removed between the check and the read.
         DriverFingerprintMismatchError: the files at ``directory`` have another
             provenance fingerprint.
+        OSError: a driver file cannot be read for another reason, for example
+            a ``PermissionError``, or a values template path that is a directory.
     """
     path = Path(directory)
     if not path.is_dir():
@@ -83,13 +86,21 @@ def check_local_driver_files(
             path=directory, image=image, work_pool=work_pool, missing=missing
         )
 
-    actual = compute_driver_directory_fingerprint(
-        path,
-        spec_file=spec_file,
-        values_template=values_template,
-        actions_file=actions_file,
-        include_actions=True,
-    )
+    try:
+        actual = compute_driver_directory_fingerprint(
+            path,
+            spec_file=spec_file,
+            values_template=values_template,
+            actions_file=actions_file,
+            include_actions=True,
+        )
+    except FileNotFoundError as exc:
+        # The file was removed after the check above.
+        image, work_pool = _action_image()
+        name = Path(str(exc.filename)).name if exc.filename else spec_file
+        raise DriverFilesNotFoundError(
+            path=directory, image=image, work_pool=work_pool, missing=[name]
+        ) from exc
     if actual != content_hash:
         image, work_pool = _action_image()
         raise DriverFingerprintMismatchError(
@@ -122,11 +133,14 @@ def check_local_driver(
     output, logs nothing in the flow run, and the flow run crashes with only
     an exit status. The hook step shows the first ``ERROR`` log of a crashed
     flow run (``run_deployment_or_fail``, research R-002), so this log is how
-    the error reaches the hook step.
+    the error reaches the hook step. Any other exception, such as an
+    ``OSError`` from reading a driver file, is logged at ``ERROR`` with the
+    path for the same reason.
 
     Raises:
         DriverFilesNotFoundError: see :func:`check_local_driver_files`.
         DriverFingerprintMismatchError: see :func:`check_local_driver_files`.
+        OSError: see :func:`check_local_driver_files`.
     """
     try:
         fingerprint = check_local_driver_files(
@@ -138,6 +152,14 @@ def check_local_driver(
         )
     except (DriverFilesNotFoundError, DriverFingerprintMismatchError) as exc:
         _logger().error("%s", exc)
+        raise
+    except Exception as exc:
+        _logger().error(
+            "Could not check the driver files at %s: %s: %s",
+            directory,
+            type(exc).__name__,
+            exc,
+        )
         raise
     _logger().info(
         "The driver files at %s have the provenance fingerprint %s of the driver version. "

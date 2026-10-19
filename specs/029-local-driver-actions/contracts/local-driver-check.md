@@ -44,7 +44,7 @@ def check_local_driver(
 Order of operations:
 
 1. When `directory` is not a directory, or `spec_file` or `actions_file` is missing in it, raise `DriverFilesNotFoundError` ([errors.md](errors.md#driverfilesnotfounderror-fr-004)).
-2. Compute the fingerprint. When it differs from `content_hash`, raise `DriverFingerprintMismatchError` ([errors.md](errors.md#driverfingerprintmismatcherror-fr-003)).
+2. Compute the fingerprint. A file removed between step 1 and its read raises `DriverFilesNotFoundError`; any other `OSError` of the read is raised as it is. When the fingerprint differs from `content_hash`, raise `DriverFingerprintMismatchError` ([errors.md](errors.md#driverfingerprintmismatcherror-fr-003)).
 3. Return `{"directory": directory}`. Prefect changes into it and imports `<actions_file>:<function>` (the entrypoint).
 
 The step never imports `actions.py`.
@@ -59,7 +59,7 @@ A failure to read Prefect's API in this resolution never hides the original erro
 
 Import constraints: importing `workflows/local_driver.py` must succeed with an empty environment, read no server settings and open no database connection, because the Job has neither. It imports `services/driver/hash.py` and `services/driver/exceptions.py`, which load the driver package and its Pydantic models; that import was checked to succeed with an empty environment. A unit test imports the module in a subprocess with an empty environment (critique E1).
 
-Logging: on success, the step logs one `INFO` line in the flow run, with the path and the short fingerprint (critique E9). On failure, the step logs the text of its error at `ERROR` in the flow run, then raises. Prefect 3.8 runs pull steps in a workspace supervisor before the flow run's engine starts. When a step raises, the supervisor prints the traceback to the process output and logs nothing in the flow run, so without this log the flow run has no `ERROR` log and the hook step shows only the exit status. This was found by the user story 2 E2E run (T028).
+Logging: on success, the step logs one `INFO` line in the flow run, with the path and the short fingerprint (critique E9). On failure, the step logs the text of its error at `ERROR` in the flow run, then raises. Any other exception, such as a `PermissionError` on `actions.py`, is logged as `Could not check the driver files at <path>: <exception type>: <message>`. Prefect 3.8 runs pull steps in a workspace supervisor before the flow run's engine starts. When a step raises, the supervisor prints the traceback to the process output and logs nothing in the flow run, so without this log the flow run has no `ERROR` log and the hook step shows only the exit status. This was found by the user story 2 E2E run (T028).
 
 ## How the error reaches the hook step
 
