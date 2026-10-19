@@ -1977,6 +1977,143 @@ async def test_apply_rejected_update_writes_nothing_else(
 
 
 # ---------------------------------------------------------------------------
+# apply: an update that returns a failed task (spec 029, research R-009)
+# ---------------------------------------------------------------------------
+
+FAILED_TASK_ID = "eeeeeeee-ffff-0000-1111-222222222222"
+UNREGISTERED_ACTION_MESSAGE = (
+    "Driver version my-app 2.0.0@a1b2c3d declares the action upgrade for the upgrade hook, mode core, "
+    "but no flow is registered for it, so the hook cannot run. Load the driver again to register its "
+    "actions: styrminctl drivers load-local-version /styrmin/drivers/my-app."
+)
+
+
+def _update_version_failed_task_response(message: str | None = UNREGISTERED_ACTION_MESSAGE) -> dict[str, Any]:
+    """The server refused the upgrade before writing anything and returned a failed task."""
+    return {
+        "data": {
+            "updateDeploymentVersion": {
+                "id": FAILED_TASK_ID,
+                "type": "upgrade_instance",
+                "status": "failed",
+                "message": message,
+                "deploymentId": DEPLOYMENT_ID,
+            }
+        }
+    }
+
+
+async def test_update_version_returns_a_failed_task_without_raising(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """The low-level call returns the failed task as it is, so a caller can read its status and message."""
+    mock_transport.execute.side_effect = [_update_version_failed_task_response()]
+
+    task = await client.deployments.update_version(DEPLOYMENT_ID, "2.0.0")
+
+    assert task is not None
+    assert str(task.id) == FAILED_TASK_ID
+    assert task.status == "failed"
+    assert task.message == UNREGISTERED_ACTION_MESSAGE
+
+
+@pytest.mark.parametrize(
+    ("message", "reason"),
+    [
+        (UNREGISTERED_ACTION_MESSAGE, f"task {FAILED_TASK_ID} failed: {UNREGISTERED_ACTION_MESSAGE}"),
+        (None, f"task {FAILED_TASK_ID} failed"),
+    ],
+    ids=["with_message", "without_message"],
+)
+async def test_apply_reports_a_failed_update_task_as_failed(
+    client: StyrminClient, mock_transport: AsyncMock, message: str | None, reason: str
+) -> None:
+    """An update that returns a failed task is a ``failed`` outcome that names the task and its message.
+
+    The deployment keeps its version, so ``updated`` would hide the failure (#372).
+    """
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_failed_task_response(message),
+    ]
+
+    outcome = await client.deployments.apply(_resolved_manifest(version="2.0.0"))
+
+    assert outcome.action == "failed"
+    assert str(outcome.deployment_id) == DEPLOYMENT_ID
+    assert str(outcome.task_id) == FAILED_TASK_ID
+    assert outcome.failure_reason == reason
+    assert outcome.error_code is None
+    assert outcome.target_version is None
+    # Nothing was written, so the overrides that apply are not read back.
+    assert len(_operation_names(mock_transport)) == 3
+
+
+async def test_apply_wait_does_not_wait_on_a_failed_update_task(
+    client: StyrminClient, mock_transport: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``apply(wait=True)`` reports a failed update task at once instead of polling the deployment.
+
+    The deployment stays ``running`` on its old version, so a poll would end the wait as a success.
+    """
+    from styrmin_sdk.resources import deployments as deployments_module
+
+    async def _no_sleep(_seconds: float) -> None:  # noqa: RUF029 — must mirror asyncio.sleep signature
+        return None
+
+    monkeypatch.setattr(deployments_module.asyncio, "sleep", _no_sleep)
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_failed_task_response(),
+        _get_deployment_response(deployment_status="running"),
+    ]
+
+    outcome = await client.deployments.apply(_resolved_manifest(version="2.0.0"), wait=True)
+
+    assert outcome.action == "failed"
+    assert str(outcome.task_id) == FAILED_TASK_ID
+    assert outcome.failure_reason == f"task {FAILED_TASK_ID} failed: {UNREGISTERED_ACTION_MESSAGE}"
+    assert not any(op.startswith("query GetDeployment(") for op in _operation_names(mock_transport))
+
+
+async def test_apply_files_wait_reports_a_failed_update_task_on_submit(
+    client: StyrminClient, mock_transport: AsyncMock, tmp_path: Path
+) -> None:
+    """``apply_files(wait=True)`` emits the failure with the ``submitted`` event and no ``terminal`` event."""
+    from styrmin_sdk.models.deployment_manifest import ApplyEvent
+
+    manifest_path = _write_manifest(
+        tmp_path / "app.yaml",
+        body="""\
+apiVersion: styrmin/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  driver: my-app
+  version: "2.0.0"
+  environment: prod
+""",
+    )
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_failed_task_response(),
+        _get_deployment_response(deployment_status="running"),
+    ]
+
+    events: list[ApplyEvent] = []
+    outcomes = await client.deployments.apply_files([manifest_path], wait=True, on_event=events.append)
+
+    assert [o.action for o in outcomes] == ["failed"]
+    assert outcomes[0].failure_reason == f"task {FAILED_TASK_ID} failed: {UNREGISTERED_ACTION_MESSAGE}"
+    assert [(e.type, e.outcome.action) for e in events] == [("submitted", "failed")]
+    assert not any(op.startswith("query GetDeployment(") for op in _operation_names(mock_transport))
+
+
+# ---------------------------------------------------------------------------
 # apply: pinned image overrides on a version change (018, FR-008)
 # ---------------------------------------------------------------------------
 

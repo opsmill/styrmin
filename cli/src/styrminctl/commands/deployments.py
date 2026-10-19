@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Annotated
 
 from cyclopts import App, Parameter
+from rich.markup import escape
 from styrmin_sdk.exceptions import ApplyError, BatchNameConflictError, StyrminError
 from styrmin_sdk.models import ComponentReplicas, ReplicaSource, UpdateDeploymentInput
 from styrmin_sdk.models.deployment_manifest import ApplyEvent, ApplyOutcome, ApplyOverrides
-from styrmin_sdk.resources.deployments import check_replica_counts
+from styrmin_sdk.resources.deployments import FAILED_TASK_STATUS, check_replica_counts, failed_task_reason
 
 from styrminctl import client
 from styrminctl.labels import format_driver_version_label
@@ -245,6 +246,10 @@ async def update_version(
     if task is None:
         print_success("Deployment already on the requested version; no changes applied.")
         return
+    if task.status == FAILED_TASK_STATUS:
+        # The server refused the change before writing it; the deployment keeps its version.
+        print_error(escape(failed_task_reason(task.id, task.message)))
+        raise SystemExit(1)
     print_success(f"Version update in progress (task: {task.id})")
     console.print(f"  Status: {task.status}")
 
