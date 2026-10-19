@@ -48,6 +48,7 @@ These answers were not in the PRD. They are flagged for the maintainer to confir
 ### Session 2026-10-18 (critique, [critique-20261018-1.md](critiques/critique-20261018-1.md))
 
 - Q: Does the counterpart stay `FAILED` after its alias step failed? → A: No. The plan first marked the counterpart's StyrminDeployment failed. The operator's rollout of the recovered spec can run after that write and replace the failed status, and the status reporter then reports `RUNNING` (critique E1). The restore still sets the counterpart to `FAILED`, as any failed restore does, and its status then follows its workloads. The signals that last are the restore, `FAILED` with the error and the failed step, and the clone, `PARTIAL` with the entry `failed` and the reason (FR-004, FR-007).
+  - Note (2026-10-19): the review of #531 changed this answer. When only the alias step failed, the restore sets the counterpart to `RUNNING`, because its workloads were recovered and run. Only the restore and the clone entry record the failure. A restore that fails for another cause still sets the counterpart to `FAILED`.
 - Q: Does FR-007 apply to a restore that failed for a cause other than the alias step? → A: Yes, for one rule across causes. It stays flagged for the maintainer (critique P1).
 
 ## User Scenarios & Testing *(mandatory)*
