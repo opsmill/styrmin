@@ -7,6 +7,7 @@ query ListBackups($deploymentId: UUID, $instanceId: UUID, $status: BackupStatus)
         instance {
             id
             applicationVersion
+            deploymentId
         }
         errorMessage
         startedAt

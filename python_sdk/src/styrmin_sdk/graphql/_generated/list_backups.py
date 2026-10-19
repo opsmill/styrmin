@@ -35,6 +35,7 @@ class ListBackupsBackups(BaseModel):
 class ListBackupsBackupsInstance(BaseModel):
     id: UUID
     application_version: str = Field(alias="applicationVersion")
+    deployment_id: UUID = Field(alias="deploymentId")
 
 
 class ListBackupsBackupsSteps(BaseModel):

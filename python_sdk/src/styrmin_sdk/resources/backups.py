@@ -62,7 +62,8 @@ class BackupResource(BaseResource):
         an upgrade, a config edit or an environment config change.
         ``instance_id`` lists the backups of that one instance. Each backup
         carries ``instance.application_version``, the application version of
-        the instance it was taken of. ``status`` filters either list.
+        the instance it was taken of, and ``instance.deployment_id``, the
+        deployment that instance belongs to. ``status`` filters either list.
 
         Pass exactly one of ``deployment_id`` and ``instance_id``, or the call
         raises :class:`ValueError` without sending a request.

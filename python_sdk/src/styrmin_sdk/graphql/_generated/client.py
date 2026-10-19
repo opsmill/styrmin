@@ -2004,6 +2004,7 @@ class Client(AsyncBaseClient):
                 instance {
                   id
                   applicationVersion
+                  deploymentId
                 }
                 errorMessage
                 startedAt

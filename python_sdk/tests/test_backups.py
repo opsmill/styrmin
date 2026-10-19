@@ -16,7 +16,11 @@ if TYPE_CHECKING:
     from styrmin_sdk.client import StyrminClient
 
 # The instance each listed backup was taken of, as ListBackups selects it.
-LISTED_INSTANCE = {"id": "00000000-0000-0000-0000-000000000010", "applicationVersion": "0.1.0"}
+LISTED_INSTANCE = {
+    "id": "00000000-0000-0000-0000-000000000010",
+    "applicationVersion": "0.1.0",
+    "deploymentId": "00000000-0000-0000-0000-000000000100",
+}
 
 
 class TestBackupResource:
@@ -199,14 +203,20 @@ class TestBackupResource:
 
     @staticmethod
     @pytest.mark.asyncio
-    async def test_create_restore_takes_no_target_namespace(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    @pytest.mark.parametrize(
+        ("argument", "value"),
+        [
+            pytest.param("target_namespace", "x", id="target_namespace"),
+            pytest.param("target_instance_id", "00000000-0000-0000-0000-000000000010", id="target_instance_id"),
+        ],
+    )
+    async def test_create_restore_takes_no_target_argument(
+        client: StyrminClient, mock_transport: AsyncMock, argument: str, value: str
+    ) -> None:
         """The server decides where a restore lands (#532): the SDK has no
-        parameter to name a namespace."""
-        with pytest.raises(TypeError, match="target_namespace"):
-            await client.backups.create_restore(
-                backup_id="00000000-0000-0000-0000-000000000001",
-                target_namespace="x",  # ty: ignore[unknown-argument]
-            )
+        parameter to name a namespace or an instance."""
+        with pytest.raises(TypeError, match=argument):
+            await client.backups.create_restore(backup_id="00000000-0000-0000-0000-000000000001", **{argument: value})
 
         mock_transport.execute.assert_not_called()
 
@@ -435,10 +445,14 @@ class TestBackupAndRestoreSteps:
         assert restores[1].steps == []
 
 
-DEPLOYMENT_ID = "00000000-0000-0000-0000-000000000100"
+DEPLOYMENT_ID = LISTED_INSTANCE["deploymentId"]
 INSTANCE_ID = LISTED_INSTANCE["id"]
 # The instance that replaced LISTED_INSTANCE after an upgrade.
-CURRENT_INSTANCE = {"id": "00000000-0000-0000-0000-000000000011", "applicationVersion": "0.2.0"}
+CURRENT_INSTANCE = {
+    "id": "00000000-0000-0000-0000-000000000011",
+    "applicationVersion": "0.2.0",
+    "deploymentId": DEPLOYMENT_ID,
+}
 
 BY_DEPLOYMENT = pytest.param({"deployment_id": DEPLOYMENT_ID}, {"deploymentId": DEPLOYMENT_ID}, id="by-deployment")
 BY_INSTANCE = pytest.param({"instance_id": INSTANCE_ID}, {"instanceId": INSTANCE_ID}, id="by-instance")
@@ -522,6 +536,8 @@ class TestListBackupsByDeploymentOrInstance:
             (CURRENT_INSTANCE["id"], "0.2.0"),
             (INSTANCE_ID, "0.1.0"),
         ]
+        # Both instances belong to the deployment whose backup history was listed.
+        assert {str(b.instance.deployment_id) for b in backups} == {DEPLOYMENT_ID}
 
     @staticmethod
     @pytest.mark.asyncio

@@ -45,8 +45,8 @@ override targeting a component the driver does not declare is rejected with
 ## Backups and restores
 
 The `backups` commands take a deployment: `create` and `list` by name or by
-`--id`. `restore` takes a backup id, or `--last` with `--target-deployment` or
-`--target-deployment-id`.
+`--id`. `restore` takes a backup id, or `--last` with `--target-deployment`,
+`--target-deployment-id` or `--target-instance-id`.
 
 - `backups create` backs up the deployment's active instance.
 - `backups list` lists the deployment's backup history: the backups of every
@@ -65,7 +65,9 @@ The `backups` commands take a deployment: `create` and `list` by name or by
 
 A raw `--instance-id` (`--target-instance-id` on `restore`) targets one
 instance instead: `create` backs up that instance, `list` lists only its
-backups, and `restore --last` chooses from its backups only.
+backups, and `restore --last` chooses from its backups only. When that instance
+is an earlier instance of its deployment, `restore --last` asks for
+confirmation in the same way, and `--yes` skips the question.
 
 ```bash
 # Back up a deployment's active instance (by name, by id, or a raw instance)
