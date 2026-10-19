@@ -10,6 +10,7 @@ step after the recovery, and a refused alias write fails the restore (#530).
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -112,7 +113,49 @@ def _alias_write_error() -> ApiException:
 
 
 #: The recovery error that a refused alias write stores for the INTERNAL flow.
-ALIAS_ERROR = f"Service alias step failed: {_alias_write_error()}"
+ALIAS_ERROR = (
+    "Create and delete service aliases: the Kubernetes API answered 500: Internal "
+    "Server Error. To write the aliases, change the configuration or the parameters "
+    "of the deployment, or upgrade it."
+)
+
+#: The message of the ``Status`` that the API answers to an agent without RBAC rights.
+FORBIDDEN_MESSAGE = (
+    'services is forbidden: User "system:serviceaccount:styrmin:agent" cannot '
+    'create resource "services" in API group "" in the namespace '
+    '"styrmin-0b0bded8-4a1e-4c55-9b39-5e1c8a2a7f10"'
+)
+
+
+class _FakeHttpResponse:
+    """An HTTP answer as ``ApiException(http_resp=...)`` reads it."""
+
+    status = 403
+    reason = "Forbidden"
+    data = json.dumps(
+        {
+            "kind": "Status",
+            "apiVersion": "v1",
+            "metadata": {},
+            "status": "Failure",
+            "message": FORBIDDEN_MESSAGE,
+            "reason": "Forbidden",
+            "details": {"kind": "services"},
+            "code": 403,
+        }
+    ).encode()
+
+    def getheaders(self) -> dict[str, str]:
+        return {
+            "Audit-Id": "5f0e1c6a-2d7b-4b8e-9a34-0c1d2e3f4a5b",
+            "Cache-Control": "no-cache, private",
+            "Content-Type": "application/json",
+            "X-Kubernetes-Pf-Flowschema-Uid": "8a9b0c1d-2e3f-4a5b-6c7d-8e9f0a1b2c3d",
+        }
+
+
+def _forbidden_alias_write() -> ApiException:
+    return ApiException(http_resp=_FakeHttpResponse())
 
 
 @pytest.fixture
@@ -536,6 +579,66 @@ async def test_a_failed_alias_read_fails_the_alias_step_and_the_recovery(
         "error": ALIAS_ERROR,
     }
     cluster.recovery.mark_failed.assert_not_awaited()
+
+
+async def test_a_forbidden_alias_write_gives_the_restore_a_one_line_error(
+    api: FakeStepApi, refused_alias_write: AsyncMock
+) -> None:
+    """Finding 5 of the #531 review: the restore's error leaves out the HTTP headers and body.
+
+    The clone entry and ``styrminctl env-clones get`` show the restore's error on
+    one line. The step keeps the full error.
+    """
+    refused_alias_write.side_effect = _forbidden_alias_write()
+
+    async with _user_flow() as cluster:
+        await _restore(**_cross_target(counterpart_context()))
+
+    error = _stored_result(cluster.variable)["recovery"]["error"]
+    assert error == (
+        "Create and delete service aliases: the Kubernetes API answered 403: "
+        f"{FORBIDDEN_MESSAGE}. To write the aliases, change the configuration or "
+        "the parameters of the deployment, or upgrade it."
+    )
+    assert "HTTP response" not in error
+    assert "\n" not in error
+    step_error = api.record("FAILED", "resource:service-aliases")["error"]
+    assert step_error.startswith("ApiException: (403)\nReason: Forbidden\n")
+    assert "HTTP response headers" in step_error
+    assert "HTTP response body" in step_error
+
+
+@pytest.mark.parametrize(
+    ("exc", "cause"),
+    [
+        pytest.param(
+            RuntimeError("the context names no namespace."),
+            "RuntimeError: the context names no namespace",
+            id="trailing-period",
+        ),
+        pytest.param(
+            ApiException(status=503, reason="Service Unavailable"),
+            "the Kubernetes API answered 503: Service Unavailable",
+            id="api-error-without-body",
+        ),
+    ],
+)
+async def test_the_alias_error_names_the_step_the_cause_and_the_repair(
+    api: FakeStepApi,
+    refused_alias_write: AsyncMock,
+    exc: Exception,
+    cause: str,
+) -> None:
+    del api
+    refused_alias_write.side_effect = exc
+
+    async with _user_flow() as cluster:
+        await _restore(**_cross_target(counterpart_context()))
+
+    assert _stored_result(cluster.variable)["recovery"]["error"] == (
+        f"Create and delete service aliases: {cause}. To write the aliases, change "
+        "the configuration or the parameters of the deployment, or upgrade it."
+    )
 
 
 # execute_restore_workflow (INTERNAL) -----------------------------------------

@@ -877,7 +877,11 @@ def test_deriving_from_a_record_reads_the_same_inputs() -> None:
 # The entry of a failed restore, as users read it (spec 030, FR-007)
 # ---------------------------------------------------------------------------
 
-ALIAS_ERROR = "Service alias step failed: (500)"
+ALIAS_ERROR = (
+    "Create and delete service aliases: the Kubernetes API answered 500: Internal "
+    "Server Error. To write the aliases, change the configuration or the parameters "
+    "of the deployment, or upgrade it."
+)
 
 
 def _entry(outcome: str, *, restore: Restore | None = None) -> CloneDeploymentResult:

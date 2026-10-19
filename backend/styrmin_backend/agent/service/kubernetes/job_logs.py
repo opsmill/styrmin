@@ -6,7 +6,6 @@ research D10.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -23,6 +22,7 @@ from styrmin_backend.domain.steps import (
 
 from .dependency import get_api_client
 from .exceptions import JobOutputUnreadableError
+from .utils import describe_api_answer
 
 #: One line or one byte more than Styrmin keeps tells that earlier output was cut.
 TAIL_LINES = MAX_OUTPUT_LINES + 1
@@ -67,7 +67,7 @@ async def read_job_output_tail(
         raise
     except ApiException as exc:
         raise JobOutputUnreadableError(
-            _api_reason(exc.status, exc.reason, exc.body)
+            describe_api_answer(exc.status, exc.reason, exc.body)
         ) from exc
     except Exception as exc:  # noqa: BLE001 - reading the output never hides the Job's failure
         raise JobOutputUnreadableError(f"{type(exc).__name__}: {exc}") from exc
@@ -117,17 +117,6 @@ async def _read_log(
         response.release()
     if not 200 <= response.status < 300:
         raise JobOutputUnreadableError(
-            _api_reason(response.status, response.reason, body)
+            describe_api_answer(response.status, response.reason, body)
         )
     return body
-
-
-def _api_reason(
-    status: int | None, reason: str | None, body: str | bytes | None
-) -> str:
-    """The message of the Kubernetes ``Status`` answer, else the HTTP reason."""
-    try:
-        message = json.loads(body or "")["message"]
-    except ValueError, TypeError, KeyError:
-        message = reason
-    return f"the Kubernetes API answered {status}: {message}"

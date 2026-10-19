@@ -1930,7 +1930,11 @@ async def test_a_cloned_entry_whose_restore_failed_reads_failed_on_every_read(
     """
     source, instance = await _seed_source_with_instance(session)
     created = await _sibling_environment(session, source, "restore-failed-read")
-    alias_error = "Service alias step failed: (500)\nReason: Internal Server Error\n"
+    alias_error = (
+        "Create and delete service aliases: the Kubernetes API answered 500: "
+        "Internal Server Error. To write the aliases, change the configuration or "
+        "the parameters of the deployment, or upgrade it."
+    )
     failed = await _seed_restore(
         session,
         instance=instance,

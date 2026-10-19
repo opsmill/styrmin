@@ -19,6 +19,7 @@ from functools import partial
 from typing import Any
 from uuid import UUID
 
+from kubernetes_asyncio.client import ApiException
 from prefect import flow, task
 from prefect.logging import get_run_logger
 from prefect.client.schemas.objects import StateType
@@ -32,6 +33,7 @@ from styrmin_backend.agent.service.kubernetes.resources.builders.backup import (
     build_velero_backup,
     build_velero_restore,
 )
+from styrmin_backend.agent.service.kubernetes.utils import describe_api_answer
 from styrmin_backend.agent.service.kubernetes.velero.client import failure_message
 from styrmin_backend.agent.service.kubernetes.velero.resources import (
     VeleroBackupHook,
@@ -93,6 +95,28 @@ def _failure_reason(resource: str, status: dict[str, Any]) -> str:
     if status.get("phase") == "Completed":
         return ""
     return status.get("failureReason") or failure_message(resource, status)
+
+
+#: The repair that the restore's error names when the alias step failed (#530).
+_SERVICE_ALIASES_REPAIR = (
+    "To write the aliases, change the configuration or the parameters of the "
+    "deployment, or upgrade it."
+)
+
+
+def _service_aliases_error(exc: Exception) -> str:
+    """The restore's error when the alias step of a cross-target restore failed (#530).
+
+    Names the step as users view it, the cause in short and the repair. For a
+    Kubernetes API error, the cause is the message of the API's answer without
+    the HTTP headers and body. The step itself records the full error.
+    """
+    if isinstance(exc, ApiException):
+        cause = describe_api_answer(exc.status, exc.reason, exc.body)
+    else:
+        cause = format_exception(exc)
+    cause = cause.rstrip().removesuffix(".")
+    return f"{steps.SERVICE_ALIASES.name}: {cause}. {_SERVICE_ALIASES_REPAIR}"
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +474,7 @@ async def execute_velero_restore_flow(
                     except Exception as exc:
                         # No mark_failed: the operator's rollout of the recovered
                         # spec would replace the failed status.
-                        error_msg = f"Service alias step failed: {exc}"
+                        error_msg = _service_aliases_error(exc)
                         logger.error(error_msg)
                         recovery_status = {"recovered": False, "error": error_msg}
         else:
