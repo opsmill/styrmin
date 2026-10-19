@@ -169,9 +169,7 @@ async def test_infrahub_backup_and_restore_lifecycle(
         assert all(t.name.value != tag_name for t in tags)  # type: ignore[union-attr]
 
     # 4. Restore from backup
-    created_restore = await client.backups.create_restore(
-        backup_id=backup.id, target_namespace=namespace
-    )
+    created_restore = await client.backups.create_restore(backup_id=backup.id)
     assert created_restore.status == "pending"
     restore = await client.backups.wait_for_restore(created_restore.id, max_wait=600)
     assert restore.status == "completed"
@@ -282,9 +280,7 @@ async def test_infrahub_enterprise_backup_and_restore_lifecycle(
         assert all(t.name.value != tag_name for t in tags)  # type: ignore[union-attr]
 
     # 4. Restore from backup
-    created_restore = await client.backups.create_restore(
-        backup_id=backup.id, target_namespace=namespace
-    )
+    created_restore = await client.backups.create_restore(backup_id=backup.id)
     assert created_restore.status == "pending"
     restore = await client.backups.wait_for_restore(created_restore.id, max_wait=600)
     assert restore.status == "completed"

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, NamedTuple, Sequence
 from uuid import UUID, uuid4
 
 from loguru import logger
 
+from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.agent.service.kubernetes.velero.resources import VeleroBackupHook
 from styrmin_backend.db.models import (
     Backup,
@@ -37,6 +39,7 @@ from styrmin_backend.services.exceptions import (
 )
 
 if TYPE_CHECKING:
+    from styrmin_backend.domain.models import Deployment as DeploymentEntity
     from styrmin_backend.services.unit_of_work import UnitOfWork
 
 # Default timeout values (seconds)
@@ -368,14 +371,15 @@ async def find_in_flight_restore(
 
     A restore records its target as a namespace rather than a deployment FK, so
     two namespaces are consulted: the requested one and the deployment's
-    canonical ``styrmin-<deployment_id>``. Every caller in the tree derives the
-    former from the latter, but the ``createRestore`` mutation takes
-    ``target_namespace`` verbatim from the client, and a restore already in
-    flight for the deployment must be found whichever namespace it was created
-    with. For the same reason, a restore of the deployment's own backups is
-    found whatever namespace it targets, unless that namespace belongs to
-    another deployment: an environment clone restoring one of these backups
-    into its counterpart lands elsewhere and is not a conflict.
+    canonical ``styrmin-<deployment_id>``. ``create_restore`` records the
+    canonical namespace of the deployment it restores into
+    (``resolve_restore_target``), but a restore created by an earlier release
+    may record another namespace, and a restore already in flight for the
+    deployment must be found whichever namespace it was created with. For the
+    same reason, a restore of the deployment's own backups is found whatever
+    namespace it targets, unless that namespace belongs to another deployment:
+    an environment clone restoring one of these backups into its counterpart
+    lands elsewhere and is not a conflict.
 
     ``PENDING`` counts as in flight: ``create_restore`` writes rows ``PENDING``
     and only ``execute_restore_workflow`` promotes them to ``IN_PROGRESS``, so a
@@ -426,24 +430,95 @@ async def has_in_flight_restore(uow: UnitOfWork, deployment_id: UUID) -> bool:
     )
 
 
+@dataclass(frozen=True)
+class RestoreTarget:
+    """Where a restore lands, as :func:`resolve_restore_target` decides it.
+
+    Never stored: ``create_restore`` records ``namespace`` and ``instance_id``
+    on the ``Restore`` row.
+    """
+
+    deployment: DeploymentEntity
+    #: ``styrmin-<deployment id>`` of ``deployment``.
+    namespace: str
+    #: The active instance of ``deployment``, or ``None`` when it has none.
+    instance_id: UUID | None
+
+
+async def resolve_restore_target(
+    backup: Backup,
+    uow: UnitOfWork,
+    *,
+    target_deployment_id: UUID | None = None,
+) -> RestoreTarget:
+    """Return the deployment that receives a restore of *backup*, its namespace and its active instance.
+
+    The one place that decides where a restore lands: no caller names a
+    namespace or an instance (#532). Must be called inside an open ``uow``
+    transaction.
+
+    In-place (``target_deployment_id`` is ``None``): the deployment of the
+    backup's instance. The data lands in that deployment's active instance,
+    which is a later instance than the backup's when the deployment was
+    upgraded since (ADR-063).
+
+    Cross-target (environment clone): the deployment ``target_deployment_id``.
+    The backup's own deployment is deliberately never resolved here — the
+    source must not be guarded, flipped, or required to still exist (SC-002).
+
+    Raises:
+        BackupNotFoundError: In-place, when the backup's instance, the
+            instance's deployment link, or that deployment is missing.
+        DeploymentNotFoundError: Cross-target, when the deployment
+            ``target_deployment_id`` is missing.
+    """
+    if target_deployment_id is None:
+        instance = await uow.application_instances.get(backup.instance_id)
+        if instance is None or instance.deployment_id is None:
+            raise BackupNotFoundError(
+                f"Backup {backup.id} has no associated deployment"
+            )
+        deployment = await uow.deployments.find(instance.deployment_id)
+        if deployment is None:
+            raise BackupNotFoundError(
+                f"Backup {backup.id}: deployment {instance.deployment_id} not found"
+            )
+    else:
+        deployment = await uow.deployments.find(target_deployment_id)
+        if deployment is None:
+            raise DeploymentNotFoundError(
+                f"Target deployment {target_deployment_id} not found"
+            )
+
+    active_instance = deployment.active_instance
+    return RestoreTarget(
+        deployment=deployment,
+        namespace=get_kubernetes_reference(deployment.id),
+        instance_id=active_instance.id if active_instance is not None else None,
+    )
+
+
 async def create_restore(
     backup_id: UUID,
-    target_namespace: str,
     uow: UnitOfWork,
     name: str | None = None,
-    target_instance_id: UUID | None = None,
     timeout: int = DEFAULT_RESTORE_TIMEOUT,
     environment_restore_id: UUID | None = None,
     target_deployment_id: UUID | None = None,
 ) -> tuple[Restore, UUID]:
     """Create a new restore operation from a backup.
 
-    Resolves the target deployment (from the backup for an in-place restore,
-    or from ``target_deployment_id`` for a cross-target one), blocks
-    restoring an internal or a deleted deployment, blocks a second restore while one is
-    still non-terminal for that deployment or for the same backup, and flips
-    that deployment to RESTORING in the same transaction so the UI reflects
-    the lifecycle immediately.
+    Resolves where the restore lands with :func:`resolve_restore_target` (the
+    backup's deployment for an in-place restore, ``target_deployment_id`` for
+    a cross-target one), blocks restoring an internal or a deleted deployment,
+    blocks a second restore while one is still non-terminal for that
+    deployment or for the same backup, and flips that deployment to RESTORING
+    in the same transaction so the UI reflects the lifecycle immediately.
+
+    The caller names neither a namespace nor an instance (#532): the row
+    records the target deployment's ``styrmin-<deployment id>`` namespace and
+    its active instance. Callers read ``restore.target_namespace`` to dispatch
+    ``execute_restore_workflow``.
 
     Args:
         environment_restore_id: Links the restore to an environment restore
@@ -454,13 +529,10 @@ async def create_restore(
             the one the backup was taken from (environment clone — research
             D2.1). When given, every guard (``internal``, concurrent-restore)
             and the ``RESTORING`` flip apply to that deployment, never to the
-            backup's source deployment, and ``target_instance_id`` defaults
-            to the target's active instance so the row records which
-            counterpart the data landed in. A counterpart already sitting in
+            backup's source deployment. A counterpart already sitting in
             ``RESTORING`` because the clone put it there is *not* a conflict —
-            see ``find_in_flight_restore``. ``None`` (the default) keeps the
-            shipped in-place behaviour: the target is resolved from the
-            backup.
+            see ``find_in_flight_restore``. ``None`` (the default) restores
+            into the deployment the backup was taken of.
 
     Returns:
         Tuple of ``(restore_record, deployment_id)``. The deployment id is
@@ -476,37 +548,11 @@ async def create_restore(
         if backup is None:
             raise BackupNotFoundError(f"Backup {backup_id} not found")
 
-        if target_deployment_id is None:
-            # In-place restore: resolve the target deployment via
-            # backup -> instance -> deployment.
-            instance = await uow.application_instances.get(backup.instance_id)
-            if instance is None or instance.deployment_id is None:
-                raise BackupNotFoundError(
-                    f"Backup {backup_id} has no associated deployment"
-                )
-            deployment_id = instance.deployment_id
-
-            deployment = await uow.deployments.find(deployment_id)
-            if deployment is None:
-                raise BackupNotFoundError(
-                    f"Backup {backup_id}: deployment {deployment_id} not found"
-                )
-        else:
-            # Cross-target restore: the caller names the deployment the data
-            # lands in. The backup's own deployment is deliberately never
-            # resolved here — the source must not be guarded, flipped, or
-            # required to still exist (SC-002).
-            deployment_id = target_deployment_id
-            deployment = await uow.deployments.find(deployment_id)
-            if deployment is None:
-                raise DeploymentNotFoundError(
-                    f"Target deployment {deployment_id} not found"
-                )
-            if target_instance_id is None:
-                active_instance = deployment.active_instance
-                target_instance_id = (
-                    active_instance.id if active_instance is not None else None
-                )
+        target = await resolve_restore_target(
+            backup, uow, target_deployment_id=target_deployment_id
+        )
+        deployment = target.deployment
+        deployment_id = deployment.id
 
         if deployment.internal:
             raise InternalDeploymentError(
@@ -534,7 +580,7 @@ async def create_restore(
         # refusal always names the row it collided with; when no row can be
         # named there is nothing to collide with.
         in_flight = await find_in_flight_restore(
-            uow, deployment_id=deployment_id, target_namespace=target_namespace
+            uow, deployment_id=deployment_id, target_namespace=target.namespace
         )
         if in_flight is not None:
             raise RestoreAlreadyInProgressError(existing_restore_id=str(in_flight.id))
@@ -560,9 +606,9 @@ async def create_restore(
             id=restore_id,
             name=name or f"styrmin-{restore_id}",
             status=RestoreStatus.PENDING,
-            target_namespace=target_namespace,
+            target_namespace=target.namespace,
             backup_id=backup_id,
-            target_instance_id=target_instance_id,
+            target_instance_id=target.instance_id,
             metadata_={"timeout": timeout},
             environment_restore_id=environment_restore_id,
         )
@@ -580,13 +626,13 @@ async def create_restore(
 
         logger.info(
             f"Created restore {restore.id} ({restore.name}) "
-            f"from backup {backup_id} to namespace {target_namespace}"
+            f"from backup {backup_id} to namespace {target.namespace}"
         )
         if target_deployment_id is not None:
             logger.info(
                 f"Restore {restore.id} is cross-target: source instance "
                 f"{backup.instance_id} -> deployment {target_deployment_id} "
-                f"(instance {target_instance_id})"
+                f"(instance {target.instance_id})"
             )
         return restore, deployment_id
 

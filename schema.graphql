@@ -1032,7 +1032,7 @@ type Mutation {
   cloneEnvironment(name: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, deploymentIds: [UUID!] = null, configOverride: UpdateEnvironmentInput = null, clearConfigFields: [String!] = null): EnvironmentClone! @requiresRole
   deleteEnvironmentBackup(environmentBackupId: UUID!): Boolean! @requiresRole
   deleteBackup(backupId: UUID!): String @requiresRole
-  createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID = null): Restore @requiresRole
+  createRestore(backupId: UUID!): Restore @requiresRole
   createBackupSchedule(deploymentId: UUID!, name: String!, cronExpression: String!, retentionCount: Int! = 10, enabled: Boolean! = true): BackupSchedule @requiresRole
   updateBackupSchedule(scheduleId: UUID!, name: String = null, cronExpression: String = null, retentionCount: Int = null, enabled: Boolean = null): BackupSchedule @requiresRole
   deleteBackupSchedule(scheduleId: UUID!): String @requiresRole

@@ -455,20 +455,10 @@ class Client(AsyncBaseClient):
         data = self.get_data(response)
         return CreateGroup.model_validate(data)
 
-    async def create_restore(
-        self,
-        backup_id: UUID,
-        target_namespace: str,
-        target_instance_id: Union[Optional[UUID], UnsetType] = UNSET,
-        **kwargs: Any,
-    ) -> CreateRestore:
+    async def create_restore(self, backup_id: UUID, **kwargs: Any) -> CreateRestore:
         query = gql("""
-            mutation CreateRestore($backupId: UUID!, $targetNamespace: String!, $targetInstanceId: UUID) {
-              createRestore(
-                backupId: $backupId
-                targetNamespace: $targetNamespace
-                targetInstanceId: $targetInstanceId
-              ) {
+            mutation CreateRestore($backupId: UUID!) {
+              createRestore(backupId: $backupId) {
                 id
                 name
                 status
@@ -483,11 +473,7 @@ class Client(AsyncBaseClient):
               }
             }
             """)
-        variables: dict[str, object] = {
-            "backupId": backup_id,
-            "targetNamespace": target_namespace,
-            "targetInstanceId": target_instance_id,
-        }
+        variables: dict[str, object] = {"backupId": backup_id}
         response = await self.execute(
             query=query, operation_name="CreateRestore", variables=variables, **kwargs
         )

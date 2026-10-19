@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -39,6 +39,7 @@ from styrmin_backend.services.backup.service import (
     create_restore,
     get_restore,
     get_restores,
+    resolve_restore_target,
     settle_undispatched_restore,
     update_restore_status,
 )
@@ -88,12 +89,62 @@ def make_uow(
     )
 
 
+def make_instance(
+    deployment: Deployment,
+    *,
+    instance_id: UUID | None = None,
+    name: str = "test-instance",
+) -> Instance:
+    """Build a domain instance of *deployment*, to set as its active instance."""
+    return Instance(
+        id=instance_id or uuid4(),
+        name=name,
+        application_version="1.0.0",
+        status=InstanceStatus.PENDING,
+        deployment_id=deployment.id,
+        application_driver_version_id=deployment.application_driver_version_id,
+        context=GlobalContext(
+            cluster=ClusterContext(config=ClusterConfig()),
+            environment=EnvironmentContext(
+                name="test-environment", config=EnvironmentConfig()
+            ),
+            deployment=DeploymentContext(config=DeploymentConfig()),
+            instance=InstanceContext(
+                config=ResolvedConfig(),
+                deployment_id=deployment.id,
+                namespace=f"styrmin-{deployment.id}",
+                release_reference=f"styrmin-{deployment.id}",
+            ),
+            app=ApplicationContext(
+                name="test-app",
+                version="1.0.0",
+                helm=HelmInfo(
+                    chart=ChartInfo(
+                        id=uuid4(),
+                        name="test-chart",
+                        version="0.1.0",
+                        values_template="",
+                    ),
+                    repository=RepositoryInfo(id=uuid4(), url="https://example.com"),
+                ),
+            ),
+        ),
+    )
+
+
 def make_chain(
     backup_status: BackupStatus = BackupStatus.COMPLETED,
     deployment_status: DeploymentState = DeploymentState.RUNNING,
     deployment_internal: bool = False,
+    *,
+    with_active_instance: bool = False,
 ) -> tuple[Deployment, ApplicationInstance, Backup]:
-    """Build a deployment + instance + backup linked chain for restore tests."""
+    """Build a deployment + instance + backup linked chain for restore tests.
+
+    With ``with_active_instance``, the backup's instance is also the
+    deployment's active instance: the returned instance's id is the id the
+    active instance carries.
+    """
     deployment = Deployment(
         id=uuid4(),
         name="test-deployment",
@@ -114,23 +165,27 @@ def make_chain(
         status=backup_status,
         instance_id=instance.id,
     )
+    if with_active_instance:
+        deployment.set_active_instance(
+            instance=make_instance(deployment, instance_id=instance.id)
+        )
     return deployment, instance, backup
 
 
 class TestCreateRestore:
     @pytest.mark.anyio
     async def test_create_restore_success(self) -> None:
-        deployment, instance, backup = make_chain()
+        deployment, instance, backup = make_chain(with_active_instance=True)
         uow = make_uow(backups=[backup], instances=[instance], deployments=[deployment])
 
         restore, deployment_id = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{deployment.id}",
             uow=uow,
         )
 
         assert restore.status == RestoreStatus.PENDING
         assert restore.target_namespace == f"styrmin-{deployment.id}"
+        assert restore.target_instance_id == instance.id
         assert restore.backup_id == backup.id
         assert restore.name == f"styrmin-{restore.id}"
         assert deployment_id == deployment.id
@@ -147,7 +202,6 @@ class TestCreateRestore:
 
         restore, _ = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{deployment.id}",
             name="my-custom-restore",
             uow=uow,
         )
@@ -155,19 +209,25 @@ class TestCreateRestore:
         assert restore.name == "my-custom-restore"
 
     @pytest.mark.anyio
-    async def test_create_restore_with_target_instance(self) -> None:
-        deployment, instance, backup = make_chain()
-        target_instance_id = uuid4()
-        uow = make_uow(backups=[backup], instances=[instance], deployments=[deployment])
+    async def test_create_restore_records_the_active_instance_not_the_backups(
+        self,
+    ) -> None:
+        """#532, ADR-063: a backup of an earlier instance lands in the active one."""
+        deployment, earlier_instance, backup = make_chain()
+        active_instance = make_instance(deployment)
+        deployment.set_active_instance(instance=active_instance)
+        uow = make_uow(
+            backups=[backup], instances=[earlier_instance], deployments=[deployment]
+        )
 
-        restore, _ = await create_restore(
+        restore, deployment_id = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{deployment.id}",
-            target_instance_id=target_instance_id,
             uow=uow,
         )
 
-        assert restore.target_instance_id == target_instance_id
+        assert deployment_id == deployment.id
+        assert restore.target_namespace == f"styrmin-{deployment.id}"
+        assert restore.target_instance_id == active_instance.id
 
     @pytest.mark.anyio
     async def test_create_restore_backup_not_found(self) -> None:
@@ -176,7 +236,6 @@ class TestCreateRestore:
         with pytest.raises(BackupNotFoundError):
             await create_restore(
                 backup_id=uuid4(),
-                target_namespace="test-ns",
                 uow=uow,
             )
 
@@ -188,7 +247,6 @@ class TestCreateRestore:
         with pytest.raises(InternalDeploymentError):
             await create_restore(
                 backup_id=backup.id,
-                target_namespace=f"styrmin-{deployment.id}",
                 uow=uow,
             )
 
@@ -204,7 +262,6 @@ class TestCreateRestore:
         with pytest.raises(DeletedDeploymentRestoreError, match="was deleted") as exc:
             await create_restore(
                 backup_id=backup.id,
-                target_namespace=f"styrmin-{deployment.id}",
                 uow=uow,
             )
 
@@ -236,7 +293,6 @@ class TestCreateRestore:
         with pytest.raises(RestoreAlreadyInProgressError) as excinfo:
             await create_restore(
                 backup_id=backup.id,
-                target_namespace=f"styrmin-{deployment.id}",
                 uow=uow,
             )
 
@@ -271,7 +327,6 @@ class TestCreateRestore:
         with pytest.raises(RestoreAlreadyInProgressError) as excinfo:
             await create_restore(
                 backup_id=backup.id,
-                target_namespace=f"styrmin-{deployment.id}",
                 uow=uow,
             )
 
@@ -281,8 +336,9 @@ class TestCreateRestore:
     async def test_create_restore_blocks_on_a_restore_into_another_namespace(
         self,
     ) -> None:
-        """A restore of this deployment's other backup into a namespace the
-        client chose is still in flight for this deployment."""
+        """A restore of this deployment's other backup into another namespace,
+        as an earlier release let the client choose, is still in flight for
+        this deployment."""
         deployment, instance, backup = make_chain()
         other_backup = Backup(
             name="other-backup",
@@ -305,7 +361,6 @@ class TestCreateRestore:
         with pytest.raises(RestoreAlreadyInProgressError) as excinfo:
             await create_restore(
                 backup_id=backup.id,
-                target_namespace=f"styrmin-{deployment.id}",
                 uow=uow,
             )
 
@@ -336,7 +391,6 @@ class TestCreateRestore:
 
         restore, deployment_id = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{deployment.id}",
             uow=uow,
         )
 
@@ -372,7 +426,6 @@ class TestCreateRestore:
 
         restore, deployment_id = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{deployment.id}",
             uow=uow,
         )
 
@@ -381,11 +434,16 @@ class TestCreateRestore:
 
     @pytest.mark.anyio
     async def test_create_restore_already_in_progress(self) -> None:
+        """One backup cannot be replayed twice concurrently, wherever aimed.
+
+        The restore in flight is a row an earlier release created into another
+        deployment's namespace, so only the same-backup guard can find it.
+        """
         deployment, instance, backup = make_chain()
         existing_restore = Restore(
             name="existing-restore",
             status=RestoreStatus.IN_PROGRESS,
-            target_namespace=f"styrmin-{deployment.id}",
+            target_namespace=f"styrmin-{uuid4()}",
             backup_id=backup.id,
         )
         uow = make_uow(
@@ -395,12 +453,13 @@ class TestCreateRestore:
             deployments=[deployment],
         )
 
-        with pytest.raises(RestoreAlreadyInProgressError):
+        with pytest.raises(RestoreAlreadyInProgressError) as excinfo:
             await create_restore(
                 backup_id=backup.id,
-                target_namespace="other-ns",
                 uow=uow,
             )
+
+        assert excinfo.value.existing_restore_id == str(existing_restore.id)
 
     @pytest.mark.anyio
     async def test_create_restore_completed_does_not_block(self) -> None:
@@ -421,7 +480,6 @@ class TestCreateRestore:
 
         restore, _ = await create_restore(
             backup_id=backup.id,
-            target_namespace="other-ns",
             uow=uow,
         )
 
@@ -614,7 +672,6 @@ async def create_undispatched_restore(
     uow = make_uow(backups=[backup], instances=[instance], deployments=[deployment])
     restore, _ = await create_restore(
         backup_id=backup.id,
-        target_namespace=f"styrmin-{deployment.id}",
         uow=uow,
     )
     return uow, restore, deployment
@@ -783,40 +840,120 @@ def make_counterpart(
     )
     if not with_active_instance:
         return deployment, None
-    instance = Instance(
-        id=uuid4(),
-        name="counterpart-instance",
-        application_version="1.0.0",
-        status=InstanceStatus.PENDING,
-        deployment_id=deployment.id,
-        application_driver_version_id=deployment.application_driver_version_id,
-        context=GlobalContext(
-            cluster=ClusterContext(config=ClusterConfig()),
-            environment=EnvironmentContext(name="clone", config=EnvironmentConfig()),
-            deployment=DeploymentContext(config=DeploymentConfig()),
-            instance=InstanceContext(
-                config=ResolvedConfig(),
-                deployment_id=deployment.id,
-                namespace=f"styrmin-{deployment.id}",
-                release_reference=f"styrmin-{deployment.id}",
-            ),
-            app=ApplicationContext(
-                name="test-app",
-                version="1.0.0",
-                helm=HelmInfo(
-                    chart=ChartInfo(
-                        id=uuid4(),
-                        name="test-chart",
-                        version="0.1.0",
-                        values_template="",
-                    ),
-                    repository=RepositoryInfo(id=uuid4(), url="https://example.com"),
-                ),
-            ),
-        ),
-    )
+    instance = make_instance(deployment, name="counterpart-instance")
     deployment.set_active_instance(instance=instance)
     return deployment, instance
+
+
+class TestResolveRestoreTarget:
+    """#532 — Styrmin, not the caller, decides where a restore lands."""
+
+    @pytest.mark.anyio
+    async def test_in_place_backup_of_the_active_instance(self) -> None:
+        deployment, instance, backup = make_chain(with_active_instance=True)
+        uow = make_uow(backups=[backup], instances=[instance], deployments=[deployment])
+
+        async with uow:
+            target = await resolve_restore_target(backup, uow)
+
+        assert target.deployment.id == deployment.id
+        assert target.namespace == f"styrmin-{deployment.id}"
+        assert target.instance_id == instance.id
+
+    @pytest.mark.anyio
+    async def test_in_place_backup_of_an_earlier_instance_records_the_active_instance(
+        self,
+    ) -> None:
+        """ADR-063: the data lands in the active instance, not the backup's."""
+        deployment, earlier_instance, backup = make_chain()
+        active_instance = make_instance(deployment)
+        deployment.set_active_instance(instance=active_instance)
+        uow = make_uow(
+            backups=[backup], instances=[earlier_instance], deployments=[deployment]
+        )
+
+        async with uow:
+            target = await resolve_restore_target(backup, uow)
+
+        assert target.deployment.id == deployment.id
+        assert target.namespace == f"styrmin-{deployment.id}"
+        assert target.instance_id == active_instance.id
+        assert target.instance_id != earlier_instance.id
+
+    @pytest.mark.anyio
+    async def test_in_place_deployment_without_an_active_instance(self) -> None:
+        deployment, instance, backup = make_chain()
+        uow = make_uow(backups=[backup], instances=[instance], deployments=[deployment])
+
+        async with uow:
+            target = await resolve_restore_target(backup, uow)
+
+        assert target.deployment.id == deployment.id
+        assert target.namespace == f"styrmin-{deployment.id}"
+        assert target.instance_id is None
+
+    @pytest.mark.anyio
+    async def test_cross_target_resolves_the_counterpart(self) -> None:
+        source, instance, backup = make_chain(with_active_instance=True)
+        counterpart, counterpart_instance = make_counterpart()
+        assert counterpart_instance is not None
+        uow = make_uow(
+            backups=[backup],
+            instances=[instance],
+            deployments=[source, counterpart],
+        )
+
+        async with uow:
+            target = await resolve_restore_target(
+                backup, uow, target_deployment_id=counterpart.id
+            )
+
+        assert target.deployment.id == counterpart.id
+        assert target.namespace == f"styrmin-{counterpart.id}"
+        assert target.instance_id == counterpart_instance.id
+
+    @pytest.mark.anyio
+    async def test_in_place_backup_instance_missing_raises_backup_not_found(
+        self,
+    ) -> None:
+        deployment, _, backup = make_chain(with_active_instance=True)
+        uow = make_uow(backups=[backup], deployments=[deployment])
+
+        with pytest.raises(BackupNotFoundError):
+            async with uow:
+                await resolve_restore_target(backup, uow)
+
+    @pytest.mark.anyio
+    async def test_in_place_instance_without_a_deployment_raises_backup_not_found(
+        self,
+    ) -> None:
+        deployment, instance, backup = make_chain(with_active_instance=True)
+        instance.deployment_id = None  # type: ignore[assignment]
+        uow = make_uow(backups=[backup], instances=[instance], deployments=[deployment])
+
+        with pytest.raises(BackupNotFoundError):
+            async with uow:
+                await resolve_restore_target(backup, uow)
+
+    @pytest.mark.anyio
+    async def test_in_place_deployment_missing_raises_backup_not_found(self) -> None:
+        _, instance, backup = make_chain(with_active_instance=True)
+        uow = make_uow(backups=[backup], instances=[instance])
+
+        with pytest.raises(BackupNotFoundError):
+            async with uow:
+                await resolve_restore_target(backup, uow)
+
+    @pytest.mark.anyio
+    async def test_cross_target_counterpart_missing_raises_deployment_not_found(
+        self,
+    ) -> None:
+        source, instance, backup = make_chain(with_active_instance=True)
+        uow = make_uow(backups=[backup], instances=[instance], deployments=[source])
+
+        with pytest.raises(DeploymentNotFoundError):
+            async with uow:
+                await resolve_restore_target(backup, uow, target_deployment_id=uuid4())
 
 
 class TestCreateRestoreCrossTarget:
@@ -837,7 +974,6 @@ class TestCreateRestoreCrossTarget:
 
         restore, deployment_id = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{counterpart.id}",
             uow=uow,
             target_deployment_id=counterpart.id,
         )
@@ -858,12 +994,16 @@ class TestCreateRestoreCrossTarget:
         assert uow.committed is True
 
     @pytest.mark.anyio
-    async def test_explicit_target_instance_id_wins_over_the_active_instance(
+    async def test_records_the_counterparts_active_instance_not_the_sources(
         self,
     ) -> None:
-        source, instance, backup = make_chain()
-        counterpart, _ = make_counterpart(status=DeploymentState.PENDING)
-        explicit = uuid4()
+        """#532: the row records the instance the data lands in, whose id the
+        caller can no longer pass."""
+        source, instance, backup = make_chain(with_active_instance=True)
+        counterpart, counterpart_instance = make_counterpart(
+            status=DeploymentState.PENDING
+        )
+        assert counterpart_instance is not None
         uow = make_uow(
             backups=[backup],
             instances=[instance],
@@ -872,13 +1012,13 @@ class TestCreateRestoreCrossTarget:
 
         restore, _ = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{counterpart.id}",
             uow=uow,
             target_deployment_id=counterpart.id,
-            target_instance_id=explicit,
         )
 
-        assert restore.target_instance_id == explicit
+        assert restore.target_namespace == f"styrmin-{counterpart.id}"
+        assert restore.target_instance_id == counterpart_instance.id
+        assert restore.target_instance_id != instance.id
 
     @pytest.mark.anyio
     async def test_target_without_active_instance_records_none(self) -> None:
@@ -894,7 +1034,6 @@ class TestCreateRestoreCrossTarget:
 
         restore, _ = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{counterpart.id}",
             uow=uow,
             target_deployment_id=counterpart.id,
         )
@@ -909,7 +1048,6 @@ class TestCreateRestoreCrossTarget:
         with pytest.raises(DeploymentNotFoundError):
             await create_restore(
                 backup_id=backup.id,
-                target_namespace="styrmin-missing",
                 uow=uow,
                 target_deployment_id=uuid4(),
             )
@@ -927,7 +1065,6 @@ class TestCreateRestoreCrossTarget:
         with pytest.raises(InternalDeploymentError):
             await create_restore(
                 backup_id=backup.id,
-                target_namespace=f"styrmin-{counterpart.id}",
                 uow=uow,
                 target_deployment_id=counterpart.id,
             )
@@ -945,7 +1082,6 @@ class TestCreateRestoreCrossTarget:
 
         restore, deployment_id = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{counterpart.id}",
             uow=uow,
             target_deployment_id=counterpart.id,
         )
@@ -980,7 +1116,6 @@ class TestCreateRestoreCrossTarget:
         with pytest.raises(RestoreAlreadyInProgressError) as excinfo:
             await create_restore(
                 backup_id=backup.id,
-                target_namespace=f"styrmin-{counterpart.id}",
                 uow=uow,
                 target_deployment_id=counterpart.id,
             )
@@ -1012,7 +1147,6 @@ class TestCreateRestoreCrossTarget:
 
         restore, deployment_id = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{counterpart.id}",
             uow=uow,
             target_deployment_id=counterpart.id,
         )
@@ -1046,7 +1180,6 @@ class TestCreateRestoreCrossTarget:
 
         first, _ = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{counterpart.id}",
             uow=uow,
             target_deployment_id=counterpart.id,
         )
@@ -1054,7 +1187,6 @@ class TestCreateRestoreCrossTarget:
         with pytest.raises(RestoreAlreadyInProgressError) as excinfo:
             await create_restore(
                 backup_id=second_backup.id,
-                target_namespace=f"styrmin-{counterpart.id}",
                 uow=uow,
                 target_deployment_id=counterpart.id,
             )
@@ -1076,7 +1208,6 @@ class TestCreateRestoreCrossTarget:
 
         restore, deployment_id = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{counterpart.id}",
             uow=uow,
             target_deployment_id=counterpart.id,
         )
@@ -1097,7 +1228,6 @@ class TestCreateRestoreCrossTarget:
 
         restore, deployment_id = await create_restore(
             backup_id=backup.id,
-            target_namespace=f"styrmin-{counterpart.id}",
             uow=uow,
             target_deployment_id=counterpart.id,
         )

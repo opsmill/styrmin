@@ -896,8 +896,6 @@ export type MutationCreateGroupArgs = {
 
 export type MutationCreateRestoreArgs = {
   backupId: Scalars['UUID']['input'];
-  targetInstanceId?: InputMaybe<Scalars['UUID']['input']>;
-  targetNamespace: Scalars['String']['input'];
 };
 
 
@@ -1849,8 +1847,6 @@ export type CreateGroupMutation = { __typename?: 'Mutation', createGroup: { __ty
 
 export type CreateRestoreMutationVariables = Exact<{
   backupId: Scalars['UUID']['input'];
-  targetNamespace: Scalars['String']['input'];
-  targetInstanceId?: InputMaybe<Scalars['UUID']['input']>;
 }>;
 
 
@@ -2446,12 +2442,8 @@ export const useCreateGroupMutation = <
     )};
 
 export const CreateRestoreDocument = `
-    mutation CreateRestore($backupId: UUID!, $targetNamespace: String!, $targetInstanceId: UUID) {
-  createRestore(
-    backupId: $backupId
-    targetNamespace: $targetNamespace
-    targetInstanceId: $targetInstanceId
-  ) {
+    mutation CreateRestore($backupId: UUID!) {
+  createRestore(backupId: $backupId) {
     id
     name
     status

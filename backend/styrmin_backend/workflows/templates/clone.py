@@ -115,7 +115,8 @@ from styrmin_backend.workflows.templates.backup import _set_deployment_status_fa
 #: disagreement would either wedge the backup or unprotect a live capture.
 CAPTURE_POLL_TIMEOUT_SECONDS = CAPTURE_IN_FLIGHT_GUARD_SECONDS
 
-#: Prefix of the per-deployment namespace a counterpart's restore targets.
+#: Prefix of a counterpart's ``styrmin-<source deployment id>`` release
+#: reference, used when the capture recorded none.
 _NAMESPACE_PREFIX = "styrmin-"
 
 
@@ -587,11 +588,11 @@ async def _dispatch_cross_target_restore(
 ) -> UUID:
     """Create and dispatch the cross-target restore for one counterpart.
 
-    The counterpart's namespace is the restore target; the source deployment
-    travels separately so the flow can derive the Velero *source* namespace and
-    the restored CR's name without the status writes following it (research
-    D2.1/D2.2). ``target_instance_id`` is left unset — ``create_restore``
-    derives it from the counterpart's active instance.
+    The counterpart is the restore target: ``create_restore`` records its
+    namespace and its active instance on the row, and the dispatch reads the
+    namespace from there. The source deployment travels separately so the flow
+    can derive the Velero *source* namespace and the restored CR's name without
+    the status writes following it (research D2.1/D2.2).
 
     The two halves are not atomic and cannot be: the row has to exist before it
     can be dispatched. So a dispatch failure is settled rather than propagated
@@ -606,11 +607,9 @@ async def _dispatch_cross_target_restore(
         _CounterpartError: When the restore row was created but its flow run
             could not be dispatched.
     """
-    target_namespace = f"{_NAMESPACE_PREFIX}{counterpart_deployment_id}"
     async with get_unit_of_work() as uow:
         restore, status_target_deployment_id = await create_restore(
             backup_id=constituent.backup_id,
-            target_namespace=target_namespace,
             uow=uow,
             target_deployment_id=counterpart_deployment_id,
         )
@@ -623,7 +622,7 @@ async def _dispatch_cross_target_restore(
                 "restore_id": str(restore.id),
                 "backup_id": str(constituent.backup_id),
                 "deployment_id": str(status_target_deployment_id),
-                "target_namespace": target_namespace,
+                "target_namespace": restore.target_namespace,
                 "source_deployment_id": str(constituent.snapshot.deployment_id),
             },
         )

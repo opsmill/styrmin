@@ -109,10 +109,9 @@ async def test_mariadb_mongodb_backup_and_restore_lifecycle(
                     f"http://localhost:{port}/mongodb/count", timeout=10
                 )
 
-    # 4. Restore from backup via scenario_driver (same namespace)
-    created_restore = await scenario_driver.create_restore(
-        backup_id=backup.id, target_namespace=namespace
-    )
+    # 4. Restore from backup via scenario_driver; the server restores into the
+    #    backup's deployment (#532).
+    created_restore = await scenario_driver.create_restore(backup_id=backup.id)
     assert created_restore.status in {"pending", "in_progress", "completed"}
     restore = await scenario_driver.wait_for_restore(
         restore_id=created_restore.id, max_wait=600

@@ -276,6 +276,37 @@ async def _confirm_backup_of_earlier_instance(
         raise ValueError("Restore cancelled.")
 
 
+#: The options that choose, with ``--last``, whose backup history the newest backup comes from.
+_TARGET_OPTIONS = "--target-deployment, --target-deployment-id and --target-instance-id"
+
+
+def _refuse_target_options_with_backup_id(
+    *,
+    target_deployment: str | None,
+    target_deployment_id: str | None,
+    target_instance_id: str | None,
+) -> None:
+    """Refuse a backup id combined with a target option, before anything is sent to the server.
+
+    A backup is always restored into the deployment it was taken of, so a
+    target option next to a backup id would only mislead the user.
+    """
+    given = [
+        option
+        for option, value in (
+            ("--target-deployment", target_deployment),
+            ("--target-deployment-id", target_deployment_id),
+            ("--target-instance-id", target_instance_id),
+        )
+        if value is not None
+    ]
+    if given:
+        raise ValueError(
+            f"{_TARGET_OPTIONS} work only with --last. A backup is restored into the deployment it "
+            f"was taken of. Run the command again without {' and '.join(given)}."
+        )
+
+
 async def _prepare_restore(
     sdk: StyrminClient,
     *,
@@ -284,21 +315,25 @@ async def _prepare_restore(
     target_deployment_id: str | None,
     target_instance_id: str | None,
     environment: str | None,
-    target_namespace: str | None,
     last: bool,
     yes: bool = False,
-) -> tuple[str, str, str | None]:
-    """Resolve the restore target, pick the backup for ``--last``, and derive the namespace.
+) -> str:
+    """Return the id of the backup to restore.
 
-    Returns ``(backup_id, target_namespace, target_instance_id)`` ready for
-    ``create_restore``. Raises ``ValueError`` on any invalid combination.
+    With ``--last``, resolve the target deployment or instance and pick the
+    newest completed backup from its backup history. Raises ``ValueError`` on
+    any invalid combination.
     """
     target_selectors = [s for s in (target_deployment, target_deployment_id, target_instance_id) if s is not None]
     if len(target_selectors) > 1:
         raise ValueError("Provide only one of --target-deployment, --target-deployment-id, or --target-instance-id")
 
-    target = None
-    if target_selectors:
+    if last:
+        if not target_selectors:
+            raise ValueError(
+                "--last requires a target deployment (--target-deployment/--target-deployment-id) "
+                "or --target-instance-id"
+            )
         target = await resolve_active_instance(
             sdk,
             deployment_name=target_deployment,
@@ -306,14 +341,6 @@ async def _prepare_restore(
             instance_id=target_instance_id,
             environment=environment,
         )
-    resolved_instance_id = target.instance_id if target else None
-
-    if last:
-        if target is None:
-            raise ValueError(
-                "--last requires a target deployment (--target-deployment/--target-deployment-id) "
-                "or --target-instance-id"
-            )
         backup = await _latest_completed_backup(sdk, target, deployment_label=target_deployment)
         backup_id = str(backup.id)
         console.print(
@@ -326,13 +353,7 @@ async def _prepare_restore(
     if backup_id is None:
         raise ValueError("backup_id is required (or use --last with a target deployment/instance)")
 
-    if target_namespace is None:
-        if target is not None and target.deployment_id is not None:
-            target_namespace = f"styrmin-{target.deployment_id}"
-        else:
-            raise ValueError("--target-namespace is required when restoring to a raw --target-instance-id")
-
-    return backup_id, target_namespace, resolved_instance_id
+    return backup_id
 
 
 @backups_app.command
@@ -346,18 +367,15 @@ async def restore(
     target_deployment_id: TargetDeploymentId = None,
     target_instance_id: OptionalInstanceId = None,
     environment: EnvironmentContextName = None,
-    target_namespace: Annotated[
-        str | None,
-        Parameter(help="Target Kubernetes namespace (defaults to the target deployment's namespace)."),
-    ] = None,
     last: Annotated[
         bool,
         Parameter(
             help=(
-                "Restore (in place) the newest completed backup that has not expired. It comes from the "
-                "target deployment's backup history, which holds the backups of the deployment's current "
-                "and earlier instances, or from the instance's backups with --target-instance-id. Restoring "
-                "a backup of an earlier instance needs confirmation, or --yes."
+                "Restore the newest completed backup that has not expired, into the deployment it was "
+                "taken of. --target-deployment or --target-deployment-id chooses the deployment whose "
+                "backup history it comes from; that history holds the backups of the deployment's current "
+                "and earlier instances. --target-instance-id chooses the instance whose backups it comes "
+                "from. Restoring a backup of an earlier instance needs confirmation, or --yes."
             )
         ),
     ] = False,
@@ -373,33 +391,37 @@ async def restore(
     max_wait: MaxWait = 300,
     interval: PollInterval = 5,
 ) -> None:
-    """Restore from a backup.
+    """Restore a backup into the deployment it was taken of.
 
-    Target an in-place restore by deployment name (with --environment), by
-    --target-deployment-id, or a specific instance with --target-instance-id.
+    Pass a backup id to restore that backup. Or pass --last with
+    --target-deployment (and --environment), --target-deployment-id or
+    --target-instance-id to restore the newest completed backup from that
+    deployment's backup history, or from that instance's backups. The target
+    options work only with --last.
     """
     with styrmin_error_handler():
         if last and backup_id is not None:
             raise ValueError("Provide either a backup_id or --last, not both")
+        if backup_id is not None:
+            _refuse_target_options_with_backup_id(
+                target_deployment=target_deployment,
+                target_deployment_id=target_deployment_id,
+                target_instance_id=target_instance_id,
+            )
 
         async with client.get_client() as sdk:
-            backup_id, target_namespace, resolved_instance_id = await _prepare_restore(
+            backup_id = await _prepare_restore(
                 sdk,
                 backup_id=backup_id,
                 target_deployment=target_deployment,
                 target_deployment_id=target_deployment_id,
                 target_instance_id=target_instance_id,
                 environment=environment,
-                target_namespace=target_namespace,
                 last=last,
                 yes=yes,
             )
 
-            rst = await sdk.backups.create_restore(
-                backup_id=backup_id,
-                target_namespace=target_namespace,
-                target_instance_id=resolved_instance_id,
-            )
+            rst = await sdk.backups.create_restore(backup_id=backup_id)
 
             print_success(f"Restore '{rst.name}' created (id: {rst.id}, status: {rst.status})")
 

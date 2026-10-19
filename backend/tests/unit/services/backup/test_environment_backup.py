@@ -425,8 +425,8 @@ def _make_uow(
     """Build a UoW whose repositories are consistent with each other.
 
     Every eligible deployment gets a matching ``ApplicationInstance`` row so
-    ``resolve_backup_target`` can walk instance → deployment the same way it
-    does in production.
+    ``resolve_backup_target`` and ``resolve_restore_target`` can walk instance →
+    deployment the same way they do in production.
     """
     instances = FakeApplicationInstanceRepository(
         [

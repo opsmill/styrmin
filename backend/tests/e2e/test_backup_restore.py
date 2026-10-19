@@ -860,6 +860,11 @@ async def test_backup_and_restore_lifecycle(
     restore and delete below act on that backup of an earlier instance. The
     restore puts the 0.1.0 instance's resources back while the deployment
     keeps its 0.2.0 active instance.
+
+    And #532: the restore names only the backup. The server records the
+    namespace of the backup's deployment and that deployment's active 0.2.0
+    instance as the restore's target, not the 0.1.0 instance the backup
+    belongs to.
     """
     client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
@@ -1083,10 +1088,9 @@ async def test_backup_and_restore_lifecycle(
             f"the namespace should carry the Styrmin labels, got {labels_before_restore!r}"
         )
 
-        # 4. Restore from backup via scenario_driver (same namespace)
-        created_restore = await scenario_driver.create_restore(
-            backup_id=backup.id, target_namespace=namespace
-        )
+        # 4. Restore from backup via scenario_driver. The restore names only the
+        #    backup; the server restores into the backup's deployment (#532).
+        created_restore = await scenario_driver.create_restore(backup_id=backup.id)
         assert created_restore.status in {"pending", "in_progress", "completed"}
         restore = await scenario_driver.wait_for_restore(
             restore_id=created_restore.id, max_wait=300
@@ -1127,6 +1131,22 @@ async def test_backup_and_restore_lifecycle(
         assert str(restored_deployment.application_instance.id) == str(
             upgraded_instance.id
         ), "The restore should not change the deployment's active instance"
+
+        # 5b. #532: the server chose where the restore lands. It recorded the
+        #     backup's deployment's namespace and that deployment's active
+        #     0.2.0 instance, although the backup belongs to the 0.1.0 instance
+        #     (FR-001, FR-004, ADR-063).
+        recorded_restore = await client.backups.get_restore(created_restore.id)
+        assert recorded_restore.target_namespace == f"styrmin-{deployment_id}", (
+            "An in-place restore should land in the namespace of the backup's "
+            f"deployment, got {recorded_restore.target_namespace!r}"
+        )
+        assert str(recorded_restore.target_instance_id) == str(
+            restored_deployment.application_instance.id
+        ), (
+            "An in-place restore should record the deployment's active instance, "
+            f"got {recorded_restore.target_instance_id!r}"
+        )
 
         # 6. Delete backup and verify
         await scenario_driver.delete_backup(backup_id=backup.id)
@@ -1775,7 +1795,6 @@ async def test_restore_lifecycle_transitions(
     driver, client = session_scenario_driver
     deployment_id = deployed_simple_app["deployment_id"]
     instance_id = deployed_simple_app["instance_id"]
-    namespace = deployed_simple_app["namespace"]
 
     # Wait for the agent's status reporter to propagate the deployed
     # state to deployment.status. ``deployed_simple_app`` returns once
@@ -1792,9 +1811,7 @@ async def test_restore_lifecycle_transitions(
     # Kick off the restore. The styrmin restore flow flips the deployment
     # to RESTORING in the same transaction that creates the restore record,
     # so the very next read should observe the transition.
-    created_restore = await driver.create_restore(
-        backup_id=backup.id, target_namespace=namespace
-    )
+    created_restore = await driver.create_restore(backup_id=backup.id)
 
     observed = await _wait_for_deployment_status(
         client,
@@ -1860,9 +1877,7 @@ async def test_restore_failure_marks_failed_not_indefinite(
     pre_status = pre.status
 
     with pytest.raises(Exception):
-        await client.backups.create_restore(
-            backup_id=uuid4(), target_namespace=deployed_simple_app["namespace"]
-        )
+        await client.backups.create_restore(backup_id=uuid4())
 
     # Deployment is not knocked into 'restoring' by an invalid request.
     after = await client.deployments.get(deployment_id)
@@ -1952,9 +1967,7 @@ async def test_restore_of_removed_velero_backup_fails_velero_step(
             timeout=VELERO_BACKUP_REMOVAL_TIMEOUT_SECONDS,
         )
 
-        created_restore = await client.backups.create_restore(
-            backup_id=backup.id, target_namespace=f"styrmin-{deployment_id}"
-        )
+        created_restore = await client.backups.create_restore(backup_id=backup.id)
         restore = await client.backups.wait_for_restore(
             created_restore.id, max_wait=600
         )

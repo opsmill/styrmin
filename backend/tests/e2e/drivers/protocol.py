@@ -358,9 +358,12 @@ class ScenarioDriver(Protocol):
         rows in the DOM while collapsed.
         """
 
-    async def create_restore(
-        self, *, backup_id: str, target_namespace: str
-    ) -> RestoreRef: ...
+    async def create_restore(self, *, backup_id: str) -> RestoreRef:
+        """Restore the backup into the deployment it was taken of.
+
+        The server takes the namespace and the instance from the backup's
+        deployment (#532), so the scenario names only the backup.
+        """
 
     async def wait_for_restore(
         self, *, restore_id: str, max_wait: float = 600.0

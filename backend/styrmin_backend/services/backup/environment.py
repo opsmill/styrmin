@@ -70,10 +70,6 @@ from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.manager import PrefectManager
 from styrmin_backend.workflows.models import PrefectAction
 
-#: Prefix of the per-deployment namespace every constituent restore targets.
-#: Mirrors :func:`resolve_backup_target`'s ``styrmin-<deployment id>``.
-_NAMESPACE_PREFIX = "styrmin-"
-
 
 class EnvironmentOperationStatus(str, Enum):
     """Derived status of an environment backup or environment restore.
@@ -1006,18 +1002,10 @@ async def restore_environment_backup(
         for constituent in usable:
             snapshot = constituent.snapshot
             try:
-                _, target_namespace, _ = await resolve_backup_target(
-                    snapshot.instance_id, constituent_uow
-                )
-                # ``resolve_backup_target`` degrades to an empty namespace when
-                # the instance row cannot be walked; the deployment (alive as of
-                # classification) still names its own namespace.
-                target_namespace = (
-                    target_namespace or f"{_NAMESPACE_PREFIX}{snapshot.deployment_id}"
-                )
+                # ``create_restore`` restores into the deployment the backup was
+                # taken of, and records its namespace and active instance.
                 restore, deployment_id = await create_restore(
                     backup_id=constituent.backup_id,
-                    target_namespace=target_namespace,
                     uow=constituent_uow,
                     environment_restore_id=environment_restore_id,
                 )
@@ -1052,7 +1040,7 @@ async def restore_environment_backup(
                     restore_id=restore.id,
                     backup_id=constituent.backup_id,
                     deployment_id=deployment_id,
-                    target_namespace=target_namespace,
+                    target_namespace=restore.target_namespace,
                 )
             )
 

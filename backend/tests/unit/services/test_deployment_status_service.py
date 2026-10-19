@@ -314,9 +314,11 @@ async def test_restoring_without_in_flight_restore_accepts_report(
 async def test_in_flight_restore_into_other_namespace_keeps_restoring(
     restore_status: RestoreStatus,
 ) -> None:
-    """``createRestore`` accepts any ``target_namespace``: an in-flight restore
-    of the deployment's own backup into another namespace still holds
-    RESTORING, since ``create_restore`` flipped the deployment for it."""
+    """A restore created by an earlier release may record another namespace,
+    since ``createRestore`` then took it from the client; it no longer accepts
+    one (#532). Such a restore of the deployment's own backup, still in
+    flight, holds RESTORING, since ``create_restore`` flipped the deployment
+    for it."""
     dep = _make_deployment(status=DeploymentState.RESTORING)
     uow, dep_repo = await _make_uow_with_own_backup_restore(
         dep, "custom-ns", restore_status

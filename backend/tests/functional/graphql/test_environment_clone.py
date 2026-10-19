@@ -67,6 +67,7 @@ from styrmin_backend.services.backup.clone import (
     EnvironmentCloneDeploymentOutcome,
     EnvironmentCloneStatus,
 )
+from styrmin_backend.services.backup.service import resolve_restore_target
 from styrmin_backend.services.scheduling.references import referenced_deployment_ids
 from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 from styrmin_backend.workflows.templates import clone as clone_flow
@@ -923,6 +924,8 @@ async def _run_clone_flow(
       rather than run because a counterpart is created in ``RESTORING`` and
       ``create_restore``'s concurrency guard refuses a ``RESTORING`` target —
       an interaction owned by US1, not by the config merge under test here.
+      The stub records the namespace and the instance that the real
+      ``resolve_restore_target`` derives, as ``create_restore`` does (#532).
 
     Everything the merge touches runs for real: the capture gate, the merge
     itself, ``create_environment`` (capabilities recomputed rather than
@@ -936,13 +939,20 @@ async def _run_clone_flow(
 
     async def _create_restore(**kwargs: Any) -> tuple[Restore, UUID]:
         restore_calls.append(kwargs)
+        backup = await session.get(Backup, kwargs["backup_id"])
+        assert backup is not None
+        async with SqlModelUnitOfWork(session=session) as uow:
+            target = await resolve_restore_target(
+                backup, uow, target_deployment_id=kwargs["target_deployment_id"]
+            )
         restore_id = uuid4()
         restore = Restore(
             id=restore_id,
             name=f"styrmin-{restore_id}",
             status=RestoreStatus.PENDING,
-            target_namespace=kwargs["target_namespace"],
+            target_namespace=target.namespace,
             backup_id=kwargs["backup_id"],
+            target_instance_id=target.instance_id,
         )
         session.add(restore)
         await session.commit()
@@ -1486,11 +1496,11 @@ async def test_the_cross_target_restore_targets_the_counterpart_not_the_source(
 ) -> None:
     """SC-002: the fan-out's restore must never name the source as its target.
 
-    ``create_restore`` is the boundary this harness stubs, so its arguments are
-    the only place the target is observable here — and a restore pointed at the
-    source's namespace or deployment would wipe and rebuild the *source*
-    namespace from the capture, which is the worst failure this feature can
-    have. Previously the stub collected the calls and the harness threw them
+    ``create_restore`` is the boundary this harness stubs, so its arguments and
+    the row its stub records are the only places the target is observable here
+    — and a restore pointed at the source's namespace or deployment would wipe
+    and rebuild the *source* namespace from the capture, which is the worst
+    failure this feature can have. Previously the stub collected the calls and the harness threw them
     away, leaving only ``target_deployment_id``'s presence pinned incidentally
     by a ``KeyError``.
     """
@@ -1514,11 +1524,11 @@ async def test_the_cross_target_restore_targets_the_counterpart_not_the_source(
     )
     call = restore_calls[0]
     assert call["target_deployment_id"] == counterpart.id
-    assert call["target_namespace"] == f"styrmin-{counterpart.id}"
-    # Spelled out as inequalities too: the assertions above would also hold for
-    # a stub that echoed whatever it was given, but these name the mistake.
+    # The flow names no namespace: ``create_restore`` derives it (#532).
+    assert "target_namespace" not in call
+    # Spelled out as an inequality too: the assertion above would also hold for
+    # a stub that echoed whatever it was given, but this names the mistake.
     assert call["target_deployment_id"] != source_deployment_id
-    assert call["target_namespace"] != f"styrmin-{source_deployment_id}"
 
     # The data comes from the source's own constituent backup, and the restore
     # record the flow attributed on the entry is the one it created.
@@ -1537,6 +1547,7 @@ async def test_the_cross_target_restore_targets_the_counterpart_not_the_source(
     restore = await session.get(Restore, UUID(entry["restore_id"]))
     assert restore is not None
     assert restore.target_namespace == f"styrmin-{counterpart.id}"
+    assert restore.target_namespace != f"styrmin-{source_deployment_id}"
 
 
 @pytest.mark.asyncio
@@ -2976,10 +2987,12 @@ async def _assert_terms_name_the_counterparts(
         [row] = rows.all()
         assert row.id == UUID(entries[name]["counterpart_deployment_id"])
         counterpart_ids[name] = row.id
-    assert {
-        (call["target_deployment_id"], call["target_namespace"])
-        for call in materialised.restore_calls
-    } == {(cp_id, f"styrmin-{cp_id}") for cp_id in counterpart_ids.values()}
+        restore = await session.get(Restore, UUID(entries[name]["restore_id"]))
+        assert restore is not None
+        assert restore.target_namespace == f"styrmin-{row.id}"
+    assert {call["target_deployment_id"] for call in materialised.restore_calls} == set(
+        counterpart_ids.values()
+    )
 
     created = await session.get(Environment, clone.created_environment_id)
     assert created is not None
