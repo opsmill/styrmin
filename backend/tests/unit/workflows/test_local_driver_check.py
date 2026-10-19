@@ -661,6 +661,90 @@ def test_check_logs_its_error_in_the_flow_run_before_it_raises(
     assert not [r for r in caplog.records if r.levelno == logging.INFO]
 
 
+def _make_values_template_a_directory(driver: Path) -> Path:
+    values_template = driver / config.SETTINGS.driver.values_template
+    values_template.unlink()
+    values_template.mkdir()
+    return values_template
+
+
+def _make_actions_file_unreadable(driver: Path) -> Path:
+    actions_file = driver / config.SETTINGS.driver.actions_code_file
+    actions_file.chmod(0)
+    return actions_file
+
+
+@pytest.mark.parametrize(
+    ("change", "error_type"),
+    [
+        pytest.param(
+            _make_values_template_a_directory,
+            IsADirectoryError,
+            id="values-template-is-a-directory",
+        ),
+        pytest.param(
+            _make_actions_file_unreadable,
+            PermissionError,
+            id="unreadable-actions-file",
+            marks=pytest.mark.skipif(
+                os.geteuid() == 0, reason="root reads a file without read permission"
+            ),
+        ),
+    ],
+)
+def test_unreadable_driver_file_is_logged_in_the_flow_run_before_it_raises(
+    driver: Path,
+    job_flow_run_id: uuid.UUID,
+    caplog: pytest.LogCaptureFixture,
+    change: Callable[[Path], Path],
+    error_type: type[OSError],
+) -> None:
+    """An error other than the two typed ones also reaches the hook step (#372 review).
+
+    The hook step shows the first ``ERROR`` log of a crashed flow run, so the
+    check logs the error with the path before it raises.
+    """
+    inputs = _check_inputs(driver)
+    path = change(driver)
+    caplog.set_level(logging.INFO)
+
+    with pytest.raises(error_type):
+        check_local_driver(**inputs)
+
+    (record,) = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    message = record.getMessage()
+    assert message.startswith(
+        f"Could not check the driver files at {driver}: {error_type.__name__}: "
+    )
+    assert str(path) in message
+    assert record.flow_run_id == str(job_flow_run_id)
+
+
+def test_driver_file_removed_after_the_check_raises_the_missing_files_error(
+    driver: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file removed between the check that it exists and its read is a missing file."""
+    inputs = _check_inputs(driver)
+    hash_directory = local_driver.compute_driver_directory_fingerprint
+
+    def _remove_then_hash(directory: Path, **kwargs: Any) -> str:
+        (directory / "actions.py").unlink()
+        return hash_directory(directory, **kwargs)
+
+    monkeypatch.setattr(
+        local_driver, "compute_driver_directory_fingerprint", _remove_then_hash
+    )
+
+    with pytest.raises(DriverFilesNotFoundError) as raised:
+        check_local_driver(**inputs)
+
+    assert str(raised.value).startswith(
+        f"The driver files are not at {driver} {UNKNOWN_IMAGE_WORDS}: "
+        "actions.py not found. "
+    )
+    assert raised.value.missing == ["actions.py"]
+
+
 def test_fingerprint_error_names_the_image_of_the_action(
     driver: Path, job_flow_run_id: uuid.UUID, monkeypatch: pytest.MonkeyPatch
 ) -> None:
