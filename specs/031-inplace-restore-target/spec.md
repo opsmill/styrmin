@@ -17,6 +17,7 @@ From the code on `develop`:
 - The `createRestore` mutation takes `targetNamespace` (required) and `targetInstanceId` (optional) from the client, and passes both unchanged to the restore service and the namespace to the restore flow ([`mutation.py`](../../backend/styrmin_backend/api/schema/mutation.py), `create_restore`).
 - For an in-place restore, the restore service resolves the deployment from the backup's instance. It stores the namespace and the instance it receives on the `Restore` row without comparing them with that deployment ([`service.py`](../../backend/styrmin_backend/services/backup/service.py), `create_restore`).
 - The restore flow deletes the namespace it receives and restores the backup into it ([`workflows/templates/backup.py`](../../backend/styrmin_backend/workflows/templates/backup.py), `execute_velero_restore` and `execute_restore_workflow`).
+- `createRestore` accepts any string as the namespace, including a namespace that no deployment owns. The agent chart's ClusterRole allows `delete` on namespaces in every namespace ([`roles.yaml`](../../helm/agent/templates/roles.yaml)). This follows from the code; it was not run, and which service account the restore Job runs as was not checked.
 - `styrminctl backups restore` builds the namespace from the deployment named with `--target-deployment` or `--target-deployment-id`, unless `--target-namespace` is given. It checks that the backup belongs to that deployment only with `--last` ([`backups.py`](../../cli/src/styrminctl/commands/backups.py), `_prepare_restore`). So `styrminctl backups restore <backup of Y> --target-deployment X` sets deployment Y to `RESTORING`, deletes deployment X's namespace and restores Y's backup into it. This follows from the code; it was not run.
 - The flow uses `targetInstanceId` only for a cross-target restore, which `createRestore` never starts. So a `Restore` row can name an instance of another deployment. The Backups tab never sends `targetInstanceId`, so the rows it creates leave it empty.
 - The Velero Restore and the restore flow decide in different ways whether a restore is cross-target. The Velero Restore compares namespaces: when they differ, it maps the source namespace to the target namespace and leaves out the HelmRelease and, since #531, the service aliases ([`builders/backup.py`](../../backend/styrmin_backend/agent/service/kubernetes/resources/builders/backup.py), `build_velero_restore`). The restore flow compares deployment ids, and only a restore whose deployment ids differ writes the aliases after its recovery. So an in-place restore into another namespace ends with no service aliases in that namespace, and reports no error.
@@ -43,6 +44,11 @@ These answers were not in the PRD. They are flagged for the maintainer to confir
 - Q: `develop` moved from `a5ec9446` to `7f0455be` after the PRD was written, with the fix for #530 (#531). Does that change the fix? → A: No. #531 is the change in which the PRD's "second effect" (an in-place restore into another namespace ends with no service aliases) was found. After this fix the namespaces of a restore differ exactly when its deployment ids differ, so that effect cannot occur.
 - Q: `styrminctl backups restore` also takes `--environment`, which only tells `--target-deployment` which environment a deployment name belongs to. Is it refused with a backup id? → A: No. The PRD names three target options. `--environment` selects no target on its own, so it keeps its current meaning and has no effect with a backup id alone.
 - Q: What does the `Restore` row record when the backup's deployment has no active instance? → A: No target instance, as a cross-target restore into a counterpart without an active instance already does. The restore itself proceeds as today.
+
+### Session 2026-10-19 (critique, [critique-20261019-1.md](critiques/critique-20261019-1.md))
+
+- Q: What does a user who upgrades see? → A: Two consequences of the agreed removal are stated in the edge cases and in the changelog (critique X1). `styrminctl backups restore <backup id> --target-deployment X`, the example in `cli/README.md` before this change, is refused. Clients and server must be upgraded together: a client from before the change sends `targetNamespace` on every restore and the new server refuses it, and a client from after the change sends no `targetNamespace` and a server from before the change refuses it.
+- Q: Should the change carry a `security` changelog fragment, since a `READ_WRITE` user could make the restore flow delete a namespace that no deployment owns? → A: Not decided by the PRD. The change keeps the PRD's fragment types, `removed` and `fixed`, and the Context states the fact. Flagged for the maintainer (critique E3).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -113,7 +119,8 @@ A user who restores an environment, or clones one, gets the same placement as a 
 
 - A backup of an earlier instance of the deployment: Styrmin restores it into the same deployment, which keeps its active instance ([ADR-063](../../dev/adr/0063-restore-of-earlier-instance-backup.md)).
 - A script that passes `--target-namespace`, or a client that sends `targetNamespace` or `targetInstanceId`: it fails until it stops passing the value. The changelog states this.
-- A script that passes a backup id together with `--target-deployment`, even when the backup belongs to that deployment: `styrminctl` refuses it. The script must drop the target option.
+- A script that passes a backup id together with `--target-deployment`, even when the backup belongs to that deployment: `styrminctl` refuses it. The script must drop the target option. Before this change, `cli/README.md` showed this form as its example, so the changelog names it.
+- A client older than the server: a `styrminctl`, a Python SDK or a web page loaded before the upgrade sends `targetNamespace` on every restore, `--last` included, and the new server refuses every one of them. A client newer than the server sends no `targetNamespace`, and a server from before the change refuses it, because the argument is required there. Clients and server must be upgraded together; the changelog says so.
 - A raw `--target-instance-id` with a backup id: today it needs `--target-namespace`. After the fix, `styrminctl` refuses it like the other target options. With `--last`, it still chooses the newest backup of that instance.
 - A restore that an earlier release created with another namespace: its row keeps the namespace it recorded. The in-flight restore guard does not change, so it still finds such a restore while it is pending or in progress ([`service.py`](../../backend/styrmin_backend/services/backup/service.py), `find_in_flight_restore`).
 - The backup's deployment has no active instance: the row records no target instance, and the restore proceeds as today.
@@ -135,14 +142,16 @@ A user who restores an environment, or clones one, gets the same placement as a 
   - Verify with the existing restore query tests.
 - **FR-006**: `styrminctl backups restore` MUST NOT accept `--target-namespace`.
   - Verify with a CLI unit test.
-- **FR-007**: `styrminctl backups restore` MUST refuse a backup id combined with `--target-deployment`, `--target-deployment-id` or `--target-instance-id`, before it calls the server. The error MUST say that these options work only with `--last`.
+- **FR-007**: `styrminctl backups restore` MUST refuse a backup id combined with `--target-deployment`, `--target-deployment-id` or `--target-instance-id`, before it calls the server. The error MUST say that these options work only with `--last`, that a backup is restored into the deployment it was taken of, and that the command works without the option.
   - Verify with a CLI unit test that asserts the SDK is never called.
 - **FR-008**: With `--last`, the three target options MUST keep choosing whose backup history the newest backup comes from.
   - Verify with the existing CLI tests for `--last`.
 - **FR-009**: An environment clone MUST keep restoring each constituent backup into its counterpart deployment's namespace, now computed by the same rule as an in-place restore.
   - Verify with the existing environment clone tests.
 - **FR-010**: The documentation MUST describe the new behaviour in the same change: `cli/README.md`, the `styrminctl` reference and the "Backups and restores" page under `docs/`, `dev/knowledge/backend/api.md`, `dev/knowledge/backend/backup-restore.md`, and the "In-place restore" entry in `CONTEXT.md`. No page MUST still say that a user can restore a backup into another deployment or name a namespace.
-- **FR-011**: The change MUST ship changelog fragments for #532: one of type `removed` for the two GraphQL arguments, the SDK parameters and the CLI option, which states that Styrmin offers no replacement until deployment clone ships; and one of type `fixed` for the bug.
+- **FR-011**: The change MUST ship changelog fragments for #532:
+  - one of type `removed`, for the two GraphQL arguments, the SDK parameters and `--target-namespace`. It MUST state that `styrminctl backups restore` now refuses a backup id combined with a target option, that clients and server must be upgraded together, and that Styrmin offers no replacement until deployment clone ships;
+  - one of type `fixed`, for the bug.
 
 ### Key Entities
 

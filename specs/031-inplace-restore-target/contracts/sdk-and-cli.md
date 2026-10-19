@@ -46,7 +46,7 @@ Help texts change for `--target-deployment`, `--target-deployment-id` and `--tar
 | Invocation | Result |
 |------------|--------|
 | `restore <backup id>` | Calls `create_restore(backup_id=<id>)`. |
-| `restore <backup id> --target-deployment X` (or `--target-deployment-id`, or `--target-instance-id`) | Refused before any call to the server, exit code 1. The error names the three options, says that they work only with `--last`, and says that a backup is restored into the deployment it was taken of. |
+| `restore <backup id> --target-deployment X` (or `--target-deployment-id`, or `--target-instance-id`) | Refused before any call to the server, exit code 1. The error names the three options, says that they work only with `--last`, says that a backup is restored into the deployment it was taken of, and tells the user to run the command again without the option. |
 | `restore <backup id> --target-namespace N` | Rejected by Cyclopts as an unknown option. |
 | `restore <backup id> --last` | Refused, as today: "Provide either a backup_id or --last, not both". |
 | `restore --last --target-deployment X` | Chooses the newest completed, unexpired backup from X's backup history, asks for confirmation for a backup of an earlier instance unless `--yes`, then calls `create_restore(backup_id=<chosen id>)`. |
