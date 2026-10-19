@@ -2,27 +2,17 @@
 
 import asyncio
 from dataclasses import dataclass
-from uuid import UUID
 
 from fast_depends import Depends, inject
 from loguru import logger
-from packaging.specifiers import SpecifierSet
-from packaging.version import InvalidVersion, Version
 from sqlalchemy.exc import IntegrityError
 
 from styrmin_backend import config as styrmin_config
-from styrmin_backend.context.exceptions import InvalidDeploymentContextError
-from styrmin_backend.context.validators import validate_deployment_config
 from styrmin_backend.db.models import (
     Action,
     ApplicationDriverVersion,
-    ApplicationInstance,
     HelmChart,
     HelmRepository,
-    InstanceStatus,
-    Task,
-    TaskStatus,
-    TaskType,
 )
 from styrmin_backend.db.models import (
     ApplicationDriver as ApplicationDriverModel,
@@ -31,33 +21,20 @@ from styrmin_backend.db.models import (
     ApplicationDriverVersion as ApplicationDriverVersionModel,
 )
 from styrmin_backend.domain.models import ComponentConfig
-from styrmin_backend.domain.payloads import (
-    HookDeploymentsPayload,
-)
 from styrmin_backend.services.driver import ApplicationDriver
 from styrmin_backend.services.driver.driver_directory import quoted
 from styrmin_backend.services.driver.exceptions import DriverLoadingError
 from styrmin_backend.services.driver.hooks import ActionRegistrationKey
-from styrmin_backend.services.driver.labels import (
-    driver_directory_of,
-    short_fingerprint,
-)
 from styrmin_backend.services.driver.loaders import (
     get_git_driver_loader,
     get_local_driver_loader,
 )
-from styrmin_backend.services.driver.models.resources.actions import HookKind
 from styrmin_backend.services.driver.models.resources.driver import Info
 from styrmin_backend.services.driver.models.structure.source import (
     GitSource,
     LocalSource,
 )
 from styrmin_backend.services.exceptions import (
-    ApplicationDriverNotFoundError,
-    EnvironmentNotFoundError,
-    InvalidContextError,
-    InvalidVersionError,
-    InvalidVersionSyntaxError,
     ServiceError,
 )
 from styrmin_backend.services.unit_of_work import UnitOfWork
@@ -68,7 +45,6 @@ from styrmin_backend.services.utils import (
 )
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.manager import PrefectManager
-from styrmin_backend.workflows.models import PrefectAction
 
 
 @dataclass(frozen=True)
@@ -540,150 +516,3 @@ async def load_application_driver_from_local_directory(
     # Create the application driver objects in database (idempotent on
     # identity-tuple via ``get_by_identity`` inside).
     return await _store_loaded_driver(application_driver, uow)
-
-
-@inject(cast_result=False)  # type: ignore[arg-type]
-async def instantiate_application(
-    name: str,
-    version: str,
-    application_id: UUID,
-    environment_id: UUID,
-    uow: UnitOfWork,
-    instance_config: dict | None = None,
-    prefect_manager: PrefectManager = Depends(get_manager),
-) -> Task:
-    """Instantiate an application in the given environment.
-
-    Args:
-        name (str): The name of the application instance.
-        application_id (UUID): The id of the application to instantiate.
-        environment_id (UUID): The id of the environment to instantiate the application in.
-        uow (UnitOfWork): The unit of work to use.
-        config (dict | None): The runtime configuration of the application instance.
-        workflow_executor (StyrminWorkflowExecutor): The workflow executor to use.
-
-    Raises:
-        InvalidContextError: If the context is invalid.
-
-    Returns:
-        Task: the task created for the application instantiation.
-    """
-
-    if instance_config is None:
-        instance_config = {}
-
-    try:
-        validate_deployment_config(context=instance_config)
-    except InvalidDeploymentContextError as e:
-        raise InvalidContextError(str(e)) from e
-
-    async with uow:
-        # Get the application
-        application = await uow.application_driver_versions.get(application_id)
-        if application is None:
-            raise ApplicationDriverNotFoundError(
-                f"Application {application_id} could not be found"
-            )
-
-        # Check if the required version match the driver requirement specifier
-        try:
-            if Version(version) not in SpecifierSet(
-                application.application_supported_versions
-            ):
-                raise InvalidVersionError(
-                    f"Version {version} does not match the required version specifier {application.application_supported_versions}"
-                )
-        except InvalidVersion as e:
-            raise InvalidVersionSyntaxError(
-                f"Version {version} is not a valid version string"
-            ) from e
-
-        # Get the environment
-        environment = await uow.environments.get(environment_id)
-        if environment is None:
-            raise EnvironmentNotFoundError(
-                f"Environment {environment_id} could not be found"
-            )
-
-        # Create instance on db
-        application_instance = await uow.instances.create(  # type: ignore[attr-defined]
-            ApplicationInstance(
-                name=name,
-                status=InstanceStatus.PENDING,
-                application_version=version,
-                environment_id=environment.id,
-                application_id=application.id,
-                config=instance_config,
-            )
-        )
-
-        # Spec 013 — pass the driver row's short fingerprint so we resolve
-        # the workflow registered against this exact ``ApplicationDriverVersion``
-        # rather than whatever shares the same (application, version) tuple.
-        instance_fingerprint = short_fingerprint(
-            content_hash=application.content_hash,
-            source_commit_sha=application.source_commit_sha,
-        )
-        # Spec 028 — and the one registered for this row's driver directory.
-        instance_driver_directory = driver_directory_of(
-            source_type=application.source_type,
-            source_path=application.source_path,
-        )
-        prehook, posthook, corehook = await asyncio.gather(
-            prefect_manager.get_user_action_deployment_id(
-                application=application.name,  # type: ignore[attr-defined]
-                hook=HookKind.SETUP,
-                mode="pre",
-                version=application.application_supported_versions,
-                fingerprint=instance_fingerprint,
-                driver_directory=instance_driver_directory,
-            ),
-            prefect_manager.get_user_action_deployment_id(
-                application=application.name,  # type: ignore[attr-defined]
-                hook=HookKind.SETUP,
-                mode="post",
-                version=application.application_supported_versions,
-                fingerprint=instance_fingerprint,
-                driver_directory=instance_driver_directory,
-            ),
-            prefect_manager.get_action_deployment_id(
-                action=PrefectAction.CREATE_HELM_RELEASE
-            ),
-        )
-        assert corehook is not None, "Core hook deployment not found"
-
-        hook_deployments_payload = HookDeploymentsPayload(
-            core_hook=corehook,
-            pre_hook=prehook,
-            post_hook=posthook,
-        )
-
-        task = await uow.tasks.create(
-            Task(
-                status=TaskStatus.PENDING,
-                type=TaskType.CREATE_INSTANCE,
-                application_instance_id=application_instance.id,
-            )
-        )
-
-        logger.debug("Run the orchestration workflow...")
-        kwargs = {
-            "task_id": task.id,
-            "instance_id": application_instance.id,
-            "hook_deployments_payload": hook_deployments_payload,
-        }
-
-        # Run the orchestration workflow
-        flow_info = await prefect_manager.run_action(
-            action=PrefectAction.CREATE_INSTANCE,
-            parameters=kwargs,
-        )
-
-        task.prefect_flow_run_id = flow_info.info.id
-        await uow.tasks.update(task)  # type: ignore[attr-defined]
-
-        await uow.commit()
-
-        result = await uow.tasks.get(task.id)
-        assert result is not None, "Task not found"
-        return result

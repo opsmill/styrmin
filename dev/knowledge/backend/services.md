@@ -12,7 +12,7 @@ styrmin_backend/services/
 ├── deployment.py                  # Deployment orchestration
 ├── deployment_status.py           # Server-side handler for reportDeploymentStatuses
 ├── deployment_timeline.py         # Deployment history with version correlation and context diffs
-├── applications.py                # Driver loading (Git, local, object) and application instantiation
+├── applications.py                # Driver loading (Git, local, object)
 ├── application_drivers.py         # Read-side accessors for application drivers
 ├── instances.py                   # Instance lifecycle
 ├── tasks.py                       # Task state management
@@ -342,7 +342,7 @@ Read-side accessors for application drivers stored in the database.
 
 ### Applications Service (`applications.py`)
 
-Driver loading and application instantiation. The "loaders" pull a driver spec from a source (Git, local directory, or in-memory object), validate it, register its actions with Prefect, and persist the resulting `ApplicationDriver` / `ApplicationDriverVersion` rows.
+Driver loading. The "loaders" pull a driver spec from a source (Git, local directory, or in-memory object), validate it, register its actions with Prefect, and persist the resulting `ApplicationDriver` / `ApplicationDriverVersion` rows.
 
 Loading is **identity-aware** (spec 013): each load computes a provenance fingerprint — `content_hash` (SHA-256 over the canonical three-file input) for local source, `source_commit_sha` (resolved at HEAD) for git source — and looks up via `get_by_identity`. Same identity tuple → the existing row is returned, and nothing else is created or registered. New fingerprint at the same `(driver, source, version)` → a new row is created alongside the existing ones; no row is ever deleted by the load path. The Prefect action registration is keyed on the fingerprint short prefix so historical deployments keep resolving actions to the bytes they were deployed from.
 
@@ -353,7 +353,6 @@ When the identity matches, the load first compares the `icon`, `description` and
 | `load_application_driver_from_object(driver_spec, uow, ...)` | Load a driver from an in-memory `DriverSpec` |
 | `load_application_driver_from_git_repository(repository_url, branch, uow, driver_directory=None) -> LoadedDriverVersion` | Clone a driver from Git and load it from the driver directory, or from the repository root when `driver_directory` is `None` (spec 028). The stored driver directory goes into `source_path`, which is part of the identity |
 | `load_application_driver_from_local_directory(path, uow) -> LoadedDriverVersion` | Load a driver from a local filesystem path |
-| `instantiate_application(...)` | Instantiate an application from a loaded driver |
 
 The Git and local loaders return `LoadedDriverVersion(version, warnings)`: the stored driver version and the warnings of its `spec.info` block (see "Driver information in `spec.info`" below). `_store_loaded_driver` logs each warning before it stores the driver version. `_driver_info_columns` maps `spec.info` to the three columns:
 
