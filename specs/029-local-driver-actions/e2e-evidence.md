@@ -108,3 +108,38 @@ T028 moved `_styrmin_pod_name` from `test_driver_reload_identity.py` into `backe
   PASSED
   =================== 1 passed, 2 warnings in 76.58s (0:01:16) ===================
   ```
+
+## T036: user story 3, a missing registration fails the hook step and loading again repairs it
+
+- Node IDs:
+  - `backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade[api-chromium]`
+  - `backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it[api-chromium]`
+
+  The user story 3 test reuses the deployment that the user story 1 test upgrades to `0.2.0`, so both run in one session, in this order. The test fails with a message that names the user story 1 test when the deployment is not running at `0.2.0`. The `[ui-chromium]` variants are skipped by their `api_only` marker.
+- What the test does:
+  - It deletes the three Prefect deployments tagged `directory//source/backend/tests/e2e/fixtures/drivers/local-actions`.
+  - The version change to `0.1.0`, pinned to the driver version, returns a `failed` task of type `upgrade_instance`. Its `hook:upgrade:core` step fails with the `ActionNotRegisteredError` text, and the deployment stays running at `0.2.0` with the same driver version.
+  - Loading the driver again returns the same driver version and registers the three actions again.
+  - The same version change returns a new task that succeeds with a succeeded `hook:upgrade:core` step. The `upgrade` marker is in the logs of the action's flow run, logged after the second request, and the deployment runs `0.1.0`.
+  - The test deletes the deployment at its end.
+- Command. `STYRMIN_IMAGE_VER` gives this session's image its own tag, because other worktrees build `registry.opsmill.io/opsmill/styrmin:latest` on the same Docker daemon:
+
+  ```shell
+  export STYRMIN_IMAGE_VER=fac-029-us3
+  docker compose build server
+  sleep infinity | uv run pytest "backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade" "backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it" -v -s --pdb 2>&1 | tee /tmp/029-us3.log
+  ```
+
+- Start: 2026-10-19T11:42:03Z. End: 2026-10-19T11:45:34Z (209.85 s). The first run passed.
+- vCluster: `pytest-533af663-ec83-4989-b8fc-cb01dbd0955b`, kubeconfig `/tmp/pytest-of-ubuntu/pytest-69/vcluster0/kubeconfig`. Torn down at the end of the session.
+- Styrmin image: `registry.opsmill.io/opsmill/styrmin:fac-029-us3`, built from the working tree by the `styrmin_deployment` fixture (image id `sha256:23ea8fa8736a33d209c5380387416f6b1e865abea33e3f1a063cfa1ea8afb155`). It holds the backend changes of T029, T031 and T033.
+- Result lines:
+
+  ```text
+  backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade[api-chromium]
+  PASSED
+  backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it[api-chromium] PASSED
+  backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade[ui-chromium] SKIPPED
+  backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it[ui-chromium] SKIPPED
+  ============= 2 passed, 2 skipped, 6 warnings in 209.85s (0:03:29) =============
+  ```
