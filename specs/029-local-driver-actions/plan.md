@@ -122,6 +122,8 @@ Three typed errors in `services/driver/exceptions.py`; their messages are part o
 | `dev/knowledge/backend/services.md` | Line 347: a repeated load registers the actions that hooks cannot resolve. |
 | `dev/knowledge/backend/api.md` | `loadLocalApplicationDriverVersion` row: the load registers the driver's actions, also when it returns an existing version, and refuses a path with `{` or `}` for a driver with actions. |
 | `backend/styrmin_backend/workflows/catalogue.py` | Docstring at line 142: remove `instantiate_application`. |
+| `driver/DRIVERS.md` | "Actions" section: what an action's `image` must hold for a driver loaded from a local directory (the driver at the same path, a `styrmin_backend` with the check step), next to the existing Prefect 3.6.9 rule for git. |
+| `dev/README.md` | ADR index: entry for ADR-081. |
 | `dev/adr/0081-local-driver-actions-run-from-the-path-in-the-job-image.md` (new) | The decisions of the PRD and of R-001 to R-010, with the rejected alternatives. |
 | `dev/adr/0053-driver-version-provenance-fingerprint.md` | Amendment note: a repeated load registers missing actions; a local version's action checks the files at its path against the fingerprint. |
 | `CONTEXT.md` | Entries Action and Provenance fingerprint. |
