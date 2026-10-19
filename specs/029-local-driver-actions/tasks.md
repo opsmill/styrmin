@@ -169,7 +169,7 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
   - `_action_image()` returns the deployment's `job_variables` image, else the work pool default, else the fallback text, with a fake Prefect client and `PREFECT__FLOW_RUN_ID` set;
   - `LocalDriverActionWorkflowDefinition.get_function()` raises the same errors before it imports;
   - a subprocess run with an empty environment (`env={}` plus `PATH`) imports `styrmin_backend.workflows.local_driver` and exits 0 (critique E1).
-- [ ] T026 [US2] In `backend/tests/e2e/test_local_driver_actions.py` add a module-scoped fixture `local_actions_check_image`:
+- [X] T026 [US2] Superseded, not implemented: an action's `image:` has no effect, because the agent runs every action in its own pod, so the image this task builds would never be used. T027 covers FR-003 with an edited copy in the agent pod (implementation sync, 2026-10-19). Original text: in `backend/tests/e2e/test_local_driver_actions.py` add a module-scoped fixture `local_actions_check_image`:
   - choose a per-session path `/tmp/local-actions-check-<session hex>`;
   - write a variant of the fixture driver named `local-actions-check` whose three actions set `image: local-actions-check:<session hex>`;
   - build that image with `docker build` `FROM` the Styrmin image under test (`registry.opsmill.io/opsmill/styrmin:<STYRMIN_IMAGE_VER or latest>`, the tag that `styrmin_deployment` installs), `COPY` the variant with an edited `actions.py` (`code=B`) to the per-session path;
@@ -373,3 +373,11 @@ After T015 and T018:
 4. Phase 5 (US3): the hook step recorded by `apply_state`, registration on a repeated load, the request check, and the repair scenario.
 5. Phase 6: documentation, the ADR, the CONTEXT entries and the changelog fragment in the same change (Constitution §VII).
 6. Phase 7: lint, the unit and functional suites, the whole E2E module and the regression modules with recorded evidence. The feature is not done until T048 and T049 have recorded `PASSED` lines.
+
+---
+
+## Remediation: Gaps
+
+**Purpose**: close the drift found when the spec was reconciled with the implementation on 2026-10-19 (spec "Revision: Implementation Sync 2026-10-19").
+
+- [X] T053 [US1] Correct the docstring of `set_directory_pull_step`, which says the clone folder holds the code "whatever the action's image is" and that "an action's own image needs Prefect 3.6.9 or later". Say that the action runs in the agent pod, and that the image the agent runs needs Prefect 3.6.9 or later, in `backend/styrmin_backend/workflows/utils.py` [Sync: Gap Report]
