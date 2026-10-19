@@ -75,8 +75,7 @@ that checks the driver files before each action runs.
 
 An action's `image:` field has no effect today, for a driver loaded from
 a local directory or from git: the agent runs every action as a process
-in its own pod, not in a container of that image. A follow-up issue
-records this.
+in its own pod, not in a container of that image.
 
 When the driver declares actions, Styrmin refuses a path that contains
 `{` or `}`. Prefect fills in `{{ ... }}` templates in the path before the
@@ -190,8 +189,10 @@ driver again: `load-local-version` with the path, or `load-version` with
 the repository, the branch and the driver directory.
 
 An upgrade request finds this error before it changes the deployment. It
-returns a failed task whose "Run the upgrade hook" step holds the error,
-and the deployment keeps its application version and driver version.
+returns a failed task, and the deployment keeps its application version
+and driver version. The error is on the step of the hook and mode whose
+action has no registered flow: "Run the upgrade hook", "Run the upgrade
+pre-hook" or "Run the upgrade post-hook".
 `styrminctl deployments update-version` and `styrminctl deployments apply`
 print the task id and the error and exit with code 1:
 
@@ -238,10 +239,9 @@ version, as after any failed upgrade. Then:
   action.
 
 Styrmin cannot run the upgrade action of that application version again;
-only a change to another application version runs an upgrade action. A
-follow-up issue records this. To avoid the case, load the target driver
-version right before you request an upgrade, so its files at the path are
-the files the check expects.
+only a change to another application version runs an upgrade action. To
+avoid the case, load the target driver version right before you request
+an upgrade, so its files at the path are the files the check expects.
 
 #### Logs of a crashed action are shown on its hook step
 

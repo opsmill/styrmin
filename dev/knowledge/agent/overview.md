@@ -246,7 +246,7 @@ post-rendered one, so it includes the replica override or driver default
 
 | File | Purpose |
 |------|---------|
-| [agent/tasks/orchestration.py](backend/styrmin_backend/agent/tasks/orchestration.py) | Orchestration flow definitions: `apply_state` and `run_job` run on the task-worker, the CRD flows and `run_job_command` on the agent's Prefect worker |
+| [agent/tasks/orchestration.py](../../../backend/styrmin_backend/agent/tasks/orchestration.py) | Orchestration flow definitions: `apply_state` and `run_job` run on the task-worker, the CRD flows and `run_job_command` on the agent's Prefect worker |
 | [agent/tasks/application.py](backend/styrmin_backend/agent/tasks/application.py) | `create_helm_release`, `update_helm_release` |
 | [agent/tasks/core.py](backend/styrmin_backend/agent/tasks/core.py) | Core rendering tasks |
 | [agent/service/kubernetes/resources/custom_resource.py](backend/styrmin_backend/agent/service/kubernetes/resources/custom_resource.py) | HelmRelease CRD |

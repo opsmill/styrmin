@@ -44,8 +44,10 @@ The **agent** is one container running _inside_ the Kubernetes cluster.
 It's the only thing in Styrmin that talks to Kubernetes directly.
 Specifically, the agent runs three coroutines side by side:
 
-- **A Prefect worker**, which picks up workflows the server has
-  scheduled (deploys, upgrades, backups, restores) and runs them.
+- **A Prefect worker**, which runs the flows that act on the cluster,
+  such as the flow that writes a deployment's `StyrminDeployment` or the
+  flow that runs a Velero backup, and the actions of drivers. It polls
+  the work pool `user-work-pool`.
 - **An operator** (built on a library called `kopf`), which watches for
   changes to Styrmin's own custom resources and reconciles them into
   Kubernetes objects. See
@@ -69,8 +71,12 @@ server uses:
 
 1. **Prefect flows.** For one-off jobs (deploy, upgrade, backup,
    restore), the server submits a Prefect flow run and writes a `Task`
-   row in the database to track it. The agent's Prefect worker pulls
-   the flow from Prefect and runs it.
+   row in the database to track it. The `task-worker` of the server's
+   Helm chart runs this flow, such as `apply_state`, from the work pool
+   `styrmin-work-pool`. The flow starts the flows that act on the
+   cluster, and the driver's actions, on the work pool `user-work-pool`,
+   where the agent's Prefect worker pulls them from Prefect and runs
+   them.
 2. **`StyrminDeployment` custom resources.** For "this is the
    long-running desired state of a deployment", the server writes a
    Kubernetes custom resource into the cluster. The agent's operator

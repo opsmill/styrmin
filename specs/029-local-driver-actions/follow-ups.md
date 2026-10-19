@@ -83,17 +83,24 @@ Effect: after the deployment is deleted, an empty namespace named after the depl
 
 Code: [`services/deployment.py`](../../backend/styrmin_backend/services/deployment.py) (`delete_deployment`), [`agent/tasks/orchestration.py`](../../backend/styrmin_backend/agent/tasks/orchestration.py) (`create_instance_crd`). Task: T052 in [tasks.md](tasks.md).
 
-### Correct the documentation that says every Prefect flow runs on the agent's worker
+### Give a local driver version loaded from a relative path its own action registrations
 
-What is wrong: three texts say that the flows the server submits run on the agent's Prefect worker:
+What is wrong: the key under which the actions of a driver version are registered and looked up holds no source type. Its `directory/` tag holds the driver directory of a git driver version and the path of a local driver version as it was given on the server (`action_directory_of` in [`services/driver/labels.py`](../../backend/styrmin_backend/services/driver/labels.py)). A git driver directory never starts with `/`, because `normalise_driver_directory` refuses it. A local path starts with `/` only when it was given as an absolute path: the CLI (`styrminctl drivers load-local-version`), the SDK (`load_local_version`), the GraphQL mutation `loadLocalApplicationDriverVersion` and `LocalDriverProvider` ([`services/driver/provider.py`](../../backend/styrmin_backend/services/driver/provider.py)) pass the path on as given. `LocalDriverProvider` checks only that the path exists and is a folder, relative to the working directory of the server process.
 
-- [`glossary.md`](../../docs/docs/concepts-and-architecture/glossary.md), line 151: "submitted by the server and executed on the agent's Prefect worker";
-- [`architecture.md`](../../docs/docs/concepts-and-architecture/architecture.md), line 72: "The agent's Prefect worker pulls the flow from Prefect and runs it";
-- [`CONTEXT.md`](../../CONTEXT.md), entry "Prefect": "Flows submitted by the server run on the agent's Prefect worker".
+A local driver version loaded from a relative path, such as `drivers/my-app`, therefore gets the same tags, and for an action of the same name the same Prefect deployment name, as a git driver version of the same driver and supported versions loaded from the driver directory `drivers/my-app`, when the first 7 characters of its `content_hash` equal those of the git commit SHA. By chance, two 7-character fingerprints are equal for about 1 in 268 million pairs.
 
-The internal workflows, such as `apply_state` and `run_job`, run on the work pool `styrmin-work-pool`, which the `task-worker` of the server chart polls ([`task-worker-deployment.yaml`](../../helm/styrmin/templates/styrmin-server/task-worker-deployment.yaml), [`workflows/catalogue.py`](../../backend/styrmin_backend/workflows/catalogue.py)). The user workflows, such as the remediation flows and the actions, run on `user-work-pool` in the agent. On the dev stack of T050, the `apply-state` flow run was in the log of the `task-worker` container and the actions were in the log of the agent container.
+Effect, read from the code and not tested:
 
-Effect: an operator who follows the documentation looks for a failed `apply_state` flow run in the agent's log, but it is in the log of the server chart's `task-worker`.
+- When the two keys are equal, `ensure_action_registrations` finds the flows of the driver version loaded first and registers nothing for the second one, so the hooks of the second driver version run the actions of the first one. When the git driver version was loaded first, the local driver version runs the git code, and the check of its own files does not run.
+- Without an equal key, the check of a local action resolves a relative path against the working directory of the flow run's process, which is a temporary folder that the agent's `ProcessWorker` creates. The actions of a local driver version loaded from a relative path are therefore expected to fail with `DriverFilesNotFoundError`.
+
+These texts say that a local value always starts with `/` and must be corrected with the fix: [research R-003](research.md#r-003-registration-key-of-a-local-driver-versions-actions) ("A `directory/` value of a local version starts with `/` and a git value never does, so the two cannot match").
+
+Options, not decided:
+
+- Refuse a relative path when a driver is loaded from a local directory.
+- Make the path absolute on the server when a driver is loaded. The stored `source_path` then differs from the path that the user gave.
+- Add the source type to the registration key, as a tag and in the deployment name. Registrations made before the change would then need to be found without that tag.
 
 ### Reconcile the spec, research and contracts of 029 with actions that run in the agent pod
 

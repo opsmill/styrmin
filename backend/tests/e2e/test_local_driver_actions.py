@@ -137,7 +137,7 @@ SPEC_FILE = "driver.styrmin.yml"
 VALUES_TEMPLATE = "values.j2.yml"
 ACTIONS_FILE = "actions.py"
 
-# A create or an upgrade runs one or two action Jobs and a Helm rollout.
+# A create or an upgrade runs one or two actions, as processes in the agent pod, and a Helm rollout.
 TASK_TIMEOUT = 600.0
 INGRESS_TEARDOWN_TIMEOUT = 300.0
 LOG_TIMEOUT = 120.0
