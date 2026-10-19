@@ -163,3 +163,67 @@ Of the 199 deselected nodes, 193 are outside `shard_backup` and were deselected 
 ### Cleanup after the session
 
 pytest exited after the summary line. The `sleep infinity` process of this run (PID 2416149) was then stopped by its PID. `vcluster list --driver=docker` listed no vcluster afterwards, and no Docker container with the name `faaeb3b0` remained.
+
+## T040: the enterprise Infrahub node of `shard_infrahub` passed under `api-chromium`
+
+The session ran on commit `463fa1a6` of the branch `fac/remove-targetnamespace-restore-8n884`. No source file changed after commit `133ed150`, so the session reused the image tag of T038. It covers `test_infrahub_enterprise_backup_and_restore_lifecycle`, which this branch modifies and which carries the `api_only` marker.
+
+The enterprise fixtures `load_infrahub_enterprise` and `deployed_infrahub_enterprise_app` in `backend/tests/e2e/conftest.py` read no license key, registry login or environment variable. The driver `driver/examples/infrahub-enterprise` pulls the chart `oci://registry.opsmill.io/opsmill/chart/infrahub-enterprise` version 4.19.2, which `helm show chart` pulled from this host without a login before the session.
+
+| Item | Value |
+|---|---|
+| Exact command | `export STYRMIN_IMAGE_VER=inplace-restore-133ed150; sleep infinity \| uv run pytest "backend/tests/e2e/test_infrahub_backup_restore.py::test_infrahub_enterprise_backup_and_restore_lifecycle" -k "api-chromium" -v -s --pdb 2>&1 \| tee <scratchpad>/t040.log` |
+| Start (ISO 8601, UTC) | `2026-10-19T17:45:31+00:00` |
+| End (ISO 8601, UTC) | `2026-10-19T17:52:13+00:00`, recorded after pytest printed the summary line; pytest reports 398.58 s |
+| Image tag | `registry.opsmill.io/opsmill/styrmin:inplace-restore-133ed150` |
+| Image digest that the Styrmin pods ran | `sha256:ddf7bb946143d0226c69746a58054f1156d5e316ff08ac28ea7f382aa980a5e9` |
+| vcluster name | `pytest-1324c775-ee94-4e7a-b521-6970bd942777`, deleted by the fixture teardown (`Successfully deleted virtual cluster pytest-1324c775-ee94-4e7a-b521-6970bd942777`) |
+| Kubeconfig path | `/tmp/pytest-of-ubuntu/pytest-129/vcluster0/kubeconfig` |
+
+`<scratchpad>` is the session scratchpad directory of the agent that ran the command. The log file is not committed.
+
+### Which image the session ran
+
+The `styrmin_deployment` fixture ran `docker compose build` for the `task-worker`, `agent-operator` and `server` services under the tag of T038. Every `RUN` and `COPY` step of the Styrmin image came from the cache (`CACHED`), and the image creation time stayed `2026-10-19T17:10:24Z`. The last of the three builds to write the tag moved it to the digest `sha256:ddf7bb946143d0226c69746a58054f1156d5e316ff08ac28ea7f382aa980a5e9`, whose `com.docker.compose.service` label is `agent-operator`. T038 records another digest for the same label; this session did not check which part of the image index differs.
+
+During the session, `kubectl get pods -n styrmin -o jsonpath='{..imageID}'` reported that image ID for the containers of the `styrmin-server`, `styrmin-styrmin-agent-agent` and `styrmin-task-worker` pods.
+
+### Pytest node ID and verbatim `PASSED` line
+
+ANSI color codes are removed. Fixture setup output separates the node ID from its `PASSED` line, which shares its line with the vcluster teardown output.
+
+```text
+backend/tests/e2e/test_infrahub_backup_restore.py::test_infrahub_enterprise_backup_and_restore_lifecycle[api-chromium] 17:45:32 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+[fixture setup output]
+PASSED17:52:06 info Removing vCluster container vcluster.cp.pytest-1324c775-ee94-4e7a-b521-6970bd942777...
+```
+
+### Final pytest summary line
+
+```text
+=========== 1 passed, 1 deselected, 4 warnings in 398.58s (0:06:38) ============
+```
+
+The four warnings are not caused by this change:
+
+- one `DeprecationWarning` from `kr8s/_vendored/asyncache/__init__.py:81`, because `asyncio.iscoroutinefunction` is deprecated in Python 3.14;
+- three `UserWarning` lines from `kr8s/_api.py:91`, because kr8s 0.20.15 supports Kubernetes 1.28 to 1.35 and the vcluster runs v1.36.0.
+
+### What the passing node checks for #532
+
+The test deploys the `infrahub-enterprise` driver at version 1.6.0, writes a `BuiltinTag` node to Neo4j and a file to the Infrahub object store on the server's volume, and takes a backup. It deletes the tag, then restores the backup with `client.backups.create_restore(backup_id=backup.id)`, which sends only the backup id; before this branch, the call also passed `target_namespace=namespace`. It checks that the restore completes, that the pods of `styrmin-<deployment id>` become ready, and that the tag and the file are back in that namespace.
+
+### Nodes of `shard_infrahub` that did not run in this session
+
+- `backend/tests/e2e/test_infrahub_backup_restore.py::test_infrahub_enterprise_backup_and_restore_lifecycle[ui-chromium]` was deselected by `-k "api-chromium"`. The test carries the `api_only` marker, and CI does not run the `ui` cell of `shard_infrahub`.
+- `backend/tests/e2e/test_infrahub_backup_restore.py::test_infrahub_backup_and_restore_lifecycle` was not selected, because the command names only the enterprise test. This branch changes its restore call in the same way, but the test carries `@pytest.mark.skip(reason="backup/restore not supported with community")`, so it runs in no session. pytest's verbatim output for its `api-chromium` variant, run with `-rs` after the session, took 0.01 s and booted no vcluster:
+
+  ```text
+  SKIPPED [1] backend/tests/e2e/test_infrahub_backup_restore.py:100: backup/restore not supported with community
+  ```
+
+- `backend/tests/e2e/test_infrahub_services.py` also belongs to `shard_infrahub`. This branch does not modify it, and task T040 does not ask for it.
+
+### Cleanup after the session
+
+pytest and `tee` exited after the summary line. The `sleep infinity` process of this run (PID 2513524) was then stopped by its PID. `vcluster list --driver=docker` listed no vcluster afterwards, and no Docker container or network with the name `1324c775` remained.
