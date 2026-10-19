@@ -7,11 +7,24 @@ Covers:
   zero-length entry).
 - Length-prefix framing collision-resistance (no boundary collisions).
 - Output shape (64 lowercase hex chars).
+
+And :func:`compute_driver_directory_fingerprint` (spec 029, T005): it equals
+the ``content_hash`` of the local loader, changes when any of the three
+files changes, and raises ``FileNotFoundError`` for a missing required file.
 """
 
 import re
+import shutil
+from pathlib import Path
 
-from styrmin_backend.services.driver.hash import compute_driver_content_hash
+import pytest
+
+from styrmin_backend import config
+from styrmin_backend.services.driver.hash import (
+    compute_driver_content_hash,
+    compute_driver_directory_fingerprint,
+)
+from styrmin_backend.services.driver.loaders import get_local_driver_loader
 
 # Sample bytes used across tests. Kept short and human-readable so failures
 # print legibly.
@@ -107,3 +120,91 @@ def test_deterministic_across_repeated_calls() -> None:
     """Hashing the same inputs many times in a row yields the same digest."""
     digests = {compute_driver_content_hash(SPEC, VALUES, ACTIONS) for _ in range(10)}
     assert len(digests) == 1
+
+
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
+_SIMPLE_APP = _REPOSITORY_ROOT / "driver" / "examples" / "simple-app"
+_LOCAL_DRIVER_DIRECTORY = Path(__file__).parent / "fixtures" / "local_driver_directory"
+
+
+def _fingerprint(directory: Path, *, include_actions: bool = True) -> str:
+    """The fingerprint of ``directory`` with the file names the loader uses."""
+    driver_settings = config.SETTINGS.driver
+    return compute_driver_directory_fingerprint(
+        directory,
+        spec_file=driver_settings.spec_file,
+        values_template=driver_settings.values_template,
+        actions_file=driver_settings.actions_code_file,
+        include_actions=include_actions,
+    )
+
+
+@pytest.fixture
+def driver_copy(tmp_path: Path) -> Path:
+    """A copy of the ``simple-app`` example driver, which declares actions."""
+    return Path(shutil.copytree(_SIMPLE_APP, tmp_path / "simple-app"))
+
+
+@pytest.mark.parametrize(
+    "directory",
+    [
+        pytest.param(_SIMPLE_APP, id="simple-app"),
+        pytest.param(_LOCAL_DRIVER_DIRECTORY, id="local_driver_directory"),
+    ],
+)
+def test_directory_fingerprint_equals_the_local_loader_content_hash(
+    directory: Path,
+) -> None:
+    loaded = get_local_driver_loader(str(directory)).load_driver()
+
+    assert loaded.driver_spec.spec.actions
+    assert _fingerprint(directory) == loaded.content_hash
+
+
+@pytest.mark.parametrize(
+    "file_name",
+    [
+        pytest.param(config.SETTINGS.driver.actions_code_file, id="actions"),
+        pytest.param(config.SETTINGS.driver.values_template, id="values-template"),
+        pytest.param(config.SETTINGS.driver.spec_file, id="spec-file"),
+    ],
+)
+def test_directory_fingerprint_changes_when_a_driver_file_changes(
+    driver_copy: Path, file_name: str
+) -> None:
+    before = _fingerprint(driver_copy)
+    edited = driver_copy / file_name
+    edited.write_bytes(edited.read_bytes() + b"\n# edited\n")
+
+    assert _fingerprint(driver_copy) != before
+
+
+def test_directory_fingerprint_hashes_a_missing_values_template_as_empty(
+    driver_copy: Path,
+) -> None:
+    values_template = driver_copy / config.SETTINGS.driver.values_template
+    values_template.write_bytes(b"")
+    empty = _fingerprint(driver_copy)
+    values_template.unlink()
+
+    assert _fingerprint(driver_copy) == empty
+
+
+def test_directory_fingerprint_raises_for_a_missing_spec_file(
+    driver_copy: Path,
+) -> None:
+    (driver_copy / config.SETTINGS.driver.spec_file).unlink()
+
+    with pytest.raises(FileNotFoundError):
+        _fingerprint(driver_copy)
+
+
+def test_directory_fingerprint_raises_for_missing_actions_when_included(
+    driver_copy: Path,
+) -> None:
+    (driver_copy / config.SETTINGS.driver.actions_code_file).unlink()
+
+    with pytest.raises(FileNotFoundError):
+        _fingerprint(driver_copy, include_actions=True)
+    # Without actions, the actions file is not read.
+    assert _fingerprint(driver_copy, include_actions=False)

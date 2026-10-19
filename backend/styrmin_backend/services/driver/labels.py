@@ -88,3 +88,25 @@ def driver_directory_of(*, source_type: str, source_path: str | None) -> str | N
     if source_type == "git":
         return source_path
     return None
+
+
+def action_directory_of(*, source_type: str, source_path: str | None) -> str | None:
+    """Return the ``driver_directory`` of a driver version's action registrations and lookups.
+
+    Spec 029 — ``source_path`` for ``git`` (the driver directory, or ``None``
+    for a load from the repository root) and for ``local`` (the absolute path
+    given on the server); ``None`` for any other source type. A local value
+    starts with ``/`` and a git value never does, so the two cannot match.
+    Unlike :func:`driver_directory_of`, which gives the GraphQL field
+    ``driverDirectory``, this gives a local row its path.
+
+    >>> action_directory_of(source_type="git", source_path="drivers/a")
+    'drivers/a'
+    >>> action_directory_of(source_type="local", source_path="/srv/drivers/a")
+    '/srv/drivers/a'
+    >>> action_directory_of(source_type="internal", source_path="x") is None
+    True
+    """
+    if source_type in {"git", "local"}:
+        return source_path
+    return None

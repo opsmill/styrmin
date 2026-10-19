@@ -8,9 +8,17 @@ Covers the rendering matrix from spec 013 §FR-008 / User Story 4:
 - defensive: both set → ``content_hash`` wins
 - empty-string fingerprint behaves like null (falsy)
 - fingerprint of exactly 7 characters is sliced without out-of-bounds error
+
+And ``action_directory_of`` (spec 029): the ``driver_directory`` of a driver
+version's action registrations and lookups.
 """
 
-from styrmin_backend.services.driver.labels import format_driver_version_label
+import pytest
+
+from styrmin_backend.services.driver.labels import (
+    action_directory_of,
+    format_driver_version_label,
+)
 
 
 def test_local_row_renders_first_seven_chars_of_content_hash() -> None:
@@ -65,3 +73,28 @@ def test_exactly_seven_char_fingerprint_is_handled_without_error() -> None:
         source_commit_sha=None,
     )
     assert label == "1.2.3@abcdef0"
+
+
+@pytest.mark.parametrize(
+    ("source_type", "source_path", "expected"),
+    [
+        pytest.param("git", None, None, id="git-repository-root"),
+        pytest.param(
+            "git", "drivers/infrahub", "drivers/infrahub", id="git-driver-directory"
+        ),
+        pytest.param(
+            "local",
+            "/styrmin/drivers/infrahub",
+            "/styrmin/drivers/infrahub",
+            id="local-path",
+        ),
+        pytest.param("internal", "/styrmin/drivers/infrahub", None, id="internal"),
+    ],
+)
+def test_action_directory_of(
+    source_type: str, source_path: str | None, expected: str | None
+) -> None:
+    assert (
+        action_directory_of(source_type=source_type, source_path=source_path)
+        == expected
+    )
