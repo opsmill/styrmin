@@ -33,12 +33,14 @@ reuses the deployment of user story 1 at ``UPGRADE_VERSION``, so it runs after
 that test in the same session. It deletes the Prefect deployments of the
 driver version's actions. A version change to ``CREATE_VERSION`` then returns
 a failed task whose ``hook:upgrade:core`` step names the action without a
-registered flow, and the deployment keeps ``UPGRADE_VERSION``. Loading the
-driver again registers the actions, and the same request runs the upgrade
-action. That second upgrade of the deployment runs ``execute_commands``
-again: it replaces the Job that the first upgrade left, instead of failing
-because a Job of that name exists (#372). The test deletes the deployment at
-its end.
+registered flow, and the deployment keeps ``UPGRADE_VERSION``. A create of a
+second deployment pinned to the same driver version fails its
+``hook:setup:pre`` step with the same kind of error, and ``deleteDeployment``
+then deletes it. Loading the driver again registers the actions, and the
+same request runs the upgrade action. That second upgrade of the deployment
+runs ``execute_commands`` again: it replaces the Job that the first upgrade
+left, instead of failing because a Job of that name exists (#372). The test
+deletes the deployment at its end.
 
 The module-scoped ``local_actions_deployment`` keeps the deployment for the
 later tests of the module and deletes it when the module ends, unless a test
@@ -713,6 +715,7 @@ async def test_driver_missing_from_the_action_image_fails_with_the_missing_files
 @pytest.mark.api_only(reason=API_ONLY_REASON)
 async def test_missing_registration_fails_and_loading_again_repairs_it(
     local_actions_deployment: LocalActionsDeployment,
+    scenario_environment_id: str,
     vcluster: dict,
 ) -> None:
     """User story 3: an action without a registered flow fails its hook step, and loading again repairs it (FR-005 to FR-007).
@@ -771,6 +774,25 @@ async def test_missing_registration_fails_and_loading_again_repairs_it(
     assert deployment.application_version == UPGRADE_VERSION, deployment
     assert deployment.status == "running", deployment
     assert str(deployment.application_driver_version_id) == driver_version_id
+
+    # A create pinned to the same driver version fails its setup pre-hook
+    # step, because the setup/pre action has no registered flow.
+    second_create_task_id = await _create_pinned_deployment(
+        client,
+        environment_id=scenario_environment_id,
+        driver_version_id=driver_version_id,
+        name=f"{DRIVER_NAME}-{uuid.uuid4().hex[:6]}",
+    )
+    second_create_task = await _wait_for_task_end(client, second_create_task_id)
+    assert second_create_task.deployment_id is not None, second_create_task
+    setup_error = _failed_step_error(second_create_task, SETUP_PRE_HOOK)
+    assert f"Driver version {DRIVER_NAME} " in setup_error, setup_error
+    assert "the action pre_setup " in setup_error, setup_error
+    assert "the setup hook" in setup_error, setup_error
+    assert "mode pre" in setup_error, setup_error
+    assert "Load the driver again" in setup_error, setup_error
+    # deleteDeployment deletes the deployment of the failed create (T052).
+    await _delete_and_wait_for_tombstone(client, str(second_create_task.deployment_id))
 
     # Loading the driver again registers its actions. The files did not
     # change, so the load returns the same driver version.
