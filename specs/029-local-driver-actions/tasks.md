@@ -120,14 +120,14 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
 
 ### E2E (US1)
 
-- [ ] T020 [P] [US1] Create the fixture driver `backend/tests/e2e/fixtures/drivers/local-actions/`:
+- [X] T020 [P] [US1] Create the fixture driver `backend/tests/e2e/fixtures/drivers/local-actions/`:
   - `driver.styrmin.yml`: name `local-actions`, `supported_versions: ">=0.1,<1.0"`, `helm.main.location: http://chart-server.default.svc.cluster.local:8080/simple-app`, version `0.1.0`, and the components and services of `backend/tests/e2e/fixtures/drivers/failing-actions/driver.styrmin.yml`;
   - actions `pre_setup` (setup/pre), `post_setup` (setup/post) and `upgrade` (upgrade/core);
   - `values.j2.yml` copied from `failing-actions`;
   - `actions.py`, whose three `@flow` functions only log `LOCAL-ACTIONS-MARKER <action> code=A`. Take each signature from the hook's parameters: `context` for setup; for `upgrade`, see `driver/examples/simple-app/actions.py`.
 
   Add a header comment saying the file must be in the Styrmin image.
-- [ ] T021 [US1] Create `backend/tests/e2e/test_local_driver_actions.py` with `pytestmark = [pytest.mark.ci, pytest.mark.shard_general]` and `@pytest.mark.api_only(reason="The change is in which actions run; the deploy and upgrade UI flows are covered by test_deploy_app")` on each test. Move `_kubectl_cp` from `backend/tests/e2e/test_driver_reload_identity.py` into `backend/tests/e2e/helpers/drivers.py` and import it in both modules. Add a module-scoped fixture that:
+- [X] T021 [US1] Create `backend/tests/e2e/test_local_driver_actions.py` with `pytestmark = [pytest.mark.ci, pytest.mark.shard_general]` and `@pytest.mark.api_only(reason="The change is in which actions run; the deploy and upgrade UI flows are covered by test_deploy_app")` on each test. Move `_kubectl_cp` from `backend/tests/e2e/test_driver_reload_identity.py` into `backend/tests/e2e/helpers/drivers.py` and import it in both modules. Add a module-scoped fixture that:
   - depends on `chart_server`, `simple_app_image` and `simple_app_image_v2`;
   - loads `/source/backend/tests/e2e/fixtures/drivers/local-actions` with `client.drivers.load_local_version`;
   - creates a deployment at `0.1.0` in the scenario environment, pinned to that driver version.
@@ -139,7 +139,7 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
   - the flow run logs of the three actions contain their markers. Read logs with the Prefect client the way `test_driver_version_reselection.py` reads deployments.
 
   Keep the deployment for US3 (T034).
-- [ ] T022 [US1] Run the US1 E2E per the E2E run rules: `docker compose build server`, then `sleep infinity | uv run pytest "backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade" -v -s --pdb 2>&1 | tee /tmp/029-us1.log`; fix failures; record the passing run in `specs/029-local-driver-actions/e2e-evidence.md`
+- [X] T022 [US1] Run the US1 E2E per the E2E run rules: `docker compose build server`, then `sleep infinity | uv run pytest "backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade" -v -s --pdb 2>&1 | tee /tmp/029-us1.log`; fix failures; record the passing run in `specs/029-local-driver-actions/e2e-evidence.md`
 
 **Checkpoint**: a local driver version's setup and upgrade actions run. US1 is usable on its own.
 

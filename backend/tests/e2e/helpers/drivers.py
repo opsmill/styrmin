@@ -1,8 +1,10 @@
-"""Publish driver variants to the harness git server and load them through the SDK."""
+"""Publish driver variants to the harness git server, copy driver files into the
+Styrmin server pod, and load them through the SDK."""
 
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from pathlib import Path
 
 import kr8s.asyncio
@@ -60,3 +62,22 @@ async def publish_misnamed_simple_app_driver(
             force=True,
         )
     return await client.drivers.load_version(git_server["simple-app"], MISNAMED_BRANCH)
+
+
+def _kubectl_cp(kubeconfig: str, local: Path, pod: str, dest: str) -> None:
+    """Copy ``local`` into ``<pod>:<dest>`` (recursively for directories)."""
+    subprocess.run(
+        [
+            "kubectl",
+            "--kubeconfig",
+            kubeconfig,
+            "-n",
+            "styrmin",
+            "cp",
+            "-c",
+            "styrmin-server",
+            str(local),
+            f"{pod}:{dest}",
+        ],
+        check=True,
+    )

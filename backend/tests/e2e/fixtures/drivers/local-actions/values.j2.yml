@@ -1,0 +1,42 @@
+fullnameOverride: styrmin-simple-app
+
+# The image stays at the simple-app build the E2E session provides: the
+# upgrade action only logs a marker, whatever the target version.
+image:
+  repository: simple-app
+  tag: "0.1.0"
+
+ingress:
+  enabled: true
+  className: "{{ instance.config.ingress_class }}"
+  hosts:
+    - host: "{{ services['simple-app'].primary_fqdn }}"
+      paths:
+        - path: /
+          pathType: Prefix
+
+database:
+  host: styrmin-postgresql
+
+postgresql:
+  enabled: true
+  fullnameOverride: styrmin-postgresql
+  auth:
+    username: simple-app
+    password: simple-app-password
+    database: simple_app
+  primary:
+    livenessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+    readinessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+    terminationGracePeriodSeconds: 10
+    persistence:
+      enabled: true
+      size: 1Gi

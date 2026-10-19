@@ -38,12 +38,12 @@ from __future__ import annotations
 import json
 import subprocess
 import uuid
-from pathlib import Path
 
 import pytest
 from styrmin_sdk import StyrminClient
 
 from tests.e2e.conftest import PROJECT_ROOT
+from tests.e2e.helpers.drivers import _kubectl_cp
 
 pytestmark = [
     pytest.mark.ci,
@@ -109,25 +109,6 @@ def _kubectl_exec(kubeconfig: str, pod: str, *cmd: str) -> str:
         check=True,
     )
     return result.stdout
-
-
-def _kubectl_cp(kubeconfig: str, local: Path, pod: str, dest: str) -> None:
-    """Copy ``local`` into ``<pod>:<dest>`` (recursively for directories)."""
-    subprocess.run(
-        [
-            "kubectl",
-            "--kubeconfig",
-            kubeconfig,
-            "-n",
-            "styrmin",
-            "cp",
-            "-c",
-            "styrmin-server",
-            str(local),
-            f"{pod}:{dest}",
-        ],
-        check=True,
-    )
 
 
 @pytest.mark.api_only(
