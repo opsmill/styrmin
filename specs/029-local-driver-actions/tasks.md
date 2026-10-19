@@ -151,19 +151,19 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
 
 **Independent Test**: T027. A driver whose action's `image:` holds an edited copy fails `hook:setup:pre` with the fingerprint error, and a driver copied only into the server pod fails with the missing-files error.
 
-- [ ] T023 [US2] In `backend/styrmin_backend/agent/tasks/utils.py` change `run_deployment_or_fail` per [contracts/local-driver-check.md](contracts/local-driver-check.md#how-the-error-reaches-the-hook-step) (research R-002):
+- [X] T023 [US2] In `backend/styrmin_backend/agent/tasks/utils.py` change `run_deployment_or_fail` per [contracts/local-driver-check.md](contracts/local-driver-check.md#how-the-error-reaches-the-hook-step) (research R-002):
   - for a crashed flow run, read its first `ERROR` log with `client.read_logs(LogFilter(flow_run_id=..., level=LogFilterLevel(ge_=40)), limit=1, sort=LogSort.TIMESTAMP_ASC)`;
   - cut the log to 4,000 characters, and raise `Deployment flow run <id> crashed: <log> (<state message>)`;
   - when the log is absent or the read fails, log a warning and keep today's message.
 
   The failed-state branch is unchanged.
-- [ ] T024 [P] [US2] In `backend/tests/unit/agent/tasks/test_run_deployment_or_fail.py` add, with a fake Prefect client:
+- [X] T024 [P] [US2] In `backend/tests/unit/agent/tasks/test_run_deployment_or_fail.py` add, with a fake Prefect client:
   - a crashed run with an `ERROR` log puts the log text and the state message in the error;
   - a crashed run without one keeps today's text;
   - a read that raises keeps today's text;
   - a 10,000-character log is cut to 4,000;
   - a failed run is unchanged.
-- [ ] T025 [P] [US2] In `backend/tests/unit/workflows/test_local_driver_check.py` add the error paths, and check every "Must contain" part of [contracts/errors.md](contracts/errors.md):
+- [X] T025 [P] [US2] In `backend/tests/unit/workflows/test_local_driver_check.py` add the error paths, and check every "Must contain" part of [contracts/errors.md](contracts/errors.md):
   - a missing directory and a missing `actions.py` raise `DriverFilesNotFoundError` naming what is missing;
   - an edited `actions.py`, values template or spec file raises `DriverFingerprintMismatchError`;
   - `_action_image()` returns the deployment's `job_variables` image, else the work pool default, else the fallback text, with a fake Prefect client and `PREFECT__FLOW_RUN_ID` set;

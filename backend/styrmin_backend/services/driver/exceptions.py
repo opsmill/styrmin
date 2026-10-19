@@ -39,31 +39,61 @@ class MissingDriverSpecificationError(DriverError):
     """A piece of driver data is missing."""
 
 
+def describe_action_image(image: str | None, work_pool: str | None) -> str:
+    """The words that name the image of an action's Job in the errors of the local driver check.
+
+    ``the image <image>`` when the image is known; otherwise ``the default image
+    of the work pool <work_pool>`` when the work pool is known; otherwise
+    ``the image of this action's Job``. Each reads correctly after "in".
+    """
+    if image:
+        return f"the image {image}"
+    if work_pool:
+        return f"the default image of the work pool {work_pool}"
+    return "the image of this action's Job"
+
+
 class DriverFilesNotFoundError(DriverError):
     """The driver files of a local driver version are not in the image of its action's Job.
 
     Raised by the check that runs before an action of a driver version loaded
     from a local directory (spec 029, FR-004). ``missing`` holds the missing
-    file names, or the path itself when the directory is missing.
+    file names, or the path itself when the directory is missing. ``image`` and
+    ``work_pool`` are ``None`` when the Prefect API does not give them; the
+    message then names the image as :func:`describe_action_image` does.
     """
 
     error_code = "NOT_FOUND"
     default_message = "The driver files are not in the action's image"
 
-    def __init__(self, *, path: str, image: str, missing: list[str]) -> None:
+    def __init__(
+        self,
+        *,
+        path: str,
+        image: str | None,
+        missing: list[str],
+        work_pool: str | None = None,
+    ) -> None:
         self.path = path
         self.image = image
+        self.work_pool = work_pool
         self.missing = missing
         super().__init__(
-            f"The driver files are not at {path} in the image {image} that runs this "
-            f"action: {', '.join(missing)} not found. An action's image must hold the "
-            "driver at the same path as the Styrmin server. Add the driver to the image "
-            f"at {path}, or load the driver from a path that the image holds."
+            f"The driver files are not at {path} in "
+            f"{describe_action_image(image, work_pool)}: {', '.join(missing)} not "
+            "found. An action's image must hold the driver at the same path as the "
+            f"Styrmin server. Add the driver to the image at {path}, or load the "
+            "driver from a path that the image holds."
         )
 
     @property
     def error_metadata(self) -> dict[str, Any]:
-        return {"path": self.path, "image": self.image, "missing": self.missing}
+        return {
+            "path": self.path,
+            "image": self.image,
+            "work_pool": self.work_pool,
+            "missing": self.missing,
+        }
 
 
 class DriverFingerprintMismatchError(DriverError):
@@ -72,7 +102,8 @@ class DriverFingerprintMismatchError(DriverError):
     Raised by the check that runs before an action of a driver version loaded
     from a local directory (spec 029, FR-003). ``expected`` and ``actual`` are
     full provenance fingerprints; the message shows their first 7 characters,
-    as driver version labels do.
+    as driver version labels do. ``image`` and ``work_pool`` are as for
+    :class:`DriverFilesNotFoundError`.
     """
 
     error_code = "VALIDATION_ERROR"
@@ -80,14 +111,24 @@ class DriverFingerprintMismatchError(DriverError):
         "The driver files in the action's image differ from the driver version"
     )
 
-    def __init__(self, *, path: str, image: str, expected: str, actual: str) -> None:
+    def __init__(
+        self,
+        *,
+        path: str,
+        image: str | None,
+        expected: str,
+        actual: str,
+        work_pool: str | None = None,
+    ) -> None:
         self.path = path
         self.image = image
+        self.work_pool = work_pool
         self.expected = expected
         self.actual = actual
         super().__init__(
-            f"The driver files at {path} in the image {image} are not the files of "
-            f"this driver version: their provenance fingerprint is {actual[:7]}, and "
+            f"The driver files at {path} in {describe_action_image(image, work_pool)} "
+            "are not the files of this driver version: their provenance fingerprint "
+            f"is {actual[:7]}, and "
             f"the driver version was loaded with {expected[:7]}. The files changed "
             "after the driver was loaded. Rebuild the image with the files you loaded "
             f"and load the driver again, or load the driver again from {path} and use "
@@ -99,6 +140,7 @@ class DriverFingerprintMismatchError(DriverError):
         return {
             "path": self.path,
             "image": self.image,
+            "work_pool": self.work_pool,
             "expected": self.expected,
             "actual": self.actual,
         }

@@ -4,6 +4,16 @@
 
 The message texts are part of the contract: SC-003 requires that a user can fix the problem from the message alone, and tests assert the parts listed under "Must contain".
 
+## Words that name the image of the action's Job
+
+The two errors of the check name the image that runs the action's Job ([local-driver-check.md](local-driver-check.md#the-pull-step), research R-006). The check passes the image name and the work pool that it read from the Prefect API; either is `None` when the API does not give it. `describe_action_image(image, work_pool)` in the same module builds the words `{image words}` that follow "in" in both messages:
+
+| What the check read | `{image words}` |
+|---------------------|-----------------|
+| The image name | `the image {image}`, for example `the image registry.opsmill.io/opsmill/styrmin:latest` |
+| Only the work pool | `the default image of the work pool {work_pool}`, for example `the default image of the work pool user-work-pool` |
+| Neither | `the image of this action's Job` |
+
 ## DriverFilesNotFoundError (FR-004)
 
 ```python
@@ -11,20 +21,27 @@ class DriverFilesNotFoundError(DriverError):
     error_code = "NOT_FOUND"
     default_message = "The driver files are not in the action's image"
 
-    def __init__(self, *, path: str, image: str, missing: list[str]) -> None: ...
+    def __init__(
+        self,
+        *,
+        path: str,
+        image: str | None,
+        missing: list[str],
+        work_pool: str | None = None,
+    ) -> None: ...
 ```
 
 - Raised by `check_local_driver` when `path` is not a directory, or when the driver specification file or the actions file is missing in it. A missing values template is not an error: the fingerprint uses empty bytes for it, as the loader does.
 - `missing` holds the missing file names, or the path itself when the directory is missing.
-- `error_metadata`: `{"path": path, "image": image, "missing": missing}`.
+- `error_metadata`: `{"path": path, "image": image, "work_pool": work_pool, "missing": missing}`.
 
 Message:
 
 ```text
-The driver files are not at {path} in the image {image} that runs this action: {missing, joined with ", "} not found. An action's image must hold the driver at the same path as the Styrmin server. Add the driver to the image at {path}, or load the driver from a path that the image holds.
+The driver files are not at {path} in {image words}: {missing, joined with ", "} not found. An action's image must hold the driver at the same path as the Styrmin server. Add the driver to the image at {path}, or load the driver from a path that the image holds.
 ```
 
-Must contain: the path, the image, each missing name.
+Must contain: the path, the image when the check read it (otherwise the work pool when it read that), each missing name.
 
 ## DriverFingerprintMismatchError (FR-003)
 
@@ -33,20 +50,28 @@ class DriverFingerprintMismatchError(DriverError):
     error_code = "VALIDATION_ERROR"
     default_message = "The driver files in the action's image differ from the driver version"
 
-    def __init__(self, *, path: str, image: str, expected: str, actual: str) -> None: ...
+    def __init__(
+        self,
+        *,
+        path: str,
+        image: str | None,
+        expected: str,
+        actual: str,
+        work_pool: str | None = None,
+    ) -> None: ...
 ```
 
 - Raised by `check_local_driver` when `compute_driver_directory_fingerprint` of the files at `path` differs from `expected`.
 - `expected` and `actual` are full SHA-256 hex digests; the message shows their first 7 characters, as driver version labels do.
-- `error_metadata`: `{"path": path, "image": image, "expected": expected, "actual": actual}`.
+- `error_metadata`: `{"path": path, "image": image, "work_pool": work_pool, "expected": expected, "actual": actual}`.
 
 Message:
 
 ```text
-The driver files at {path} in the image {image} are not the files of this driver version: their provenance fingerprint is {actual[:7]}, and the driver version was loaded with {expected[:7]}. The files changed after the driver was loaded. Rebuild the image with the files you loaded and load the driver again, or load the driver again from {path} and use the new driver version.
+The driver files at {path} in {image words} are not the files of this driver version: their provenance fingerprint is {actual[:7]}, and the driver version was loaded with {expected[:7]}. The files changed after the driver was loaded. Rebuild the image with the files you loaded and load the driver again, or load the driver again from {path} and use the new driver version.
 ```
 
-Must contain: the path, the image, both short fingerprints, "Rebuild the image", "load the driver again".
+Must contain: the path, the image when the check read it (otherwise the work pool when it read that), both short fingerprints, "Rebuild the image", "load the driver again".
 
 ## ActionNotRegisteredError (FR-005)
 

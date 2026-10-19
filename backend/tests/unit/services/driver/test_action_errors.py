@@ -38,6 +38,7 @@ def test_driver_files_not_found_error_names_path_image_and_missing_files() -> No
     assert error.error_metadata == {
         "path": PATH,
         "image": IMAGE,
+        "work_pool": None,
         "missing": ["driver.styrmin.yml", "actions.py"],
     }
 
@@ -71,9 +72,55 @@ def test_driver_fingerprint_mismatch_error_shows_both_short_fingerprints() -> No
     assert error.error_metadata == {
         "path": PATH,
         "image": IMAGE,
+        "work_pool": None,
         "expected": EXPECTED,
         "actual": ACTUAL,
     }
+
+
+# The image of the action's Job is named in a sentence that reads correctly
+# whether the image, only its work pool, or neither is known (research R-006).
+IMAGE_CASES = [
+    pytest.param(IMAGE, "user-work-pool", f"the image {IMAGE}", id="image-known"),
+    pytest.param(
+        None,
+        "user-work-pool",
+        "the default image of the work pool user-work-pool",
+        id="work-pool-known",
+    ),
+    pytest.param(None, None, "the image of this action's Job", id="nothing-known"),
+]
+
+
+@pytest.mark.parametrize(("image", "work_pool", "image_words"), IMAGE_CASES)
+def test_driver_files_not_found_error_names_the_image_in_a_sentence(
+    image: str | None, work_pool: str | None, image_words: str
+) -> None:
+    error = DriverFilesNotFoundError(
+        path=PATH, image=image, work_pool=work_pool, missing=["actions.py"]
+    )
+
+    assert str(error).startswith(
+        f"The driver files are not at {PATH} in {image_words}: actions.py not found. "
+    )
+    assert error.error_metadata["image"] == image
+    assert error.error_metadata["work_pool"] == work_pool
+
+
+@pytest.mark.parametrize(("image", "work_pool", "image_words"), IMAGE_CASES)
+def test_driver_fingerprint_mismatch_error_names_the_image_in_a_sentence(
+    image: str | None, work_pool: str | None, image_words: str
+) -> None:
+    error = DriverFingerprintMismatchError(
+        path=PATH, image=image, work_pool=work_pool, expected=EXPECTED, actual=ACTUAL
+    )
+
+    assert str(error).startswith(
+        f"The driver files at {PATH} in {image_words} are not the files of this "
+        "driver version: "
+    )
+    assert error.error_metadata["image"] == image
+    assert error.error_metadata["work_pool"] == work_pool
 
 
 @pytest.mark.parametrize(

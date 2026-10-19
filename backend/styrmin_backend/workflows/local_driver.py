@@ -27,14 +27,12 @@ from prefect.logging.loggers import PrefectLogAdapter, flow_run_logger, get_logg
 from styrmin_backend.services.driver.exceptions import (
     DriverFilesNotFoundError,
     DriverFingerprintMismatchError,
+    describe_action_image,
 )
 from styrmin_backend.services.driver.hash import compute_driver_directory_fingerprint
 
 # Set by the Prefect worker in the environment of the flow run's Job.
 FLOW_RUN_ID_ENV = "PREFECT__FLOW_RUN_ID"
-
-# The image that the errors name when the Prefect API does not say which image runs the Job.
-UNKNOWN_IMAGE = "the image of this action's Job"
 
 _logger_outside_flow_run = get_logger(__name__)
 
@@ -71,15 +69,17 @@ def check_local_driver_files(
     """
     path = Path(directory)
     if not path.is_dir():
+        image, work_pool = _action_image()
         raise DriverFilesNotFoundError(
-            path=directory, image=_action_image(), missing=[directory]
+            path=directory, image=image, work_pool=work_pool, missing=[directory]
         )
     missing = [
         name for name in (spec_file, actions_file) if not (path / name).is_file()
     ]
     if missing:
+        image, work_pool = _action_image()
         raise DriverFilesNotFoundError(
-            path=directory, image=_action_image(), missing=missing
+            path=directory, image=image, work_pool=work_pool, missing=missing
         )
 
     actual = compute_driver_directory_fingerprint(
@@ -90,8 +90,13 @@ def check_local_driver_files(
         include_actions=True,
     )
     if actual != content_hash:
+        image, work_pool = _action_image()
         raise DriverFingerprintMismatchError(
-            path=directory, image=_action_image(), expected=content_hash, actual=actual
+            path=directory,
+            image=image,
+            work_pool=work_pool,
+            expected=content_hash,
+            actual=actual,
         )
     return actual
 
@@ -165,26 +170,19 @@ def _work_pool_default_image(base_job_template: dict[str, Any]) -> str | None:
     return str(image) if image else None
 
 
-def _image_fallback(work_pool_name: str | None) -> str:
-    """The text that names the image when the Prefect API does not give it."""
-    if work_pool_name:
-        return f"the default image of the work pool {work_pool_name}"
-    return UNKNOWN_IMAGE
-
-
-def _action_image() -> str:
-    """The image of this action's Job, named in the errors of the check (research R-006).
+def _action_image() -> tuple[str | None, str | None]:
+    """The image of this action's Job and its work pool, named in the errors of the check (research R-006).
 
     Reads the flow run in ``PREFECT__FLOW_RUN_ID``, then the ``image`` job
     variable of its deployment, otherwise the default image of its work pool.
-    When the API does not give an image, returns ``the default image of the
-    work pool <name>``, or ``the image of this action's Job`` when the work
-    pool is unknown. A failure to read the API is logged and returns that text,
-    so it never replaces the error of the check.
+    Returns ``(image, work_pool)``; either is ``None`` when the Prefect API
+    does not give it, and the error then names the image as
+    ``describe_action_image`` does. A failure to read the API is logged and
+    returns what was read before it, so it never replaces the error of the check.
     """
     flow_run_id = _flow_run_id()
     if flow_run_id is None:
-        return UNKNOWN_IMAGE
+        return None, None
 
     image: str | None = None
     work_pool_name: str | None = None
@@ -201,12 +199,11 @@ def _action_image() -> str:
                     client.read_work_pool(work_pool_name).base_job_template
                 )
     except Exception:  # noqa: BLE001 - the error of the check must reach the hook step
-        fallback = _image_fallback(work_pool_name)
         _logger().warning(
             "Could not read the image of this action's Job from the Prefect API; the error names %s instead.",
-            fallback,
+            describe_action_image(None, work_pool_name),
             exc_info=True,
         )
-        return fallback
+        return None, work_pool_name
 
-    return str(image) if image else _image_fallback(work_pool_name)
+    return (str(image) if image else None), work_pool_name
