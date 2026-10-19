@@ -115,17 +115,29 @@ def check_local_driver(
     Prefect then changes into ``directory`` and imports the deployment's
     entrypoint from it. The step never imports the actions file.
 
+    When the check fails, the step logs the error at ``ERROR`` in the flow run
+    before it raises. Prefect runs pull steps before the flow run's engine
+    starts: when a step raises, Prefect prints the traceback to the process
+    output, logs nothing in the flow run, and the flow run crashes with only
+    an exit status. The hook step shows the first ``ERROR`` log of a crashed
+    flow run (``run_deployment_or_fail``, research R-002), so this log is how
+    the error reaches the hook step.
+
     Raises:
         DriverFilesNotFoundError: see :func:`check_local_driver_files`.
         DriverFingerprintMismatchError: see :func:`check_local_driver_files`.
     """
-    fingerprint = check_local_driver_files(
-        directory=directory,
-        content_hash=content_hash,
-        spec_file=spec_file,
-        values_template=values_template,
-        actions_file=actions_file,
-    )
+    try:
+        fingerprint = check_local_driver_files(
+            directory=directory,
+            content_hash=content_hash,
+            spec_file=spec_file,
+            values_template=values_template,
+            actions_file=actions_file,
+        )
+    except (DriverFilesNotFoundError, DriverFingerprintMismatchError) as exc:
+        _logger().error("%s", exc)
+        raise
     _logger().info(
         "The driver files at %s have the provenance fingerprint %s of the driver version. "
         "The action runs from %s.",

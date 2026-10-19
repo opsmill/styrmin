@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -555,6 +556,52 @@ def test_failed_image_read_is_logged_and_the_error_still_raises(
         f"error names the default image of the work pool {WORK_POOL} instead."
     )
     assert record.flow_run_id == str(job_flow_run_id)
+
+
+@pytest.mark.parametrize(
+    ("change", "error_type"),
+    [
+        pytest.param(
+            lambda driver: shutil.rmtree(driver),
+            DriverFilesNotFoundError,
+            id="missing-directory",
+        ),
+        pytest.param(
+            lambda driver: (driver / "actions.py").write_text("# edited\n"),
+            DriverFingerprintMismatchError,
+            id="edited-actions-file",
+        ),
+    ],
+)
+def test_check_logs_its_error_in_the_flow_run_before_it_raises(
+    driver: Path,
+    job_flow_run_id: uuid.UUID,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    change: Callable[[Path], object],
+    error_type: type[Exception],
+) -> None:
+    """The error is the first ``ERROR`` log of the flow run, which the hook step shows.
+
+    Prefect runs the pull step before the flow run's engine starts and logs
+    nothing in the flow run when the step raises (Prefect 3.8), so the check
+    logs the error itself (research R-002).
+    """
+    inputs = _check_inputs(driver)
+    change(driver)
+    _use_prefect_client(
+        monkeypatch,
+        FakePrefectClient(job_flow_run_id, job_variables={"image": ACTION_IMAGE}),
+    )
+    caplog.set_level(logging.INFO)
+
+    with pytest.raises(error_type) as raised:
+        check_local_driver(**inputs)
+
+    (record,) = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert record.getMessage() == str(raised.value)
+    assert record.flow_run_id == str(job_flow_run_id)
+    assert not [r for r in caplog.records if r.levelno == logging.INFO]
 
 
 def test_fingerprint_error_names_the_image_of_the_action(
