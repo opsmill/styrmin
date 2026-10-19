@@ -2,6 +2,7 @@ import importlib
 import sys
 from abc import ABC, abstractmethod
 from enum import Enum
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Awaitable, Callable, TypeVar
 from uuid import UUID
@@ -12,11 +13,16 @@ from prefect.client.schemas.actions import DeploymentScheduleCreate
 from prefect.client.schemas.objects import FlowRun
 from prefect.client.schemas.schedules import CronSchedule
 from prefect.runner.storage import GitRepository
+from prefect.utilities.importtools import import_object
 from prefect_github import GitHubCredentials
 from pydantic import BaseModel, Field
 from typing_extensions import Self
 
 from styrmin_backend import __version__
+from styrmin_backend.workflows.local_driver import (
+    CHECK_LOCAL_DRIVER_STEP,
+    check_local_driver_files,
+)
 from styrmin_backend.workflows.utils import get_repository_name, set_directory_pull_step
 
 from .constants import WorkflowType
@@ -211,6 +217,57 @@ class GitSourceWorkflowDefinition(WorkflowDefinition):
             sys.path.append(tmpdir)
             module = importlib.import_module(f"{self.module}")
             return getattr(module, self.function)
+
+
+class LocalDriverActionWorkflowDefinition(WorkflowDefinition):
+    """An action of a driver version loaded from a local directory (spec 029).
+
+    The action runs from ``directory`` in the image of its Job: the deployment's
+    only pull step, :func:`~styrmin_backend.workflows.local_driver.check_local_driver`,
+    checks the provenance fingerprint of the driver files at ``directory`` and
+    returns the directory. Prefect then changes into it and imports the
+    entrypoint ``<module>:<function>`` (research R-001).
+    """
+
+    # The path that the driver version was loaded from (``source_path``).
+    directory: str
+    # The full provenance fingerprint of the driver version (``content_hash``).
+    content_hash: str
+    # The driver file names of the server settings when the driver was loaded.
+    spec_file: str
+    values_template: str
+    actions_file: str
+
+    @property
+    def entrypoint(self) -> str:
+        return f"{self.module}:{self.function}"
+
+    async def to_deployment(self) -> dict[str, Any]:
+        data = await super().to_deployment()
+        data["pull_steps"] = [
+            {
+                CHECK_LOCAL_DRIVER_STEP: {
+                    "directory": self.directory,
+                    "content_hash": self.content_hash,
+                    "spec_file": self.spec_file,
+                    "values_template": self.values_template,
+                    "actions_file": self.actions_file,
+                }
+            }
+        ]
+        return data
+
+    def get_function(self) -> Callable[..., Awaitable[Any]]:
+        # The same check as the pull step, so the files are never imported unchecked.
+        check_local_driver_files(
+            directory=self.directory,
+            content_hash=self.content_hash,
+            spec_file=self.spec_file,
+            values_template=self.values_template,
+            actions_file=self.actions_file,
+        )
+        # Prefect's script loader, as in the action's Job: the directory is on ``sys.path``.
+        return import_object(f"{Path(self.directory) / self.module}:{self.function}")
 
 
 class LocalSourceWorkflowDefinition(WorkflowDefinition):
