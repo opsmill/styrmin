@@ -83,3 +83,83 @@ No node was skipped. Of the 199 deselected nodes, 193 are outside `shard_backup`
 ### Cleanup after the session
 
 pytest exited after the summary line. The `sleep infinity` process of this run (PID 2304973) was then stopped by its PID. `vcluster list --driver=docker` listed no vcluster afterwards, and no Docker container with the name `pytest-d457e9d3` remained.
+
+## T039: the three dual-entrypoint nodes of `shard_backup` passed under `ui-chromium`
+
+The session ran on commit `3e9e3a31` of the branch `fac/remove-targetnamespace-restore-8n884`. No source file changed after commit `133ed150`, so the session reused the image tag of T038. It covers the three nodes of `shard_backup` that run under both scenario drivers: `test_backup_and_restore_lifecycle`, `test_restore_lifecycle_transitions` and `test_mariadb_mongodb_backup_and_restore_lifecycle`.
+
+| Item | Value |
+|---|---|
+| Exact command | `export STYRMIN_IMAGE_VER=inplace-restore-133ed150; sleep infinity \| uv run pytest backend/tests/e2e -m shard_backup -k "ui-chromium" -v -s --pdb 2>&1 \| tee <scratchpad>/t039.log` |
+| Start (ISO 8601, UTC) | `2026-10-19T17:28:33+00:00` |
+| End (ISO 8601, UTC) | `2026-10-19T17:41:27+00:00`, recorded after pytest printed the summary line; pytest reports 766.39 s |
+| Image tag | `registry.opsmill.io/opsmill/styrmin:inplace-restore-133ed150` |
+| Image digest that the Styrmin pods ran | `sha256:b6c5f8d167e3191bfb98138cc7a9ac3cf3cee181e2bbf8d4063df7d66a1b30d7` |
+| vcluster name | `pytest-faaeb3b0-a754-428f-9ef4-3871ba23cdef`, deleted by the fixture teardown (`Successfully deleted virtual cluster pytest-faaeb3b0-a754-428f-9ef4-3871ba23cdef`) |
+| Kubeconfig path | `/tmp/pytest-of-ubuntu/pytest-128/vcluster0/kubeconfig` |
+| Browser | Chromium 145.0.7632.6, launched by Playwright 1.58.0. pytest does not print the version; it was read afterwards with `browser.version` from the same Playwright installation. |
+
+`<scratchpad>` is the session scratchpad directory of the agent that ran the command. The log file is not committed.
+
+### Which image the session ran
+
+The `styrmin_deployment` fixture ran `docker compose build` for the `task-worker`, `agent-operator` and `server` services under the tag of T038. Every build step of the Styrmin image came from the cache (`CACHED`), so the image layers did not change and the image creation time stayed `2026-10-19T17:10:24Z`. Docker Compose writes the label `com.docker.compose.service` with each service's name into the image config. In this session the `task-worker` build was the last to write the tag, so the tag moved to the digest `sha256:b6c5f8d167e3191bfb98138cc7a9ac3cf3cee181e2bbf8d4063df7d66a1b30d7`, whose label is `task-worker`. In T038 the last build was `agent-operator`, which is why the two sessions record different digests for the same layers.
+
+During the session, `kubectl get pods -n styrmin -o jsonpath='{..imageID}'` reported that image ID for the containers of the `styrmin-server`, `styrmin-styrmin-agent-agent` and `styrmin-task-worker` pods.
+
+### Pytest node IDs and verbatim `PASSED` lines
+
+ANSI color codes are removed. Fixture setup output separates the first node ID from its `PASSED` line, and image build output separates the last node ID from its `PASSED` line. The last `PASSED` line shares its line with the vcluster teardown output.
+
+```text
+backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle[ui-chromium] 17:28:35 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+[fixture setup output]
+PASSED
+backend/tests/e2e/test_backup_restore.py::test_restore_lifecycle_transitions[ui-chromium] PASSED
+backend/tests/e2e/test_backup_restore_databases.py::test_mariadb_mongodb_backup_and_restore_lifecycle[ui-chromium] #0 building with "default" instance using docker driver
+[fixture and image build output]
+PASSED17:41:14 info Removing vCluster container vcluster.cp.pytest-faaeb3b0-a754-428f-9ef4-3871ba23cdef...
+```
+
+### Final pytest summary line
+
+```text
+===== 3 passed, 3 skipped, 199 deselected, 6 warnings in 766.39s (0:12:46) =====
+```
+
+The six warnings are not caused by this change:
+
+- one `DeprecationWarning` from `kr8s/_vendored/asyncache/__init__.py:81`, because `asyncio.iscoroutinefunction` is deprecated in Python 3.14;
+- five `UserWarning` lines from `kr8s/_api.py:91`, because kr8s 0.20.15 supports Kubernetes 1.28 to 1.35 and the vcluster runs v1.36.0.
+
+### What the passing nodes check for #532 under `ui-chromium`
+
+Each of the three nodes starts its restore with `scenario_driver.create_restore(backup_id=...)`. Under `ui-chromium`, that call clicks the backup row's Restore button on the deployment detail page and opens the "Restore Backup" dialog. Before it submits the dialog, it reads the read-only "Target Namespace" field and fails the scenario unless the field shows `styrmin-<deployment id>` of the deployment on that page. The web app then sends only the backup id to `createRestore`.
+
+- `test_backup_and_restore_lifecycle` restores a backup of the 0.1.0 instance after the deployment was upgraded to 0.2.0. It then reads the restore back with `client.backups.get_restore` and checks that `target_namespace` is `styrmin-<deployment id>` and that `target_instance_id` is the deployment's active 0.2.0 instance.
+- `test_restore_lifecycle_transitions` checks that the deployment status passes through `restoring` and returns to `running`.
+- `test_mariadb_mongodb_backup_and_restore_lifecycle` writes data to MariaDB and MongoDB, backs it up, changes the data, restores the backup from the web app and checks the data.
+
+### Nodes of `shard_backup` that did not run in this session
+
+Three `ui-chromium` nodes were skipped. Each test carries the `api_only` marker, and `pytest_collection_modifyitems` in `backend/tests/e2e/conftest.py` adds a skip marker with the marker's reason to its `ui-chromium` variant. The session log shows only `SKIPPED`, because `-v` does not print skip reasons. The reasons below are pytest's verbatim output for the same three node IDs, run again with `-rs` after the session. A skip marker skips a test before any fixture starts, so that second run took 0.01 s and booted no vcluster.
+
+```text
+SKIPPED [1] backend/tests/e2e/test_backup_restore.py:1819: api_only: Every action is a raw SDK call — the driver half of ``session_scenario_driver`` is discarded (``_, client = ...``) and no dual-entrypoint driver method is invoked. The flow provokes a rejected restore by passing a non-existent backup id, which the UI cannot express: the restore button is bound to a listed backup row, so there is no Playwright path to submit an unknown id. The [ui-chromium] variant would replay the identical GraphQL calls for ~20 minutes of extra CI time.
+SKIPPED [1] backend/tests/e2e/test_backup_restore.py:1882: api_only: Every action is a raw SDK or Kubernetes call and no dual-entrypoint driver method is invoked. Component tests in BackupRestoreSteps.test.tsx cover how a failed restore step and its error appear on the Backups tab, and test_backup_and_restore_lifecycle[ui-chromium] reads restore steps from the page; a [ui-chromium] variant would repeat the same GraphQL calls with one more deployment boot.
+SKIPPED [1] backend/tests/e2e/test_backup_restore.py:2162: api_only: Every action is an SDK or Kubernetes call and no dual-entrypoint driver method is invoked; the assertions read cluster objects that the UI does not show.
+```
+
+The three skipped nodes are, in the same order:
+
+- `backend/tests/e2e/test_backup_restore.py::test_restore_failure_marks_failed_not_indefinite[ui-chromium]`
+- `backend/tests/e2e/test_backup_restore.py::test_restore_of_removed_velero_backup_fails_velero_step[ui-chromium]`
+- `backend/tests/e2e/test_backup_restore.py::test_renamed_bsl_cluster_objects_follow_the_location_id[ui-chromium]`
+
+Their `api-chromium` variants passed in T038.
+
+Of the 199 deselected nodes, 193 are outside `shard_backup` and were deselected by `-m shard_backup`. The other six are the `api-chromium` variants of this shard, deselected by `-k "ui-chromium"`; pytest gives no other reason for a deselection. T038 ran them.
+
+### Cleanup after the session
+
+pytest exited after the summary line. The `sleep infinity` process of this run (PID 2416149) was then stopped by its PID. `vcluster list --driver=docker` listed no vcluster afterwards, and no Docker container with the name `faaeb3b0` remained.
