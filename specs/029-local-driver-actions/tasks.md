@@ -303,8 +303,8 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
 
 ## Phase 7: Polish and Verification
 
-- [ ] T046 Stage all changes, then run `export npm_config_ignore_workspace=true && uv run invoke format lint`; fix every finding
-- [ ] T047 Run the backend unit and functional suites: `uv run invoke test` (or `uv run pytest backend/tests/unit backend/tests/functional -q`); every test passes
+- [X] T046 Stage all changes, then run `export npm_config_ignore_workspace=true && uv run invoke format lint`; fix every finding
+- [X] T047 Run the backend unit and functional suites: `uv run invoke test` (or `uv run pytest backend/tests/unit backend/tests/functional -q`); every test passes
 - [ ] T048 Run the whole new E2E module in one session per the E2E run rules, after `docker compose build server`: `sleep infinity | uv run pytest backend/tests/e2e/test_local_driver_actions.py -v -s --pdb 2>&1 | tee /tmp/029-e2e.log`; record the run in `specs/029-local-driver-actions/e2e-evidence.md`
 - [ ] T049 Re-run the E2E tests whose path changed, in one session: `sleep infinity | uv run pytest backend/tests/e2e/test_driver_reload_identity.py backend/tests/e2e/test_driver_version_reselection.py backend/tests/e2e/test_task_steps.py backend/tests/e2e/test_deploy_app.py -k "not ui-chromium" -v -s --pdb 2>&1 | tee /tmp/029-regression.log`; record the run in `specs/029-local-driver-actions/e2e-evidence.md`; any test that relied on a skipped hook is a finding to fix, not to skip (SC-002)
 - [ ] T050 Run the quickstart sections 1, 2 and 4 ([quickstart.md](quickstart.md)); on the dev stack, run the section 3 scenarios that the available cluster supports, at least the Semaphore registration and the `simple-app` scenarios, and note in `specs/029-local-driver-actions/e2e-evidence.md` which scenarios ran and which did not
