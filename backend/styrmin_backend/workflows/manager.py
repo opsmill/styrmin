@@ -99,8 +99,9 @@ class PrefectManager:
         a reload of the same driver (#375) overwrite this deployment.
 
         Spec 028 — when ``driver_directory`` is set (the driver version was
-        loaded from a driver directory of its repository), the deployment
-        gets the tag ``directory/<driver_directory>`` and the name ends with
+        loaded from a driver directory of its repository, or, spec 029, from
+        a local directory, whose path is then the driver directory), the
+        deployment gets the tag ``directory/<driver_directory>`` and the name ends with
         the 12-character digest of the driver directory
         (``<workflow> (<application>@<fingerprint> <digest>)``), so two
         driver versions loaded from one commit keep separate deployments.
@@ -149,8 +150,8 @@ class PrefectManager:
 
         Spec 028 — ``driver_directory`` must match the value used at
         registration time, and has no default. When set, the lookup also requires the tag
-        ``directory/<driver_directory>``. When ``None`` (a load from the
-        repository root, or a local driver), deployments with any
+        ``directory/<driver_directory>``. When ``None`` (a git load from the
+        repository root), deployments with any
         ``directory/`` tag are dropped, so a root driver version never runs
         another driver directory's action: Prefect's tag filter cannot
         exclude a tag, so the drop happens here.

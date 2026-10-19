@@ -35,6 +35,9 @@ from styrmin_backend.domain.payloads import (
     HookDeploymentsPayload,
 )
 from styrmin_backend.services.driver import ApplicationDriver
+from styrmin_backend.services.driver.driver_directory import quoted
+from styrmin_backend.services.driver.exceptions import DriverLoadingError
+from styrmin_backend.services.driver.hooks import ActionRegistrationKey
 from styrmin_backend.services.driver.labels import (
     driver_directory_of,
     short_fingerprint,
@@ -45,7 +48,10 @@ from styrmin_backend.services.driver.loaders import (
 )
 from styrmin_backend.services.driver.models.resources.actions import HookKind
 from styrmin_backend.services.driver.models.resources.driver import Info
-from styrmin_backend.services.driver.models.structure.source import GitSource
+from styrmin_backend.services.driver.models.structure.source import (
+    GitSource,
+    LocalSource,
+)
 from styrmin_backend.services.exceptions import (
     ApplicationDriverNotFoundError,
     EnvironmentNotFoundError,
@@ -97,6 +103,99 @@ def _driver_info_columns(info: Info) -> dict[str, object]:
     }
 
 
+async def ensure_action_registrations(
+    driver_object: ApplicationDriver,
+    prefect_manager: PrefectManager,
+) -> int:
+    """Register the declared actions whose hook and mode have no registered flow.
+
+    Spec 029 (FR-001, FR-002, FR-006). The actions of a driver version loaded
+    from git or from a local directory are registered under the key that hook
+    resolution looks them up with (:class:`ActionRegistrationKey`): the driver,
+    the supported versions, the short provenance fingerprint and the driver
+    directory (the path of a local driver version). Each hook and mode that the
+    driver declares is looked up first, and only the actions of the pairs
+    without a registered flow are registered, so a load with nothing to
+    register makes no Prefect write.
+
+    Returns:
+        int: The number of actions registered.
+
+    Raises:
+        DriverLoadingError: The driver declares actions and was loaded from a
+            local path that contains ``{`` or ``}``. Prefect fills in
+            ``{{ ... }}`` templates in the inputs of the step that checks the
+            driver files, so the path could make the check write a secret,
+            such as the action token, into its error (research R-005).
+    """
+    actions = driver_object.driver_spec.spec.actions
+    if not actions:
+        return 0
+    source = driver_object.source
+    if isinstance(source, LocalSource) and ("{" in source.path or "}" in source.path):
+        raise DriverLoadingError(
+            f"Driver path {quoted(source.path)} is refused: it contains '{{' or '}}', "
+            "and the driver declares actions. Prefect fills in '{{ ... }}' templates "
+            "in the path before the action checks the driver files. Load the driver "
+            "from a path without '{' or '}'."
+        )
+
+    key = ActionRegistrationKey.key_for_driver_object(driver_object)
+    pairs = list(dict.fromkeys((action.hook, action.mode) for action in actions))
+    flows = await asyncio.gather(
+        *(
+            prefect_manager.get_user_action_deployment_id(
+                application=key.application,
+                version=key.version,
+                hook=hook,
+                mode=mode,
+                fingerprint=key.fingerprint,
+                driver_directory=key.directory,
+            )
+            for hook, mode in pairs
+        )
+    )
+    missing_pairs = {
+        pair for pair, flow in zip(pairs, flows, strict=True) if flow is None
+    }
+    missing = [
+        action for action in actions if (action.hook, action.mode) in missing_pairs
+    ]
+    if not missing:
+        return 0
+
+    if isinstance(source, GitSource):
+        await prefect_manager.register_token(namespace="user", token=source.token)
+    builder = ActionsWorkflowBuilder(
+        source=source,
+        commit_sha=driver_object.source_commit_sha,
+        content_hash=driver_object.content_hash,
+    )
+    for action in missing:
+        workflow = builder.build_user_action_workflow_definition(action=action)
+        logger.info(
+            "Registering action {} of driver {} ({}): hook={} mode={} "
+            "fingerprint={} driver_directory={}",
+            action.name,
+            key.application,
+            key.version,
+            action.hook.value,
+            action.mode,
+            key.fingerprint,
+            key.directory,
+        )
+        await prefect_manager.register_user_action(
+            workflow=workflow,
+            application=key.application,
+            version=key.version,
+            hook=action.hook,
+            mode=action.mode,
+            fingerprint=key.fingerprint,
+            driver_directory=key.directory,
+        )
+    return len(missing)
+
+
 @inject(cast_result=False)  # type: ignore[arg-type]
 async def load_application_driver_from_object(
     driver_object: ApplicationDriver,
@@ -109,11 +208,19 @@ async def load_application_driver_from_object(
     of a local load, the driver directory of a git load from one, or None for
     a git load from the repository root.
 
+    A new driver version's actions, from git or from a local directory, are
+    registered with :func:`ensure_action_registrations` before the version is
+    stored.
+
     Args:
         driver_object (ApplicationDriver): The object representing the application driver.
 
     Returns:
         Application: The loaded application driver.
+
+    Raises:
+        DriverLoadingError: A local driver with actions was loaded from a path
+            that contains ``{`` or ``}``.
     """
 
     async with uow:
@@ -203,46 +310,6 @@ async def load_application_driver_from_object(
                 )
             )
 
-        # Register token and action workflows only for git-sourced drivers.
-        # Spec 013 — the registration tags include a ``fingerprint/{short}``
-        # disambiguator so two same-version reloads with different commit
-        # SHAs (or local content hashes, for the future-local-actions case)
-        # do not clobber each other. Execution-time lookups in
-        # ``instantiate_application`` and the reconciliation strategies
-        # pass the same fingerprint so older deployments keep resolving
-        # to their original workflows.
-        if isinstance(driver_object.source, GitSource):
-            fingerprint = short_fingerprint(
-                content_hash=driver_object.content_hash,
-                source_commit_sha=driver_object.source_commit_sha,
-            )
-            await prefect_manager.register_token(
-                namespace="user",
-                token=driver_object.source.token,
-            )
-
-            builder = ActionsWorkflowBuilder(
-                source=driver_object.source,
-                commit_sha=driver_object.source_commit_sha,
-            )
-            if driver_object.driver_spec.spec.actions:
-                for action in driver_object.driver_spec.spec.actions:
-                    workflow = builder.build_user_action_workflow_definition(
-                        action=action
-                    )
-                    logger.info(
-                        f"Registering user action {action.name}: {workflow.name}, {supported_versions}, {action.hook}, {action.mode}, fingerprint={fingerprint}"
-                    )
-                    await prefect_manager.register_user_action(
-                        workflow=workflow,
-                        application=name,
-                        version=supported_versions,
-                        hook=action.hook,
-                        mode=action.mode,
-                        fingerprint=fingerprint,
-                        driver_directory=driver_object.source.driver_directory,
-                    )
-
         # Create application
         components = (
             driver_object.driver_spec.spec.components.model_dump()
@@ -277,6 +344,15 @@ async def load_application_driver_from_object(
             if driver_object.driver_spec.spec.env_vars
             else None
         )
+        # Spec 029 — register the actions of the new driver version, from git
+        # or from a local directory, after the checks above and before the
+        # insert: a load that the checks refuse leaves no deployment in
+        # Prefect, and a load whose registration fails stores no driver
+        # version (critique E3). The registration key includes the short
+        # provenance fingerprint (spec 013) and the driver directory, so two
+        # driver versions of one driver keep their own deployments, and hook
+        # resolution looks them up with the same key.
+        await ensure_action_registrations(driver_object, prefect_manager)
         # Spec 013 — the ``get_by_identity`` fast-path above resolves the
         # common case where the row already exists. Two concurrent loads
         # of the same content can still both miss the lookup and race
