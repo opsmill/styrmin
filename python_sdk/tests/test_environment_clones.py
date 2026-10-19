@@ -443,6 +443,40 @@ class TestEnvironmentCloneCreate:
 
     @staticmethod
     @pytest.mark.asyncio
+    async def test_create_refused_uncloned_reference_gives_extensions(
+        client: StyrminClient, mock_transport: AsyncMock
+    ) -> None:
+        """A refused selection gives the caller the ``deployments`` extension, not only the message (#522)."""
+        term_path = "deployment[peer].config.scheduling.pod_affinity.preferred[0].term"
+        deployments = [
+            {
+                "deployment_id": DEPLOYMENT_ID,
+                "deployment_name": "demo",
+                "paths": [term_path],
+                "reason": "not included in the requested deployment selection",
+            }
+        ]
+        mock_transport.execute.return_value = {
+            "data": None,
+            "errors": [
+                {
+                    "message": f"An affinity term names a deployment that the clone does not copy: 'demo' "
+                    f"(not included in the requested deployment selection), named at {term_path}.",
+                    "extensions": {"code": "VALIDATION_ERROR", "deployments": deployments},
+                }
+            ],
+        }
+
+        with pytest.raises(OperationFailedError) as refused:
+            await client.environment_clones.create(
+                name="prod-rehearsal", environment_id=ENVIRONMENT_ID, deployment_ids=[OTHER_DEPLOYMENT_ID]
+            )
+
+        assert refused.value.typename == "VALIDATION_ERROR"
+        assert refused.value.extensions["deployments"] == deployments
+
+    @staticmethod
+    @pytest.mark.asyncio
     async def test_create_already_in_progress(client: StyrminClient, mock_transport: AsyncMock) -> None:
         mock_transport.execute.return_value = {
             "data": None,

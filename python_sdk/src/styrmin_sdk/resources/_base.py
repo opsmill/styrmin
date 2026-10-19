@@ -44,14 +44,17 @@ class BaseResource:
 
     @staticmethod
     def _check_graphql_errors(result: dict[str, Any]) -> None:
-        """Raise the appropriate SDK exception if the result contains GraphQL errors."""
+        """Raise the appropriate SDK exception if the result contains GraphQL errors.
+
+        The exception is built from the first error and carries its ``extensions``.
+        """
         errors = result.get("errors")
         if not errors:
             return
 
         error = errors[0]
         message = error.get("message", "Unknown error")
-        extensions = error.get("extensions", {})
+        extensions = error.get("extensions") or {}
         code = extensions.get("code", "")
 
         # NOT_FOUND-shaped codes all surface as ResourceNotFoundError so
@@ -59,17 +62,17 @@ class BaseResource:
         # resource was missing. The server-side codes are listed
         # in ``backend/styrmin_backend/services/exceptions.py``.
         if code in {"NOT_FOUND", "USER_NOT_FOUND", "GROUP_NOT_FOUND"}:
-            raise ResourceNotFoundError(message, code)
+            raise ResourceNotFoundError(message, code, extensions)
         # Duplicate-resource codes (admin user/group mutations) reuse the
         # existing AlreadyExists hierarchy so callers do not need to know
         # the specific code to handle the conflict path. The generic
         # ``ALREADY_EXISTS`` is retained for legacy resources.
         if code in {"ALREADY_EXISTS", "DUPLICATE_USERNAME", "DUPLICATE_GROUP_NAME"}:
-            raise ResourceAlreadyExistsError(message, code)
+            raise ResourceAlreadyExistsError(message, code, extensions)
         if code == "DEPLOYMENT_RESTORING":
-            raise DeploymentRestoringError(message, code)
+            raise DeploymentRestoringError(message, code, extensions)
         if code in {"UNAUTHENTICATED", "INVALID_CREDENTIALS"}:
-            raise StyrminAuthenticationError(message, code)
+            raise StyrminAuthenticationError(message, code, extensions)
         if code == "FORBIDDEN":
-            raise StyrminAuthorizationError(message, code)
-        raise OperationFailedError(message, code)
+            raise StyrminAuthorizationError(message, code, extensions)
+        raise OperationFailedError(message, code, extensions)

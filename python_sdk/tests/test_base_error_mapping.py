@@ -13,6 +13,7 @@ from styrmin_sdk.exceptions import (
     OperationFailedError,
     ResourceAlreadyExistsError,
     ResourceNotFoundError,
+    StyrminAPIError,
     StyrminAuthenticationError,
     StyrminAuthorizationError,
 )
@@ -96,3 +97,75 @@ def test_error_without_extensions_falls_back() -> None:
     # Code defaults to empty string when extensions is absent.
     assert not exc_info.value.typename
     assert "no extensions" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("code", "exception_class"),
+    [
+        ("NOT_FOUND", ResourceNotFoundError),
+        ("ALREADY_EXISTS", ResourceAlreadyExistsError),
+        ("DEPLOYMENT_RESTORING", DeploymentRestoringError),
+        ("UNAUTHENTICATED", StyrminAuthenticationError),
+        ("FORBIDDEN", StyrminAuthorizationError),
+        ("VALIDATION_ERROR", OperationFailedError),
+    ],
+)
+def test_exception_carries_all_extensions(code: str, exception_class: type[StyrminAPIError]) -> None:
+    """Every mapped exception gives the caller all the extensions of the error (#522)."""
+    extensions = {
+        "code": code,
+        "path": "deployment.config.scheduling.pod_affinity.required[0]",
+        "deployment_id": "00000000-0000-0000-0000-000000000100",
+        "deployment_name": "primary",
+        "deleted": True,
+    }
+    result = {"errors": [{"message": "boom", "extensions": extensions}]}
+
+    with pytest.raises(exception_class) as exc_info:
+        BaseResource._check_graphql_errors(result)
+
+    assert exc_info.value.extensions == extensions
+    assert exc_info.value.typename == code
+
+
+def test_exception_carries_extensions_of_first_error_only() -> None:
+    """The exception is built from the first error, so it carries that error's extensions."""
+    result = {
+        "errors": [
+            {"message": "first", "extensions": {"code": "VALIDATION_ERROR", "path": "a"}},
+            {"message": "second", "extensions": {"code": "NOT_FOUND", "path": "b"}},
+        ]
+    }
+
+    with pytest.raises(OperationFailedError) as exc_info:
+        BaseResource._check_graphql_errors(result)
+
+    assert exc_info.value.extensions == {"code": "VALIDATION_ERROR", "path": "a"}
+
+
+def test_exception_extensions_are_a_copy() -> None:
+    """Changing the exception's extensions does not change the response the caller holds."""
+    extensions = {"code": "VALIDATION_ERROR", "path": "a"}
+    result = {"errors": [{"message": "boom", "extensions": extensions}]}
+
+    with pytest.raises(OperationFailedError) as exc_info:
+        BaseResource._check_graphql_errors(result)
+    exc_info.value.extensions["path"] = "changed"
+
+    assert extensions == {"code": "VALIDATION_ERROR", "path": "a"}
+
+
+@pytest.mark.parametrize("error", [{"message": "boom"}, {"message": "boom", "extensions": None}])
+def test_error_without_extensions_gives_empty_extensions(error: dict) -> None:
+    """An error with no ``extensions``, or ``extensions: null``, gives an empty dict."""
+    with pytest.raises(OperationFailedError) as exc_info:
+        BaseResource._check_graphql_errors({"errors": [error]})
+    assert exc_info.value.extensions == {}
+    assert not exc_info.value.typename
+
+
+def test_exception_built_without_extensions_has_empty_extensions() -> None:
+    """Code that builds an SDK exception with only a message and a code still works."""
+    error = OperationFailedError("boom", "VALIDATION_ERROR")
+    assert error.extensions == {}
+    assert error.typename == "VALIDATION_ERROR"

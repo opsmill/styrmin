@@ -761,6 +761,24 @@ What happens depends on what you name, and the difference matters:
 | An eligible deployment | It's included. |
 | A selection that leaves out a deployment, or includes one that isn't eligible, when an affinity term that the clone copies names that deployment | The whole request is **rejected up front** with `VALIDATION_ERROR`. The error message lists each such deployment, the reason the clone does not copy it, and the path of every term that names it. Nothing is created and no backup is taken. Add the deployment to the selection, leave out the deployment whose term names it, or, for a term in the environment's config, clear or override `scheduling`. |
 
+For a program, the GraphQL error of the last row gives the same details in
+`extensions.deployments`: one entry per deployment, with its
+`deployment_id`, `deployment_name`, `reason` and the `paths` of the terms
+that name it. The Python SDK raises `OperationFailedError`, and its
+`extensions` attribute holds these extensions:
+
+```python
+from styrmin_sdk.exceptions import OperationFailedError
+
+try:
+    await client.environment_clones.create(
+        "prod-rehearsal", environment_id=environment_id, deployment_ids=[peer_id]
+    )
+except OperationFailedError as refused:
+    for entry in refused.extensions.get("deployments", []):
+        print(entry["deployment_name"], entry["paths"])
+```
+
 An affinity term can name another deployment of the same environment, in
 `scheduling.pod_affinity` or `scheduling.pod_anti_affinity`. Styrmin stores
 the id of the deployment it names. The clone checks the terms of the new

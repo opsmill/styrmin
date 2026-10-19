@@ -109,7 +109,11 @@ class EnvironmentCloneResource(BaseResource):
         typically ``PENDING`` or ``IN_PROGRESS``. Upfront failures — a taken
         target name, an unknown source or selected deployment, an invalid
         override, another environment-level operation already running on the
-        source — raise before anything is created (FR-011).
+        source — raise before anything is created (FR-011). A selection that
+        leaves out a deployment that a copied affinity term names raises
+        ``OperationFailedError`` with ``VALIDATION_ERROR``; its
+        ``extensions["deployments"]`` lists each such deployment with the
+        ``paths`` of the terms that name it.
         """
         variables: dict[str, Any] = {"name": name}
         if environment_id is not None:
