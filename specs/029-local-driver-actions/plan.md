@@ -77,7 +77,7 @@ No database, GraphQL, Helm, SDK, CLI or frontend change.
 
 ### Load: register the actions of every driver version (FR-001, FR-006)
 
-`load_application_driver_from_object` (`services/applications.py`) calls a new `ensure_action_registrations` on both paths: after the identity lookup finds an existing version, and before it creates a new one. See [contracts/action-registration.md](contracts/action-registration.md).
+`load_application_driver_from_object` (`services/applications.py`) calls a new `ensure_action_registrations` on both paths: after the identity lookup finds an existing version, and, for a new version, after the spec validations of the load (services and components) and just before the insert, so a refused load leaves no deployment in Prefect. See [contracts/action-registration.md](contracts/action-registration.md).
 
 - `ActionsWorkflowBuilder` (`services/user.py`) accepts a `GitSource` or a `LocalSource`. For a `LocalSource`, it builds a `LocalDriverActionWorkflowDefinition` (`workflows/models.py`): entrypoint `actions.py:<function>`, the action's `image`, and one pull step `styrmin_backend.workflows.local_driver.check_local_driver` with the path, the full `content_hash` and the three driver file names.
 - The registration and lookup key uses `action_directory_of(source_type, source_path)` (`services/driver/labels.py`) as the ADR-080 driver directory.
@@ -114,9 +114,14 @@ Three typed errors in `services/driver/exceptions.py`; their messages are part o
 
 | File | Change |
 |------|--------|
-| `docs/docs/drivers/loading-drivers.md` | Actions of a local driver run from the same path in the action's image; what a custom `image:` must hold; the three errors and how to fix each; loading a driver again registers missing actions. |
+| `docs/docs/drivers/loading-drivers.md` | Actions of a local driver run from the same path in the action's image; what a custom `image:` must hold; the three errors and how to fix each; loading a driver again registers missing actions; a local path with `{` or `}` is refused for a driver with actions; how to recover when an action's check fails during an upgrade (P5 of the critique); actions must not log secrets, because the first error log of a crashed action appears on its hook step. |
 | `dev/guides/driver-iteration.md` | After editing an action on the dev stack, run `docker compose build` and load the driver again. Fix two stale statements found during research: the values template name comes from `STYRMIN_DRIVER_VALUES_TEMPLATE`, and the hash framing is the name, a zero byte and an 8-byte big-endian length. |
-| `dev/knowledge/backend/hooks-and-actions.md` | Local registration, the check pull step, hook resolution, the crash log in hook step errors, the request check. |
+| `dev/knowledge/backend/hooks-and-actions.md` | Local registration, the check pull step, hook resolution, the crash log in hook step errors and who can read it (next to the rule for command output), the request check. |
+| `dev/knowledge/backend/data-models.md` | Line 166: the Prefect action lookup reads `action_directory_of`, not `driverDirectory` / `driver_directory_of`, which only the GraphQL field uses. |
+| `dev/knowledge/backend/orchestration-flows.md` | Line 491: user actions use `GitSourceWorkflowDefinition` or `LocalDriverActionWorkflowDefinition`. |
+| `dev/knowledge/backend/services.md` | Line 347: a repeated load registers the actions that hooks cannot resolve. |
+| `dev/knowledge/backend/api.md` | `loadLocalApplicationDriverVersion` row: the load registers the driver's actions, also when it returns an existing version, and refuses a path with `{` or `}` for a driver with actions. |
+| `backend/styrmin_backend/workflows/catalogue.py` | Docstring at line 142: remove `instantiate_application`. |
 | `dev/adr/0081-local-driver-actions-run-from-the-path-in-the-job-image.md` (new) | The decisions of the PRD and of R-001 to R-010, with the rejected alternatives. |
 | `dev/adr/0053-driver-version-provenance-fingerprint.md` | Amendment note: a repeated load registers missing actions; a local version's action checks the files at its path against the fingerprint. |
 | `CONTEXT.md` | Entries Action and Provenance fingerprint. |
@@ -205,8 +210,10 @@ What a test asserts is what a user views: which actions ran, which step failed, 
 | FR-007 | request check: failed task, deployment unchanged | — | user story 3: same request runs the upgrade |
 | R-002 | crashed run with an error log, without one, and when the read fails | — | user story 2: the hook step shows the check's message |
 | R-005 | path with `{` refused for a driver with actions, accepted without actions | — | — |
+| R-009 rule (critique X1) | the request check's condition holds exactly when the comparator yields `ApplicationVersionChange`, for a version increase, a decrease, a driver change alone and no change | — | — |
+| Check module (critique E1, E2) | imports in a subprocess with an empty environment; `get_function` raises the check's errors before it imports | — | — |
 
-E2E module: `backend/tests/e2e/test_local_driver_actions.py`, markers `ci`, `shard_general`, `api_only(reason="The change is in which actions run; the deploy and upgrade UI flows are covered by test_deploy_app")`. Run with `--pdb` per AGENTS.md. Design in [R-011](research.md#r-011-e2e-design).
+E2E module: `backend/tests/e2e/test_local_driver_actions.py`, markers `ci`, `shard_general`, `api_only(reason="The change is in which actions run; the deploy and upgrade UI flows are covered by test_deploy_app")`. Run with `--pdb` per AGENTS.md. Design in [R-011](research.md#r-011-e2e-design): the user story 2 variants use their own driver name, and every create and version change in the module pins `driver_version_id`, so the latest-wins rule cannot bind a deployment to another variant.
 
 Existing tests to re-run because their path changes: `backend/tests/unit/services/reconciliation/test_remediation.py`, `backend/tests/unit/workflows/test_user_action_registration.py`, `backend/tests/functional/test_user_action_registration.py`, `backend/tests/e2e/test_driver_reload_identity.py` (its fixture declares actions, which are now registered), `backend/tests/e2e/test_driver_version_reselection.py`, `backend/tests/e2e/test_task_steps.py` and `backend/tests/e2e/test_deploy_app.py`.
 
@@ -219,6 +226,8 @@ Existing tests to re-run because their path changes: `backend/tests/unit/service
 | A registration disappears between the request check and the plan. | `apply_state` still fails the hook step (R-008). The deployment then needs the usual recovery for a failed upgrade. |
 | An existing E2E test relied on a skipped hook. | Every E2E driver load except `test_driver_reload_identity.py` is from git and registers its actions today. That test deploys nothing. |
 | The derived image of the E2E test collides between concurrent CI jobs on one runner. | Its tag and its driver path include the session id. The session removes it at the end. |
+| A rollback to a release without this change. | The local registrations stay in Prefect and are never looked up, because older lookups for a local version pass no directory and drop deployments with a `directory/` tag. Failed tasks without a flow run stay as history. No action is needed. |
+| A passing check leaves no trace. | The check step logs one `INFO` line in the action's flow run: the path and the short fingerprint. |
 
 ## Complexity Tracking
 

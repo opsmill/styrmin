@@ -48,7 +48,8 @@ class LocalDriverActionWorkflowDefinition(WorkflowDefinition):
         ...
 
     def get_function(self) -> Callable[..., Awaitable[Any]]:
-        # imports the function from <directory>/<module>, for validate_workflow
+        # runs check_local_driver's checks first (critique E2), then imports the
+        # function from <directory>/<module>, for validate_workflow
         ...
 ```
 
@@ -85,9 +86,9 @@ Behaviour:
 Callers in `load_application_driver_from_object`:
 
 - When `get_by_identity` finds a version: call it before each `return`, including the branch that fills the info columns.
-- When the load creates a version: call it where the git-only registration block is today, for git and local sources. The `isinstance(..., GitSource)` gate is removed.
+- When the load creates a version: call it after the spec validations of the load (the service and component checks) and just before the insert, for git and local sources. The git-only registration block and its `isinstance(..., GitSource)` gate are removed.
 
-A load that raises from `ensure_action_registrations` stores no new version: the call comes before the insert, as the registration does today.
+A load that raises from `ensure_action_registrations` stores no new version, and a load refused by its validations registers nothing (critique E3).
 
 ## Lookup rule (unchanged, now also for local versions)
 

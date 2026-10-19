@@ -86,6 +86,20 @@ uv run styrminctl tasks get <task id>
 
 Expected: the create task lists "Run the setup pre-hook" and "Run the setup post-hook" as succeeded, and the upgrade task lists "Run the upgrade hook" as succeeded.
 
+### Setup and upgrade actions of the bundled Infrahub driver (SC-001, SC-004)
+
+This is the driver that the INFP-726 sandbox rebuild uses. It needs a cluster that can run Infrahub.
+
+```shell
+uv run styrminctl drivers load-local-version /styrmin/drivers/infrahub
+uv run styrminctl deployments create infrahub <application version> <environment>
+uv run styrminctl tasks get <task id>
+uv run styrminctl deployments update-version <deployment id> <newer application version>
+uv run styrminctl tasks get <task id>
+```
+
+Pick two application versions that the driver's `supported_versions` accepts. Expected: the create task lists "Run the setup pre-hook" and "Run the setup post-hook" as succeeded. The upgrade task lists "Run the upgrade hook" as succeeded, and that hook's started tasks stop and start the Infrahub components. Repeat for `infrahub-enterprise`, `semaphore` and `slurpit` when their stacks are available.
+
 ### An edited action without an image rebuild (user story 2)
 
 1. Edit `driver/examples/simple-app/actions.py` (for example, change a log line).
