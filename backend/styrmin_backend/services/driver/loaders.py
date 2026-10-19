@@ -1,8 +1,9 @@
 from pathlib import Path
 from typing import Type
 
+from styrmin_backend import config
 from styrmin_backend.services.driver import ApplicationDriver
-from styrmin_backend.services.driver.hash import compute_driver_content_hash
+from styrmin_backend.services.driver.hash import compute_driver_directory_fingerprint
 from styrmin_backend.services.driver.deserializers import (
     Deserializer,
     get_deserializer,
@@ -117,21 +118,18 @@ class DriverLoader:
                 # fingerprint from the raw bytes of the three driver
                 # files. The provider's ``driver_dir`` is still valid
                 # inside this ``with`` block. ``actions.py`` participates
-                # in the hash iff the spec declares any actions.
+                # in the hash iff the spec declares any actions. Spec 029:
+                # the check before a local driver version's action calls
+                # the same function with the same file names, so both
+                # compute the same fingerprint for the same files.
+                driver_settings = config.SETTINGS.driver
                 try:
-                    driver_spec_bytes = directory_map.driver_spec.path.read_bytes()
-                    values_template_bytes = (
-                        directory_map.values_template.path.read_bytes()
-                        if directory_map.values_template.path.exists()
-                        else b""
-                    )
-                    actions_py_bytes: bytes | None = None
-                    if has_actions:
-                        actions_py_bytes = directory_map.actions_code.path.read_bytes()
-                    content_hash = compute_driver_content_hash(
-                        driver_spec=driver_spec_bytes,
-                        values_template=values_template_bytes,
-                        actions_py=actions_py_bytes,
+                    content_hash = compute_driver_directory_fingerprint(
+                        driver_dir,
+                        spec_file=driver_settings.spec_file,
+                        values_template=driver_settings.values_template,
+                        actions_file=driver_settings.actions_code_file,
+                        include_actions=has_actions,
                     )
                 except OSError as err:
                     # If we cannot re-read the bytes we already parsed, the

@@ -25,9 +25,17 @@ Design notes
 
 See ``specs/013-driver-fingerprint/data-model.md`` for the authoritative
 algorithm definition.
+
+:func:`compute_driver_directory_fingerprint` reads the files of a driver
+directory and hashes them with :func:`compute_driver_content_hash`. The local
+loader and the check that runs before a local driver version's action both
+call it, so the two cannot compute the fingerprint differently (spec 029,
+research R-004). This module must stay importable without server settings or
+a database, because the action's Job imports it.
 """
 
 import hashlib
+from pathlib import Path
 
 
 def compute_driver_content_hash(
@@ -60,3 +68,44 @@ def compute_driver_content_hash(
         out += len(body).to_bytes(8, "big")
         out += body
     return hashlib.sha256(bytes(out)).hexdigest()
+
+
+def compute_driver_directory_fingerprint(
+    directory: Path,
+    *,
+    spec_file: str,
+    values_template: str,
+    actions_file: str,
+    include_actions: bool,
+) -> str:
+    """Return the provenance fingerprint of the driver files in ``directory``.
+
+    Reads ``spec_file``, ``values_template`` (empty bytes when the file is
+    missing, as the loader treats an optional values template) and, when
+    ``include_actions``, ``actions_file``, then returns
+    :func:`compute_driver_content_hash` of their bytes.
+
+    Args:
+        directory: The driver directory.
+        spec_file: The name of the driver specification file in ``directory``.
+        values_template: The name of the values template in ``directory``.
+        actions_file: The name of the actions file in ``directory``.
+        include_actions: Whether the actions file is part of the fingerprint;
+            true when the driver specification declares actions.
+
+    Returns:
+        64-character lowercase hexadecimal SHA-256 digest.
+
+    Raises:
+        FileNotFoundError: ``spec_file`` is missing, or ``actions_file`` is
+            missing and ``include_actions`` is true.
+    """
+    try:
+        values_template_bytes = (directory / values_template).read_bytes()
+    except FileNotFoundError:
+        values_template_bytes = b""
+    return compute_driver_content_hash(
+        driver_spec=(directory / spec_file).read_bytes(),
+        values_template=values_template_bytes,
+        actions_py=(directory / actions_file).read_bytes() if include_actions else None,
+    )

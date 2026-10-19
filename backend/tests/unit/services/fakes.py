@@ -270,7 +270,15 @@ class FakeApplicationDriverRepository(
 
 
 class FakeActionRepository(FakeRepository[Action], ActionRepository):
-    pass
+    async def list_by_driver_version(self, driver_version_id: UUID) -> list[Action]:
+        return sorted(
+            (
+                m
+                for m in self.models
+                if m.application_driver_version_id == driver_version_id
+            ),
+            key=lambda m: m.name,
+        )
 
 
 class FakeTaskRepository(FakeRepository[Task], TaskRepository):

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from styrmin_backend.domain.models import StepKind
+
+if TYPE_CHECKING:
+    from styrmin_backend.services.driver.models.resources.actions import HookKind
 
 
 class StepDefinition(NamedTuple):
@@ -77,6 +80,32 @@ RESTORE_VELERO = StepDefinition(
 RESTORE_RECOVERY = StepDefinition(
     "restore:recovery", "Run the recovery", StepKind.RESTORE
 )
+
+
+_HOOK_STEPS = {
+    step.key: step
+    for step in (
+        SETUP_PRE_HOOK,
+        SETUP_POST_HOOK,
+        UPGRADE_PRE_HOOK,
+        UPGRADE_CORE_HOOK,
+        UPGRADE_POST_HOOK,
+    )
+}
+
+
+def hook_step(hook: HookKind, mode: str) -> StepDefinition:
+    """The step that runs the action of a hook and mode (spec 029).
+
+    Raises:
+        ValueError: No step runs an action for this pair, such as ``setup``
+            with mode ``core``.
+    """
+    step = _HOOK_STEPS.get(f"hook:{hook.value}:{mode}")
+    if step is None:
+        msg = f"No step runs an action for the {hook.value} hook, mode {mode}"
+        raise ValueError(msg)
+    return step
 
 
 def backup_component_step(component: str) -> StepDefinition:
