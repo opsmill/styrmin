@@ -6,7 +6,9 @@ The flow must:
 - Load the deployment, new instance, and (if provided) current
   instance from the freshly-committed DB.
 - Build a DiffReport via Comparator.
-- Generate a Remediation via Remediator, then end the plan step.
+- Generate a Remediation via Remediator, then end the plan step. When
+  planning finds a declared action without a registered flow, end the plan
+  step and fail the step of that hook and mode (spec 029).
 - Call `remediation.apply()` (the existing sub-flow chain) with a
   freshly minted driver action token (ADR-059) and the task id, after the
   UoW closes; when it fails, fail the task's open flow steps before raising.
@@ -15,7 +17,7 @@ The flow must:
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 from uuid import uuid4
 
 import pytest
@@ -23,6 +25,8 @@ from tests.helpers.unit_of_work import yield_unit_of_work
 
 from styrmin_backend.domain import steps
 from styrmin_backend.domain.models import StepParent
+from styrmin_backend.services.driver.exceptions import ActionNotRegisteredError
+from styrmin_backend.services.driver.models.resources.actions import HookKind
 from styrmin_backend.services.reconciliation.exceptions import ReconciliationError
 
 MODULE = "styrmin_backend.agent.tasks.orchestration"
@@ -33,6 +37,8 @@ def flow() -> Iterator[SimpleNamespace]:
     """The flow's collaborators, logging into one ordered event list."""
     events: list[str] = []
     plan_step_id = uuid4()
+    # The id of each opened step, by step key; the plan step keeps ``plan_step_id``.
+    step_ids = {steps.PLAN.key: plan_step_id}
 
     fake_uow = AsyncMock()
     fake_uow.deployments.find = AsyncMock(return_value=MagicMock())
@@ -52,10 +58,11 @@ def flow() -> Iterator[SimpleNamespace]:
 
     async def _open_task_step(task_id, step):
         events.append(f"{step.key} step opened")
-        return plan_step_id
+        return step_ids.setdefault(step.key, uuid4())
 
     async def _end_step(step_id, error=None):
-        events.append("plan step failed" if error else "plan step succeeded")
+        key = next((k for k, v in step_ids.items() if v == step_id), "unopened")
+        events.append(f"{key} step failed" if error else f"{key} step succeeded")
 
     async def _fail_open_steps(parent, message):
         events.append("open steps failed")
@@ -89,6 +96,7 @@ def flow() -> Iterator[SimpleNamespace]:
             events=events,
             uow=fake_uow,
             plan_step_id=plan_step_id,
+            step_ids=step_ids,
             comparator_cls=comparator_cls,
             remediator_cls=remediator_cls,
             remediation=fake_remediation,
@@ -177,7 +185,60 @@ async def test_apply_state_flow_fails_the_plan_step_with_the_planning_error(
         flow.plan_step_id, error="ReconciliationError: No upgrade hook for 2.0.0"
     )
     flow.remediation.apply.assert_not_awaited()
+    # Only ActionNotRegisteredError goes on a hook step (spec 029, R-008).
     assert flow.events == ["plan step opened", "uow closed", "plan step failed"]
+
+
+@pytest.mark.asyncio
+async def test_apply_state_flow_fails_the_hook_step_of_an_action_without_a_registered_flow(
+    flow: SimpleNamespace,
+) -> None:
+    """Spec 029 (FR-005, R-008): planning succeeded, the hook that cannot run failed."""
+    task_id = uuid4()
+    load_command = "styrminctl drivers load-local-version /drivers/local-actions"
+    error = ActionNotRegisteredError(
+        driver_name="local-actions",
+        driver_version_label="0.1.0@0123abc",
+        actions=["pre_setup"],
+        hook=HookKind.SETUP,
+        mode="pre",
+        load_command=load_command,
+    )
+    flow.remediator_cls.return_value.generate_remediation = AsyncMock(side_effect=error)
+
+    with pytest.raises(ActionNotRegisteredError, match="no flow is registered"):
+        await _apply_state(task_id=task_id)
+
+    assert flow.events == [
+        "plan step opened",
+        "uow closed",
+        "plan step succeeded",
+        "hook:setup:pre step opened",
+        "hook:setup:pre step failed",
+    ]
+    assert flow.open_step.await_args_list == [
+        call(task_id, steps.PLAN),
+        call(task_id, steps.SETUP_PRE_HOOK),
+    ]
+    hook_step_id = flow.step_ids[steps.SETUP_PRE_HOOK.key]
+    assert flow.end_step.await_args_list == [
+        call(flow.plan_step_id),
+        call(hook_step_id, error=f"ActionNotRegisteredError: {error}"),
+    ]
+    hook_error = flow.end_step.await_args_list[1].kwargs["error"]
+    for part in (
+        "local-actions",
+        "0.1.0@0123abc",
+        "pre_setup",
+        "setup hook",
+        "mode pre",
+        "Load the driver again",
+        load_command,
+        "request the change again",
+    ):
+        assert part in hook_error
+    flow.remediation.apply.assert_not_awaited()
+    flow.fail_open.assert_not_awaited()
 
 
 @pytest.mark.asyncio

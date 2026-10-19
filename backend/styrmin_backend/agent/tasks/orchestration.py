@@ -57,6 +57,7 @@ from styrmin_backend.domain.models import Instance
 from styrmin_backend.domain.models import Instance as InstanceEntity
 from styrmin_backend.domain.models import InstanceStatus as InstanceStatusEntity
 from styrmin_backend.domain.models import StepParent
+from styrmin_backend.services.driver.exceptions import ActionNotRegisteredError
 from styrmin_backend.services.reconciliation.diffs.comparison import Comparator
 from styrmin_backend.services.reconciliation.remediation import (
     Remediation,
@@ -361,6 +362,10 @@ async def apply_state(
     remediation here — not in the FastAPI request. This means a flow
     retry sees fresh state, and DB writes that landed between scheduling
     and run no longer produce a stale plan.
+
+    When planning finds a declared action without a registered flow
+    (``ActionNotRegisteredError``, spec 029), the plan step succeeds and the
+    step of that hook and mode fails with the error.
     """
     plan_step_id = await open_task_step(task_id, steps.PLAN)
     try:
@@ -369,6 +374,15 @@ async def apply_state(
             new_instance_id=new_instance_id,
             current_instance_id=current_instance_id,
         )
+    except ActionNotRegisteredError as exc:
+        # Spec 029 (FR-005, research R-008): planning completed and found a
+        # hook that cannot run, so the error goes on that hook's step.
+        await end_step(plan_step_id)
+        hook_step_id = await open_task_step(
+            task_id, steps.hook_step(exc.hook, exc.mode)
+        )
+        await end_step(hook_step_id, error=format_exception(exc))
+        raise
     except Exception as exc:
         await end_step(plan_step_id, error=format_exception(exc))
         raise
