@@ -830,6 +830,37 @@ def test_backups_restore_last_of_the_active_instance_id_does_not_ask(
     assert "Warning" not in capsys.readouterr().out
 
 
+def test_backups_restore_last_of_an_instance_id_whose_deployment_has_no_active_instance_restores(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The server restores into a deployment without an active instance, so the command does not refuse it."""
+    monkeypatch.setattr(backups_commands, "_stdin_is_terminal", lambda: False)
+    _arm_restore_last(
+        mock_client, [_make_completed_backup()], deployment=_make_deployment(name="demo", instance_id=None)
+    )
+
+    assert _restore_last_of_instance(INSTANCE_UUID) == 0
+    mock_client.backups.create_restore.assert_called_once_with(backup_id=BACKUP_UUID)
+    assert "Warning" not in capsys.readouterr().out
+
+
+def test_backups_restore_last_of_an_instance_id_of_a_deleted_deployment_is_refused(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    _arm_restore_last(
+        mock_client,
+        [_make_completed_backup()],
+        deployment=_make_deployment(name="demo", instance_id=None, deleted_at="2026-10-01T00:00:00+00:00"),
+    )
+
+    assert _restore_last_of_instance(INSTANCE_UUID, "--yes") == 1
+    mock_client.backups.create_restore.assert_not_called()
+    output = capsys.readouterr().out
+    assert "Deployment 'demo' was deleted" in output
+    assert f"styrminctl backups list --id {DEPLOYMENT_UUID}" in output
+
+
 # --- list: pointing to --id for a deleted deployment (#304 review) -------
 
 

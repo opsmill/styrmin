@@ -236,14 +236,16 @@ def _stdin_is_terminal() -> bool:
 async def _confirm_backup_of_earlier_instance(
     sdk: StyrminClient,
     deployment_id: str,
-    active_instance_id: str,
     backup: ListBackupsBackups,
     *,
     yes: bool,
 ) -> None:
     """Ask before ``--last`` restores a backup of an earlier instance, or of another version.
 
-    Refuses a deleted deployment, which the server also refuses.
+    ``deployment_id`` is the deployment the backup was taken of, which the
+    server restores it into. Refuses a deleted deployment, which the server
+    also refuses. A deployment without an active instance has no instance the
+    backup could be earlier than, so only the versions are compared.
     """
     deployment = await sdk.deployments.get(deployment_id)
     if deployment.deleted_at is not None:
@@ -253,7 +255,8 @@ async def _confirm_backup_of_earlier_instance(
         )
     backup_version = backup.instance.application_version
     current_version = deployment.application_version
-    is_earlier_instance = str(backup.instance_id) != active_instance_id
+    active_instance = deployment.application_instance
+    is_earlier_instance = active_instance is not None and str(backup.instance_id) != str(active_instance.id)
     if not is_earlier_instance and backup_version == current_version:
         return
 
@@ -347,15 +350,12 @@ async def _prepare_restore(
             f"Selected the newest completed backup: {backup_id} "
             f"(application version {backup.instance.application_version})"
         )
-        if target.deployment_id is not None:
-            deployment_id, active_instance_id = target.deployment_id, target.instance_id
-        else:
-            # A raw --target-instance-id names no deployment. The server restores the backup into
-            # the deployment its instance belongs to, so compare against that deployment's active
-            # instance: the instance given can be an earlier one.
-            deployment_id = str(backup.instance.deployment_id)
-            active_instance_id = (await resolve_active_instance(sdk, deployment_id=deployment_id)).instance_id
-        await _confirm_backup_of_earlier_instance(sdk, deployment_id, active_instance_id, backup, yes=yes)
+        # A raw --target-instance-id names no deployment, and the instance given can be an earlier
+        # one. The server restores the backup into the deployment its instance belongs to, so
+        # compare against that deployment.
+        await _confirm_backup_of_earlier_instance(
+            sdk, target.deployment_id or str(backup.instance.deployment_id), backup, yes=yes
+        )
 
     if backup_id is None:
         raise ValueError("backup_id is required (or use --last with a target deployment/instance)")
