@@ -173,7 +173,7 @@ The flow keeps the check of R-008 for a registration that disappears between the
 
 **Facts**: `load_application_driver_from_object` returns early when the identity matches (`services/applications.py:150-173`), before the registration block, for git and local loads. Registration happens before the new row exists (ADR-080). Prefect replaces a deployment with the same flow and name.
 
-**Decision**: a function `ensure_action_registrations` in `services/applications.py` runs on both paths of the load. For each hook and mode that the driver declares, it calls the hook lookup with the version's key (application, supported versions, short fingerprint, `action_directory_of`). It registers every declared action of each hook and mode whose lookup finds nothing. For a git version, it saves the token block first when it registers at least one action. A load that registers nothing makes no Prefect write.
+**Decision**: a function `ensure_action_registrations` in `services/applications.py` runs on both paths of the load: when the identity lookup finds a version, and, for a new version, after the spec validations of the load and just before the insert, so a refused load leaves no deployment in Prefect (critique E3). For each hook and mode that the driver declares, it calls the hook lookup with the version's key (application, supported versions, short fingerprint, `action_directory_of`). It registers every declared action of each hook and mode whose lookup finds nothing. For a git version, it saves the token block first when it registers at least one action. A load that registers nothing makes no Prefect write.
 
 **Rationale**: the same lookup as hooks decides what is missing, so a load never changes a registration that hooks already find, and a repeated load stays idempotent (Constitution §I). A new version's lookups find nothing, so all its actions are registered, as today.
 
@@ -190,6 +190,8 @@ The flow keeps the check of R-008 for a registration that disappears between the
 - `test_driver_reload_identity.py` copies a driver into the server pod with `kubectl cp` and loads it locally; it deploys nothing.
 
 **Decision**: a new module `backend/tests/e2e/test_local_driver_actions.py` (`ci`, `shard_general`, `api_only`) with a new fixture driver `backend/tests/e2e/fixtures/drivers/local-actions/`. The driver uses the `simple-app` chart at the fixed chart server URL. Its `pre_setup`, `post_setup` and `upgrade` actions log a marker and do nothing else.
+
+The module depends on the session fixtures `chart_server`, `simple_app_image` and `simple_app_image_v2`, and on the Styrmin image tag that `styrmin_deployment` installs (`latest` locally, `$STYRMIN_IMAGE_VER` in CI), which is the base of the derived image. The user story 2 variants use their own driver name (`local-actions-check`), and every create and version change in the module pins `driver_version_id`, so the latest-wins rule cannot bind a deployment to another variant (critique E7).
 
 - User story 1: load `/source/backend/tests/e2e/fixtures/drivers/local-actions` locally, deploy `0.1.0`, upgrade to `0.2.0`. Assert:
   - three registrations exist;
@@ -227,3 +229,4 @@ The flow keeps the check of R-008 for a registration that disappears between the
 - A shared driver volume for action Jobs, for drivers mounted only into the server (PRD, out of scope).
 - Running `upgrade`/`pre` and `upgrade`/`post` actions without an `upgrade`/`core` action (R-012).
 - A note on [#10](https://github.com/opsmill/styrmin/issues/10): local driver versions now run their actions.
+- Running an upgrade again after its action failed: the failed instance stays active, so the same request is a no-op, and a request for another driver version at the same application version runs as an update (critique P5).

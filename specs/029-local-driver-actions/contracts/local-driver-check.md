@@ -57,7 +57,9 @@ Image named in the errors (R-006), resolved only on the error path:
 
 A failure to read Prefect's API in this resolution never hides the original error.
 
-Import constraints: `workflows/local_driver.py` imports only the standard library, `prefect`, `services/driver/hash.py` and `services/driver/exceptions.py`. Importing it must not read server settings or open a database connection, because the Job has neither.
+Import constraints: importing `workflows/local_driver.py` must succeed with an empty environment, read no server settings and open no database connection, because the Job has neither. It imports `services/driver/hash.py` and `services/driver/exceptions.py`, which load the driver package and its Pydantic models; that import was checked to succeed with an empty environment. A unit test imports the module in a subprocess with an empty environment (critique E1).
+
+Logging: on success, the step logs one `INFO` line in the flow run, with the path and the short fingerprint (critique E9).
 
 ## How the error reaches the hook step
 

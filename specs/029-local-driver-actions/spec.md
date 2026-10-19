@@ -42,7 +42,7 @@ The PRD defines three user journeys. Each story below is one of them and can be 
 
 ### User Story 1 - Deploy and upgrade an application from a bundled driver loaded from a local directory (Priority: P1)
 
-An operator loads `/styrmin/drivers/infrahub` with `styrminctl drivers load-local-version`, creates a deployment, then upgrades it to a newer driver version that was also loaded from a local directory. Every declared action runs: `pre_setup` and `post_setup` at creation, and `upgrade` at the upgrade. If the action sets `image:`, the action runs in that image, as it does for a driver version loaded from git.
+An operator loads `/styrmin/drivers/infrahub` with `styrminctl drivers load-local-version`, creates a deployment, then upgrades it to a newer application version, whose driver version was also loaded from a local directory. Every declared action runs: `pre_setup` and `post_setup` at creation, and `upgrade` at the upgrade. If the action sets `image:`, the action runs in that image, as it does for a driver version loaded from git.
 
 **Why this priority**: This is the defect of [#372](https://github.com/opsmill/styrmin/issues/372). The documented way to load the bundled drivers produces deployments whose setup and upgrade actions never run, and nothing reports it. The INFP-726 sandbox rebuild relies on the Infrahub driver's seeding at setup and on its upgrade action.
 
@@ -51,7 +51,7 @@ An operator loads `/styrmin/drivers/infrahub` with `styrminctl drivers load-loca
 **Acceptance Scenarios**:
 
 1. **Given** a Styrmin installation whose action image holds `/styrmin/drivers/infrahub`, **When** the operator loads the driver with `load-local-version` and creates a deployment, **Then** the `pre_setup` and `post_setup` actions run as hook steps of the task, and the deployment reaches `running` only after they succeed.
-2. **Given** that deployment, **When** the operator upgrades it to a newer driver version loaded from a local directory, **Then** the `upgrade` action runs as a hook step, and the upgrade is not applied as a plain update.
+2. **Given** that deployment, **When** the operator upgrades it to a newer application version whose driver version was loaded from a local directory, **Then** the `upgrade` action runs as a hook step, and the upgrade is not applied as a plain update. A change of driver version alone, at the same application version, is an update and runs no upgrade action, as today.
 3. **Given** the bundled Semaphore driver, **When** the operator loads it with `load-local-version /styrmin/drivers/semaphore`, **Then** Prefect holds three `User Action:` flows registered for this driver version, one for each declared action.
 4. **Given** a local driver whose action sets `image:` to an image that holds the driver at the same path, **When** that action runs, **Then** its Job runs in that image.
 
@@ -103,13 +103,16 @@ A driver version loaded before this fix, or one whose Prefect registration was d
 - Two local versions loaded from two paths with the same files have the same provenance fingerprint. Each runs the `actions.py` at its own path (FR-002).
 - A target version declares `upgrade`/`pre` or `upgrade`/`post` actions and no `upgrade`/`core` action. Styrmin keeps today's behaviour: the upgrade is applied as a plain update and those actions do not run. No driver in this repository declares this combination. It is out of scope and is recorded as a follow-up.
 - An action's registration is deleted between the request and the moment the task plans its work. The hook step and the task fail with the FR-005 error.
+- A local driver that declares actions is loaded from a path that contains `{` or `}`. The load is refused (FR-001), because Prefect would replace `{{ ... }}` in that path with values such as the action token before the check of FR-003 reads it. A driver without actions loads from such a path as today.
+- The check of FR-003 or FR-004 fails during an upgrade. The task fails, and the new instance stays the deployment's active instance, as after any failed upgrade. A second request for the same upgrade is then a no-op, and a request for another driver version at the same application version runs as an update, so the upgrade action does not run. This is true of every failed upgrade today. This feature documents the recovery and does not change it; a follow-up issue records it.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
 - **FR-001**: When an application driver version is loaded from a local directory and declares actions, Styrmin MUST register a flow for each action, as it does for a version loaded from git.
-  - Verification: load `/styrmin/drivers/semaphore` locally. Prefect then holds three `User Action:` deployments tagged with the version's provenance fingerprint.
+  - Styrmin MUST refuse such a load when its path contains `{` or `}`, with an error that names the path, because Prefect replaces `{{ ... }}` in the inputs of the step that checks the files ([research R-005](research.md#r-005-prefect-templates-in-pull-step-inputs)).
+  - Verification: load `/styrmin/drivers/semaphore` locally. Prefect then holds three `User Action:` deployments tagged with the version's provenance fingerprint. A copy of a driver with actions at a path that contains `{` is refused.
 - **FR-002**: When an action of a locally loaded version runs, Styrmin MUST run the `actions.py` that is at the version's `source_path` in the image of the action's Job. That image is the default image of the action work pool, or the image the action sets with `image:`. Each local version MUST run the `actions.py` at its own `source_path`, also when another version loaded from another path has the same files.
   - Verification: E2E with a local driver whose `post_setup` action logs a marker. The marker appears in the action's logs.
 - **FR-003**: Before an action of a locally loaded version runs, Styrmin MUST compute the provenance fingerprint of the driver files at the `source_path` in the action's Job: `driver.styrmin.yml`, the values template and `actions.py`. If it differs from the version's stored provenance fingerprint, Styrmin MUST fail the action, the hook step and the task, without importing or running the `actions.py` at the path. The error MUST name the path, the image and both provenance fingerprints, and tell the user to rebuild the image or load the driver again.
@@ -176,6 +179,7 @@ All of these entities exist today. The change adds no entity and no column.
 - Running an edited action on the dev stack without `docker compose build`.
 - Any change for git driver versions other than FR-005 and FR-006.
 - Validating actions offline before a driver is loaded ([#23](https://github.com/opsmill/styrmin/issues/23)).
+- Running an upgrade again after its action failed in the action's Job (see Edge Cases).
 - Running `upgrade`/`pre` and `upgrade`/`post` actions of a target version that declares no `upgrade`/`core` action (see Edge Cases).
 
 ## Decisions and Rejected Alternatives

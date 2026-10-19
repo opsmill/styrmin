@@ -77,10 +77,10 @@ class ActionNotRegisteredError(DriverError):
 Message:
 
 ```text
-Driver version {driver_name} {driver_version_label} declares the action {actions, joined with ", "} for the {hook} hook, mode {mode}, but no flow is registered for it, so the hook cannot run. Load the driver again to register its actions: {load_command}. If the driver's files or commit changed since it was loaded, the load creates a new driver version; use that version instead.
+Driver version {driver_name} {driver_version_label} declares the action {actions, joined with ", "} for the {hook} hook, mode {mode}, but no flow is registered for it, so the hook cannot run. Load the driver again to register its actions: {load_command}. Then request the change again; a deployment whose creation failed must be deleted and created again. If the driver's files or commit changed since it was loaded, the load creates a new driver version; use that version instead.
 ```
 
-Must contain: the driver name, the version label, each action name, the hook, the mode, "Load the driver again", the load command.
+Must contain: the driver name, the version label, each action name, the hook, the mode, "Load the driver again", the load command, "request the change again".
 
 ## How the errors appear to users
 
