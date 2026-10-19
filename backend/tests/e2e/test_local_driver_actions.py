@@ -4,13 +4,16 @@ The ``local-actions`` test driver (``fixtures/drivers/local-actions``) is in
 the Styrmin image at ``LOCAL_ACTIONS_PATH``. The server loads it from that
 path with ``load-local-version``. The agent's Prefect process worker runs each
 action from the same path in the agent pod, which runs the Styrmin image too.
-Its ``pre_setup``, ``post_setup`` and ``upgrade`` actions only log a marker.
+Its ``pre_setup``, ``post_setup`` and ``upgrade`` actions log a marker. The
+``upgrade`` action also runs ``execute_commands``, whose Job
+``<release reference>-job`` prints ``JOB_MARKER`` and the target version.
 
 User story 1 (``test_local_driver_actions_run_on_create_and_upgrade``): the
 load registers the three actions in Prefect, a create runs the setup actions
 as the ``hook:setup:pre`` and ``hook:setup:post`` steps of its task, and an
 upgrade runs the upgrade action as the ``hook:upgrade:core`` step. Each
-marker is in the logs of its action's flow run.
+marker is in the logs of its action's flow run, and the upgrade's Job
+succeeded.
 
 User story 2: the variant ``local-actions-check`` of the driver is copied
 into the server pod at a path of the session and loaded from there. When the
@@ -32,7 +35,10 @@ driver version's actions. A version change to ``CREATE_VERSION`` then returns
 a failed task whose ``hook:upgrade:core`` step names the action without a
 registered flow, and the deployment keeps ``UPGRADE_VERSION``. Loading the
 driver again registers the actions, and the same request runs the upgrade
-action. The test deletes the deployment at its end.
+action. That second upgrade of the deployment runs ``execute_commands``
+again: it replaces the Job that the first upgrade left, instead of failing
+because a Job of that name exists (#372). The test deletes the deployment at
+its end.
 
 The module-scoped ``local_actions_deployment`` keeps the deployment for the
 later tests of the module and deletes it when the module ends, unless a test
@@ -60,6 +66,7 @@ import kr8s.asyncio
 import pytest
 import yaml
 from kr8s.asyncio.objects import Service as AsyncService
+from kubernetes_asyncio import client as kubeclient
 from prefect.client.orchestration import PrefectClient
 from prefect.client.schemas.filters import (
     DeploymentFilter,
@@ -91,6 +98,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
     from pathlib import Path
 
+    from kubernetes_asyncio.client import V1Job
     from prefect.client.schemas.responses import DeploymentResponse
     from styrmin_sdk.graphql._generated.get_task import GetTaskTask
 
@@ -144,6 +152,12 @@ LOG_TIMEOUT = 120.0
 RUNNING_TIMEOUT = 120.0
 DELETE_TIMEOUT = 120.0
 POLL_INTERVAL = 3.0
+
+
+# The line that the Job of the upgrade action prints, followed by the target version.
+JOB_MARKER = "LOCAL-ACTIONS-JOB upgrade"
+# The container of the Job that execute_commands creates.
+JOB_CONTAINER = "user-job"
 
 
 def marker(action: str, code: str = "A") -> str:
@@ -395,6 +409,39 @@ async def _copy_driver_to_agent(vcluster: dict, driver_dir: Path, path: str) -> 
     )
 
 
+@dataclass(frozen=True)
+class ActionJob:
+    """The Job that ``execute_commands`` left in the deployment's namespace, and its output."""
+
+    uid: str
+    output: str
+
+
+async def _action_job(vcluster: dict, deployment_id: str) -> ActionJob:
+    """Read the Job of the upgrade action, which must have succeeded, and the output of its pod.
+
+    ``execute_commands`` names the Job after the deployment's release. The
+    deployment is not the counterpart of a clone, so its release reference
+    and its namespace are both ``styrmin-<deployment id>``. The Job must have
+    exactly one pod: the pods of a Job that an earlier run left are deleted
+    with it.
+    """
+    namespace = f"styrmin-{deployment_id}"
+    name = f"{namespace}-job"
+    batch = kubeclient.BatchV1Api(vcluster["api"])
+    core = kubeclient.CoreV1Api(vcluster["api"])
+    job: V1Job = await batch.read_namespaced_job(name=name, namespace=namespace)
+    assert job.status.succeeded == 1, f"Job {namespace}/{name}: {job.status}"
+    pods = await core.list_namespaced_pod(
+        namespace, label_selector=f"batch.kubernetes.io/job-name={name}"
+    )
+    assert len(pods.items) == 1, [pod.metadata.name for pod in pods.items]
+    output = await core.read_namespaced_pod_log(
+        name=pods.items[0].metadata.name, namespace=namespace, container=JOB_CONTAINER
+    )
+    return ActionJob(uid=str(job.metadata.uid), output=str(output))
+
+
 @asynccontextmanager
 async def _prefect(vcluster: dict) -> AsyncIterator[PrefectClient]:
     """A Prefect client on a port-forward to the vCluster's Prefect server."""
@@ -544,6 +591,9 @@ async def test_local_driver_actions_run_on_create_and_upgrade(
     await _wait_for_running(client, deployment_id, UPGRADE_VERSION)
     deployment = await client.deployments.get(deployment_id)
     assert str(deployment.application_driver_version_id) == driver_version_id
+    # The upgrade action ran its command in a Job, which stays after it ends.
+    job = await _action_job(vcluster, deployment_id)
+    assert f"{JOB_MARKER} {UPGRADE_VERSION}" in job.output, job.output
 
     # Each action ran its own code: the marker is in the logs of its flow run.
     await _wait_for_markers(vcluster, "pre_setup", "post_setup", "upgrade")
@@ -668,8 +718,10 @@ async def test_missing_registration_fails_and_loading_again_repairs_it(
     """User story 3: an action without a registered flow fails its hook step, and loading again repairs it (FR-005 to FR-007).
 
     Runs after ``test_local_driver_actions_run_on_create_and_upgrade`` in the
-    same session, which leaves the deployment running at ``UPGRADE_VERSION``.
-    The version change back to ``CREATE_VERSION`` runs the upgrade hook.
+    same session, which leaves the deployment running at ``UPGRADE_VERSION``
+    and the Job of its upgrade action in its namespace. The version change
+    back to ``CREATE_VERSION`` runs the upgrade hook, whose action creates
+    that Job again (#372).
     """
     client = local_actions_deployment.client
     deployment_id = local_actions_deployment.deployment_id
@@ -686,6 +738,8 @@ async def test_missing_registration_fails_and_loading_again_repairs_it(
             "test_local_driver_actions_run_on_create_and_upgrade before this test in "
             "the same session: it creates the deployment and upgrades it."
         )
+    # The Job of the first upgrade's action is still in the namespace.
+    first_job = await _action_job(vcluster, deployment_id)
 
     # Delete the registered flows of the driver version's actions.
     async with _prefect(vcluster) as prefect:
@@ -740,6 +794,10 @@ async def test_missing_registration_fails_and_loading_again_repairs_it(
     _assert_steps_succeeded(repaired_task, UPGRADE_CORE_HOOK)
     await _wait_for_running(client, deployment_id, CREATE_VERSION)
     await _wait_for_markers(vcluster, "upgrade", since=since)
+    # The second upgrade replaced the Job of the first one and ran its command.
+    second_job = await _action_job(vcluster, deployment_id)
+    assert second_job.uid != first_job.uid, (first_job, second_job)
+    assert f"{JOB_MARKER} {CREATE_VERSION}" in second_job.output, second_job.output
 
     deleted = await client.deployments.delete(deployment_id)
     assert deleted.type_ == "delete_deployment", deleted

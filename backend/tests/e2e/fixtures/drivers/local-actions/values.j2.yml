@@ -1,7 +1,8 @@
 fullnameOverride: styrmin-simple-app
 
-# The image stays at the simple-app build the E2E session provides: the
-# upgrade action only logs a marker, whatever the target version.
+# The image stays at the simple-app build the E2E session provides, whatever
+# the target version: the upgrade action logs a marker and runs its Job in
+# this image, which the cluster already holds.
 image:
   repository: simple-app
   tag: "0.1.0"

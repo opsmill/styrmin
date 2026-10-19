@@ -380,11 +380,35 @@ the deployment of the action's context, which is the deployment of the hook's ta
 do not reject their calls. An action that calls the API through the SDK instead of these
 primitives sends no `startedByStepId`, so the tasks it creates are not linked to the hook step.
 
-## Command output of a failed Job
+## The Job of `execute_commands`
 
 `execute_commands` runs its commands as a Kubernetes Job (container `user-job`) through `run_job`
-in `agent/service/kubernetes/primitives.py`. When the Job fails, `run_job` reads the end of the
-output before it raises (`read_job_output_tail` in `agent/service/kubernetes/job_logs.py`):
+in `agent/service/kubernetes/primitives.py`. The Job is named `<release reference>-job`, in the
+deployment's namespace, so every call on one deployment uses the same name. The Job has no
+`ttlSecondsAfterFinished` and no owner, so it stays in the cluster after it ends, and an operator
+can read it and its pod's output until the next call.
+
+Before it creates the Job, `run_job` deletes the Job of that name that an earlier call left,
+whether it completed, failed or is still running (#372):
+
+- It reads the Job, then deletes it with the `Foreground` propagation policy and a `uid`
+  precondition. Kubernetes removes the Job only after its pods, and the precondition keeps the
+  delete from removing a Job that another writer created after the read.
+- It reads the Job every second until the read answers 404 or finds a Job with another `uid`. When
+  the Job is still there after 120 seconds (`JOB_DELETION_TIMEOUT_SECONDS`), it raises
+  `JobNotDeletedError`, with the `kubectl` command that lists the Job's pods.
+- It then creates the new Job. When the create answers 409, because a Job of the same name was
+  created after the delete, it raises `JobAlreadyExistsError`. Before #372 the 409 raised
+  `CustomResourceNotFound`, and every later call on the deployment failed until someone deleted
+  the Job by hand.
+
+Because the earlier Job's pods are gone before the new Job starts, the output reader below reads
+only pods of the new Job.
+
+## Command output of a failed Job
+
+When the Job of `execute_commands` fails, `run_job` reads the end of the output before it raises
+(`read_job_output_tail` in `agent/service/kubernetes/job_logs.py`):
 
 - It lists the Job's pods by the label `batch.kubernetes.io/job-name`, then by the older label
   `job-name`, and reads a failed pod before a retry that has not ended, then the newest one.

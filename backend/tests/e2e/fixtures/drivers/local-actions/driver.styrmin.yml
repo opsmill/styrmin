@@ -1,9 +1,10 @@
 ---
 # E2E test driver for spec 029 (backend/tests/e2e/test_local_driver_actions.py):
-# the simple-app chart with setup and upgrade actions that only log a marker
-# (see actions.py). The test loads it with `load-local-version` from its path
-# in the Styrmin image (/source/backend/tests/e2e/fixtures/drivers/local-actions),
-# so `helm.main.location` names the in-cluster chart server directly.
+# the simple-app chart with setup and upgrade actions that log a marker; the
+# upgrade action also runs a command in a Job (see actions.py). The test loads
+# it with `load-local-version` from its path in the Styrmin image
+# (/source/backend/tests/e2e/fixtures/drivers/local-actions), so
+# `helm.main.location` names the in-cluster chart server directly.
 apiVersion: "styrmin.io/v1"
 kind: ApplicationDriver
 metadata:
@@ -56,5 +57,5 @@ spec:
     - name: upgrade
       hook: upgrade
       mode: core
-      description: Log a marker for the target version
+      description: Log a marker and run a command in a Job for the target version
       location: "actions.py::upgrade"

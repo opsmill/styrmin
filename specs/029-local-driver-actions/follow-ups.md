@@ -119,12 +119,6 @@ Evidence: [e2e-evidence.md](e2e-evidence.md#what-the-earlier-runs-of-t028-found)
 
 These problems are not caused by this change, and this branch does not change the code involved. They are recorded here because the quickstart run met them ([e2e-evidence.md](e2e-evidence.md#t050-the-quickstart-sections)).
 
-### Let a driver action call `execute_commands` more than once on the same deployment
-
-What is wrong: `execute_commands` creates a Job named `<release reference>-job`, with no `ttlSecondsAfterFinished`, and does not delete it after it completes ([`actions/primitives.py`](../../backend/styrmin_backend/actions/primitives.py)). The next `execute_commands` on the same deployment fails while that Job exists: `run_job` raises "Job … already exists in namespace …", with the exception class `CustomResourceNotFound`, which names a different problem ([`agent/service/kubernetes/primitives.py`](../../backend/styrmin_backend/agent/service/kubernetes/primitives.py)).
-
-Effect: the second upgrade of a `simple-app` deployment failed in its upgrade action. The action had already stopped the `server` component and changed the version, so the deployment showed `running` at the new version with no server pod. The upgrade actions of `simple-app` and `infrahub` call `execute_commands`, so the second upgrade of any deployment of these drivers fails the same way until someone deletes the Job.
-
 ### Let the agent of the dev stack reach the Styrmin API on Linux
 
 What is wrong: [`docker-compose.yml`](../../docker-compose.yml) sets `STYRMIN_URL_API_K8S=http://host.docker.internal:8000` on the server, and the server writes it as `STYRMIN_URL_API` into the environment of the work pool `user-work-pool` ([`workflows/catalogue.py`](../../backend/styrmin_backend/workflows/catalogue.py)). The agent container uses the host network, and on a Linux host `host.docker.internal` does not resolve there.

@@ -28,3 +28,11 @@ class JobFailedError(AgentServiceError):
 
 class JobOutputUnreadableError(KubernetesError):
     """The output of a Job's pod could not be read; the message gives the reason."""
+
+
+class JobNotDeletedError(KubernetesError):
+    """The earlier Job of the same name, or its pods, still existed when the wait for their deletion ended."""
+
+
+class JobAlreadyExistsError(KubernetesError):
+    """A Job of the same name was created after Styrmin deleted the earlier one."""

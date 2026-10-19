@@ -453,6 +453,8 @@ await start_components(components: list[str], context: GlobalContext) -> None
 
 Executes shell commands as a Kubernetes job.
 
+The Job is named `<release reference>-job` in the deployment's namespace and stays in the cluster after it ends, so you can read its output with `kubectl logs`. The next `execute_commands` call on the same deployment deletes that Job and its pods, even when it failed or is still running, then creates its own.
+
 ```python
 await execute_commands(
     commands: list[str],

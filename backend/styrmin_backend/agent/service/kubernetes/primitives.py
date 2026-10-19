@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,7 +22,13 @@ from kubernetes_asyncio.client import (
 from kubernetes_asyncio.client.api_client import ApiClient, ApiException
 
 from .dependency import get_api_client
-from .exceptions import CustomResourceNotFound, JobFailedError, JobOutputUnreadableError
+from .exceptions import (
+    CustomResourceNotFound,
+    JobAlreadyExistsError,
+    JobFailedError,
+    JobNotDeletedError,
+    JobOutputUnreadableError,
+)
 from .job_logs import read_job_output_tail
 
 
@@ -655,26 +662,108 @@ async def get_component_images(
     return [c.image for c in containers]
 
 
+#: How long ``run_job`` waits for the earlier Job of the same name and its pods to be deleted.
+JOB_DELETION_TIMEOUT_SECONDS = 120.0
+#: How often ``run_job`` reads the earlier Job while it waits for its deletion.
+JOB_DELETION_POLL_SECONDS = 1.0
+
+
+async def _delete_earlier_job(
+    batch_api: kubeclient.BatchV1Api, namespace: str, job_name: str
+) -> None:
+    """Delete the Job ``job_name`` that an earlier run left, then wait until it and its pods are gone.
+
+    The delete uses the ``Foreground`` propagation policy, so Kubernetes
+    removes the Job only after its pods; a Job that is gone therefore has no
+    pod left that the output reader of the next Job could read. The delete
+    has a ``uid`` precondition, so it never removes a Job that another writer
+    created after the read. Returns when the read answers 404, or finds a Job
+    with another ``uid``, which the create then reports as a conflict.
+
+    Raises:
+        JobNotDeletedError: the earlier Job still exists after
+            ``JOB_DELETION_TIMEOUT_SECONDS``.
+    """
+    try:
+        earlier = await batch_api.read_namespaced_job(
+            name=job_name, namespace=namespace
+        )
+    except ApiException as exc:
+        if exc.status == status.HTTP_404_NOT_FOUND:
+            return
+        raise
+    uid = earlier.metadata.uid
+    try:
+        await batch_api.delete_namespaced_job(
+            name=job_name,
+            namespace=namespace,
+            body=V1DeleteOptions(
+                propagation_policy="Foreground",
+                preconditions=V1Preconditions(uid=uid),
+            ),
+        )
+    except ApiException as exc:
+        # 404: already gone. 409: another Job replaced it; the create reports it.
+        if exc.status not in (status.HTTP_404_NOT_FOUND, status.HTTP_409_CONFLICT):
+            raise
+
+    deadline = time.monotonic() + JOB_DELETION_TIMEOUT_SECONDS
+    while True:
+        try:
+            job = await batch_api.read_namespaced_job(
+                name=job_name, namespace=namespace
+            )
+        except ApiException as exc:
+            if exc.status == status.HTTP_404_NOT_FOUND:
+                return
+            raise
+        if job.metadata.uid != uid:
+            return
+        if time.monotonic() >= deadline:
+            raise JobNotDeletedError(
+                f"Job {job_name} of an earlier run still exists in namespace {namespace} "
+                f"{JOB_DELETION_TIMEOUT_SECONDS:.0f} seconds after Styrmin deleted it, so "
+                "the new Job cannot be created. Check why its pods are not removed: "
+                f"kubectl get pods -n {namespace} -l batch.kubernetes.io/job-name={job_name}"
+            )
+        await asyncio.sleep(JOB_DELETION_POLL_SECONDS)
+
+
 @inject
 async def run_job(
     namespace: str,
     body: Any,
     client: ApiClient = Depends(get_api_client),
 ) -> None:
+    """Run the Job ``body`` in ``namespace`` and wait until it succeeds.
+
+    The Job's name is fixed by its caller (``execute_commands`` names it after
+    the deployment's release). A Job of that name that an earlier run left,
+    completed, failed or still running, is deleted first, with its pods, so
+    each run of an action can create its Job again. The last Job stays in the
+    cluster until the next run, for inspection.
+
+    Raises:
+        JobNotDeletedError: the earlier Job was not deleted in time.
+        JobAlreadyExistsError: a Job of the same name was created after the
+            earlier one was deleted.
+        JobFailedError: the Job failed; carries the end of its output.
+    """
     batch_api = kubeclient.BatchV1Api(client)
-    # core_api = kubeclient.CoreV1Api(client)
     job_name = body["metadata"]["name"]
 
+    await _delete_earlier_job(batch_api, namespace, job_name)
     try:
-        # Create the job
         await batch_api.create_namespaced_job(
             body=body, namespace=namespace, pretty="pretty"
         )
     except ApiException as exc:
         if exc.status == status.HTTP_409_CONFLICT:
-            raise CustomResourceNotFound(
-                f"Job {job_name} already exists in namespace {namespace}"
-            )
+            raise JobAlreadyExistsError(
+                f"Job {job_name} already exists in namespace {namespace}: it was created "
+                "after Styrmin deleted the Job of an earlier run. Another action may be "
+                "running for this deployment."
+            ) from exc
         raise
 
     # Wait for the job to complete

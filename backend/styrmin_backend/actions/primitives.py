@@ -266,6 +266,11 @@ async def execute_commands(
     """
     Executes a list of commands as kubernetes job with the given context.
 
+    The Job is named ``<release reference>-job`` in the deployment's namespace.
+    The Job of an earlier call on the same deployment, which stays in the
+    cluster after it ends, is deleted with its pods before the new Job is
+    created (``run_job``).
+
     Args:
         commands (list[str]): A list of commands to execute.
         image (str): The container image to use for the job.
@@ -283,6 +288,9 @@ async def execute_commands(
         ValueError: If a component is not found or no matching K8s resource exists.
         JobFailedError: If the Job fails. The end of its output is first recorded
             on the hook step that runs this action (``STYRMIN_STEP_ID``).
+        JobNotDeletedError: If the Job of an earlier call is not deleted in time.
+        JobAlreadyExistsError: If another Job of the same name is created after
+            the Job of the earlier call is deleted.
     """
     container_spec: dict = {
         "name": "user-job",
