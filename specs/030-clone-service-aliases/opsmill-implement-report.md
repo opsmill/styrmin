@@ -139,6 +139,14 @@ Six review agents ran on `f816ac25..3a3c6982`: code, comments, tests, errors, ty
 | Low | `backend/tests/unit/agent/test_service_aliases.py` (`TestCounterpartAliases`) | The test runs only code that existed before #530. The restore wiring is covered by other tests. | tests |
 | Low (10 suggestions) | `backup.py`, `clone.py`, `environment_clone.py`, `test_restore_steps.py`, `test_environment_clone_status.py`, `test_backup_restore.py` | Simplifications that keep behaviour the same. They are listed after this table. | simplify |
 
+Changes to the deferred findings after the review of #531 (2026-10-19), in the commits after the rebase onto `develop` `a5ec9446`:
+
+- The Medium finding on `counterpart_crd_body` and `counterpart_context` is fixed in `dcf60ed0`. The restore flow reads the counterpart's context from the body's `spec.context`, so no second parameter exists.
+- The Low finding on an in-place restore into another namespace is recorded in [#532](https://github.com/opsmill/styrmin/issues/532), because the maintainer traced it to an older defect: an in-place restore accepts a namespace other than the deployment's own.
+- The Low finding on a long multi-line `ApiException` text in the reason is fixed in `b7901107`. The restore's error names the step, gives the message of the Kubernetes API's answer on one line and names the repair. The step keeps the full error.
+- The simplify suggestion to unpack `_build_counterpart_crd_body` and possibly rename it no longer applies. Since `dcf60ed0`, the function returns only the body again.
+- `323b20bf` renamed tests that §4 lists: `test_a_refused_alias_write_fails_the_alias_step_and_the_recovery`, `test_a_failed_alias_read_fails_the_alias_step_and_the_recovery` and `test_a_refused_alias_write_fails_the_restore_and_the_counterpart`. §4 records the names at the time of its runs.
+
 The simplify review's suggestions:
 
 - Unpack `_build_counterpart_crd_body` directly, and possibly rename it.

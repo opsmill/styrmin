@@ -80,6 +80,9 @@ The review of the whole change ([opsmill-implement-report.md](opsmill-implement-
   - Step 11 of `test_environment_clone_lifecycle` is again the configuration-only re-clone of `develop`, which finishes in seconds.
   - The partial clone that checks SC-002 is a new step 12, under its own name.
   - Step 12 adds one counterpart restore to the `shard_env_backup` CI shard in each variant. Research D12 of spec 010 avoided a second full clone in this test for this cost. The maintainer has not confirmed this cost yet.
+- **An in-place restore into another namespace (finding 2):**
+  - The Velero Restore leaves out the service aliases when the namespaces differ, and the restore writes aliases only when the deployment ids differ. So an in-place restore into a namespace other than the deployment's own ends with no aliases and reports no error.
+  - The maintainer stated that an in-place restore should always restore into the deployment's own namespace. This is a defect older than this change, so this change does not fix it. [#532](https://github.com/opsmill/styrmin/issues/532) records it.
 
 ## Effect on the demo branch `fac/demo-beta-presentation-bhshh`
 
