@@ -45,7 +45,8 @@ override targeting a component the driver does not declare is rejected with
 ## Backups and restores
 
 The `backups` commands take a deployment: `create` and `list` by name or by
-`--id`, and `restore` with `--target-deployment` or `--target-deployment-id`.
+`--id`. `restore` takes a backup id, or `--last` with `--target-deployment` or
+`--target-deployment-id`.
 
 - `backups create` backs up the deployment's active instance.
 - `backups list` lists the deployment's backup history: the backups of every
@@ -83,9 +84,8 @@ uv run styrminctl backups list --id <deployment-id>
 # List the backups of one instance only
 uv run styrminctl backups list --instance-id <instance-id>
 
-# Restore a specific backup into a deployment (in-place). The target namespace
-# defaults to the deployment's namespace, so you usually don't pass it.
-uv run styrminctl backups restore <backup-id> --target-deployment my-app
+# Restore a specific backup: restores the backup into the deployment it was taken of
+uv run styrminctl backups restore <backup-id>
 
 # Restore the newest completed backup in a deployment's history, in-place
 uv run styrminctl backups restore --last --target-deployment my-app
@@ -98,9 +98,14 @@ A deleted deployment's backups cannot be restored: the server refuses the
 restore with `OPERATION_DENIED`.
 
 Name lookups search every environment by default; pass `--environment` when the
-same deployment name exists in more than one. When you restore to a raw
-`--target-instance-id`, `--target-namespace` is required (there is no deployment
-to derive it from).
+same deployment name exists in more than one.
+
+`restore` always restores a backup into the deployment it was taken of, in that
+deployment's namespace. `--target-deployment`, `--target-deployment-id` and
+`--target-instance-id` work only with `--last`: they choose whose newest
+completed backup is restored, not where it is restored. The command refuses a
+backup id combined with one of these options, before it contacts the server,
+and exits with status 1. Run it again with the backup id alone.
 
 ## Environment-level backups
 

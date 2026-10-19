@@ -181,20 +181,25 @@ class Restore(StyrminModel, table=True):
     name: str                     # Unique restore name
     status: RestoreStatus
     backup_id: UUID               # FK to Backup, indexed
-    target_namespace: str         # K8s namespace to restore into
-    target_instance_id: UUID | None  # Optional target instance
+    target_namespace: str         # K8s namespace the restore writes into, set by create_restore
+    target_instance_id: UUID | None  # Active instance of the deployment that receives the restore
     environment_restore_id: UUID | None  # FK to EnvironmentRestore (constituent membership), indexed
     component_statuses: dict      # JSON: component-level restore status
     metadata_: dict
 ```
 
-For a cross-target restore (an environment clone's constituent), `create_restore` sets
-`target_instance_id` to the active instance of the counterpart deployment, because the
-backup's own instance belongs to the source deployment
-(`services/backup/service.py:505-508`). Deleting the counterpart's environment does not
-delete such a restore: `DeploymentRepository.delete_all_for_environment` sets
-`target_instance_id` to null and keeps the row, so the clone's `restore_id` still
-resolves (`repository/deployment.py:380-431`).
+No caller names the namespace or the instance ([#532](https://github.com/opsmill/styrmin/issues/532)).
+`create_restore` sets both columns from the deployment that receives the restore, as
+`resolve_restore_target` returns it: `target_namespace` is that deployment's
+`styrmin-<deployment id>` namespace, and `target_instance_id` is its active instance, or
+null when it has none. For an in-place restore, that deployment is the one the backup was
+taken of. For a cross-target restore (an environment clone's constituent), it is the
+counterpart deployment, because the backup's own instance belongs to the source
+deployment. Rows created by earlier releases keep what they recorded: an in-place restore
+then recorded the namespace and the instance the caller sent, if any. Deleting the
+counterpart's environment does not delete a cross-target restore:
+`DeploymentRepository.delete_all_for_environment` sets `target_instance_id` to null and
+keeps the row, so the clone's `restore_id` still resolves.
 
 <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 
@@ -230,7 +235,8 @@ class BackupSchedule(StyrminModel, table=True):
 
 | Function | Description |
 |----------|-------------|
-| `create_restore(backup_id, target_namespace, uow, ...)` | Create restore from backup; resolves the target deployment, rejects internal deployments, tombstoned deployments (`DeletedDeploymentRestoreError`, `OPERATION_DENIED`, #304) and concurrent restores, flips `deployment.status` to `RESTORING`. Returns `(Restore, deployment_id)`. `environment_restore_id` links it as an environment-restore constituent; the row id is generated up front for the same unique-name reason as `create_backup`. |
+| `resolve_restore_target(backup, uow, *, target_deployment_id=None)` | The only place that decides where a restore lands. Returns a `RestoreTarget(deployment, namespace, instance_id)`: the deployment that receives a restore of the backup, its `styrmin-<deployment id>` namespace, and its active instance, or `None` when it has none. Without `target_deployment_id` (in-place), the deployment is the one of the backup's instance, and a missing instance, deployment link or deployment raises `BackupNotFoundError`. With `target_deployment_id` (environment clone), the deployment is that one, and a missing deployment raises `DeploymentNotFoundError`; the backup's own deployment is not read. Called inside an open unit of work |
+| `create_restore(backup_id, uow, name=None, timeout=DEFAULT_RESTORE_TIMEOUT, environment_restore_id=None, target_deployment_id=None)` | Create restore from backup. The caller names neither a namespace nor an instance (#532): `resolve_restore_target` picks the deployment, and the row records its namespace as `target_namespace` and its active instance as `target_instance_id`. Rejects internal deployments, tombstoned deployments (`DeletedDeploymentRestoreError`, `OPERATION_DENIED`, #304) and concurrent restores, and flips `deployment.status` to `RESTORING`. Returns `(Restore, deployment_id)`. `environment_restore_id` links it as an environment-restore constituent. Only the environment clone passes `target_deployment_id`, to restore into the counterpart deployment. The row id is generated up front for the same unique-name reason as `create_backup`. |
 | `get_restore(restore_id, uow)` | Get restore by ID |
 | `get_restores(backup_id, uow, status)` | List restores for backup |
 | `update_restore_status(restore_id, status, uow, ...)` | Update restore status |
@@ -474,7 +480,7 @@ A restore is a multi-stage operation: velero recreates the namespace and its res
 
 ### Stages
 
-1. **Restore start (`services/backup/service.py:create_restore`).** The deployment's status is flipped to `DeploymentState.RESTORING` in the same transaction that creates the `Restore` record. Internal deployments are rejected, and so are tombstoned ones (`deleted_at` set): Velero would recreate the deleted deployment's resources and the flip would move it out of `DELETED` while `deleted_at` stays set. The tombstone keeps `active_application_instance_id`, so the CLI can resolve a target instance for it; the service guard is what refuses it. A second restore is rejected with `RestoreAlreadyInProgressError` when a **non-terminal `Restore` row** (`PENDING` or `IN_PROGRESS`) already targets that deployment, or when one already replays the same backup. `find_in_flight_restore` counts a row as targeting the deployment when it targets the requested or the deployment's own `styrmin-<id>` namespace, or when it restores one of the deployment's own backups into any namespace other than another deployment's `styrmin-<id>` (`createRestore` accepts any `target_namespace`; an environment clone restoring the backup into its counterpart is not a conflict) — the refusal always names the offending restore in `existing_restore_id`. The guard deliberately does **not** read `deployment.status`: an environment clone parks each counterpart in `RESTORING` so nothing reconciles it before its data lands (`specs/010-environment-clone/research.md` D5), and that state is the *precondition* of the first cross-target restore rather than a conflict with it. A deployment left `RESTORING` by a dead restore is therefore restorable again instead of permanently wedged. If the caller then cannot dispatch `execute_restore_workflow`, nothing would ever move the `PENDING` row, so `createRestore` and the environment-restore fan-out call `settle_undispatched_restore`, which marks the restore `FAILED` with the dispatch error and the deployment `FAILED` in one transaction; the clone flow does the same through `_settle_undispatched_restore`.
+1. **Restore start (`services/backup/service.py:create_restore`).** The deployment's status is flipped to `DeploymentState.RESTORING` in the same transaction that creates the `Restore` record. Internal deployments are rejected, and so are tombstoned ones (`deleted_at` set): Velero would recreate the deleted deployment's resources and the flip would move it out of `DELETED` while `deleted_at` stays set. The tombstone keeps `active_application_instance_id`, so the CLI can resolve a target instance for it; the service guard is what refuses it. A second restore is rejected with `RestoreAlreadyInProgressError` when a **non-terminal `Restore` row** (`PENDING` or `IN_PROGRESS`) already targets that deployment, or when one already replays the same backup. `find_in_flight_restore` counts a row as targeting the deployment when it targets the deployment's own `styrmin-<id>` namespace, which `create_restore` records, or when it restores one of the deployment's own backups into any namespace other than another deployment's `styrmin-<id>` (a restore created by an earlier release may record another namespace; an environment clone restoring the backup into its counterpart is not a conflict) — the refusal always names the offending restore in `existing_restore_id`. The guard deliberately does **not** read `deployment.status`: an environment clone parks each counterpart in `RESTORING` so nothing reconciles it before its data lands (`specs/010-environment-clone/research.md` D5), and that state is the *precondition* of the first cross-target restore rather than a conflict with it. A deployment left `RESTORING` by a dead restore is therefore restorable again instead of permanently wedged. If the caller then cannot dispatch `execute_restore_workflow`, nothing would ever move the `PENDING` row, so `createRestore` and the environment-restore fan-out call `settle_undispatched_restore`, which marks the restore `FAILED` with the dispatch error and the deployment `FAILED` in one transaction; the clone flow does the same through `_settle_undispatched_restore`.
 2. **Velero work (USER flow).** Namespace is deleted, then velero restores everything from the backup except the [resources left out of every backup and restore](#resources-left-out-of-every-backup-and-restore). The CRD is recreated with empty status.
 3. **Operator quiesce.** While `phase == Restoring`, the operator's `kopf_styrmin_deployment_timer` early-returns — it does not advance phases and does not trip the 300 s readiness-timeout-to-Error branch.
 4. **Post-velero recovery (`operator/restore_recovery.py`).** Called from the USER flow after velero polling reports `Completed`:
@@ -1661,7 +1667,7 @@ environmentClones(environmentId: UUID!): [EnvironmentClone!]!     # by SOURCE en
 ```graphql
 createBackup(instanceId: UUID!, name: String): Backup!
 deleteBackup(backupId: UUID!): String!
-createRestore(backupId: UUID!, targetNamespace: String!, targetInstanceId: UUID): Restore!
+createRestore(backupId: UUID!): Restore   # namespace and target instance derived from the backup's deployment (#532)
 createBackupSchedule(deploymentId: UUID!, name: String!, cronExpression: String!, retentionCount: Int, enabled: Boolean): BackupSchedule!
 updateBackupSchedule(scheduleId: UUID!, name: String, cronExpression: String, retentionCount: Int, enabled: Boolean): BackupSchedule!
 deleteBackupSchedule(scheduleId: UUID!): String!
