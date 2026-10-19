@@ -192,6 +192,18 @@ the repository, the branch and the driver directory.
 An upgrade request finds this error before it changes the deployment. It
 returns a failed task whose "Run the upgrade hook" step holds the error,
 and the deployment keeps its application version and driver version.
+`styrminctl deployments update-version` and `styrminctl deployments apply`
+print the task id and the error and exit with code 1:
+
+```text
+failed my-app: task <task-id> failed: Driver version my-app 1.0.0@a1b2c3d declares the action upgrade for the upgrade hook, mode core, but no flow is registered for it, ...
+```
+
+`apply --wait` reports the failure at once and does not wait for the
+deployment. In the SDK, `client.deployments.apply` returns an outcome
+with `action="failed"`, the task id as `task_id` and the same reason as
+`failure_reason`. `client.deployments.update_version` returns the failed
+task, with the error as its `message`, and does not raise.
 
 To fix it:
 

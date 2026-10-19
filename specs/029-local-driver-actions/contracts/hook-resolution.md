@@ -102,6 +102,7 @@ When `resolve_upgrade_hooks` returns, the function continues unchanged. The reso
 
 - Create from a version whose `setup`/`pre` registration is missing: the task fails, the `plan` step succeeds, the `hook:setup:pre` step fails with the error (unit and E2E).
 - Upgrade request to a version whose `upgrade`/`core` registration is missing: the response is a failed task with a failed `hook:upgrade:core` step; the deployment's version, driver binding, status and active instance are unchanged; no flow run starts (unit and E2E user story 3).
+- The clients report that failed task as a failure: `styrminctl deployments update-version` and `styrminctl deployments apply`, with and without `--wait`, print the task id and its message and exit with code 1; the SDK's `apply` returns `action="failed"` and does not wait; the SDK's `update_version` returns the failed task (SDK and CLI unit).
 - After the driver is loaded again, the same request starts a new task, and the upgrade action runs (E2E user story 3).
 - Upgrade to a version that declares no `upgrade`/`core` action: plain update, as today (unit).
 - A git version with all registrations: unchanged behaviour (existing unit and E2E tests).

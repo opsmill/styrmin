@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
@@ -192,6 +192,29 @@ def test_deployments_update_version_with_driver_version_pin(
     )
     output = capsys.readouterr().out
     assert "t-1" in output
+
+
+UNREGISTERED_ACTION_MESSAGE = (
+    "Driver version web 15.0@a1b2c3d declares the action upgrade for the upgrade hook, mode core, "
+    "but no flow is registered for it, so the hook cannot run. Load the driver again to register its "
+    "actions: styrminctl drivers load-local-version /styrmin/drivers/web."
+)
+
+
+def test_deployments_update_version_exits_one_on_a_failed_task(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A failed task from the request means the server refused the change: print its message and exit 1 (#372)."""
+    mock_task = MagicMock(id="t-1", status="failed", message=UNREGISTERED_ACTION_MESSAGE)
+    mock_client.deployments.update_version = AsyncMock(return_value=mock_task)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "update-version", DEPLOYMENT_UUID, "15.0"])
+    assert exc.value.code == 1
+
+    output = " ".join(capsys.readouterr().out.split())
+    assert f"Error: task t-1 failed: {UNREGISTERED_ACTION_MESSAGE}" in output
+    assert "in progress" not in output
 
 
 def test_deployments_start_components(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
@@ -952,6 +975,117 @@ def test_deployments_apply_wait_rejected_update_names_the_error_code(
         f"failed my-app: {reason} [COMPONENT_CONTAINER_NOT_DECLARED]",
         "0 created, 0 updated, 0 unchanged, 1 failed",
     ]
+
+
+# --------------------------------------------------------------------------
+# An update request that returns a failed task (spec 029, #372). These tests
+# run the SDK's real ``apply_files`` over a fake transport, because the SDK
+# decides the outcome from the returned task.
+# --------------------------------------------------------------------------
+
+FAILED_TASK_UUID = "c1d2e3f4-a5b6-7890-cdef-0123456789ab"
+
+
+def _deployment_payload(*, status: str) -> dict[str, Any]:
+    """The ``deployment`` field of ``GetDeploymentByName`` and ``GetDeployment``: running, on version 1.0.0."""
+    return {
+        "id": DEPLOYMENT_UUID,
+        "name": "my-app",
+        "status": status,
+        "deletedAt": None,
+        "config": {},
+        "parameters": {},
+        "applicationVersion": "1.0.0",
+        "applicationDriverVersionId": "cccccccc-dddd-eeee-ffff-000000000000",
+        "applicationDriverVersion": {
+            "id": "cccccccc-dddd-eeee-ffff-000000000000",
+            "version": "1.0.0",
+            "contentHash": None,
+            "sourceCommitSha": None,
+            "applicationDriver": {"id": "dddddddd-eeee-ffff-0000-111111111111", "name": "acme/web"},
+        },
+        "environmentId": ENV_UUID,
+        "createdBy": {"id": "55555555-6666-7777-8888-999999999999", "username": "alice", "displayName": "Alice"},
+        "applicationInstance": {"id": "33333333-4444-5555-6666-777777777777", "status": "running"},
+        "components": [],
+        "componentImageOverrides": [],
+        "componentReplicas": [],
+        "deployedServices": [],
+    }
+
+
+def _use_sdk_whose_update_returns_a_failed_task(mock_client: MagicMock) -> AsyncMock:
+    """Wire the real SDK deployment resource to a transport whose update request returns a failed task.
+
+    The deployment stays ``running`` on its old version, as on a server that refused the upgrade.
+    """
+    from styrmin_sdk import Transport
+    from styrmin_sdk.resources.deployments import DeploymentResource
+
+    responses: dict[str, dict[str, Any]] = {
+        "query ListEnvironments": {
+            "environments": [
+                {"id": ENV_UUID, "name": "prod", "config": {}, "cluster": {"id": DEPLOYMENT_UUID, "name": "default"}}
+            ]
+        },
+        "query GetDeploymentByName": {"deployment": _deployment_payload(status="running")},
+        "mutation UpdateDeploymentVersion": {
+            "updateDeploymentVersion": {
+                "id": FAILED_TASK_UUID,
+                "type": "upgrade_instance",
+                "status": "failed",
+                "message": UNREGISTERED_ACTION_MESSAGE,
+                "deploymentId": DEPLOYMENT_UUID,
+            }
+        },
+        "query GetDeployment(": {"deployment": _deployment_payload(status="running")},
+    }
+
+    async def execute(query: str, _variables: dict[str, Any] | None = None) -> dict[str, Any]:  # noqa: RUF029 — mirrors Transport.execute
+        first_line = query.splitlines()[0].strip()
+        for prefix, data in responses.items():
+            if first_line.startswith(prefix):
+                return {"data": data}
+        raise AssertionError(f"unexpected query: {first_line}")
+
+    transport = AsyncMock(spec=Transport)
+    transport.execute.side_effect = execute
+    mock_client.deployments = DeploymentResource(transport)
+    return transport
+
+
+def _polled_the_deployment(transport: AsyncMock) -> bool:
+    return any(
+        call.args[0].splitlines()[0].strip().startswith("query GetDeployment(")
+        for call in transport.execute.call_args_list
+    )
+
+
+@pytest.mark.parametrize("wait", [False, True], ids=["no_wait", "wait"])
+def test_deployments_apply_exits_one_when_the_update_returns_a_failed_task(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    wait: bool,
+) -> None:
+    """The failed task's message is on the ``failed`` line and the exit code is 1, with or without ``--wait``.
+
+    Without the check, ``apply`` reported ``updated`` and ``--wait`` ended on the ``running`` deployment,
+    so a CI job passed while the deployment stayed on its old version (#372).
+    """
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    transport = _use_sdk_whose_update_returns_a_failed_task(mock_client)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest), *(["--wait"] if wait else [])])
+    assert exc.value.code == 1
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line]
+    assert lines == [
+        f"failed my-app: task {FAILED_TASK_UUID} failed: {UNREGISTERED_ACTION_MESSAGE}",
+        "0 created, 0 updated, 0 unchanged, 1 failed",
+    ]
+    assert not _polled_the_deployment(transport)
 
 
 def test_deployments_apply_wait_timeout_emits_failed_wait_timeout(

@@ -278,6 +278,16 @@ def _error_code(exc: BaseException) -> str | None:
     return None
 
 
+#: ``Task.status`` of a failed task. :meth:`DeploymentResource.update_version` returns a task
+#: with this status when the server refuses an upgrade before it writes anything (spec 029).
+FAILED_TASK_STATUS = "failed"
+
+
+def failed_task_reason(task_id: UUID, message: str | None) -> str:
+    """Describe a failed task by its id and, when it has one, its message."""
+    return f"task {task_id} failed: {message}" if message else f"task {task_id} failed"
+
+
 def _effective_image_overrides(update_input: UpdateDeploymentInput, stored_config: object) -> dict[str, str | None]:
     """Image override per component once ``update_input`` lands (research D-011).
 
@@ -564,6 +574,13 @@ class DeploymentResource(BaseResource):
         Returns ``None`` when the backend detects a no-op (the requested
         state equals the current one): the resolver returns ``null`` and no
         task is dispatched.
+
+        The returned task can already have the status ``failed``
+        (:data:`FAILED_TASK_STATUS`): the server refused the change before it
+        wrote anything, for example an upgrade whose driver action has no
+        registered flow, and the task's ``message`` says why. The deployment
+        keeps its version. This method returns that task and does not raise;
+        callers check ``status``. :meth:`apply` reports it as ``action="failed"``.
         """
         variables: dict[str, Any] = {
             "deploymentId": str(deployment_id),
@@ -717,7 +734,8 @@ class DeploymentResource(BaseResource):
         A ``max_wait`` that is not positive raises :class:`ValueError`
         before anything is submitted. On a terminal failure or wait timeout
         the returned outcome's ``action`` is flipped to ``"failed"`` and
-        ``failure_reason`` is populated. The
+        ``failure_reason`` is populated. An update that returns a failed task
+        is a ``"failed"`` outcome at once, and ``apply`` does not wait. The
         submission itself is NOT undone — re-running ``apply`` against the
         same manifest is the recovery path.
         """
@@ -768,7 +786,12 @@ class DeploymentResource(BaseResource):
         dispatched even when the version is unchanged: the backend re-resolves the
         driver version and owns no-op detection, returning ``None`` when nothing
         changes (``action="unchanged"``). A rejected call returns ``action="failed"``
-        with the server's message and ``error_code``; nothing was written. An
+        with the server's message and ``error_code``; nothing was written. A call
+        that returns a task whose status is already ``failed`` also returns
+        ``action="failed"``, with the task's id and message as ``failure_reason``:
+        the server refused the change before writing it, for example an upgrade
+        whose driver action has no registered flow (spec 029, research R-009), so
+        there is nothing to wait for. An
         ``updated`` outcome that changes the application version also carries
         ``target_version`` and the token-free ``pinned_image_components`` (FR-008),
         and ``inapplicable_overrides`` lists, per component, the manifest's overrides that
@@ -797,6 +820,14 @@ class DeploymentResource(BaseResource):
                 name=manifest.name,
                 action="unchanged",
                 deployment_id=existing.id,
+            )
+        if task.status == FAILED_TASK_STATUS:
+            return ApplyOutcome(
+                name=manifest.name,
+                action="failed",
+                deployment_id=existing.id,
+                task_id=task.id,
+                failure_reason=failed_task_reason(task.id, task.message),
             )
 
         version_changed = manifest.version != existing.application_version

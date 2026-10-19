@@ -538,7 +538,11 @@ Each deployment in a run is reported with its outcome:
 - `failed <name>: <reason>` — the apply errored for that deployment. When
   the server rejected the manifest, the line ends with the server's error
   code, for example `[COMPONENT_CONTAINER_NOT_DECLARED]`, and nothing on
-  the deployment changed.
+  the deployment changed. When the server refused the update and returned
+  a failed task, the reason is `task <task-id> failed: <message>`, and the
+  deployment keeps its application version. See
+  [A declared action has no registered flow](../drivers/loading-drivers.md#a-declared-action-has-no-registered-flow)
+  for an example.
 
 A run ends with a summary line counting each outcome, for example:
 
@@ -547,7 +551,8 @@ A run ends with a summary line counting each outcome, for example:
 ```
 
 A run consisting solely of no-ops still exits with a success code, so
-`apply` is safe to run repeatedly in a declarative loop.
+`apply` is safe to run repeatedly in a declarative loop. A run with at
+least one `failed` outcome exits with code 1.
 
 For an existing deployment, `apply` sends the manifest's config,
 parameters and version in one request. This needs a Styrmin server with
@@ -579,7 +584,10 @@ redeploy.
 
 With `--wait`, `apply` prints `submitted <name>` when it submits a
 change, then `running <name>` or `failed <name>: <reason>` when the
-deployment reaches a final state. For an upgrade, `running` comes only
+deployment reaches a final state. When the server refuses the change
+and returns a failed task, `apply` prints only the line
+`failed <name>: task <task-id> failed: <message>` and does not wait,
+because the deployment did not change. For an upgrade, `running` comes only
 after the upgrade task and the tasks its driver hook started have
 finished (see
 [Status reporting](../concepts-and-architecture/status-reporting.md)).
@@ -636,6 +644,14 @@ the version and checked against the target driver version, and one task
 reconciles both. `--config` needs a Styrmin server with
 [#388](https://github.com/opsmill/styrmin/issues/388);
 `update-version` without `--config` works with older servers too.
+
+When the server refuses the version change before it writes anything,
+the request returns a failed task. The command then prints
+`Error: task <task-id> failed: <message>` and exits with code 1, and the
+deployment keeps its application version and driver version. For
+example, the server refuses an upgrade to a driver version that declares
+an upgrade action with no registered flow: see
+[A declared action has no registered flow](../drivers/loading-drivers.md#a-declared-action-has-no-registered-flow).
 
 When the command changes the deployment's driver version and the target
 driver version no longer declares a parameter that the deployment sets,
