@@ -39,7 +39,7 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
 
 **Purpose**: a green baseline before any change.
 
-- [ ] T001 Run `uv sync`, then `uv run pytest backend/tests/unit/services/driver backend/tests/unit/workflows backend/tests/unit/services/reconciliation/test_remediation.py backend/tests/unit/agent/tasks/test_run_deployment_or_fail.py backend/tests/unit/agent/tasks/test_apply_state_flow.py backend/tests/unit/services/test_update_deployment_noop.py backend/tests/unit/services/test_applications_upsert_idempotent.py backend/tests/unit/services/test_application_services.py backend/tests/functional/test_user_action_registration.py -q`, and note the results in your working notes as the baseline (no file change)
+- [X] T001 Run `uv sync`, then `uv run pytest backend/tests/unit/services/driver backend/tests/unit/workflows backend/tests/unit/services/reconciliation/test_remediation.py backend/tests/unit/agent/tasks/test_run_deployment_or_fail.py backend/tests/unit/agent/tasks/test_apply_state_flow.py backend/tests/unit/services/test_update_deployment_noop.py backend/tests/unit/services/test_applications_upsert_idempotent.py backend/tests/unit/services/test_application_services.py backend/tests/functional/test_user_action_registration.py -q`, and note the results in your working notes as the baseline (no file change)
 
 ---
 
