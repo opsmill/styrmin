@@ -7,7 +7,8 @@ through ``PrefectManager`` to a ``prefect_test_harness`` server, and each
 
 Spec 029 (FR-001, FR-002): the actions of a driver loaded from a local
 directory are registered with the driver directory of that path and a pull
-step that checks the driver files before the action runs.
+step that checks the driver files before the action runs. FR-006: loading a
+driver version again registers the actions whose deployments are gone.
 """
 
 from __future__ import annotations
@@ -23,9 +24,16 @@ from prefect.client.schemas.actions import WorkPoolCreate
 from prefect.client.schemas.filters import DeploymentFilter, DeploymentFilterTags
 from prefect.client.schemas.responses import DeploymentResponse
 from prefect.testing.utilities import prefect_test_harness
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend import config
-from styrmin_backend.services.applications import ensure_action_registrations
+from styrmin_backend.services.applications import (
+    ensure_action_registrations,
+    load_application_driver_from_object,
+)
 from styrmin_backend.services.driver import ApplicationDriver
 from styrmin_backend.services.driver.loaders import get_local_driver_loader
 from styrmin_backend.services.driver.models.resources.actions import (
@@ -33,6 +41,7 @@ from styrmin_backend.services.driver.models.resources.actions import (
     HookKind,
 )
 from styrmin_backend.services.driver.models.structure.source import GitSource
+from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
 from styrmin_backend.services.user import ActionsWorkflowBuilder
 from styrmin_backend.services.workflow.local import WorkflowLocalExecutor
 from styrmin_backend.workflows.catalogue import PrefectCatalogue
@@ -82,6 +91,21 @@ async def manager() -> PrefectManager:
     )
     await manager.register_token(namespace="user", token="default")
     return manager
+
+
+@pytest.fixture
+async def uow():
+    """A unit of work on an in-memory SQLite database, for loads that store a driver version."""
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        yield SqlModelUnitOfWork(session=session)
+    await engine.dispose()
 
 
 async def _load_driver(
@@ -277,3 +301,36 @@ async def test_two_paths_with_the_same_driver_files_keep_their_own_actions(
             assert deployment.pull_steps is not None
             (step,) = deployment.pull_steps
             assert step[CHECK_LOCAL_DRIVER_STEP]["directory"] == directory
+
+
+async def test_loading_a_local_driver_again_registers_its_deleted_actions_again(
+    manager: PrefectManager, uow: SqlModelUnitOfWork, tmp_path: Path
+) -> None:
+    """FR-006: a repeated load repairs a driver version whose deployments were deleted."""
+    directory = str(shutil.copytree(_EXAMPLES / "semaphore", tmp_path / "semaphore"))
+    driver = get_local_driver_loader(path=directory).load_driver()
+    stored = await load_application_driver_from_object(
+        driver_object=driver, uow=uow, prefect_manager=manager
+    )
+    deployments = await _local_deployments(directory)
+    assert len(deployments) == 3
+    async with get_client() as client:
+        for deployment in deployments:
+            await client.delete_deployment(deployment.id)
+    assert await _local_deployments(directory) == []
+    assert not any((await _lookup_local(manager, driver, directory)).values())
+
+    again = await load_application_driver_from_object(
+        driver_object=get_local_driver_loader(path=directory).load_driver(),
+        uow=uow,
+        prefect_manager=manager,
+    )
+
+    assert again.id == stored.id
+    deployments = await _local_deployments(directory)
+    assert len(deployments) == 3
+    assert driver.content_hash is not None
+    for deployment in deployments:
+        assert deployment.pull_steps == [_check_step(directory, driver.content_hash)]
+    flows = await _lookup_local(manager, driver, directory)
+    assert set(flows.values()) == {deployment.id for deployment in deployments}

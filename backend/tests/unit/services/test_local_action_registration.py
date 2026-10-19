@@ -26,6 +26,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.db.models import ApplicationDriverVersion
 from styrmin_backend.services.applications import (
+    LoadedDriverVersion,
     ensure_action_registrations,
     load_application_driver_from_local_directory,
     load_application_driver_from_object,
@@ -185,6 +186,12 @@ def _registered_actions(manager: FakePrefectManager) -> set[tuple[str, str, str]
     return {(r.workflow.function, r.hook.value, r.mode) for r in manager.registrations}
 
 
+def _content_hash_of(loaded: LoadedDriverVersion) -> str:
+    content_hash = loaded.version.content_hash
+    assert content_hash is not None
+    return content_hash
+
+
 SEMAPHORE_ACTIONS = {
     ("pre_setup", "setup", "pre"),
     ("post_setup", "setup", "post"),
@@ -331,3 +338,69 @@ async def test_pair_whose_lookup_finds_a_flow_is_not_registered_again(
     assert [r.workflow.function for r in prefect_manager.registrations].count(
         "pre_setup"
     ) == 1
+
+
+async def test_loading_a_stored_version_again_registers_nothing_when_every_pair_resolves(
+    tmp_path: Path,
+    db_session: AsyncSession,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+) -> None:
+    """FR-006: a repeated load makes no Prefect write when hooks find every action."""
+    path = _copy_driver("semaphore", tmp_path / "semaphore")
+    first = await load_application_driver_from_local_directory(path=str(path), uow=uow)
+    registrations = list(prefect_manager.registrations)
+
+    again = await load_application_driver_from_local_directory(path=str(path), uow=uow)
+
+    assert again.version.id == first.version.id
+    assert prefect_manager.registrations == registrations
+    assert [v.id for v in await _stored_versions(db_session)] == [first.version.id]
+
+
+@pytest.mark.parametrize(
+    "stale_info",
+    [False, True],
+    ids=["stored-version", "stored-version-with-stale-info"],
+)
+async def test_loading_a_stored_version_again_registers_the_actions_of_a_missing_pair(
+    tmp_path: Path,
+    db_session: AsyncSession,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+    stale_info: bool,
+) -> None:
+    """FR-006: only the actions of the hook and mode without a registered flow are registered.
+
+    Both returns of the stored-version path register: the plain return, and
+    the one that first fills the info columns of an older row.
+    """
+    path = _copy_driver("semaphore", tmp_path / "semaphore")
+    first = await load_application_driver_from_local_directory(path=str(path), uow=uow)
+    if stale_info:
+        stored = await db_session.get(ApplicationDriverVersion, first.version.id)
+        assert stored is not None
+        stored.description = None
+        await db_session.commit()
+    # The Prefect deployment of the upgrade/core action was deleted.
+    prefect_manager.registrations = [
+        r
+        for r in prefect_manager.registrations
+        if (r.hook, r.mode) != (HookKind.UPGRADE, "core")
+    ]
+    kept = list(prefect_manager.registrations)
+
+    again = await load_application_driver_from_local_directory(path=str(path), uow=uow)
+
+    assert again.version.id == first.version.id
+    assert prefect_manager.registrations[: len(kept)] == kept
+    new = prefect_manager.registrations[len(kept) :]
+    assert [(r.workflow.function, r.hook.value, r.mode) for r in new] == [
+        ("upgrade", "upgrade", "core")
+    ]
+    assert _content_hash_of(again) == _content_hash_of(first)
+    assert new[0].driver_directory == str(path)
+    assert new[0].fingerprint == _content_hash_of(first)[:7]
+    assert [v.id for v in await _stored_versions(db_session)] == [first.version.id]
+    if stale_info:
+        assert again.version.description is not None

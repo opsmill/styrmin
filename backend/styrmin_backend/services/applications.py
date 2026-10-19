@@ -186,7 +186,8 @@ async def load_application_driver_from_object(
 
     A new driver version's actions, from git or from a local directory, are
     registered with :func:`ensure_action_registrations` before the version is
-    stored.
+    stored. Loading a stored driver version again registers the declared
+    actions that have no registered flow, and returns the stored version.
 
     Args:
         driver_object (ApplicationDriver): The object representing the application driver.
@@ -241,6 +242,12 @@ async def load_application_driver_from_object(
             source_commit_sha=driver_object.source_commit_sha,
         )
         if existing_identity is not None:
+            # Spec 029 (FR-006) — loading a driver version again registers the
+            # declared actions whose hook and mode have no registered flow, for
+            # example after their Prefect deployments were deleted. Before both
+            # returns below, and before the info refresh commits, so a load
+            # that this refuses writes nothing.
+            await ensure_action_registrations(driver_object, prefect_manager)
             # The identity tuple pins the file content, so this only fills
             # rows stored before the info columns existed (spec 020, R5).
             info = _driver_info_columns(driver_object.driver_spec.spec.info)
