@@ -53,7 +53,7 @@ The spec flags these answers, which the PRD did not give. Each one can be confir
 
 The review of the whole change ([opsmill-implement-report.md](opsmill-implement-report.md)) added three commits after `3a3c6982`:
 
-- `f7bb114f`: the alias step reads the peers' services and the cluster's aliases before it opens. A read that failed in a clone's restore failed the restore, but no step held the error, which FR-004 and SC-004 require. The step now records a failed read as the failed step "Create and delete service aliases".
+- `f7bb114f`: the alias step lists the aliases in the cluster before it opens. When that list failed in a clone's restore, the restore failed, but no step held the error, which FR-004 and SC-004 require. The step now records an error raised before it opens as the failed step "Create and delete service aliases". A failed read of the environment's services from the server still does not fail the step, which then uses the services that the context lists (#503).
   - The create, update and upgrade flows call the same step, so in those flows too a failed read is now recorded as the failed alias step. Before, those flows failed with no alias step recorded.
   - Both E2E variants ran again at `ffbcf1b1`, which holds this commit, and passed ([e2e-evidence.md](e2e-evidence.md), "Re-run at the final head").
 - `8da6967e` and `e52c8600`: documentation that the change had made false, the description of `counterpartDeploymentId` above, and `CONTEXT.md`, which said that a restore has at most three steps.
