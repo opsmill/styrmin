@@ -9,8 +9,12 @@ Constitution §V definition-of-done record for the E2E tasks of spec 030. Each s
 | `ui-chromium` | T036 | `e2e-530-1792325479` | `2 passed, 2 deselected` |
 | `api-chromium`, at the final head `ffbcf1b1` | re-run after the review | `e2e-530-r2-1792394706` | `2 passed, 2 deselected` |
 | `ui-chromium`, at the final head `ffbcf1b1` | re-run after the review | `e2e-530-r2-1792394706` | `2 passed, 2 deselected` |
+| `api-chromium`, after the review of #531 | re-run at `b21ab009` | `e2e-530-r3-1792403506` | `2 passed, 2 deselected` |
+| `ui-chromium`, after the review of #531 | re-run at `b21ab009` | `e2e-530-r3-1792403506` | `2 passed, 2 deselected` |
 
-The sessions above the last two rows ran on another host, before the review fix `f7bb114f`. The last two rows are described in [Re-run at the final head](#re-run-at-the-final-head-ffbcf1b1).
+The first three sessions ran on another host, before the review fix `f7bb114f`. The fourth and fifth are described in [Re-run at the final head](#re-run-at-the-final-head-ffbcf1b1), and the last two in [Re-run after the review of #531](#re-run-after-the-review-of-531-b21ab009).
+
+The branch was rebased onto `develop` at `a5ec9446` on 2026-10-19, before the last two sessions. The commit SHAs in the sections before that one name the commits before the rebase. [pr-notes.md](pr-notes.md), "Commits", maps them to the rebased commits.
 
 ## Styrmin image under test
 
@@ -207,6 +211,7 @@ The tests that check each expectation of the quickstart:
   - `test_a_cross_target_restore_that_fails_before_its_end_writes_no_aliases` (cases `recovery-failed` and `velero-failed`) checks that a restore that fails before its recovery succeeds does not run the step.
   - `test_a_refused_alias_write_fails_the_alias_step_and_the_recovery` runs the real step and checks that its record is named "Create and delete service aliases".
 - A refused alias write fails the restore: `test_a_refused_alias_write_fails_the_alias_step_and_the_recovery` (the step fails with the error, and the stored result reads `recovered: False` with the alias error) and `test_a_refused_alias_write_fails_the_restore_and_the_counterpart` (the restore and the counterpart are set to `FAILED` with the alias error).
+  - Note (2026-10-19): `323b20bf`, after the review of #531, changed this behaviour and renamed both tests. `test_a_refused_alias_write_fails_the_alias_step_but_not_the_recovery` checks that the stored result reads `recovered: True` with the error under `aliases_error`. `test_a_refused_alias_write_fails_the_restore_and_keeps_the_counterpart_running` checks that the restore is `FAILED` with the error and the counterpart is set to `RUNNING`.
 - An entry whose restore failed reads `FAILED` with the restore's error: `test_a_cloned_entry_whose_restore_failed_reads_failed_with_the_error`, `test_a_failed_restore_without_an_error_gives_the_reason_alone`, `test_every_other_entry_is_read_as_stored` and `test_the_entries_read_agree_with_the_derived_status` in `test_environment_clone_status.py`, and, through the GraphQL resolver, `test_a_cloned_entry_whose_restore_failed_reads_failed_on_every_read` in `backend/tests/functional/graphql/test_environment_clone.py`.
 
 ### E2E tests: both variants passed in T035 and T036
@@ -385,3 +390,75 @@ Three earlier attempts failed in fixture setup, before any test ran. None was ca
 3. **`ui-chromium`, `2026-10-19T07:51Z`** (vcluster `pytest-ace546d8-97b8-46a0-9bc7-2ccab99bbad4`, kubeconfig `/tmp/pytest-of-ubuntu/pytest-5/vcluster0/kubeconfig`).
    - The host had no Chromium for Playwright 1.58.0 (build 1208), and Playwright 1.58.0 does not support downloading it on Ubuntu 26.04.
    - The build was then installed with `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64 uv run playwright install chromium`.
+
+## Re-run after the review of #531 (`b21ab009`)
+
+Both variants ran again on 2026-10-19 at commit `b21ab00969744d19f684b0066f6453d864cb6b6c`, on the same host as the re-run at `ffbcf1b1`. This commit holds:
+
+- the rebase onto `develop` at `a5ec9446`, which includes #467;
+- `dcf60ed0`: the restore flow reads the counterpart's context from its StyrminDeployment body;
+- `b7901107` and `323b20bf`: the new error of a failed alias step, and the counterpart set to `RUNNING` when only that step failed;
+- `b21ab009`: step 11 of `test_environment_clone_lifecycle` is again the configuration-only re-clone, and the partial clone is step 12.
+
+No observer loop ran in these sessions, so this section has no record of the Velero Restores or the alias Services read during them. The alias checks of the tests themselves passed.
+
+### Styrmin image under test
+
+```bash
+export STYRMIN_IMAGE_VER=e2e-530-r3-1792403506
+docker compose build server
+```
+
+- The image was built at `2026-10-19T09:51:59Z`, at `b21ab009`.
+- A check in the image found `_service_aliases_error` and `aliases_error` in `styrmin_backend/workflows/templates/backup.py`, and `describe_api_answer` in `styrmin_backend/agent/service/kubernetes/utils.py`.
+
+### api-chromium
+
+| Item | Value |
+|---|---|
+| pytest node IDs | `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[api-chromium]`, `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[api-chromium]` |
+| Start (UTC) | `2026-10-19T09:52:26+00:00` |
+| End, pytest exited (UTC) | `2026-10-19T10:03:48+00:00` (exit code 0) |
+| vcluster name | `pytest-a15d285c-a2d9-4721-98f5-f16c4af1bdb8` (deleted by the fixture teardown after the pass) |
+| Summary line | `=========== 2 passed, 2 deselected, 6 warnings in 678.83s (0:11:18) ============` |
+
+### ui-chromium
+
+| Item | Value |
+|---|---|
+| pytest node IDs | `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium]`, `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium]` |
+| Start (UTC) | `2026-10-19T10:03:48+00:00` |
+| End, pytest exited (UTC) | `2026-10-19T10:16:23+00:00` (exit code 0) |
+| vcluster name | `pytest-ce9cbb1b-3744-4400-aad8-569bd8fb6756` (deleted by the fixture teardown after the pass) |
+| Summary line | `=========== 2 passed, 2 deselected, 6 warnings in 752.53s (0:12:32) ============` |
+
+### Exact command
+
+The two sessions ran one after the other, from one script, with `<variant>` set to `api-chromium` and then `ui-chromium`:
+
+```bash
+export STYRMIN_IMAGE_VER=e2e-530-r3-1792403506
+exec 3< <(sleep infinity); spid=$!
+uv run pytest "backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle" "backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle" -k <variant> -v -s --pdb <&3 >> e2e-<variant>.log 2>&1
+exec 3<&-; kill "$spid"
+```
+
+### Verbatim pass lines
+
+ANSI color codes are removed.
+
+```text
+backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[api-chromium] 09:52:28 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+...
+PASSED
+backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[api-chromium] PASSED10:03:42 info Removing vCluster container vcluster.cp.pytest-a15d285c-a2d9-4721-98f5-f16c4af1bdb8...
+```
+
+```text
+backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium] 10:03:50 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+...
+PASSED
+backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium] PASSED10:16:17 info Removing vCluster container vcluster.cp.pytest-ce9cbb1b-3744-4400-aad8-569bd8fb6756...
+```
+
+The six warnings of each session are of the same two kinds as in the re-run at `ffbcf1b1`: the `DeprecationWarning` for `asyncio.iscoroutinefunction` in `kr8s/_vendored/asyncache`, and the `UserWarning` that kr8s 0.20.15 does not support Kubernetes v1.36.0.
