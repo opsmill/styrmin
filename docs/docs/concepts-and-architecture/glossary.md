@@ -147,8 +147,13 @@ administrator role.
 ### F
 
 **Flow / Prefect flow** — A unit of orchestration (`CREATE_INSTANCE`,
-`UPDATE_INSTANCE`, `UPGRADE_INSTANCE`, ...) submitted by the server
-and executed on the agent's Prefect worker.
+`UPDATE_INSTANCE`, `UPGRADE_INSTANCE`, ...) submitted by the server.
+The internal flows, such as `apply_state` and the backup and restore
+flows, run on the `task-worker` of the server's Helm chart, which polls
+the work pool `styrmin-work-pool`. The flows that they start to act on
+the cluster, such as `create_instance_crd`, and the driver actions run
+on the agent's Prefect worker, which polls the work pool
+`user-work-pool`.
 
 **Frontend** — The React 19 + Vite single-page app that consumes the
 GraphQL API.

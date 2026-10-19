@@ -107,7 +107,7 @@ A specific version of an **application driver**, sourced from a **driver directo
 _Avoid_: "version" alone (ambiguous with **application version**), "driver release".
 
 **Driver directory**:
-The folder that holds an **application driver**'s **driver specification file**, `values.j2.yml` and `actions.py`. For a load from a local directory, it is the path given on the server. For a load from git, it is the repository root or a folder of the repository, given as a path relative to the root. Stored on the **application driver version** as `source_path`, which is null when it is the repository root, and returned by the GraphQL field `driverDirectory` for a git load (null for the repository root and for a local load). The **actions** of a driver version loaded from git run from it and can import only modules inside it, apart from packages installed in the action's image; a git load refuses a driver directory that is a symlink to a path outside the repository, and a driver specification file, `values.j2.yml` or `actions.py` that is a symlink to a path outside the driver directory. See [issue #517](https://github.com/opsmill/styrmin/issues/517) and [ADR-079](dev/adr/0079-driver-actions-import-only-from-their-driver-directory.md).
+The folder that holds an **application driver**'s **driver specification file**, `values.j2.yml` and `actions.py`. For a load from a local directory, it is the path given on the server. For a load from git, it is the repository root or a folder of the repository, given as a path relative to the root. Stored on the **application driver version** as `source_path`, which is null when it is the repository root, and returned by the GraphQL field `driverDirectory` for a git load (null for the repository root and for a local load). The **actions** of a driver version loaded from git or from a local directory run from it, as processes in the **agent** pod, and can import only modules inside it, apart from the packages installed in the image that the **agent** runs; a git load refuses a driver directory that is a symlink to a path outside the repository, and a driver specification file, `values.j2.yml` or `actions.py` that is a symlink to a path outside the driver directory. See [issue #517](https://github.com/opsmill/styrmin/issues/517), [ADR-079](dev/adr/0079-driver-actions-import-only-from-their-driver-directory.md) and [ADR-081](dev/adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md).
 _Avoid_: "subfolder", "subpath", "driver root".
 
 **Driver specification file**:
@@ -291,7 +291,7 @@ _Avoid_: collapsing chart + repository into one term.
 ### Async orchestration
 
 **Prefect**:
-The workflow engine. Hosts a **Prefect server** (UI on port 4200) and **Prefect workers**. Flows submitted by the **server** run on the **agent**'s **Prefect worker**.
+The workflow engine. Hosts a **Prefect server** (UI on port 4200) and **Prefect workers**. The internal flows, such as `apply_state`, `run_job` and the backup and restore flows, run on the work pool `styrmin-work-pool`, which the `task-worker` of the server chart polls. The flows that act on the cluster, such as `create_instance_crd`, and the driver **actions** run on the work pool `user-work-pool`, which the **agent**'s **Prefect worker** polls.
 _Avoid_: "celery" (we are not Celery), "queue".
 
 **PrefectManager**:

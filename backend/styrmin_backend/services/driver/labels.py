@@ -94,10 +94,16 @@ def action_directory_of(*, source_type: str, source_path: str | None) -> str | N
     """Return the ``driver_directory`` of a driver version's action registrations and lookups.
 
     Spec 029 — ``source_path`` for ``git`` (the driver directory, or ``None``
-    for a load from the repository root) and for ``local`` (the absolute path
-    given on the server); ``None`` for any other source type. A local value
-    starts with ``/`` and a git value never does, so the two cannot match.
-    Unlike :func:`driver_directory_of`, which gives the GraphQL field
+    for a load from the repository root) and for ``local`` (the path as given
+    on the server); ``None`` for any other source type. A git value never
+    starts with ``/``. A local value starts with ``/`` only when the path
+    given is absolute: no layer makes it absolute or refuses a relative one.
+    So a local row loaded from a relative path, such as ``drivers/a``, gets
+    the same registration key as a git row of the same driver and supported
+    versions loaded from the driver directory ``drivers/a`` when their short
+    fingerprints are equal (listed in
+    ``specs/029-local-driver-actions/follow-ups.md``). Unlike
+    :func:`driver_directory_of`, which gives the GraphQL field
     ``driverDirectory``, this gives a local row its path.
 
     >>> action_directory_of(source_type="git", source_path="drivers/a")

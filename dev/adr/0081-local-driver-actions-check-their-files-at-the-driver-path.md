@@ -76,8 +76,9 @@ Facts about Prefect 3.8.6 that shape the decisions:
 ## Decision
 
 We chose option 4. Option 1 blocks the documented way to load the bundled drivers. Option 2 was
-rejected in the PRD. Option 3 is a follow-up issue: it needs a Helm change, and the bundled drivers
-are already in the Styrmin image.
+rejected in the PRD. Option 3 is a follow-up, listed in [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md) of spec 029 and not yet
+opened as an issue: it needs a Helm change, and the bundled drivers are already in the Styrmin
+image.
 
 ### Registration of the actions of a local driver version (R-003, R-005, R-010)
 
@@ -87,8 +88,13 @@ are already in the Styrmin image.
 - The actions of a local driver version are registered and looked up with
   `driver_directory=<source_path>`, through the ADR-080 tag and name digest.
   `action_directory_of(source_type, source_path)` in `services/driver/labels.py` returns
-  `source_path` for `git` and `local`, and `None` otherwise. A local value starts with `/` and a git
-  value never does, so the two cannot match. Two local driver versions loaded from two paths with
+  `source_path` for `git` and `local`, and `None` otherwise. A git value never starts with `/`. A
+  local value starts with `/` only when the path given on the server is absolute: no layer makes
+  the path absolute or refuses a relative one. A local driver version loaded from a relative path,
+  such as `drivers/my-app`, therefore gets the same key as a git driver version of the same driver
+  and supported versions loaded from the driver directory `drivers/my-app` when their short
+  fingerprints are equal; [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md) lists this, and it is not yet opened as an
+  issue. Two local driver versions loaded from two paths with
   the same files keep their own deployments, and each runs the `actions.py` at its own path.
   `driver_directory_of` keeps its meaning for the GraphQL field `driverDirectory`.
 - A load whose driver declares actions is refused with `DriverLoadingError` when its local path
@@ -130,7 +136,8 @@ are already in the Styrmin image.
 - Because Prefect logs nothing in the flow run when a pull step raises, `check_local_driver` logs
   its error at `ERROR` in the flow run before it raises.
 - Rejected: an upstream Prefect change that puts the exception text in the `Crashed` state, which
-  is the right fix but reaches only later Prefect releases (a follow-up issue proposes it); a
+  is the right fix but reaches only later Prefect releases (a follow-up in [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md)
+  proposes it, not yet opened as an issue); a
   `Failed` state proposed by the step before it raises, because which of two final states wins
   depends on Prefect's rules; recording the error on the hook step through `recordStep`, which
   would put two errors on one attempt.
@@ -206,19 +213,19 @@ not record which hooks were skipped. The changelog tells operators about it.
 - Good, because no hook is skipped without an error, and loading the driver again repairs a driver
   version whose registrations are missing. The same upgrade request then starts a new task.
 - Bad, because the agent pod must hold each local driver at the same path as the server. A driver
-  that only the server container holds fails its actions. A shared driver volume is a follow-up
-  issue.
+  that only the server container holds fails its actions. A shared driver volume is a follow-up,
+  listed in [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md) and not yet opened as an issue.
 - Bad, because any edit of the three files at a path makes every driver version loaded earlier from
   that path fail its actions. After a Styrmin upgrade that ships a newer bundled driver, operators
   load the bundled drivers again.
 - Bad, because the check's errors name "the action's image" and an image, while the action runs in
   the agent pod and an action's `image:` has no effect. The maintainer kept these texts; the
-  documentation explains how to read them, and a follow-up issue records that `image:` has no
-  effect.
+  documentation explains how to read them, and [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md) lists, as a follow-up not
+  yet opened as an issue, that `image:` has no effect.
 - Bad, because when the check fails during an upgrade, the failed instance stays active: the same
   request is a no-op, and a request for another driver version at the same application version runs
-  as an update without the upgrade action. This is true of every failed upgrade; a follow-up issue
-  records it.
+  as an update without the upgrade action. This is true of every failed upgrade; [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md)
+  lists it as a follow-up, not yet opened as an issue.
 - Bad, because the hook step's error now holds the first `ERROR` log of a crashed action, which
   every signed-in user who can read the task can read. Actions must not write secrets to their
   logs.
@@ -272,6 +279,6 @@ not record which hooks were skipped. The changelog tells operators about it.
   in [hooks-and-actions.md](../knowledge/backend/hooks-and-actions.md).
 - The errors and how operators fix them are described in
   [Loading a Driver](../../docs/docs/drivers/loading-drivers.md#actions-of-a-driver-loaded-from-a-local-directory).
-- Follow-up issues to open are listed in `specs/029-local-driver-actions/research.md` ("Follow-ups
-  to open after this change ships"), plus one for an action's `image:`, which has no effect while
-  the agent runs actions in its own pod.
+- The follow-ups of this change are listed in [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md) of spec 029, with the
+  follow-ups of `research.md` ("Follow-ups to open after this change ships"). None of them is opened
+  as an issue yet.
