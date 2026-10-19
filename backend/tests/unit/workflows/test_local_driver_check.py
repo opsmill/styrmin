@@ -32,6 +32,7 @@ from prefect.deployments.steps import core as steps_core
 from prefect.deployments.steps.core import run_steps
 from prefect.flows import load_flow_from_entrypoint
 from prefect.settings import PREFECT_LOGGING_TO_API_ENABLED, temporary_settings
+from pydantic import ValidationError
 
 from styrmin_backend import config
 from styrmin_backend.services.driver.exceptions import (
@@ -239,6 +240,61 @@ def test_get_function_imports_the_action_from_the_path(driver: Path) -> None:
         Path(function.fn.__code__.co_filename).resolve()
         == (driver / "actions.py").resolve()
     )
+
+
+# ---------------------------------------------------------------------------
+# Inputs that the definition refuses (research R-005)
+# ---------------------------------------------------------------------------
+
+_FULL_CONTENT_HASH = "0123456789abcdef" * 4
+
+
+def _definition_with(
+    *, directory: str, content_hash: str
+) -> LocalDriverActionWorkflowDefinition:
+    return LocalDriverActionWorkflowDefinition(
+        name="User Action: pre_setup",
+        module="actions.py",
+        function="pre_setup",
+        directory=directory,
+        content_hash=content_hash,
+        spec_file="driver.styrmin.yml",
+        values_template="values.j2.yml",
+        actions_file="actions.py",
+    )
+
+
+@pytest.mark.parametrize(
+    "directory",
+    ["/srv/drivers/{{ name }}", "/srv/drivers/a{b", "/srv/drivers/a}b"],
+)
+def test_definition_refuses_a_directory_with_a_template_brace(directory: str) -> None:
+    """Prefect fills in templates in the pull-step inputs before the check reads them."""
+    with pytest.raises(ValidationError) as raised:
+        _definition_with(directory=directory, content_hash=_FULL_CONTENT_HASH)
+
+    (error,) = raised.value.errors()
+    assert error["loc"] == ("directory",)
+    assert f"The driver path {directory!r} contains '{{' or '}}'" in error["msg"]
+    assert "Prefect fills in '{{ ... }}' templates" in error["msg"]
+
+
+def test_definition_refuses_an_empty_content_hash() -> None:
+    with pytest.raises(ValidationError) as raised:
+        _definition_with(directory="/srv/drivers/my-app", content_hash="")
+
+    (error,) = raised.value.errors()
+    assert error["loc"] == ("content_hash",)
+    assert "The provenance fingerprint (content_hash) is empty" in error["msg"]
+
+
+def test_definition_accepts_a_path_without_braces_and_a_fingerprint() -> None:
+    definition = _definition_with(
+        directory="/srv/drivers/my-app", content_hash=_FULL_CONTENT_HASH
+    )
+
+    assert definition.directory == "/srv/drivers/my-app"
+    assert definition.content_hash == _FULL_CONTENT_HASH
 
 
 # ---------------------------------------------------------------------------
