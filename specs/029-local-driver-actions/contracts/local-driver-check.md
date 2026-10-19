@@ -49,13 +49,13 @@ Order of operations:
 
 The step never imports `actions.py`.
 
-Image named in the errors (R-006), resolved only on the error path:
+Image named in the errors (R-006), resolved only on the error path by `_action_image()`, which returns the image name and the work pool name:
 
 1. The deployment's `job_variables["image"]` of the flow run in `PREFECT__FLOW_RUN_ID`.
 2. Otherwise the `default` of `variables.properties.image` in the base job template of the flow run's work pool.
-3. Otherwise the text `the default image of the work pool <name>`, or `the image of this action's Job` when the work pool is unknown.
+3. Otherwise no image name. The error then names the image with the work pool: `in the default image of the work pool <name>`, or `in the image of this action's Job` when the work pool is unknown too ([errors.md](errors.md#words-that-name-the-image-of-the-actions-job)).
 
-A failure to read Prefect's API in this resolution never hides the original error.
+A failure to read Prefect's API in this resolution never hides the original error: the check logs a warning in the flow run and raises its error with the work pool read before the failure, if any.
 
 Import constraints: importing `workflows/local_driver.py` must succeed with an empty environment, read no server settings and open no database connection, because the Job has neither. It imports `services/driver/hash.py` and `services/driver/exceptions.py`, which load the driver package and its Pydantic models; that import was checked to succeed with an empty environment. A unit test imports the module in a subprocess with an empty environment (critique E1).
 
@@ -72,14 +72,22 @@ if flow_run.state and flow_run.state.is_crashed():
     raise RuntimeError(f"Deployment flow run {flow_run.id} crashed: {detail}")
 ```
 
-- `_first_error_log` calls `client.read_logs(LogFilter(flow_run_id={"any_": [id]}, level={"ge_": 40}), limit=1, sort=LogSort.TIMESTAMP_ASC)` and returns the message cut to 4,000 characters.
-- Any exception while reading logs returns `None` and is logged at warning level.
+- `_first_error_log` calls `client.read_logs(LogFilter(flow_run_id=LogFilterFlowRunId(any_=[id]), level=LogFilterLevel(ge_=40)), limit=1, sort=LogSort.TIMESTAMP_ASC)` and returns the message cut to 4,000 characters (`FIRST_ERROR_LOG_MAX_LENGTH`).
+- When the flow run has no `ERROR` log, or any exception occurs while reading logs, it returns `None` and logs a warning.
 - The failed-state branch is unchanged.
 
-Example of the hook step error for FR-003:
+Text of the hook step error: `Deployment flow run <id> crashed: <first ERROR log> (<state message>)`, or `Deployment flow run <id> crashed: <state message>` without a first `ERROR` log.
+
+Example of the hook step error for FR-003, when the check read the image of the action:
 
 ```text
 RuntimeError: Deployment flow run 6f0c… crashed: The driver files at /styrmin/drivers/my-app in the image registry.opsmill.io/opsmill/styrmin:latest are not the files of this driver version: their provenance fingerprint is 9b1e2c4, and the driver version was loaded with 0a7d3f1. The files changed after the driver was loaded. Rebuild the image with the files you loaded and load the driver again, or load the driver again from /styrmin/drivers/my-app and use the new driver version. (Process exited with status code: 1. …)
+```
+
+Example of the hook step error for FR-004, when the check read only the work pool:
+
+```text
+RuntimeError: Deployment flow run 6f0c… crashed: The driver files are not at /styrmin/drivers/my-app in the default image of the work pool user-work-pool: actions.py not found. An action's image must hold the driver at the same path as the Styrmin server. Add the driver to the image at /styrmin/drivers/my-app, or load the driver from a path that the image holds. (Process exited with status code: 1. …)
 ```
 
 ## Observable results (tests)
