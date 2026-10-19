@@ -1,1 +1,0 @@
-Fixed the Deploy form binding a new deployment to the newest driver version that supports the application version instead of the driver version selected in the form, so the form's fields could differ from the checks the server ran. The form now lists the versions of each driver newest first.

@@ -1,1 +1,0 @@
-Fixed `styrminctl deployments apply` dropping its warnings about stored overrides that are not applied without a message when it cannot read them back from the server: it now prints a warning with the error, and the Python SDK sets `ApplyOutcome.applicability_check_error`.

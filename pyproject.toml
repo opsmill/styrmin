@@ -1,6 +1,6 @@
 [project]
 name = "styrmin-mvp"
-version = "0.1.49"
+version = "0.1.50"
 description = "Deployment orchestration platform for Kubernetes applications"
 authors = [{name = "OpsMill", email = "info@opsmill.com"}]
 readme = "README.md"
