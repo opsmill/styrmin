@@ -59,7 +59,7 @@ A failure to read Prefect's API in this resolution never hides the original erro
 
 Import constraints: importing `workflows/local_driver.py` must succeed with an empty environment, read no server settings and open no database connection, because the Job has neither. It imports `services/driver/hash.py` and `services/driver/exceptions.py`, which load the driver package and its Pydantic models; that import was checked to succeed with an empty environment. A unit test imports the module in a subprocess with an empty environment (critique E1).
 
-Logging: on success, the step logs one `INFO` line in the flow run, with the path and the short fingerprint (critique E9).
+Logging: on success, the step logs one `INFO` line in the flow run, with the path and the short fingerprint (critique E9). On failure, the step logs the text of its error at `ERROR` in the flow run, then raises. Prefect 3.8 runs pull steps in a workspace supervisor before the flow run's engine starts. When a step raises, the supervisor prints the traceback to the process output and logs nothing in the flow run, so without this log the flow run has no `ERROR` log and the hook step shows only the exit status. This was found by the user story 2 E2E run (T028).
 
 ## How the error reaches the hook step
 
@@ -72,6 +72,7 @@ if flow_run.state and flow_run.state.is_crashed():
     raise RuntimeError(f"Deployment flow run {flow_run.id} crashed: {detail}")
 ```
 
+- The first `ERROR` log of a flow run whose check failed is the error that the check step logged before it raised (see "Logging" above).
 - `_first_error_log` calls `client.read_logs(LogFilter(flow_run_id=LogFilterFlowRunId(any_=[id]), level=LogFilterLevel(ge_=40)), limit=1, sort=LogSort.TIMESTAMP_ASC)` and returns the message cut to 4,000 characters (`FIRST_ERROR_LOG_MAX_LENGTH`).
 - When the flow run has no `ERROR` log, or any exception occurs while reading logs, it returns `None` and logs a warning.
 - The failed-state branch is unchanged.
