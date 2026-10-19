@@ -228,6 +228,35 @@ class DeploymentRestoringError(ServiceError):
     )
 
 
+class DeploymentRolloutInProgressError(ServiceError):
+    """Deletion was requested before the flow of a change wrote the deployment's ``StyrminDeployment``.
+
+    The flow can still write the ``StyrminDeployment`` after the request, so
+    the deletion cannot count the deployment as already removed.
+    """
+
+    error_code = "ALREADY_IN_PROGRESS"
+    default_message = (
+        "Cannot delete the deployment while a change is applied and its "
+        "StyrminDeployment does not exist yet. Delete the deployment again "
+        "when the change has ended."
+    )
+
+    def __init__(self, *, deployment_id: UUID, status: str) -> None:
+        self.deployment_id = deployment_id
+        self.status = status
+        super().__init__(
+            f"Cannot delete deployment {deployment_id} yet: a change of the "
+            f"deployment is applied (status {status}) and its StyrminDeployment "
+            "does not exist yet. Delete the deployment again when the change "
+            "has ended."
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {"deploymentId": str(self.deployment_id), "status": self.status}
+
+
 class DeploymentNameValidationError(ServiceError):
     """The deployment name is invalid."""
 

@@ -143,3 +143,66 @@ T028 moved `_styrmin_pod_name` from `test_driver_reload_identity.py` into `backe
   backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it[ui-chromium] SKIPPED
   ============= 2 passed, 2 skipped, 6 warnings in 209.85s (0:03:29) =============
   ```
+
+## T052: deleting the deployment of a create that failed before its `StyrminDeployment`
+
+The two user story 2 tests no longer create their deployments in an environment of their own. Each test creates its deployment in the scenario environment and ends by deleting it with `deleteDeployment` (`client.deployments.delete`). It asserts that the call returns a `delete_deployment` task with the status `success`, that the deployment reaches `deleted` with `deletedAt` set, and that the `resource:delete-request` and `operator:teardown` steps of the delete task succeeded.
+
+### Reproduction before the fix
+
+- Command, with the changed tests and the backend of commit `958d562a`:
+
+  ```shell
+  export STYRMIN_IMAGE_VER=fac-029-delete-repro
+  sleep infinity | uv run pytest "backend/tests/e2e/test_local_driver_actions.py" -k "fingerprint_error or missing_files_error" -v -s --pdb > /tmp/029-delete-repro.log 2>&1
+  ```
+
+- Start: 2026-10-19T11:52:36Z. vCluster `pytest-6ea87d3a-0b6e-4cab-9aa3-3ce1f40849ba`, kubeconfig `/tmp/pytest-of-ubuntu/pytest-70/vcluster0/kubeconfig`. Image `registry.opsmill.io/opsmill/styrmin:fac-029-delete-repro` (`sha256:ef91014460af96372548aee1053e979308ab861af58652b898b336c874e071be`), removed afterwards.
+- Every assertion of `test_changed_local_driver_fails_with_the_fingerprint_error` before the deletion passed. `client.deployments.delete` raised `OperationFailedError: An internal error occurred`.
+- The deployment's namespace did not exist in the vCluster (`kubectl get ns` listed only the namespace of the environment's ingress controller), so the deployment had no `StyrminDeployment`. The server log held this traceback (shortened):
+
+  ```text
+  ERROR | styrmin_backend.api.errors - Unexpected GraphQL error: Custom resource styrmindeployments/styrmin-f8f9cbad-37da-4280-9561-dd6d3c0a9426 not found in namespace styrmin-f8f9cbad-37da-4280-9561-dd6d3c0a9426
+  kubernetes_asyncio.client.exceptions.ApiException: (404)
+  HTTP response body: {"kind":"Status",...,"message":"styrmindeployments.styrmin.io \"styrmin-f8f9cbad-37da-4280-9561-dd6d3c0a9426\" not found","reason":"NotFound",...,"code":404}
+  During handling of the above exception, another exception occurred:
+    File "/source/backend/styrmin_backend/api/schema/mutation.py", line 950, in delete_deployment
+    File "/source/backend/styrmin_backend/services/deployment.py", line 2061, in delete_deployment
+      await _patch_deletion_requested(deployment_id)
+    File "/source/backend/styrmin_backend/services/deployment.py", line 2244, in _patch_deletion_requested
+    File "/source/backend/styrmin_backend/agent/service/kubernetes/primitives.py", line 304, in patch_custom_resource
+  styrmin_backend.agent.service.kubernetes.exceptions.CustomResourceNotFound: Custom resource styrmindeployments/styrmin-f8f9cbad-37da-4280-9561-dd6d3c0a9426 not found in namespace styrmin-f8f9cbad-37da-4280-9561-dd6d3c0a9426
+  ```
+
+- The session was stopped at the `(Pdb)` prompt by ending its `sleep infinity`; pytest tore the vCluster down.
+
+### Passing run with the fix
+
+- Node IDs:
+  - `backend/tests/e2e/test_local_driver_actions.py::test_changed_local_driver_fails_with_the_fingerprint_error[api-chromium]`
+  - `backend/tests/e2e/test_local_driver_actions.py::test_driver_missing_from_the_action_image_fails_with_the_missing_files_error[api-chromium]`
+
+  The `[ui-chromium]` variants are skipped by their `api_only` marker.
+- Command:
+
+  ```shell
+  export STYRMIN_IMAGE_VER=fac-029-delete
+  docker compose build server
+  sleep infinity | uv run pytest "backend/tests/e2e/test_local_driver_actions.py" -k "fingerprint_error or missing_files_error" -v -s --pdb 2>&1 | tee /tmp/029-delete.log
+  ```
+
+- Start: 2026-10-19T11:57:35Z. End: 2026-10-19T12:00:45Z (187.39 s). The first run passed.
+- The first test's deployment was the last application of the scenario environment, so its deletion started the removal of the environment's ingress controller (#252). The second test's create was rejected once with "The dedicated ingress controller is being removed" and `_create_pinned_deployment` retried it.
+- vCluster: `pytest-f517511d-c385-492c-91ea-0a1391948996`, kubeconfig `vcluster0/kubeconfig` under the session's base directory in `/tmp/pytest-of-ubuntu/`. The log does not print the directory, and pytest removed it once later sessions on the machine created newer ones; its number is not known. Torn down at the end of the session ("Successfully deleted virtual cluster pytest-f517511d-c385-492c-91ea-0a1391948996").
+- Styrmin image: `registry.opsmill.io/opsmill/styrmin:fac-029-delete`, built from the working tree with the fix (image id `sha256:4515a4839b55971fb8b10b162004c795b30e7bd06277d8581c592efbe4b26442`).
+- Result lines:
+
+  ```text
+  backend/tests/e2e/test_local_driver_actions.py::test_changed_local_driver_fails_with_the_fingerprint_error[api-chromium]
+  PASSED
+  backend/tests/e2e/test_local_driver_actions.py::test_driver_missing_from_the_action_image_fails_with_the_missing_files_error[api-chromium]
+  PASSED
+  backend/tests/e2e/test_local_driver_actions.py::test_changed_local_driver_fails_with_the_fingerprint_error[ui-chromium] SKIPPED
+  backend/tests/e2e/test_local_driver_actions.py::test_driver_missing_from_the_action_image_fails_with_the_missing_files_error[ui-chromium] SKIPPED
+  ====== 2 passed, 2 skipped, 4 deselected, 6 warnings in 187.39s (0:03:07) ======
+  ```

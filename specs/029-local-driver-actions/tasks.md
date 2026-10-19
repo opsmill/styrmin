@@ -185,7 +185,7 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
 
   Done with these changes, because of the findings of T028:
   - The fingerprint test copies the variant with `code=A` into the server pod and the variant with an edited `actions.py` (`code=B`) into the agent pod at the same path. The variant sets no `image:`, so the error names the default image of the work pool, which the test reads from Prefect, instead of `local-actions-check:<session hex>`.
-  - Both tests create their deployments in an environment of their own (`check_environment_id`) and delete the environment at the end. `deleteDeployment` fails with an internal error for a deployment whose create failed at `hook:setup:pre`, because the `StyrminDeployment` is written after that step; environment deletion handles such a deployment.
+  - Both tests create their deployments in an environment of their own (`check_environment_id`) and delete the environment at the end. `deleteDeployment` fails with an internal error for a deployment whose create failed at `hook:setup:pre`, because the `StyrminDeployment` is written after that step; environment deletion handles such a deployment. T052 fixed `deleteDeployment` for such a deployment, and the tests now delete their deployments with it.
   - `check_local_driver` logs its error at `ERROR` in the flow run before it raises, so the error reaches the hook step under Prefect 3.8 (`backend/styrmin_backend/workflows/local_driver.py`, unit test in `backend/tests/unit/workflows/test_local_driver_check.py`).
 - [X] T028 [US2] Run the US2 E2E per the E2E run rules (`docker compose build server` first if backend code changed since T022): `sleep infinity | uv run pytest "backend/tests/e2e/test_local_driver_actions.py" -k "fingerprint_error or missing_files_error" -v -s --pdb 2>&1 | tee /tmp/029-us2.log`; record the passing run in `specs/029-local-driver-actions/e2e-evidence.md`
 
@@ -230,6 +230,13 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
 
   Delete the deployment at the end
 - [X] T036 [US3] Run the US3 E2E per the E2E run rules: `sleep infinity | uv run pytest "backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade" "backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it" -v -s --pdb 2>&1 | tee /tmp/029-us3.log`; record the passing run in `specs/029-local-driver-actions/e2e-evidence.md`
+- [X] T052 [US3] Make `deleteDeployment` delete a deployment whose create failed before its `StyrminDeployment` was written:
+  - find the root cause and fix it in the layer where it is; a cluster object that does not exist during the delete counts as already deleted, and other errors still fail the delete;
+  - add a unit test that fails without the fix and passes with it;
+  - make `test_changed_local_driver_fails_with_the_fingerprint_error` and `test_driver_missing_from_the_action_image_fails_with_the_missing_files_error` in `backend/tests/e2e/test_local_driver_actions.py` delete their deployments with `deleteDeployment` and assert the deletion, instead of deleting a separate environment;
+  - run them per the E2E run rules and record the passing run in `specs/029-local-driver-actions/e2e-evidence.md` (section "T052").
+
+  The user approved this scope addition on 2026-10-19, because the `ActionNotRegisteredError` text and the spec's edge case tell the operator to delete and create again a deployment whose create failed.
 
 **Checkpoint**: no declared action is skipped without an error, and a repeated load repairs a version.
 
@@ -275,7 +282,8 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
 - [ ] T045 [P] Run `uv run towncrier create -c "<text>" 372.fixed.md` to create `changelog/372.fixed.md`, following `dev/guidelines/changelog.md`. The text says that:
   - the actions of drivers loaded with `load-local-version` now run, and a declared action without a registered flow fails its hook instead of being skipped;
   - operators should load their local drivers again;
-  - deployments created from them before the fix never ran their setup actions.
+  - deployments created from them before the fix never ran their setup actions;
+  - `deleteDeployment` now deletes a deployment whose create failed before its `StyrminDeployment` was written, instead of returning "An internal error occurred" (T052). The changelog guide names fragments by issue and type, so this fix goes in the same `372.fixed.md`.
 
 ---
 
@@ -307,7 +315,7 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
 
 - US1: T011 → T012 → T013 → T014; T013 → T015 → T016, T017; T018 → T019; T020 → T021 → T022.
 - US2: T023 → T024; T025 after T011 and T012; T026 → T027 → T028.
-- US3: T029 → T030; T031 → T032; T033 → T034; T035 after T031 and T033 → T036.
+- US3: T029 → T030; T031 → T032; T033 → T034; T035 after T031 and T033 → T036; T052 after T028.
 
 ### Parallel Opportunities
 
