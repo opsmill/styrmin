@@ -173,7 +173,6 @@ async def build_counterpart_body(*, internal: bool = False) -> dict[str, Any]:
     consumer cannot drift from what the producer renders.
     """
     deployment = counterpart_deployment(internal=internal)
-    counterpart = await _build_counterpart_crd_body(
+    return await _build_counterpart_crd_body(
         deployment_id=deployment.id, uow=StubUnitOfWork(deployment)
     )
-    return counterpart.crd_body

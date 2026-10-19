@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from kubernetes_asyncio.client import ApiException
 from prefect.client.schemas.actions import DeploymentFlowRunCreate
 from prefect.client.schemas.objects import StateType
@@ -37,6 +37,7 @@ from styrmin_backend.agent.tasks.utils import (
 from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.db.models import RestoreStatus
 from styrmin_backend.domain.models import Deployment, StepParent
+from styrmin_backend.operator.crd.builder import build_styrmin_deployment_body
 from styrmin_backend.workflows.templates.backup import (
     execute_restore_workflow,
     execute_velero_restore_flow,
@@ -196,7 +197,9 @@ async def _user_flow(
         patch(f"{MODULE}.Variable", variable),
         patch(f"{MODULE}.flow_run_ctx", SimpleNamespace(id=uuid4())),
     ):
-        yield SimpleNamespace(velero=velero, recovery=recovery, variable=variable)
+        yield SimpleNamespace(
+            core_api=core_api, velero=velero, recovery=recovery, variable=variable
+        )
 
 
 async def _restore(**cross_target: Any) -> dict[str, Any]:
@@ -211,11 +214,18 @@ async def _restore(**cross_target: Any) -> dict[str, Any]:
 
 
 def _cross_target(context: GlobalContext) -> dict[str, Any]:
-    """The parameters the INTERNAL flow adds for a cross-target restore."""
+    """The parameters the INTERNAL flow adds for a cross-target restore.
+
+    The counterpart's CR body embeds *context* under ``spec.context``, which
+    is where the USER flow reads it from.
+    """
     return {
         "restored_crd_name": SOURCE_RELEASE_REFERENCE,
-        "counterpart_crd_body": {"metadata": {"name": COUNTERPART_NAMESPACE}},
-        "counterpart_context": context,
+        "counterpart_crd_body": build_styrmin_deployment_body(
+            context=context,
+            release_reference=context.instance.release_reference,
+            namespace=context.instance.namespace,
+        ),
     }
 
 
@@ -389,6 +399,37 @@ async def test_an_in_place_restore_writes_no_aliases(
 
     assert events == ALL_STEPS_SUCCEEDED
     alias_step.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("spec", "error"),
+    [
+        pytest.param({}, KeyError, id="no-context"),
+        pytest.param({"context": {}}, ValidationError, id="invalid-context"),
+    ],
+)
+async def test_a_body_without_a_valid_context_fails_before_the_namespace_is_deleted(
+    api: FakeStepApi,
+    events: list[Event],
+    spec: dict[str, Any],
+    error: type[Exception],
+) -> None:
+    """A malformed counterpart CR body changes nothing in the cluster."""
+    del api
+    async with _user_flow() as cluster:
+        with pytest.raises(error):
+            await _restore(
+                restored_crd_name=SOURCE_RELEASE_REFERENCE,
+                counterpart_crd_body={
+                    "metadata": {"name": COUNTERPART_NAMESPACE},
+                    "spec": spec,
+                },
+            )
+
+    assert events == []
+    cluster.core_api.delete_namespace.assert_not_awaited()
+    cluster.velero.create_restore_from_dict.assert_not_awaited()
+    cluster.variable.set.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -723,9 +764,10 @@ async def test_restore_runs_without_steps_when_no_token_can_be_created(
     assert flow.status.await_args.kwargs["status"].name == "COMPLETED"
 
 
-async def test_restore_workflow_gives_a_cross_target_restore_the_counterpart_context(
+async def test_restore_workflow_gives_a_cross_target_restore_the_counterpart_crd_body(
     events: list[Event],
 ) -> None:
+    """The body embeds the context of the counterpart's active instance."""
     counterpart = counterpart_deployment()
     assert counterpart.active_instance is not None
 
@@ -734,28 +776,28 @@ async def test_restore_workflow_gives_a_cross_target_restore_the_counterpart_con
             uuid4(), deployment_id=counterpart.id, source_deployment_id=uuid4()
         )
 
-    parameters = flow.dispatch.await_args.kwargs["parameters"]
-    assert parameters["counterpart_context"] == counterpart.active_instance.context
-    assert parameters["counterpart_crd_body"]["metadata"]["name"] == (
-        COUNTERPART_NAMESPACE
+    body = flow.dispatch.await_args.kwargs["parameters"]["counterpart_crd_body"]
+    assert body["metadata"]["name"] == COUNTERPART_NAMESPACE
+    assert GlobalContext.model_validate(body["spec"]["context"]) == (
+        counterpart.active_instance.context
     )
 
 
-async def test_restore_workflow_gives_an_in_place_restore_no_counterpart_context(
+async def test_restore_workflow_gives_an_in_place_restore_no_counterpart_crd_body(
     events: list[Event],
 ) -> None:
     async with _internal_restore_flow(events) as flow:
         await _run_restore_workflow(uuid4())
 
     parameters = flow.dispatch.await_args.kwargs["parameters"]
-    assert parameters["counterpart_context"] is None
     assert parameters["counterpart_crd_body"] is None
 
 
-async def test_the_counterpart_context_reaches_the_user_flow_as_a_context(
-    events: list[Event],
+async def test_the_alias_step_gets_the_counterpart_context_from_the_body_sent(
+    api: FakeStepApi, events: list[Event], alias_step: AsyncMock
 ) -> None:
-    """Prefect sends the parameters as JSON; the USER flow validates them back."""
+    """Prefect sends the parameters as JSON; the USER flow reads the context back."""
+    del api
     counterpart = counterpart_deployment()
     assert counterpart.active_instance is not None
 
@@ -768,5 +810,10 @@ async def test_the_counterpart_context_reaches_the_user_flow_as_a_context(
         parameters=flow.dispatch.await_args.kwargs["parameters"]
     ).model_dump(mode="json", exclude_unset=True)["parameters"]
     received = execute_velero_restore_flow.validate_parameters(sent)
-    assert isinstance(received["counterpart_context"], GlobalContext)
-    assert received["counterpart_context"] == counterpart.active_instance.context
+    async with _user_flow():
+        await execute_velero_restore_flow.fn(**received)
+
+    alias_step.assert_awaited_once()
+    _, context = alias_step.await_args.args
+    assert isinstance(context, GlobalContext)
+    assert context == counterpart.active_instance.context
