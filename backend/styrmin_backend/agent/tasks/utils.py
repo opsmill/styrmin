@@ -1,8 +1,17 @@
+import logging
 import os
 from typing import Any
 from uuid import UUID
 
+from loguru import logger
+from prefect.client.orchestration import get_client
+from prefect.client.schemas.filters import (
+    LogFilter,
+    LogFilterFlowRunId,
+    LogFilterLevel,
+)
 from prefect.client.schemas.objects import FlowRun
+from prefect.client.schemas.sorting import LogSort
 from prefect.deployments.flow_runs import arun_deployment
 
 from styrmin_backend import config
@@ -14,6 +23,8 @@ BACKUP_ID_ENV = "STYRMIN_BACKUP_ID"
 RESTORE_ID_ENV = "STYRMIN_RESTORE_ID"
 #: The hook step that runs a driver action's Job.
 STEP_ID_ENV = "STYRMIN_STEP_ID"
+#: The most characters of a crashed flow run's first error log that its error holds.
+FIRST_ERROR_LOG_MAX_LENGTH = 4000
 
 
 def action_job_variables(
@@ -39,8 +50,50 @@ def action_job_variables(
     return {"env": env} if env else {}
 
 
+async def _first_error_log(flow_run_id: UUID) -> str | None:
+    """The first ``ERROR`` log of a flow run, cut to ``FIRST_ERROR_LOG_MAX_LENGTH`` characters.
+
+    A flow run crashes when its Job exits before the flow starts, for example
+    when the check of a local driver version's files raises (spec 029,
+    research R-002). Prefect's state message then holds only the exit status,
+    and the error that explains the crash is in the flow run's logs. Returns
+    ``None``, and logs a warning, when the flow run has no such log or the logs
+    cannot be read; the caller then keeps the state message alone.
+    """
+    try:
+        async with get_client() as client:
+            logs = await client.read_logs(
+                LogFilter(
+                    flow_run_id=LogFilterFlowRunId(any_=[flow_run_id]),
+                    level=LogFilterLevel(ge_=logging.ERROR),
+                ),
+                limit=1,
+                sort=LogSort.TIMESTAMP_ASC,
+            )
+    except Exception as exc:  # noqa: BLE001 - the crash must still raise its error
+        logger.warning(
+            "Could not read the logs of crashed flow run {}; its error holds only "
+            "the state message: {}",
+            flow_run_id,
+            exc,
+        )
+        return None
+    if not logs:
+        logger.warning(
+            "Crashed flow run {} has no ERROR log; its error holds only the state "
+            "message",
+            flow_run_id,
+        )
+        return None
+    return logs[0].message[:FIRST_ERROR_LOG_MAX_LENGTH]
+
+
 async def run_deployment_or_fail(**kwargs: Any) -> FlowRun:
-    """Run a Prefect deployment and raise if the flow run fails or crashes."""
+    """Run a Prefect deployment and raise if the flow run fails or crashes.
+
+    The error of a crashed flow run holds its first ``ERROR`` log, when it has
+    one, followed by the state message in parentheses.
+    """
     # Prefect's 5s default rounds every hook/remediation wait up to 5s.
     kwargs.setdefault("poll_interval", 1)
     flow_run: FlowRun = await arun_deployment(**kwargs)
@@ -49,9 +102,13 @@ async def run_deployment_or_fail(**kwargs: Any) -> FlowRun:
             f"Deployment flow run {flow_run.id} failed: {flow_run.state.message}"
         )
     if flow_run.state and flow_run.state.is_crashed():
-        raise RuntimeError(
-            f"Deployment flow run {flow_run.id} crashed: {flow_run.state.message}"
+        first_error = await _first_error_log(flow_run.id)
+        detail = (
+            f"{first_error} ({flow_run.state.message})"
+            if first_error
+            else flow_run.state.message
         )
+        raise RuntimeError(f"Deployment flow run {flow_run.id} crashed: {detail}")
     return flow_run
 
 
