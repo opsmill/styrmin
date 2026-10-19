@@ -82,6 +82,7 @@ backend/styrmin_backend/
 ├── services/backup/service.py               # RestoreTarget, resolve_restore_target, create_restore signature, guard docstring
 ├── services/backup/environment.py           # restore_environment_backup: no namespace building
 ├── workflows/templates/clone.py             # _dispatch_cross_target_restore: no namespace building
+├── repository/deployment.py                 # delete_all_for_environment docstring only (critique E1)
 └── api/schema/mutation.py                   # createRestore(backupId)
 
 backend/tests/
@@ -142,6 +143,8 @@ Steps 4 to 6 depend on step 3, because they use the regenerated types. Step 7 de
 ## Risks
 
 - **A caller outside the repository passes the removed arguments.** It fails at once with a validation error or a `TypeError`. The changelog fragment of type `removed` says so, and that no replacement exists until deployment clone ships.
+- **Clients and server at different versions.** A `styrminctl`, SDK or open web page from before the change sends `targetNamespace` on every restore and the new server refuses it; a client from after the change sends no `targetNamespace` and an older server refuses it. The `removed` fragment says that clients and server must be upgraded together (critique X1).
+- **Scripts that follow the old README example.** `styrminctl backups restore <backup id> --target-deployment X` is refused. The refusal message tells the user to run the command again without the option, and the `removed` fragment names the form (critique X1, P4).
 - **A test seeds a restore into another namespace through `create_restore`.** Such tests no longer compile. They insert the row through the fake repository instead, which is what an earlier release's row looks like (R-013).
 - **The E2E UI variant reads the dialog's namespace.** The page object keeps the check, with the namespace computed from the driver's bound deployment id (R-012).
 
