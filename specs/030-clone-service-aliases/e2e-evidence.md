@@ -7,6 +7,10 @@ Constitution §V definition-of-done record for the E2E tasks of spec 030. Each s
 | `api-chromium`, first attempt | T035 | `e2e-530-1792325479` | `1 failed, 1 passed, 2 deselected` (test defect, fixed in `73d9d4bf`) |
 | `api-chromium`, second attempt | T035 | `e2e-530-1792325479` | `2 passed, 2 deselected` |
 | `ui-chromium` | T036 | `e2e-530-1792325479` | `2 passed, 2 deselected` |
+| `api-chromium`, at the final head `ffbcf1b1` | re-run after the review | `e2e-530-r2-1792394706` | `2 passed, 2 deselected` |
+| `ui-chromium`, at the final head `ffbcf1b1` | re-run after the review | `e2e-530-r2-1792394706` | `2 passed, 2 deselected` |
+
+The sessions above the last two rows ran on another host, before the review fix `f7bb114f`. The last two rows are described in [Re-run at the final head](#re-run-at-the-final-head-ffbcf1b1).
 
 ## Styrmin image under test
 
@@ -238,3 +242,146 @@ Observer logs:
 - The quickstart's Restore read printed only the name and the selector, so it could not show which Restore is cross-target. Fixed in `quickstart.md`: the read also prints `spec.namespaceMapping`, as the observer did, and the "Expected" paragraph says that the cross-target Restores are the ones with a namespace mapping.
 - The Velero namespace `-n styrmin` is correct. Every Restore that the observer read with `-A` was in the namespace `styrmin`, and `execute_restore_workflow` sets `velero_namespace = "styrmin"` in `backend/styrmin_backend/workflows/templates/backup.py`. Not changed.
 - The kubeconfig glob matched the sessions' files, for example `/tmp/pytest-of-root/pytest-2021/vcluster0/kubeconfig`. `ls … | tail -1` returns the last path in alphabetical order. That path is the current session's only when no other pytest session runs on the host and the `pytest-<N>` numbers have the same number of digits. The observer instead picked the kubeconfig that names the session's vcluster. Not changed, because `AGENTS.md` gives the same command.
+
+## Re-run at the final head (`ffbcf1b1`)
+
+Both variants ran again on 2026-10-19 at commit `ffbcf1b1a55e23603691ff234cfe3b03abefd645`, so that the E2E evidence includes the review fix `f7bb114f`, which changed the shared alias step. The sessions ran on a different host from the sessions above, as the user `ubuntu`.
+
+### Styrmin image under test
+
+```bash
+export STYRMIN_IMAGE_VER=e2e-530-r2-1792394706
+docker compose build server
+```
+
+- The image was built at `2026-10-19T07:37:01Z`, at `ffbcf1b1`.
+- A check in the image found the comment that `f7bb114f` adds to `apply_service_aliases_step`.
+- The fixture's own `docker compose build` writes the same tag again at the start of each session, from the same commit.
+
+### api-chromium
+
+| Item | Value |
+|---|---|
+| pytest node IDs | `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[api-chromium]`, `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[api-chromium]` |
+| Start (UTC) | `2026-10-19T07:37:17+00:00` |
+| End, pytest exited (UTC) | `2026-10-19T07:49:06+00:00` (exit code 0) |
+| vcluster name | `pytest-0076cc5b-4796-45a6-bae4-61fec86223d8` (deleted by the fixture teardown after the pass) |
+| Kubeconfig path during the run | `/tmp/pytest-of-ubuntu/pytest-3/vcluster0/kubeconfig` |
+| Summary line | `=========== 2 passed, 2 deselected, 6 warnings in 706.45s (0:11:46) ============` |
+
+### ui-chromium
+
+| Item | Value |
+|---|---|
+| pytest node IDs | `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium]`, `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium]` |
+| Start (UTC) | `2026-10-19T07:53:52+00:00` |
+| End, pytest exited (UTC) | `2026-10-19T08:05:45+00:00` (exit code 0) |
+| vcluster name | `pytest-b34cb423-019c-4f0b-a54e-b67c454af511` (deleted by the fixture teardown after the pass) |
+| Kubeconfig path during the run | `/tmp/pytest-of-ubuntu/pytest-6/vcluster0/kubeconfig` |
+| Browser | Chrome Headless Shell 145.0.7632.6 (Playwright 1.58.0, `chromium-headless-shell` build 1208) |
+| Summary line | `=========== 2 passed, 2 deselected, 6 warnings in 710.30s (0:11:50) ============` |
+
+### Exact command
+
+The command is the same for both variants, with `<variant>` set to `api-chromium` or `ui-chromium`, one pytest session per variant:
+
+```bash
+export STYRMIN_IMAGE_VER=e2e-530-r2-1792394706
+exec 3< <(sleep infinity); spid=$!
+uv run pytest "backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle" "backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle" -k <variant> -v -s --pdb <&3 > e2e-<variant>.log 2>&1
+exec 3<&-; kill "$spid"
+```
+
+### Verbatim pass lines
+
+ANSI color codes are removed. With `-s`, the fixture output appears between the first node ID and its `PASSED`, and the vcluster teardown log shares the last line.
+
+```text
+backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[api-chromium] 07:37:19 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+...
+PASSED
+backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[api-chromium] PASSED07:49:00 info Removing vCluster container vcluster.cp.pytest-0076cc5b-4796-45a6-bae4-61fec86223d8...
+```
+
+```text
+backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium] 07:53:54 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+...
+PASSED
+backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium] PASSED08:05:40 info Removing vCluster container vcluster.cp.pytest-b34cb423-019c-4f0b-a54e-b67c454af511...
+```
+
+The six warnings of each session are not related to this change:
+
+- one `DeprecationWarning` for `asyncio.iscoroutinefunction`, raised in `kr8s/_vendored/asyncache`, as in the earlier sessions;
+- five copies of the `UserWarning` "Kubernetes version v1.36.0 is not supported. Supported versions for kr8s 0.20.15 are 1.28 to 1.35", because the vcluster on this host runs Kubernetes v1.36.0.
+
+### Observer data of the re-run
+
+A loop read every 15 seconds, without pausing the test:
+
+- `kubectl get restores.velero.io -A`, with the name, `spec.namespaceMapping` and `spec.labelSelector` of each Restore;
+- `kubectl get svc -A -l styrmin.io/service-alias=true`, with the namespace, name, owner deployment id and `spec.externalName` of each alias.
+
+The `api-chromium` session had 45 reads and the `ui-chromium` session 44. In the tables, `NotIn` stands for `{"matchExpressions":[{"key":"styrmin.io/service-alias","operator":"NotIn","values":["true"]}]}`.
+
+In the `api-chromium` session:
+
+- The source environment's deployments were the primary `0142a2de` (service `simple-app`), the second deployment of the backup test `77f3c7aa` (service `envsnap00df9cf8`) and the peer of the clone test `8edd2b80` (service `envcloneaa8a5c30`).
+- The environment restore's aliases were present in every read from `07:41:07` to `07:43:58`:
+  - `envsnap00df9cf8` in `styrmin-0142a2de-…`, with the target `styrmin-77f3c7aa-…`;
+  - `simple-app` in `styrmin-77f3c7aa-…`, with the target `styrmin-0142a2de-…`.
+- First clone, primary's counterpart `styrmin-f6a8f368-…`: it held `envcloneaa8a5c30`, with the owner `5f5eab9e` and the target `styrmin-5f5eab9e-…`, which is the peer's counterpart.
+- First clone, peer's counterpart `styrmin-5f5eab9e-…`: it held `simple-app`, with the owner `f6a8f368` and the target `styrmin-f6a8f368-…`, which is the primary's counterpart.
+- Re-clone, primary's counterpart `styrmin-6aa3e58c-…`: it held no alias. The peer was not cloned, so the namespace has no alias for the peer's service (SC-002).
+- No alias in a namespace of either clone pointed to the source environment's namespaces.
+  - The first clone's third namespace, `styrmin-6904e430-…`, held `simple-app`, with the target `styrmin-f6a8f368-…`.
+  - This target is inside the same clone, as in the earlier sessions.
+- The source environment's own aliases stayed in place in every read from `07:44:29` to `07:48:51`:
+  - `envcloneaa8a5c30` in `styrmin-0142a2de-…`;
+  - `simple-app` in `styrmin-8edd2b80-…`.
+
+| Restore | Kind | Namespace mapping | Selector |
+|---|---|---|---|
+| `styrmin-2da13a01-1c9c-4cb8-baa6-00249262b81c` | in place (environment restore) | none | none |
+| `styrmin-95aec874-42d1-4a2d-beb8-26ea984e2a4c` | cross-target (first clone, primary) | `styrmin-0142a2de-…` to `styrmin-f6a8f368-…` | `NotIn` |
+| `styrmin-14104c7c-7d5a-4d20-887f-5c9209e70ec3` | cross-target (first clone, peer) | `styrmin-8edd2b80-…` to `styrmin-5f5eab9e-…` | `NotIn` |
+| `styrmin-adeba698-397f-4944-b09c-3dacecfa5008` | cross-target (re-clone, primary) | `styrmin-0142a2de-…` to `styrmin-6aa3e58c-…` | `NotIn` |
+
+In the `ui-chromium` session:
+
+- The source environment's deployments were the primary `e498740d` (service `simple-app`), the second deployment `42edc1e2` (service `envsnapf61c7693`) and the peer `d64d88d9` (service `envclone96e5d404`).
+- The environment restore's aliases were present from `07:56:58` to `08:00:19`:
+  - `envsnapf61c7693` in `styrmin-e498740d-…`, with the target `styrmin-42edc1e2-…`;
+  - `simple-app` in `styrmin-42edc1e2-…`, with the target `styrmin-e498740d-…`.
+- First clone, primary's counterpart `styrmin-64a86ca8-…`: it held `envclone96e5d404`, with the owner `87e7c41d` and the target `styrmin-87e7c41d-…`, which is the peer's counterpart.
+- First clone, peer's counterpart `styrmin-87e7c41d-…`: it held `simple-app`, with the owner `64a86ca8` and the target `styrmin-64a86ca8-…`, which is the primary's counterpart.
+- Re-clone, primary's counterpart `styrmin-8777ce96-…`: it held no alias (SC-002).
+- No alias in a namespace of either clone pointed to the source environment's namespaces.
+  - The clones' third namespaces held `simple-app` with a target inside the same clone:
+    - `styrmin-a453eeb9-…`, with the target `styrmin-64a86ca8-…`;
+    - `styrmin-ac44abb3-…`, with the target `styrmin-8777ce96-…`.
+- The source environment's own aliases stayed in place from `08:00:50` to `08:05:31`:
+  - `envclone96e5d404` in `styrmin-e498740d-…`;
+  - `simple-app` in `styrmin-d64d88d9-…`.
+
+| Restore | Kind | Namespace mapping | Selector |
+|---|---|---|---|
+| `styrmin-e01cc036-acde-4ddb-9387-061ef6111451` | in place (environment restore) | none | none |
+| `styrmin-c0a065d5-ae85-477c-a254-9f5753a6813d` | cross-target (first clone, primary) | `styrmin-e498740d-…` to `styrmin-64a86ca8-…` | `NotIn` |
+| `styrmin-e08ca624-8116-4b9a-93ee-ed21572f3781` | cross-target (first clone, peer) | `styrmin-d64d88d9-…` to `styrmin-87e7c41d-…` | `NotIn` |
+| `styrmin-2a8bbacc-7492-4c1b-bccc-eb40a15d89bb` | cross-target (re-clone, primary) | `styrmin-e498740d-…` to `styrmin-8777ce96-…` | `NotIn` |
+
+### Failed attempts caused by the host
+
+Three earlier attempts failed in fixture setup, before any test ran. None was caused by the code under test.
+
+1. **`api-chromium`, `2026-10-19T07:26Z`** (vcluster `pytest-604cbe19-d006-46fd-b489-065b696ac605`, kubeconfig `/tmp/pytest-of-ubuntu/pytest-2/vcluster0/kubeconfig`).
+   - The host's root file system was 82% full, so the vcluster's node reported `DiskPressure`.
+   - The node evicted the `helm-controller` pods, and `helm upgrade --install` timed out.
+   - The Docker build cache and unused images were then pruned, which freed 41 GB.
+2. **`ui-chromium`, `2026-10-19T07:49Z`** (vcluster `pytest-d0195b17-e9c2-4c43-b5bb-eccc063863d1`, kubeconfig `/tmp/pytest-of-ubuntu/pytest-4/vcluster0/kubeconfig`).
+   - The fixture's `docker compose build` builds three services from one image at the same time.
+   - During that build, the Docker daemon stopped with `fatal error: concurrent map iteration and map write` in BuildKit (`solver/jobs.go`), and systemd restarted it.
+3. **`ui-chromium`, `2026-10-19T07:51Z`** (vcluster `pytest-ace546d8-97b8-46a0-9bc7-2ccab99bbad4`, kubeconfig `/tmp/pytest-of-ubuntu/pytest-5/vcluster0/kubeconfig`).
+   - The host had no Chromium for Playwright 1.58.0 (build 1208), and Playwright 1.58.0 does not support downloading it on Ubuntu 26.04.
+   - The build was then installed with `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64 uv run playwright install chromium`.

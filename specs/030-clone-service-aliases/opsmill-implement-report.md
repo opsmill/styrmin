@@ -96,13 +96,17 @@ The functional tests start their own temporary server and database. The unit tes
 | `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[api-chromium]` | e2e | Same session as the row above | 2026-10-18T12:34:02Z | Same as the row above | `...::test_environment_clone_lifecycle[api-chromium] PASSED` |
 | `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium]` | e2e | The same command with `-k ui-chromium` | 2026-10-18T12:46:44Z | vcluster `pytest-cd1a98bd-0f3d-44ec-abac-44aec202970b`; kubeconfig `/tmp/pytest-of-root/pytest-2022/vcluster0/kubeconfig`; commit `b364b819` | `...::test_environment_backup_and_restore_lifecycle[ui-chromium] ... PASSED` |
 | `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium]` | e2e | Same session as the row above | 2026-10-18T12:46:44Z | Same as the row above | `...::test_environment_clone_lifecycle[ui-chromium] PASSED` |
+| `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[api-chromium]`, at the final head | e2e | The same command with `-k api-chromium`, with `STYRMIN_IMAGE_VER=e2e-530-r2-1792394706` | 2026-10-19T07:49:06Z | vcluster `pytest-0076cc5b-4796-45a6-bae4-61fec86223d8`; kubeconfig `/tmp/pytest-of-ubuntu/pytest-3/vcluster0/kubeconfig`; commit `ffbcf1b1` | `...::test_environment_backup_and_restore_lifecycle[api-chromium] ... PASSED` |
+| `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[api-chromium]`, at the final head | e2e | Same session as the row above | 2026-10-19T07:49:06Z | Same as the row above | `...::test_environment_clone_lifecycle[api-chromium] PASSED` |
+| `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium]`, at the final head | e2e | The same command with `-k ui-chromium` | 2026-10-19T08:05:45Z | vcluster `pytest-b34cb423-019c-4f0b-a54e-b67c454af511`; kubeconfig `/tmp/pytest-of-ubuntu/pytest-6/vcluster0/kubeconfig`; commit `ffbcf1b1`; Chrome Headless Shell 145.0.7632.6 | `...::test_environment_backup_and_restore_lifecycle[ui-chromium] ... PASSED` |
+| `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium]`, at the final head | e2e | Same session as the row above | 2026-10-19T08:05:45Z | Same as the row above | `...::test_environment_clone_lifecycle[ui-chromium] PASSED` |
 
 Notes on the evidence:
 
 - Each `...` stands for the node id given in the "Test id" cell.
 - The E2E pass lines are quoted in full, with the fixture output between the node id and `PASSED`, in [e2e-evidence.md](e2e-evidence.md).
-- Each E2E session ends with the summary line `2 passed, 2 deselected, 1 warning`.
-- The E2E sessions ran before the review fix `f7bb114f`. See §6, decision 6.
+- Each E2E session of 2026-10-18 ends with the summary line `2 passed, 2 deselected, 1 warning`. Those sessions ran before the review fix `f7bb114f`.
+- Both variants then ran again at the final head `ffbcf1b1`, at the user's request. Each session ends with `2 passed, 2 deselected, 6 warnings`; the five extra warnings come from `kr8s`, which does not support the Kubernetes version of the vcluster on this host. See §6, decision 6, and [e2e-evidence.md](e2e-evidence.md), "Re-run at the final head".
 
 ## 5. Review findings
 
@@ -154,11 +158,15 @@ The simplify review's suggestions:
 3. **The six review agents ran in parallel.** They only read files.
 4. **The missing-step finding was rated High.** The reviewers rated it Medium or Low. It breaks a MUST of FR-004 and the success criterion SC-004, and the fix is small.
 5. **The fix is in the shared alias step, so it also changes the create, update and upgrade flows.** In those flows a failed read is now recorded as the failed alias step "Create and delete service aliases". Before, the flow failed with no alias step recorded. This is the same rule as for the restore, and [pr-notes.md](pr-notes.md) now says so for the maintainer.
-6. **The E2E tests were not run again after `f7bb114f`.**
-   - The image under test in both E2E sessions was built before this commit.
-   - The commit adds a path only for an exception raised by the reads. The successful path runs the same calls in the same order, and neither E2E test makes a read fail.
-   - The unit tests cover the new path. Run C also covers the create, update and upgrade flows.
-   - Re-running both variants takes about 45 minutes, including the image build. It is the first next step if you want E2E evidence at the final head.
+6. **The E2E tests were first left as they were after `f7bb114f`, then run again at the user's request.**
+   - The commit adds a path only for an exception raised by the reads, and the unit tests cover it. The successful path runs the same calls in the same order.
+   - On 2026-10-19 the user asked for both variants at the final head. Both passed at `ffbcf1b1`, with an image that holds the fix.
+   - Three attempts failed first because of the host, before any test ran:
+     - a full disk caused `DiskPressure`, and the user chose to prune the Docker build cache and unused images;
+     - the Docker daemon crashed in BuildKit during the fixture's build;
+     - Chromium was missing for Playwright 1.58.0.
+   - The daemon crash also stopped the `styrmin` dev vcluster, which has no restart policy.
+   - [e2e-evidence.md](e2e-evidence.md) records the passes and the failed attempts.
 7. **Documentation findings were rated High under Constitution §VII**, because the change had made those pages false. The Medium and Low documentation findings in the same files were fixed as well.
 8. **The GraphQL descriptions changed again, still in their text only.** The schema diff and the frontend types diff each change two lines of description. [pr-notes.md](pr-notes.md) already asks the maintainer to confirm a change to descriptions only.
 9. **[pr-notes.md](pr-notes.md) was edited twice in this run:**
@@ -168,7 +176,7 @@ The simplify review's suggestions:
 
 ## 7. Suggested next steps
 
-1. Optional: run `test_environment_clone_lifecycle` and `test_environment_backup_and_restore_lifecycle` again in both variants, on an image built at the final head, for E2E evidence that includes `f7bb114f` (decision 6).
+1. Done on 2026-10-19: both E2E variants passed at the final head `ffbcf1b1` (decision 6).
 2. Decide on the two deferred Medium findings: the check that `counterpart_crd_body` and `counterpart_context` come together, and a stronger SC-003 check.
 3. Confirm the open points in [pr-notes.md](pr-notes.md):
    - the answers that the spec gave on its own

@@ -14,6 +14,7 @@ Not decided yet: the autonomous answers in the spec and the description-only cha
 ## Test results: both E2E variants passed
 
 - [e2e-evidence.md](e2e-evidence.md) records both E2E sessions of `test_environment_clone_lifecycle` and `test_environment_backup_and_restore_lifecycle`: `api-chromium` (`2 passed, 2 deselected`, after a test fix in `73d9d4bf`) and `ui-chromium` (`2 passed, 2 deselected`). It also holds the quickstart walk-through (T037) and the observer reads of the Velero Restores and alias Services.
+- After the review, both variants ran again at the final head `ffbcf1b1` and passed: `api-chromium` and `ui-chromium`, each `2 passed, 2 deselected` ([e2e-evidence.md](e2e-evidence.md), "Re-run at the final head").
 - The quickstart's unit and functional tests: `268 passed` (e2e-evidence.md, T037).
 - The backend suite outside E2E: `5194 passed, 3 skipped` (message of commit `1d9f7ce3`).
 
@@ -54,7 +55,7 @@ The review of the whole change ([opsmill-implement-report.md](opsmill-implement-
 
 - `f7bb114f`: the alias step reads the peers' services and the cluster's aliases before it opens. A read that failed in a clone's restore failed the restore, but no step held the error, which FR-004 and SC-004 require. The step now records a failed read as the failed step "Create and delete service aliases".
   - The create, update and upgrade flows call the same step, so in those flows too a failed read is now recorded as the failed alias step. Before, those flows failed with no alias step recorded.
-  - The E2E sessions in [e2e-evidence.md](e2e-evidence.md) ran before this commit. The commit adds a path only for a failed read, and the successful path runs the same calls in the same order.
+  - Both E2E variants ran again at `ffbcf1b1`, which holds this commit, and passed ([e2e-evidence.md](e2e-evidence.md), "Re-run at the final head").
 - `8da6967e` and `e52c8600`: documentation that the change had made false, the description of `counterpartDeploymentId` above, and `CONTEXT.md`, which said that a restore has at most three steps.
 
 ## Effect on the demo branch `fac/demo-beta-presentation-bhshh`
