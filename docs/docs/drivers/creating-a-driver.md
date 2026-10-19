@@ -65,8 +65,9 @@ directory. `actions.py` can import modules from the driver directory,
 such as `helpers.py` above, but not modules from other folders of the
 repository, such as `other-driver/` or a folder at the repository root.
 Put code that several drivers share into each driver directory, or
-install it in the image that the actions run in (the action's `image`,
-which must hold Prefect 3.6.9 or later). A symlink does not work around this: a load fails when `actions.py`,
+install it in the image that the Styrmin agent runs: the agent runs each
+action as a process in its pod, and an action's `image` has no effect
+today (see [Actions run from the driver directory](./loading-drivers.md#actions-run-from-the-driver-directory)). A symlink does not work around this: a load fails when `actions.py`,
 `driver.styrmin.yml` or `values.j2.yml` is a symlink to a path outside
 the driver directory.
 See [Loading a Driver](./loading-drivers.md#loading-a-driver-from-a-driver-directory)

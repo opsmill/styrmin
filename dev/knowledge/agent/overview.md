@@ -3,7 +3,7 @@
 The agent is the in-cluster process responsible for everything that happens inside the target Kubernetes cluster. A single container runs three coroutines on a shared async event loop:
 
 - **Kopf operator** — watches `StyrminDeployment` CRDs and drives Kubernetes resources to match. See [operator.md](operator.md).
-- **Prefect worker** — executes the internal orchestration flows that the server submits (`apply_state`, `create_instance`, `update_instance`, `upgrade_instance`, `run_job`). The USER flows that these start (the remediation flows `create_instance_crd`, `update_instance_crd` and `upgrade_instance_crd`, and `run_job_command`) run as Kubernetes Jobs in the user work pool. The flow definitions live under `agent/tasks/` but the catalogue, manager API, and callback wiring belong to the orchestration layer (see [`../backend/orchestration-flows.md`](../backend/orchestration-flows.md)).
+- **Prefect worker** — a Prefect `ProcessWorker` that polls `user-work-pool` (`styrmin agent start --work-pool user-work-pool`) and runs each USER flow run as a process in the agent pod: the remediation flows `create_instance_crd`, `update_instance_crd` and `upgrade_instance_crd`, `run_job_command`, the other USER flows, and the driver actions. The INTERNAL flows that start them (`apply_state`, `run_job`) run on `styrmin-work-pool`, which the server chart's `task-worker` polls. The flow definitions live under `agent/tasks/` but the catalogue, manager API, and callback wiring belong to the orchestration layer (see [`../backend/orchestration-flows.md`](../backend/orchestration-flows.md)).
 - **Status reporter** — periodically observes pod and CRD state and reports it back to the server. See [Status Reporter](#status-reporter).
 
 [ADR-002](../../adr/0002-shared-async-event-loop-kopf-prefect.md) covers the shared event loop. ADR-004, ADR-005, and ADR-006 cover the operator's responsibility split with Prefect.
@@ -13,17 +13,18 @@ The agent is the in-cluster process responsible for everything that happens insi
 Prefect spans both processes. The split is:
 
 - The **server** registers workflow definitions, submits flow runs through `PrefectManager`, and tracks task state in the database.
-- The **agent** runs the Prefect *worker* that picks up internal flow runs and executes them. The flow definitions for those internal flows live in `backend/styrmin_backend/agent/tasks/` — physically agent-side code, but conceptually part of the orchestration layer documented in [`../backend/orchestration-flows.md`](../backend/orchestration-flows.md).
-- **User actions** (driver-defined hooks) run as separate Kubernetes Jobs in the user work pool, *not* on the agent's worker. See [`../backend/hooks-and-actions.md`](../backend/hooks-and-actions.md).
+- The server chart's **task-worker** (`prefect worker start --pool styrmin-work-pool`) picks up the INTERNAL flow runs, such as `apply_state` and `run_job`, and runs each as a process in the task-worker pod.
+- The **agent** runs the Prefect `ProcessWorker` that picks up the USER flow runs from `user-work-pool` and runs each as a process in the agent pod. The definitions of the orchestration flows live in `backend/styrmin_backend/agent/tasks/` — physically agent-side code, but conceptually part of the orchestration layer documented in [`../backend/orchestration-flows.md`](../backend/orchestration-flows.md).
+- **User actions** (driver-defined hooks) are USER flow runs too: the agent's worker runs each as a process in the agent pod, not as a Kubernetes Job, so an action's `image` has no effect today. See [`../backend/hooks-and-actions.md`](../backend/hooks-and-actions.md#work-pools).
 
-In short: the agent's Prefect worker is what *runs* internal flows; everything else about Prefect (catalogue, manager, models, work-pool topology) is documented under `backend/`.
+In short: the agent's Prefect worker is what *runs* USER flows and driver actions; everything else about Prefect (catalogue, manager, models, work-pool topology) is documented under `backend/`.
 
 ## Directory structure (agent-side code)
 
 ```text
 backend/styrmin_backend/
 ├── agent/
-│   ├── tasks/                  # Prefect flow definitions executed by the agent's worker
+│   ├── tasks/                  # Prefect flow definitions (INTERNAL and USER flows)
 │   │   ├── core.py             # Rendering tasks
 │   │   ├── application.py      # Application-specific (create/update HelmRelease)
 │   │   ├── orchestration.py    # apply_state, create_instance, update_instance, upgrade_instance, run_job, run_job_command
@@ -245,7 +246,7 @@ post-rendered one, so it includes the replica override or driver default
 
 | File | Purpose |
 |------|---------|
-| [agent/tasks/orchestration.py](backend/styrmin_backend/agent/tasks/orchestration.py) | Internal flow definitions executed on the agent's Prefect worker |
+| [agent/tasks/orchestration.py](backend/styrmin_backend/agent/tasks/orchestration.py) | Orchestration flow definitions: `apply_state` and `run_job` run on the task-worker, the CRD flows and `run_job_command` on the agent's Prefect worker |
 | [agent/tasks/application.py](backend/styrmin_backend/agent/tasks/application.py) | `create_helm_release`, `update_helm_release` |
 | [agent/tasks/core.py](backend/styrmin_backend/agent/tasks/core.py) | Core rendering tasks |
 | [agent/service/kubernetes/resources/custom_resource.py](backend/styrmin_backend/agent/service/kubernetes/resources/custom_resource.py) | HelmRelease CRD |

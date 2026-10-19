@@ -222,10 +222,11 @@ class GitSourceWorkflowDefinition(WorkflowDefinition):
 class LocalDriverActionWorkflowDefinition(WorkflowDefinition):
     """An action of a driver version loaded from a local directory (spec 029).
 
-    The action runs from ``directory`` in the image of its Job: the deployment's
-    only pull step, :func:`~styrmin_backend.workflows.local_driver.check_local_driver`,
-    checks the provenance fingerprint of the driver files at ``directory`` and
-    returns the directory. Prefect then changes into it and imports the
+    The action runs from ``directory`` in the agent pod, through the agent's
+    Prefect process worker: the deployment's only pull step,
+    :func:`~styrmin_backend.workflows.local_driver.check_local_driver`, checks
+    the provenance fingerprint of the driver files at ``directory`` and returns
+    the directory. Prefect then changes into it and imports the
     entrypoint ``<module>:<function>`` (research R-001).
     """
 
@@ -266,7 +267,7 @@ class LocalDriverActionWorkflowDefinition(WorkflowDefinition):
             values_template=self.values_template,
             actions_file=self.actions_file,
         )
-        # Prefect's script loader, as in the action's Job: the directory is on ``sys.path``.
+        # Prefect's script loader, as in the action's flow run: the directory is on ``sys.path``.
         return import_object(f"{Path(self.directory) / self.module}:{self.function}")
 
 

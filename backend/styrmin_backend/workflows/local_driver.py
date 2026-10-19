@@ -3,12 +3,13 @@
 Spec 029 (research R-001, R-004, R-006). The Prefect deployment of such an
 action has one pull step, :func:`check_local_driver`. Before Prefect imports
 ``actions.py``, the step checks that the driver files at the driver version's
-path, in the image of the action's Job, have the provenance fingerprint that
-the driver version was loaded with. It then returns the path, so that Prefect
+path, where the action runs (in the agent pod, through the agent's Prefect
+process worker), have the provenance fingerprint that the driver version was
+loaded with. It then returns the path, so that Prefect
 changes into it and imports the action from it, as it does from the driver
 directory of a git driver version (ADR-079).
 
-The action's Job has no server settings and no database. This module must
+The agent pod has no server settings and no database. This module must
 import without them: it imports only Prefect and the driver modules ``hash``
 and ``exceptions``.
 """
@@ -31,7 +32,7 @@ from styrmin_backend.services.driver.exceptions import (
 )
 from styrmin_backend.services.driver.hash import compute_driver_directory_fingerprint
 
-# Set by the Prefect worker in the environment of the flow run's Job.
+# Set by the Prefect worker in the environment of the flow run's process.
 FLOW_RUN_ID_ENV = "PREFECT__FLOW_RUN_ID"
 
 _logger_outside_flow_run = get_logger(__name__)
@@ -148,12 +149,12 @@ def check_local_driver(
     return {"directory": directory}
 
 
-# The fully qualified name of the pull step, which Prefect imports in the action's Job.
+# The fully qualified name of the pull step, which Prefect imports in the action's process.
 CHECK_LOCAL_DRIVER_STEP = f"{__name__}.{check_local_driver.__name__}"
 
 
 def _flow_run_id() -> UUID | None:
-    """The id of the flow run whose Job runs this process, or None outside such a Job."""
+    """The id of the flow run that this process runs, or None outside a flow run."""
     value = os.environ.get(FLOW_RUN_ID_ENV)
     if not value:
         return None
@@ -183,10 +184,12 @@ def _work_pool_default_image(base_job_template: dict[str, Any]) -> str | None:
 
 
 def _action_image() -> tuple[str | None, str | None]:
-    """The image of this action's Job and its work pool, named in the errors of the check (research R-006).
+    """The image and the work pool that the errors of the check name (research R-006).
 
     Reads the flow run in ``PREFECT__FLOW_RUN_ID``, then the ``image`` job
-    variable of its deployment, otherwise the default image of its work pool.
+    variable of its deployment (the action's ``image``), otherwise the default
+    image of its work pool. The action does not run in that image: the agent's
+    process worker runs it as a process in the agent pod.
     Returns ``(image, work_pool)``; either is ``None`` when the Prefect API
     does not give it, and the error then names the image as
     ``describe_action_image`` does. A failure to read the API is logged and
@@ -212,7 +215,7 @@ def _action_image() -> tuple[str | None, str | None]:
                 )
     except Exception:  # noqa: BLE001 - the error of the check must reach the hook step
         _logger().warning(
-            "Could not read the image of this action's Job from the Prefect API; the error names %s instead.",
+            "Could not read from the Prefect API the image to name in the error; the error names %s instead.",
             describe_action_image(None, work_pool_name),
             exc_info=True,
         )

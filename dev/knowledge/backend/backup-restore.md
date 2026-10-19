@@ -322,7 +322,7 @@ Backup workflows use a two-worker model:
 | Worker | Pool | Responsibilities |
 |--------|------|------------------|
 | INTERNAL | `styrmin-work-pool` | DB operations, CRD building, status updates, flow dispatch |
-| USER | `user-work-pool` (K8s) | Velero CRD creation/polling, in-cluster K8s operations |
+| USER | `user-work-pool` (the agent's process worker, in the agent pod) | Velero CRD creation/polling, in-cluster K8s operations |
 
 Results are passed between workers via **Prefect Variables** (a cross-worker communication channel).
 
@@ -354,7 +354,7 @@ See `workflows/templates/backup.py:242-273`, `:376-425`, `:761-800` and `:802-93
 
 Backups and restores record steps, like tasks, so users can view each stage and why it failed on the deployment page (`Backup.steps`, `Restore.steps`). The work runs in the USER flows, which have no database access, so they record steps through the `recordStep` mutation with the flow step reporter (`agent/steps/reporter.py`). See [ADR-060](../../adr/0060-steps-and-derived-task-result.md) and [orchestration-flows.md](orchestration-flows.md#steps-recorded-by-the-flows).
 
-**Action token.** `execute_backup_workflow` and `execute_restore_workflow` create one action token for the built-in `styrmin-actions` user per backup or restore (`_step_token`, which wraps `action_api_token()`, [ADR-059](../../adr/0059-driver-action-api-tokens.md)) and delete the session when the USER flow returns. They pass it with `action_job_variables(token, backup_id=...)` or `action_job_variables(token, restore_id=...)`, which put `STYRMIN_TOKEN` and `STYRMIN_BACKUP_ID` or `STYRMIN_RESTORE_ID` in the Job's `env`. When the token cannot be created, the INTERNAL flow logs a warning and the backup or restore runs without steps. A step write that fails never fails the backup or restore.
+**Action token.** `execute_backup_workflow` and `execute_restore_workflow` create one action token for the built-in `styrmin-actions` user per backup or restore (`_step_token`, which wraps `action_api_token()`, [ADR-059](../../adr/0059-driver-action-api-tokens.md)) and delete the session when the USER flow returns. They pass it with `action_job_variables(token, backup_id=...)` or `action_job_variables(token, restore_id=...)`, which put `STYRMIN_TOKEN` and `STYRMIN_BACKUP_ID` or `STYRMIN_RESTORE_ID` in the `env` of the USER flow's process. When the token cannot be created, the INTERNAL flow logs a warning and the backup or restore runs without steps. A step write that fails never fails the backup or restore.
 
 **Restore steps.** `execute_velero_restore_flow` records, in order:
 

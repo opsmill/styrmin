@@ -1314,7 +1314,7 @@ depends on where the code runs:
   `agent/steps/reporter.py`, which calls the `recordStep` mutation with the action token. Wrap
   the work in `async with reporter.step(*steps.MY_STEP):`, which records the start, the success,
   or the failure with the exception text before it raises the exception again.
-- **To give a USER Job its step parent**, add it to the Job's environment with
+- **To give a USER flow its step parent**, add it to the flow run's environment with
   `agent/tasks/utils.py::action_job_variables(token, task_id=..., backup_id=..., restore_id=...,
   step_id=...)`. Do not add flow parameters for it: they would change the parameters of every
   registered Prefect deployment for values that only the reporter reads.

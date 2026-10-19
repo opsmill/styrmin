@@ -17,11 +17,11 @@ from prefect.deployments.flow_runs import arun_deployment
 from styrmin_backend import config
 from styrmin_backend.config import API_TOKEN_ENV
 
-#: The parent of the steps a Job records; exactly one is set (019 research D3).
+#: The parent of the steps a USER flow run records; exactly one is set (019 research D3).
 TASK_ID_ENV = "STYRMIN_TASK_ID"
 BACKUP_ID_ENV = "STYRMIN_BACKUP_ID"
 RESTORE_ID_ENV = "STYRMIN_RESTORE_ID"
-#: The hook step that runs a driver action's Job.
+#: The hook step that runs a driver action.
 STEP_ID_ENV = "STYRMIN_STEP_ID"
 #: The most characters of a crashed flow run's first error log that its error holds.
 FIRST_ERROR_LOG_MAX_LENGTH = 4000
@@ -35,7 +35,7 @@ def action_job_variables(
     restore_id: UUID | str | None = None,
     step_id: UUID | str | None = None,
 ) -> dict[str, Any]:
-    """Prefect job variables that set the action token and the step parent in the flow run's job."""
+    """Prefect job variables that set the action token and the step parent in the flow run's environment."""
     env = {
         name: str(value)
         for name, value in (
@@ -53,7 +53,7 @@ def action_job_variables(
 async def _first_error_log(flow_run_id: UUID) -> str | None:
     """The first ``ERROR`` log of a flow run, cut to ``FIRST_ERROR_LOG_MAX_LENGTH`` characters.
 
-    A flow run crashes when its Job exits before the flow starts, for example
+    A flow run crashes when its process exits before the flow starts, for example
     when the check of a local driver version's files raises (spec 029,
     research R-002). Prefect's state message then holds only the exit status,
     and the error that explains the crash is in the flow run's logs. Returns
@@ -117,7 +117,7 @@ async def run_driver_action_or_fail(
 ) -> FlowRun:
     """``run_deployment_or_fail`` for a driver action run by the hook step ``step_id``.
 
-    Forwards this job's API token and task id, and adds the hook step.
+    Forwards this flow run's API token and task id, and adds the hook step.
     """
     token = config.SETTINGS.agent.api_token
     return await run_deployment_or_fail(
