@@ -76,7 +76,7 @@ spec:
       description: <string>
       location: <string>   # Python function reference: "file.py::function"
       parameters: []       # Optional parameters
-      image: <string>      # Optional container image for execution
+      image: <string>      # Optional container image; no effect today (see "Actions")
 ```
 
 ### Required Fields
@@ -322,12 +322,28 @@ spec:
       description: <string>
       location: <string>   # Python function reference: "file.py::function"
       parameters: []       # Optional parameters
-      image: <string>      # Optional container image for execution
+      image: <string>      # Optional container image; no effect today (see below)
 ```
 
 An action's own `image` must hold Prefect 3.6.9 or later: the action's Job
 runs Prefect's `git_clone` step with `clone_directory_name`, which earlier
 releases refuse.
+
+The `image` field has no effect today: the Styrmin agent runs every action
+as a process in the agent pod, not in a container of that image. A
+follow-up issue records this.
+
+For a driver loaded from a local directory, each action runs the
+`actions.py` at the path the driver was loaded from, in the agent pod.
+Before the action runs, Styrmin checks that the driver files at that path
+have the provenance fingerprint the driver version was loaded with, and
+fails the hook step when they are missing or differ. The agent pod must
+therefore hold the driver at the same path as the server, and a
+`styrmin_backend` package that has this check. In a standard install,
+the server and the agent run the same Styrmin image, which holds the
+bundled drivers at `/styrmin/drivers/<name>` and the check. See
+[Loading a Driver](../docs/docs/drivers/loading-drivers.md#actions-of-a-driver-loaded-from-a-local-directory)
+for the errors and how to fix each one.
 
 ### Hooks and Modes
 
@@ -548,7 +564,9 @@ Drivers are loaded from Git repositories, or from a directory on the Styrmin ser
 6. Stores the driver version in the database, with the driver directory in `source_path`
 7. Registers any actions with the workflow engine (Prefect)
 
-Each action runs with the driver directory as its working directory. `actions.py` can import modules from the driver directory, such as a `helpers.py` next to it, but not modules from other folders of the repository. Packages installed in the action's image, such as `prefect` and `styrmin_backend`, import as before. Code that several drivers share goes into each driver directory, or is installed in the action's image.
+Each action runs with the driver directory as its working directory. `actions.py` can import modules from the driver directory, such as a `helpers.py` next to it, but not modules from other folders of the repository. Packages installed in the agent's image, such as `prefect` and `styrmin_backend`, import as before. Code that several drivers share goes into each driver directory, or is installed in the image that the agent runs.
+
+A load from a local directory reads the driver from the path on the server, stores the path in `source_path`, and registers the driver's actions in the same way. Each action then runs from that path in the agent pod, after the check described in [Actions](#actions).
 
 See [Loading a Driver](../docs/docs/drivers/loading-drivers.md#from-a-git-repository) for the CLI, SDK, GraphQL and UI options and the values refused as a driver directory, and [ADR-079](../dev/adr/0079-driver-actions-import-only-from-their-driver-directory.md) for the reasons behind the import rule and the symlink check.
 
