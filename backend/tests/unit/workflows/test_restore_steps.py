@@ -4,7 +4,8 @@ The USER flow ``execute_velero_restore`` records "Delete the namespace", "Run
 the Velero restore" and "Run the recovery". The INTERNAL flow
 ``execute_restore_workflow`` gives it an action token and the restore id, and
 fails its open steps when it dies. A cross-target restore also runs the alias
-step after the recovery, and a refused alias write fails the restore (#530).
+step after the recovery. A refused alias write fails the restore and keeps the
+deployment ``RUNNING``, because its workloads were recovered (#530).
 """
 
 from __future__ import annotations
@@ -299,6 +300,7 @@ async def test_a_restore_records_its_three_steps_in_order(
     assert _stored_result(cluster.variable)["recovery"] == {
         "recovered": True,
         "error": None,
+        "aliases_error": None,
     }
 
 
@@ -411,6 +413,7 @@ async def test_a_failed_recovery_fails_the_recovery_step(
     assert _stored_result(cluster.variable)["recovery"] == {
         "recovered": False,
         "error": "Restore reapply failed: CR is gone",
+        "aliases_error": None,
     }
 
 
@@ -429,6 +432,7 @@ async def test_a_cross_target_restore_writes_the_aliases_after_the_recovery(
     assert _stored_result(cluster.variable)["recovery"] == {
         "recovered": True,
         "error": None,
+        "aliases_error": None,
     }
 
 
@@ -510,16 +514,21 @@ async def test_a_cross_target_restore_that_fails_before_its_end_writes_no_aliase
 
     assert events[-2:] == last_events
     alias_step.assert_not_awaited()
-    assert _stored_result(cluster.variable)["recovery"]["recovered"] is False
+    recovery = _stored_result(cluster.variable)["recovery"]
+    assert (recovery["recovered"], recovery["aliases_error"]) == (False, None)
 
 
-async def test_a_refused_alias_write_fails_the_alias_step_and_the_recovery(
+async def test_a_refused_alias_write_fails_the_alias_step_but_not_the_recovery(
     api: FakeStepApi,
     events: list[Event],
     restore_id: UUID,
     refused_alias_write: AsyncMock,
 ) -> None:
-    """SC-004: the step and the stored result carry the error; no CR is marked failed."""
+    """SC-004: the step and the stored result carry the error; no CR is marked failed.
+
+    The recovery succeeded, so the result reports it as recovered and carries
+    the alias error apart (finding 6 of the #531 review).
+    """
     async with _user_flow() as cluster:
         await _restore(**_cross_target(counterpart_context()))
 
@@ -540,13 +549,14 @@ async def test_a_refused_alias_write_fails_the_alias_step_and_the_recovery(
         aliases=[{"metadata": {"name": "db"}}], stale_aliases=[]
     )
     assert _stored_result(cluster.variable)["recovery"] == {
-        "recovered": False,
-        "error": ALIAS_ERROR,
+        "recovered": True,
+        "error": None,
+        "aliases_error": ALIAS_ERROR,
     }
     cluster.recovery.mark_failed.assert_not_awaited()
 
 
-async def test_a_failed_alias_read_fails_the_alias_step_and_the_recovery(
+async def test_a_failed_alias_read_fails_the_alias_step_but_not_the_recovery(
     api: FakeStepApi,
     events: list[Event],
     refused_alias_write: AsyncMock,
@@ -575,8 +585,9 @@ async def test_a_failed_alias_read_fails_the_alias_step_and_the_recovery(
     )
     refused_alias_write.assert_not_awaited()
     assert _stored_result(cluster.variable)["recovery"] == {
-        "recovered": False,
-        "error": ALIAS_ERROR,
+        "recovered": True,
+        "error": None,
+        "aliases_error": ALIAS_ERROR,
     }
     cluster.recovery.mark_failed.assert_not_awaited()
 
@@ -594,7 +605,7 @@ async def test_a_forbidden_alias_write_gives_the_restore_a_one_line_error(
     async with _user_flow() as cluster:
         await _restore(**_cross_target(counterpart_context()))
 
-    error = _stored_result(cluster.variable)["recovery"]["error"]
+    error = _stored_result(cluster.variable)["recovery"]["aliases_error"]
     assert error == (
         "Create and delete service aliases: the Kubernetes API answered 403: "
         f"{FORBIDDEN_MESSAGE}. To write the aliases, change the configuration or "
@@ -635,7 +646,7 @@ async def test_the_alias_error_names_the_step_the_cause_and_the_repair(
     async with _user_flow() as cluster:
         await _restore(**_cross_target(counterpart_context()))
 
-    assert _stored_result(cluster.variable)["recovery"]["error"] == (
+    assert _stored_result(cluster.variable)["recovery"]["aliases_error"] == (
         f"Create and delete service aliases: {cause}. To write the aliases, change "
         "the configuration or the parameters of the deployment, or upgrade it."
     )
@@ -819,14 +830,18 @@ async def test_failed_velero_restore_gives_the_restore_an_error_message(
     assert (kwargs["status"].name, kwargs["error_message"]) == ("FAILED", message)
 
 
-async def test_a_refused_alias_write_fails_the_restore_and_the_counterpart(
+async def test_a_refused_alias_write_fails_the_restore_and_keeps_the_counterpart_running(
     events: list[Event],
 ) -> None:
-    """Critique E4: the restore's error is the alias error that the clone entry shows."""
+    """Critique E4: the restore's error is the alias error that the clone entry shows.
+
+    Finding 6 of the #531 review: the counterpart's workloads were recovered,
+    so the deployment is RUNNING and only the restore records the failure.
+    """
     counterpart = counterpart_deployment()
     velero_result = {
         "status": {"phase": "Completed", "failureReason": ""},
-        "recovery": {"recovered": False, "error": ALIAS_ERROR},
+        "recovery": {"recovered": True, "error": None, "aliases_error": ALIAS_ERROR},
     }
 
     async with _internal_restore_flow(
@@ -841,14 +856,49 @@ async def test_a_refused_alias_write_fails_the_restore_and_the_counterpart(
         RestoreStatus.FAILED,
         ALIAS_ERROR,
     )
-    flow.deployment_failed.assert_awaited_once()
-    failed = flow.deployment_failed.await_args.kwargs
-    assert (failed["deployment_id"], failed["error_message"]) == (
-        counterpart.id,
-        ALIAS_ERROR,
-    )
-    flow.deployment_running.assert_not_awaited()
+    flow.deployment_running.assert_awaited_once()
+    assert flow.deployment_running.await_args.kwargs["deployment_id"] == counterpart.id
+    flow.deployment_failed.assert_not_awaited()
     flow.fail_open.assert_not_awaited()
+
+
+async def test_a_failed_recovery_fails_the_restore_and_the_deployment(
+    events: list[Event],
+) -> None:
+    """A failed recovery keeps failing both, whatever the alias error says."""
+    deployment_id = uuid4()
+    error = "Restore reapply failed: CR is gone"
+    velero_result = {
+        "status": {"phase": "Completed", "failureReason": ""},
+        "recovery": {"recovered": False, "error": error, "aliases_error": None},
+    }
+
+    async with _internal_restore_flow(events, velero_result=velero_result) as flow:
+        await _run_restore_workflow(uuid4(), deployment_id=deployment_id)
+
+    kwargs = flow.status.await_args.kwargs
+    assert (kwargs["status"], kwargs["error_message"]) == (RestoreStatus.FAILED, error)
+    failed = flow.deployment_failed.await_args.kwargs
+    assert (failed["deployment_id"], failed["error_message"]) == (deployment_id, error)
+    flow.deployment_running.assert_not_awaited()
+
+
+async def test_a_completed_restore_without_an_alias_error_completes(
+    events: list[Event],
+) -> None:
+    velero_result = {
+        "status": {"phase": "Completed", "failureReason": ""},
+        "recovery": {"recovered": True, "error": None, "aliases_error": None},
+    }
+
+    async with _internal_restore_flow(events, velero_result=velero_result) as flow:
+        await _run_restore_workflow(uuid4())
+
+    kwargs = flow.status.await_args.kwargs
+    assert kwargs["status"] is RestoreStatus.COMPLETED
+    assert "error_message" not in kwargs
+    flow.deployment_running.assert_awaited_once()
+    flow.deployment_failed.assert_not_awaited()
 
 
 async def test_restore_runs_without_steps_when_no_token_can_be_created(

@@ -882,17 +882,20 @@ When the Kubernetes API refused a request, the cause is
 "Create and delete service aliases" in the restore's list of steps holds
 the full error.
 
-The failed restore sets the counterpart to `FAILED`. When only the alias
-step failed, the counterpart's workloads run, so its status then follows
-them and can read `RUNNING`. The clone's attribution and the failed
-restore record the failure. To write
-the missing aliases, make a change to the counterpart's configuration or
-parameters, or upgrade it. The update or upgrade writes the counterpart's
-aliases and the aliases of its services in the namespaces of the other
-deployments. Saving the same values does not always run an update, so it
-might write no alias. After the repair, the failed restore and the clone's
-entry for that deployment still read failed, because they record the
-restore, not the aliases that the deployment has now.
+When only the alias step failed, the restore sets the counterpart to
+`RUNNING`, because Styrmin recovered its workloads and they run. Only the
+failed restore and the clone's entry for that deployment record the
+failure. A restore that fails for another cause sets the counterpart to
+`FAILED`.
+
+To write the missing aliases, make a change to the counterpart's
+configuration or parameters, or upgrade it. The update or upgrade writes
+the counterpart's aliases and the aliases of its services in the
+namespaces of the other deployments. Saving the same values does not
+always run an update, so it might write no alias. After the repair, the
+failed restore and the clone's entry for that deployment still read
+failed, because they record the restore, not the aliases that the
+deployment has now.
 
 A restore that fails after it has started changes only the attribution of
 the deployment it restores. A deployment that fails before its restore

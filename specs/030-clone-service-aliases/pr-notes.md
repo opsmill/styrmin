@@ -6,7 +6,7 @@ After an environment clone, each counterpart's namespace held the source's servi
 
 - a cross-target restore restores no service alias;
 - after its recovery, a cross-target restore writes the new environment's aliases in the step "Create and delete service aliases";
-- a failed alias write fails the restore, and a clone entry whose restore failed reads `failed` with the restore's error;
+- a failed alias write fails the restore and leaves the counterpart `RUNNING`, and a clone entry whose restore failed reads `failed` with the restore's error;
 - in-place and environment restores do not change.
 
 Not decided yet: the autonomous answers in the spec and the description-only change of `schema.graphql`, listed below for the maintainer to confirm.
@@ -20,7 +20,7 @@ Not decided yet: the autonomous answers in the spec and the description-only cha
 
 ## High-risk files and what changed in each
 
-- `backend/styrmin_backend/workflows/templates/backup.py`: for a cross-target restore, the INTERNAL flow passes the counterpart's `GlobalContext` to the USER flow as the new parameter `counterpart_context`, and the USER flow runs the alias step after "Run the recovery"; a failed alias step stores `recovered: False` with the error, which fails the restore.
+- `backend/styrmin_backend/workflows/templates/backup.py`: for a cross-target restore, the USER flow reads the counterpart's context from the `spec.context` of the counterpart's CR body, which the INTERNAL flow passes as `counterpart_crd_body`, and runs the alias step after "Run the recovery"; a failed alias step stores its error as `aliases_error` with `recovered: True`, so the INTERNAL flow fails the restore and sets the counterpart to `RUNNING`.
 - `backend/styrmin_backend/agent/service/kubernetes/resources/builders/backup.py`: `build_velero_restore` gives a cross-target restore the label selector `styrmin.io/service-alias NotIn ["true"]`, and an in-place restore none.
 - `backend/styrmin_backend/agent/service/kubernetes/velero/resources.py`: `VeleroRestore` gets the optional field `label_selector`, written to `spec.labelSelector` only when set.
 - `backend/styrmin_backend/agent/tasks/service_aliases.py`: holds `apply_service_aliases_step`, moved from `orchestration.py` with the same body.
@@ -35,7 +35,7 @@ The spec flags these answers, which the PRD did not give. Each one can be confir
 - Reuse of the alias step of #503: "Yes. The cross-target restore runs the same step "Create and delete service aliases" as the create, update and upgrade flows. That step reads the other deployments' services from the server when it runs, so the counterpart whose restore ends last writes the aliases in both directions between it and each counterpart whose restore ended before."
 - The namespace rule in FR-002 and SC-001: "No. A counterpart whose namespace is missing or terminating when another counterpart's alias step runs gets its aliases from its own alias step, at the end of its own restore, or from its next create, update or upgrade flow. [...] SC-001 counts only deployments whose namespace exists when the clone ends."
 - FR-007 for every cause of a failed restore: "The clone record reports the entry of a counterpart whose restore failed as `failed`, with the restore's error as the reason. This applies to any failed counterpart restore, because an alias write failure is reported as a restore failure." The critique session kept it: "Yes, for one rule across causes. It stays flagged for the maintainer (critique P1)."
-- The counterpart's status after an alias failure: "The restore still sets the counterpart to `FAILED`, as any failed restore does, and its status then follows its workloads." So a counterpart whose alias step failed can read `RUNNING` a few seconds later; the failed restore and the clone entry keep the failure.
+- The counterpart's status after an alias failure: "The restore still sets the counterpart to `FAILED`, as any failed restore does, and its status then follows its workloads." The review of #531 changed this answer: the restore now sets the counterpart to `RUNNING`, and only the failed restore and the clone entry record the failure (see the next section).
 - The `CONTEXT.md` entry "Service alias": "The fix extends that entry with what a clone does with aliases."
 
 ## Description-only change of `schema.graphql`, for the maintainer to confirm
@@ -57,6 +57,12 @@ The review of the whole change ([opsmill-implement-report.md](opsmill-implement-
   - The create, update and upgrade flows call the same step, so in those flows too a failed read is now recorded as the failed alias step. Before, those flows failed with no alias step recorded.
   - Both E2E variants ran again at `ffbcf1b1`, which holds this commit, and passed ([e2e-evidence.md](e2e-evidence.md), "Re-run at the final head").
 - `8da6967e` and `e52c8600`: documentation that the change had made false, the description of `counterpartDeploymentId` above, and `CONTEXT.md`, which said that a restore has at most three steps.
+
+## Changes made after the review of #531: the restore's error and the counterpart's status
+
+- Finding 5: the restore's error was `Service alias step failed: <str(exc)>`. For a Kubernetes `ApiException`, that text holds the HTTP response headers and body, and it became the clone entry's reason, which the UI and `styrminctl env-clones get` show on one line. The error is now `Create and delete service aliases: <cause>. To write the aliases, change the configuration or the parameters of the deployment, or upgrade it.` For an `ApiException`, the cause is `the Kubernetes API answered <status>: <message>`, built by `describe_api_answer`, which moved from `job_logs.py` to `agent/service/kubernetes/utils.py`. The step still holds the full error.
+- Finding 6: when only the alias step failed, the restore is `FAILED` with that error and the counterpart is set to `RUNNING`, not `FAILED`, because its workloads were recovered and run. A failed Velero restore or a failed recovery still sets the counterpart to `FAILED`.
+- The user documentation says that, after the repair, the failed restore and the clone entry still read `failed`, because they record the restore.
 
 ## Effect on the demo branch `fac/demo-beta-presentation-bhshh`
 

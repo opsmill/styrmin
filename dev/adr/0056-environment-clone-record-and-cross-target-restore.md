@@ -148,8 +148,10 @@ checking the selector (research R-001 of spec 030).
 After the recovery succeeds, the restore runs the alias step of the create, update and
 upgrade flows with the counterpart's context. That step reads the new environment's
 services from the server when it runs, so it writes no alias to a source namespace and
-none for a deployment that was not cloned (research R-002). A failed alias write fails
-the restore with the error, as a failed recovery does. A clone entry recorded `cloned`
+none for a deployment that was not cloned (research R-002). A failed alias step fails
+the restore with the error, and the counterpart is set to `RUNNING`, because its
+workloads were recovered and run (changed in the review of #531: the counterpart was set
+to `FAILED` before). A clone entry recorded `cloned`
 whose restore failed reads `failed`, with the reason `the restore failed: <restore
 error>`; the stored entry does not change. In-place restores and environment restores
 send no selector and restore the aliases from the backup as before.

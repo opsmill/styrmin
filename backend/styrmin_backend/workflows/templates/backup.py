@@ -313,8 +313,17 @@ async def execute_velero_restore_flow(
             counterpart's context from the body's ``spec.context``. A
             cross-target restore restores none of the source's service
             aliases, and the flow writes the counterpart's aliases after the
-            recovery (#530). When that write fails, the stored result reports
-            the recovery as failed with the error, which fails the restore.
+            recovery (#530).
+
+    The flow stores its result in the Prefect Variable
+    ``velero-result-<flow run id>`` for the INTERNAL flow: Velero's phase and
+    failure reason under ``status``, and under ``recovery``:
+
+    - ``recovered``: True when the recovery succeeded.
+    - ``error``: the error of a failed recovery, else None.
+    - ``aliases_error``: the error of a failed alias step, else None. The
+      recovery succeeded, so ``recovered`` stays True: the INTERNAL flow fails
+      the restore with this error and sets the deployment ``RUNNING`` (#530).
 
     Returns:
         The final Velero Restore resource dict from the K8s API.
@@ -444,7 +453,11 @@ async def execute_velero_restore_flow(
             if counterpart_name and counterpart_name != crd_name:
                 failure_crd_names.append(counterpart_name)
 
-        recovery_status: dict[str, Any] = {"recovered": False, "error": None}
+        recovery_status: dict[str, Any] = {
+            "recovered": False,
+            "error": None,
+            "aliases_error": None,
+        }
         if velero_phase == "Completed":
             await reporter.start_step(*steps.RESTORE_RECOVERY)
             try:
@@ -472,11 +485,13 @@ async def execute_velero_restore_flow(
                     try:
                         await apply_service_aliases_step(reporter, counterpart_context)
                     except Exception as exc:
-                        # No mark_failed: the operator's rollout of the recovered
-                        # spec would replace the failed status.
+                        # No mark_failed: the recovery succeeded and the workloads
+                        # run, so only the restore records the failure, and the
+                        # operator's rollout of the recovered spec would replace a
+                        # failed status anyway.
                         error_msg = _service_aliases_error(exc)
                         logger.error(error_msg)
-                        recovery_status = {"recovered": False, "error": error_msg}
+                        recovery_status["aliases_error"] = error_msg
         else:
             failure_reason = velero_status.get("failureReason") or (
                 f"Velero restore phase: {velero_phase}"
@@ -882,6 +897,14 @@ async def execute_restore_workflow(
     ``source_namespace`` derives from — while ``deployment_id`` names the
     counterpart whose ``deployment.status`` and CR this flow writes.
 
+    After a completed Velero restore and a successful recovery, the restore is
+    ``COMPLETED`` and the deployment ``RUNNING``. After a failed Velero restore
+    or a failed recovery, both are ``FAILED`` with the error. When only the
+    alias step of a cross-target restore failed (``recovery["aliases_error"]``
+    in the USER flow's result), the restore is ``FAILED`` with the step's error
+    and the deployment ``RUNNING``, because its workloads were recovered and
+    run (#530). The clone entry reads that restore's error.
+
     Args:
         restore_id: The Styrmin restore record ID (passed as string for serialization).
         backup_id: The Styrmin backup ID.
@@ -1032,15 +1055,28 @@ async def execute_restore_workflow(
 
         async with get_unit_of_work() as uow:
             if velero_phase == "Completed" and recovery.get("recovered"):
-                await update_restore_status(
-                    restore_id=restore_uuid,
-                    status=RestoreStatus.COMPLETED,
-                    uow=uow,
-                )
+                aliases_error = recovery.get("aliases_error")
+                if aliases_error:
+                    # Only the alias step failed: the workloads were recovered
+                    # and run, so the deployment is RUNNING and only the restore
+                    # records the failure.
+                    await update_restore_status(
+                        restore_id=restore_uuid,
+                        status=RestoreStatus.FAILED,
+                        uow=uow,
+                        error_message=aliases_error,
+                    )
+                    logger.error(f"Restore {restore_uuid} failed: {aliases_error}")
+                else:
+                    await update_restore_status(
+                        restore_id=restore_uuid,
+                        status=RestoreStatus.COMPLETED,
+                        uow=uow,
+                    )
+                    logger.info(f"Restore {restore_uuid} completed successfully")
                 await _set_deployment_status_running(
                     deployment_id=UUID(deployment_id), uow=uow
                 )
-                logger.info(f"Restore {restore_uuid} completed successfully")
             else:
                 if velero_phase == "Completed":
                     error_msg = (
