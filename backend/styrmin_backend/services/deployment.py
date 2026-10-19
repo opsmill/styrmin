@@ -3,9 +3,11 @@ from datetime import UTC, datetime
 from typing import Literal, overload
 from uuid import UUID, uuid4
 
+from fast_depends import Depends, inject
 from loguru import logger
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
+from prefect.states import format_exception
 
 from styrmin_backend.agent.service.kubernetes.exceptions import CustomResourceNotFound
 from styrmin_backend.agent.service.kubernetes.primitives import patch_custom_resource
@@ -54,6 +56,8 @@ from styrmin_backend.services.env_vars.exceptions import (
     UnknownComponentEnvVarError,
 )
 from styrmin_backend.services.env_vars.validator import validate_env_vars_dict
+from styrmin_backend.services.driver.exceptions import ActionNotRegisteredError
+from styrmin_backend.services.driver.hooks import resolve_upgrade_hooks
 from styrmin_backend.services.image_overrides.reference import validate_reference
 from styrmin_backend.services.image_overrides.validator import (
     prevalidate_image_overrides,
@@ -102,12 +106,15 @@ from styrmin_backend.services.services_discovery import (
 )
 from styrmin_backend.services.steps.recorder import (
     add_pending_steps,
+    fail_step,
     open_step,
     succeed_step,
     supersede_operator_steps,
 )
 from styrmin_backend.services.steps.reads import check_starting_step
 from styrmin_backend.services.unit_of_work import UnitOfWork
+from styrmin_backend.workflows.dependency import get_manager
+from styrmin_backend.workflows.manager import PrefectManager
 
 
 def _validate_component_env_var_targets(
@@ -824,6 +831,7 @@ def _ensure_pin_supports_version(
         )
 
 
+@inject(cast_result=False)  # type: ignore[arg-type]
 async def update_deployment_version(
     deployment_id: UUID,
     version: str,
@@ -835,6 +843,7 @@ async def update_deployment_version(
     parameter_updates: dict | None = None,
     deployment_name: str | None = None,
     service_name_overrides: dict[str, str] | None = None,
+    prefect_manager: PrefectManager = Depends(get_manager),
 ) -> Task | None:
     """Update a deployment's application version and driver-version binding.
 
@@ -855,6 +864,13 @@ async def update_deployment_version(
     FR-006). A change that the instance does not carry, such as a rename, is
     then written without a task, as :func:`update_deployment` writes it.
 
+    When the application version changes, which is when the flow runs the
+    upgrade hook, the target driver version's upgrade actions must have a
+    registered flow (spec 029, research R-009). If one has none, the function
+    changes nothing on the deployment, starts no flow run, and returns a
+    failed ``UPGRADE_INSTANCE`` task whose hook step holds the error, so the
+    same request can be sent again after the driver is loaded again.
+
     Args:
         deployment_id (UUID): The ID of the deployment to update.
         version (str): The target application version.
@@ -872,6 +888,8 @@ async def update_deployment_version(
         deployment_name (str | None): New name for the deployment.
         service_name_overrides (dict[str, str] | None): Replaces the service
             name overrides; omitted, the current overrides are kept.
+        prefect_manager (PrefectManager): Looks up the registered flows of the
+            target driver version's upgrade actions.
 
     Raises:
         InvalidContextError: If the context is invalid.
@@ -903,7 +921,8 @@ async def update_deployment_version(
 
     Returns:
         Task | None: The task created for the deployment update, or ``None``
-            when the instance matches the current one (no-op).
+            when the instance matches the current one (no-op). A failed task
+            without a flow run when an upgrade action has no registered flow.
     """
 
     logger.info(
@@ -1059,6 +1078,33 @@ async def update_deployment_version(
             else {}
         )
 
+        # Spec 029 (research R-009): the flow runs the upgrade hook when the
+        # application version changes (``ApplicationVersionChange``). Check its
+        # actions here, before the first write: refused here, the deployment
+        # keeps its version and active instance, so the same request is not a
+        # no-op once the driver is loaded again (FR-007). The flow checks again
+        # when it plans.
+        active_instance = deployment.active_instance
+        runs_upgrade_hook = (
+            active_instance is not None
+            and active_instance.application_version != version
+        )
+        if runs_upgrade_hook:
+            try:
+                await resolve_upgrade_hooks(
+                    target_driver_version,
+                    application_driver.name,
+                    uow=uow,
+                    prefect_manager=prefect_manager,
+                )
+            except ActionNotRegisteredError as exc:
+                return await _fail_upgrade_of_unregistered_action(
+                    deployment_id=deployment.id,
+                    error=exc,
+                    started_by_step_id=started_by_step_id,
+                    uow=uow,
+                )
+
         # After validation: creating the ingress deployment dispatches its flow run immediately.
         await _ensure_ingress_controller(
             environment_id=deployment.environment_id,
@@ -1203,6 +1249,51 @@ async def update_deployment_version(
         result = await uow.tasks.find(id=task.id)
         assert result is not None, "Task not found"
         return result
+
+
+async def _fail_upgrade_of_unregistered_action(
+    *,
+    deployment_id: UUID,
+    error: ActionNotRegisteredError,
+    started_by_step_id: UUID | None,
+    uow: UnitOfWork,
+) -> Task:
+    """Save a failed upgrade task whose hook step holds ``error``, and commit.
+
+    Spec 029 (FR-005, research R-009). The task has no flow run and no
+    instance, and the deployment is not written, so it keeps its version,
+    driver binding, status and active instance. The task message is the
+    error text; the step of the error's hook and mode fails with the error.
+    """
+    task = Task.create(
+        type=TaskType.UPGRADE_INSTANCE,
+        deployment_id=deployment_id,
+        status=TaskStatus.FAILED,
+        started_by_step_id=started_by_step_id,
+    ).model_copy(update={"message": str(error)})
+    await uow.tasks.save(task=task)
+    failed_at = datetime.now(UTC)
+    step = await open_step(
+        StepParent.of_task(task.id),
+        *steps.hook_step(error.hook, error.mode),
+        failed_at,
+        uow=uow,
+    )
+    await fail_step(step, format_exception(error), failed_at, uow=uow)
+    await uow.commit()
+    logger.warning(
+        "Upgrade failed before any write, an upgrade action has no registered "
+        "flow: deployment_id={} task_id={} hook={} mode={} actions={}",
+        deployment_id,
+        task.id,
+        error.hook.value,
+        error.mode,
+        error.actions,
+    )
+
+    result = await uow.tasks.find(id=task.id)
+    assert result is not None, "Task not found"
+    return result
 
 
 async def _resolve_service_overrides(

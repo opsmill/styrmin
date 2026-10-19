@@ -205,12 +205,12 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
 - [X] T032 [P] [US3] Add tests for T031:
   - In `backend/tests/unit/services/test_local_action_registration.py`: loading an existing version whose pairs all resolve makes no `register_user_action` call; when one pair resolves and another does not, only the actions of the missing pair are registered.
   - In `backend/tests/functional/test_user_action_registration.py`: load a local driver, delete its deployments through the Prefect client, load it again, and the three deployments exist again.
-- [ ] T033 [US3] In `backend/styrmin_backend/services/deployment.py` (`update_deployment_version`) add the request check of [contracts/hook-resolution.md](contracts/hook-resolution.md#request-check-in-update_deployment_version) (research R-009):
+- [X] T033 [US3] In `backend/styrmin_backend/services/deployment.py` (`update_deployment_version`) add the request check of [contracts/hook-resolution.md](contracts/hook-resolution.md#request-check-in-update_deployment_version) (research R-009):
   - Place it after the request's validations and before `_ensure_ingress_controller`, and check that nothing above it writes to the session.
   - It runs when the deployment has an active instance whose `application_version` differs from the target version.
   - On `ActionNotRegisteredError` from `resolve_upgrade_hooks(target_driver_version, ...)`, leave the deployment unchanged and save `Task.create(type=TaskType.UPGRADE_INSTANCE, deployment_id=..., status=TaskStatus.FAILED, started_by_step_id=...)` with `message=str(exc)`.
   - Record `steps.hook_step(exc.hook, exc.mode)` with `open_step` and `fail_step` (error `format_exception(exc)`), commit, and return the task.
-- [ ] T034 [P] [US3] Create `backend/tests/unit/services/test_update_version_hook_check.py`, following the setup of `backend/tests/unit/services/test_update_deployment_noop.py`:
+- [X] T034 [P] [US3] Create `backend/tests/unit/services/test_update_version_hook_check.py`, following the setup of `backend/tests/unit/services/test_update_deployment_noop.py`:
   - an upgrade to a target whose `upgrade`/`core` action is not registered returns a `failed` task of type `upgrade_instance` with no flow run and a failed `hook:upgrade:core` step whose error names the action;
   - the deployment's version, driver binding, status and active instance are unchanged, and `apply_state` is not called;
   - `started_by_step_id` is kept on the task;
