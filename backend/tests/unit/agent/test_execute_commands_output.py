@@ -122,6 +122,39 @@ async def test_failed_job_records_its_output_on_the_hook_step_then_raises(
     assert fake.log_reads[0]["container"] == "user-job"
 
 
+async def test_failed_job_of_an_earlier_run_is_replaced_and_the_new_output_is_recorded(
+    step_api: FakeStepApi, cluster: Callable[[FakeKubernetes], Any]
+) -> None:
+    """A second run on the deployment replaces the earlier failed Job (#372).
+
+    The earlier Job's pod goes with it, so the hook step records the output of
+    the new Job's pod, not the earlier one's.
+    """
+    earlier_pod = FakePod(
+        name=f"{JOB}-old01",
+        labels={"batch.kubernetes.io/job-name": JOB},
+        created=datetime(2026, 10, 6, 9, 0, tzinfo=UTC),
+        logs={"user-job": b"earlier-output\n"},
+    )
+    fake = FakeKubernetes(
+        pods=[earlier_pod],
+        jobs={
+            JOB: {"metadata": {"name": JOB, "uid": "earlier"}, "status": {"failed": 1}}
+        },
+        pods_on_create=[_job_pod(b"step-output-1\nstep-output-2\n")],
+    )
+
+    async with cluster(fake):
+        with pytest.raises(JobFailedError) as raised:
+            await _execute()
+
+    assert str(raised.value) == f"Job {JOB} failed in namespace {NAMESPACE}"
+    (output,) = _outputs(step_api)
+    assert output["output"] == "step-output-1\nstep-output-2\n"
+    assert fake.jobs[JOB]["metadata"]["uid"] != "earlier"
+    assert [pod.name for pod in fake.pods] == [f"{JOB}-abcde"]
+
+
 async def test_cut_output_is_recorded_as_truncated(
     step_api: FakeStepApi, cluster: Callable[[FakeKubernetes], Any]
 ) -> None:

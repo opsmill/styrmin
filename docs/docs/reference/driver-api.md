@@ -56,6 +56,13 @@ author:
   200 lines, at most 64 KiB. Every signed-in user, including Read-only
   users, can read it on the deployment page and through the API. Action
   commands must therefore not print secrets, such as passwords or tokens.
+- `execute_commands` names its Job `<release reference>-job`, in the
+  deployment's namespace. The Job stays in the cluster after it ends. The
+  next `execute_commands` call on the same deployment, in the same action
+  or in a later one, deletes that Job and its pods, even when it failed or
+  is still running, then creates its own Job. So an action can call
+  `execute_commands` several times, and each upgrade of a deployment can
+  run its upgrade action again.
 - `stop_components`, `start_components` and `upgrade_deployment_version`
   link the task they start to the hook step that runs the action. The
   deployment page lists the started task under that step, and the hook's

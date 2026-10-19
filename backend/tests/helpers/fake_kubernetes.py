@@ -1,7 +1,7 @@
 """A fake Kubernetes API for tests that read a failed Job's output (spec 019, research D10).
 
 It answers pod lists, pod log reads (with the kubelet's ``tailLines`` and
-``limitBytes`` rules), Job creation and Job status, so the real
+``limitBytes`` rules), Job reads, creation, deletion and status, so the real
 ``kubernetes_asyncio`` client runs against it.
 """
 
@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from aiohttp import web
 from aiohttp.test_utils import TestServer
@@ -42,7 +43,26 @@ class FakeKubernetes:
     #: ``(HTTP status, message)`` answered to every log read when set.
     log_error: tuple[int, str] | None = None
     job_succeeds: bool = False
+    #: Each Job by name, with ``metadata.uid``; a Job added by a test may set its ``status``.
     jobs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: How many reads still find a deleted Job, as while Kubernetes removes its
+    #: pods first; ``None`` keeps it for ever.
+    reads_until_deleted: int | None = 0
+    #: When set, another writer creates a new Job of the same name as soon as
+    #: a deleted Job is removed.
+    recreated_after_delete: bool = False
+    #: The pods that the Job controller starts: each one joins ``pods`` when
+    #: the Job named by its ``batch.kubernetes.io/job-name`` label is created.
+    pods_on_create: list[FakePod] = field(default_factory=list)
+    #: ``(request, Job name)`` of each Job request, in order: ``read``,
+    #: ``delete``, ``create`` or ``status``.
+    job_requests: list[tuple[str, str]] = field(default_factory=list)
+    #: The body of each Job delete, in order.
+    job_deletes: list[dict[str, Any]] = field(default_factory=list)
+    #: The reads left before each deleted Job is removed.
+    _deleting: dict[str, int | None] = field(
+        default_factory=dict, init=False, repr=False
+    )
     #: The label selector of each pod list, in order.
     pod_lists: list[str] = field(default_factory=list)
     #: The query of each log read, in order.
@@ -56,6 +76,12 @@ class FakeKubernetes:
         )
         app.router.add_post(
             "/apis/batch/v1/namespaces/{namespace}/jobs", self._create_job
+        )
+        app.router.add_get(
+            "/apis/batch/v1/namespaces/{namespace}/jobs/{job}", self._read_job
+        )
+        app.router.add_delete(
+            "/apis/batch/v1/namespaces/{namespace}/jobs/{job}", self._delete_job
         )
         app.router.add_get(
             "/apis/batch/v1/namespaces/{namespace}/jobs/{job}/status",
@@ -97,14 +123,60 @@ class FakeKubernetes:
         job = await request.json()
         metadata = job.setdefault("metadata", {})
         name = metadata.get("name") or metadata["generateName"] + GENERATED_SUFFIX
+        self.job_requests.append(("create", name))
         if name in self.jobs:
             return _status(409, f'jobs.batch "{name}" already exists')
         metadata["name"] = name
+        metadata["uid"] = str(uuid4())
         self.jobs[name] = job
+        started = [pod for pod in self.pods_on_create if _job_of(pod) == name]
+        self.pods_on_create = [pod for pod in self.pods_on_create if pod not in started]
+        self.pods.extend(started)
         return web.json_response(job, status=201)
+
+    async def _read_job(self, request: web.Request) -> web.Response:
+        name = request.match_info["job"]
+        self.job_requests.append(("read", name))
+        if name in self._deleting:
+            reads_left = self._deleting[name]
+            if reads_left is not None and reads_left <= 0:
+                self._remove_deleted(name)
+            elif reads_left is not None:
+                self._deleting[name] = reads_left - 1
+        job = self.jobs.get(name)
+        if job is None:
+            return _status(404, f'jobs.batch "{name}" not found')
+        return web.json_response(job)
+
+    async def _delete_job(self, request: web.Request) -> web.Response:
+        name = request.match_info["job"]
+        self.job_requests.append(("delete", name))
+        options = await request.json() if request.can_read_body else {}
+        self.job_deletes.append(options)
+        job = self.jobs.get(name)
+        if job is None:
+            return _status(404, f'jobs.batch "{name}" not found')
+        uid = (options.get("preconditions") or {}).get("uid")
+        if uid is not None and uid != job["metadata"]["uid"]:
+            return _status(409, f"Precondition failed: UID in precondition: {uid}")
+        self._deleting[name] = self.reads_until_deleted
+        if self.reads_until_deleted == 0:
+            self._remove_deleted(name)
+        return web.json_response(
+            {"apiVersion": "v1", "kind": "Status", "status": "Success"}
+        )
+
+    def _remove_deleted(self, name: str) -> None:
+        """Remove a deleted Job after its pods, as the ``Foreground`` propagation policy does."""
+        del self._deleting[name]
+        self.pods = [pod for pod in self.pods if _job_of(pod) != name]
+        del self.jobs[name]
+        if self.recreated_after_delete:
+            self.jobs[name] = {"metadata": {"name": name, "uid": str(uuid4())}}
 
     async def _read_job_status(self, request: web.Request) -> web.Response:
         name = request.match_info["job"]
+        self.job_requests.append(("status", name))
         job = self.jobs.get(name)
         if job is None:
             return _status(404, f'jobs.batch "{name}" not found')
@@ -125,6 +197,10 @@ async def serve(fake: FakeKubernetes) -> AsyncIterator[ApiClient]:
         configuration = Configuration(host=str(server.make_url("")).rstrip("/"))
         async with ApiClient(configuration) as client:
             yield client
+
+
+def _job_of(pod: FakePod) -> str | None:
+    return pod.labels.get("batch.kubernetes.io/job-name")
 
 
 def _pod_json(pod: FakePod) -> dict[str, Any]:
