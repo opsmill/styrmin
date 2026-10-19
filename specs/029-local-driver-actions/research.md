@@ -4,6 +4,8 @@
 
 Each decision below states what was chosen, why, and the alternatives that were rejected. Facts about Prefect come from the installed Prefect 3.8.6 (`.venv/lib/python3.14/site-packages/prefect`), the version that Styrmin pins in the server, the task manager image (`docker-compose.yml`) and the action images.
 
+**Amendment (implementation, 2026-10-19)**: this research assumed that each action runs as a Kubernetes Job in its `image:`. The E2E tests showed that this is false. The agent runs a Prefect `ProcessWorker` on `user-work-pool` (`backend/styrmin_backend/entrypoint/combined.py`), so every action runs as a process in the Styrmin agent pod, and an action's `image:` has no effect. Where a decision below says "the action's Job" or "the Job's image", read "the agent pod" or "the image the agent runs". The decisions themselves hold: the pull step (R-001), the crash log (R-002), the key (R-003), the shared fingerprint (R-004) and the brace refusal (R-005). R-006 and R-013 carry their own notes.
+
 ## R-001: How an action of a local driver version runs the `actions.py` at its path
 
 **Facts**:
@@ -107,6 +109,8 @@ Each decision below states what was chosen, why, and the alternatives that were 
 **Rationale**: the check names the image the Job actually runs. A value stored at registration would be stale after a Styrmin upgrade, which is when FR-003 most often fails.
 
 **Alternative rejected**: passing the image as a step input at registration: stale after a Styrmin upgrade, and an `image:` value written by a driver author would be templated (R-005).
+
+**Amendment (implementation, 2026-10-19)**: the rationale does not hold, because the action never runs in the image the check names. It runs in the agent pod. The user decided to keep the text: in a standard install, the work pool's default image is the image the agent runs, so the error is correct unless an action sets `image:`. When the image is unknown, the error says "in the default image of the work pool <name>" or "in the image of this action's Job" ([contracts/errors.md](contracts/errors.md)).
 
 ## R-007: Hook resolution in one service function
 
@@ -223,7 +227,11 @@ The module depends on the session fixtures `chart_server`, `simple_app_image` an
 
 **Decision**: the documentation states that an action's `image:` must hold the driver at the same path as the server, Prefect 3.6.9 or later (as for git actions), and a `styrmin_backend` of a release that has the check step. Without the check step, the Job crashes with `ModuleNotFoundError`, which the hook step shows through R-002.
 
+**Amendment (implementation, 2026-10-19)**: an action's `image:` has no effect, so this decision is replaced. The documentation states that the agent pod must hold the driver at the same path as the server, and that the image the agent runs needs Prefect 3.6.9 or later.
+
 ## Follow-ups to open after this change ships
+
+The full list, with the follow-ups found during implementation, is in [follow-ups.md](follow-ups.md).
 
 - A Prefect upstream issue: propose `Crashed` with the exception text when a flow cannot be loaded (R-002).
 - A shared driver volume for action Jobs, for drivers mounted only into the server (PRD, out of scope).

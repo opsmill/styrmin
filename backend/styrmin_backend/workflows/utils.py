@@ -64,10 +64,10 @@ def set_directory_pull_step(
     """Set the working directory in a pull step.
 
     The path is relative: Prefect resolves it against the working directory
-    at that point, which is the folder that holds the clone, whatever the
-    action's image is (spec 028, research R-002). An action's own image needs
-    Prefect 3.6.9 or later, whose ``git_clone`` step accepts
-    ``clone_directory_name``.
+    at that point, which is the folder that holds the clone (spec 028,
+    research R-002). The action runs as a process in the agent pod, so the
+    image the agent runs needs Prefect 3.6.9 or later, whose ``git_clone``
+    step accepts ``clone_directory_name``.
 
     Examples:
         >>> set_directory_pull_step("drivers/a/", "repo-555d155")
