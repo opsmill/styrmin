@@ -159,8 +159,8 @@ description: "Tasks for 031: an in-place restore always restores into the deploy
 
 **Independent Test**: the environment restore and clone suites pass with the new assertions.
 
-- [ ] T026 [P] [US4] In `backend/tests/unit/services/backup/test_environment_backup.py`, extend the environment restore test that asserts the constituent rows' `target_namespace` (`{restore.target_namespace for restore in uow.restores.models} == {...}`) so that each row's `target_instance_id` equals its deployment's active instance id; give the fixture's deployments active instances if they have none (research R-013, critique E5)
-- [ ] T027 [P] [US4] In `backend/tests/functional/graphql/test_environment_clone.py`, extend the test that asserts `restore.target_namespace == f"styrmin-{counterpart.id}"` to assert that `restore.target_instance_id` is the counterpart's active instance id, unless an existing assertion already covers it; run `uv run pytest backend/tests/functional/graphql/test_environment_clone.py backend/tests/unit/services/backup -q`
+- [X] T026 [P] [US4] In `backend/tests/unit/services/backup/test_environment_backup.py`, extend the environment restore test that asserts the constituent rows' `target_namespace` (`{restore.target_namespace for restore in uow.restores.models} == {...}`) so that each row's `target_instance_id` equals its deployment's active instance id; give the fixture's deployments active instances if they have none (research R-013, critique E5)
+- [X] T027 [P] [US4] In `backend/tests/functional/graphql/test_environment_clone.py`, extend the test that asserts `restore.target_namespace == f"styrmin-{counterpart.id}"` to assert that `restore.target_instance_id` is the counterpart's active instance id, unless an existing assertion already covers it; run `uv run pytest backend/tests/functional/graphql/test_environment_clone.py backend/tests/unit/services/backup -q`
 
 **Checkpoint**: Every restore path records the target the same way.
 

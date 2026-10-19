@@ -1548,6 +1548,10 @@ async def test_the_cross_target_restore_targets_the_counterpart_not_the_source(
     assert restore is not None
     assert restore.target_namespace == f"styrmin-{counterpart.id}"
     assert restore.target_namespace != f"styrmin-{source_deployment_id}"
+    # FR-004/FR-009 (#532): the row also records the counterpart's active
+    # instance, the instance the restored data lands in.
+    assert counterpart.active_application_instance_id is not None
+    assert restore.target_instance_id == counterpart.active_application_instance_id
 
 
 @pytest.mark.asyncio
