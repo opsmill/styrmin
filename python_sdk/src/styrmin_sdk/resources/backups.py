@@ -92,20 +92,13 @@ class BackupResource(BaseResource):
         result = await self._transport.execute(load_query("delete_backup"), {"backupId": str(backup_id)})
         self._check_graphql_errors(result)
 
-    async def create_restore(
-        self,
-        backup_id: str | UUID,
-        target_namespace: str,
-        target_instance_id: str | UUID | None = None,
-    ) -> CreateRestoreCreateRestore:
-        variables: dict[str, Any] = {
-            "backupId": str(backup_id),
-            "targetNamespace": target_namespace,
-        }
-        if target_instance_id is not None:
-            variables["targetInstanceId"] = str(target_instance_id)
+    async def create_restore(self, backup_id: str | UUID) -> CreateRestoreCreateRestore:
+        """Restore a backup into the deployment it was taken of.
 
-        result = await self._transport.execute(load_query("create_restore"), variables)
+        The server records that deployment's namespace and active instance on
+        the restore; the caller names neither.
+        """
+        result = await self._transport.execute(load_query("create_restore"), {"backupId": str(backup_id)})
         self._check_graphql_errors(result)
         return self._parse(CreateRestore, result["data"], "create_restore", CreateRestoreCreateRestore)
 

@@ -191,12 +191,24 @@ class TestBackupResource:
             }
         }
 
-        restore = await client.backups.create_restore(
-            backup_id="00000000-0000-0000-0000-000000000001",
-            target_namespace="styrmin-ns",
-        )
+        restore = await client.backups.create_restore(backup_id="00000000-0000-0000-0000-000000000001")
+
+        assert _sent_variables(mock_transport) == {"backupId": "00000000-0000-0000-0000-000000000001"}
         assert restore.status == "pending"
         assert restore.target_namespace == "styrmin-ns"
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_restore_takes_no_target_namespace(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        """The server decides where a restore lands (#532): the SDK has no
+        parameter to name a namespace."""
+        with pytest.raises(TypeError, match="target_namespace"):
+            await client.backups.create_restore(
+                backup_id="00000000-0000-0000-0000-000000000001",
+                target_namespace="x",  # ty: ignore[unknown-argument]
+            )
+
+        mock_transport.execute.assert_not_called()
 
     @staticmethod
     @pytest.mark.asyncio

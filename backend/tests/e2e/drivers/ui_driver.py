@@ -481,8 +481,8 @@ class UiScenarioDriver:
     # in the UI flow — the page already knows which instance it's showing — but
     # we accept it for protocol parity.
 
-    async def _ensure_deployment_detail(self) -> None:
-        """Ensure the page shows the deployment this driver is bound to.
+    async def _ensure_deployment_detail(self) -> str:
+        """Ensure the page shows the deployment this driver is bound to; return its id.
 
         Checking only for ``"/deployments/"`` in the URL is not enough: the
         Playwright ``Page`` is **session-scoped and shared** across every
@@ -515,6 +515,7 @@ class UiScenarioDriver:
             await self._deployment_detail.goto(
                 environment_id=environment_id, deployment_id=deployment_id
             )
+        return deployment_id
 
     async def create_backup(self, *, instance_id: str) -> BackupRef:  # noqa: ARG002
         async with _ui_errors("creating backup"):
@@ -533,13 +534,14 @@ class UiScenarioDriver:
                 max_wait=max_wait,
             )
 
-    async def create_restore(
-        self, *, backup_id: str, target_namespace: str
-    ) -> RestoreRef:
+    async def create_restore(self, *, backup_id: str) -> RestoreRef:
         async with _ui_errors(f"creating restore from backup {backup_id}"):
-            await self._ensure_deployment_detail()
+            deployment_id = await self._ensure_deployment_detail()
+            # An in-place restore lands in the namespace of the deployment
+            # the backup was taken of (#532); the dialog shows that namespace.
             return await self._deployment_detail.create_restore(
-                backup_id=backup_id, target_namespace=target_namespace
+                backup_id=backup_id,
+                expected_namespace=f"styrmin-{deployment_id}",
             )
 
     async def wait_for_restore(

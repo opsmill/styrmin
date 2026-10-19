@@ -1192,17 +1192,18 @@ class Mutation:
     async def create_restore(
         self,
         backup_id: UUID,
-        target_namespace: str,
         info: strawberry.Info,
-        target_instance_id: UUID | None = None,
     ) -> RestoreType | None:
-        """Create a restore operation from a backup."""
+        """Create a restore operation from a backup.
+
+        Styrmin restores the backup into the deployment it was taken of, in
+        that deployment's namespace and active instance; the client names
+        neither (#532).
+        """
         uow = info.context["uow"]
 
         restore, deployment_id = await create_restore_service(
             backup_id=backup_id,
-            target_namespace=target_namespace,
-            target_instance_id=target_instance_id,
             uow=uow,
         )
 
@@ -1214,7 +1215,7 @@ class Mutation:
                     "restore_id": str(restore.id),
                     "backup_id": str(backup_id),
                     "deployment_id": str(deployment_id),
-                    "target_namespace": target_namespace,
+                    "target_namespace": restore.target_namespace,
                 },
             )
         except Exception as exc:

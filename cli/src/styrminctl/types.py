@@ -69,17 +69,20 @@ EnvironmentContextName = Annotated[
     Parameter(name="--environment", help="Environment name to disambiguate the deployment name."),
 ]
 
-# --- Restore target deployment flags ---
+# --- `backups restore --last` target flags ---
 
 TargetDeploymentName = Annotated[
     str | None,
-    Parameter(name="--target-deployment", help="Name of the target deployment (restore into its active instance)."),
+    Parameter(
+        name="--target-deployment",
+        help="With --last: name of the deployment whose newest completed backup is restored.",
+    ),
 ]
 TargetDeploymentId = Annotated[
     str | None,
     Parameter(
         name="--target-deployment-id",
-        help="UUID of the target deployment (restore into its active instance).",
+        help="With --last: UUID of the deployment whose newest completed backup is restored.",
         validator=validate_uuid,
     ),
 ]
@@ -114,7 +117,11 @@ InstanceId = Annotated[str, Parameter(help="UUID of the application instance.", 
 # --- Optional UUID type aliases ---
 
 OptionalInstanceId = Annotated[
-    str | None, Parameter(help="UUID of the target application instance.", validator=validate_uuid)
+    str | None,
+    Parameter(
+        help="With --last: UUID of the application instance whose newest completed backup is restored.",
+        validator=validate_uuid,
+    ),
 ]
 InstanceIdOption = Annotated[
     str | None,

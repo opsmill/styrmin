@@ -908,13 +908,9 @@ class ApiScenarioDriver:
             raise _normalise(exc) from exc
         return _backup_ref(backup)
 
-    async def create_restore(
-        self, *, backup_id: str, target_namespace: str
-    ) -> RestoreRef:
+    async def create_restore(self, *, backup_id: str) -> RestoreRef:
         try:
-            restore = await self._client.backups.create_restore(
-                backup_id=backup_id, target_namespace=target_namespace
-            )
+            restore = await self._client.backups.create_restore(backup_id=backup_id)
         except StyrminError as exc:
             raise _normalise(exc) from exc
         return RestoreRef(id=str(restore.id), status=restore.status)

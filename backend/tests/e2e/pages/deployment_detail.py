@@ -1197,14 +1197,16 @@ class DeploymentDetailPage:
         await row.wait_for(state="detached", timeout=30_000)
 
     async def create_restore(
-        self, *, backup_id: str, target_namespace: str
+        self, *, backup_id: str, expected_namespace: str
     ) -> RestoreRef:
         """Click the row's Restore, confirm in the dialog, return the new restore ref.
 
-        ``target_namespace`` is a readOnly input on the UI (the dialog
-        derives it from the deployment context). Scenarios still pass it so
-        the same argument list works against both entrypoints — we verify
-        the displayed value matches so API/UI results stay equivalent.
+        The dialog's "Target Namespace" is a read-only field that shows where
+        the restore lands. The mutation sends only the backup id and the
+        server restores into the namespace of the backup's deployment (#532),
+        so the field must show ``expected_namespace``, the namespace of the
+        deployment on this page. A mismatch fails the scenario before the
+        restore is submitted.
         """
         await self.open_backups_tab()
         row = self._page.locator(
@@ -1215,10 +1217,10 @@ class DeploymentDetailPage:
         await dialog.wait_for()
 
         shown_namespace = await dialog.get_by_label("Target Namespace").input_value()
-        if shown_namespace != target_namespace:
+        if shown_namespace != expected_namespace:
             raise ScenarioActionError(
                 f"Restore dialog shows target namespace {shown_namespace!r} but "
-                f"scenario expected {target_namespace!r}"
+                f"scenario expected {expected_namespace!r}"
             )
 
         # Existing restore ids so we can pick the new one.

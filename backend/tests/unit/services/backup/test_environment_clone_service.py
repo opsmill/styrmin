@@ -963,10 +963,12 @@ def flow_harness(monkeypatch: pytest.MonkeyPatch, scenario: _Scenario):
 
     async def _create_restore(**kwargs: Any):
         calls["restore"].append(kwargs)
+        # The namespace the real service records for the deployment it
+        # restores into (#532): the flow dispatches it from the row.
         restore = Restore(
             name=f"styrmin-{uuid4()}",
             status=RestoreStatus.PENDING,
-            target_namespace=kwargs["target_namespace"],
+            target_namespace=f"styrmin-{kwargs['target_deployment_id']}",
             backup_id=kwargs["backup_id"],
         )
         await scenario.uow.restores.create(restore)
@@ -1073,13 +1075,16 @@ async def test_partial_capture_clones_the_usable_constituents(
     restore_call = flow_harness["restore"][0]
     counterpart_id = UUID(entries["api"]["counterpart_deployment_id"])
     assert restore_call["target_deployment_id"] == counterpart_id
-    assert restore_call["target_namespace"] == f"styrmin-{counterpart_id}"
+    # The flow names no namespace; ``create_restore`` records it (#532).
+    assert "target_namespace" not in restore_call
 
     # The restore is dispatched with the source identity travelling separately
-    # from the status-write target (research D2.2).
+    # from the status-write target (research D2.2), into the namespace the
+    # restore row records.
     dispatch = flow_harness["dispatch"][0]
     assert dispatch["action"] is PrefectAction.EXECUTE_RESTORE
     assert dispatch["parameters"]["deployment_id"] == str(counterpart_id)
+    assert dispatch["parameters"]["target_namespace"] == f"styrmin-{counterpart_id}"
     assert dispatch["parameters"]["source_deployment_id"] == str(scenario.second.id)
 
     # While the dispatched restore is still PENDING the clone is IN_PROGRESS;

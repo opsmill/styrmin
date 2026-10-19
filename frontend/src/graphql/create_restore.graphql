@@ -1,13 +1,5 @@
-mutation CreateRestore(
-  $backupId: UUID!
-  $targetNamespace: String!
-  $targetInstanceId: UUID
-) {
-  createRestore(
-    backupId: $backupId
-    targetNamespace: $targetNamespace
-    targetInstanceId: $targetInstanceId
-  ) {
+mutation CreateRestore($backupId: UUID!) {
+  createRestore(backupId: $backupId) {
     id
     name
     status

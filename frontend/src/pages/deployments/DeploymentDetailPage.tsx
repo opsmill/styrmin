@@ -179,6 +179,8 @@ export default function DeploymentDetailPage() {
   const deleteBackupName = backupsData?.backups?.find(
     (b) => b.id === deleteBackupId,
   )?.name;
+  // Shown read-only in the Restore dialog. The server restores a backup into
+  // its own deployment's namespace; the client never sends one (#532).
   const targetNamespace = deploymentId ? `styrmin-${deploymentId}` : "";
 
   async function handleBackup() {
@@ -200,10 +202,7 @@ export default function DeploymentDetailPage() {
     if (!selectedBackupId) return;
     setRestoreError(null);
     try {
-      await createRestoreMutation.mutateAsync({
-        backupId: selectedBackupId,
-        targetNamespace,
-      });
+      await createRestoreMutation.mutateAsync({ backupId: selectedBackupId });
       queryClient.invalidateQueries({ queryKey: ["ListRestores"] });
       setRestoreOpen(false);
       setSelectedBackupId(null);
