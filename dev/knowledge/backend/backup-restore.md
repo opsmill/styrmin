@@ -248,10 +248,10 @@ Detail in [Environment-Level Backup & Restore](#environment-level-backup--restor
 
 | Function | Description |
 |----------|-------------|
-| `create_environment_backup(environment_id, uow, name, deployment_ids, prefect_manager)` | Capture config + declared state and create every constituent backup in **one transaction**, then dispatch one `EXECUTE_BACKUP` per committed constituent. `deployment_ids` narrows the capture: `None` captures every eligible deployment, `[]` captures none (a config-only snapshot), and an id that is unknown or not eligible is not captured and raises nothing. The `createEnvironmentBackup` mutation does not expose it; the environment clone is the only caller that passes it (`services/backup/environment.py:610-665`) |
-| `register_environment_backup(environment, uow, name, deployment_ids)` | Writes the whole capture (parent row, constituent `Backup` rows, constituent errors) into the caller's open transaction. Does not run the concurrency guard, commit or dispatch. Returns a `CaptureRegistration`: the parent row, the backups waiting for dispatch, the errors, and `evaluated`. `create_environment_backup` and the clone both call it (`services/backup/environment.py:443-565`) |
-| `dispatch_constituent_backups(pending_dispatch, prefect_manager, environment_backup_id)` | Starts one `EXECUTE_BACKUP` per registered constituent, after the commit. Returns `(dispatched, dispatch_failed)` (`services/backup/environment.py:568-606`) |
-| `guard_no_clone_occupying_environment(environment_id, uow)` | The clone part of the concurrency guard on its own, so `update_environment` can apply it without the backup and restore parts (`services/backup/environment.py:368-391`) |
+| `create_environment_backup(environment_id, uow, name, deployment_ids, prefect_manager)` | Capture config + declared state and create every constituent backup in **one transaction**, then dispatch one `EXECUTE_BACKUP` per committed constituent. `deployment_ids` narrows the capture: `None` captures every eligible deployment, `[]` captures none (a config-only snapshot), and an id that is unknown or not eligible is not captured and raises nothing. The `createEnvironmentBackup` mutation does not expose it; the environment clone is the only caller that passes it (`services/backup/environment.py:606-659`) |
+| `register_environment_backup(environment, uow, name, deployment_ids)` | Writes the whole capture (parent row, constituent `Backup` rows, constituent errors) into the caller's open transaction. Does not run the concurrency guard, commit or dispatch. Returns a `CaptureRegistration`: the parent row, the backups waiting for dispatch, the errors, and `evaluated`. `create_environment_backup` and the clone both call it (`services/backup/environment.py:439-561`) |
+| `dispatch_constituent_backups(pending_dispatch, prefect_manager, environment_backup_id)` | Starts one `EXECUTE_BACKUP` per registered constituent, after the commit. Returns `(dispatched, dispatch_failed)` (`services/backup/environment.py:564-602`) |
+| `guard_no_clone_occupying_environment(environment_id, uow)` | The clone part of the concurrency guard on its own, so `update_environment` can apply it without the backup and restore parts (`services/backup/environment.py:364-387`) |
 | `restore_environment_backup(environment_backup_id, uow, acting_user_id, prefect_manager)` | Revert captured config and create every constituent restore in **one transaction** (skips classified up front), then apply the reverted config with `fan_out_environment_config`, which also acts on the dedicated ingress controller and skips the `RESTORING` deployments, and dispatch `EXECUTE_RESTORE` per constituent |
 | `get_environment_backup` / `get_environment_backups(environment_id, ...)` | Read one snapshot / an environment's snapshots (newest first) |
 | `get_environment_restore` / `get_environment_restores(environment_backup_id, ...)` | Read one restore / a snapshot's restores (newest first) |
@@ -630,7 +630,7 @@ wait for one to finish before it starts the next. The same is true of the
 constituent restores. Nothing stops an application's components or holds its
 writes while the backups run, so a snapshot is close to consistent across
 applications, not exact. Restores have no order between applications
-(`services/backup/environment.py:568-606` and `:1090-1126`).
+(`services/backup/environment.py:564-602` and `:1078-1114`).
 
 Structured audit lines mirror ADR-0012's `env_config_fanout_dispatched`:
 
@@ -695,8 +695,8 @@ plain JSON (the `Backup.component_statuses` / `metadata_` precedent):
 
 The environment clone added two `DeploymentSnapshot` fields, so that a
 counterpart deployment can be built from the snapshot alone, without reading
-the source deployment again (`services/backup/environment.py:133-170` and
-`:298-323`):
+the source deployment again (`services/backup/environment.py:129-166` and
+`:299-325`):
 
 - `service_name_overrides: dict[str, str] | None` maps a driver service name to
   its resolved name. It holds only the services whose resolved name differs
@@ -708,7 +708,7 @@ the source deployment again (`services/backup/environment.py:133-170` and
   first clone's counterpart adopted.
 
 The clone flow passes both values to `deploy_application` when it creates the
-counterpart (`workflows/templates/clone.py:419-436`). Neither field is exposed
+counterpart (`workflows/templates/clone.py:502-520`). Neither field is exposed
 on the GraphQL `DeploymentSnapshot` type
 (`api/definitions/backup/environment_backup.py`).
 
@@ -772,7 +772,7 @@ revert the environment's config. For example, when every constituent of a
 snapshot has expired, every `Backup` row still reads `COMPLETED`, so the
 snapshot derives `COMPLETED` and can be restored; the restore reverts the
 config, skips every constituent as `backup expired`, and derives `FAILED`
-(`services/backup/environment.py:193-238`).
+(`services/backup/environment.py:189-234`).
 
 <!-- Extracted from specs/001-env-backup-restore on 2026-10-13 -->
 
@@ -857,7 +857,7 @@ deployment".
 
 `_guard_no_environment_operation_in_progress` raises
 `EnvironmentOperationInProgressError` (`ALREADY_IN_PROGRESS`) when one of three
-things holds for the environment (`services/backup/environment.py:332-391`):
+things holds for the environment (`services/backup/environment.py:328-387`):
 
 - an environment backup is in flight;
 - an environment restore is in flight;
@@ -893,7 +893,7 @@ Two consequences worth knowing:
   clone is still capturing into; see [Cascade delete](#cascade-delete).
   A constituent backup whose dispatch fails stays `PENDING` this way, with no
   `error_message`: the reason is written only to the `env_backup_dispatch_error`
-  log line (`services/backup/environment.py:592-604`). A constituent restore
+  log line (`services/backup/environment.py:588-600`). A constituent restore
   whose dispatch fails does not: the fan-out marks it `FAILED` and its
   deployment `FAILED` (`settle_undispatched_restore`).
 - **Two racing create calls can both pass the check.** Accepted: the
@@ -950,7 +950,7 @@ Two implementation details that are easy to get wrong:
   before anything is dispatched.
 
 How the step-4 fan-out compares with the one of `update_environment`
-(`services/backup/environment.py:1186-1223`, `services/environments.py:295-433`):
+(`services/backup/environment.py:1174-1211`, `services/environments.py:295-433`):
 
 - **The same function runs.** `_fan_out_restored_config` calls
   `fan_out_environment_config` with `_deployment_already_at_config` against the
@@ -1032,8 +1032,8 @@ backup-time objects.
 Plus one escape hatch outside the enum: `restore could not be created: <exc>`,
 appended as a late skip when `create_restore` fails for any other reason.
 
-Two details of where the reasons come from (`services/backup/environment.py:801-864`
-and `:1011-1022`):
+Two details of where the reasons come from (`services/backup/environment.py:797-860`
+and `:1012-1023`):
 
 - `DEPLOYMENT_BUSY` is read from the loaded `deployment.status == RESTORING`, not
   from an unfinished `Restore` row. A deployment left in `RESTORING` by a restore
@@ -1065,7 +1065,7 @@ clones built from the snapshot are detached
 (`detach_clones_from_environment_backup` sets their `environment_backup_id` to
 null and records an `environment_backup_deleted` entry), then the parent. A
 constituent that vanished in the meantime is a no-op, not an error
-(`services/backup/environment.py:1309-1358`).
+(`services/backup/environment.py:1336-1369`).
 
 **There is deliberately no guard on the snapshot's own status** — deleting a
 snapshot whose constituents are still in flight is the documented escape hatch
@@ -1154,8 +1154,8 @@ burn the name).
 | `find_clone_occupying_environment(...)` | Backs the environment-level guard: a non-terminal clone occupies its *created* environment for its whole lifetime, and its *source* only while the capture is in flight. |
 | `guard_no_clone_capturing_environment_backup(...)` | The `IN_USE` guard on `delete_environment_backup`, scoped to the capture window (see below). |
 | `detach_clones_from_environment_backup(...)` | Post-capture backup deletion: nulls the FK and appends `environment_backup_deleted` — fatal on a non-terminal clone, non-fatal on a terminal one. |
-| `detach_clones_from_created_environment(...)` | The discard path: nulls `created_environment_id` and appends `created_environment_deleted` — fatal on a clone that has not finished, non-fatal on a finished one, which keeps its outcome (`services/backup/clone.py:941-981`). |
-| `resolve_clones_of_deleted_source_environment(...)` | Source deletion. The rule depends on whether the clone created an environment. Kept, with `source_environment_id` nulled: every finished clone, and every unfinished clone that has a created environment; the unfinished ones also get a fatal `source_environment_deleted` entry. Deleted: only unfinished clones that have no created environment. Returns `SourceCloneResolution(kept, deleted, failed)`, where `failed` counts the kept clones that the deletion failed (`services/backup/clone.py:984-1078`). |
+| `detach_clones_from_created_environment(...)` | The discard path: nulls `created_environment_id` and appends `created_environment_deleted` — fatal on a clone that has not finished, non-fatal on a finished one, which keeps its outcome (`services/backup/clone.py:1238-1278`). |
+| `resolve_clones_of_deleted_source_environment(...)` | Source deletion. The rule depends on whether the clone created an environment. Kept, with `source_environment_id` nulled: every finished clone, and every unfinished clone that has a created environment; the unfinished ones also get a fatal `source_environment_deleted` entry. Deleted: only unfinished clones that have no created environment. Returns `SourceCloneResolution(kept, deleted, failed)`, where `failed` counts the kept clones that the deletion failed (`services/backup/clone.py:1281-1375`). |
 | `get_environment_clone` / `get_environment_clones` | Reads. `get_environment_clones` is scoped by **source** environment, newest first. |
 
 <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
@@ -1236,25 +1236,25 @@ quietly on `EnvironmentCloneNotFoundError` exactly as `execute_restore_workflow`
   not finished after `CAPTURE_POLL_TIMEOUT_SECONDS` (7200 seconds), the flow run fails
   with a `RuntimeError` and the clone stays unfinished. To recover, the operator
   deletes the backing environment backup; the `IN_USE` guard no longer refuses it by
-  then, because it uses the same constant (`workflows/templates/clone.py:91-103` and
-  `:239-291`).
+  then, because it uses the same constant (`workflows/templates/clone.py:104-116` and
+  `:253-305`).
 - **Clone flow not started.** When `EXECUTE_ENVIRONMENT_CLONE` cannot be started, the
   mutation still returns the clone and logs `env_clone_dispatch_error`. The clone stays
-  unfinished and recovers the same way (`services/backup/clone.py:1381-1398`).
+  unfinished and recovers the same way (`services/backup/clone.py:1697-1714`).
 - **Driver version resolution.** `_resolve_pinned_driver_version` matches the driver
   name and the version string, then filters on the provenance fingerprint
   (`content_hash` or `source_commit_sha`) only when the snapshot recorded one. When
   nothing matches, that deployment is attributed `FAILED` with "captured driver version
   no longer exists" and the rest of the clone continues
-  (`workflows/templates/clone.py:353-385`).
+  (`workflows/templates/clone.py:367-399`).
 - **Constituent classification.** `_classify_captured_constituents` reads only the
   capture. Unlike `_classify_constituents` of the in-place environment restore, it never
   reads the live source deployment, because a clone must not read the source after the
-  capture (`workflows/templates/clone.py:304-350`).
+  capture (`workflows/templates/clone.py:318-364`).
 - **Results written back by key.** The flow merges its `deployment_results` entries
   into the stored list by `deployment_id` (`_merge_results`). An entry it cannot read
   stays in the list unchanged, so the derivation still counts it
-  (`workflows/templates/clone.py:120-178`).
+  (`workflows/templates/clone.py:134-192`).
 
 Audit lines:
 
@@ -1334,7 +1334,7 @@ Four points worth internalising, all pinned by the unit matrix:
 | `referenced_deployment_not_cloned` | An affinity term of the new environment's config names a deployment that has no counterpart, because its captured data cannot be used or the capture cascade failed it (no environment is created), or a deployment whose counterpart failed (no further counterpart is created). | yes |
 
 How the derivation reads entries that are missing data or cannot be read
-(`services/backup/clone.py:370-487`):
+(`services/backup/clone.py:625-748`):
 
 - A `clone_errors` entry without a `fatal` flag is read as non-fatal, and a warning is
   logged.
@@ -1344,7 +1344,7 @@ How the derivation reads entries that are missing data or cannot be read
 - The GraphQL `deploymentResults` field shows such an entry as `FAILED`, with a
   `reason` that quotes the stored value. When the id or the name cannot be read, it
   shows the nil UUID as `deploymentId` and `<unreadable entry N>` as the name. The rest of the query still succeeds
-  (`api/definitions/backup/environment_clone.py:65-67` and `:155-195`).
+  (`api/definitions/backup/environment_clone.py:64-68` and `:171-227`).
 - `cloneErrors` arrives as `"<step>: <error>"` strings without the `fatal` flag. The
   Clones tab's "Discarded" label and the E2E API driver detect a discard by the
   `created_environment_deleted:` prefix. `backend/tests/unit/test_clone_discard_step_contract.py`
@@ -1617,7 +1617,7 @@ Two related notes:
   `clone_capture_guard_expired`. The clone flow's `CAPTURE_POLL_TIMEOUT_SECONDS` is the
   same constant, so the guard stops when the flow stops waiting. The limit exists because
   a constituent whose `EXECUTE_BACKUP` dispatch failed stays `PENDING` forever, and the
-  capture would then never finish (`services/backup/clone.py:204-216` and `:752-866`).
+  capture would then never finish (`services/backup/clone.py:219-231` and `:1049-1163`).
 - **`delete_environment` runs four steps, in this order**
   (`services/environments.py:431-571`):
   1. It settles the clone records of both roles in one transaction. As the *created*

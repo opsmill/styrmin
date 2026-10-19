@@ -1437,9 +1437,14 @@ async def test_restore_reverts_config_and_restores_every_usable_constituent(
         call.kwargs for call in prefect_manager_mock.run_action.call_args_list
     ]
     assert {call["action"] for call in dispatched} == {PrefectAction.EXECUTE_RESTORE}
-    assert {call["parameters"]["deployment_id"] for call in dispatched} == {
-        str(infrahub.id),
-        str(netbox.id),
+    # Each dispatched restore lands in its own deployment's namespace, as the
+    # restore row records it; a dict, so a swap between the two fails.
+    assert {
+        call["parameters"]["deployment_id"]: call["parameters"]["target_namespace"]
+        for call in dispatched
+    } == {
+        str(infrahub.id): f"styrmin-{infrahub.id}",
+        str(netbox.id): f"styrmin-{netbox.id}",
     }
     # Every restored deployment is excluded from the config fan-out (D4).
     no_config_fanout.assert_not_awaited()

@@ -369,17 +369,18 @@ async def find_in_flight_restore(
 ) -> Restore | None:
     """Return a non-terminal restore already landing in *deployment_id*, if any.
 
-    A restore records its target as a namespace rather than a deployment FK, so
-    two namespaces are consulted: the requested one and the deployment's
-    canonical ``styrmin-<deployment_id>``. ``create_restore`` records the
-    canonical namespace of the deployment it restores into
-    (``resolve_restore_target``), but a restore created by an earlier release
-    may record another namespace, and a restore already in flight for the
-    deployment must be found whichever namespace it was created with. For the
-    same reason, a restore of the deployment's own backups is found whatever
-    namespace it targets, unless that namespace belongs to another deployment:
-    an environment clone restoring one of these backups into its counterpart
-    lands elsewhere and is not a conflict.
+    A restore records its target as a namespace rather than a deployment FK.
+    Both callers pass the deployment's own namespace,
+    ``styrmin-<deployment_id>``, as *target_namespace*: ``create_restore``
+    passes the namespace that ``resolve_restore_target`` returns, and
+    ``has_in_flight_restore`` builds it. The first lookup finds the restores
+    that record that namespace. A restore created by an earlier release may
+    record another namespace, and a restore already in flight for the
+    deployment must be found whichever namespace it was created with: the
+    second lookup, by the deployment the restored backup was taken of, finds it
+    whatever namespace it targets, unless that namespace belongs to another
+    deployment. An environment clone restoring one of these backups into its
+    counterpart lands elsewhere and is not a conflict.
 
     ``PENDING`` counts as in flight: ``create_restore`` writes rows ``PENDING``
     and only ``execute_restore_workflow`` promotes them to ``IN_PROGRESS``, so a
