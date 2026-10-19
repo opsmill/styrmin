@@ -39,15 +39,15 @@ Callers: `create_instance_crd`, `update_instance_crd`, `upgrade_instance_crd` (`
 
 ## Restore flows (`workflows/templates/backup.py`)
 
-### `execute_restore_workflow(restore_id, backup_id, deployment_id, target_namespace, source_deployment_id=None)` (INTERNAL, changed)
+### `execute_restore_workflow(restore_id, backup_id, deployment_id, target_namespace, source_deployment_id=None)` (INTERNAL, unchanged)
 
-Signature unchanged. For a cross-target restore, it loads the counterpart's active instance once and passes `counterpart_crd_body` and `counterpart_context` (the instance's `GlobalContext`) to the USER flow. For an in-place restore both stay `None`.
+The signature and the parameters that it sends to the USER flow do not change. For a cross-target restore, it passes `counterpart_crd_body`, which `_build_counterpart_crd_body` renders from the context of the counterpart's active instance and which holds that context under `spec.context`. For an in-place restore, `counterpart_crd_body` stays `None`. Because the USER flow reads the counterpart's context from the body, no second parameter carries it.
 
-### `execute_velero_restore_flow(..., counterpart_crd_body=None, counterpart_context: GlobalContext | None = None) -> dict` (USER, changed)
+### `execute_velero_restore_flow(..., counterpart_crd_body=None) -> dict` (USER, changed)
 
-New parameter `counterpart_context`. After "Run the recovery" succeeds and when `counterpart_context` is not `None`:
+Signature unchanged. When `counterpart_crd_body` is not `None`, the flow reads the counterpart's context with `GlobalContext.model_validate(counterpart_crd_body["spec"]["context"])` before it deletes the namespace. A body without `spec.context` raises `KeyError`, and a context that does not validate raises `pydantic.ValidationError`; either fails the flow before it changes anything in the cluster. After "Run the recovery" succeeds, for a cross-target restore only:
 
-- calls `apply_service_aliases_step(reporter, counterpart_context)`;
+- calls `apply_service_aliases_step(reporter, context)` with the context read from the body;
 - on an exception: stores `recovery = {"recovered": False, "error": "Service alias step failed: <error>"}` in the result variable. It does not call `mark_failed` (research R-004).
 
 The result variable keeps its shape: `{"status": {...}, "recovery": {"recovered": bool, "error": str | None}}`.
