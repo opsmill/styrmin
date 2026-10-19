@@ -22,6 +22,7 @@ from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from styrmin_backend.agent.service.kubernetes.exceptions import CustomResourceNotFound
 from styrmin_backend.db.models import (
     Deployment,
     DeploymentState,
@@ -355,3 +356,89 @@ async def test_non_last_app_tombstone_keeps_ingress_controller(
     ingress_db = await session.get(Deployment, ingress_id)
     assert ingress_db is not None
     assert ingress_db.status == DeploymentState.PENDING
+
+
+@pytest.mark.asyncio
+async def test_delete_deployment_without_styrmin_deployment_reaches_deleted(
+    client: AsyncClient,
+    session: AsyncSession,
+    patch_crd_mock,
+) -> None:
+    """Spec 029, T052: a create that failed before it wrote the CR leaves
+    nothing on the cluster, so the patch finds no CR. The mutation returns
+    the delete task instead of an internal error, the deployment goes to
+    DELETING, and the reporter's Deleted report tombstones it."""
+
+    deployment = await seed_deployment(session)
+    deployment.status = DeploymentState.FAILED
+    session.add(deployment)
+    await session.commit()
+    deployment_id = deployment.id
+    patch_crd_mock.side_effect = CustomResourceNotFound(
+        f"Custom resource styrmindeployments/styrmin-{deployment_id} not found "
+        f"in namespace styrmin-{deployment_id}"
+    )
+
+    data = await gql(client, "delete_deployment", {"deploymentId": str(deployment_id)})
+    payload = data["deleteDeployment"]
+
+    assert payload["type"] == "delete_deployment"
+    assert payload["status"] == "success"
+    session.expire_all()
+    deployment_db = await session.get(Deployment, deployment_id)
+    assert deployment_db is not None
+    assert deployment_db.status == DeploymentState.DELETING
+    assert deployment_db.deleted_at is None
+    task_id = UUID(payload["id"])
+    assert await _step_statuses(session, task_id) == {
+        "resource:delete-request": StepStatus.SUCCEEDED,
+        "operator:teardown": StepStatus.PENDING,
+    }
+
+    await _report_deleted(client, deployment_id)
+
+    session.expire_all()
+    deployment_db = await session.get(Deployment, deployment_id)
+    assert deployment_db is not None
+    assert deployment_db.status == DeploymentState.DELETED
+    assert deployment_db.deleted_at is not None
+    assert (await _step_statuses(session, task_id))[
+        "operator:teardown"
+    ] == StepStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_delete_deployment_without_styrmin_deployment_during_a_change_is_refused(
+    client: AsyncClient,
+    session: AsyncSession,
+    patch_crd_mock,
+) -> None:
+    """Spec 029, T052: while a change is applied, its flow can still write
+    the CR, so the deletion is refused with a typed error."""
+
+    deployment = await seed_deployment(session)  # PENDING
+    deployment_id = deployment.id
+    patch_crd_mock.side_effect = CustomResourceNotFound("not found")
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("delete_deployment"),
+            "variables": {"deploymentId": str(deployment_id)},
+        },
+    )
+
+    assert response.status_code == 200
+    errors = response.json()["errors"]
+    assert [error["extensions"]["code"] for error in errors] == [
+        "ALREADY_IN_PROGRESS"
+    ], errors
+    assert "Delete the deployment again" in errors[0]["message"], errors
+    session.expire_all()
+    deployment_db = await session.get(Deployment, deployment_id)
+    assert deployment_db is not None
+    assert deployment_db.status == DeploymentState.PENDING
+    tasks = (
+        await session.exec(select(Task).where(Task.deployment_id == deployment_id))
+    ).all()
+    assert tasks == []

@@ -69,6 +69,7 @@ from styrmin_backend.services.exceptions import (
     DeploymentNameValidationError,
     DeploymentNotFoundError,
     DeploymentRestoringError,
+    DeploymentRolloutInProgressError,
     DriverVersionNotFoundError,
     EnvironmentNotFoundError,
     IngressControllerNotHealthyError,
@@ -2013,11 +2014,20 @@ async def delete_deployment(
     re-issuing the patch. A call against a deployment in ``DELETED`` raises
     ``DeploymentNotFoundError`` (intentional conflation with unknown id).
 
+    When the CR does not exist, for example because the create failed before
+    it wrote the CR, the cluster holds nothing to tear down: the deployment
+    goes to ``DELETING`` at once, and the status reporter's ``Deleted`` report
+    for a ``DELETING`` deployment without a CR tombstones it. While a change
+    is still applied (``PENDING`` or ``DEPLOYING``), its flow can still write
+    the CR, so the deletion is refused.
+
     Raises:
         DeploymentNotFoundError: id is unknown OR the deployment is already
             tombstoned (status DELETED / deleted_at set).
         DeploymentRestoringError: the deployment is currently restoring;
             deletion is refused for data-integrity reasons.
+        DeploymentRolloutInProgressError: the CR does not exist and the
+            deployment is ``PENDING`` or ``DEPLOYING``.
     """
     async with uow:
         deployment = await uow.deployments.find(id=deployment_id)
@@ -2058,7 +2068,28 @@ async def delete_deployment(
             )
 
         requested_at = datetime.now(UTC)
-        await _patch_deletion_requested(deployment_id)
+        try:
+            await _patch_deletion_requested(deployment_id)
+        except CustomResourceNotFound as exc:
+            # The flow of a change that is still applied can write the
+            # StyrminDeployment after this request.
+            if deployment.status in _ROLLOUT_STATES:
+                raise DeploymentRolloutInProgressError(
+                    deployment_id=deployment_id, status=deployment.status.value
+                ) from exc
+            # The cluster holds nothing of the deployment, for example after a
+            # create that failed before it wrote the namespace and the
+            # StyrminDeployment. The status reporter reports a DELETING
+            # deployment without a StyrminDeployment as Deleted, which
+            # tombstones it and ends the teardown step.
+            logger.info(
+                "deployment_delete_without_styrmin_deployment deployment_id={} "
+                "status={}: no StyrminDeployment to patch, marking it deleting",
+                deployment_id,
+                deployment.status.value,
+            )
+            deployment.set_status(DeploymentState.DELETING)
+            await uow.deployments.save(deployment)
         patched_at = datetime.now(UTC)
 
         # Create a born-complete DELETE_DEPLOYMENT task. The mutation acks

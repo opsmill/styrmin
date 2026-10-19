@@ -20,8 +20,10 @@ the files fails the ``hook:setup:pre`` step of the create with the provenance
 fingerprint error. When the agent pod does not hold the path
 (``test_driver_missing_from_the_action_image_fails_with_the_missing_files_error``),
 the check fails the step with the missing files error. No action code runs.
-These deployments are created in the module-scoped ``check_environment_id``,
-whose deletion deletes them.
+Each test then deletes its deployment with ``deleteDeployment``. The create
+failed before it wrote the ``StyrminDeployment``, so the cluster holds
+nothing of the deployment, and the deployment reaches ``deleted`` without
+an operator teardown (T052).
 
 User story 3 (``test_missing_registration_fails_and_loading_again_repairs_it``)
 reuses the deployment of user story 1 at ``UPGRADE_VERSION``, so it runs after
@@ -123,6 +125,9 @@ ACTION_HOOKS = {
 SETUP_PRE_HOOK = "hook:setup:pre"
 SETUP_POST_HOOK = "hook:setup:post"
 UPGRADE_CORE_HOOK = "hook:upgrade:core"
+# The steps of a delete_deployment task.
+DELETE_REQUEST_STEP = "resource:delete-request"
+TEARDOWN_STEP = "operator:teardown"
 
 # The variant of the driver that user story 2 loads from paths of the session.
 CHECK_DRIVER_NAME = "local-actions-check"
@@ -137,6 +142,7 @@ TASK_TIMEOUT = 600.0
 INGRESS_TEARDOWN_TIMEOUT = 300.0
 LOG_TIMEOUT = 120.0
 RUNNING_TIMEOUT = 120.0
+DELETE_TIMEOUT = 120.0
 POLL_INTERVAL = 3.0
 
 
@@ -269,29 +275,6 @@ def check_session_hex() -> str:
     return uuid.uuid4().hex[:8]
 
 
-@pytest.fixture(scope="module")
-async def check_environment_id(
-    styrmin_resources: dict, check_session_hex: str
-) -> AsyncGenerator[str, None]:
-    """An environment of its own for the deployments of user story 2, deleted when the module ends.
-
-    The create of each of these deployments fails at its ``hook:setup:pre``
-    step, before the ``StyrminDeployment`` is written, and ``deleteDeployment``
-    fails for a deployment without one. Deleting the environment deletes its
-    deployments, also when a test fails.
-    """
-    client: StyrminClient = styrmin_resources["client"]
-    environment = await client.environments.create(
-        name=f"{CHECK_DRIVER_NAME}-{check_session_hex}",
-        cluster_id=styrmin_resources["cluster_id"],
-        config={},
-    )
-    try:
-        yield str(environment.id)
-    finally:
-        await client.environments.delete(environment_id=environment.id)
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -339,6 +322,35 @@ def _assert_steps_succeeded(task: GetTaskTask, *keys: str) -> None:
     for key in keys:
         assert key in steps, f"no {key} step: {_describe(task)}"
         assert steps[key].status == StepStatus.SUCCEEDED, _describe(task)
+
+
+async def _delete_and_wait_for_tombstone(
+    client: StyrminClient, deployment_id: str
+) -> None:
+    """Delete the deployment with ``deleteDeployment`` and read it until it is ``deleted``.
+
+    For a deployment whose create failed before it wrote the
+    ``StyrminDeployment``, the agent's status reporter finds no
+    ``StyrminDeployment`` and reports the deployment as deleted, which
+    succeeds the teardown step of the delete task.
+    """
+    task = await client.deployments.delete(deployment_id)
+    assert task.type_ == "delete_deployment", task
+    assert task.status == "success", task
+    deadline = time.monotonic() + DELETE_TIMEOUT
+    while True:
+        deployment = await client.deployments.get(deployment_id)
+        if deployment.status == "deleted":
+            break
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"Deployment {deployment_id} is not deleted after {DELETE_TIMEOUT}s: "
+                f"status={deployment.status}"
+            )
+        await asyncio.sleep(POLL_INTERVAL)
+    assert deployment.deleted_at is not None, deployment
+    delete_task = await client.tasks.get(str(task.id))
+    _assert_steps_succeeded(delete_task, DELETE_REQUEST_STEP, TEARDOWN_STEP)
 
 
 async def _wait_for_running(
@@ -540,7 +552,7 @@ async def test_local_driver_actions_run_on_create_and_upgrade(
 @pytest.mark.api_only(reason=API_ONLY_REASON)
 async def test_changed_local_driver_fails_with_the_fingerprint_error(
     styrmin_resources: dict,
-    check_environment_id: str,
+    scenario_environment_id: str,
     check_session_hex: str,
     vcluster: dict,
     tmp_path: Path,
@@ -551,7 +563,8 @@ async def test_changed_local_driver_fails_with_the_fingerprint_error(
     agent's Prefect process worker runs the actions, holds the variant at the
     same path with an edited ``actions.py`` (``code=B``). The check fails the
     ``hook:setup:pre`` step with the provenance fingerprint error, and neither
-    code runs.
+    code runs. ``deleteDeployment`` then deletes the deployment of the failed
+    create (T052).
     """
     client: StyrminClient = styrmin_resources["client"]
     path = f"/tmp/{CHECK_DRIVER_NAME}-{check_session_hex}"
@@ -573,12 +586,13 @@ async def test_changed_local_driver_fails_with_the_fingerprint_error(
 
     create_task_id = await _create_pinned_deployment(
         client,
-        environment_id=check_environment_id,
+        environment_id=scenario_environment_id,
         driver_version_id=str(loaded.id),
         name=f"{CHECK_DRIVER_NAME}-{uuid.uuid4().hex[:6]}",
         driver=CHECK_DRIVER_NAME,
     )
     create_task = await _wait_for_task_end(client, create_task_id)
+    assert create_task.deployment_id is not None, create_task
     error = _failed_step_error(create_task, SETUP_PRE_HOOK)
     async with _prefect(vcluster) as prefect:
         image = await _default_action_image(prefect, "pre_setup", directory=path)
@@ -603,11 +617,13 @@ async def test_changed_local_driver_fails_with_the_fingerprint_error(
                 marker(action, code) in message for message in action_messages
             ), (action, code, action_messages)
 
+    await _delete_and_wait_for_tombstone(client, str(create_task.deployment_id))
+
 
 @pytest.mark.api_only(reason=API_ONLY_REASON)
 async def test_driver_missing_from_the_action_image_fails_with_the_missing_files_error(
     styrmin_resources: dict,
-    check_environment_id: str,
+    scenario_environment_id: str,
     check_session_hex: str,
     vcluster: dict,
     tmp_path: Path,
@@ -617,7 +633,8 @@ async def test_driver_missing_from_the_action_image_fails_with_the_missing_files
     The agent pod, where the actions run, does not hold the path that the
     server loaded the driver from. The variant sets no ``image:``, so the
     error names the default image of the work pool, the Styrmin image that
-    the agent runs.
+    the agent runs. ``deleteDeployment`` then deletes the deployment of the
+    failed create (T052).
     """
     client: StyrminClient = styrmin_resources["client"]
     path = f"/tmp/local-actions-missing-{check_session_hex}"
@@ -627,17 +644,20 @@ async def test_driver_missing_from_the_action_image_fails_with_the_missing_files
 
     create_task_id = await _create_pinned_deployment(
         client,
-        environment_id=check_environment_id,
+        environment_id=scenario_environment_id,
         driver_version_id=str(loaded.id),
         name=f"{CHECK_DRIVER_NAME}-{uuid.uuid4().hex[:6]}",
         driver=CHECK_DRIVER_NAME,
     )
     create_task = await _wait_for_task_end(client, create_task_id)
+    assert create_task.deployment_id is not None, create_task
     error = _failed_step_error(create_task, SETUP_PRE_HOOK)
     async with _prefect(vcluster) as prefect:
         image = await _default_action_image(prefect, "pre_setup", directory=path)
     assert path in error, error
     assert f"in the image {image}" in error, error
+
+    await _delete_and_wait_for_tombstone(client, str(create_task.deployment_id))
 
 
 @pytest.mark.api_only(reason=API_ONLY_REASON)

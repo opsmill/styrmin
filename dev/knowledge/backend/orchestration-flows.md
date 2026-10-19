@@ -355,7 +355,7 @@ The flows do not record the operator's work. When `resource:styrmindeployment` s
 
 The status reporter's reports then move those steps forward (`services/steps/operator_history.py`, called from `report_deployment_statuses`). See [`../agent/operator.md`](../agent/operator.md) for the CR status that drives them.
 
-A delete has no flow. `delete_deployment` records `resource:delete-request` ("Request the deletion") as succeeded after it patches the CR, supersedes the open operator-phase steps of the deployment's older tasks (all its other tasks, because the delete task is the newest), and creates `operator:teardown` ("Remove the deployment's resources and namespace") as pending. Reports in the `Deleting` and `Deleted` phases go to the deployment's newest `delete_deployment` task.
+A delete has no flow. `delete_deployment` records `resource:delete-request` ("Request the deletion") as succeeded after it patches the CR, or after it sets the deployment to `DELETING` when no CR exists, supersedes the open operator-phase steps of the deployment's older tasks (all its other tasks, because the delete task is the newest), and creates `operator:teardown` ("Remove the deployment's resources and namespace") as pending. Reports in the `Deleting` and `Deleted` phases go to the deployment's newest `delete_deployment` task.
 
 ## Flow: run_job
 
