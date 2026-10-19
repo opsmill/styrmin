@@ -93,19 +93,19 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
 
 ### Register local actions on load
 
-- [ ] T015 [US1] In `backend/styrmin_backend/services/applications.py` add `ensure_action_registrations(driver_object, prefect_manager) -> int` per [contracts/action-registration.md](contracts/action-registration.md#ensure_action_registrations), using `ActionRegistrationKey.key_for_driver_object` (T009):
+- [X] T015 [US1] In `backend/styrmin_backend/services/applications.py` add `ensure_action_registrations(driver_object, prefect_manager) -> int` per [contracts/action-registration.md](contracts/action-registration.md#ensure_action_registrations), using `ActionRegistrationKey.key_for_driver_object` (T009):
   - refuse with `DriverLoadingError` a `LocalSource` path that contains `{` or `}` when the driver declares actions (research R-005);
   - look up each declared hook and mode pair, and register every action of each pair that has no flow;
   - for a `GitSource`, call `register_token` only when at least one action is registered.
 
   In `load_application_driver_from_object`, replace the git-only registration block: call `ensure_action_registrations` for a new version after the service and component validation and just before the insert (critique E3). Pass `content_hash=driver_object.content_hash` to the builder for local sources. Update the comments that say only git drivers register actions
-- [ ] T016 [P] [US1] Create `backend/tests/unit/services/test_local_action_registration.py` with a fake `PrefectManager`:
+- [X] T016 [P] [US1] Create `backend/tests/unit/services/test_local_action_registration.py` with a fake `PrefectManager`:
   - a new local version with three actions registers three workflows with `driver_directory=<path>` and `fingerprint=<content_hash[:7]>`, and no token;
   - a git version still registers its token and its workflows;
   - a local path with `{` is refused for a driver with actions and accepted for one without;
   - a load refused by service validation registers nothing;
   - a pair whose lookup already finds a flow is not registered again.
-- [ ] T017 [US1] In `backend/tests/functional/test_user_action_registration.py` (real Prefect through `prefect_test_harness`) add:
+- [X] T017 [US1] In `backend/tests/functional/test_user_action_registration.py` (real Prefect through `prefect_test_harness`) add:
   - each of the five bundled drivers loaded with `get_local_driver_loader(<repo>/driver/examples/<name>)` and `ensure_action_registrations` creates three deployments with the tags `fingerprint/<hash7>` and `directory/<path>` and the check pull step (FR-001, SC-001 registration);
   - two `tmp_path` copies of one driver at two paths create two sets of deployments that the lookup tells apart (FR-002).
 

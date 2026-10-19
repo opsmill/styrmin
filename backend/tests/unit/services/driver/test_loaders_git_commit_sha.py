@@ -124,9 +124,12 @@ def prefect_manager_mock(mocker):
 
     Git-sourced loads register tokens and user-action workflows via the
     Prefect manager; we stub it with an async-friendly mock so the
-    service path runs without a real Prefect instance.
+    service path runs without a real Prefect instance. The load registers
+    only the actions whose hook and mode have no registered flow (spec 029),
+    so the lookup finds none.
     """
     manager_mock = mocker.AsyncMock(spec=PrefectManager)
+    manager_mock.get_user_action_deployment_id.return_value = None
 
     def _get_fake_manager(catalogue=None, workflow_executor=None):  # noqa: ARG001
         return manager_mock

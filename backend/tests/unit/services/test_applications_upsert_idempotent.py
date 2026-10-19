@@ -70,10 +70,10 @@ async def db_session():
 def prefect_manager_mock(mocker):
     """Override the Prefect manager dependency for the duration of the test.
 
-    Local-sourced loads never hit Prefect, but the ``@inject`` decorator
-    still resolves the dependency, so we wire a no-op mock to keep that
-    path quiet (matches the convention in ``backend/tests/unit/services/
-    conftest.py``).
+    A local load looks up and registers its driver's actions through the
+    Prefect manager (spec 029), so we wire a mock in its place (matches the
+    convention in ``backend/tests/unit/services/conftest.py``). Its lookup
+    returns a truthy mock, so these tests register nothing.
     """
     manager_mock = mocker.Mock(spec=PrefectManager)
 

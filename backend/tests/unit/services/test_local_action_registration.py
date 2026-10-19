@@ -1,0 +1,333 @@
+"""Action registration when a driver is loaded (spec 029, FR-001, FR-002, FR-006).
+
+The loads run against a real (in-memory SQLite) ``SqlModelUnitOfWork`` and a
+fake ``PrefectManager`` that records each registration and answers the hook
+lookups from them, so the tests check which actions a load registers, under
+which driver directory and provenance fingerprint, and that a refused load
+registers nothing and stores no driver version.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import shutil
+from collections.abc import Iterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+from uuid import UUID, uuid4
+
+import pytest
+from fast_depends import dependency_provider
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import StaticPool
+from sqlmodel import SQLModel, select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from styrmin_backend.db.models import ApplicationDriverVersion
+from styrmin_backend.services.applications import (
+    ensure_action_registrations,
+    load_application_driver_from_local_directory,
+    load_application_driver_from_object,
+)
+from styrmin_backend.services.driver import ApplicationDriver
+from styrmin_backend.services.driver.exceptions import DriverLoadingError
+from styrmin_backend.services.driver.loaders import get_local_driver_loader
+from styrmin_backend.services.driver.models.resources.actions import HookKind
+from styrmin_backend.services.driver.models.structure.source import GitSource
+from styrmin_backend.services.exceptions import ServiceError
+from styrmin_backend.services.unit_of_work import SqlModelUnitOfWork
+from styrmin_backend.workflows.dependency import get_manager
+from styrmin_backend.workflows.manager import PrefectManager
+from styrmin_backend.workflows.models import (
+    GitSourceWorkflowDefinition,
+    LocalDriverActionWorkflowDefinition,
+    WorkflowDefinition,
+)
+
+_EXAMPLES = Path(__file__).resolve().parents[4] / "driver" / "examples"
+
+type Mode = Literal["pre", "core", "post"]
+
+
+@dataclass(frozen=True)
+class _Registration:
+    workflow: WorkflowDefinition
+    application: str
+    version: str
+    hook: HookKind
+    mode: Mode
+    fingerprint: str | None
+    driver_directory: str | None
+    flow_id: UUID
+
+
+class FakePrefectManager(PrefectManager):
+    """Records registrations and answers lookups from them, with the key of ADR-080."""
+
+    def __init__(self) -> None:  # noqa: D107 — no catalogue or executor is needed
+        self.registrations: list[_Registration] = []
+        self.tokens: list[tuple[str, str]] = []
+
+    async def register_token(self, namespace: str, token: str) -> None:
+        self.tokens.append((namespace, token))
+
+    async def register_user_action(
+        self,
+        workflow: WorkflowDefinition,
+        application: str,
+        version: str,
+        hook: HookKind,
+        mode: Mode,
+        fingerprint: str | None = None,
+        *,
+        driver_directory: str | None,
+    ) -> None:
+        self.registrations.append(
+            _Registration(
+                workflow=workflow,
+                application=application,
+                version=version,
+                hook=hook,
+                mode=mode,
+                fingerprint=fingerprint,
+                driver_directory=driver_directory,
+                flow_id=uuid4(),
+            )
+        )
+
+    async def get_user_action_deployment_id(
+        self,
+        application: str,
+        version: str,
+        hook: HookKind,
+        mode: Mode,
+        fingerprint: str | None = None,
+        *,
+        driver_directory: str | None,
+    ) -> UUID | None:
+        for registration in reversed(self.registrations):
+            if (
+                registration.application,
+                registration.version,
+                registration.hook,
+                registration.mode,
+                registration.fingerprint,
+                registration.driver_directory,
+            ) == (application, version, hook, mode, fingerprint, driver_directory):
+                return registration.flow_id
+        return None
+
+
+@pytest.fixture
+def prefect_manager() -> Iterator[FakePrefectManager]:
+    manager = FakePrefectManager()
+
+    def _get_fake_manager(catalogue=None, workflow_executor=None):  # noqa: ARG001
+        return manager
+
+    dependency_provider.override(get_manager.__wrapped__, _get_fake_manager)
+    yield manager
+    dependency_provider.clear()
+
+
+@pytest.fixture
+async def db_session():
+    """In-memory SQLite session with StaticPool (single connection)."""
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        yield session
+    await engine.dispose()
+
+
+@pytest.fixture
+def uow(db_session: AsyncSession) -> SqlModelUnitOfWork:
+    return SqlModelUnitOfWork(session=db_session)
+
+
+def _copy_driver(name: str, destination: Path) -> Path:
+    """Copy the bundled driver ``name`` to ``destination``, so a test may edit it."""
+    shutil.copytree(_EXAMPLES / name, destination)
+    return destination
+
+
+_COMMIT_SHA = "c" * 40
+
+
+def _as_git_driver(path: Path) -> ApplicationDriver:
+    """Load the driver at ``path`` as if it came from the driver directory of a git repository."""
+    local = get_local_driver_loader(path=str(path)).load_driver()
+    return dataclasses.replace(
+        local,
+        source=GitSource(
+            repository="https://example.com/drivers.git",
+            branch="main",
+            token="git-token",
+            driver_directory="drivers/semaphore",
+        ),
+        content_hash=None,
+        source_commit_sha=_COMMIT_SHA,
+    )
+
+
+async def _stored_versions(session: AsyncSession) -> list[ApplicationDriverVersion]:
+    return list((await session.exec(select(ApplicationDriverVersion))).all())
+
+
+def _registered_actions(manager: FakePrefectManager) -> set[tuple[str, str, str]]:
+    """The registered actions, as ``(entrypoint function, hook, mode)``."""
+    return {(r.workflow.function, r.hook.value, r.mode) for r in manager.registrations}
+
+
+SEMAPHORE_ACTIONS = {
+    ("pre_setup", "setup", "pre"),
+    ("post_setup", "setup", "post"),
+    ("upgrade", "upgrade", "core"),
+}
+
+
+async def test_new_local_version_registers_its_three_actions_at_its_path(
+    tmp_path: Path,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+) -> None:
+    path = _copy_driver("semaphore", tmp_path / "semaphore")
+
+    loaded = await load_application_driver_from_local_directory(path=str(path), uow=uow)
+
+    content_hash = loaded.version.content_hash
+    assert content_hash is not None
+    assert _registered_actions(prefect_manager) == SEMAPHORE_ACTIONS
+    for registration in prefect_manager.registrations:
+        assert registration.application == "semaphore"
+        assert registration.version == ">=2.15,<2.17"
+        assert registration.driver_directory == str(path)
+        assert registration.fingerprint == content_hash[:7]
+        assert isinstance(registration.workflow, LocalDriverActionWorkflowDefinition)
+        assert registration.workflow.directory == str(path)
+        assert registration.workflow.content_hash == content_hash
+    # A local driver version's actions run from its path: no git token is saved.
+    assert prefect_manager.tokens == []
+
+
+async def test_new_git_version_registers_its_token_and_its_actions(
+    tmp_path: Path,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+) -> None:
+    path = _copy_driver("semaphore", tmp_path / "semaphore")
+    driver_object = _as_git_driver(path)
+
+    await load_application_driver_from_object(driver_object=driver_object, uow=uow)
+
+    assert prefect_manager.tokens == [("user", "git-token")]
+    assert _registered_actions(prefect_manager) == SEMAPHORE_ACTIONS
+    for registration in prefect_manager.registrations:
+        assert registration.driver_directory == "drivers/semaphore"
+        assert registration.fingerprint == _COMMIT_SHA[:7]
+        assert isinstance(registration.workflow, GitSourceWorkflowDefinition)
+        assert registration.workflow.commit_sha == _COMMIT_SHA
+
+
+async def test_local_path_with_a_brace_is_refused_for_a_driver_with_actions(
+    tmp_path: Path,
+    db_session: AsyncSession,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+) -> None:
+    path = _copy_driver("semaphore", tmp_path / "semaphore-{{ env }}")
+
+    with pytest.raises(DriverLoadingError) as exc_info:
+        await load_application_driver_from_local_directory(path=str(path), uow=uow)
+
+    message = str(exc_info.value)
+    assert str(path) in message
+    assert "'{' or '}'" in message
+    assert prefect_manager.registrations == []
+    assert await _stored_versions(db_session) == []
+
+
+async def test_local_path_with_a_brace_is_accepted_for_a_driver_without_actions(
+    tmp_path: Path,
+    db_session: AsyncSession,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+) -> None:
+    path = _copy_driver("generic-app", tmp_path / "generic-app-{x}")
+
+    loaded = await load_application_driver_from_local_directory(path=str(path), uow=uow)
+
+    assert loaded.version.source_path == str(path)
+    assert [v.id for v in await _stored_versions(db_session)] == [loaded.version.id]
+    assert prefect_manager.registrations == []
+
+
+@pytest.mark.parametrize("source_type", ["local", "git"])
+async def test_load_refused_by_service_validation_registers_nothing(
+    tmp_path: Path,
+    db_session: AsyncSession,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+    source_type: str,
+) -> None:
+    """Critique E3: the load registers its actions only after the checks of the driver."""
+    path = _copy_driver("semaphore", tmp_path / "semaphore")
+    spec_file = path / "driver.styrmin.yml"
+    spec_file.write_text(
+        spec_file.read_text().replace("component: server", "component: missing")
+    )
+    driver_object = (
+        get_local_driver_loader(path=str(path)).load_driver()
+        if source_type == "local"
+        else _as_git_driver(path)
+    )
+
+    with pytest.raises(ServiceError, match="references undeclared component"):
+        await load_application_driver_from_object(driver_object=driver_object, uow=uow)
+
+    assert prefect_manager.registrations == []
+    assert prefect_manager.tokens == []
+    assert await _stored_versions(db_session) == []
+
+
+async def test_pair_whose_lookup_finds_a_flow_is_not_registered_again(
+    tmp_path: Path,
+    prefect_manager: FakePrefectManager,
+) -> None:
+    path = _copy_driver("semaphore", tmp_path / "semaphore")
+    driver_object = get_local_driver_loader(path=str(path)).load_driver()
+    assert driver_object.content_hash is not None
+    fingerprint = driver_object.content_hash[:7]
+    # The setup/pre action of this driver version is already registered.
+    await prefect_manager.register_user_action(
+        workflow=LocalDriverActionWorkflowDefinition(
+            name="User Action: pre_setup",
+            module="actions.py",
+            function="pre_setup",
+            directory=str(path),
+            content_hash=driver_object.content_hash,
+            spec_file="driver.styrmin.yml",
+            values_template="values.j2.yml",
+            actions_file="actions.py",
+        ),
+        application="semaphore",
+        version=">=2.15,<2.17",
+        hook=HookKind.SETUP,
+        mode="pre",
+        fingerprint=fingerprint,
+        driver_directory=str(path),
+    )
+
+    registered = await ensure_action_registrations(driver_object, prefect_manager)
+
+    assert registered == 2
+    assert _registered_actions(prefect_manager) == SEMAPHORE_ACTIONS
+    assert [r.workflow.function for r in prefect_manager.registrations].count(
+        "pre_setup"
+    ) == 1
