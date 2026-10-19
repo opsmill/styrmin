@@ -168,10 +168,12 @@ A deleted deployment keeps its backup history:
   is the last part of the page's URL,
   `/environments/<environment-id>/deployments/<deployment-id>`.
 
-A deleted deployment's backups cannot be restored, into the deleted
-deployment or into another deployment. Styrmin refuses such a restore
-with the error code `OPERATION_DENIED`. An environment restore and an
-environment clone also skip a deleted deployment.
+A deleted deployment's backups cannot be restored. A restore puts a
+backup back into the deployment it was taken of, and Styrmin refuses a
+restore into a deleted deployment with the error code
+`OPERATION_DENIED`. Only an environment clone restores a backup into
+another deployment, and an environment restore and an environment clone
+both skip a deleted deployment.
 
 A new deployment that reuses the name of a deleted deployment starts
 with an empty backup history, because the history is listed by
@@ -182,8 +184,8 @@ history, which you reach by its id.
 
 A restore is the same machinery, run in reverse:
 
-1. You pick a backup and a target deployment (the same one or a
-   different one).
+1. You pick a backup. Styrmin restores it into the deployment it was
+   taken of, in that deployment's namespace.
 2. Styrmin asks each strategy "what do I need to do to bring this
    backup back?" — for a Postgres component, that means restoring the
    dump and replaying it.
@@ -254,8 +256,9 @@ under "Steps", with their status, times and errors.
 The restore of a deployment or of an environment has three steps, in this
 order:
 
-1. "Delete the namespace": Styrmin deletes the target namespace and waits
-   until it is gone, so the restore starts from a clean namespace.
+1. "Delete the namespace": Styrmin deletes the namespace of the
+   deployment that receives the restore and waits until it is gone, so
+   the restore starts from a clean namespace.
 2. "Run the Velero restore": Styrmin creates the Velero `Restore` object
    and waits for Velero to finish.
 3. "Run the recovery": Styrmin prepares the restored `StyrminDeployment`

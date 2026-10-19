@@ -151,7 +151,7 @@ Defined on `type Mutation`:
 | `cloneEnvironment` | `name, environmentId?, environmentName?, clusterId?, clusterName?, deploymentIds?, configOverride?: UpdateEnvironmentInput, clearConfigFields?` | `EnvironmentClone!` (`ADMIN`; returns the clone record at once, and the clone flow builds the new environment; see [backup-restore.md](backup-restore.md#environment-clone)) <!-- Extracted from specs/010-environment-clone on 2026-10-13 --> |
 | `deleteEnvironmentBackup` | `environmentBackupId` | `Boolean!` (`READ_WRITE`; cascades through the constituent backups and the environment restores; `IN_USE` while a clone is still capturing into the snapshot) <!-- Extracted from specs/001-env-backup-restore on 2026-10-13 --> |
 | `deleteBackup` | `backupId` | `String` |
-| `createRestore` | `backupId, targetNamespace, targetInstanceId?` | `Restore` |
+| `createRestore` | `backupId` | `Restore` (the caller names only the backup: Styrmin derives the namespace, `styrmin-<deployment id>`, and the target instance, the deployment's active instance or none, from the deployment the backup was taken of, and records them on the `Restore` as `targetNamespace` and `targetInstanceId`, which stay readable fields. The `targetNamespace` and `targetInstanceId` arguments were removed in [#532](https://github.com/opsmill/styrmin/issues/532); see [backup-restore.md](backup-restore.md#restore-operations-servicesbackupservicepy)) |
 | `createBackupSchedule` | `deploymentId, name, cronExpression, retentionCount=10, enabled=true` | `BackupSchedule` |
 | `updateBackupSchedule` | `scheduleId, name?, cronExpression?, retentionCount?, enabled?` | `BackupSchedule` |
 | `deleteBackupSchedule` | `scheduleId` | `String` |

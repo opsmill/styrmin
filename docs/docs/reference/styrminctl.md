@@ -274,19 +274,28 @@ them. Per-deployment backups stay in the `backups` group. The two groups
 are separate because the `backups` commands target one deployment or one
 instance, and the `env-backups` commands target an environment:
 
+- `backups restore <BACKUP_ID>` takes the backup id alone and restores
+  the backup into the deployment it was taken of, in that deployment's
+  namespace. You do not choose the deployment or the namespace.
 - `backups list` and `backups restore --last` work on a deployment's
   backup history: the backups of every instance the deployment has had.
   `backups list` takes the deployment by name or by `--id`, and
   `backups restore --last` takes it with `--target-deployment` or
   `--target-deployment-id`. See [Backup history of a
   deployment](../concepts-and-architecture/backups-and-restores.md#backup-history-of-a-deployment).
+- `--target-deployment`, `--target-deployment-id` and
+  `--target-instance-id` work only with `backups restore --last`: they
+  choose whose newest completed backup is restored, and the backup is
+  restored into the deployment it was taken of. `backups restore`
+  refuses a backup id combined with one of these options, before it
+  contacts the server, and exits with status 1.
 - `backups restore --last` skips backups whose expiry date has passed.
   When the backup it chooses was taken of an earlier instance, it shows
   the backup's application version and the deployment's current one,
   and asks for confirmation. `--yes` skips the question, and without a
   terminal the command refuses unless you pass `--yes`.
 - `--instance-id` on `backups list` and `--target-instance-id` on
-  `backups restore` work on one instance only.
+  `backups restore --last` work on one instance only.
 
 For the semantics behind the `env-backups` commands, read [Backups and
 restores](../concepts-and-architecture/backups-and-restores.md#backing-up-a-whole-environment).
