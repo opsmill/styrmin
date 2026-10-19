@@ -227,3 +227,65 @@ The test deploys the `infrahub-enterprise` driver at version 1.6.0, writes a `Bu
 ### Cleanup after the session
 
 pytest and `tee` exited after the summary line. The `sleep infinity` process of this run (PID 2513524) was then stopped by its PID. `vcluster list --driver=docker` listed no vcluster afterwards, and no Docker container or network with the name `1324c775` remained.
+
+## Review follow-up: the two `api-chromium` nodes of `shard_env_backup` passed
+
+A review found that this branch changes two callers of `create_restore` that no local session had run: `restore_environment_backup` in [`backend/styrmin_backend/services/backup/environment.py`](../../backend/styrmin_backend/services/backup/environment.py) and `_dispatch_cross_target_restore` in [`backend/styrmin_backend/workflows/templates/clone.py`](../../backend/styrmin_backend/workflows/templates/clone.py). Both now call `create_restore` without a namespace and dispatch the namespace that the server recorded on the restore row, `styrmin-<deployment id>`. This session runs the two E2E nodes that exercise these callers. This branch does not modify either test.
+
+The session ran on commit `fc4532f3` of the branch `fac/remove-targetnamespace-restore-8n884`. The `ui-chromium` variants of the two nodes were not run locally: the web app's environment restore and environment clone pages did not change on this branch, and CI runs those variants.
+
+| Item | Value |
+|---|---|
+| Exact command | `export STYRMIN_IMAGE_VER=inplace-restore-fc4532f3; date -Iseconds > <scratchpad>/review-env-backup.log.start; sleep infinity \| uv run pytest backend/tests/e2e -m shard_env_backup -k "api-chromium" -v -s --pdb 2>&1 \| tee <scratchpad>/review-env-backup.log` |
+| Start (ISO 8601, UTC) | `2026-10-19T18:16:46+00:00` |
+| End (ISO 8601, UTC) | `2026-10-19T18:28:19+00:00`, recorded after pytest printed the summary line; pytest reports 678.02 s |
+| Image tag | `registry.opsmill.io/opsmill/styrmin:inplace-restore-fc4532f3` |
+| Image digest that the Styrmin pods ran | `sha256:2b6d11f1e9aa5797639f9499c119420ea4442e40a75b4477edc33940701ef87c` |
+| vcluster name | `pytest-744262fa-0ad2-4547-b83b-e1cc3bdff5d8`, deleted by the fixture teardown (`Successfully deleted virtual cluster pytest-744262fa-0ad2-4547-b83b-e1cc3bdff5d8`) |
+| Kubeconfig path | `/tmp/pytest-of-ubuntu/pytest-138/vcluster0/kubeconfig` |
+
+`<scratchpad>` is the session scratchpad directory of the agent that ran the command. The log file is not committed.
+
+### Which image the session ran
+
+No image had the tag `inplace-restore-fc4532f3` before the session. The `styrmin_deployment` fixture ran `docker compose build` for the `task-worker`, `agent-operator` and `server` services under that tag, from a clean working tree at commit `fc4532f3`. The steps `COPY backend ./backend`, `COPY python_sdk ./python_sdk` and `COPY cli ./cli` and the steps after them ran again instead of coming from the cache, because those directories changed after commit `133ed150`. The image creation time is `2026-10-19T18:17:34Z`. The `task-worker` build was the last of the three to write the tag, so the tag points to the digest `sha256:2b6d11f1e9aa5797639f9499c119420ea4442e40a75b4477edc33940701ef87c`, whose `com.docker.compose.service` label is `task-worker`.
+
+During the session, `kubectl get pods -n styrmin -o jsonpath='{..imageID}'` reported that image ID for the containers of the `styrmin-server`, `styrmin-styrmin-agent-agent` and `styrmin-task-worker` pods.
+
+### Pytest node IDs and verbatim `PASSED` lines
+
+ANSI color codes are removed. Fixture setup and image build output separate the first node ID from its `PASSED` line. The second `PASSED` line shares its line with the vcluster teardown output.
+
+```text
+backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[api-chromium] 18:16:48 warn There is a newer version of vcluster: v0.37.3. Run `vcluster upgrade` to upgrade to the newest version.
+[fixture setup and image build output]
+PASSED
+backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[api-chromium] PASSED18:28:01 info Removing vCluster container vcluster.cp.pytest-744262fa-0ad2-4547-b83b-e1cc3bdff5d8...
+```
+
+### Final pytest summary line
+
+```text
+========== 2 passed, 203 deselected, 6 warnings in 678.02s (0:11:18) ===========
+```
+
+The six warnings are not caused by this change:
+
+- one `DeprecationWarning` from `kr8s/_vendored/asyncache/__init__.py:81`, because `asyncio.iscoroutinefunction` is deprecated in Python 3.14;
+- five `UserWarning` lines from `kr8s/_api.py:91`, because kr8s 0.20.15 supports Kubernetes 1.28 to 1.35 and the vcluster runs v1.36.0.
+
+### What the passing nodes check for #532
+
+- `test_environment_backup_and_restore_lifecycle` takes an environment backup of two deployments, deletes the backup of the second deployment, and restores the environment backup with `scenario_driver.restore_environment_backup`. On the server, `restore_environment_backup` creates one restore for the usable constituent with `create_restore` and dispatches the namespace recorded on that restore. The test checks that the environment restore skips the second deployment with the reason `backup deleted` and ends as `PARTIAL`, that the environment config equals the config captured at backup time, and that the primary deployment's counter in `styrmin-<primary deployment id>` is back at its backup-time value. It also checks that the restore created or deleted no deployment, and that the primary's namespace still holds the service alias that points to `styrmin-<second deployment id>`.
+- `test_environment_clone_lifecycle` clones the environment that holds the primary deployment and a peer deployment, with `scenario_driver.clone_environment`. On the server, `_dispatch_cross_target_restore` creates one cross-target restore per counterpart deployment with `create_restore` and dispatches the namespace recorded on that restore. The test checks that the clone ends as `COMPLETED`, that both deployments are `CLONED` with a counterpart deployment and a restore id, and that each counterpart's namespace `styrmin-<counterpart deployment id>` holds the service aliases of its peers. It checks that the source environment's config is unchanged and that the clone deleted no object from the primary's namespace. It checks that an authenticated write to the primary's counterpart in `styrmin-<counterpart deployment id>` succeeds and returns the counter that the source held when the clone captured it, not the value that the test wrote to the source after the capture. It then discards the clone, clones the environment's configuration again with no deployment selected, and runs a clone that selects only the primary deployment, which restores one deployment.
+
+### Nodes of `shard_env_backup` that did not run in this session
+
+No node was skipped. Of the 203 deselected nodes, 201 are outside `shard_env_backup` and were deselected by `-m shard_env_backup`. The other two are the `ui-chromium` variants of the two nodes, deselected by `-k "api-chromium"`; pytest gives no other reason for a deselection:
+
+- `backend/tests/e2e/test_backup_restore.py::test_environment_backup_and_restore_lifecycle[ui-chromium]`
+- `backend/tests/e2e/test_backup_restore.py::test_environment_clone_lifecycle[ui-chromium]`
+
+### Cleanup after the session
+
+pytest and `tee` exited after the summary line. The `sleep infinity` process of this run (PID 2609648) was then stopped by its PID. `vcluster list --driver=docker` listed no vcluster afterwards, and no Docker container or network with the name `744262fa` remained.
