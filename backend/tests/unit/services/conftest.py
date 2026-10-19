@@ -2,8 +2,6 @@ import pytest
 from fast_depends import dependency_provider
 
 from styrmin_backend.db.models import (
-    ApplicationDriver,
-    ApplicationDriverVersion,
     BackupStorageLocation,
     Cluster,
     Environment,
@@ -135,31 +133,6 @@ async def fake_helm_chart(
             """,
         )
     )
-
-
-@pytest.fixture
-async def fake_application(
-    fake_helm_chart: HelmChart, fake_application_repository: FakeApplicationRepository
-):
-    """Insert a fake application bound to a previously inserted fake helm chart in the repository and return it."""
-    # Create an ApplicationDriver to set the relationship
-    app_driver = ApplicationDriver(name="test_application")
-    app_driver_version = ApplicationDriverVersion(
-        version="1.0.0",
-        application_supported_versions=">=1.0.0",
-        helm_chart_id=fake_helm_chart.id,
-        source_type="git",
-        source_repository="https://github.com/test/repo",
-        source_branch="main",
-        source_path=None,
-        application_driver_id=app_driver.id,
-    )
-    # Set the relationship manually for the fake
-    app_driver_version.application_driver = app_driver
-    # Add name property as expected by instantiate_application
-    # (implementation accesses application.name directly with type: ignore)
-    object.__setattr__(app_driver_version, "name", "test_application")
-    return await fake_application_repository.create(app_driver_version)
 
 
 @pytest.fixture

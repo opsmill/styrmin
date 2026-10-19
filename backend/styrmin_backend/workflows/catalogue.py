@@ -138,10 +138,8 @@ class PrefectCatalogue:
     def _register_default_workflows(self) -> None:
         """Register the default workflows required by the Styrmin system.
 
-        Current workflows:
-        - instantiate_application: Workflow to instantiate an application instance.
-        - orchestrate_application_setup: Workflow to orchestrate the setup of an application instance.
-
+        One workflow for each :class:`PrefectAction`. The actions of a driver
+        version are registered when the driver is loaded, not here.
         """
 
         self.add_workflow_definition(
