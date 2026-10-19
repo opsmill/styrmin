@@ -43,7 +43,7 @@ import pytest
 from styrmin_sdk import StyrminClient
 
 from tests.e2e.conftest import PROJECT_ROOT
-from tests.e2e.helpers.drivers import _kubectl_cp
+from tests.e2e.helpers.drivers import _kubectl_cp, _styrmin_pod_name
 
 pytestmark = [
     pytest.mark.ci,
@@ -61,31 +61,6 @@ _FIXTURE_DRIVER_DIR = (
     / "fixtures"
     / "local_driver_directory"
 )
-
-
-def _styrmin_pod_name(kubeconfig: str) -> str:
-    """Return the styrmin-server pod name in the e2e vcluster."""
-    result = subprocess.run(
-        [
-            "kubectl",
-            "--kubeconfig",
-            kubeconfig,
-            "-n",
-            "styrmin",
-            "get",
-            "pods",
-            "-l",
-            "app.kubernetes.io/component=server,app.kubernetes.io/name=styrmin",
-            "-o",
-            "jsonpath={.items[0].metadata.name}",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    name = result.stdout.strip()
-    assert name, "styrmin-server pod not found in vcluster"
-    return name
 
 
 def _kubectl_exec(kubeconfig: str, pod: str, *cmd: str) -> str:

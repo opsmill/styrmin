@@ -1,5 +1,5 @@
 """Publish driver variants to the harness git server, copy driver files into the
-Styrmin server pod, and load them through the SDK."""
+Styrmin server and agent pods, and load them through the SDK."""
 
 from __future__ import annotations
 
@@ -64,7 +64,22 @@ async def publish_misnamed_simple_app_driver(
     return await client.drivers.load_version(git_server["simple-app"], MISNAMED_BRANCH)
 
 
-def _kubectl_cp(kubeconfig: str, local: Path, pod: str, dest: str) -> None:
+# The container of the Styrmin server pod, and the agent pod and its container
+# (helm/styrmin and helm/agent). The agent's Prefect process worker runs every
+# action of a driver version.
+SERVER_CONTAINER = "styrmin-server"
+AGENT_POD_SELECTOR = "app.kubernetes.io/component=agent"
+AGENT_CONTAINER = "agent"
+
+
+def _kubectl_cp(
+    kubeconfig: str,
+    local: Path,
+    pod: str,
+    dest: str,
+    *,
+    container: str = SERVER_CONTAINER,
+) -> None:
     """Copy ``local`` into ``<pod>:<dest>`` (recursively for directories)."""
     subprocess.run(
         [
@@ -75,9 +90,46 @@ def _kubectl_cp(kubeconfig: str, local: Path, pod: str, dest: str) -> None:
             "styrmin",
             "cp",
             "-c",
-            "styrmin-server",
+            container,
             str(local),
             f"{pod}:{dest}",
         ],
         check=True,
     )
+
+
+def _pod_name(kubeconfig: str, selector: str) -> str:
+    """Return the name of the first pod in the ``styrmin`` namespace that ``selector`` selects."""
+    result = subprocess.run(
+        [
+            "kubectl",
+            "--kubeconfig",
+            kubeconfig,
+            "-n",
+            "styrmin",
+            "get",
+            "pods",
+            "-l",
+            selector,
+            "-o",
+            "jsonpath={.items[0].metadata.name}",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    name = result.stdout.strip()
+    assert name, f"no pod {selector} found in vcluster"
+    return name
+
+
+def _styrmin_pod_name(kubeconfig: str) -> str:
+    """Return the styrmin-server pod name in the e2e vcluster."""
+    return _pod_name(
+        kubeconfig, "app.kubernetes.io/component=server,app.kubernetes.io/name=styrmin"
+    )
+
+
+def _agent_pod_name(kubeconfig: str) -> str:
+    """Return the agent pod name in the e2e vcluster."""
+    return _pod_name(kubeconfig, AGENT_POD_SELECTOR)
