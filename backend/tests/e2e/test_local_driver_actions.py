@@ -2,15 +2,26 @@
 
 The ``local-actions`` test driver (``fixtures/drivers/local-actions``) is in
 the Styrmin image at ``LOCAL_ACTIONS_PATH``. The server loads it from that
-path with ``load-local-version``, and each action runs from the same path in
-its Job, which runs the Styrmin image. Its ``pre_setup``, ``post_setup`` and
-``upgrade`` actions only log a marker.
+path with ``load-local-version``. The agent's Prefect process worker runs each
+action from the same path in the agent pod, which runs the Styrmin image too.
+Its ``pre_setup``, ``post_setup`` and ``upgrade`` actions only log a marker.
 
 User story 1 (``test_local_driver_actions_run_on_create_and_upgrade``): the
 load registers the three actions in Prefect, a create runs the setup actions
 as the ``hook:setup:pre`` and ``hook:setup:post`` steps of its task, and an
 upgrade runs the upgrade action as the ``hook:upgrade:core`` step. Each
 marker is in the logs of its action's flow run.
+
+User story 2: the variant ``local-actions-check`` of the driver is copied
+into the server pod at a path of the session and loaded from there. When the
+agent pod holds other files at that path
+(``test_changed_local_driver_fails_with_the_fingerprint_error``), the check of
+the files fails the ``hook:setup:pre`` step of the create with the provenance
+fingerprint error. When the agent pod does not hold the path
+(``test_driver_missing_from_the_action_image_fails_with_the_missing_files_error``),
+the check fails the step with the missing files error. No action code runs.
+These deployments are created in the module-scoped ``check_environment_id``,
+whose deletion deletes them.
 
 The module-scoped ``local_actions_deployment`` keeps the deployment for the
 later tests of the module (user story 3 reuses it at ``UPGRADE_VERSION``) and
@@ -26,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -34,6 +46,7 @@ from typing import TYPE_CHECKING
 
 import kr8s.asyncio
 import pytest
+import yaml
 from kr8s.asyncio.objects import Service as AsyncService
 from prefect.client.orchestration import PrefectClient
 from prefect.client.schemas.filters import (
@@ -43,15 +56,29 @@ from prefect.client.schemas.filters import (
     LogFilter,
     LogFilterFlowRunId,
 )
+from styrmin_backend.services.driver.hash import compute_driver_directory_fingerprint
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.exceptions import StyrminError
 from styrmin_sdk.graphql._generated.enums import StepStatus, TaskResult
 
-from tests.e2e.conftest import _INGRESS_TEARDOWN_ERROR, _portforward, _wait_for_http
+from tests.e2e.conftest import (
+    _INGRESS_TEARDOWN_ERROR,
+    FIXTURES_DIR,
+    _portforward,
+    _wait_for_http,
+)
+from tests.e2e.helpers.drivers import (
+    AGENT_CONTAINER,
+    _agent_pod_name,
+    _kubectl_cp,
+    _styrmin_pod_name,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator
+    from pathlib import Path
 
+    from prefect.client.schemas.responses import DeploymentResponse
     from styrmin_sdk.graphql._generated.get_task import GetTaskTask
 
 pytestmark = [
@@ -86,6 +113,14 @@ SETUP_PRE_HOOK = "hook:setup:pre"
 SETUP_POST_HOOK = "hook:setup:post"
 UPGRADE_CORE_HOOK = "hook:upgrade:core"
 
+# The variant of the driver that user story 2 loads from paths of the session.
+CHECK_DRIVER_NAME = "local-actions-check"
+LOCAL_ACTIONS_DIR = FIXTURES_DIR / "drivers" / DRIVER_NAME
+# The default names of the driver files (STYRMIN_DRIVER_* settings).
+SPEC_FILE = "driver.styrmin.yml"
+VALUES_TEMPLATE = "values.j2.yml"
+ACTIONS_FILE = "actions.py"
+
 # A create or an upgrade runs one or two action Jobs and a Helm rollout.
 TASK_TIMEOUT = 600.0
 INGRESS_TEARDOWN_TIMEOUT = 300.0
@@ -94,9 +129,12 @@ RUNNING_TIMEOUT = 120.0
 POLL_INTERVAL = 3.0
 
 
-def marker(action: str) -> str:
-    """The line that ``action`` logs (fixtures/drivers/local-actions/actions.py)."""
-    return f"LOCAL-ACTIONS-MARKER {action} code=A"
+def marker(action: str, code: str = "A") -> str:
+    """The line that ``action`` logs (fixtures/drivers/local-actions/actions.py).
+
+    The fixture driver logs ``code=A``; a variant of user story 2 can log another code.
+    """
+    return f"LOCAL-ACTIONS-MARKER {action} code={code}"
 
 
 @dataclass(frozen=True)
@@ -121,8 +159,9 @@ async def _create_pinned_deployment(
     environment_id: str,
     driver_version_id: str,
     name: str,
+    driver: str = DRIVER_NAME,
 ) -> str:
-    """Create a deployment of ``local-actions`` at ``CREATE_VERSION`` pinned to the driver version.
+    """Create a deployment of ``driver`` at ``CREATE_VERSION`` pinned to the driver version.
 
     Returns the id of the create task. Retries only while the environment's
     ingress controller is being removed because an earlier test deleted its
@@ -132,7 +171,7 @@ async def _create_pinned_deployment(
     while True:
         try:
             task = await client.deployments.create(
-                driver=DRIVER_NAME,
+                driver=driver,
                 version=CREATE_VERSION,
                 environment_id=environment_id,
                 name=name,
@@ -196,6 +235,52 @@ async def local_actions_deployment(
             _LOG.warning("Could not delete deployment %s: %s", deployment_id, exc)
 
 
+def _write_check_variant(directory: Path, *, code: str) -> Path:
+    """Write the ``local-actions-check`` variant of the fixture driver into ``directory``.
+
+    Each action of the variant logs its marker with ``code=<code>``, and sets
+    no ``image:``.
+    """
+    directory.mkdir(parents=True)
+    spec = yaml.safe_load((LOCAL_ACTIONS_DIR / SPEC_FILE).read_text())
+    spec["metadata"]["name"] = CHECK_DRIVER_NAME
+    (directory / SPEC_FILE).write_text(yaml.safe_dump(spec, sort_keys=False))
+    shutil.copyfile(LOCAL_ACTIONS_DIR / VALUES_TEMPLATE, directory / VALUES_TEMPLATE)
+    actions = (LOCAL_ACTIONS_DIR / ACTIONS_FILE).read_text()
+    assert marker("pre_setup") in actions, "the fixture driver no longer logs code=A"
+    (directory / ACTIONS_FILE).write_text(actions.replace(" code=A", f" code={code}"))
+    return directory
+
+
+@pytest.fixture(scope="module")
+def check_session_hex() -> str:
+    """A hex string that keeps the paths of this session apart from other sessions'."""
+    return uuid.uuid4().hex[:8]
+
+
+@pytest.fixture(scope="module")
+async def check_environment_id(
+    styrmin_resources: dict, check_session_hex: str
+) -> AsyncGenerator[str, None]:
+    """An environment of its own for the deployments of user story 2, deleted when the module ends.
+
+    The create of each of these deployments fails at its ``hook:setup:pre``
+    step, before the ``StyrminDeployment`` is written, and ``deleteDeployment``
+    fails for a deployment without one. Deleting the environment deletes its
+    deployments, also when a test fails.
+    """
+    client: StyrminClient = styrmin_resources["client"]
+    environment = await client.environments.create(
+        name=f"{CHECK_DRIVER_NAME}-{check_session_hex}",
+        cluster_id=styrmin_resources["cluster_id"],
+        config={},
+    )
+    try:
+        yield str(environment.id)
+    finally:
+        await client.environments.delete(environment_id=environment.id)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -227,6 +312,16 @@ async def _wait_for_task_end(client: StyrminClient, task_id: str) -> GetTaskTask
         await asyncio.sleep(POLL_INTERVAL)
 
 
+def _failed_step_error(task: GetTaskTask, key: str) -> str:
+    """The error of the step ``key`` of a failed task, which must have failed."""
+    assert task.result == TaskResult.FAILED, _describe(task)
+    step = next((step for step in task.steps if step.key == key), None)
+    assert step is not None, f"no {key} step: {_describe(task)}"
+    assert step.status == StepStatus.FAILED, _describe(task)
+    assert step.error, f"the failed {key} step has no error: {_describe(task)}"
+    return step.error
+
+
 def _assert_steps_succeeded(task: GetTaskTask, *keys: str) -> None:
     assert task.result == TaskResult.SUCCEEDED, _describe(task)
     steps = {step.key: step for step in task.steps}
@@ -253,6 +348,30 @@ async def _wait_for_running(
         await asyncio.sleep(POLL_INTERVAL)
 
 
+async def _copy_driver_to_server(vcluster: dict, driver_dir: Path, path: str) -> None:
+    """Copy the driver files in ``driver_dir`` into the Styrmin server pod at ``path``.
+
+    ``path`` must not exist in the pod: ``kubectl cp`` then creates it with
+    the files of ``driver_dir``. The server loads the driver from there.
+    """
+    kubeconfig = vcluster["kubeconfig_path"]
+    pod = await asyncio.to_thread(_styrmin_pod_name, kubeconfig)
+    await asyncio.to_thread(_kubectl_cp, kubeconfig, driver_dir, pod, path)
+
+
+async def _copy_driver_to_agent(vcluster: dict, driver_dir: Path, path: str) -> None:
+    """Copy the driver files in ``driver_dir`` into the agent pod at ``path``.
+
+    The agent's Prefect process worker runs the actions, so the check reads
+    the files at ``path`` in this pod. ``path`` must not exist in the pod.
+    """
+    kubeconfig = vcluster["kubeconfig_path"]
+    pod = await asyncio.to_thread(_agent_pod_name, kubeconfig)
+    await asyncio.to_thread(
+        _kubectl_cp, kubeconfig, driver_dir, pod, path, container=AGENT_CONTAINER
+    )
+
+
 @asynccontextmanager
 async def _prefect(vcluster: dict) -> AsyncIterator[PrefectClient]:
     """A Prefect client on a port-forward to the vCluster's Prefect server."""
@@ -267,21 +386,29 @@ async def _prefect(vcluster: dict) -> AsyncIterator[PrefectClient]:
             yield prefect
 
 
-async def _action_log_messages(prefect: PrefectClient, action: str) -> list[str]:
-    """The log messages of the flow runs of ``action`` of the driver version at ``LOCAL_ACTIONS_PATH``."""
+async def _action_deployment(
+    prefect: PrefectClient, action: str, *, directory: str
+) -> DeploymentResponse:
+    """The Prefect deployment of ``action`` of the driver version loaded from ``directory``."""
     hook, mode = ACTION_HOOKS[action]
     deployments = await prefect.read_deployments(
         deployment_filter=DeploymentFilter(
             tags=DeploymentFilterTags(
-                all_=[DIRECTORY_TAG, f"hook/{hook}", f"mode/{mode}"]
+                all_=[f"directory/{directory}", f"hook/{hook}", f"mode/{mode}"]
             )
         )
     )
     assert len(deployments) == 1, [deployment.name for deployment in deployments]
+    return deployments[0]
+
+
+async def _action_log_messages(
+    prefect: PrefectClient, action: str, *, directory: str = LOCAL_ACTIONS_PATH
+) -> list[str]:
+    """The log messages of the flow runs of ``action`` of the driver version loaded from ``directory``."""
+    deployment = await _action_deployment(prefect, action, directory=directory)
     runs = await prefect.read_flow_runs(
-        deployment_filter=DeploymentFilter(
-            id=DeploymentFilterId(any_=[deployments[0].id])
-        )
+        deployment_filter=DeploymentFilter(id=DeploymentFilterId(any_=[deployment.id]))
     )
     if not runs:
         return []
@@ -291,6 +418,24 @@ async def _action_log_messages(prefect: PrefectClient, action: str) -> list[str]
         )
     )
     return [log.message for log in logs]
+
+
+async def _default_action_image(
+    prefect: PrefectClient, action: str, *, directory: str
+) -> str:
+    """The image that the check names for ``action`` of the driver version loaded from ``directory``.
+
+    The action sets no ``image:``, so the check names the default image of the
+    work pool of the action's Prefect deployment. In the E2E install, that is
+    the Styrmin image, which the agent that runs the action runs too.
+    """
+    deployment = await _action_deployment(prefect, action, directory=directory)
+    assert not deployment.job_variables.get("image"), deployment.job_variables
+    assert deployment.work_pool_name, deployment
+    work_pool = await prefect.read_work_pool(deployment.work_pool_name)
+    image = work_pool.base_job_template["variables"]["properties"]["image"]["default"]
+    assert image, work_pool.base_job_template
+    return str(image)
 
 
 async def _wait_for_markers(vcluster: dict, *actions: str) -> None:
@@ -355,3 +500,106 @@ async def test_local_driver_actions_run_on_create_and_upgrade(
 
     # Each action ran its own code: the marker is in the logs of its flow run.
     await _wait_for_markers(vcluster, "pre_setup", "post_setup", "upgrade")
+
+
+@pytest.mark.api_only(reason=API_ONLY_REASON)
+async def test_changed_local_driver_fails_with_the_fingerprint_error(
+    styrmin_resources: dict,
+    check_environment_id: str,
+    check_session_hex: str,
+    vcluster: dict,
+    tmp_path: Path,
+) -> None:
+    """User story 2: the files where the actions run differ from the loaded files (FR-003).
+
+    The server loads the variant with ``code=A``. The agent pod, where the
+    agent's Prefect process worker runs the actions, holds the variant at the
+    same path with an edited ``actions.py`` (``code=B``). The check fails the
+    ``hook:setup:pre`` step with the provenance fingerprint error, and neither
+    code runs.
+    """
+    client: StyrminClient = styrmin_resources["client"]
+    path = f"/tmp/{CHECK_DRIVER_NAME}-{check_session_hex}"
+    loaded_dir = _write_check_variant(tmp_path / "loaded", code="A")
+    changed_dir = _write_check_variant(tmp_path / "changed", code="B")
+    await _copy_driver_to_server(vcluster, loaded_dir, path)
+    await _copy_driver_to_agent(vcluster, changed_dir, path)
+    changed_fingerprint = compute_driver_directory_fingerprint(
+        changed_dir,
+        spec_file=SPEC_FILE,
+        values_template=VALUES_TEMPLATE,
+        actions_file=ACTIONS_FILE,
+        include_actions=True,
+    )
+    loaded = await client.drivers.load_local_version(path)
+    loaded_fingerprint = loaded.content_hash
+    assert loaded_fingerprint is not None, loaded
+    assert loaded_fingerprint != changed_fingerprint
+
+    create_task_id = await _create_pinned_deployment(
+        client,
+        environment_id=check_environment_id,
+        driver_version_id=str(loaded.id),
+        name=f"{CHECK_DRIVER_NAME}-{uuid.uuid4().hex[:6]}",
+        driver=CHECK_DRIVER_NAME,
+    )
+    create_task = await _wait_for_task_end(client, create_task_id)
+    error = _failed_step_error(create_task, SETUP_PRE_HOOK)
+    async with _prefect(vcluster) as prefect:
+        image = await _default_action_image(prefect, "pre_setup", directory=path)
+        messages = {
+            action: await _action_log_messages(prefect, action, directory=path)
+            for action in ACTION_HOOKS
+        }
+    assert path in error, error
+    assert f"in the image {image}" in error, error
+    assert loaded_fingerprint[:7] in error, error
+    assert changed_fingerprint[:7] in error, error
+    assert "Rebuild the image" in error, error
+
+    # No code of the variant ran: neither the loaded code nor the changed one.
+    # The logs are read: the check logged its error in the flow run of pre_setup.
+    assert any("Rebuild the image" in message for message in messages["pre_setup"]), (
+        messages
+    )
+    for action, action_messages in messages.items():
+        for code in ("A", "B"):
+            assert not any(
+                marker(action, code) in message for message in action_messages
+            ), (action, code, action_messages)
+
+
+@pytest.mark.api_only(reason=API_ONLY_REASON)
+async def test_driver_missing_from_the_action_image_fails_with_the_missing_files_error(
+    styrmin_resources: dict,
+    check_environment_id: str,
+    check_session_hex: str,
+    vcluster: dict,
+    tmp_path: Path,
+) -> None:
+    """User story 2: the driver is only in the server pod (FR-004).
+
+    The agent pod, where the actions run, does not hold the path that the
+    server loaded the driver from. The variant sets no ``image:``, so the
+    error names the default image of the work pool, the Styrmin image that
+    the agent runs.
+    """
+    client: StyrminClient = styrmin_resources["client"]
+    path = f"/tmp/local-actions-missing-{check_session_hex}"
+    driver_dir = _write_check_variant(tmp_path / "driver", code="A")
+    await _copy_driver_to_server(vcluster, driver_dir, path)
+    loaded = await client.drivers.load_local_version(path)
+
+    create_task_id = await _create_pinned_deployment(
+        client,
+        environment_id=check_environment_id,
+        driver_version_id=str(loaded.id),
+        name=f"{CHECK_DRIVER_NAME}-{uuid.uuid4().hex[:6]}",
+        driver=CHECK_DRIVER_NAME,
+    )
+    create_task = await _wait_for_task_end(client, create_task_id)
+    error = _failed_step_error(create_task, SETUP_PRE_HOOK)
+    async with _prefect(vcluster) as prefect:
+        image = await _default_action_image(prefect, "pre_setup", directory=path)
+    assert path in error, error
+    assert f"in the image {image}" in error, error

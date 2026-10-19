@@ -174,13 +174,20 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
   - write a variant of the fixture driver named `local-actions-check` whose three actions set `image: local-actions-check:<session hex>`;
   - build that image with `docker build` `FROM` the Styrmin image under test (`registry.opsmill.io/opsmill/styrmin:<STYRMIN_IMAGE_VER or latest>`, the tag that `styrmin_deployment` installs), `COPY` the variant with an edited `actions.py` (`code=B`) to the per-session path;
   - remove the image at teardown.
-- [ ] T027 [US2] In `backend/tests/e2e/test_local_driver_actions.py` add `test_changed_local_driver_fails_with_the_fingerprint_error`. It copies the unedited variant (`code=A`) into the server pod at the per-session path with `_kubectl_cp`, loads it, and creates a deployment pinned to it. Assert:
+
+  Not done as written. The first T028 run showed that the agent's Prefect `ProcessWorker` (`entrypoint/combined.py`) runs every action in the agent pod and ignores the action's `image:`, so an image built for the actions is never used ([e2e-evidence.md](e2e-evidence.md#what-the-earlier-runs-of-t028-found)). The module has the per-session path (`check_session_hex`) and the `local-actions-check` variant (`_write_check_variant`); T027 copies the edited variant into the agent pod instead of building an image. The spec's premise that an action runs in a Job in its `image:` (research R-006, FR-003, FR-004) needs a decision before T037 and T041 document it.
+- [X] T027 [US2] In `backend/tests/e2e/test_local_driver_actions.py` add `test_changed_local_driver_fails_with_the_fingerprint_error`. It copies the unedited variant (`code=A`) into the server pod at the per-session path with `_kubectl_cp`, loads it, and creates a deployment pinned to it. Assert:
   - the task fails;
   - its `hook:setup:pre` step error contains the path, `local-actions-check:<session hex>`, both short fingerprints and "Rebuild the image";
   - no marker with `code=B` or `code=A` is logged.
 
   Add `test_driver_missing_from_the_action_image_fails_with_the_missing_files_error`. It copies `local-actions-check` without `image:` into the server pod at a second per-session path, loads it, and creates a pinned deployment. Assert that the `hook:setup:pre` step error names the path and the default image. Delete both deployments at the end
-- [ ] T028 [US2] Run the US2 E2E per the E2E run rules (`docker compose build server` first if backend code changed since T022): `sleep infinity | uv run pytest "backend/tests/e2e/test_local_driver_actions.py" -k "fingerprint_error or missing_files_error" -v -s --pdb 2>&1 | tee /tmp/029-us2.log`; record the passing run in `specs/029-local-driver-actions/e2e-evidence.md`
+
+  Done with these changes, because of the findings of T028:
+  - The fingerprint test copies the variant with `code=A` into the server pod and the variant with an edited `actions.py` (`code=B`) into the agent pod at the same path. The variant sets no `image:`, so the error names the default image of the work pool, which the test reads from Prefect, instead of `local-actions-check:<session hex>`.
+  - Both tests create their deployments in an environment of their own (`check_environment_id`) and delete the environment at the end. `deleteDeployment` fails with an internal error for a deployment whose create failed at `hook:setup:pre`, because the `StyrminDeployment` is written after that step; environment deletion handles such a deployment.
+  - `check_local_driver` logs its error at `ERROR` in the flow run before it raises, so the error reaches the hook step under Prefect 3.8 (`backend/styrmin_backend/workflows/local_driver.py`, unit test in `backend/tests/unit/workflows/test_local_driver_check.py`).
+- [X] T028 [US2] Run the US2 E2E per the E2E run rules (`docker compose build server` first if backend code changed since T022): `sleep infinity | uv run pytest "backend/tests/e2e/test_local_driver_actions.py" -k "fingerprint_error or missing_files_error" -v -s --pdb 2>&1 | tee /tmp/029-us2.log`; record the passing run in `specs/029-local-driver-actions/e2e-evidence.md`
 
 **Checkpoint**: a changed or missing local driver fails with an error that names the path, the image and the fingerprints.
 
