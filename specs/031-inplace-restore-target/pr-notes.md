@@ -17,7 +17,7 @@ Not decided yet, for the maintainer:
 - whether the change also needs a `security` changelog fragment (critique E3);
 - whether to print the target namespace in the CLI success line, a critique follow-up that this change does not apply (critique P2).
 
-Every E2E node that this branch modifies and that is not skipped passed locally (see "Test results").
+Every E2E node that this branch modifies and that is not skipped passed locally. The two `api-chromium` nodes that run the environment restore and the environment clone also passed locally (see "Test results").
 
 ## Breaking changes to createRestore, the Python SDK and styrminctl
 
@@ -59,7 +59,7 @@ The changelog fragments [`changelog/532.removed.md`](../../changelog/532.removed
 
 [e2e-evidence.md](e2e-evidence.md) records each E2E session: the node IDs, the exact command, the start and end times, the image tag and digest, the vcluster name and the verbatim `PASSED` lines.
 
-All sessions used the image tag `inplace-restore-133ed150`, built from commit `133ed150`; no source file changed after that commit.
+The sessions of T038, T039 and T040 used the image tag `inplace-restore-133ed150`, built from commit `133ed150`. The review follow-up session used the image tag `inplace-restore-fc4532f3`, built from commit `fc4532f3`.
 
 - `shard_backup`, `api-chromium` (T038): `6 passed, 199 deselected`. Each node passed:
   - `test_backup_and_restore_lifecycle[api-chromium]`, which now also checks that the restore records `styrmin-<deployment id>` and the active 0.2.0 instance, although the backup belongs to the 0.1.0 instance;
@@ -75,6 +75,9 @@ All sessions used the image tag `inplace-restore-133ed150`, built from commit `1
   - Passed: `test_infrahub_enterprise_backup_and_restore_lifecycle[api-chromium]`, which restores an Infrahub Enterprise backup with only the backup id and checks that a Neo4j node and an object-store file are back.
   - Not run: `test_infrahub_enterprise_backup_and_restore_lifecycle[ui-chromium]`, deselected because the test is `api_only`; CI does not run the `ui` cell of `shard_infrahub`.
   - Not run: `test_infrahub_backup_and_restore_lifecycle`. This branch changes its restore call, but the test carries `@pytest.mark.skip(reason="backup/restore not supported with community")`, so it runs in no session, locally or in CI.
+- `shard_env_backup`, `api-chromium` (review follow-up): `2 passed, 203 deselected`.
+  - Passed: `test_environment_backup_and_restore_lifecycle[api-chromium]` and `test_environment_clone_lifecycle[api-chromium]`. This branch does not modify these tests, but it changes the code they run: the environment restore and the environment clone now call `create_restore` without a namespace and dispatch the namespace that the server recorded on the restore row. A review found that no local session had run them.
+  - Not run locally: the `ui-chromium` variants of the two nodes. The web app's environment restore and environment clone pages did not change on this branch, and CI runs those variants.
 
 Tests outside E2E:
 
