@@ -206,3 +206,100 @@ The two user story 2 tests no longer create their deployments in an environment 
   backend/tests/e2e/test_local_driver_actions.py::test_driver_missing_from_the_action_image_fails_with_the_missing_files_error[ui-chromium] SKIPPED
   ====== 2 passed, 2 skipped, 4 deselected, 6 warnings in 187.39s (0:03:07) ======
   ```
+
+## The image of the final runs, T048 and T049
+
+Both sessions ran against commit `03c8e6a0`, the final code of the branch, with no change between them.
+
+- Tag: `registry.opsmill.io/opsmill/styrmin:fac-029-final`. `STYRMIN_IMAGE_VER` gives the image its own tag, because other worktrees build `registry.opsmill.io/opsmill/styrmin:latest` on the same Docker daemon.
+- Built once before T048 with `docker compose build server` (image id `sha256:7cd3f50672b9bdf43da60cd8f616d173003f6856a3315d5ec6b1cc20ea006005`, created 2026-10-19T12:34:22Z). The image holds the fixture driver at `/source/backend/tests/e2e/fixtures/drivers/local-actions` (`actions.py`, `driver.styrmin.yml`, `values.j2.yml`).
+- The `styrmin_deployment` fixture runs `docker compose build` again at the start of each session. It builds the three services `server`, `agent-operator` and `task-worker` from `docker/Dockerfile` into the same tag, from the build cache: the image keeps its creation time, 2026-10-19T12:34:22Z, and the id of the tag changes with each build. After T048 the tag's id was `sha256:a5d2827e9e65d39787cc22d48adf6500612493cd87b360a4769a23f37c0d6f6e`; after T049 it was `sha256:d78ac3d2c72082b578dc3fb84c9c1268fcec1227dd6b9d98c98c43453cc6dadd`.
+
+## T048: the whole module in one session
+
+- Node IDs:
+  - `backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade[api-chromium]`
+  - `backend/tests/e2e/test_local_driver_actions.py::test_changed_local_driver_fails_with_the_fingerprint_error[api-chromium]`
+  - `backend/tests/e2e/test_local_driver_actions.py::test_driver_missing_from_the_action_image_fails_with_the_missing_files_error[api-chromium]`
+  - `backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it[api-chromium]`
+
+  The `[ui-chromium]` variants are skipped by their `api_only` marker.
+- Command:
+
+  ```shell
+  export STYRMIN_IMAGE_VER=fac-029-final
+  docker compose build server
+  sleep infinity | uv run pytest backend/tests/e2e/test_local_driver_actions.py -v -s --pdb 2>&1 | tee /tmp/029-e2e.log
+  ```
+
+- Start: 2026-10-19T12:34:33Z. End: 2026-10-19T12:38:51Z (255.77 s). The first run passed, with no retry.
+- vCluster: `pytest-0107b83d-5044-48a4-b574-12344a53a33a`, kubeconfig `/tmp/pytest-of-ubuntu/pytest-81/vcluster0/kubeconfig`. Torn down at the end of the session ("Successfully deleted virtual cluster pytest-0107b83d-5044-48a4-b574-12344a53a33a").
+- Styrmin image: `registry.opsmill.io/opsmill/styrmin:fac-029-final` (see the image section above).
+- Result lines:
+
+  ```text
+  backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade[api-chromium]
+  PASSED
+  backend/tests/e2e/test_local_driver_actions.py::test_changed_local_driver_fails_with_the_fingerprint_error[api-chromium] PASSED
+  backend/tests/e2e/test_local_driver_actions.py::test_driver_missing_from_the_action_image_fails_with_the_missing_files_error[api-chromium] PASSED
+  backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it[api-chromium] PASSED
+  backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade[ui-chromium] SKIPPED
+  backend/tests/e2e/test_local_driver_actions.py::test_changed_local_driver_fails_with_the_fingerprint_error[ui-chromium] SKIPPED
+  backend/tests/e2e/test_local_driver_actions.py::test_driver_missing_from_the_action_image_fails_with_the_missing_files_error[ui-chromium] SKIPPED
+  backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it[ui-chromium] SKIPPED
+  ============= 4 passed, 4 skipped, 8 warnings in 255.77s (0:04:15) =============
+  ```
+
+## T049: the E2E tests whose path changed, in one session
+
+These tests run hooks, load drivers or read task steps, so the change from a skipped hook to a failed hook step could break them (SC-002). Every selected test passed, so none of them relied on a skipped hook. No code was changed.
+
+- Node IDs:
+  - `backend/tests/e2e/test_driver_reload_identity.py::test_local_driver_reload_creates_new_row_on_content_change`
+  - `backend/tests/e2e/test_driver_version_reselection.py::test_driver_version_reselection[api-chromium]`
+  - `backend/tests/e2e/test_driver_version_reselection.py::test_drivers_of_one_repository_keep_their_own_actions[api-chromium]`
+  - `backend/tests/e2e/test_driver_version_reselection.py::test_drivers_list_caps_long_histories[api-chromium]`, skipped by its `ui_only` marker
+  - `backend/tests/e2e/test_task_steps.py::test_hook_action_error_shows_failed_step[api-chromium]`
+  - `backend/tests/e2e/test_task_steps.py::test_command_output_on_failed_step[api-chromium]`
+  - `backend/tests/e2e/test_task_steps.py::test_prerequisite_failure_shows_attempts[api-chromium]`
+  - `backend/tests/e2e/test_task_steps.py::test_update_recreates_a_missing_namespace[api-chromium]`
+  - `backend/tests/e2e/test_task_steps.py::test_helmrelease_failure_shows_fluxcd_reason[api-chromium]`
+  - `backend/tests/e2e/test_deploy_app.py::test_deploy_simple_app[api-chromium]`
+  - `backend/tests/e2e/test_deploy_app.py::test_upgrade_simple_app[api-chromium]`
+  - `backend/tests/e2e/test_deploy_app.py::test_deployment_records_created_by[api-chromium]`
+  - `backend/tests/e2e/test_deploy_app.py::test_deployed_service_external_url_includes_port[api-chromium]`
+  - `backend/tests/e2e/test_deploy_app.py::test_environment_views_hide_ingress_controller[api-chromium]`, skipped by its `ui_only` marker
+
+  `-k "not ui-chromium"` deselected the 13 `[ui-chromium]` variants: pytest collected 27 items and selected 14.
+- Command:
+
+  ```shell
+  export STYRMIN_IMAGE_VER=fac-029-final
+  sleep infinity | uv run pytest backend/tests/e2e/test_driver_reload_identity.py backend/tests/e2e/test_driver_version_reselection.py backend/tests/e2e/test_task_steps.py backend/tests/e2e/test_deploy_app.py -k "not ui-chromium" -v -s --pdb 2>&1 | tee /tmp/029-regression.log
+  ```
+
+- Start: 2026-10-19T12:39:23Z. End: 2026-10-19T12:52:51Z (805.63 s). The first run passed, with no retry.
+- vCluster: `pytest-f6232844-6e71-483f-8f12-8dcd7e6d0670`, kubeconfig `/tmp/pytest-of-ubuntu/pytest-82/vcluster0/kubeconfig`. Torn down at the end of the session ("Successfully deleted virtual cluster pytest-f6232844-6e71-483f-8f12-8dcd7e6d0670").
+- Styrmin image: `registry.opsmill.io/opsmill/styrmin:fac-029-final` (see the image section above).
+- Result lines:
+
+  ```text
+  backend/tests/e2e/test_driver_reload_identity.py::test_local_driver_reload_creates_new_row_on_content_change
+  PASSED
+  backend/tests/e2e/test_driver_version_reselection.py::test_driver_version_reselection[api-chromium]
+  PASSED
+  backend/tests/e2e/test_driver_version_reselection.py::test_drivers_of_one_repository_keep_their_own_actions[api-chromium] PASSED
+  backend/tests/e2e/test_driver_version_reselection.py::test_drivers_list_caps_long_histories[api-chromium] SKIPPED
+  backend/tests/e2e/test_task_steps.py::test_hook_action_error_shows_failed_step[api-chromium] PASSED
+  backend/tests/e2e/test_task_steps.py::test_command_output_on_failed_step[api-chromium] PASSED
+  backend/tests/e2e/test_task_steps.py::test_prerequisite_failure_shows_attempts[api-chromium] PASSED
+  backend/tests/e2e/test_task_steps.py::test_update_recreates_a_missing_namespace[api-chromium] PASSED
+  backend/tests/e2e/test_task_steps.py::test_helmrelease_failure_shows_fluxcd_reason[api-chromium] PASSED
+  backend/tests/e2e/test_deploy_app.py::test_deploy_simple_app[api-chromium] PASSED
+  backend/tests/e2e/test_deploy_app.py::test_upgrade_simple_app[api-chromium]
+  PASSED
+  backend/tests/e2e/test_deploy_app.py::test_deployment_records_created_by[api-chromium] PASSED
+  backend/tests/e2e/test_deploy_app.py::test_deployed_service_external_url_includes_port[api-chromium] PASSED
+  backend/tests/e2e/test_deploy_app.py::test_environment_views_hide_ingress_controller[api-chromium] SKIPPED
+  ===== 12 passed, 2 skipped, 13 deselected, 8 warnings in 805.63s (0:13:25) =====
+  ```
