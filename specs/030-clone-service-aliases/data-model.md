@@ -37,13 +37,13 @@ Changes:
 
 ```text
 recovery succeeded ──► alias step succeeded ──► restore COMPLETED, deployment RUNNING
-                   └─► alias step failed ─────► restore FAILED (error "Service alias step failed: …"),
-                                                deployment FAILED, then the status reported by its
-                                                StyrminDeployment (DEPLOYING, then RUNNING)
+                   └─► alias step failed ─────► restore FAILED (error "Create and delete service
+                                                aliases: <cause>. To write the aliases, …"),
+                                                deployment RUNNING
 recovery failed ───────────────────────────────► unchanged: restore FAILED, deployment FAILED
 ```
 
-After an alias failure, the counterpart reads `RUNNING` again once its StyrminDeployment is `Ready`, but its aliases are missing until an update or an upgrade that changes it runs the alias step (research R-004, R-005).
+After an alias failure, the counterpart reads `RUNNING`, but its aliases are missing until an update or an upgrade that changes it runs the alias step (research R-004, R-005). The review of #531 changed this on 2026-10-19: before, the restore set the counterpart to `FAILED`, and its status read `RUNNING` again once its StyrminDeployment was `Ready`.
 
 ## Clone deployment result (`EnvironmentClone.deployment_results[]`, existing JSON)
 

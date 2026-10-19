@@ -48,9 +48,9 @@ The signature and the parameters that it sends to the USER flow do not change. F
 Signature unchanged. When `counterpart_crd_body` is not `None`, the flow reads the counterpart's context with `GlobalContext.model_validate(counterpart_crd_body["spec"]["context"])` before it deletes the namespace. A body without `spec.context` raises `KeyError`, and a context that does not validate raises `pydantic.ValidationError`; either fails the flow before it changes anything in the cluster. After "Run the recovery" succeeds, for a cross-target restore only:
 
 - calls `apply_service_aliases_step(reporter, context)` with the context read from the body;
-- on an exception: stores `recovery = {"recovered": False, "error": "Service alias step failed: <error>"}` in the result variable. It does not call `mark_failed` (research R-004).
+- on an exception: keeps `recovered: True` and stores the error under `recovery["aliases_error"]` in the result variable. The error reads `Create and delete service aliases: <cause>. To write the aliases, change the configuration or the parameters of the deployment, or upgrade it.` For a Kubernetes API error, the cause is `the Kubernetes API answered <status>: <message of the Status body>`; the step holds the full error. It does not call `mark_failed` (research R-004).
 
-The result variable keeps its shape: `{"status": {...}, "recovery": {"recovered": bool, "error": str | None}}`.
+The result variable is `{"status": {...}, "recovery": {"recovered": bool, "error": str | None, "aliases_error": str | None}}`. `execute_restore_workflow` marks the restore `FAILED` with `aliases_error` and sets the deployment `RUNNING`. The review of #531 set this contract on 2026-10-19; before, the flow stored `recovered: False` with the error, and the deployment was set to `FAILED`.
 
 ## Clone entry fold (`services/backup/clone.py`)
 
