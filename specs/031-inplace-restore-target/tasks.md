@@ -33,7 +33,7 @@ description: "Tasks for 031: an in-place restore always restores into the deploy
 
 **Purpose**: a green baseline before any change.
 
-- [ ] T001 Run `uv sync` and `cd frontend && pnpm install`, then `uv run pytest backend/tests/unit/services/backup backend/tests/unit/services/test_deployment_status_service.py backend/tests/functional/graphql/test_create_restore.py backend/tests/functional/graphql/test_environment_clone.py backend/tests/functional/graphql/test_environment_backup.py cli/tests/test_backups.py python_sdk/tests/test_backups.py -q`, and note the result as the baseline (no file change)
+- [X] T001 Run `uv sync` and `cd frontend && pnpm install`, then `uv run pytest backend/tests/unit/services/backup backend/tests/unit/services/test_deployment_status_service.py backend/tests/functional/graphql/test_create_restore.py backend/tests/functional/graphql/test_environment_clone.py backend/tests/functional/graphql/test_environment_backup.py cli/tests/test_backups.py python_sdk/tests/test_backups.py -q`, and note the result as the baseline (no file change)
 
 ---
 
