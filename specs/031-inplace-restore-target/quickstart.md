@@ -28,9 +28,12 @@ Expected: `createRestore(backupId: UUID!): Restore @requiresRole` in `schema.gra
 uv run pytest backend/tests/unit/services/backup/test_restore.py -q
 uv run pytest backend/tests/functional/graphql/test_create_restore.py -q
 uv run pytest backend/tests/unit/services/backup backend/tests/functional/graphql/test_environment_clone.py backend/tests/functional/graphql/test_environment_backup.py -q
-uv run pytest cli/tests/test_backups.py python_sdk/tests/test_backups.py -q
-cd frontend && pnpm exec tsc -b && pnpm lint && pnpm test -- deployment-detail
+uv run pytest cli/tests/test_backups.py -q
+uv run pytest python_sdk/tests/test_backups.py -q
+cd frontend && pnpm exec tsc -b && pnpm lint && pnpm test deployment-detail
 ```
+
+Run one pytest session per package. `backend/tests`, `cli/tests` and `python_sdk/tests` each have a `tests/conftest.py`, so a session that collects two of them stops at collection with `ImportPathMismatchError`. `backend/tests/unit` and `backend/tests/functional` belong to one package and can share a session.
 
 Expected:
 
