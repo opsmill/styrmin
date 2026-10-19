@@ -217,7 +217,7 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
   - a driver-only change at the same application version runs no check;
   - a target that declares no `upgrade`/`core` action passes;
   - an equivalence test (critique X1): for a version increase, a decrease, a driver-only change and no change, the check runs exactly when `Comparator(current_instance, new_instance).compare()` yields an `ApplicationVersionChange`.
-- [ ] T035 [US3] In `backend/tests/e2e/test_local_driver_actions.py` add `test_missing_registration_fails_and_loading_again_repairs_it`, using the US1 deployment at `0.2.0`:
+- [X] T035 [US3] In `backend/tests/e2e/test_local_driver_actions.py` add `test_missing_registration_fails_and_loading_again_repairs_it`, using the US1 deployment at `0.2.0`:
   - delete the Prefect deployments tagged `directory//source/backend/tests/e2e/fixtures/drivers/local-actions`;
   - call `update_version(..., "0.1.0", driver_version_id=<pinned>)` and assert:
     - the returned task failed and its `hook:upgrade:core` step error names `local-actions`, the hook, the mode, `upgrade` and "Load the driver again";
@@ -229,7 +229,7 @@ description: "Tasks for 029: run the actions of driver versions loaded from a lo
     - the deployment runs `0.1.0`.
 
   Delete the deployment at the end
-- [ ] T036 [US3] Run the US3 E2E per the E2E run rules: `sleep infinity | uv run pytest "backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade" "backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it" -v -s --pdb 2>&1 | tee /tmp/029-us3.log`; record the passing run in `specs/029-local-driver-actions/e2e-evidence.md`
+- [X] T036 [US3] Run the US3 E2E per the E2E run rules: `sleep infinity | uv run pytest "backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade" "backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it" -v -s --pdb 2>&1 | tee /tmp/029-us3.log`; record the passing run in `specs/029-local-driver-actions/e2e-evidence.md`
 
 **Checkpoint**: no declared action is skipped without an error, and a repeated load repairs a version.
 

@@ -23,9 +23,18 @@ the check fails the step with the missing files error. No action code runs.
 These deployments are created in the module-scoped ``check_environment_id``,
 whose deletion deletes them.
 
+User story 3 (``test_missing_registration_fails_and_loading_again_repairs_it``)
+reuses the deployment of user story 1 at ``UPGRADE_VERSION``, so it runs after
+that test in the same session. It deletes the Prefect deployments of the
+driver version's actions. A version change to ``CREATE_VERSION`` then returns
+a failed task whose ``hook:upgrade:core`` step names the action without a
+registered flow, and the deployment keeps ``UPGRADE_VERSION``. Loading the
+driver again registers the actions, and the same request runs the upgrade
+action. The test deletes the deployment at its end.
+
 The module-scoped ``local_actions_deployment`` keeps the deployment for the
-later tests of the module (user story 3 reuses it at ``UPGRADE_VERSION``) and
-deletes it when the module ends. Every create and version change pins the
+later tests of the module and deletes it when the module ends, unless a test
+deleted it already. Every create and version change pins the
 driver version, so the latest-wins rule cannot bind the deployment to another
 driver version (research R-011).
 
@@ -42,6 +51,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import kr8s.asyncio
@@ -55,6 +65,7 @@ from prefect.client.schemas.filters import (
     DeploymentFilterTags,
     LogFilter,
     LogFilterFlowRunId,
+    LogFilterTimestamp,
 )
 from styrmin_backend.services.driver.hash import compute_driver_directory_fingerprint
 from styrmin_sdk import StyrminClient
@@ -402,10 +413,28 @@ async def _action_deployment(
     return deployments[0]
 
 
+async def _registered_action_deployments(
+    prefect: PrefectClient,
+) -> list[DeploymentResponse]:
+    """The Prefect deployments of the actions of the driver version loaded from ``LOCAL_ACTIONS_PATH``."""
+    return await prefect.read_deployments(
+        deployment_filter=DeploymentFilter(
+            tags=DeploymentFilterTags(all_=[DIRECTORY_TAG])
+        )
+    )
+
+
 async def _action_log_messages(
-    prefect: PrefectClient, action: str, *, directory: str = LOCAL_ACTIONS_PATH
+    prefect: PrefectClient,
+    action: str,
+    *,
+    directory: str = LOCAL_ACTIONS_PATH,
+    since: datetime | None = None,
 ) -> list[str]:
-    """The log messages of the flow runs of ``action`` of the driver version loaded from ``directory``."""
+    """The log messages of the flow runs of ``action`` of the driver version loaded from ``directory``.
+
+    With ``since``, only the messages logged after that time.
+    """
     deployment = await _action_deployment(prefect, action, directory=directory)
     runs = await prefect.read_flow_runs(
         deployment_filter=DeploymentFilter(id=DeploymentFilterId(any_=[deployment.id]))
@@ -414,7 +443,8 @@ async def _action_log_messages(
         return []
     logs = await prefect.read_logs(
         log_filter=LogFilter(
-            flow_run_id=LogFilterFlowRunId(any_=[run.id for run in runs])
+            flow_run_id=LogFilterFlowRunId(any_=[run.id for run in runs]),
+            timestamp=LogFilterTimestamp(after_=since) if since else None,
         )
     )
     return [log.message for log in logs]
@@ -438,13 +468,18 @@ async def _default_action_image(
     return str(image)
 
 
-async def _wait_for_markers(vcluster: dict, *actions: str) -> None:
-    """Read the flow run logs of each action until they contain its marker."""
+async def _wait_for_markers(
+    vcluster: dict, *actions: str, since: datetime | None = None
+) -> None:
+    """Read the flow run logs of each action until they contain its marker.
+
+    With ``since``, only a marker logged after that time counts.
+    """
     async with _prefect(vcluster) as prefect:
         for action in actions:
             deadline = time.monotonic() + LOG_TIMEOUT
             while True:
-                messages = await _action_log_messages(prefect, action)
+                messages = await _action_log_messages(prefect, action, since=since)
                 if any(marker(action) in message for message in messages):
                     break
                 if time.monotonic() >= deadline:
@@ -603,3 +638,88 @@ async def test_driver_missing_from_the_action_image_fails_with_the_missing_files
         image = await _default_action_image(prefect, "pre_setup", directory=path)
     assert path in error, error
     assert f"in the image {image}" in error, error
+
+
+@pytest.mark.api_only(reason=API_ONLY_REASON)
+async def test_missing_registration_fails_and_loading_again_repairs_it(
+    local_actions_deployment: LocalActionsDeployment,
+    vcluster: dict,
+) -> None:
+    """User story 3: an action without a registered flow fails its hook step, and loading again repairs it (FR-005 to FR-007).
+
+    Runs after ``test_local_driver_actions_run_on_create_and_upgrade`` in the
+    same session, which leaves the deployment running at ``UPGRADE_VERSION``.
+    The version change back to ``CREATE_VERSION`` runs the upgrade hook.
+    """
+    client = local_actions_deployment.client
+    deployment_id = local_actions_deployment.deployment_id
+    driver_version_id = local_actions_deployment.driver_version_id
+
+    deployment = await client.deployments.get(deployment_id)
+    if (
+        deployment.status != "running"
+        or deployment.application_version != UPGRADE_VERSION
+    ):
+        pytest.fail(
+            f"Deployment {deployment_id} must be running at {UPGRADE_VERSION}, but it is "
+            f"{deployment.status} at {deployment.application_version}. Run "
+            "test_local_driver_actions_run_on_create_and_upgrade before this test in "
+            "the same session: it creates the deployment and upgrades it."
+        )
+
+    # Delete the registered flows of the driver version's actions.
+    async with _prefect(vcluster) as prefect:
+        registered = await _registered_action_deployments(prefect)
+        assert len(registered) == 3, [item.name for item in registered]
+        for item in registered:
+            await prefect.delete_deployment(item.id)
+        assert await _registered_action_deployments(prefect) == []
+
+    # The version change fails at the upgrade hook step and changes nothing.
+    failed = await client.deployments.update_version(
+        deployment_id, CREATE_VERSION, driver_version_id=driver_version_id
+    )
+    assert failed is not None, f"the version change to {CREATE_VERSION} started no task"
+    assert failed.type_ == "upgrade_instance", failed
+    assert failed.status == "failed", failed
+    assert failed.message is not None, failed
+    assert "Load the driver again" in failed.message, failed.message
+    failed_task = await client.tasks.get(str(failed.id))
+    error = _failed_step_error(failed_task, UPGRADE_CORE_HOOK)
+    assert f"Driver version {DRIVER_NAME} " in error, error
+    assert "the action upgrade " in error, error
+    assert "the upgrade hook" in error, error
+    assert "mode core" in error, error
+    assert "Load the driver again" in error, error
+    assert f"styrminctl drivers load-local-version {LOCAL_ACTIONS_PATH}" in error, error
+    assert "request the change again" in error, error
+    deployment = await client.deployments.get(deployment_id)
+    assert deployment.application_version == UPGRADE_VERSION, deployment
+    assert deployment.status == "running", deployment
+    assert str(deployment.application_driver_version_id) == driver_version_id
+
+    # Loading the driver again registers its actions. The files did not
+    # change, so the load returns the same driver version.
+    reloaded = await client.drivers.load_local_version(LOCAL_ACTIONS_PATH)
+    assert str(reloaded.id) == driver_version_id, reloaded
+    async with _prefect(vcluster) as prefect:
+        registered = await _registered_action_deployments(prefect)
+    assert len(registered) == 3, [item.name for item in registered]
+
+    # The same request now runs the upgrade action and changes the version.
+    since = datetime.now(UTC)
+    repaired = await client.deployments.update_version(
+        deployment_id, CREATE_VERSION, driver_version_id=driver_version_id
+    )
+    assert repaired is not None, (
+        f"the version change to {CREATE_VERSION} started no task"
+    )
+    assert repaired.id != failed.id, repaired
+    repaired_task = await _wait_for_task_end(client, str(repaired.id))
+    assert repaired_task.type_ == "upgrade_instance", _describe(repaired_task)
+    _assert_steps_succeeded(repaired_task, UPGRADE_CORE_HOOK)
+    await _wait_for_running(client, deployment_id, CREATE_VERSION)
+    await _wait_for_markers(vcluster, "upgrade", since=since)
+
+    deleted = await client.deployments.delete(deployment_id)
+    assert deleted.type_ == "delete_deployment", deleted
