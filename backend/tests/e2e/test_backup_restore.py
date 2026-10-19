@@ -186,6 +186,14 @@ ENVIRONMENT_CLONE_TIMEOUT_SECONDS = (
     + DERIVED_STATUS_TIMEOUT_SECONDS
 )
 
+# A *configuration-only* clone (empty selection) reaching terminal: a capture
+# with no constituents derives ``COMPLETED`` on its first read, the environment
+# is created, and there are no counterparts and no restores. Only the clone
+# flow's own poll interval stands between registration and terminality, so this
+# is deliberately far below ``ENVIRONMENT_CLONE_TIMEOUT_SECONDS`` — a
+# config-only clone taking many minutes is a defect, not slowness.
+CONFIG_ONLY_CLONE_TIMEOUT_SECONDS = 300.0
+
 # Pods in the *cloned* namespace becoming ready after the cross-target restore.
 # Recovery replaces the Velero-restored source-named CR with the counterpart's
 # own CR body and Flux rolls the workload, so this is a fresh install's worth of
@@ -2308,7 +2316,7 @@ async def test_environment_clone_lifecycle(
     velero_ready: None,  # noqa: ARG001 — ensures Velero is up before the capture
     vcluster: dict,
 ) -> None:
-    """One clone of a live environment, then its discard and a re-clone.
+    """One clone of a live environment, its discard, a re-clone and a partial clone.
 
     Covers the whole 010-environment-clone feature in one dual-entrypoint node
     (Constitution §V "reuse before you boot", research D12): US1 (running,
@@ -2330,8 +2338,11 @@ async def test_environment_clone_lifecycle(
 
     030-clone-service-aliases (#530): after the first clone, each counterpart's
     namespace holds one alias for each service of the new environment's other
-    deployments (SC-001). The re-clone selects only the primary, and no alias in
-    its environment names a namespace outside that environment (SC-002).
+    deployments (SC-001). The re-clone of step 11 selects no deployment, so it
+    restores nothing. A partial clone under its own name (step 12) then selects
+    only the primary: no alias in its environment names a namespace outside that
+    environment, and the primary's counterpart has no alias for the peer's
+    service (SC-002).
 
     Success criteria asserted here:
 
@@ -2344,15 +2355,17 @@ async def test_environment_clone_lifecycle(
       built from.
     * **SC-003** — every source deployment considered is attributed exactly
       once: both selected ones ``CLONED`` with a counterpart and a restore; the
-      re-clone selects only the primary, which is ``CLONED``, and gives the peer
-      ``SKIPPED`` with the not-selected reason. Internal deployments are omitted
-      entirely (not reported as skips), which is what makes set *equality* the
-      right assertion.
+      configuration-only re-clone's empty selection gives each ``SKIPPED`` with
+      the not-selected reason; the partial clone gives the primary ``CLONED``
+      and the peer ``SKIPPED`` with the not-selected reason. Internal
+      deployments are omitted entirely (not reported as skips), which is what
+      makes set *equality* the right assertion.
     * **SC-004** — the clone holds the data as of the capture, not the source
       mutation written after it, proved by an **authenticated write** against
       the counterpart (step 9 explains why ``/count`` is that write).
     * **SC-005** — deleting the created environment discards the clone and frees
-      its name: a second clone under the same name is accepted and materialises.
+      its name: a configuration-only re-clone under the same name is accepted
+      and materialises.
 
     Also FR-006: the created environment's config is the captured config with
     one field cleared and the override merged over the rest, asserted as an
@@ -2954,13 +2967,17 @@ async def test_environment_clone_lifecycle(
             f"the finished outcome as history; got {discarded.status!r}"
         )
 
-        # 11. SC-005 — the name is free again and a re-clone materialises. It
-        #     selects only the primary, to check that a clone of some deployments
-        #     reaches no deployment of the source (SC-002 of spec 030).
+        # 11. SC-005 — the name is free again and a re-clone materialises.
+        #     Deliberately a *configuration-only* re-clone (empty selection, a
+        #     legal request distinct from omitting the argument): the restore
+        #     path is already proven by the first cycle, and a second full cycle
+        #     would put this node roughly 2.5 clone-cycles deep on the heaviest
+        #     shard (research D12). What SC-005 needs is that the name is free,
+        #     the record is created, and the environment row exists.
         reclone = await scenario_driver.clone_environment(
             environment_id=scenario_environment_id,
             name=clone_name,
-            deployment_ids=[primary_deployment_id],
+            deployment_ids=[],
         )
         assert reclone.id != clone.id
         assert reclone.name == clone_name, (
@@ -2969,21 +2986,18 @@ async def test_environment_clone_lifecycle(
         )
         rematerialised = await scenario_driver.wait_for_environment_clone(
             environment_clone_id=reclone.id,
-            max_wait=ENVIRONMENT_CLONE_TIMEOUT_SECONDS,
+            max_wait=CONFIG_ONLY_CLONE_TIMEOUT_SECONDS,
         )
-        recreated_environment_id = rematerialised.created_environment_id
-        # Recorded before the status check, so that the ``finally`` block deletes
-        # the re-clone's counterpart even when the re-clone fails.
-        if recreated_environment_id is not None:
-            created_environment_ids.append(recreated_environment_id)
         assert rematerialised.status == "COMPLETED", (
-            "the selected primary cloned and restored cleanly, so the derived "
-            f"status must be COMPLETED; got {rematerialised.status!r} with events "
+            "a configuration-only clone has nothing that can fail, so it must "
+            f"reach COMPLETED; got {rematerialised.status!r} with events "
             f"{rematerialised.clone_errors!r}"
         )
+        recreated_environment_id = rematerialised.created_environment_id
         assert recreated_environment_id is not None, (
             "the re-clone must materialise an environment (SC-005)"
         )
+        created_environment_ids.append(recreated_environment_id)
         assert recreated_environment_id != created_environment_id, (
             "the re-clone must create a new environment, not resurrect the "
             "discarded one"
@@ -2992,73 +3006,129 @@ async def test_environment_clone_lifecycle(
             environment_id=recreated_environment_id
         )
         assert recreated.name == clone_name
-        # Both source deployments are accounted for: the primary is cloned and
-        # the peer, which the selection leaves out, is a skip (SC-003).
+        # Coverage identity holds for a configuration-only clone too: both
+        # source deployments are accounted for, neither is included.
         reclone_results = _clone_results_by_deployment(rematerialised)
         assert set(reclone_results) == {
             primary_deployment_id,
             peer_deployment_id,
-        }, f"SC-003 must hold for a partial clone too: {set(reclone_results)!r}"
-        recloned_result = reclone_results[primary_deployment_id]
-        assert recloned_result.outcome == "CLONED", (
-            f"the selected primary must be cloned, got {recloned_result.outcome!r} "
-            f"({recloned_result.reason!r})"
+        }, f"SC-003 must hold for a config-only clone too: {set(reclone_results)!r}"
+        assert all(
+            result.outcome == "SKIPPED" for result in reclone_results.values()
+        ), (
+            "an empty selection includes nothing, so every source deployment is "
+            f"a skip: {[(r.deployment_id, r.outcome) for r in reclone_results.values()]!r}"
         )
-        assert recloned_result.deployment_name == primary_name
-        assert recloned_result.restore_id is not None, (
+        for deployment_id, name in (
+            (primary_deployment_id, primary_name),
+            (peer_deployment_id, peer_name),
+        ):
+            skipped_result = reclone_results[deployment_id]
+            assert skipped_result.deployment_name == name, (
+                "a skip is attributed by deployment name (SC-003); got "
+                f"{skipped_result.deployment_name!r}"
+            )
+            assert skipped_result.reason == CLONE_REASON_NOT_SELECTED, (
+                f"unexpected skip reason {skipped_result.reason!r}"
+            )
+            assert skipped_result.counterpart_deployment_id is None, (
+                "an unselected deployment must not get a counterpart"
+            )
+
+        # 12. SC-002 of spec 030 — a clone of some deployments reaches no
+        #     deployment of the source. This clone selects only the primary, so it
+        #     restores one deployment. It takes its own name, because the
+        #     environment that step 11 created still holds ``clone_name``.
+        partial_clone_name = f"clone-partial-{suffix}"
+        partial_clone = await scenario_driver.clone_environment(
+            environment_id=scenario_environment_id,
+            name=partial_clone_name,
+            deployment_ids=[primary_deployment_id],
+        )
+        partial_finished = await scenario_driver.wait_for_environment_clone(
+            environment_clone_id=partial_clone.id,
+            max_wait=ENVIRONMENT_CLONE_TIMEOUT_SECONDS,
+        )
+        partial_environment_id = partial_finished.created_environment_id
+        # Recorded before the status check, so that the ``finally`` block deletes
+        # the partial clone's counterpart even when the partial clone fails.
+        if partial_environment_id is not None:
+            created_environment_ids.append(partial_environment_id)
+        assert partial_finished.status == "COMPLETED", (
+            "the selected primary cloned and restored cleanly, so the derived "
+            f"status must be COMPLETED; got {partial_finished.status!r} with events "
+            f"{partial_finished.clone_errors!r}"
+        )
+        assert partial_environment_id is not None, (
+            "a COMPLETED clone must have created its environment"
+        )
+        # Both source deployments are accounted for: the primary is cloned and
+        # the peer, which the selection leaves out, is a skip (SC-003).
+        partial_results = _clone_results_by_deployment(partial_finished)
+        assert set(partial_results) == {
+            primary_deployment_id,
+            peer_deployment_id,
+        }, f"SC-003 must hold for a partial clone too: {set(partial_results)!r}"
+        partial_cloned_result = partial_results[primary_deployment_id]
+        assert partial_cloned_result.outcome == "CLONED", (
+            "the selected primary must be cloned, got "
+            f"{partial_cloned_result.outcome!r} ({partial_cloned_result.reason!r})"
+        )
+        assert partial_cloned_result.deployment_name == primary_name
+        assert partial_cloned_result.restore_id is not None, (
             "a CLONED entry must name the cross-target restore carrying its data"
         )
-        recloned_counterpart_id = recloned_result.counterpart_deployment_id
-        assert recloned_counterpart_id is not None, (
+        partial_counterpart_id = partial_cloned_result.counterpart_deployment_id
+        assert partial_counterpart_id is not None, (
             "a CLONED entry must name the counterpart deployment it created"
         )
-        skipped_result = reclone_results[peer_deployment_id]
-        assert skipped_result.outcome == "SKIPPED", (
+        partial_skipped_result = partial_results[peer_deployment_id]
+        assert partial_skipped_result.outcome == "SKIPPED", (
             "the selection leaves the peer out, so the peer must be a skip; got "
-            f"{skipped_result.outcome!r} ({skipped_result.reason!r})"
+            f"{partial_skipped_result.outcome!r} ({partial_skipped_result.reason!r})"
         )
-        assert skipped_result.deployment_name == peer_name, (
+        assert partial_skipped_result.deployment_name == peer_name, (
             "a skip is attributed by deployment name (SC-003); got "
-            f"{skipped_result.deployment_name!r}"
+            f"{partial_skipped_result.deployment_name!r}"
         )
-        assert skipped_result.reason == CLONE_REASON_NOT_SELECTED, (
-            f"unexpected skip reason {skipped_result.reason!r}"
+        assert partial_skipped_result.reason == CLONE_REASON_NOT_SELECTED, (
+            f"unexpected skip reason {partial_skipped_result.reason!r}"
         )
-        assert skipped_result.counterpart_deployment_id is None, (
+        assert partial_skipped_result.counterpart_deployment_id is None, (
             "an unselected deployment must not get a counterpart"
         )
 
         # SC-002 of spec 030. The restore writes its aliases before it completes, so
         # one read after the clone completes is enough.
-        recreated_namespaces = {
+        partial_namespaces = {
             f"styrmin-{deployment.id}"
             for deployment in await client.deployments.list(
-                recreated_environment_id, include_internal=True
+                partial_environment_id, include_internal=True
             )
         }
-        recloned_namespace = f"styrmin-{recloned_counterpart_id}"
-        assert recloned_namespace in recreated_namespaces, (
-            "the re-clone's environment must list its counterpart "
-            f"{recloned_counterpart_id}; got {sorted(recreated_namespaces)!r}"
+        partial_counterpart_namespace = f"styrmin-{partial_counterpart_id}"
+        assert partial_counterpart_namespace in partial_namespaces, (
+            "the partial clone's environment must list its counterpart "
+            f"{partial_counterpart_id}; got {sorted(partial_namespaces)!r}"
         )
-        recreated_aliases = {
+        partial_aliases = {
             namespace: await service_aliases(kubeconfig_path, namespace)
-            for namespace in recreated_namespaces
+            for namespace in partial_namespaces
         }
         aliases_outside = sorted(
             (namespace, alias)
-            for namespace, aliases in recreated_aliases.items()
+            for namespace, aliases in partial_aliases.items()
             for alias in aliases
-            if alias.target_namespace not in recreated_namespaces
+            if alias.target_namespace not in partial_namespaces
         )
         assert not aliases_outside, (
-            "no alias in the re-clone's environment may point to a namespace "
+            "no alias in the partial clone's environment may point to a namespace "
             "outside it (SC-002 of spec 030); got (namespace, alias): "
             f"{aliases_outside!r}"
         )
         peer_aliases = sorted(
             alias
-            for alias in recreated_aliases[recloned_namespace]
+            for alias in partial_aliases[partial_counterpart_namespace]
             if alias.name == peer_service_name
         )
         assert not peer_aliases, (
@@ -3069,7 +3139,7 @@ async def test_environment_clone_lifecycle(
         # The counterpart must leave RESTORING before the ``finally`` block deletes
         # its environment, as the peer's counterpart does in step 9.
         await _wait_for_sdk_deployment_running(
-            client, recloned_counterpart_id, DEPLOYMENT_RUNNING_TIMEOUT_SECONDS
+            client, partial_counterpart_id, DEPLOYMENT_RUNNING_TIMEOUT_SECONDS
         )
     finally:
         # Every cleanup step below is best-effort *except* the retention revert:
