@@ -13,8 +13,7 @@ With this change:
 
 Not decided yet, for the maintainer:
 
-- three answers that the spec gave without the maintainer (see "Autonomous answers for the maintainer to confirm");
-- whether the change also needs a `security` changelog fragment (critique E3);
+- the answer about the fix for #530 that the spec gave without the maintainer (see "Autonomous answers for the maintainer to confirm"). The review of PR #536 settled the other two answers and the `security` fragment (see "Changes after the review of PR #536");
 - whether to print the target namespace in the CLI success line, a critique follow-up that this change does not apply (critique P2).
 
 Every E2E node that this branch modifies and that is not skipped passed locally. The two `api-chromium` nodes that run the environment restore and the environment clone also passed locally (see "Test results").
@@ -26,28 +25,28 @@ The arguments are removed with no deprecation period, as #472 did for other inpu
 - GraphQL: the mutation is now `createRestore(backupId: UUID!)`. The arguments `targetNamespace` and `targetInstanceId` are removed, and GraphQL validation refuses a request that still sends either of them. The `Restore` type keeps `targetNamespace` and `targetInstanceId` as readable fields.
 - Python SDK: `BackupResource.create_restore()` takes only `backup_id`. A caller that passes `target_namespace` or `target_instance_id` gets a Python `TypeError` ([contracts/sdk-and-cli.md](contracts/sdk-and-cli.md)).
 - `styrminctl backups restore`: the option `--target-namespace` is removed, and Cyclopts rejects it as an unknown option.
-- `styrminctl backups restore <backup-id>` with `--target-deployment`, `--target-deployment-id` or `--target-instance-id` is refused before any call to the server, with exit code 1. Before this change, `cli/README.md` showed `styrminctl backups restore <backup-id> --target-deployment my-app` as its example, so scripts that copied it fail after the upgrade. The error reads, for `--target-deployment`:
+- `styrminctl backups restore <backup-id>` with `--target-deployment`, `--target-deployment-id`, `--target-instance-id` or `--environment` is refused before any call to the server, with exit code 1. Before this change, `cli/README.md` showed `styrminctl backups restore <backup-id> --target-deployment my-app` as its example, so scripts that copied it fail after the upgrade. The error reads, for `--target-deployment`:
 
   ```text
-  --target-deployment, --target-deployment-id and --target-instance-id work only with --last. A backup is restored into the deployment it was taken of. Run the command again without --target-deployment.
+  --target-deployment, --target-deployment-id, --target-instance-id and --environment work only with --last. A backup is restored into the deployment it was taken of. Run the command again without --target-deployment.
   ```
 
-  With `--last`, the three options keep choosing whose backup history the newest completed backup comes from.
+  With `--last`, the three target options keep choosing whose backup history the newest completed backup comes from, and `--environment` keeps narrowing `--target-deployment`.
 - Client and server versions must match. Upgrade `styrminctl`, the Python SDK and the server together, and reload web pages that were open during the upgrade:
-  - a client from before this change sends `targetNamespace` on every restore, `--last` included, and the new server refuses it;
-  - a server from before this change requires `targetNamespace`, and refuses a restore from a client after this change.
+  - a client from before this change sends `targetNamespace` on every restore, `--last` included. The new server refuses it with a message that starts with "createRestore no longer takes the argument targetNamespace" and says to upgrade the client or reload the page;
+  - a server from before this change requires `targetNamespace`, and refuses a restore from a client after this change. The new Python SDK and `styrminctl` then raise `IncompatibleServerError`, which says to upgrade the server.
 - No replacement: apart from an environment clone, Styrmin offers no way to restore a backup into another deployment until "deployment clone" ships. That is a separate feature with no issue yet.
 
-The changelog fragments [`changelog/532.removed.md`](../../changelog/532.removed.md) and [`changelog/532.fixed.md`](../../changelog/532.fixed.md) state these changes for users.
+The changelog fragments [`changelog/532.security.md`](../../changelog/532.security.md), [`changelog/532.removed.md`](../../changelog/532.removed.md) and [`changelog/532.fixed.md`](../../changelog/532.fixed.md) state these changes for users. The upgrade steps are under "Migration" in [the docs changelog](../../docs/docs/changelog.md).
 
 ## Changes to the restore service, the web app and the documentation
 
 - [`backend/styrmin_backend/services/backup/service.py`](../../backend/styrmin_backend/services/backup/service.py):
   - the new `resolve_restore_target` returns the deployment that receives a restore, its namespace `styrmin-<deployment id>` and its active instance, or no instance when the deployment has none;
   - `create_restore` no longer takes `target_namespace` or `target_instance_id`, and stores the resolved values on the `Restore` row;
-  - the in-flight restore guard `find_in_flight_restore` keeps its code; only its docstring changes.
+  - the in-flight restore guard `find_in_flight_restore` takes only the deployment id, and the repository filters the in-flight statuses in SQL (see "Changes after the review of PR #536").
 - The `createRestore` mutation, the environment restore fan-out ([`environment.py`](../../backend/styrmin_backend/services/backup/environment.py)) and the environment clone ([`clone.py`](../../backend/styrmin_backend/workflows/templates/clone.py)) read `restore.target_namespace` instead of building or passing a namespace.
-- The Backups tab sends only `backupId`. The Restore dialog still shows `styrmin-<deployment id>` in its read-only "Target Namespace" field.
+- The Backups tab sends only `backupId`. The Restore dialog shows, as text, the deployment and the namespace `styrmin-<deployment id>` that the backup is restored into.
 - No database change: the `Restore` table keeps its columns. A `Restore` row that an earlier release created keeps the namespace it recorded.
 - Documentation updated in the same change:
   - [`cli/README.md`](../../cli/README.md) and the [`styrminctl` reference](../../docs/docs/reference/styrminctl.md);
@@ -94,15 +93,44 @@ Tests outside E2E:
 The spec gave these answers without the maintainer, because the PRD did not cover them. Each can be confirmed or rejected on its own. The quotes are from [spec.md, Clarifications](spec.md#clarifications), session "autonomous, while writing this spec".
 
 - The fix for #530 (#531) on `develop`. Question: "`develop` moved from `a5ec9446` to `7f0455be` after the PRD was written, with the fix for #530 (#531). Does that change the fix?" Answer: "No. #531 is the change in which the PRD's "second effect" (an in-place restore into another namespace ends with no service aliases) was found. After this fix the namespaces of a restore differ exactly when its deployment ids differ, so that effect cannot occur."
-- `--environment` with a backup id. Question: "`styrminctl backups restore` also takes `--environment`, which only tells `--target-deployment` which environment a deployment name belongs to. Is it refused with a backup id?" Answer: "No. The PRD names three target options. `--environment` selects no target on its own, so it keeps its current meaning and has no effect with a backup id alone."
-- A deployment with no active instance. Question: "What does the `Restore` row record when the backup's deployment has no active instance?" Answer: "No target instance, as a cross-target restore into a counterpart without an active instance already does. The restore itself proceeds as today."
+- `--environment` with a backup id. The spec answered: "No. The PRD names three target options. `--environment` selects no target on its own, so it keeps its current meaning and has no effect with a backup id alone." The review of PR #536 reversed this answer: `styrminctl backups restore` now refuses a backup id combined with `--environment`, because the option was ignored without a message.
+- A deployment with no active instance. The spec answered: "No target instance, as a cross-target restore into a counterpart without an active instance already does. The restore itself proceeds as today." The review of PR #536 made `styrminctl backups restore --last` follow this answer for every target option.
 
-## Open question: a security changelog fragment (critique E3)
+## Security changelog fragment (critique E3, settled by the review of PR #536)
 
-Before this change, a user with the `READ_WRITE` role could send any namespace to `createRestore`, and the restore flow deletes the namespace it receives. The agent chart's ClusterRole allows `delete` on namespaces in every namespace ([`helm/agent/templates/roles.yaml`](../../helm/agent/templates/roles.yaml)). The spec states this from the code; it was not run, and which service account the restore Job runs as was not checked ([spec.md, Context](spec.md#context)).
+Before this change, a user with the `READ_WRITE` role could send any namespace to `createRestore`, and the restore flow deletes the namespace it receives. The review of PR #536 checked which service account the restore Job runs as:
 
-The PRD files the change as `removed` and `fixed`, and this change keeps those two fragment types. The critique asks whether the change should also carry a `security` changelog fragment, or other handling, and leaves the decision to the maintainer ([critique E3](critiques/critique-20261019-1.md)).
+- the restore Job uses `styrmin-service-account` ([`config.py`](../../backend/styrmin_backend/config.py), [`catalogue.py`](../../backend/styrmin_backend/workflows/catalogue.py), [`helm/agent/values.yaml`](../../helm/agent/values.yaml));
+- a ClusterRoleBinding gives that account a ClusterRole that allows `delete` on namespaces ([`helm/agent/templates/roles.yaml`](../../helm/agent/templates/roles.yaml)).
+
+[`changelog/532.security.md`](../../changelog/532.security.md) records the role, the effect and the affected versions. `createRestore` took `targetNamespace` from v0.1.0, and is gated on `READ_WRITE` from v0.1.19, the first release that contains commit `7d7f14f3`, which added roles. These versions come from `git tag --contains`; the fix was not run against them.
 
 ## Critique follow-up not applied: print the target namespace in the CLI success line (P2)
 
 After this change, `styrminctl backups restore <backup-id>` prints only the restore's name, id and status, so the user does not see which deployment receives the restore without running `styrminctl backups restore-get`. The critique suggests printing the target namespace in the success line. It was not applied, because it is outside the PRD, and is listed for the maintainer as a follow-up ([critique P2](critiques/critique-20261019-1.md)).
+
+## Changes after the review of PR #536
+
+Each item names the review finding it answers. The commits are on the branch after `8df355fe`.
+
+- Finding 1, security fragment: `changelog/532.security.md` (see "Security changelog fragment").
+- Finding 3, the restore flow trusted its `target_namespace` parameter: `execute_restore_workflow` now fails the restore, before it builds or dispatches anything, unless the parameter and the namespace recorded on the `Restore` row are both `styrmin-<deployment_id>`. This covers a flow run started through the Prefect API and a restore that an earlier release queued. Whether a Styrmin user can reach the Prefect API was not checked. Tests: `test_a_restore_into_another_namespace_fails_before_the_cluster_is_changed` in `backend/tests/unit/workflows/test_restore_workflow_failure_handler.py`.
+- Finding 6, `--last` with a deployment refused a deployment without an active instance: `--last` now resolves only the deployment id, so all three target forms and a bare backup id restore into a deployment without an active instance, as the server does.
+- Finding 7, `--environment` with a backup id was ignored without a message: it is now refused like the target options.
+- Finding 8, no message for a version mismatch:
+  - the server reports, for `targetNamespace` and `targetInstanceId` on `createRestore`, that the client is older than the server and to upgrade it or reload the page (`backend/styrmin_backend/api/removed_arguments.py`);
+  - the Python SDK raises `IncompatibleServerError` when a server from before #532 requires `targetNamespace`;
+  - `docs/docs/changelog.md` has a section with "What's new" and "Migration".
+- Finding 13, commits that did not build: the four commits that changed the server, the clients and the E2E drivers, and the next commit, which updated the CLI tests, are now one commit, `5ab09621`. Its backend restore tests, CLI tests and SDK tests pass at that commit. Each commit added for this review passes, at that commit, the test files it changes.
+- Finding 14: `find_in_flight_restore` takes only the deployment id and builds the namespace with `get_kubernetes_reference`; `RestoreTarget.namespace` is a property computed from the deployment id.
+- Finding 15: `RestoreRepository.get_non_terminal_by_target_namespace` filters `PENDING` and `IN_PROGRESS` in SQL, and replaces `get_by_target_namespace`.
+- Finding 16: after the restore, the E2E page object checks that the new restore row, which shows the namespace the server recorded, shows the namespace the dialog showed.
+- Finding 17: `global_context_dict` in `backend/tests/functional/graphql/seeds.py` replaces the three copies.
+- Finding 19, copy:
+  - the Restore dialog shows the deployment and the namespace as text;
+  - for a deployment without an active instance, the web warning and the `styrminctl` confirmation say that the deployment has no active instance and that the restore does not give it one;
+  - the help of `--yes` and `--last` names the backup taken at another application version;
+  - the help of the target options says that they choose which backups `--last` picks from;
+  - `changelog/532.removed.md` stays one line, because `rumdl` lints the fragments and `dev/guidelines/changelog.md` asks for one line. It links to the upgrade steps, which the docs changelog lists under "Migration";
+  - "Restore already in progress" now says to wait until that restore completes or fails, and where to view its status.
+- Finding 20: the user glossary has "Cross-target restore" and "In-place restore". The `CLAUDE.md` pointer and the line-reference corrections stay in this PR.
