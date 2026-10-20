@@ -1,3 +1,4 @@
+import shlex
 from typing import Any, Literal
 
 from styrmin_backend.services.driver.models.resources.actions import HookKind
@@ -39,18 +40,21 @@ class MissingDriverSpecificationError(DriverError):
     """A piece of driver data is missing."""
 
 
-def describe_action_image(image: str | None, work_pool: str | None) -> str:
-    """The words that name the action's image in the errors of the local driver check.
+def describe_agent_pod(agent_pod: str | None) -> str:
+    """The words that name the pod where an action runs, in the errors of the local driver check.
 
-    ``the image <image>`` when the image is known; otherwise ``the default image
-    of the work pool <work_pool>`` when the work pool is known; otherwise
-    ``the image of this action's Job``. Each reads correctly after "in".
+    ``the Styrmin agent pod <agent_pod>`` when the pod is known; otherwise
+    ``the Styrmin agent pod``. The agent's Prefect process worker runs every
+    action as a process in the agent pod; an action's ``image:`` has no
+    effect, so the errors do not name an image.
     """
-    if image:
-        return f"the image {image}"
-    if work_pool:
-        return f"the default image of the work pool {work_pool}"
-    return "the image of this action's Job"
+    return (
+        f"the Styrmin agent pod {agent_pod}" if agent_pod else "the Styrmin agent pod"
+    )
+
+
+def _load_local_command(path: str) -> str:
+    return shlex.join(["styrminctl", "drivers", "load-local-version", path])
 
 
 class DriverFilesNotFoundError(DriverError):
@@ -58,40 +62,37 @@ class DriverFilesNotFoundError(DriverError):
 
     Raised by the check that runs before an action of a driver version loaded
     from a local directory (spec 029, FR-004). ``missing`` holds the missing
-    file names, or the path itself when the directory is missing. ``image`` and
-    ``work_pool`` are ``None`` when the Prefect API does not give them; the
-    message then names the image as :func:`describe_action_image` does.
+    file names, or the path itself when the directory is missing.
+    ``agent_pod`` names the pod where the check ran, or is ``None`` when it is
+    not known.
     """
 
     error_code = "NOT_FOUND"
-    default_message = "The driver files are not in the action's image"
+    default_message = "The driver files are not in the agent pod, where the action runs"
 
     def __init__(
         self,
         *,
         path: str,
-        image: str | None,
         missing: list[str],
-        work_pool: str | None = None,
+        agent_pod: str | None = None,
     ) -> None:
         self.path = path
-        self.image = image
-        self.work_pool = work_pool
         self.missing = missing
+        self.agent_pod = agent_pod
         super().__init__(
-            f"The driver files are not at {path} in "
-            f"{describe_action_image(image, work_pool)}: {', '.join(missing)} not "
-            "found. An action's image must hold the driver at the same path as the "
-            f"Styrmin server. Add the driver to the image at {path}, or load the "
-            "driver from a path that the image holds."
+            f"The driver files are not at {path} in {describe_agent_pod(agent_pod)}: "
+            f"{', '.join(missing)} not found. The agent pod runs every driver action, "
+            "so it must hold the driver at the same path as the Styrmin server. Mount "
+            f"or copy the driver into the agent pod at {path}, or load the driver from "
+            "a path that both the server and the agent pod hold."
         )
 
     @property
     def error_metadata(self) -> dict[str, Any]:
         return {
             "path": self.path,
-            "image": self.image,
-            "work_pool": self.work_pool,
+            "agent_pod": self.agent_pod,
             "missing": self.missing,
         }
 
@@ -102,45 +103,43 @@ class DriverFingerprintMismatchError(DriverError):
     Raised by the check that runs before an action of a driver version loaded
     from a local directory (spec 029, FR-003). ``expected`` and ``actual`` are
     full provenance fingerprints; the message shows their first 7 characters,
-    as driver version labels do. ``image`` and ``work_pool`` are as for
+    as driver version labels do. ``agent_pod`` is as for
     :class:`DriverFilesNotFoundError`.
     """
 
     error_code = "VALIDATION_ERROR"
     default_message = (
-        "The driver files in the action's image differ from the driver version"
+        "The driver files in the agent pod, where the action runs, differ from the "
+        "driver version"
     )
 
     def __init__(
         self,
         *,
         path: str,
-        image: str | None,
         expected: str,
         actual: str,
-        work_pool: str | None = None,
+        agent_pod: str | None = None,
     ) -> None:
         self.path = path
-        self.image = image
-        self.work_pool = work_pool
         self.expected = expected
         self.actual = actual
+        self.agent_pod = agent_pod
         super().__init__(
-            f"The driver files at {path} in {describe_action_image(image, work_pool)} "
-            "are not the files of this driver version: their provenance fingerprint "
-            f"is {actual[:7]}, and "
-            f"the driver version was loaded with {expected[:7]}. The files changed "
-            "after the driver was loaded. Rebuild the image with the files you loaded "
-            f"and load the driver again, or load the driver again from {path} and use "
-            "the new driver version."
+            f"The driver files at {path} in {describe_agent_pod(agent_pod)} are not "
+            "the files of this driver version: their provenance fingerprint is "
+            f"{actual[:7]}, and the driver version was loaded with {expected[:7]}. If "
+            "the files changed after the driver was loaded, load the driver again and "
+            f"use the new driver version: {_load_local_command(path)}. If the agent "
+            f"pod holds other files at {path} than the Styrmin server, give both the "
+            "same files first."
         )
 
     @property
     def error_metadata(self) -> dict[str, Any]:
         return {
             "path": self.path,
-            "image": self.image,
-            "work_pool": self.work_pool,
+            "agent_pod": self.agent_pod,
             "expected": self.expected,
             "actual": self.actual,
         }

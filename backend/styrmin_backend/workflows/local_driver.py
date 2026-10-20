@@ -18,17 +18,15 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
-from prefect.client.orchestration import get_client
 from prefect.logging.loggers import PrefectLogAdapter, flow_run_logger, get_logger
 
 from styrmin_backend.services.driver.exceptions import (
     DriverFilesNotFoundError,
     DriverFingerprintMismatchError,
-    describe_action_image,
 )
 from styrmin_backend.services.driver.hash import compute_driver_directory_fingerprint
 
@@ -44,13 +42,13 @@ def check_local_driver_files(
     spec_file: str,
     values_template: str,
     actions_file: str,
+    agent_pod: str | None = None,
 ) -> str:
     """Check that the driver files at ``directory`` have the provenance fingerprint ``content_hash``.
 
     The pull step :func:`check_local_driver` and
     ``LocalDriverActionWorkflowDefinition.get_function`` run this check before
-    they import the action. The image named in the errors is read from the
-    Prefect API only when the check fails.
+    they import the action.
 
     Args:
         directory: The path that the driver version was loaded from.
@@ -58,6 +56,7 @@ def check_local_driver_files(
         spec_file: The name of the driver specification file.
         values_template: The name of the values template; a missing one hashes as empty.
         actions_file: The name of the actions file.
+        agent_pod: The agent pod that the errors name, when the check runs in it.
 
     Returns:
         The provenance fingerprint of the files at ``directory``.
@@ -73,17 +72,15 @@ def check_local_driver_files(
     """
     path = Path(directory)
     if not path.is_dir():
-        image, work_pool = _action_image()
         raise DriverFilesNotFoundError(
-            path=directory, image=image, work_pool=work_pool, missing=[directory]
+            path=directory, missing=[directory], agent_pod=agent_pod
         )
     missing = [
         name for name in (spec_file, actions_file) if not (path / name).is_file()
     ]
     if missing:
-        image, work_pool = _action_image()
         raise DriverFilesNotFoundError(
-            path=directory, image=image, work_pool=work_pool, missing=missing
+            path=directory, missing=missing, agent_pod=agent_pod
         )
 
     try:
@@ -96,19 +93,16 @@ def check_local_driver_files(
         )
     except FileNotFoundError as exc:
         # The file was removed after the check above.
-        image, work_pool = _action_image()
         name = Path(str(exc.filename)).name if exc.filename else spec_file
         raise DriverFilesNotFoundError(
-            path=directory, image=image, work_pool=work_pool, missing=[name]
+            path=directory, missing=[name], agent_pod=agent_pod
         ) from exc
     if actual != content_hash:
-        image, work_pool = _action_image()
         raise DriverFingerprintMismatchError(
             path=directory,
-            image=image,
-            work_pool=work_pool,
             expected=content_hash,
             actual=actual,
+            agent_pod=agent_pod,
         )
     return actual
 
@@ -122,8 +116,10 @@ def check_local_driver(
 ) -> dict[str, str]:
     """Prefect pull step of an action of a driver version loaded from a local directory.
 
-    Runs :func:`check_local_driver_files`, logs the path and the short
-    provenance fingerprint in the flow run, and returns ``{"directory": directory}``.
+    Runs :func:`check_local_driver_files`, whose errors name this pod (the
+    agent pod, where the agent's process worker runs the action), logs the
+    path and the short provenance fingerprint in the flow run, and returns
+    ``{"directory": directory}``.
     Prefect then changes into ``directory`` and imports the deployment's
     entrypoint from it. The step never imports the actions file.
 
@@ -149,6 +145,7 @@ def check_local_driver(
             spec_file=spec_file,
             values_template=values_template,
             actions_file=actions_file,
+            agent_pod=socket.gethostname(),
         )
     except (DriverFilesNotFoundError, DriverFingerprintMismatchError) as exc:
         _logger().error("%s", exc)
@@ -192,55 +189,3 @@ def _logger() -> PrefectLogAdapter | logging.Logger:
     if flow_run_id is None:
         return _logger_outside_flow_run
     return flow_run_logger(flow_run_id=flow_run_id)
-
-
-def _work_pool_default_image(base_job_template: dict[str, Any]) -> str | None:
-    """The default of the ``image`` variable in a work pool's base job template."""
-    image = (
-        base_job_template.get("variables", {})
-        .get("properties", {})
-        .get("image", {})
-        .get("default")
-    )
-    return str(image) if image else None
-
-
-def _action_image() -> tuple[str | None, str | None]:
-    """The image and the work pool that the errors of the check name (research R-006).
-
-    Reads the flow run in ``PREFECT__FLOW_RUN_ID``, then the ``image`` job
-    variable of its deployment (the action's ``image``), otherwise the default
-    image of its work pool. The action does not run in that image: the agent's
-    process worker runs it as a process in the agent pod.
-    Returns ``(image, work_pool)``; either is ``None`` when the Prefect API
-    does not give it, and the error then names the image as
-    ``describe_action_image`` does. A failure to read the API is logged and
-    returns what was read before it, so it never replaces the error of the check.
-    """
-    flow_run_id = _flow_run_id()
-    if flow_run_id is None:
-        return None, None
-
-    image: str | None = None
-    work_pool_name: str | None = None
-    try:
-        with get_client(sync_client=True) as client:
-            flow_run = client.read_flow_run(flow_run_id)
-            work_pool_name = flow_run.work_pool_name
-            if flow_run.deployment_id is not None:
-                deployment = client.read_deployment(flow_run.deployment_id)
-                work_pool_name = work_pool_name or deployment.work_pool_name
-                image = deployment.job_variables.get("image") or None
-            if image is None and work_pool_name:
-                image = _work_pool_default_image(
-                    client.read_work_pool(work_pool_name).base_job_template
-                )
-    except Exception:  # noqa: BLE001 - the error of the check must reach the hook step
-        _logger().warning(
-            "Could not read from the Prefect API the image to name in the error; the error names %s instead.",
-            describe_action_image(None, work_pool_name),
-            exc_info=True,
-        )
-        return None, work_pool_name
-
-    return (str(image) if image else None), work_pool_name
