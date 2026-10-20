@@ -79,6 +79,62 @@ def _driver_info_columns(info: Info) -> dict[str, object]:
     }
 
 
+def _refuse_two_actions_for_one_hook_and_mode(driver_object: ApplicationDriver) -> None:
+    """Refuse a driver that declares more than one action for one hook and mode.
+
+    The actions of a hook and mode are registered under one key, so a second
+    action would replace the first, or would be skipped when the first is
+    registered already.
+    """
+    by_pair: dict[tuple[str, str], list[str]] = {}
+    for action in driver_object.driver_spec.spec.actions:
+        by_pair.setdefault((action.hook.value, action.mode), []).append(action.name)
+    for (hook, mode), names in by_pair.items():
+        if len(names) > 1:
+            raise DriverLoadingError(
+                f"Driver {driver_object.driver_spec.metadata.name} declares "
+                f"{len(names)} actions for the {hook} hook, mode {mode}: "
+                f"{', '.join(names)}. Styrmin runs one action for each hook and mode. "
+                "Keep one of them, or call the others from it, then load the driver "
+                "again."
+            )
+
+
+def _refuse_local_actions_that_the_check_cannot_cover(
+    driver_object: ApplicationDriver, source: LocalSource
+) -> None:
+    """Refuse a local driver with actions whose path or action locations the check cannot cover (spec 029)."""
+    if "{" in source.path or "}" in source.path:
+        raise DriverLoadingError(
+            f"Driver path {quoted(source.path)} is refused: it contains '{{' or '}}', "
+            "and the driver declares actions. Prefect fills in '{{ ... }}' templates "
+            "in the path before the action checks the driver files. Load the driver "
+            "from a path without '{' or '}'."
+        )
+    if not source.path.startswith("/"):
+        raise DriverLoadingError(
+            f"Driver path {quoted(source.path)} is refused: it is a relative path, "
+            "and the driver declares actions. The Styrmin agent runs each action from "
+            "a temporary working folder, where a relative path does not lead to the "
+            "driver. Load the driver from an absolute path, such as "
+            f"/styrmin/drivers/{driver_object.driver_spec.metadata.name}."
+        )
+    actions_file = styrmin_config.SETTINGS.driver.actions_code_file
+    for action in driver_object.driver_spec.spec.actions:
+        module, function = action.location.split("::")
+        if module != actions_file:
+            raise DriverLoadingError(
+                f"Action {action.name} of the driver loaded from {quoted(source.path)} "
+                f"is refused: its location {action.location} is not in "
+                f"{actions_file}. Before an action of a driver loaded from a local "
+                f"directory runs, Styrmin checks only the driver specification, the "
+                f"values template and {actions_file}, so the code of another file "
+                f"could change without the check noticing. Move the function to "
+                f"{actions_file}, set the location to {actions_file}::{function}, and "
+                "load the driver again."
+            )
+
+
 async def ensure_action_registrations(
     driver_object: ApplicationDriver,
     prefect_manager: PrefectManager,
@@ -98,23 +154,28 @@ async def ensure_action_registrations(
         int: The number of actions registered.
 
     Raises:
-        DriverLoadingError: The driver declares actions and was loaded from a
-            local path that contains ``{`` or ``}``. Prefect fills in
-            ``{{ ... }}`` templates in the inputs of the step that checks the
-            driver files, so the path could make the check write a secret,
-            such as the action token, into its error (research R-005).
+        DriverLoadingError: The driver declares more than one action for one
+            hook and mode: they share one registration key, so only one of
+            them would run. Or the driver declares actions and was loaded from
+            a local path that:
+
+            - contains ``{`` or ``}``. Prefect fills in ``{{ ... }}`` templates
+              in the inputs of the step that checks the driver files, so the
+              path could make the check write a secret, such as the action
+              token, into its error (research R-005);
+            - is relative. The agent runs each action from a temporary working
+              folder, where a relative path does not lead to the driver.
+
+            Or an action of a local driver has a location outside the actions
+            file, which the check before each action does not cover.
     """
     actions = driver_object.driver_spec.spec.actions
     if not actions:
         return 0
+    _refuse_two_actions_for_one_hook_and_mode(driver_object)
     source = driver_object.source
-    if isinstance(source, LocalSource) and ("{" in source.path or "}" in source.path):
-        raise DriverLoadingError(
-            f"Driver path {quoted(source.path)} is refused: it contains '{{' or '}}', "
-            "and the driver declares actions. Prefect fills in '{{ ... }}' templates "
-            "in the path before the action checks the driver files. Load the driver "
-            "from a path without '{' or '}'."
-        )
+    if isinstance(source, LocalSource):
+        _refuse_local_actions_that_the_check_cannot_cover(driver_object, source)
 
     key = ActionRegistrationKey.key_for_driver_object(driver_object)
     pairs = list(dict.fromkeys((action.hook, action.mode) for action in actions))
