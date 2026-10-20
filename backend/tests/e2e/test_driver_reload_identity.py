@@ -43,7 +43,7 @@ import pytest
 from styrmin_sdk import StyrminClient
 
 from tests.e2e.conftest import PROJECT_ROOT
-from tests.e2e.helpers.drivers import _kubectl_cp, _styrmin_pod_name
+from tests.e2e.helpers.drivers import kubectl_cp, styrmin_pod_name
 
 pytestmark = [
     pytest.mark.ci,
@@ -106,7 +106,7 @@ async def test_local_driver_reload_creates_new_row_on_content_change(
     from styrmin_sdk._queries import load_query
 
     kubeconfig = vcluster["kubeconfig_path"]
-    pod = _styrmin_pod_name(kubeconfig)
+    pod = styrmin_pod_name(kubeconfig)
 
     # Stage the fixture inside the styrmin-server pod under a unique path so
     # the test is hermetic from other concurrent test data.
@@ -116,7 +116,7 @@ async def test_local_driver_reload_creates_new_row_on_content_change(
     # without `kubectl cp` ambiguity around source-dir trailing slashes.
     for src_name in ("driver.styrmin.yml", "values.j2.yml", "actions.py"):
         src = _FIXTURE_DRIVER_DIR / src_name
-        _kubectl_cp(
+        kubectl_cp(
             kubeconfig,
             src,
             pod,

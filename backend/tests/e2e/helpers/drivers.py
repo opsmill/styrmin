@@ -72,7 +72,7 @@ AGENT_POD_SELECTOR = "app.kubernetes.io/component=agent"
 AGENT_CONTAINER = "agent"
 
 
-def _kubectl_cp(
+def kubectl_cp(
     kubeconfig: str,
     local: Path,
     pod: str,
@@ -123,13 +123,13 @@ def _pod_name(kubeconfig: str, selector: str) -> str:
     return name
 
 
-def _styrmin_pod_name(kubeconfig: str) -> str:
+def styrmin_pod_name(kubeconfig: str) -> str:
     """Return the styrmin-server pod name in the e2e vcluster."""
     return _pod_name(
         kubeconfig, "app.kubernetes.io/component=server,app.kubernetes.io/name=styrmin"
     )
 
 
-def _agent_pod_name(kubeconfig: str) -> str:
+def agent_pod_name(kubeconfig: str) -> str:
     """Return the agent pod name in the e2e vcluster."""
     return _pod_name(kubeconfig, AGENT_POD_SELECTOR)

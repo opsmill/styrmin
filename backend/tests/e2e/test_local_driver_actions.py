@@ -21,7 +21,7 @@ agent pod holds other files at that path
 (``test_changed_local_driver_fails_with_the_fingerprint_error``), the check of
 the files fails the ``hook:setup:pre`` step of the create with the provenance
 fingerprint error. When the agent pod does not hold the path
-(``test_driver_missing_from_the_action_image_fails_with_the_missing_files_error``),
+(``test_driver_missing_from_the_agent_pod_fails_with_the_missing_files_error``),
 the check fails the step with the missing files error. No action code runs.
 Each test then deletes its deployment with ``deleteDeployment``. The create
 failed before it wrote the ``StyrminDeployment``, so the cluster holds
@@ -29,18 +29,19 @@ nothing of the deployment, and the deployment reaches ``deleted`` without
 an operator teardown (T052).
 
 User story 3 (``test_missing_registration_fails_and_loading_again_repairs_it``)
-reuses the deployment of user story 1 at ``UPGRADE_VERSION``, so it runs after
-that test in the same session. It deletes the Prefect deployments of the
-driver version's actions. A version change to ``CREATE_VERSION`` then returns
+reuses the deployment of user story 1 at ``UPGRADE_VERSION``. Run alone, it
+first waits for the create and runs the upgrade itself
+(``_ensure_running_at_upgrade_version``). It deletes the Prefect deployments
+of the driver version's actions. A version change to ``CREATE_VERSION`` then returns
 a failed task whose ``hook:upgrade:core`` step names the action without a
 registered flow, and the deployment keeps ``UPGRADE_VERSION``. A create of a
 second deployment pinned to the same driver version fails its
 ``hook:setup:pre`` step with the same kind of error, and ``deleteDeployment``
 then deletes it. Loading the driver again registers the actions, and the
 same request runs the upgrade action. That second upgrade of the deployment
-runs ``execute_commands`` again: it replaces the Job that the first upgrade
-left, instead of failing because a Job of that name exists (#372). The test
-deletes the deployment at its end.
+runs ``execute_commands`` again: it deletes the Job that the first upgrade
+left, which has ended, and creates its own, instead of failing because a Job
+of that name exists (#372). The test deletes the deployment at its end.
 
 The module-scoped ``local_actions_deployment`` keeps the deployment for the
 later tests of the module and deletes it when the module ends, unless a test
@@ -80,7 +81,9 @@ from prefect.client.schemas.filters import (
 )
 from styrmin_backend.services.driver.hash import compute_driver_directory_fingerprint
 from styrmin_sdk import StyrminClient
+from styrmin_sdk._queries import load_query
 from styrmin_sdk.exceptions import StyrminError
+from styrmin_sdk.graphql._generated import GetStepOutput
 from styrmin_sdk.graphql._generated.enums import StepStatus, TaskResult
 
 from tests.e2e.conftest import (
@@ -91,9 +94,9 @@ from tests.e2e.conftest import (
 )
 from tests.e2e.helpers.drivers import (
     AGENT_CONTAINER,
-    _agent_pod_name,
-    _kubectl_cp,
-    _styrmin_pod_name,
+    agent_pod_name,
+    kubectl_cp,
+    styrmin_pod_name,
 )
 
 if TYPE_CHECKING:
@@ -394,8 +397,8 @@ async def _copy_driver_to_server(vcluster: dict, driver_dir: Path, path: str) ->
     the files of ``driver_dir``. The server loads the driver from there.
     """
     kubeconfig = vcluster["kubeconfig_path"]
-    pod = await asyncio.to_thread(_styrmin_pod_name, kubeconfig)
-    await asyncio.to_thread(_kubectl_cp, kubeconfig, driver_dir, pod, path)
+    pod = await asyncio.to_thread(styrmin_pod_name, kubeconfig)
+    await asyncio.to_thread(kubectl_cp, kubeconfig, driver_dir, pod, path)
 
 
 async def _copy_driver_to_agent(vcluster: dict, driver_dir: Path, path: str) -> None:
@@ -405,9 +408,9 @@ async def _copy_driver_to_agent(vcluster: dict, driver_dir: Path, path: str) -> 
     the files at ``path`` in this pod. ``path`` must not exist in the pod.
     """
     kubeconfig = vcluster["kubeconfig_path"]
-    pod = await asyncio.to_thread(_agent_pod_name, kubeconfig)
+    pod = await asyncio.to_thread(agent_pod_name, kubeconfig)
     await asyncio.to_thread(
-        _kubectl_cp, kubeconfig, driver_dir, pod, path, container=AGENT_CONTAINER
+        kubectl_cp, kubeconfig, driver_dir, pod, path, container=AGENT_CONTAINER
     )
 
 
@@ -511,24 +514,6 @@ async def _action_log_messages(
     return [log.message for log in logs]
 
 
-async def _default_action_image(
-    prefect: PrefectClient, action: str, *, directory: str
-) -> str:
-    """The image that the check names for ``action`` of the driver version loaded from ``directory``.
-
-    The action sets no ``image:``, so the check names the default image of the
-    work pool of the action's Prefect deployment. In the E2E install, that is
-    the Styrmin image, which the agent that runs the action runs too.
-    """
-    deployment = await _action_deployment(prefect, action, directory=directory)
-    assert not deployment.job_variables.get("image"), deployment.job_variables
-    assert deployment.work_pool_name, deployment
-    work_pool = await prefect.read_work_pool(deployment.work_pool_name)
-    image = work_pool.base_job_template["variables"]["properties"]["image"]["default"]
-    assert image, work_pool.base_job_template
-    return str(image)
-
-
 async def _wait_for_markers(
     vcluster: dict, *actions: str, since: datetime | None = None
 ) -> None:
@@ -549,6 +534,33 @@ async def _wait_for_markers(
                         f"after {LOG_TIMEOUT}s: {messages}"
                     )
                 await asyncio.sleep(POLL_INTERVAL)
+
+
+async def _ensure_running_at_upgrade_version(
+    deployment: LocalActionsDeployment,
+) -> None:
+    """Bring the deployment to ``running`` at ``UPGRADE_VERSION``, with the Job of its upgrade action.
+
+    ``test_local_driver_actions_run_on_create_and_upgrade`` leaves it so when it
+    ran earlier in the session. Otherwise, as when a later test runs alone,
+    this waits for the create and runs the upgrade.
+    """
+    client = deployment.client
+    current = await client.deployments.get(deployment.deployment_id)
+    if current.status == "running" and current.application_version == UPGRADE_VERSION:
+        return
+    create_task = await _wait_for_task_end(client, deployment.create_task_id)
+    _assert_steps_succeeded(create_task, SETUP_PRE_HOOK, SETUP_POST_HOOK)
+    await _wait_for_running(client, deployment.deployment_id, CREATE_VERSION)
+    upgrade = await client.deployments.update_version(
+        deployment.deployment_id,
+        UPGRADE_VERSION,
+        driver_version_id=deployment.driver_version_id,
+    )
+    assert upgrade is not None, f"the upgrade to {UPGRADE_VERSION} started no task"
+    upgrade_task = await _wait_for_task_end(client, str(upgrade.id))
+    _assert_steps_succeeded(upgrade_task, UPGRADE_CORE_HOOK)
+    await _wait_for_running(client, deployment.deployment_id, UPGRADE_VERSION)
 
 
 # ---------------------------------------------------------------------------
@@ -647,22 +659,24 @@ async def test_changed_local_driver_fails_with_the_fingerprint_error(
     assert create_task.deployment_id is not None, create_task
     error = _failed_step_error(create_task, SETUP_PRE_HOOK)
     async with _prefect(vcluster) as prefect:
-        image = await _default_action_image(prefect, "pre_setup", directory=path)
         messages = {
             action: await _action_log_messages(prefect, action, directory=path)
             for action in ACTION_HOOKS
         }
-    assert path in error, error
-    assert f"in the image {image}" in error, error
+    pod = await asyncio.to_thread(agent_pod_name, vcluster["kubeconfig_path"])
+    # The error names the agent pod, where the action runs, and the fix.
+    assert f"The driver files at {path} in the Styrmin agent pod {pod} " in error, error
     assert loaded_fingerprint[:7] in error, error
     assert changed_fingerprint[:7] in error, error
-    assert "Rebuild the image" in error, error
+    assert f"styrminctl drivers load-local-version {path}" in error, error
+    assert "image" not in error, error
 
     # No code of the variant ran: neither the loaded code nor the changed one.
     # The logs are read: the check logged its error in the flow run of pre_setup.
-    assert any("Rebuild the image" in message for message in messages["pre_setup"]), (
-        messages
-    )
+    assert any(
+        f"in the Styrmin agent pod {pod}" in message
+        for message in messages["pre_setup"]
+    ), messages
     for action, action_messages in messages.items():
         for code in ("A", "B"):
             assert not any(
@@ -673,7 +687,7 @@ async def test_changed_local_driver_fails_with_the_fingerprint_error(
 
 
 @pytest.mark.api_only(reason=API_ONLY_REASON)
-async def test_driver_missing_from_the_action_image_fails_with_the_missing_files_error(
+async def test_driver_missing_from_the_agent_pod_fails_with_the_missing_files_error(
     styrmin_resources: dict,
     scenario_environment_id: str,
     check_session_hex: str,
@@ -683,10 +697,9 @@ async def test_driver_missing_from_the_action_image_fails_with_the_missing_files
     """User story 2: the driver is only in the server pod (FR-004).
 
     The agent pod, where the actions run, does not hold the path that the
-    server loaded the driver from. The variant sets no ``image:``, so the
-    error names the default image of the work pool, the Styrmin image that
-    the agent runs. ``deleteDeployment`` then deletes the deployment of the
-    failed create (T052).
+    server loaded the driver from. The error names the agent pod and says to
+    put the driver there. ``deleteDeployment`` then deletes the deployment of
+    the failed create (T052).
     """
     client: StyrminClient = styrmin_resources["client"]
     path = f"/tmp/local-actions-missing-{check_session_hex}"
@@ -704,10 +717,11 @@ async def test_driver_missing_from_the_action_image_fails_with_the_missing_files
     create_task = await _wait_for_task_end(client, create_task_id)
     assert create_task.deployment_id is not None, create_task
     error = _failed_step_error(create_task, SETUP_PRE_HOOK)
-    async with _prefect(vcluster) as prefect:
-        image = await _default_action_image(prefect, "pre_setup", directory=path)
-    assert path in error, error
-    assert f"in the image {image}" in error, error
+    pod = await asyncio.to_thread(agent_pod_name, vcluster["kubeconfig_path"])
+    assert (
+        f"The driver files are not at {path} in the Styrmin agent pod {pod}: " in error
+    ), error
+    assert f"Mount or copy the driver into the agent pod at {path}" in error, error
 
     await _delete_and_wait_for_tombstone(client, str(create_task.deployment_id))
 
@@ -720,27 +734,18 @@ async def test_missing_registration_fails_and_loading_again_repairs_it(
 ) -> None:
     """User story 3: an action without a registered flow fails its hook step, and loading again repairs it (FR-005 to FR-007).
 
-    Runs after ``test_local_driver_actions_run_on_create_and_upgrade`` in the
-    same session, which leaves the deployment running at ``UPGRADE_VERSION``
-    and the Job of its upgrade action in its namespace. The version change
-    back to ``CREATE_VERSION`` runs the upgrade hook, whose action creates
-    that Job again (#372).
+    Starts from the deployment running at ``UPGRADE_VERSION`` with the Job of
+    its upgrade action in its namespace, which
+    ``test_local_driver_actions_run_on_create_and_upgrade`` leaves, or which
+    ``_ensure_running_at_upgrade_version`` sets up when this test runs alone.
+    The version change back to ``CREATE_VERSION`` runs the upgrade hook,
+    whose action creates that Job again (#372).
     """
     client = local_actions_deployment.client
     deployment_id = local_actions_deployment.deployment_id
     driver_version_id = local_actions_deployment.driver_version_id
 
-    deployment = await client.deployments.get(deployment_id)
-    if (
-        deployment.status != "running"
-        or deployment.application_version != UPGRADE_VERSION
-    ):
-        pytest.fail(
-            f"Deployment {deployment_id} must be running at {UPGRADE_VERSION}, but it is "
-            f"{deployment.status} at {deployment.application_version}. Run "
-            "test_local_driver_actions_run_on_create_and_upgrade before this test in "
-            "the same session: it creates the deployment and upgrades it."
-        )
+    await _ensure_running_at_upgrade_version(local_actions_deployment)
     # The Job of the first upgrade's action is still in the namespace.
     first_job = await _action_job(vcluster, deployment_id)
 
@@ -820,6 +825,21 @@ async def test_missing_registration_fails_and_loading_again_repairs_it(
     second_job = await _action_job(vcluster, deployment_id)
     assert second_job.uid != first_job.uid, (first_job, second_job)
     assert f"{JOB_MARKER} {CREATE_VERSION}" in second_job.output, second_job.output
+    # The hook step names the Job that it deleted and how that Job ended.
+    hook_step = next(
+        step for step in repaired_task.steps if step.key == UPGRADE_CORE_HOOK
+    )
+    assert hook_step.has_output, _describe(repaired_task)
+    raw = await client._transport.execute(
+        load_query("get_step_output"), {"stepId": str(hook_step.id)}
+    )
+    step_output = GetStepOutput.model_validate(raw["data"]).step
+    assert step_output is not None, raw
+    assert step_output.output == (
+        f"Deleting Job styrmin-{deployment_id}-job, which an earlier action left "
+        "(completed), and its pods before the new Job is created. This waits up to "
+        "120 seconds."
+    ), step_output.output
 
     deleted = await client.deployments.delete(deployment_id)
     assert deleted.type_ == "delete_deployment", deleted
