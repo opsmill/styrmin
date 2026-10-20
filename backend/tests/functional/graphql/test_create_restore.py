@@ -209,7 +209,8 @@ async def test_create_restore_refuses_a_removed_target_argument(
 ) -> None:
     """A client that still names a namespace or an instance is refused by
     GraphQL validation, before any restore row is written or any workflow is
-    dispatched (#532)."""
+    dispatched (#532). The error says that the client is older than the server
+    and how to upgrade it, instead of graphql-core's "Unknown argument"."""
     instance = await seed_application_instance(session)
     backup = Backup(
         name="restore-refusal-seed",
@@ -233,7 +234,11 @@ async def test_create_restore_refuses_a_removed_target_argument(
     )
 
     [error] = response.json()["errors"]
-    assert f"Unknown argument '{argument}'" in error["message"], error
+    assert error["message"].startswith(
+        f"createRestore no longer takes the argument {argument}: "
+    ), error
+    assert "older than the server" in error["message"], error
+    assert "Upgrade styrminctl and the Python SDK" in error["message"], error
     restores = await session.exec(select(Restore).where(Restore.backup_id == backup_id))
     assert restores.all() == []
     prefect_manager_mock.run_action.assert_not_called()
