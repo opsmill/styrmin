@@ -8,7 +8,6 @@ All four demos can be recorded: `deploy-upgrade` (demo 1), `component-overrides`
 
 - The maintainer has not yet confirmed that demos 3 and 4 may show the `infrahub-enterprise` driver (see [Questions for the maintainer](#questions-for-the-maintainer)).
 - Nobody has played a video in Keynote, PowerPoint and Google Slides yet (task T047).
-- The branch on GitHub still holds the history from before the rebase on `develop`. Publishing the rebased branch needs `git push --force-with-lease` (see [Rebase on develop](#rebase-on-develop-on-2026-10-20)).
 
 Suggested title: `test(e2e): record demos of Styrmin features for the beta presentation (#518)`.
 
@@ -40,7 +39,7 @@ No product code, E2E test, GraphQL schema, SDK, `styrminctl`, frontend, database
   - `CLAUDE.md` keeps this branch's `Active plan` line;
   - `backend/tests/e2e/pages/drivers_list.py` keeps the field `driver_directory` that `develop` added to the Load Driver drawer, and enters it with `enter_text`, as the other fields of the drawer.
 - The ref `backup/demo-beta-presentation-before-rebase-20261020` holds the branch as it was before the rebase.
-- On GitHub, `fac/demo-beta-presentation-bhshh` is at `11a4b58b`, pushed on 2026-10-18. It holds `472fe403` and the history from before the rebase. No pull request exists for it. Publishing the rebased branch replaces that history, so it needs `git push --force-with-lease`. Nothing has been pushed since the rebase.
+- On 2026-10-18, `fac/demo-beta-presentation-bhshh` had been pushed to GitHub at `11a4b58b`, with `472fe403` and the history from before the rebase. On 2026-10-20, after the local run of `test_task_steps.py` in the `ui-chromium` variant, the rebased branch replaced it with `git push --force-with-lease`, pinned to `11a4b58b`.
 
 ## Evidence
 

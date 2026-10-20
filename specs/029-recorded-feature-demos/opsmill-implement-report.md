@@ -18,7 +18,7 @@ Status: INCOMPLETE. All four demos record in one run, and every task but one is 
   - `backend/tests/e2e/pages/drivers_list.py`: `develop` added a `driver_directory` field to `load_remote_version`; it goes through `enter_text` like the other two fields.
 - The rebase rewrote the SHAs of the 2026-10-18 commits. For example, the page-object commit `b6c85a35` is now `fb749950`.
 - The branch before these changes is kept in the local ref `backup/demo-beta-presentation-before-rebase-20261020`.
-- `origin/fac/demo-beta-presentation-bhshh` is at `11a4b58b` (pushed on 2026-10-18) and still holds `472fe403`. Publishing the rebased branch needs `git push --force-with-lease`. Nothing was pushed.
+- `origin/fac/demo-beta-presentation-bhshh` was at `11a4b58b` (pushed on 2026-10-18) and held `472fe403`. On 2026-10-20 the rebased branch replaced it with `git push --force-with-lease`, pinned to `11a4b58b`.
 - `git fetch` over SSH is refused on this host (`Permission denied (publickey)`); `develop` was fetched over HTTPS with the `gh` credentials.
 
 ## Chunk ledger
@@ -115,7 +115,7 @@ Not fixed:
 
 ## Suggested next steps
 
-1. Push the rebased branch with `--force-with-lease` (the remote branch holds `472fe403`) and open the pull request from [pr-notes.md](pr-notes.md). The maintainer asked for both on 2026-10-20, after the local run of `test_task_steps.py`.
+1. Review the pull request. On 2026-10-20 the rebased branch replaced `11a4b58b` on GitHub with `git push --force-with-lease`, and the pull request was opened from [pr-notes.md](pr-notes.md), both at the maintainer's request.
 2. Play one video in Keynote, PowerPoint and Google Slides (T047) and record the result in `full-run.log`.
 3. Confirm that demos 3 and 4 may show the `infrahub-enterprise` driver (question in [pr-notes.md](pr-notes.md)).
 4. Consider the deferred shared setup helper for demos 3 and 4, and look into the slower upgrade (5 min 56 s) seen in the last demo 1 run.
