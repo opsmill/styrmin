@@ -616,4 +616,56 @@ describe("DeploymentDetailPage backups tab review follow-ups (#304)", () => {
       screen.queryByTestId("restore-earlier-instance-warning"),
     ).not.toBeInTheDocument();
   });
+
+  it("shows the deployment and namespace the backup is restored into as text (#532)", async () => {
+    await renderBackupsTab([makeBackup()]);
+
+    const row = screen.getByTestId("backup-row");
+    await userEvent.click(within(row).getByRole("button", { name: "Restore" }));
+
+    expect(screen.getByTestId("restore-target-deployment")).toHaveTextContent(
+      "web",
+    );
+    expect(screen.getByTestId("restore-target-namespace")).toHaveTextContent(
+      "styrmin-dep-1",
+    );
+    // The namespace is not a choice, so the dialog has no field for it.
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("does not say the deployment keeps a current instance it does not have (#532)", async () => {
+    await renderBackupsTab(
+      [olderBackup()],
+      makeDeployment({ applicationInstance: null }),
+    );
+
+    const row = screen.getByTestId("backup-row");
+    await userEvent.click(within(row).getByRole("button", { name: "Restore" }));
+
+    const warning = screen.getByTestId("restore-earlier-instance-warning");
+    expect(warning).toHaveTextContent(
+      "This backup was taken at another application version",
+    );
+    expect(warning).toHaveTextContent(
+      "The deployment has no active instance, and the restore does not give it one, so this page keeps showing version 2.5.0.",
+    );
+    expect(warning).not.toHaveTextContent("keeps the current instance");
+  });
+
+  it("does not warn for a backup at the current version of a deployment without an active instance (#532)", async () => {
+    await renderBackupsTab(
+      [olderBackup()],
+      makeDeployment({
+        applicationInstance: null,
+        applicationVersion: "2.4.0",
+      }),
+    );
+
+    const row = screen.getByTestId("backup-row");
+    await userEvent.click(within(row).getByRole("button", { name: "Restore" }));
+
+    expect(
+      screen.queryByTestId("restore-earlier-instance-warning"),
+    ).not.toBeInTheDocument();
+  });
 });

@@ -179,7 +179,7 @@ export default function DeploymentDetailPage() {
   const deleteBackupName = backupsData?.backups?.find(
     (b) => b.id === deleteBackupId,
   )?.name;
-  // Shown read-only in the Restore dialog. The server restores a backup into
+  // Shown as text in the Restore dialog. The server restores a backup into
   // its own deployment's namespace; the client never sends one (#532).
   const targetNamespace = deploymentId ? `styrmin-${deploymentId}` : "";
 
@@ -292,9 +292,18 @@ export default function DeploymentDetailPage() {
       ? "This deployment is deleted"
       : undefined;
   // Warn before restoring a backup of an earlier instance or another version.
+  // A deployment without an active instance has no instance the backup could
+  // be earlier than, so only the versions are compared.
+  const selectedBackupIsOfEarlierInstance =
+    !!selectedBackup &&
+    !!instanceId &&
+    selectedBackup.instance.id !== instanceId;
+  const restoreInstanceOutcome = instanceId
+    ? "Styrmin keeps the current instance as the deployment's active instance"
+    : "The deployment has no active instance, and the restore does not give it one";
   const selectedBackupNeedsWarning =
     !!selectedBackup &&
-    (selectedBackup.instance.id !== instanceId ||
+    (selectedBackupIsOfEarlierInstance ||
       selectedBackup.instance.applicationVersion !==
         deployment.applicationVersion);
   const driverName =
@@ -767,13 +776,24 @@ export default function DeploymentDetailPage() {
               >
                 {deployment.applicationVersion}
               </dd>
+              <dt className="text-muted-foreground">Restores into</dt>
+              <dd className="break-all" data-testid="restore-target-deployment">
+                {deployment.name}
+              </dd>
+              <dt className="text-muted-foreground">Target namespace</dt>
+              <dd
+                className="break-all font-mono"
+                data-testid="restore-target-namespace"
+              >
+                {targetNamespace}
+              </dd>
             </dl>
           )}
           {selectedBackup && selectedBackupNeedsWarning && (
             <Alert data-testid="restore-earlier-instance-warning">
               <AlertTriangle className="h-4 w-4" />
               <AlertTitle>
-                {selectedBackup.instance.id !== instanceId
+                {selectedBackupIsOfEarlierInstance
                   ? "This backup was taken of an earlier instance"
                   : "This backup was taken at another application version"}
               </AlertTitle>
@@ -782,9 +802,8 @@ export default function DeploymentDetailPage() {
                 {selectedBackup.instance.applicationVersion}. The deployment
                 runs version {deployment.applicationVersion} now. The restore
                 puts back the StyrminDeployment and HelmRelease that the backup
-                holds, with that application version and config. Styrmin keeps
-                the current instance as the deployment&apos;s active instance,
-                so this page keeps showing version{" "}
+                holds, with that application version and config.{" "}
+                {restoreInstanceOutcome}, so this page keeps showing version{" "}
                 {deployment.applicationVersion}.
               </AlertDescription>
             </Alert>
@@ -794,15 +813,6 @@ export default function DeploymentDetailPage() {
               <AlertDescription>{restoreError}</AlertDescription>
             </Alert>
           )}
-          <div className="space-y-2">
-            <Label htmlFor="target-namespace">Target Namespace</Label>
-            <Input
-              id="target-namespace"
-              value={targetNamespace}
-              readOnly
-              className="font-mono bg-muted"
-            />
-          </div>
           <DialogFooter>
             <Button
               variant="outline"
