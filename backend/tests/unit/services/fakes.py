@@ -397,13 +397,15 @@ class FakeRestoreRepository(FakeRepository[Restore], RestoreRepository):
             results = [r for r in results if r.status == status]
         return results
 
-    async def get_by_target_namespace(
-        self, target_namespace: str, status: RestoreStatus | None = None
+    async def get_non_terminal_by_target_namespace(
+        self, target_namespace: str
     ) -> list[Restore]:
-        results = [r for r in self.models if r.target_namespace == target_namespace]
-        if status is not None:
-            results = [r for r in results if r.status == status]
-        return results
+        return [
+            r
+            for r in self.models
+            if r.target_namespace == target_namespace
+            and r.status in (RestoreStatus.PENDING, RestoreStatus.IN_PROGRESS)
+        ][::-1]
 
     async def get_non_terminal_by_source_deployment_id(
         self, deployment_id: UUID
