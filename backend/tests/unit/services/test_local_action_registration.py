@@ -275,6 +275,133 @@ async def test_local_path_with_a_brace_is_accepted_for_a_driver_without_actions(
     assert prefect_manager.registrations == []
 
 
+async def test_relative_local_path_is_refused_for_a_driver_with_actions(
+    tmp_path: Path,
+    db_session: AsyncSession,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The agent runs each action from a temporary folder, where a relative path leads nowhere (#372 review)."""
+    _copy_driver("semaphore", tmp_path / "semaphore")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(DriverLoadingError) as exc_info:
+        await load_application_driver_from_local_directory(path="semaphore", uow=uow)
+
+    assert str(exc_info.value) == (
+        "Driver path 'semaphore' is refused: it is a relative path, and the driver "
+        "declares actions. The Styrmin agent runs each action from a temporary "
+        "working folder, where a relative path does not lead to the driver. Load the "
+        "driver from an absolute path, such as /styrmin/drivers/semaphore."
+    )
+    assert prefect_manager.registrations == []
+    assert await _stored_versions(db_session) == []
+
+
+async def test_relative_local_path_is_accepted_for_a_driver_without_actions(
+    tmp_path: Path,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _copy_driver("generic-app", tmp_path / "generic-app")
+    monkeypatch.chdir(tmp_path)
+
+    loaded = await load_application_driver_from_local_directory(
+        path="generic-app", uow=uow
+    )
+
+    assert loaded.version.source_path == "generic-app"
+    assert prefect_manager.registrations == []
+
+
+def _move_upgrade_location(path: Path, location: str) -> None:
+    spec_file = path / "driver.styrmin.yml"
+    spec = spec_file.read_text()
+    assert 'location: "actions.py::upgrade"' in spec
+    spec_file.write_text(
+        spec.replace('location: "actions.py::upgrade"', f'location: "{location}"')
+    )
+
+
+async def test_local_action_located_outside_the_actions_file_is_refused(
+    tmp_path: Path,
+    db_session: AsyncSession,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+) -> None:
+    """The check before each action hashes only actions.py of the driver's code (#372 review)."""
+    path = _copy_driver("semaphore", tmp_path / "semaphore")
+    _move_upgrade_location(path, "helpers.py::upgrade")
+
+    with pytest.raises(DriverLoadingError) as exc_info:
+        await load_application_driver_from_local_directory(path=str(path), uow=uow)
+
+    assert str(exc_info.value) == (
+        f"Action upgrade of the driver loaded from '{path}' is refused: its location "
+        "helpers.py::upgrade is not in actions.py. Before an action of a driver "
+        "loaded from a local directory runs, Styrmin checks only the driver "
+        "specification, the values template and actions.py, so the code of another "
+        "file could change without the check noticing. Move the function to "
+        "actions.py, set the location to actions.py::upgrade, and load the driver "
+        "again."
+    )
+    assert prefect_manager.registrations == []
+    assert await _stored_versions(db_session) == []
+
+
+async def test_git_action_located_outside_the_actions_file_is_registered(
+    tmp_path: Path,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+) -> None:
+    """A git driver version's flow clones the commit it was loaded at, so any file of it is pinned."""
+    path = _copy_driver("semaphore", tmp_path / "semaphore")
+    _move_upgrade_location(path, "helpers.py::upgrade")
+
+    await load_application_driver_from_object(
+        driver_object=_as_git_driver(path), uow=uow
+    )
+
+    assert ("upgrade", "upgrade", "core") in _registered_actions(prefect_manager)
+
+
+@pytest.mark.parametrize("source_type", ["local", "git"])
+async def test_two_actions_for_one_hook_and_mode_are_refused(
+    tmp_path: Path,
+    db_session: AsyncSession,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+    source_type: str,
+) -> None:
+    """They share one registration key, so only one of them would run (#372 review)."""
+    path = _copy_driver("semaphore", tmp_path / "semaphore")
+    spec_file = path / "driver.styrmin.yml"
+    spec_file.write_text(
+        spec_file.read_text().replace(
+            "    - name: post_setup\n      hook: setup\n      mode: post",
+            "    - name: post_setup\n      hook: setup\n      mode: pre",
+        )
+    )
+
+    with pytest.raises(DriverLoadingError) as exc_info:
+        if source_type == "local":
+            await load_application_driver_from_local_directory(path=str(path), uow=uow)
+        else:
+            await load_application_driver_from_object(
+                driver_object=_as_git_driver(path), uow=uow
+            )
+
+    assert str(exc_info.value) == (
+        "Driver semaphore declares 2 actions for the setup hook, mode pre: "
+        "pre_setup, post_setup. Styrmin runs one action for each hook and mode. Keep "
+        "one of them, or call the others from it, then load the driver again."
+    )
+    assert prefect_manager.registrations == []
+    assert await _stored_versions(db_session) == []
+
+
 @pytest.mark.parametrize("source_type", ["local", "git"])
 async def test_load_refused_by_service_validation_registers_nothing(
     tmp_path: Path,

@@ -7,11 +7,10 @@ provenance fingerprint of the driver version, the step returns the path, and
 Prefect imports the action from it. These tests run Prefect's own pull-step
 runner and flow loader against a copy of the ``simple-app`` example driver.
 
-User story 2 (FR-003, FR-004, research R-006): when the files are missing or
-differ, the check raises an error that names the path, the action's image
-(otherwise the default image of its work pool) and, for changed files, both
-short provenance fingerprints
-(contracts/errors.md, "Must contain").
+User story 2 (FR-003, FR-004): when the files are missing or differ, the
+check raises an error that names the path, the agent pod where the action
+runs and, for changed files, both short provenance fingerprints and the
+command that loads the driver again (contracts/errors.md, "Must contain").
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ import sys
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -250,11 +248,11 @@ _FULL_CONTENT_HASH = "0123456789abcdef" * 4
 
 
 def _definition_with(
-    *, directory: str, content_hash: str
+    *, directory: str, content_hash: str, module: str = "actions.py"
 ) -> LocalDriverActionWorkflowDefinition:
     return LocalDriverActionWorkflowDefinition(
         name="User Action: pre_setup",
-        module="actions.py",
+        module=module,
         function="pre_setup",
         directory=directory,
         content_hash=content_hash,
@@ -288,6 +286,27 @@ def test_definition_refuses_an_empty_content_hash() -> None:
     assert "The provenance fingerprint (content_hash) is empty" in error["msg"]
 
 
+def test_definition_refuses_a_relative_directory() -> None:
+    with pytest.raises(ValidationError) as raised:
+        _definition_with(directory="drivers/my-app", content_hash=_FULL_CONTENT_HASH)
+
+    assert "The driver path 'drivers/my-app' is relative" in str(raised.value)
+
+
+def test_definition_refuses_a_module_other_than_the_actions_file() -> None:
+    with pytest.raises(ValidationError) as raised:
+        _definition_with(
+            directory="/srv/drivers/my-app",
+            content_hash=_FULL_CONTENT_HASH,
+            module="helpers.py",
+        )
+
+    assert (
+        "The action's module 'helpers.py' is not the actions file 'actions.py'"
+        in str(raised.value)
+    )
+
+
 def test_definition_accepts_a_path_without_braces_and_a_fingerprint() -> None:
     definition = _definition_with(
         directory="/srv/drivers/my-app", content_hash=_FULL_CONTENT_HASH
@@ -301,15 +320,28 @@ def test_definition_accepts_a_path_without_braces_and_a_fingerprint() -> None:
 # Missing driver files (FR-004)
 # ---------------------------------------------------------------------------
 
-# Outside an action's flow run, no flow run tells which image the error names.
-UNKNOWN_IMAGE_WORDS = "in the image of this action's Job"
+# The pull step names the host it runs on: the agent pod, where the action runs.
+AGENT_POD = "styrmin-agent-7c9d8-x2k4q"
+IN_THE_AGENT_POD = f"in the Styrmin agent pod {AGENT_POD}"
+
+
+@pytest.fixture(autouse=True)
+def agent_pod(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(local_driver.socket, "gethostname", lambda: AGENT_POD)
 
 
 def _assert_names_the_fix(message: str, path: str) -> None:
-    """The missing-files error says how to fix the image or the load."""
-    assert "An action's image must hold the driver at the same path" in message
-    assert f"Add the driver to the image at {path}" in message
-    assert "load the driver from a path that the image holds" in message
+    """The missing-files error says where the action runs and how to fix the agent pod or the load."""
+    assert (
+        "The agent pod runs every driver action, so it must hold the driver at the "
+        "same path as the Styrmin server." in message
+    )
+    assert f"Mount or copy the driver into the agent pod at {path}" in message
+    assert (
+        "load the driver from a path that both the server and the agent pod hold"
+        in message
+    )
+    assert "image" not in message
 
 
 def test_missing_directory_raises_the_missing_files_error(driver: Path) -> None:
@@ -321,8 +353,7 @@ def test_missing_directory_raises_the_missing_files_error(driver: Path) -> None:
 
     message = str(raised.value)
     assert message.startswith(
-        f"The driver files are not at {driver} {UNKNOWN_IMAGE_WORDS}: "
-        f"{driver} not found. "
+        f"The driver files are not at {driver} {IN_THE_AGENT_POD}: {driver} not found. "
     )
     _assert_names_the_fix(message, str(driver))
     assert raised.value.missing == [str(driver)]
@@ -346,7 +377,7 @@ def test_missing_driver_file_raises_the_missing_files_error(
 
     message = str(raised.value)
     assert message.startswith(
-        f"The driver files are not at {driver} {UNKNOWN_IMAGE_WORDS}: "
+        f"The driver files are not at {driver} {IN_THE_AGENT_POD}: "
         f"{file_name} not found. "
     )
     _assert_names_the_fix(message, str(driver))
@@ -363,9 +394,9 @@ def _assert_fingerprint_error(
     *,
     driver: Path,
     expected: str,
-    image_words: str,
+    where: str = IN_THE_AGENT_POD,
 ) -> None:
-    """The error names the path, the image, both short fingerprints and the fix."""
+    """The error names the path, the agent pod, both short fingerprints and the fix."""
     actual = compute_driver_directory_fingerprint(
         driver,
         spec_file=config.SETTINGS.driver.spec_file,
@@ -376,12 +407,20 @@ def _assert_fingerprint_error(
     assert actual != expected
     message = str(error)
     assert message.startswith(
-        f"The driver files at {driver} {image_words} are not the files of this "
+        f"The driver files at {driver} {where} are not the files of this "
         f"driver version: their provenance fingerprint is {actual[:7]}, and the "
         f"driver version was loaded with {expected[:7]}. "
     )
-    assert "Rebuild the image with the files you loaded" in message
-    assert f"load the driver again from {driver}" in message
+    assert (
+        "If the files changed after the driver was loaded, load the driver again and "
+        f"use the new driver version: styrminctl drivers load-local-version {driver}."
+        in message
+    )
+    assert (
+        f"If the agent pod holds other files at {driver} than the Styrmin server, "
+        "give both the same files first." in message
+    )
+    assert "image" not in message
     assert (error.expected, error.actual) == (expected, actual)
 
 
@@ -404,10 +443,7 @@ def test_edited_driver_file_raises_the_fingerprint_error(
         check_local_driver(**inputs)
 
     _assert_fingerprint_error(
-        raised.value,
-        driver=driver,
-        expected=inputs["content_hash"],
-        image_words=UNKNOWN_IMAGE_WORDS,
+        raised.value, driver=driver, expected=inputs["content_hash"]
     )
 
 
@@ -420,82 +456,14 @@ def test_removed_values_template_raises_the_fingerprint_error(driver: Path) -> N
         check_local_driver(**inputs)
 
     _assert_fingerprint_error(
-        raised.value,
-        driver=driver,
-        expected=inputs["content_hash"],
-        image_words=UNKNOWN_IMAGE_WORDS,
+        raised.value, driver=driver, expected=inputs["content_hash"]
     )
+    assert raised.value.agent_pod == AGENT_POD
 
 
 # ---------------------------------------------------------------------------
-# The image named in the errors (research R-006)
+# Errors logged in the action's flow run (research R-002)
 # ---------------------------------------------------------------------------
-
-WORK_POOL = "user-work-pool"
-ACTION_IMAGE = "registry.example.com/simple-app-actions:1.2.3"
-WORK_POOL_IMAGE = "registry.opsmill.io/opsmill/styrmin:1.4.0"
-
-
-class FakePrefectClient:
-    """The synchronous Prefect client of the action's process, with one flow run.
-
-    The flow run belongs to a deployment whose job variables hold
-    ``job_variables`` and to the work pool ``work_pool``, whose base job
-    template has the default image ``work_pool_image``. A read named in
-    ``failing_reads`` raises.
-    """
-
-    def __init__(
-        self,
-        flow_run_id: uuid.UUID,
-        *,
-        job_variables: dict[str, Any] | None = None,
-        work_pool: str | None = WORK_POOL,
-        work_pool_image: str | None = None,
-        failing_reads: tuple[str, ...] = (),
-    ) -> None:
-        self.flow_run_id = flow_run_id
-        self.deployment_id = uuid.uuid4()
-        self.job_variables = job_variables or {}
-        self.work_pool = work_pool
-        self.work_pool_image = work_pool_image
-        self.failing_reads = failing_reads
-
-    def __enter__(self) -> FakePrefectClient:
-        return self
-
-    def __exit__(self, *exc_info: object) -> None:
-        return None
-
-    def _read(self, name: str) -> None:
-        if name in self.failing_reads:
-            raise RuntimeError(f"Prefect API is unreachable ({name})")
-
-    def read_flow_run(self, flow_run_id: uuid.UUID) -> SimpleNamespace:
-        self._read("flow_run")
-        assert flow_run_id == self.flow_run_id
-        return SimpleNamespace(
-            deployment_id=self.deployment_id, work_pool_name=self.work_pool
-        )
-
-    def read_deployment(self, deployment_id: uuid.UUID) -> SimpleNamespace:
-        self._read("deployment")
-        assert deployment_id == self.deployment_id
-        return SimpleNamespace(
-            job_variables=self.job_variables, work_pool_name=self.work_pool
-        )
-
-    def read_work_pool(self, work_pool_name: str) -> SimpleNamespace:
-        self._read("work_pool")
-        assert work_pool_name == self.work_pool
-        properties = (
-            {"image": {"type": "string", "default": self.work_pool_image}}
-            if self.work_pool_image
-            else {}
-        )
-        return SimpleNamespace(
-            base_job_template={"variables": {"properties": properties}}
-        )
 
 
 @pytest.fixture
@@ -508,111 +476,6 @@ def job_flow_run_id(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(FLOW_RUN_ID_ENV, str(flow_run_id))
     with temporary_settings({PREFECT_LOGGING_TO_API_ENABLED: False}):
         yield flow_run_id
-
-
-def _use_prefect_client(
-    monkeypatch: pytest.MonkeyPatch, client: FakePrefectClient
-) -> None:
-    def _get_client(sync_client: bool = False) -> FakePrefectClient:
-        assert sync_client
-        return client
-
-    monkeypatch.setattr(local_driver, "get_client", _get_client)
-
-
-@pytest.mark.parametrize(
-    ("client_options", "image_words", "image", "work_pool"),
-    [
-        pytest.param(
-            {"job_variables": {"image": ACTION_IMAGE}},
-            f"in the image {ACTION_IMAGE}",
-            ACTION_IMAGE,
-            WORK_POOL,
-            id="image-of-the-action",
-        ),
-        pytest.param(
-            {"work_pool_image": WORK_POOL_IMAGE},
-            f"in the image {WORK_POOL_IMAGE}",
-            WORK_POOL_IMAGE,
-            WORK_POOL,
-            id="default-image-of-the-work-pool",
-        ),
-        pytest.param(
-            {},
-            f"in the default image of the work pool {WORK_POOL}",
-            None,
-            WORK_POOL,
-            id="work-pool-without-a-default-image",
-        ),
-        pytest.param(
-            {"work_pool_image": WORK_POOL_IMAGE, "failing_reads": ("deployment",)},
-            f"in the default image of the work pool {WORK_POOL}",
-            None,
-            WORK_POOL,
-            id="deployment-read-fails",
-        ),
-        pytest.param(
-            {"work_pool": None},
-            "in the image of this action's Job",
-            None,
-            None,
-            id="unknown-work-pool",
-        ),
-        pytest.param(
-            {"failing_reads": ("flow_run",)},
-            "in the image of this action's Job",
-            None,
-            None,
-            id="flow-run-read-fails",
-        ),
-    ],
-)
-def test_missing_files_error_names_the_image_of_the_job(
-    driver: Path,
-    job_flow_run_id: uuid.UUID,
-    monkeypatch: pytest.MonkeyPatch,
-    client_options: dict[str, Any],
-    image_words: str,
-    image: str | None,
-    work_pool: str | None,
-) -> None:
-    inputs = _check_inputs(driver)
-    (driver / "actions.py").unlink()
-    _use_prefect_client(
-        monkeypatch, FakePrefectClient(job_flow_run_id, **client_options)
-    )
-
-    with pytest.raises(DriverFilesNotFoundError) as raised:
-        check_local_driver(**inputs)
-
-    assert str(raised.value).startswith(
-        f"The driver files are not at {driver} {image_words}: actions.py not found. "
-    )
-    assert (raised.value.image, raised.value.work_pool) == (image, work_pool)
-
-
-def test_failed_image_read_is_logged_and_the_error_still_raises(
-    driver: Path,
-    job_flow_run_id: uuid.UUID,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    inputs = _check_inputs(driver)
-    (driver / "actions.py").unlink()
-    _use_prefect_client(
-        monkeypatch, FakePrefectClient(job_flow_run_id, failing_reads=("deployment",))
-    )
-    caplog.set_level(logging.WARNING)
-
-    with pytest.raises(DriverFilesNotFoundError):
-        check_local_driver(**inputs)
-
-    (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert record.getMessage() == (
-        "Could not read from the Prefect API the image to name in the error; the "
-        f"error names the default image of the work pool {WORK_POOL} instead."
-    )
-    assert record.flow_run_id == str(job_flow_run_id)
 
 
 @pytest.mark.parametrize(
@@ -633,7 +496,6 @@ def test_failed_image_read_is_logged_and_the_error_still_raises(
 def test_check_logs_its_error_in_the_flow_run_before_it_raises(
     driver: Path,
     job_flow_run_id: uuid.UUID,
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     change: Callable[[Path], object],
     error_type: type[Exception],
@@ -646,10 +508,6 @@ def test_check_logs_its_error_in_the_flow_run_before_it_raises(
     """
     inputs = _check_inputs(driver)
     change(driver)
-    _use_prefect_client(
-        monkeypatch,
-        FakePrefectClient(job_flow_run_id, job_variables={"image": ACTION_IMAGE}),
-    )
     caplog.set_level(logging.INFO)
 
     with pytest.raises(error_type) as raised:
@@ -739,32 +597,10 @@ def test_driver_file_removed_after_the_check_raises_the_missing_files_error(
         check_local_driver(**inputs)
 
     assert str(raised.value).startswith(
-        f"The driver files are not at {driver} {UNKNOWN_IMAGE_WORDS}: "
+        f"The driver files are not at {driver} {IN_THE_AGENT_POD}: "
         "actions.py not found. "
     )
     assert raised.value.missing == ["actions.py"]
-
-
-def test_fingerprint_error_names_the_image_of_the_action(
-    driver: Path, job_flow_run_id: uuid.UUID, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    inputs = _check_inputs(driver)
-    with (driver / "actions.py").open("a") as file:
-        file.write("\n# edited after the driver was loaded\n")
-    _use_prefect_client(
-        monkeypatch,
-        FakePrefectClient(job_flow_run_id, job_variables={"image": ACTION_IMAGE}),
-    )
-
-    with pytest.raises(DriverFingerprintMismatchError) as raised:
-        check_local_driver(**inputs)
-
-    _assert_fingerprint_error(
-        raised.value,
-        driver=driver,
-        expected=inputs["content_hash"],
-        image_words=f"in the image {ACTION_IMAGE}",
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -791,7 +627,11 @@ def test_get_function_raises_the_missing_files_error_before_it_imports(
         definition.get_function()
 
     assert raised.value.missing == ["actions.py"]
-    assert str(driver) in str(raised.value)
+    # Not the pull step: the error does not name the host of this process.
+    assert raised.value.agent_pod is None
+    assert str(raised.value).startswith(
+        f"The driver files are not at {driver} in the Styrmin agent pod: "
+    )
 
 
 def test_get_function_raises_the_fingerprint_error_before_it_imports(
@@ -809,7 +649,7 @@ def test_get_function_raises_the_fingerprint_error_before_it_imports(
         raised.value,
         driver=driver,
         expected=definition.content_hash,
-        image_words=UNKNOWN_IMAGE_WORDS,
+        where="in the Styrmin agent pod",
     )
     assert _imported_from(driver) == []
 

@@ -15,7 +15,7 @@ from prefect.client.schemas.schedules import CronSchedule
 from prefect.runner.storage import GitRepository
 from prefect.utilities.importtools import import_object
 from prefect_github import GitHubCredentials
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing_extensions import Self
 
 from styrmin_backend import __version__
@@ -229,9 +229,10 @@ class LocalDriverActionWorkflowDefinition(WorkflowDefinition):
     the directory. Prefect then changes into it and imports the
     entrypoint ``<module>:<function>`` (research R-001).
 
-    The definition refuses a ``directory`` that contains ``{`` or ``}`` and an
-    empty ``content_hash``. ``ensure_action_registrations`` refuses such a path
-    first, with the message for the user.
+    The definition refuses a ``directory`` that contains ``{`` or ``}`` or is
+    relative, an empty ``content_hash``, and a ``module`` other than
+    ``actions_file``. ``ensure_action_registrations`` refuses such a path and
+    such an action first, with the message for the user.
     """
 
     # The path that the driver version was loaded from (``source_path``).
@@ -270,6 +271,27 @@ class LocalDriverActionWorkflowDefinition(WorkflowDefinition):
                 "each action compares the driver files with it, so it must be set."
             )
         return content_hash
+
+    @model_validator(mode="after")
+    def _refuse_what_the_check_does_not_cover(self) -> Self:
+        """Refuse a relative ``directory`` and a ``module`` other than ``actions_file``.
+
+        The agent runs the action from a temporary working folder, where a
+        relative path does not lead to the driver, and the check hashes only
+        ``actions_file`` of the driver's code.
+        """
+        if not self.directory.startswith("/"):
+            raise ValueError(
+                f"The driver path {self.directory!r} is relative. The action runs "
+                "from a temporary working folder, so the path must be absolute."
+            )
+        if self.module != self.actions_file:
+            raise ValueError(
+                f"The action's module {self.module!r} is not the actions file "
+                f"{self.actions_file!r}, the only code file that the check before "
+                "the action covers."
+            )
+        return self
 
     @property
     def entrypoint(self) -> str:
