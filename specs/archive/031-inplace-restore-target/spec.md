@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-19
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: PRD "An in-place restore always restores into the deployment its backup was taken of" — [opsmill/styrmin#532 (comment)](https://github.com/opsmill/styrmin/issues/532#issuecomment-6267704797). Seed issue: [#532](https://github.com/opsmill/styrmin/issues/532), found in the review of [#531](https://github.com/opsmill/styrmin/pull/531), which fixes [#530](https://github.com/opsmill/styrmin/issues/530). The PRD's links point to `develop` at [`a5ec9446`](https://github.com/opsmill/styrmin/tree/a5ec944687e5479abd824342d557a28b4e97af9e). This spec is written against `develop` at `7f0455be`, which adds the fix for #530 (spec [030](../030-clone-service-aliases/spec.md)).
 

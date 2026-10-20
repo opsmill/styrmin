@@ -1189,6 +1189,30 @@ before it creates the Job of `execute_commands`
 ([ADR-081](../../adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md),
 "The Job of `execute_commands`").
 
+### Derive the namespace that a flow deletes on the server, and check it again in the flow
+
+<!-- Extracted from specs/031-inplace-restore-target on 2026-10-20 -->
+
+Before #532, `createRestore` took the namespace to restore into from the client, and the restore
+flow deleted that namespace. A user with the `READ_WRITE` role could make a restore delete the
+namespace of another deployment, or any namespace such as `kube-system`. When a request leads to a
+flow that deletes or overwrites cluster objects:
+
+- Do not accept a namespace, or another cluster-object name, from the client. Take the record from
+  the request, such as the backup, and derive the namespace from the record's id on the server.
+- Derive it in one service function that every caller uses, and store the result on the operation's
+  row. Callers read the value from the row to start the flow, and never build it again. Reference:
+  `resolve_restore_target` in `services/backup/service.py`, whose result `create_restore` records
+  as `Restore.target_namespace`; the `createRestore` mutation, the environment restore and the clone
+  flow read that column.
+- In the flow, before the first step that deletes or writes, check that the namespace parameter and
+  the namespace stored on the row are both the one that the record's id gives. If they differ, fail
+  the operation with a message that says nothing in the cluster changed. A flow run can be started
+  directly through the Prefect API, or queued by an earlier release that built the parameter in
+  another way. Reference: `_check_restore_namespace` in `workflows/templates/backup.py`.
+
+See [ADR-085](../../adr/0085-restore-target-derived-from-the-backups-deployment.md).
+
 ### Delete an object that another writer can replace with a `resourceVersion` precondition
 
 <!-- Extracted from specs/026-delete-service-aliases on 2026-10-17 -->
@@ -1388,6 +1412,37 @@ items, and fails when the two counts differ or pass a fixed limit. Reference:
 
 Leave large text fields, such as `Step.output`, out of list queries. Expose a boolean
 (`hasOutput`) and a single-item query (`Query.step`) that the client calls on request.
+
+### Remove an argument that released clients send
+
+<!-- Extracted from specs/031-inplace-restore-target on 2026-10-20 -->
+
+Before version 1.0, remove a GraphQL argument with no deprecation period, as #472 and #532 did. A
+`styrminctl`, a Python SDK or a web page from before the removal keeps sending the argument, and
+graphql-core refuses it with `Unknown argument '<name>' on field '<type>.<field>'.`, which does not
+say that the client is out of date. In the change that removes an argument that a released client
+sends:
+
+- Add the argument to `REMOVED_ARGUMENTS` in `api/removed_arguments.py`, keyed by
+  `(parent type, field, argument)`.
+- Write a message that says what changed and why, that the client is older than the server, and
+  what to do: upgrade `styrminctl` and the Python SDK to the server's version, or reload the web
+  page. `{argument}` in the message is replaced by the argument's name.
+- Add a functional test that sends the argument and asserts the message, that no row was written
+  and that no flow run started (see
+  [Test that a removed argument is refused](../../guides/graphql-propagation-tests.md#test-that-a-removed-argument-is-refused)).
+- In the same change, make the SDK report an older server that still requires the argument (see
+  [Report an older server that still requires an argument the SDK no longer sends](#report-an-older-server-that-still-requires-an-argument-the-sdk-no-longer-sends)).
+
+```python
+REMOVED_ARGUMENTS: dict[tuple[str, str, str], str] = {
+    ("Mutation", "createRestore", "targetNamespace"): _CREATE_RESTORE_REMOVED,
+    ("Mutation", "createRestore", "targetInstanceId"): _CREATE_RESTORE_REMOVED,
+}
+```
+
+The request is still refused by validation, before any resolver runs. See
+[ADR-086](../../adr/0086-removed-graphql-arguments-explained-to-older-clients.md).
 
 ## Prefect Flows & Tasks
 
@@ -1611,6 +1666,32 @@ Use `@overload` so the return type follows the argument, because the two operati
 result types. References: `DriverResource.load_version` in
 `python_sdk/src/styrmin_sdk/resources/drivers.py` (#517), and `update_version()` with
 `update_deployment_version_with_input.graphql` in `resources/deployments.py` (#388).
+
+### Report an older server that still requires an argument the SDK no longer sends
+
+<!-- Extracted from specs/031-inplace-restore-target on 2026-10-20 -->
+
+When the server removes a required argument, the SDK stops sending it. A server from before the
+removal then refuses every call with `Field '<field>' argument '<name>' of type '<type>!' is
+required, but it was not provided.` Before the generic error check, look for an error that starts
+with that text, and raise `IncompatibleServerError` with a message that says the server is older
+than the SDK and to upgrade the server, or to use the `styrminctl` or SDK of the server's version.
+`styrminctl` prints the message.
+
+```python
+#: How a server from before #532 refuses a restore that names only the backup.
+_TARGET_NAMESPACE_REQUIRED = "Field 'createRestore' argument 'targetNamespace' of type 'String!' is required"
+
+result = await self._transport.execute(load_query("create_restore"), {"backupId": str(backup_id)})
+_raise_if_server_requires_target_namespace(result)
+self._check_graphql_errors(result)
+```
+
+Reference: `BackupResource.create_restore` in `python_sdk/src/styrmin_sdk/resources/backups.py`
+(#532), tested by `test_create_restore_on_a_server_from_before_532_raises` in
+`python_sdk/tests/test_backups.py`. The server side of the same removal is
+[Remove an argument that released clients send](#remove-an-argument-that-released-clients-send).
+See [ADR-086](../../adr/0086-removed-graphql-arguments-explained-to-older-clients.md).
 
 ## Invoke Tasks
 

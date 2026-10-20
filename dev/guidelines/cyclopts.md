@@ -99,6 +99,47 @@ Note: `validators.Path` only works with `pathlib.Path` parameters. For `str` pat
 - **Enum-like strings** (e.g., status filters) — server validates allowed values
 - **Free-form names** — no format constraints to enforce
 
+### Refuse an option combination in the command body
+
+<!-- Extracted from specs/031-inplace-restore-target on 2026-10-20 -->
+
+A validator checks one parameter. When an option is valid only together with another option, or
+never together with an argument, check the combination in the command body:
+
+- Check it at the top of the command, inside `styrmin_error_handler()` and before
+  `client.get_client()`, so the command refuses the request before it calls the server.
+- Raise `ValueError`. `styrmin_error_handler()` prints the message and exits with code 1, as it does
+  for the command's other errors.
+- In the message, name the options, say where they work, and say what to run instead.
+- Also refuse an option that only narrows another option, such as `--environment`, which only says
+  which environment a `--target-deployment` name belongs to. Otherwise the command ignores the option
+  without a message.
+- Do not use Cyclopts groups with the `mutually_exclusive` validator. No command uses them, and the
+  messages above need the command's own text.
+
+```python
+with styrmin_error_handler():
+    if last and backup_id is not None:
+        raise ValueError("Provide either a backup_id or --last, not both")
+    if backup_id is not None:
+        _refuse_target_options_with_backup_id(
+            target_deployment=target_deployment,
+            target_deployment_id=target_deployment_id,
+            target_instance_id=target_instance_id,
+            environment=environment,
+        )
+
+    async with client.get_client() as sdk:
+        ...
+```
+
+`_refuse_target_options_with_backup_id` refuses `--target-deployment`, `--target-deployment-id`,
+`--target-instance-id` and `--environment` next to a backup id, with "… work only with --last. A
+backup is restored into the deployment it was taken of. Run the command again without
+--target-deployment." Reference: `restore` in `cli/src/styrminctl/commands/backups.py` (#532),
+tested by `test_backups_restore_backup_id_with_a_target_option_is_refused` in
+`cli/tests/test_backups.py`.
+
 ## Docstrings
 
 Keep only the command description in docstrings. Parameter documentation belongs in `Parameter(help=...)`.

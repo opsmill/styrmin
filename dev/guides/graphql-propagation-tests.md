@@ -187,6 +187,46 @@ resolver function directly, passing a real `info.context["uow"]` backed by
 the test session. Prefer the HTTP-driven recipes above unless there's a
 specific reason to bypass the GraphQL transport.
 
+## Test that a removed argument is refused
+
+<!-- Extracted from specs/031-inplace-restore-target on 2026-10-20 -->
+
+When you remove an argument that released clients send, test the request
+that such a client sends. Do not commit a `.graphql` file that still passes
+the removed argument: `uv run invoke validate-graphql` checks every
+`.graphql` file in the repository against `schema.graphql`, so that file
+fails CI. Build the request from the valid operation file instead:
+
+1. Parse the operation with `graphql.parse(load_query("<name>"))`.
+2. Add one `ArgumentNode` with the removed argument to the field.
+3. Print the document with `graphql.print_ast` and post it.
+
+```python
+def _create_restore_with_argument(name: str, value: str) -> str:
+    document = graphql.parse(load_query("create_restore"))
+    [operation] = document.definitions
+    assert isinstance(operation, OperationDefinitionNode)
+    [field] = operation.selection_set.selections
+    assert isinstance(field, FieldNode)
+    field.arguments = (
+        *field.arguments,
+        ArgumentNode(name=NameNode(value=name), value=StringValueNode(value=value)),
+    )
+    return graphql.print_ast(document)
+```
+
+The request then differs from what a client before the removal sends only
+by the removed argument. Parametrize the test over each removed argument,
+and assert:
+
+- the message from `REMOVED_ARGUMENTS`, not only the error code (see
+  [`dev/guidelines/backend/python.md`](../guidelines/backend/python.md#remove-an-argument-that-released-clients-send));
+- that no row was written, read back through the session;
+- that no flow run started (`prefect_manager_mock.run_action.assert_not_called()`).
+
+Reference: `test_create_restore_refuses_a_removed_target_argument` in
+`backend/tests/functional/graphql/test_create_restore.py` (#532).
+
 ## Skipping
 
 Never skip the propagation test for a new or modified schema element. If you
