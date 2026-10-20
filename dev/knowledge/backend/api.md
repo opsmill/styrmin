@@ -257,7 +257,7 @@ async def create_cluster(
     return Cluster.from_instance(cluster)
 ```
 
-On the client side, errors arrive as standard GraphQL errors with `extensions.code` for programmatic handling. The Python SDK raises a `StyrminAPIError` subclass chosen by the `extensions.code` of the first error (`BaseResource._check_graphql_errors` in `python_sdk/src/styrmin_sdk/resources/_base.py`). The exception gives the code as `typename` and all the extensions of that error as `extensions`, so the `error_metadata` of a `ServiceError` reaches SDK callers. See [`../guides/graphql-propagation-tests.md`](../guides/graphql-propagation-tests.md) for the per-field test pattern.
+On the client side, errors arrive as standard GraphQL errors with `extensions.code` for programmatic handling. The Python SDK raises a `StyrminAPIError` subclass chosen by the `extensions.code` of the first error (`BaseResource._check_graphql_errors` in `python_sdk/src/styrmin_sdk/resources/_base.py`). The exception gives the code as `typename` and all the extensions of that error as `extensions`, so the `error_metadata` of a `ServiceError` reaches SDK callers. `deployments.apply()` and `apply_files()` copy them into the `error_extensions` of a failed `ApplyOutcome`. [`docs/docs/reference/python-sdk-errors.md`](../../../docs/docs/reference/python-sdk-errors.md) describes this for SDK users. See [`../guides/graphql-propagation-tests.md`](../guides/graphql-propagation-tests.md) for the per-field test pattern.
 
 <!-- Extracted from specs/011-env-config-input-hardening on 2026-05-10 -->
 

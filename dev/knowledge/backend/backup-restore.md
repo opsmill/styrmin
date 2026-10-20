@@ -1405,7 +1405,9 @@ busy source is reported first:
    deployment that the plan leaves off the record, or
    `no deployment of the source environment has this name`. The message lists the same
    deployments, reasons and paths, then the three ways to fix the request
-   (`UnclonedDeploymentReferenceError.fixes`), because the SDK shows only the message. A
+   (`UnclonedDeploymentReferenceError.fixes`), because `styrminctl` shows only the message. A
+   program that uses the Python SDK reads the entries in
+   `OperationFailedError.extensions["deployments"]`. A
    malformed `deployment_id` in a driver version's component definitions raises
    `UnresolvableAffinityReferenceError` with the term's path (`parse_deployment_id`).
 

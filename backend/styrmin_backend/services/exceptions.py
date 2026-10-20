@@ -670,8 +670,9 @@ class UnresolvableAffinityReferenceError(ServiceError):
     deployment that doesn't exist, lives in a different environment, or is
     tombstoned (``deleted=True``, with the deployment's last name).
     The message gives the term's ``path``, the environment when known, the
-    reason and, for a tombstoned deployment, how to fix the term, because the
-    SDK and ``styrminctl`` show the message only.
+    reason and, for a tombstoned deployment, how to fix the term, because
+    ``styrminctl`` shows the message only. SDK callers also read the
+    ``error_metadata`` below in the exception's ``extensions`` (#522).
     """
 
     error_code = "VALIDATION_ERROR"

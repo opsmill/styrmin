@@ -22,6 +22,7 @@ to [Concepts and Architecture](../concepts-and-architecture/index.md).
 |------|----------------|--------|
 | [`StyrminDeployment` CRD](./styrmindeployment.md) | Field-by-field reference of the `StyrminDeployment` Kubernetes Custom Resource. | Generated from the OpenAPI schema embedded in the operator. |
 | [`styrminctl` CLI](./styrminctl.md) | Every command, flag, and exit code in the `styrminctl` CLI. | Generated from the Cyclopts command tree at build time. |
+| [Python SDK errors](./python-sdk-errors.md) | Which exception the Python SDK raises for each error code, and how a program reads the details of a refused request. | Written by hand from `python_sdk/src/styrmin_sdk/exceptions.py` and `python_sdk/src/styrmin_sdk/resources/_base.py`. |
 | [Driver API](./driver-api.md) | Reference for the `driver.styrmin.yml` specification — every field, every action declaration. | Generated from the Pydantic models in `backend/styrmin_backend/driver/`. |
 | [Configuration](./configuration.md) | Server and agent configuration: environment variables, Helm values, defaults. | Generated from the Pydantic-settings models and the Helm chart's `values.schema.json`. |
 

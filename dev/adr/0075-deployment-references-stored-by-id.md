@@ -100,6 +100,12 @@ We chose option 2, as decided in the review of PR #504 and recorded in #508.
   that a deeper level discards with `replace: true` is dropped before it is resolved. The error
   message gives the term's path, the environment's name and the reason, and for a tombstoned
   deployment how to fix the term, because the SDK shows only the message.
+
+  > Amended 2026-10-20 ([#522](https://github.com/opsmill/styrmin/issues/522)): the SDK now gives
+  > the error's extensions (the term's `path`, the `deployment_id` or `deployment_name`, and
+  > `deleted`) in the `extensions` attribute of its exceptions, and in the `error_extensions` of
+  > a failed apply outcome. `styrminctl` still shows only the message, so the message keeps the
+  > path, the environment's name, the reason and the fix.
 - **`updateDeployment` checks every level before it saves.** It resolves the terms of the
   environment's config and of each component's config, as building the next instance does, before
   its first commit, so a term that names a tombstoned deployment refuses the update and saves

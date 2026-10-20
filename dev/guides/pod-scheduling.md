@@ -110,8 +110,12 @@ term gives. The path starts with the config that holds the term:
 for example `environment.config.scheduling.pod_anti_affinity.preferred[0].term`.
 Paths use the snake_case keys of the stored config, as a read gives them.
 The message gives the same path, the environment's name and the reason,
-because the SDK and `styrminctl` show only the message
-([#522](https://github.com/opsmill/styrmin/issues/522)), for example:
+because `styrminctl` shows only the message. A program that uses the
+Python SDK reads the error's extensions in the `extensions` attribute of
+the `OperationFailedError`, or in the `error_extensions` of a failed
+apply outcome ([#522](https://github.com/opsmill/styrmin/issues/522)).
+The environment's name and the reason are only in the message. An
+example message:
 
 ```text
 Affinity term at deployment.config.scheduling.pod_affinity.required[0] names
