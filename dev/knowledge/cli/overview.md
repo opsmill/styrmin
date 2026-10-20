@@ -433,3 +433,40 @@ config and starting the redeploys, and that the operator should check the config
 **Reading the config back.** `clusters get --json` prints only the config, as indented JSON with
 sorted keys, to edit and pass to `clusters update --config @FILE`. `clusters get` and
 `clusters list` show the config as JSON in a table cell.
+
+## Restoring a backup
+
+<!-- Extracted from specs/031-inplace-restore-target on 2026-10-20 -->
+
+`styrminctl backups restore` sends only a backup id to the server, through
+`sdk.backups.create_restore(backup_id=...)`. The server restores the backup into the deployment it
+was taken of, in `styrmin-<deployment id>`, and records that deployment's active instance on the
+restore ([ADR-085](../../adr/0085-restore-target-derived-from-the-backups-deployment.md)). The
+command takes the backup in one of two ways (`restore` and `_prepare_restore` in
+`commands/backups.py`):
+
+- **A backup id.** The command sends it as given. With a backup id, it refuses
+  `--target-deployment`, `--target-deployment-id`, `--target-instance-id` and `--environment`
+  before it opens a client, with "… work only with --last. A backup is restored into the deployment
+  it was taken of. Run the command again without <option>."
+  (`_refuse_target_options_with_backup_id`). Before #532, `cli/README.md` showed
+  `backups restore <backup-id> --target-deployment my-app` as its example, and that form is now
+  refused.
+- **`--last` with one target option.** `--target-deployment` (with `--environment` to name the
+  environment) or `--target-deployment-id` chooses the deployment whose backup history the newest
+  completed backup that has not expired is picked from. `--target-instance-id` picks from the
+  backups of one instance. `--last` resolves only the deployment id (`resolve_deployment_id`), not
+  the active instance, so it works for a deployment without an active instance, as the server does.
+  The command then asks for confirmation when the chosen backup was taken of an earlier instance or
+  at another application version, unless `--yes` is passed
+  ([ADR-063](../../adr/0063-restore-of-earlier-instance-backup.md)). For `--target-instance-id`, it
+  compares against the deployment of the backup's instance, because the server restores into that
+  deployment.
+
+`--target-namespace` was removed in #532, and Cyclopts rejects it as an unknown option.
+
+**Server compatibility.** A server from before #532 requires `targetNamespace` and refuses a restore
+that names only the backup. The SDK raises `IncompatibleServerError`, which says that the server is
+older than the SDK and to upgrade it, and the command prints that message. The opposite case, a
+`styrminctl` from before #532 against a newer server, gets the server's message from
+`REMOVED_ARGUMENTS` ([ADR-086](../../adr/0086-removed-graphql-arguments-explained-to-older-clients.md)).

@@ -1725,6 +1725,10 @@ Backups and restores track status at the component level. The overall status is 
   - sets `labelSelector` to `CROSS_TARGET_LABEL_SELECTOR`, which leaves out the service aliases (`styrmin.io/service-alias` `NotIn` `["true"]`), because they point to the source's namespaces ([#530](https://github.com/opsmill/styrmin/issues/530));
   - labels the Restore with `styrmin.io/instance` set to the counterpart's instance (`target_instance_id`) and `styrmin.io/source-instance` set to the source's instance.
 
+  <!-- Extracted from specs/031-inplace-restore-target on 2026-10-20 -->
+
+  `build_velero_restore` decides that a restore is cross-target by comparing namespaces, while `execute_restore_workflow` decides it by comparing deployment ids (`source_deployment_id` against `deployment_id`): only a restore whose deployment ids differ builds the counterpart's CR body and writes the service aliases after its recovery. Before #532, an in-place restore could name another deployment's namespace, so the builder left out the aliases and the flow did not write them, and the restore ended with no aliases in that namespace and no error. Since #532 a restore's namespace is always `styrmin-<id>` of the deployment that receives it (`resolve_restore_target`), so the namespaces differ exactly when the deployment ids differ, and the two decisions agree on every restore ([ADR-085](../../adr/0085-restore-target-derived-from-the-backups-deployment.md)).
+
   Every restore sets `restore_pvs=False` (`build_velero_restore`, `builders/backup.py:70-126`). Restored data therefore comes from the file-system (kopia) pod volume restore, and the `resourceModifier` rule that removes `spec.volumeName` lets the restored PVCs be provisioned again in the target namespace. Research D1 of the environment clone records the constraint: if the platform moves to CSI snapshot restores, this setting would restore no volume data and must be changed with the data mover.
 
 <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
