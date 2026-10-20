@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.e2e.demos import infrahub_setup
 from tests.e2e.demos.catalog import DEMOS
 from tests.e2e.demos.scenarios import clone
 from tests.e2e.drivers.errors import ScenarioActionError
@@ -84,8 +85,10 @@ def test_the_count_pattern_matches_the_line_the_playbook_prints() -> None:
     playbook = (
         REPOSITORY_ROOT / "backend/tests/e2e/demos/semaphore/ansible/list_hosts.yml"
     ).read_text()
+    template = "{{ groups['all'] | length }}"
+    assert template in playbook
 
-    assert "Devices in the inventory: {{ groups['all'] | length }}" in playbook
+    assert clone.device_count(playbook.replace(template, "2")) == 2
 
 
 def test_device_count_reads_the_count_of_the_playbook_output() -> None:
@@ -103,6 +106,18 @@ def test_device_count_names_a_log_without_a_count_and_shows_its_last_lines() -> 
         "The Semaphore task output gives no device count. Last lines of its log:\n"
         "PLAY [List the network devices] ****\nskipping: no hosts matched"
     )
+
+
+def test_device_count_hides_the_infrahub_token_in_the_last_lines() -> None:
+    token = infrahub_setup.INFRAHUB_TOKEN
+    log = f"fatal: Infrahub refused the token {token}\nPLAY RECAP ****\n"
+
+    with pytest.raises(ScenarioActionError) as raised:
+        clone.device_count(log)
+
+    message = str(raised.value)
+    assert token not in message
+    assert message.endswith("fatal: Infrahub refused the token ***\nPLAY RECAP ****")
 
 
 def test_device_count_refuses_two_different_counts() -> None:

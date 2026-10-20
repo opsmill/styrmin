@@ -115,4 +115,4 @@ def test_check_catalog_refuses_shared_environment_names_and_wrong_order() -> Non
 
 def test_the_registered_demos_follow_the_catalog_rules() -> None:
     check_catalog(DEMOS)
-    assert all(demo.slug in SLUGS for demo in DEMOS)
+    assert tuple(demo.slug for demo in DEMOS) == SLUGS

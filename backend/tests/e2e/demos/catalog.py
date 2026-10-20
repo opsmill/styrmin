@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
     from tests.e2e.demos.recorder import DemoRecorder
 
-# Every demo of the PRD, in its order. A slug is in DEMOS only once its scenario exists.
+# Every demo of the PRD, in its order. DEMOS registers one demo for each slug, in the same order.
 SLUGS = ("deploy-upgrade", "component-overrides", "backup-restore", "clone")
 VERSIONS_PATH = Path(__file__).with_name("infrahub_versions.yml")
 VERSION_KEYS = ("previous", "latest")
@@ -148,7 +148,8 @@ DEMOS: tuple[Demo[Any], ...] = (
     Demo(
         slug="clone",
         number=4,
-        # The clone first, so the deletion of the leftovers and the cleanup delete it before its source.
+        # The clone first, so the deletion of the environments an earlier failed run kept, and the
+        # cleanup, delete it before its source.
         environment_names=(clone.CLONE_NAME, clone.ENVIRONMENT_NAME),
         setup=clone.setup,
         record=clone.record,

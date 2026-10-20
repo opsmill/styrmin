@@ -188,6 +188,39 @@ async def _read_started_tasks(
     )
 
 
+async def _read_timeline_entry(row: Locator) -> TimelineEntry:
+    """Read one ``timeline-entry`` element of the Timeline tab."""
+    task_id = await _required_attr(row, "data-task-id", context="timeline entry")
+    context = f"timeline entry {task_id}"
+    task_type = await _required_attr(row, "data-task-type", context=context)
+    task_status = await _required_attr(row, "data-task-status", context=context)
+    created_on = await row.get_attribute("data-created-on")
+    application_version = await row.get_attribute("data-application-version")
+    started_by_step_id = await row.get_attribute("data-started-by-step-id")
+    result = await _required_attr(row, "data-task-result", context=context)
+    started_by_task_id = await row.get_attribute("data-started-by-task-id")
+    started_by_task_type = await row.get_attribute("data-started-by-task-type")
+    return TimelineEntry(
+        task_id=task_id,
+        task_type=task_type,
+        task_status=task_status,
+        application_version=application_version or None,
+        created_on=created_on or None,
+        steps=await _read_steps(row, context=context),
+        started_by_step_id=started_by_step_id or None,
+        result=result,
+        # The timeline shows only the type of the starting task.
+        started_by=(
+            TaskLinkRef(
+                id=started_by_task_id, type=started_by_task_type or "", result=None
+            )
+            if started_by_task_id
+            else None
+        ),
+        started_tasks=await _read_started_tasks(row, context=context),
+    )
+
+
 class DeploymentDetailPage:
     """Deployment detail — status, Upgrade, Timeline tab, Backups tab, Restores tab."""
 
@@ -902,25 +935,37 @@ class DeploymentDetailPage:
         await self.open_timeline()
         return {task.id for task in await self._read_timeline_tasks()}
 
-    async def show_timeline_entry(self, task_id: str) -> tuple[StepRef, ...]:
-        """On the open Timeline tab, expand the entry of ``task_id``, scroll it to
-        the top of the page and return its steps."""
+    async def show_timeline_entry(self, task_id: str) -> TimelineEntry:
+        """Expand the entry of ``task_id``, scroll it to the top of the page and
+        return it, with its application version and its steps.
+
+        The Timeline tab must already be open (``open_timeline``); this method
+        does not click it. Raises ``ScenarioActionError`` when the tab shows no
+        entry for the task within 10 s, or when the entry does not expand after
+        a click.
+        """
         entry = self._page.locator(
             f"[data-testid=timeline-entry][data-task-id='{task_id}']"
         )
         try:
             await entry.wait_for(state="visible", timeout=10_000)
-        except PlaywrightTimeoutError:
+        except PlaywrightTimeoutError as exc:
             raise ScenarioActionError(
-                f"the timeline does not list task {task_id}"
-            ) from None
+                f"no entry for task {task_id} on the open Timeline tab within 10 s"
+            ) from exc
         if await entry.get_attribute("data-expanded") != "true":
             await entry.locator("[data-testid=timeline-entry-trigger]").first.click()
-            await expect(entry).to_have_attribute("data-expanded", "true")
+            try:
+                await expect(entry).to_have_attribute("data-expanded", "true")
+            except AssertionError as exc:
+                raise ScenarioActionError(
+                    f"the entry for task {task_id} on the open Timeline tab "
+                    "did not expand after a click"
+                ) from exc
         await entry.evaluate(
             "entry => entry.scrollIntoView({block: 'start', behavior: 'smooth'})"
         )
-        return await _read_steps(entry, context=f"timeline entry {task_id}")
+        return await _read_timeline_entry(entry)
 
     async def wait_for_new_task(
         self, task_type: str, *, known_task_ids: set[str], timeout: float
@@ -968,52 +1013,7 @@ class DeploymentDetailPage:
         await self.open_timeline()
         entries_loc = self._page.locator("[data-testid=timeline-entry]")
         count = await entries_loc.count()
-        results: list[TimelineEntry] = []
-        for i in range(count):
-            row = entries_loc.nth(i)
-            task_id = await _required_attr(
-                row, "data-task-id", context="timeline entry"
-            )
-            task_type = await _required_attr(
-                row, "data-task-type", context=f"timeline entry {task_id}"
-            )
-            task_status = await _required_attr(
-                row, "data-task-status", context=f"timeline entry {task_id}"
-            )
-            created_on = await row.get_attribute("data-created-on")
-            application_version = await row.get_attribute("data-application-version")
-            started_by_step_id = await row.get_attribute("data-started-by-step-id")
-            result = await _required_attr(
-                row, "data-task-result", context=f"timeline entry {task_id}"
-            )
-            started_by_task_id = await row.get_attribute("data-started-by-task-id")
-            started_by_task_type = await row.get_attribute("data-started-by-task-type")
-            results.append(
-                TimelineEntry(
-                    task_id=task_id,
-                    task_type=task_type,
-                    task_status=task_status,
-                    application_version=application_version or None,
-                    created_on=created_on or None,
-                    steps=await _read_steps(row, context=f"timeline entry {task_id}"),
-                    started_by_step_id=started_by_step_id or None,
-                    result=result,
-                    # The timeline shows only the type of the starting task.
-                    started_by=(
-                        TaskLinkRef(
-                            id=started_by_task_id,
-                            type=started_by_task_type or "",
-                            result=None,
-                        )
-                        if started_by_task_id
-                        else None
-                    ),
-                    started_tasks=await _read_started_tasks(
-                        row, context=f"timeline entry {task_id}"
-                    ),
-                )
-            )
-        return results
+        return [await _read_timeline_entry(entries_loc.nth(i)) for i in range(count)]
 
     async def read_instance_id(self) -> str | None:
         """Read the deployment's instance id from the detail page attributes."""

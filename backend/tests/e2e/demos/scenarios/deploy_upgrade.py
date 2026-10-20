@@ -13,10 +13,8 @@ from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 from tests.e2e.pages.environments import EnvironmentDetailPage
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from tests.e2e.demos.catalog import DemoContext
-    from tests.e2e.drivers.refs import StepRef
+    from tests.e2e.drivers.refs import TimelineEntry
 
 ENVIRONMENT_NAME = "network-lab-upgrade"
 DRIVER = "infrahub"
@@ -46,17 +44,29 @@ def check_version(shown: str | None, expected: str) -> None:
         )
 
 
-def check_upgrade_action(steps: Sequence[StepRef], task_id: str) -> None:
-    """Raise ``ScenarioActionError`` unless the upgrade task's ``steps`` ran the driver's upgrade action and it succeeded."""
-    step = next((step for step in steps if step.key == UPGRADE_ACTION_STEP), None)
+def check_upgrade_task(entry: TimelineEntry, expected_version: str) -> None:
+    """Raise ``ScenarioActionError`` unless the upgrade task's timeline ``entry`` ran the driver's upgrade
+    action, the action succeeded, and the entry shows the ``expected_version`` of Infrahub.
+
+    The timeline shows each task with the version of the newest instance created at or before the task,
+    which for an upgrade task is the instance that the task rolls out. The deployment page's version does
+    not prove the upgrade: Styrmin sets it when it accepts the upgrade request, before the task runs.
+    """
+    task_id = entry.task_id
+    step = next((step for step in entry.steps if step.key == UPGRADE_ACTION_STEP), None)
     if step is None:
-        shown = ", ".join(step.name for step in steps) or "none"
+        shown = ", ".join(step.name for step in entry.steps) or "none"
         raise ScenarioActionError(
             f"The upgrade task {task_id} did not run the driver's upgrade action; its steps: {shown}"
         )
     if step.status != "SUCCEEDED":
         raise ScenarioActionError(
             f"The step {step.name!r} of the upgrade task {task_id} ended {step.status}, not SUCCEEDED"
+        )
+    if entry.application_version != expected_version:
+        raise ScenarioActionError(
+            f"The upgrade task {task_id} shows Infrahub "
+            f"{entry.application_version or 'with no version'}, not {expected_version}"
         )
 
 
@@ -89,7 +99,8 @@ async def record(context: DemoContext, lab: Lab) -> None:
                 deployment_id=deployment.id, timeout=DEPLOY_TIMEOUT
             )
         check_version(await detail.read_application_version(), versions.previous)
-        # Read the tasks here, so the page does not show the timeline and reload at once in the next step.
+        # Read the task ids at the end of this chapter, so the next chapter does not open the
+        # Timeline tab and then reload the page to open the Upgrade dialog.
         known_task_ids = await detail.read_task_ids()
         await asyncio.sleep(RESULT_HOLD_SECONDS)
 
@@ -109,6 +120,5 @@ async def record(context: DemoContext, lab: Lab) -> None:
     async with recorder.step("The upgrade task and its steps"):
         await detail.open_timeline()
         # The tasks that the upgrade action started are listed above the upgrade task.
-        check_upgrade_action(await detail.show_timeline_entry(task_id), task_id)
-        check_version(await detail.read_application_version(), versions.latest)
+        check_upgrade_task(await detail.show_timeline_entry(task_id), versions.latest)
         await asyncio.sleep(STEPS_HOLD_SECONDS)

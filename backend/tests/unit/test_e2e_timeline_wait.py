@@ -1,12 +1,14 @@
-"""``DeploymentDetailPage.wait_for_new_task``: which timeline task ends the wait.
+"""``DeploymentDetailPage.wait_for_new_task``: which timeline task ends the wait,
+and the errors of ``DeploymentDetailPage.show_timeline_entry``.
 
-The demos wait on it for an upgrade or update task; the E2E suite does not call
-it, so its selection and polling are checked here with a fake timeline.
+The demos call both; the E2E suite does not, so they are checked here with a
+fake timeline.
 """
 
 from __future__ import annotations
 
 import pytest
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from tests.e2e.drivers.errors import ScenarioActionError, ScenarioTimeout
 from tests.e2e.pages import deployment_detail
@@ -118,3 +120,70 @@ async def test_times_out_naming_the_new_tasks_it_saw(
         await page.wait_for_new_task(
             "upgrade_instance", known_task_ids=set(), timeout=0.05
         )
+
+
+class _FakeEntry:
+    """A timeline entry that is never listed, or that stays collapsed after a click."""
+
+    def __init__(self, *, listed: bool) -> None:
+        self._listed = listed
+        self.first = self
+        self.clicks = 0
+
+    async def wait_for(self, *, state: str, timeout: float) -> None:
+        if not self._listed:
+            raise PlaywrightTimeoutError("Timeout 10000ms exceeded.")
+
+    async def get_attribute(self, name: str) -> str:
+        return "false"
+
+    def locator(self, selector: str) -> _FakeEntry:
+        return self
+
+    async def click(self) -> None:
+        self.clicks += 1
+
+
+class _FakePage:
+    def __init__(self, entry: _FakeEntry) -> None:
+        self._entry = entry
+
+    def locator(self, selector: str) -> _FakeEntry:
+        return self._entry
+
+
+class _StaysCollapsed:
+    def __init__(self, entry: _FakeEntry) -> None:
+        pass
+
+    async def to_have_attribute(self, name: str, value: str) -> None:
+        raise AssertionError("Locator expected to have attribute 'data-expanded'")
+
+
+async def test_show_timeline_entry_names_a_task_the_open_tab_does_not_list() -> None:
+    page = DeploymentDetailPage(_FakePage(_FakeEntry(listed=False)))  # type: ignore[arg-type]
+
+    with pytest.raises(ScenarioActionError) as raised:
+        await page.show_timeline_entry(NEW)
+
+    assert str(raised.value) == (
+        f"no entry for task {NEW} on the open Timeline tab within 10 s"
+    )
+    assert isinstance(raised.value.__cause__, PlaywrightTimeoutError)
+
+
+async def test_show_timeline_entry_names_an_entry_that_does_not_expand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(deployment_detail, "expect", _StaysCollapsed)
+    entry = _FakeEntry(listed=True)
+    page = DeploymentDetailPage(_FakePage(entry))  # type: ignore[arg-type]
+
+    with pytest.raises(ScenarioActionError) as raised:
+        await page.show_timeline_entry(NEW)
+
+    assert str(raised.value) == (
+        f"the entry for task {NEW} on the open Timeline tab did not expand after a click"
+    )
+    assert isinstance(raised.value.__cause__, AssertionError)
+    assert entry.clicks == 1

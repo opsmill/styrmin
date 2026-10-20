@@ -214,7 +214,7 @@ def build_semaphore_image(context: Context) -> None:
 @task(
     help={
         "demo": "Record only this demo: deploy-upgrade, component-overrides, backup-restore or clone. "
-        "Default: every available demo.",
+        "Default: all four demos.",
         "output_dir": "Where to write the MP4 files. Default: demo-videos/ at the repository root.",
         "build_image": f"Rebuild {SEMAPHORE_DEMO_IMAGE} even if it already exists.",
     }

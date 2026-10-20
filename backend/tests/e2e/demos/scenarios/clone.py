@@ -43,7 +43,8 @@ _DEVICE_COUNT_PATTERN = re.compile(r"Devices in the inventory: (\d+)")
 
 @dataclass(frozen=True)
 class Lab:
-    """The source environment of the demo and the addresses of its two web applications."""
+    """The source environment's Styrmin id, the URLs of its Infrahub and its Semaphore, and the ids of the
+    Semaphore project, template and environment that the setup created."""
 
     environment_id: str
     infrahub_url: str
@@ -54,12 +55,14 @@ class Lab:
 def device_count(log: str) -> int:
     """Return the device count that the playbook prints in the task ``log``.
 
-    Raises ``ScenarioActionError`` with the last lines of ``log`` when it prints no count or two different counts.
+    Raises ``ScenarioActionError`` with the last lines of ``log`` when it prints no count or more than one
+    different count. The message shows ``***`` in place of the Infrahub token.
     """
     counts = {int(count) for count in _DEVICE_COUNT_PATTERN.findall(log)}
     if len(counts) == 1:
         return counts.pop()
     tail = "\n".join([line for line in log.splitlines() if line.strip()][-10:])
+    tail = tail.replace(infrahub_setup.INFRAHUB_TOKEN, "***")
     problem = (
         "no device count" if not counts else f"several device counts {sorted(counts)}"
     )

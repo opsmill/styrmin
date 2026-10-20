@@ -116,6 +116,8 @@ description: "Task list for the recorded demos of four Styrmin features"
   3. step "The upgrade task and its steps": `open_timeline()` again and hold 3 s so the expanded task and its steps, including the driver's upgrade action, are on screen.
 
   Register the demo in `demos/catalog.py` with environment names `("network-lab-upgrade",)`
+
+  Changed after the first recordings ([spike-notes.md](spike-notes.md#what-changed-after-watching-the-first-recording)): `read_task_ids()` moved to the end of chapter 1; `DeploymentDetailPage.show_timeline_entry(task_id)` was added to expand and show the upgrade task; the demo fails unless the step of the driver's upgrade action succeeded and the upgrade task's timeline entry shows the `latest` version.
 - [X] T034 [US1] Record demo 1 alone on a demo stack that `uv run invoke start` just created: `uv run invoke record --demo deploy-upgrade`. Watch the video and check each item of quickstart §4 for demo 1; check `ffprobe` gives `h264,1920,1080,yuv420p` and a length of 3:00 or less; check the environment is gone. Fix the scenario or the page objects until it passes, and note the length in `specs/029-recorded-feature-demos/spike-notes.md`
 
 **Checkpoint**: one demo works end to end; the presenter can use video 1.
