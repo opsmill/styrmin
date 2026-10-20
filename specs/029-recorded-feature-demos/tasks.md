@@ -110,13 +110,13 @@ description: "Task list for the recorded demos of four Styrmin features"
 **Independent Test**: on a demo stack that `uv run invoke start` just created, `uv run invoke record --demo deploy-upgrade` writes `demo-videos/1-deploy-upgrade.mp4`, and the video shows the deploy, the upgrade and the upgrade task's steps.
 
 - [X] T032 [US1] Create `demos/infrahub_versions.yml` with `previous: "1.10.11"` and `latest: "1.11.7"` (or the version T009 chose) and a comment that someone updates it by hand and that a new Infrahub release may need a newer chart in the `infrahub` driver (FR-006). Until this file exists, the prerequisites check reports it as missing
-- [ ] T033 [US1] Create `demos/scenarios/deploy_upgrade.py` (plan demo table; data-model names): setup creates `network-lab-upgrade`; the recorded steps use `UiScenarioDriver(page=page, base_url=..., keystroke_delay_ms=45)` and `DeploymentDetailPage`:
+- [X] T033 [US1] Create `demos/scenarios/deploy_upgrade.py` (plan demo table; data-model names): setup creates `network-lab-upgrade`; the recorded steps use `UiScenarioDriver(page=page, base_url=..., keystroke_delay_ms=45)` and `DeploymentDetailPage`:
   1. step "Deploy Infrahub <previous>": `create_deployment(driver="infrahub", version=previous, environment_id=..., name="infrahub")`, then `wait("Infrahub <previous> is starting")` around `wait_for_deployment_running(timeout=900)`;
   2. step "Upgrade to Infrahub <latest>": `read_task_ids()`, `upgrade_deployment(version=latest)`, `open_timeline()`, then `wait("Upgrade in progress")` around `wait_for_new_task("upgrade_instance", ...)`;
   3. step "The upgrade task and its steps": `open_timeline()` again and hold 3 s so the expanded task and its steps, including the driver's upgrade action, are on screen.
 
   Register the demo in `demos/catalog.py` with environment names `("network-lab-upgrade",)`
-- [ ] T034 [US1] Record demo 1 alone on a demo stack that `uv run invoke start` just created: `uv run invoke record --demo deploy-upgrade`. Watch the video and check each item of quickstart §4 for demo 1; check `ffprobe` gives `h264,1920,1080,yuv420p` and a length of 3:00 or less; check the environment is gone. Fix the scenario or the page objects until it passes, and note the length in `specs/029-recorded-feature-demos/spike-notes.md`
+- [X] T034 [US1] Record demo 1 alone on a demo stack that `uv run invoke start` just created: `uv run invoke record --demo deploy-upgrade`. Watch the video and check each item of quickstart §4 for demo 1; check `ffprobe` gives `h264,1920,1080,yuv420p` and a length of 3:00 or less; check the environment is gone. Fix the scenario or the page objects until it passes, and note the length in `specs/029-recorded-feature-demos/spike-notes.md`
 
 **Checkpoint**: one demo works end to end; the presenter can use video 1.
 

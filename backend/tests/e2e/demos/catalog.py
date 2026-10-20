@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from packaging.version import InvalidVersion, Version
 
-from tests.e2e.demos.scenarios import backup_restore, component_overrides
+from tests.e2e.demos.scenarios import (
+    backup_restore,
+    component_overrides,
+    deploy_upgrade,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -119,6 +123,13 @@ def check_catalog(demos: Sequence[Demo[Any]]) -> None:
 
 
 DEMOS: tuple[Demo[Any], ...] = (
+    Demo(
+        slug="deploy-upgrade",
+        number=1,
+        environment_names=(deploy_upgrade.ENVIRONMENT_NAME,),
+        setup=deploy_upgrade.setup,
+        record=deploy_upgrade.record,
+    ),
     Demo(
         slug="component-overrides",
         number=2,

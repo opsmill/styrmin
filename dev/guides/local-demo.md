@@ -97,27 +97,32 @@ and the options, output and exit codes in the
 
 | Slug | Video file | Environments the demo creates | What the video shows | Can be recorded today |
 |------|------------|-------------------------------|----------------------|-----------------------|
-| `deploy-upgrade` | `1-deploy-upgrade.mp4` | `network-lab-upgrade` (planned) | Infrahub deployed at the `previous` version and upgraded to `latest` | No, waits for [#372](https://github.com/opsmill/styrmin/issues/372) |
+| `deploy-upgrade` | `1-deploy-upgrade.mp4` | `network-lab-upgrade` | Infrahub deployed at the `previous` version and upgraded to `latest`, then the upgrade task with the step that runs the driver's upgrade action | Yes |
 | `component-overrides` | `2-component-overrides.mp4` | `network-lab-overrides` | An image override on the Semaphore `server` component and a replica override of 2 on the Infrahub `server` component | Yes |
 | `backup-restore` | `3-backup-restore.mp4` | `network-lab-backup` | An environment backup, a device deleted in Infrahub and a task template deleted in Semaphore, an environment restore, and the device and the template back | Yes |
 | `clone` | `4-clone.mp4` | `network-lab` and `network-lab-clone` (planned) | An environment clone whose Semaphore lists a device added in the clone's Infrahub, while the source's Semaphore does not | No, waits for [#530](https://github.com/opsmill/styrmin/issues/530) |
 
-Why two demos are not available yet:
-
-- `deploy-upgrade`: the demo stack loads the `infrahub` application driver
-  from a local directory, and Styrmin registers driver actions only for
-  drivers loaded from a Git source. So the upgrade does not run the driver's
-  upgrade action, and Infrahub runs on a database that `infrahub upgrade` has
-  not migrated ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#the-upgrade-does-not-run-the-drivers-upgrade-action)).
-- `clone`: an environment clone keeps the source's service aliases, which
-  point to the namespaces of the source environment, so the clone's Semaphore
-  would read the source's Infrahub
-  ([E2E evidence](../../specs/029-recorded-feature-demos/e2e-evidence.md)).
+Why `clone` is not available yet: an environment clone keeps the source's
+service aliases, which point to the namespaces of the source environment, so
+the clone's Semaphore would read the source's Infrahub
+([E2E evidence](../../specs/029-recorded-feature-demos/e2e-evidence.md)).
 
 `uv run invoke record` without `--demo` records every demo that is
-available, so today it records `component-overrides` and `backup-restore`.
-`--demo deploy-upgrade` and `--demo clone` stop with exit code 2 and a
-message that the demo is not available yet.
+available, so today it records `deploy-upgrade`, `component-overrides` and
+`backup-restore`. `--demo clone` stops with exit code 2 and a message that
+the demo is not available yet.
+
+Demo 1 (`deploy-upgrade`) shows the `infrahub` driver's upgrade action, which
+stops the Infrahub server and task workers, runs `infrahub upgrade` in a job,
+and starts them again. The demo stack loads the driver from
+`/styrmin/drivers/infrahub`, and the Styrmin agent runs the action from that
+path in the agent pod, where the Styrmin image holds the driver too
+([Actions of a driver loaded from a local directory](../../docs/docs/drivers/loading-drivers.md#actions-of-a-driver-loaded-from-a-local-directory)).
+Before the fix to [#372](https://github.com/opsmill/styrmin/issues/372), the
+upgrade did not run the action
+([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#the-upgrade-runs-the-drivers-upgrade-action-since-the-fix-to-372)).
+The demo fails unless the upgrade task lists the step "Run the upgrade hook"
+as succeeded.
 
 Demo 3 (`backup-restore`) deploys the `infrahub-enterprise` application
 driver instead of `infrahub`. The environment backup runs
@@ -273,6 +278,9 @@ Measured on 2026-10-18 on one Linux host
 - `uv run invoke record --demo backup-restore` after a failed run of demo 3:
   20 min 40 s, of which about 5 min 45 s went to deleting the environment the
   failed run kept. The video lasts 1:09.
+- `uv run invoke record --demo deploy-upgrade`, measured on 2026-10-20 on a
+  fresh demo stack: 8 min 21 s. The video lasts 0:35
+  ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#demo-1-recorded-tasks-t033-and-t034)).
 
 The setup, which deploys Infrahub and Semaphore and waits for them, and the
 waits for the cluster take most of the time. The environment restore of

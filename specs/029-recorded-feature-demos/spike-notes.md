@@ -5,7 +5,8 @@
 Results of the checks of tasks T009 and T010 ([tasks.md](tasks.md)), run on 2026-10-18 on a fresh local demo stack. Each finding names the research item it confirms or changes.
 
 - Infrahub 1.10.11 starts on chart 4.33.2 and upgrades to 1.11.7, so demo 1 keeps `previous: "1.10.11"` (research [R-015](research.md#r-015-infrahub-versions-for-demo-1)).
-- On the demo stack, that upgrade does not run the `infrahub` driver's upgrade action, so Infrahub 1.11.7 runs on a database that `infrahub upgrade` has not migrated. Demo 1 waits for the fix to issue [#372](https://github.com/opsmill/styrmin/issues/372), as the maintainer decided on 2026-10-18. See "The upgrade does not run the driver's upgrade action".
+- On 2026-10-18, that upgrade did not run the `infrahub` driver's upgrade action, so Infrahub 1.11.7 ran on a database that `infrahub upgrade` had not migrated. The fix to issue [#372](https://github.com/opsmill/styrmin/issues/372) ([PR #535](https://github.com/opsmill/styrmin/pull/535), on `develop`) makes the upgrade run the action: on 2026-10-20 the upgrade task showed the step "Run the upgrade hook" with the tasks it started, and `infrahub upgrade` migrated the database from graph version 75 to 79. See "The upgrade runs the driver's upgrade action since the fix to #372".
+- Demo 1 (`deploy-upgrade`) records end to end on a fresh demo stack: a video of 0:35, and the whole command takes 8 min 21 s. See "Demo 1 recorded (tasks T033 and T034)".
 - `infrahub-enterprise` 1.11.7 starts, and an environment backup and its restore both reach `COMPLETED` (research [R-007](research.md#r-007-environment-backups-need-the-infrahub-enterprise-driver)). Demos 3 and 4 can go on.
 - One screencast records the whole run, including a navigation to a second origin, with the cursor still visible after it. The recorder does not need one recorded page per web application (research [R-001](research.md#r-001-playwright-version-and-the-screencast-api)).
 - Demo 2 (`component-overrides`) records end to end on a fresh demo stack: a video of 0:45, and the whole command takes 8 min 15 s. Watching the first recordings showed that Playwright draws no highlight unless the recorder gives it a style, so the recorder now sets one (FR-004). See "Demo 2 recorded (tasks T035 and T036)".
@@ -29,9 +30,13 @@ Environment `spike-upgrade` on cluster `local`, deployment `infrahub` of the `in
 
 Demo 1 keeps `previous: "1.10.11"` and `latest: "1.11.7"`; the fallback to an older 1.11 release is not needed.
 
-## The upgrade does not run the driver's upgrade action
+## The upgrade runs the driver's upgrade action since the fix to #372
 
-The `infrahub` driver declares an `upgrade` action (`hook: upgrade`, `mode: core`) that stops the server and task workers, runs `infrahub upgrade` in a job, and starts them again ([`driver/examples/infrahub/actions.py`](../../driver/examples/infrahub/actions.py)). On the demo stack this action did not run:
+The `infrahub` driver declares an `upgrade` action (`hook: upgrade`, `mode: core`) that stops the server and task workers, runs `infrahub upgrade` in a job, and starts them again ([`driver/examples/infrahub/actions.py`](../../driver/examples/infrahub/actions.py)).
+
+### Before the fix (2026-10-18)
+
+On the demo stack this action did not run:
 
 - The `upgrade_instance` task had these six steps and no other: "Plan the changes", "Write the StyrminDeployment resource", "Create network policies and secrets", "Install or upgrade the HelmRelease", "Create services and middlewares", "Wait for the deployment to be ready". No step started another task.
 - The task worker logged, verbatim:
@@ -46,16 +51,37 @@ The `infrahub` driver declares an `upgrade` action (`hook: upgrade`, `mode: core
   warning  ] Expected database graph version 79 but got 75, possibly 'infrahub upgrade' has not been executed
   ```
 
-Cause, from the code: Styrmin registers a driver's action workflows only when the driver is loaded from a Git source ([`backend/styrmin_backend/services/applications.py`](../../backend/styrmin_backend/services/applications.py), comment "Register token and action workflows only for git-sourced drivers"). `uv run invoke start` loads `infrahub` and `semaphore` from local paths (`/styrmin/drivers/<name>`), and demos 3 and 4 load `infrahub-enterprise` the same way. Without a registered upgrade action, the reconciliation falls back to a plain HelmRelease upgrade ([`remediation.py`](../../backend/styrmin_backend/services/reconciliation/remediation.py), `_handle_upgrade`).
+Cause, from the code at that time: Styrmin registered a driver's action workflows only when the driver was loaded from a Git source. `uv run invoke start` loads `infrahub` and `semaphore` from local paths (`/styrmin/drivers/<name>`), and demos 3 and 4 load `infrahub-enterprise` the same way. Without a registered upgrade action, the reconciliation fell back to a plain HelmRelease upgrade ([`remediation.py`](../../backend/styrmin_backend/services/reconciliation/remediation.py), `_handle_upgrade`). The gap was filed as [#372](https://github.com/opsmill/styrmin/issues/372), "actions of drivers loaded from a local directory are never registered and never run".
 
-Effect on the plan:
+Decision (maintainer, 2026-10-18): demo 1 (tasks T033 and T034) waits for the fix to #372. Loading the driver from a Git server inside the demo stack, and recording the upgrade without the action, were both rejected.
 
-- Demo 1 step 3 (task T033) expects "the expanded task and its steps, including the driver's upgrade action". On the demo stack the timeline shows the six steps above and no upgrade action.
-- Research R-015 says the upgrade from 1.10 to 1.11 "runs the driver's upgrade action with Infrahub's migrations, which is what demo 1 shows". On the demo stack it does not, and Infrahub runs on graph version 75 instead of 79.
+### Since the fix (2026-10-20)
 
-How to resolve it is not decided. The code offers one route without a product change: load the driver from a Git source, which registers its actions. The demo stack has no Git server today, and whether the recorder may reach a remote repository is not known. The other route is a product change so that locally loaded drivers register their actions. The code gap is already filed as [#372](https://github.com/opsmill/styrmin/issues/372), "actions of drivers loaded from a local directory are never registered and never run".
+[PR #535](https://github.com/opsmill/styrmin/pull/535) fixed #372 on `develop`, and this branch was rebased on `develop` (commit `17468791`). The agent now runs the actions of a driver loaded from a local directory as processes in the agent pod, from the driver version's path ([loading drivers](../../docs/docs/drivers/loading-drivers.md#actions-of-a-driver-loaded-from-a-local-directory)). The Styrmin image holds the driver at `/styrmin/drivers/infrahub` in the agent pod as well, so the demo stack needed no change.
 
-Decision (maintainer, 2026-10-18): demo 1 (tasks T033 and T034) waits for the fix to #372. Loading the driver from a Git server inside the demo stack, and recording the upgrade without the action, were both rejected. Task T032 (the versions file) still lands, because demos 2 and 3 deploy the `latest` version.
+Observed in the two recordings of demo 1 on 2026-10-20, each on a demo stack created just before from an image that `uv run invoke build` built from commit `17468791` (times are from the second recording):
+
+- The task worker logged `Upgrade core hook found` and `Upgrade remediation ready: application=infrahub target_version=1.11.7 prehook=False posthook=False`, and no longer `No upgrade core hook defined`.
+- The agent ran the flow run "Upgrade infrahub to 1.11.7". Its pull step `check_local_driver` logged, verbatim:
+
+  ```text
+  The driver files at /styrmin/drivers/infrahub have the provenance fingerprint 751f957 of the driver version. The action runs from /styrmin/drivers/infrahub.
+  ```
+
+  These task runs of the action then finished in state `Completed`, in this order: "Stop Components ['server', 'task-worker']", "Upgrade Deployment Version to 1.11.7", "Get Component Images server", "Execute Commands ['sh', '-c', 'infrahub upgrade --help && infrahub upgrade || (infrahub db migrate && infrahub db update-core-schema)']" and "Start Components ['server', 'task-worker']".
+- The job of the action ran with the image `registry.opsmill.io/opsmill/infrahub:1.11.7` from 13:28:12 to 13:28:49 UTC. Its output first shows the help of `infrahub upgrade`, because the command starts with `infrahub upgrade --help`. Then it gives `Database version: 75`, `Target version: 79`, `Applied 4 migrations successfully` (migrations 076 to 079), and ends with `Upgrade complete SUCCESS`.
+- At the end of the recording, the deployment's timeline listed the upgrade task as Succeeded, with these steps:
+  - "Plan the changes", "Write the StyrminDeployment resource" and "Create network policies and secrets": Succeeded;
+  - "Run the upgrade hook": Succeeded after 1 min 53 s, with the started tasks "Stop Components" and "Start Components", both Succeeded;
+  - "Install or upgrade the HelmRelease", "Create services and middlewares" and "Wait for the deployment to be ready": Superseded, each with "Superseded by Stop Components".
+
+  Above the upgrade task, the timeline lists the tasks "Start Components" and "Stop Components", each with "Started by Upgrade" and six succeeded steps.
+- The Infrahub server pod that started after the job (at 13:29:23 UTC) logged no `Expected database graph version` warning. Its log held 130 lines, including "Application startup complete", when it was read at 13:29:57 UTC, before the cleanup deleted the environment. In the first recording, the server pod that started after the job did not log the warning either.
+- Before the action stopped the components, a server pod of Infrahub 1.11.7 started at 13:27:34 UTC and logged the warning twice at 13:27:46, verbatim `Expected database graph version 79 but got 75, possibly 'infrahub upgrade' has not been executed`. The action stopped that pod ("Stop Components" finished at 13:28:02). The first recording showed the same order. Why the HelmRelease runs Infrahub 1.11.7 before the action stops the server was not investigated.
+
+Not investigated: whether the three Superseded steps are what the product means to show for an upgrade that runs a core action. The task's result is Succeeded.
+
+Effect on the plan: on the demo stack, the upgrade from 1.10.11 to 1.11.7 now runs the driver's upgrade action with Infrahub's migrations, as research R-015 expected, and demo 1 step 3 shows it.
 
 ## infrahub-enterprise 1.11.7 backs up and restores
 
@@ -88,7 +114,7 @@ Wall-clock times from the request to the state named, measured by the spike scri
 
 - Fresh demo stack with `uv run invoke reset`: 2 min 9 s.
 - Deploy `infrahub` 1.10.11 to Running: 136 s.
-- Upgrade to 1.11.7 until the task succeeded and the deployment was Running: 61 s, without the driver's upgrade action. With the action, the upgrade also stops and starts components and runs `infrahub upgrade`, so it would take longer; how much longer is not measured.
+- Upgrade to 1.11.7 until the task succeeded and the deployment was Running: 61 s, without the driver's upgrade action (2026-10-18). With the action (2026-10-20), the wait "Upgrade in progress" of demo 1, from a moment after the request until the timeline showed the upgrade task as succeeded, took 2 min 55 s in each of the two recordings.
 - Deploy `infrahub-enterprise` 1.11.7 to Running: 142 s.
 - Environment backup to `COMPLETED`: 52 s.
 - Environment restore to `COMPLETED`: 135 s, then about 36 s until Infrahub answered.
@@ -214,3 +240,28 @@ The restore recreates the pods of both deployments. When the recorded restore co
 - The first recording opened each Semaphore page from its address, so the video showed three white pages while Semaphore loaded. The demo now clicks the template in the list (new page-object method `SemaphoreTemplatesPage.open_template`) and reads the list that Semaphore opens after the deletion (new method `listed_template_names`, which first waits for the list address, because a template's own page also holds a table, of its tasks). Only the switch from Infrahub to Semaphore still shows a white page.
 - The Semaphore wait (new helper `semaphore_setup.wait_until_ready`, which polls `GET /api/ping`) took 0 s in all three runs, so it never shows a label. It stays, so that a Semaphore restart after a restore cannot make the last step fail.
 
+## Demo 1 recorded (tasks T033 and T034)
+
+Recorded on 2026-10-20 with `uv run invoke record --demo deploy-upgrade` on a demo stack that `uv run invoke reset` had just created (13:21:15 to 13:23:41 UTC). The run lasted from 13:23:59 to 13:32:20 UTC, printed one `recorded` line and exited with code 0. An earlier recording, on a demo stack that `uv run invoke start` had just created (13:07:46 to 13:09:47 UTC), also exited with code 0 and gave a video of 0:36; watching it led to the changes listed below.
+
+The video `demo-videos/1-deploy-upgrade.mp4`:
+
+- `ffprobe` gives `h264,1920,1080,yuv420p` at 30 frames per second and a length of 35.4 s, which the summary shows as 0:35.
+- Each of the three steps starts with its chapter title: "Deploy Infrahub 1.10.11", "Upgrade to Infrahub 1.11.7" and "The upgrade task and its steps".
+- The deployment name `infrahub`, the application version `1.10.11` and the new version `1.11.7` appear one key at a time; frames show the partial values `i`, `1.10`, `1.10.1` and `1.1`. The cursor and the blue outline are on each element the demo clicks or types into, including the driver version select and its option "infrahub v5@751f957", "Deploy", "Upgrade", the Upgrade button of the dialog, and the Timeline tab.
+- Both waits are sped up with their labels: "Sped up 41×: Infrahub 1.10.11 is starting took 2 min 41 s" and "Sped up 44×: Upgrade in progress took 2 min 55 s". The first recording gave the same two durations.
+- Step 1 ends on the Timeline tab with the task "Create" Succeeded at v1.10.11. During the upgrade wait, the timeline shows the upgrade task expanded with the step "Run the upgrade hook" running and its started task "Stop Components".
+- Step 3 ends with the upgrade task Succeeded and its steps on screen, as listed in "Since the fix (2026-10-20)" above, with the change of `app.version` from 1.10.11 to 1.11.7 under the steps.
+- No password, token or login form is on screen; the recording starts on the page of the environment `network-lab-upgrade`.
+
+After each run, only the `local` environment existed, and no `styrmin-<deployment id>` namespace was left.
+
+With the fix to #372, the agent also ran the driver's setup actions while Infrahub 1.10.11 was created (flow runs "Run infrahub pre-hook" and "Run infrahub post-hook", both `Completed`). The wait "Infrahub 1.10.11 is starting" took 2 min 41 s, against 136 s for the same deployment in the spike of 2026-10-18; how much of the difference the setup actions cause was not measured.
+
+### What changed after watching the first recording
+
+- Step 3 of the first recording showed the tasks "Start Components" and "Stop Components", which the timeline lists above the upgrade task, and the upgrade task was below the bottom of the page. A new page-object method, `DeploymentDetailPage.show_timeline_entry(task_id)`, expands a task's entry when it is collapsed, scrolls it to the top of the page or as far as the page scrolls, and returns its steps. Step 3 uses it, and the demo fails unless the steps hold "Run the upgrade hook" (step key `hook:upgrade:core`) with the status Succeeded.
+- The first recording read the task ids at the start of step 2, as task T033 orders: the Timeline tab opened, and the page reloaded at once to open the Upgrade dialog. The demo now reads the task ids at the end of step 1, so step 1 ends on the timeline with the succeeded "Create" task.
+- The demo also fails unless the deployment page shows the version 1.10.11 after step 1 and 1.11.7 after the upgrade.
+
+Not changed: `upgrade_deployment` opens the deployment page by its address before it opens the Upgrade dialog, so after the chapter title of step 2 the page switches from the Timeline tab to the Overview tab.
