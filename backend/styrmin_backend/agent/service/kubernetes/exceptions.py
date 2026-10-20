@@ -36,3 +36,15 @@ class JobNotDeletedError(KubernetesError):
 
 class JobAlreadyExistsError(KubernetesError):
     """A Job of the same name was created after Styrmin deleted the earlier one."""
+
+
+class JobStillRunningError(KubernetesError):
+    """The Job of an earlier action, of the same name, has not ended; Styrmin does not delete it."""
+
+
+class JobNotFromActionError(KubernetesError):
+    """A Job of the same name exists that no driver action created; Styrmin does not delete it."""
+
+
+class JobDeletedError(KubernetesError):
+    """The Job was deleted while Styrmin waited for it to end, so its result is not known."""

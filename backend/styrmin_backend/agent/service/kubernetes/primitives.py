@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -25,9 +26,12 @@ from .dependency import get_api_client
 from .exceptions import (
     CustomResourceNotFound,
     JobAlreadyExistsError,
+    JobDeletedError,
     JobFailedError,
     JobNotDeletedError,
+    JobNotFromActionError,
     JobOutputUnreadableError,
+    JobStillRunningError,
 )
 from .job_logs import read_job_output_tail
 
@@ -662,16 +666,62 @@ async def get_component_images(
     return [c.image for c in containers]
 
 
+#: The label that marks a Job that ``execute_commands`` created for a driver action.
+ACTION_JOB_LABEL = "styrmin.io/action-job"
+#: The container of the Job that ``execute_commands`` creates. A Job that an
+#: earlier Styrmin version created for an action has no ``ACTION_JOB_LABEL``
+#: and is known by this single container.
+ACTION_JOB_CONTAINER = "user-job"
 #: How long ``run_job`` waits for the earlier Job of the same name and its pods to be deleted.
 JOB_DELETION_TIMEOUT_SECONDS = 120.0
 #: How often ``run_job`` reads the earlier Job while it waits for its deletion.
 JOB_DELETION_POLL_SECONDS = 1.0
 
 
+def _is_action_job(job: V1Job) -> bool:
+    """Whether a driver action created ``job`` through ``execute_commands``.
+
+    True when the Job has ``ACTION_JOB_LABEL``, or, for a Job that an earlier
+    Styrmin version created without the label, when its only container is
+    ``ACTION_JOB_CONTAINER``.
+    """
+    labels = job.metadata.labels or {}
+    if labels.get(ACTION_JOB_LABEL) == "true":
+        return True
+    template = job.spec.template if job.spec else None
+    containers = template.spec.containers if template and template.spec else []
+    return [container.name for container in containers] == [ACTION_JOB_CONTAINER]
+
+
+def _end_of_job(job: V1Job) -> str | None:
+    """``"completed"`` or ``"failed"`` when ``job`` has ended, None while it can still run a pod.
+
+    A Job has ended when it has the ``Complete`` or the ``Failed`` condition.
+    A Job with a failed pod and no ``Failed`` condition can still start
+    another pod (``backoffLimit``), so it has not ended.
+    """
+    conditions = job.status.conditions if job.status else None
+    for condition in conditions or []:
+        if condition.status != "True":
+            continue
+        if condition.type == "Complete":
+            return "completed"
+        if condition.type == "Failed":
+            return "failed"
+    return None
+
+
 async def _delete_earlier_job(
-    batch_api: kubeclient.BatchV1Api, namespace: str, job_name: str
+    batch_api: kubeclient.BatchV1Api,
+    namespace: str,
+    job_name: str,
+    on_delete: Callable[[str], Awaitable[None]] | None,
 ) -> None:
-    """Delete the Job ``job_name`` that an earlier run left, then wait until it and its pods are gone.
+    """Delete the Job ``job_name`` that an earlier action left, then wait until it and its pods are gone.
+
+    Only a Job that a driver action created (:func:`_is_action_job`) and that
+    has ended (:func:`_end_of_job`) is deleted. Before the delete,
+    ``on_delete`` receives a line that names the Job and how it ended.
 
     The delete uses the ``Foreground`` propagation policy, so Kubernetes
     removes the Job only after its pods; a Job that is gone therefore has no
@@ -681,6 +731,8 @@ async def _delete_earlier_job(
     with another ``uid``, which the create then reports as a conflict.
 
     Raises:
+        JobNotFromActionError: the Job was not created by a driver action.
+        JobStillRunningError: the Job has not ended.
         JobNotDeletedError: the earlier Job still exists after
             ``JOB_DELETION_TIMEOUT_SECONDS``.
     """
@@ -692,6 +744,29 @@ async def _delete_earlier_job(
         if exc.status == status.HTTP_404_NOT_FOUND:
             return
         raise
+    if not _is_action_job(earlier):
+        raise JobNotFromActionError(
+            f"Job {job_name} in namespace {namespace} was not created by a driver "
+            f"action: it has no label {ACTION_JOB_LABEL}=true. Styrmin does not delete "
+            "it, so the action cannot create its own Job of that name. If nothing "
+            "needs that Job, delete it, then request the change again: "
+            f"kubectl delete job -n {namespace} {job_name}"
+        )
+    end = _end_of_job(earlier)
+    if end is None:
+        raise JobStillRunningError(
+            f"Job {job_name} of an earlier action is still running in namespace "
+            f"{namespace}, so Styrmin does not delete it: another change of this "
+            "deployment may still be running its action. Wait until the Job ends, "
+            "then request the change again. To read its state: "
+            f"kubectl get job -n {namespace} {job_name}"
+        )
+    if on_delete is not None:
+        await on_delete(
+            f"Deleting Job {job_name}, which an earlier action left ({end}), and its "
+            "pods before the new Job is created. This waits up to "
+            f"{JOB_DELETION_TIMEOUT_SECONDS:.0f} seconds."
+        )
     uid = earlier.metadata.uid
     try:
         await batch_api.delete_namespaced_job(
@@ -734,25 +809,33 @@ async def run_job(
     namespace: str,
     body: Any,
     client: ApiClient = Depends(get_api_client),
+    *,
+    on_delete: Callable[[str], Awaitable[None]] | None = None,
 ) -> None:
     """Run the Job ``body`` in ``namespace`` and wait until it succeeds.
 
     The Job's name is fixed by its caller (``execute_commands`` names it after
-    the deployment's release). A Job of that name that an earlier run left,
-    completed, failed or still running, is deleted first, with its pods, so
-    each run of an action can create its Job again. The last Job stays in the
-    cluster until the next run, for inspection.
+    the deployment's release). A Job of that name that an earlier action left
+    and that has ended, completed or failed, is deleted first, with its pods,
+    so each run of an action can create its Job again; ``on_delete`` receives
+    a line that names it first. A Job of that name that is still running, or
+    that no driver action created, is never deleted: the call raises instead.
+    The last Job stays in the cluster until the next run, for inspection.
 
     Raises:
+        JobStillRunningError: the earlier Job has not ended.
+        JobNotFromActionError: the Job of that name was not created by a
+            driver action.
         JobNotDeletedError: the earlier Job was not deleted in time.
         JobAlreadyExistsError: a Job of the same name was created after the
             earlier one was deleted.
+        JobDeletedError: the Job was deleted before it ended.
         JobFailedError: the Job failed; carries the end of its output.
     """
     batch_api = kubeclient.BatchV1Api(client)
     job_name = body["metadata"]["name"]
 
-    await _delete_earlier_job(batch_api, namespace, job_name)
+    await _delete_earlier_job(batch_api, namespace, job_name, on_delete)
     try:
         await batch_api.create_namespaced_job(
             body=body, namespace=namespace, pretty="pretty"
@@ -768,9 +851,19 @@ async def run_job(
 
     # Wait for the job to complete
     while True:
-        job = await batch_api.read_namespaced_job_status(
-            name=job_name, namespace=namespace
-        )
+        try:
+            job = await batch_api.read_namespaced_job_status(
+                name=job_name, namespace=namespace
+            )
+        except ApiException as exc:
+            if exc.status == status.HTTP_404_NOT_FOUND:
+                raise JobDeletedError(
+                    f"Job {job_name} in namespace {namespace} was deleted before it "
+                    "ended, so the result of its commands is not known. Something other "
+                    "than this action deleted it, such as another change of this "
+                    "deployment or a kubectl command. Request the change again."
+                ) from exc
+            raise
         if job.status.succeeded:
             # Job completed successfully
             break
