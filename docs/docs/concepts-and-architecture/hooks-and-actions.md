@@ -125,6 +125,18 @@ was cut" when Styrmin dropped the start. Every signed-in user, including
 Read-only users, can read this output, so action commands must not print
 secrets.
 
+`execute_commands` deletes the Job that an earlier action of the same
+deployment left before it starts its own, once that Job has ended. The
+hook step then shows a line that names the deleted Job. When that Job is
+still running, for example because another change of the deployment runs
+its action, the action fails and tells you to wait for the Job to end
+and request the change again.
+
+When the flow run of an action crashes, the hook step's error holds the
+first log line of level `ERROR` of that flow run, with the action's API
+token and common forms of secrets replaced by `<redacted>`. Actions must
+not write secrets to their logs either.
+
 When an action calls `stop_components`, `start_components` or
 `upgrade_deployment_version`, the task that the call creates is linked to
 the hook step. The deployment page lists that task, with its result,

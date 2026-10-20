@@ -71,7 +71,11 @@ today (see [Actions run from the driver directory](./loading-drivers.md#actions-
 `driver.styrmin.yml` or `values.j2.yml` is a symlink to a path outside
 the driver directory.
 See [Loading a Driver](./loading-drivers.md#loading-a-driver-from-a-driver-directory)
-for how to load a driver from a driver directory.
+for how to load a driver from a driver directory. For a driver loaded from
+a local directory, the check of the driver files before each action covers
+`actions.py` but not `helpers.py`, so an edit of `helpers.py` takes effect
+without a new driver version (see
+[Actions of a driver loaded from a local directory](./loading-drivers.md#actions-of-a-driver-loaded-from-a-local-directory)).
 
 ### Step 1: Analyse the Helm chart
 

@@ -177,11 +177,10 @@ On the local demo and in any other Helm install, the server and the
 agent read the driver from their image. After an edit, rebuild the
 image, roll out the server and the agent, then load the driver again.
 
-The errors name an image: the action's `image:` when it sets one,
-otherwise the default image of the work pool `user-work-pool`. On the
-dev stack, the server does not set `STYRMIN_K8S_WORKER_IMAGE`, so that
-default is `registry.opsmill.io/opsmill/styrmin`. The action still ran
-in the agent container: an action's `image:` has no effect today.
+The errors name the host where the action ran: "the Styrmin agent pod
+<host name>". On the dev stack, that host name is the container id of
+the `agent-operator` container, which `docker ps` lists. An action's
+`image:` has no effect today.
 
 ## Row accumulation
 

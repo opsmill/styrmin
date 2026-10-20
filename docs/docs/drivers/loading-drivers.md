@@ -58,6 +58,13 @@ driver loaded from git. Each action runs the `actions.py` at the path you
 gave to `load-local-version`, with that path as its working directory, so
 `actions.py` can import modules next to it, such as a `helpers.py`.
 
+The [check of the driver files](#check-of-the-driver-files-before-an-action-runs)
+covers `actions.py` but not the modules that it imports. When you edit a
+module such as `helpers.py` at the path, the next action runs the edited
+module, and the check does not report it. To keep the code of a driver
+version fixed, put the code of its actions in `actions.py`, or load the
+driver again after each edit.
+
 The Styrmin agent runs each action as a process in the agent pod, and
 reads the driver from the same path as the server. The agent pod must
 therefore hold the driver files at that path, in the agent's image or on
@@ -75,18 +82,36 @@ that checks the driver files before each action runs.
 
 An action's `image:` field has no effect today, for a driver loaded from
 a local directory or from git: the agent runs every action as a process
-in its own pod, not in a container of that image.
+in its own pod, not in a container of that image. The errors of the
+check name the agent pod, not an image.
 
-When the driver declares actions, Styrmin refuses a path that contains
-`{` or `}`. Prefect fills in `{{ ... }}` templates in the path before the
-action checks the driver files, so such a path could write a value of the
-action's environment, such as the action's API token, into the error of
-the check. A driver without actions loads from such a path. The refusal
-reads:
+When the driver declares actions, Styrmin refuses the load in these cases.
+A driver without actions loads from any path.
 
-```text
-Driver path '/srv/drivers/{{ name }}' is refused: it contains '{' or '}', and the driver declares actions. Prefect fills in '{{ ... }}' templates in the path before the action checks the driver files. Load the driver from a path without '{' or '}'.
-```
+- The path contains `{` or `}`. Prefect fills in `{{ ... }}` templates in
+  the path before the action checks the driver files, so such a path could
+  write a value of the action's environment, such as the action's API
+  token, into the error of the check:
+
+  ```text
+  Driver path '/srv/drivers/{{ name }}' is refused: it contains '{' or '}', and the driver declares actions. Prefect fills in '{{ ... }}' templates in the path before the action checks the driver files. Load the driver from a path without '{' or '}'.
+  ```
+
+- The path is relative, such as `drivers/my-app`. The agent runs each
+  action from a temporary working folder, where a relative path does not
+  lead to the driver:
+
+  ```text
+  Driver path 'drivers/my-app' is refused: it is a relative path, and the driver declares actions. The Styrmin agent runs each action from a temporary working folder, where a relative path does not lead to the driver. Load the driver from an absolute path, such as /styrmin/drivers/my-app.
+  ```
+
+- An action's `location` is in another file than `actions.py`, such as
+  `helpers.py::upgrade`. The check covers only `actions.py` of the
+  driver's code:
+
+  ```text
+  Action upgrade of the driver loaded from '/srv/drivers/my-app' is refused: its location helpers.py::upgrade is not in actions.py. Before an action of a driver loaded from a local directory runs, Styrmin checks only the driver specification, the values template and actions.py, so the code of another file could change without the check noticing. Move the function to actions.py, set the location to actions.py::upgrade, and load the driver again.
+  ```
 
 #### Check of the driver files before an action runs
 
@@ -113,60 +138,54 @@ The two errors of the check appear inside an error that starts with
 state message in parentheses. The logs of the action's flow run in
 Prefect show the same error.
 
-The two errors of the check name an image after the path:
-
-- `the image <name>`: the action's `image:` when it sets one, otherwise
-  the default image of the work pool `user-work-pool`. In a standard
-  install, that default is the Styrmin image of the server's release,
-  which the agent also runs.
-- `the default image of the work pool user-work-pool`, or
-  `the image of this action's Job`: the check could not read the image
-  from Prefect.
-
-In every case, the action ran in the agent pod and not in a container of
-the named image. To fix the error, change the files at the path in the
-agent pod, or load the driver again, as described for each error.
+The two errors of the check name the path and the agent pod where the
+action ran, such as `styrmin-agent-7c9d8-x2k4q`. To list the files at the
+path in that pod, run
+`kubectl exec -n <namespace of the Styrmin release> <agent pod> -- ls <path>`.
 
 ##### The driver files are not at the path
 
 ```text
-The driver files are not at /srv/drivers/my-app in the image registry.opsmill.io/opsmill/styrmin:latest: /srv/drivers/my-app not found. An action's image must hold the driver at the same path as the Styrmin server. Add the driver to the image at /srv/drivers/my-app, or load the driver from a path that the image holds.
+The driver files are not at /srv/drivers/my-app in the Styrmin agent pod styrmin-agent-7c9d8-x2k4q: /srv/drivers/my-app not found. The agent pod runs every driver action, so it must hold the driver at the same path as the Styrmin server. Mount or copy the driver into the agent pod at /srv/drivers/my-app, or load the driver from a path that both the server and the agent pod hold.
 ```
 
 The path, `driver.styrmin.yml` or `actions.py` is not in the agent pod.
 The error names the missing path or files. To fix it, do one of the
 following:
 
-- Put the driver at the path in the agent pod: rebuild the image that the
+- Put the driver at the path in the agent pod: build the image that the
   agent runs with the driver at that path, or mount a volume at that path
   into the agent pod.
-- Load the driver from a path that the agent pod holds, and use the new
-  driver version.
+- Load the driver from a path that both the server and the agent pod
+  hold, and use the new driver version.
 
 ##### The driver files at the path are not the files of the driver version
 
 ```text
-The driver files at /styrmin/drivers/my-app in the image registry.opsmill.io/opsmill/styrmin:latest are not the files of this driver version: their provenance fingerprint is e9f0a1b, and the driver version was loaded with a1b2c3d. The files changed after the driver was loaded. Rebuild the image with the files you loaded and load the driver again, or load the driver again from /styrmin/drivers/my-app and use the new driver version.
+The driver files at /styrmin/drivers/my-app in the Styrmin agent pod styrmin-agent-7c9d8-x2k4q are not the files of this driver version: their provenance fingerprint is e9f0a1b, and the driver version was loaded with a1b2c3d. If the files changed after the driver was loaded, load the driver again and use the new driver version: styrminctl drivers load-local-version /styrmin/drivers/my-app. If the agent pod holds other files at /styrmin/drivers/my-app than the Styrmin server, give both the same files first.
 ```
 
-The files at the path in the agent pod changed after the driver version
-was loaded. This happens when:
+The files at the path in the agent pod are not the files that the driver
+version was loaded with. This happens when:
 
 - someone edited `driver.styrmin.yml`, the values template or `actions.py`
   at the path;
 - a Styrmin upgrade installed an image with a newer bundled driver at the
   same path;
-- the image that the agent runs was built before an edit of the files that
-  the server loaded.
+- the agent pod holds other files at the path than the server, for
+  example because the image that the agent runs was built before an edit
+  of the files that the server loaded.
 
-To fix it, do one of the following:
+To fix it:
 
-- To use the files that are now at the path, load the driver again from
-  the path. The load creates a new driver version. Create or upgrade the
-  deployment with it; pass `--driver-version-id` to pin it (see
-  [Selecting a driver version](#selecting-a-driver-version-when-deploying-or-upgrading)).
-- To use the driver version you loaded, rebuild the image that the agent
-  runs with the files you loaded, and load the driver again.
+1. When the agent pod and the server hold other files at the path, give
+   both the same files: build the image that the agent runs with the
+   server's files, or mount the same volume into both pods.
+2. Load the driver again from the path with the command in the message.
+   When the files changed, the load creates a new driver version. Create
+   or upgrade the deployment with it; pass `--driver-version-id` to pin it
+   (see
+   [Selecting a driver version](#selecting-a-driver-version-when-deploying-or-upgrading)).
 
 After a Styrmin upgrade that ships a newer bundled driver, load the
 bundled drivers again. A create or an upgrade that uses a driver version
@@ -247,9 +266,22 @@ an upgrade, so its files at the path are the files the check expects.
 
 When the flow run of an action crashes, for example because the check of
 the driver files failed, the error of its hook step holds the first log
-line of level `ERROR` of that flow run, cut to 4,000 characters. Every
-signed-in user who can read the task can read this error, so actions must
-not write secrets to their logs.
+line of level `ERROR` of that flow run, cut to 4,000 characters. Only the
+flow runs of driver actions add their logs to an error; the other flows
+that Styrmin runs do not.
+
+Before the log line goes into the error, Styrmin replaces these parts of
+it with `<redacted>`:
+
+- the action's API token;
+- the user name and password in a URL, such as `https://user:password@host`;
+- the credential after `Bearer` or `Basic`;
+- the value after `=` or `:` of a key whose name contains `password`,
+  `passwd`, `secret`, `token`, `api_key`, `private_key` or `credential`.
+
+A secret written in any other form stays in the error. Every signed-in
+user who can read the task can read this error, so actions must not write
+secrets to their logs.
 
 ### From a git repository
 

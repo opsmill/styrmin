@@ -200,7 +200,11 @@ ensure_action_registrations(driver_object, prefect_manager):
           - "directory/{driver_directory}"  (driver directory and local versions)
 ```
 
-`ensure_action_registrations` decides that a flow is missing with the lookup that hooks use, so a repeated load registers only what hooks cannot resolve and never replaces a deployment that hooks already find (FR-006). A local path with `{` or `}` is refused only for a driver that declares actions, because only such a driver gets the check pull step whose inputs Prefect templates (see [Pull steps](#pull-steps)). `ActionsWorkflowBuilder` refuses a `LocalSource` without a `content_hash` with `DriverLoadingError`, and keeps the path with the checked `content_hash` (`CheckedLocalSource`). `LocalDriverActionWorkflowDefinition` also refuses, with a pydantic `ValidationError`, a `directory` that contains `{` or `}` and an empty `content_hash`, so no other caller can build such a pull step; the `DriverLoadingError` of `ensure_action_registrations` comes first and gives the message for the user.
+`ensure_action_registrations` decides that a flow is missing with the lookup that hooks use, so a repeated load registers only what hooks cannot resolve and never replaces a deployment that hooks already find (FR-006). It refuses with `DriverLoadingError`, before any Prefect write:
+
+- a driver, from git or from a local directory, that declares more than one action for one hook and mode, because the actions of a hook and mode share one registration key, so a second action would replace the first or be skipped (`_refuse_two_actions_for_one_hook_and_mode`);
+- for a driver loaded from a local directory that declares actions (`_refuse_local_actions_that_the_check_cannot_cover`): a path with `{` or `}`, because only such a driver gets the check pull step whose inputs Prefect templates (see [Pull steps](#pull-steps)); a relative path, because the agent's `ProcessWorker` runs the pull steps in a temporary folder, where a relative path does not lead to the driver; and an action whose `location` module is not the actions file, because the check hashes only that file of the driver's code. Modules that `actions.py` imports, such as a `helpers.py` next to it, are not checked: an edit of one at the path takes effect without a new driver version.
+ `ActionsWorkflowBuilder` refuses a `LocalSource` without a `content_hash` with `DriverLoadingError`, and keeps the path with the checked `content_hash` (`CheckedLocalSource`). `LocalDriverActionWorkflowDefinition` also refuses, with a pydantic `ValidationError`, a `directory` that contains `{` or `}` or is relative, an empty `content_hash`, and a `module` other than `actions_file`, so no other caller can build such a pull step; the `DriverLoadingError` of `ensure_action_registrations` comes first and gives the message for the user.
 
 ### Pull steps
 
@@ -224,7 +228,7 @@ A driver version loaded from a local directory has one pull step, `styrmin_backe
 
 The step never imports `actions.py`, so changed or missing files are never run. `LocalDriverActionWorkflowDefinition.get_function()` runs the same check before it imports the function. `workflows/local_driver.py` imports only Prefect and the driver modules `hash` and `exceptions`, so it imports without server settings or a database.
 
-Only on the error paths, `_action_image()` reads from the Prefect API the image that the errors name: the flow run in `PREFECT__FLOW_RUN_ID`, then its deployment's `job_variables["image"]`, otherwise the default `image` of its work pool's base job template. `describe_action_image(image, work_pool)` in `services/driver/exceptions.py` writes `the image <image>`, `the default image of the work pool <work pool>` when only the work pool was read, or `the image of this action's Job` when neither was. A failed read is logged as a warning and never replaces the error. The default image of `user-work-pool` is `STYRMIN_K8S_WORKER_IMAGE`, which the Helm chart sets to the server's image; in a standard install, that is also the image the agent runs. The texts of the errors name "the action's image" although the action runs in the agent pod; the maintainer kept these texts on 2026-10-19 ([ADR-081](../../adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md)).
+The errors name the agent pod where the check ran: `check_local_driver` passes `socket.gethostname()`, which is the pod name in Kubernetes, as `agent_pod`, and `describe_agent_pod` in `services/driver/exceptions.py` writes `the Styrmin agent pod <name>`. `get_function()` passes no name, so its errors say `the Styrmin agent pod`. The errors name no image, because an action's `image:` has no effect; they give the fixes that work in the agent pod: put the driver at the path there, or load the driver again with `styrminctl drivers load-local-version <path>` ([ADR-081](../../adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md)).
 
 ### Deployment names
 
@@ -269,7 +273,7 @@ Queries Prefect for deployments that carry all of these tags, newest first:
 
 Without a driver directory (a driver version loaded from the repository root), the lookup drops every deployment that carries a `directory/` tag before it picks one, so a root driver version never runs the action of a driver directory version with the same driver name, version and commit. Prefect's tag filter cannot exclude a tag, so Styrmin filters the results.
 
-The two callers build the arguments with `ActionRegistrationKey` (`services/driver/hooks.py`), so registration and lookup use the same key: hook resolution (`key_for_version`, from a stored driver version) and `ensure_action_registrations` (`key_for_driver_object`, from a loaded driver). The key passes `driver_directory=action_directory_of(source_type=..., source_path=...)` from `services/driver/labels.py`: the `source_path` of a git driver version (its driver directory, or `None` for the repository root) and of a local driver version (the path as given on the server), and `None` for any other source type. A git value never starts with `/`, because `normalise_driver_directory` refuses a leading `/`. A local value starts with `/` only when the path given on the server is absolute: the CLI (`styrminctl drivers load-local-version`), the SDK, the GraphQL mutation `loadLocalApplicationDriverVersion` and `LocalDriverProvider` pass the path on as given and do not refuse a relative one. A local driver version loaded from a relative path, such as `drivers/my-app`, therefore gets the same registration key as a git driver version of the same driver and supported versions loaded from the driver directory `drivers/my-app` when their short fingerprints are equal; [`specs/029-local-driver-actions/follow-ups.md`](../../../specs/029-local-driver-actions/follow-ups.md#give-a-local-driver-version-loaded-from-a-relative-path-its-own-action-registrations) lists this, and it is not yet opened as an issue. `driver_directory_of` in the same module keeps its meaning for the GraphQL field `driverDirectory` only, which is null for a local driver version.
+The two callers build the arguments with `ActionRegistrationKey` (`services/driver/hooks.py`), so registration and lookup use the same key: hook resolution (`key_for_version`, from a stored driver version) and `ensure_action_registrations` (`key_for_driver_object`, from a loaded driver). The key passes `driver_directory=action_directory_of(source_type=..., source_path=...)` from `services/driver/labels.py`: the `source_path` of a git driver version (its driver directory, or `None` for the repository root) and of a local driver version (the path as given on the server), and `None` for any other source type. A git value never starts with `/`, because `normalise_driver_directory` refuses a leading `/`. A local value of a driver version that declares actions always starts with `/`, because `ensure_action_registrations` refuses a relative path for such a driver, so it never matches the key of a git driver version. The CLI (`styrminctl drivers load-local-version`), the SDK, the GraphQL mutation `loadLocalApplicationDriverVersion` and `LocalDriverProvider` pass the path on as given, so a driver without actions can still be loaded from a relative path; it registers nothing. `driver_directory_of` in the same module keeps its meaning for the GraphQL field `driverDirectory` only, which is null for a local driver version.
 
 Returns the first matching deployment's UUID, or `None`.
 
@@ -279,8 +283,7 @@ Returns the first matching deployment's UUID, or `None`.
 
 | Function | Returns |
 |----------|---------|
-| `resolve_hook_flow(driver_version, application_name, hook, mode, *, uow, prefect_manager)` | `None` when the driver version declares no action for the hook and mode, without a Prefect lookup; the registered flow otherwise |
-| `resolve_setup_hooks(...)` | `(pre, post)` for the `setup` hook |
+| `resolve_setup_hooks(driver_version, application_name, *, uow, prefect_manager)` | `(pre, post)` for the `setup` hook; each is `None` when the driver version declares no action for it, without a Prefect lookup |
 | `resolve_upgrade_hooks(...)` | `None` when the driver version declares no `upgrade`/`core` action, without looking up `pre` or `post`; otherwise `UpgradeHookFlows(core, pre, post)` |
 
 The declared actions are the driver version's `Action` rows, read with `uow.actions.list_by_driver_version(driver_version_id)` in the caller's transaction. When a hook and mode with a declared action has no registered flow, the functions raise `ActionNotRegisteredError` (`services/driver/exceptions.py`) for the first such pair in the order `pre`, `post` for setup and `core`, `pre`, `post` for upgrade, so the error names the same hook step on every run. The error carries `hook` and `mode` as attributes and names:
@@ -389,10 +392,26 @@ deployment's namespace, so every call on one deployment uses the same name. The 
 `ttlSecondsAfterFinished` and no owner, so it stays in the cluster after it ends, and an operator
 can read it and its pod's output until the next call.
 
-Before it creates the Job, `run_job` deletes the Job of that name that an earlier call left,
-whether it completed, failed or is still running (#372):
+`execute_commands` gives the Job the labels `app.kubernetes.io/managed-by=styrmin` and
+`styrmin.io/action-job=true` (`ACTION_JOB_LABEL`), and `backoffLimit: 0`: `run_job` reports the
+first failed pod as the Job's failure, so the Job ends there instead of starting pods that nobody
+waits for.
 
-- It reads the Job, then deletes it with the `Foreground` propagation policy and a `uid`
+Before it creates the Job, `run_job` deletes the Job of that name that an earlier call left, once
+that Job has ended (#372):
+
+- It reads the Job. When the Job has no `styrmin.io/action-job=true` label and its only container
+  is not `user-job` (the Jobs that Styrmin created before the label have only that container), it
+  raises `JobNotFromActionError` and deletes nothing. When the Job has neither the `Complete` nor
+  the `Failed` condition, it is still running, or can still start a pod, so `run_job` raises
+  `JobStillRunningError` and deletes nothing: another change of the deployment may be running its
+  action. Deleting a running Job would stop, for example, the migration Job of an upgrade that
+  another upgrade request overlaps.
+- It passes a line that names the Job and how it ended (`completed` or `failed`) to the
+  `on_delete` callback. `execute_commands` records that line as the output of the hook step that
+  runs the action (`STYRMIN_STEP_ID`) and logs it in the run, because the wait below can take up
+  to 120 seconds. A failure of the new Job replaces that output with the Job's own output.
+- It deletes the Job with the `Foreground` propagation policy and a `uid`
   precondition. Kubernetes removes the Job only after its pods, and the precondition keeps the
   delete from removing a Job that another writer created after the read.
 - It reads the Job every second until the read answers 404 or finds a Job with another `uid`. When
@@ -402,6 +421,9 @@ whether it completed, failed or is still running (#372):
   created after the delete, it raises `JobAlreadyExistsError`. Before #372 the 409 raised
   `CustomResourceNotFound`, and every later call on the deployment failed until someone deleted
   the Job by hand.
+
+While `run_job` waits for the new Job to end, a 404 on the status read means that something else
+deleted the Job; `run_job` raises `JobDeletedError`.
 
 Because the earlier Job's pods are gone before the new Job starts, the output reader below reads
 only pods of the new Job.
@@ -436,19 +458,25 @@ again to the last 200 lines and 64 KiB. Every signed-in user can read it through
 
 A flow run crashes when its process exits before the flow ends normally, for example when the
 check pull step of a local driver version raises. Prefect's state message then holds only the exit
-status, such as `Process exited with status code: 1.`. For a crashed flow run,
-`run_deployment_or_fail` (`agent/tasks/utils.py`) reads the first log of level `ERROR` or higher
+status, such as `Process exited with status code: 1.`. For a crashed flow run of a driver action,
+`run_driver_action_or_fail` (`agent/tasks/utils.py`) reads the first log of level `ERROR` or higher
 of that flow run (`_first_error_log`: `read_logs` with a `LogFilter` on the flow run id and the
 level, sorted by timestamp, limit 1), cuts it to 4,000 characters (`FIRST_ERROR_LOG_MAX_LENGTH`),
-and raises `RuntimeError("Deployment flow run <id> crashed: <first error log> (<state message>)")`.
-When the flow run has no such log, or the logs cannot be read, it logs a warning and raises with the
-state message alone. A failed flow run (not crashed) keeps `Deployment flow run <id> failed:
-<state message>`.
+redacts it with `redact_secrets`, and raises
+`RuntimeError("Deployment flow run <id> crashed: <first error log> (<state message>)")`.
+`redact_secrets` replaces with `<redacted>` the action token, the user info of every `scheme://`
+URL, the credential after `Bearer` or `Basic`, and the value after `=` or `:` of a key whose name
+contains `password`, `passwd`, `secret`, `token`, `api_key`, `private_key` or `credential`; other
+forms of a secret are kept. When the flow run has no such log, or the logs cannot be read, it logs a
+warning in the calling flow run (`log_in_run`) and raises with the state message alone. The other
+flows that `run_deployment_or_fail` starts, such as the orchestration flows and the remediations,
+keep `Deployment flow run <id> crashed: <state message>`: their logs are not copied into a task. A
+failed flow run (not crashed) keeps `Deployment flow run <id> failed: <state message>`.
 
 `StepReporter.step` records the formatted exception on the hook step, so the hook step's error
-holds the first `ERROR` log of the action's flow run. Every signed-in user who can read the task
-can read the step's errors, as for the command output above, so actions must not write secrets to
-their logs.
+holds the first `ERROR` log of the action's flow run, redacted. Every signed-in user who can read
+the task can read the step's errors, as for the command output above, so actions must not write
+secrets to their logs.
 
 ### Reading the component image in an upgrade action
 
@@ -603,9 +631,10 @@ If the new driver version declares no `upgrade`/`core` action, `_handle_upgrade`
 | [services/driver/validators.py](backend/styrmin_backend/services/driver/validators.py) | `UserActionsValidator` (AST validation) |
 | [services/user.py](../../../backend/styrmin_backend/services/user.py) | `ActionsWorkflowBuilder` (git and local sources) |
 | [services/applications.py](../../../backend/styrmin_backend/services/applications.py) | `ensure_action_registrations`: action registration during driver loading, also for a stored driver version |
-| [services/driver/hooks.py](../../../backend/styrmin_backend/services/driver/hooks.py) | `ActionRegistrationKey`, `resolve_hook_flow`, `resolve_setup_hooks`, `resolve_upgrade_hooks`, `load_command_for` |
-| [services/driver/exceptions.py](../../../backend/styrmin_backend/services/driver/exceptions.py) | `DriverFilesNotFoundError`, `DriverFingerprintMismatchError`, `ActionNotRegisteredError`, `describe_action_image` |
-| [workflows/local_driver.py](../../../backend/styrmin_backend/workflows/local_driver.py) | `check_local_driver` pull step, `check_local_driver_files`, `_action_image` |
+| [services/driver/hooks.py](../../../backend/styrmin_backend/services/driver/hooks.py) | `ActionRegistrationKey`, `resolve_setup_hooks`, `resolve_upgrade_hooks`, `load_command_for` |
+| [services/driver/exceptions.py](../../../backend/styrmin_backend/services/driver/exceptions.py) | `DriverFilesNotFoundError`, `DriverFingerprintMismatchError`, `ActionNotRegisteredError`, `describe_agent_pod` |
+| [workflows/local_driver.py](../../../backend/styrmin_backend/workflows/local_driver.py) | `check_local_driver` pull step, `check_local_driver_files` |
+| [agent/tasks/utils.py](../../../backend/styrmin_backend/agent/tasks/utils.py) | `run_driver_action_or_fail`, `redact_secrets`, `log_in_run` |
 | [workflows/models.py](../../../backend/styrmin_backend/workflows/models.py) | `GitSourceWorkflowDefinition`, `LocalDriverActionWorkflowDefinition` |
 | [services/driver/hash.py](../../../backend/styrmin_backend/services/driver/hash.py) | `compute_driver_directory_fingerprint`, shared by the local loader and the check |
 | [services/deployment.py](../../../backend/styrmin_backend/services/deployment.py) | Request check of `update_deployment_version`, `_fail_upgrade_of_unregistered_action` |
