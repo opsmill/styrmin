@@ -345,6 +345,20 @@ bundled drivers at `/styrmin/drivers/<name>` and the check. See
 [Loading a Driver](../docs/docs/drivers/loading-drivers.md#actions-of-a-driver-loaded-from-a-local-directory)
 for the errors and how to fix each one.
 
+The check covers `driver.styrmin.yml`, the values template and
+`actions.py`, but not the modules that `actions.py` imports. An edit of a
+module such as `helpers.py` at the path takes effect in the next action
+run, and the check does not report it. A load from a local directory of a
+driver that declares actions is therefore refused when an action's
+`location` is in another file than `actions.py`, and when the path is
+relative or contains `{` or `}`.
+
+A driver declares at most one action for each hook and mode. Styrmin
+registers the actions of one hook and mode under one key, so a load of a
+driver that declares two of them, from git or from a local directory, is
+refused. To run several steps in one hook and mode, call them from one
+action.
+
 ### Hooks and Modes
 
 | Hook | Description |
@@ -385,6 +399,13 @@ spec:
 ### Action Implementation (`actions.py`)
 
 Actions are implemented as Python functions decorated with Prefect's `@flow` decorator.
+
+Do not write secrets to the logs of an action. When an action's flow run
+crashes, its first log line of level `ERROR` becomes part of the error of
+its hook step, which every signed-in user who can read the task can read.
+Styrmin replaces the action's API token and some common forms of secrets
+in that line with `<redacted>`, but not every form (see
+[Logs of a crashed action are shown on its hook step](../docs/docs/drivers/loading-drivers.md#logs-of-a-crashed-action-are-shown-on-its-hook-step)).
 
 ```python
 from styrmin_backend.actions import stop_components, start_components, execute_commands, GlobalContext
@@ -453,7 +474,12 @@ await start_components(components: list[str], context: GlobalContext) -> None
 
 Executes shell commands as a Kubernetes job.
 
-The Job is named `<release reference>-job` in the deployment's namespace and stays in the cluster after it ends, so you can read its output with `kubectl logs`. The next `execute_commands` call on the same deployment deletes that Job and its pods, even when it failed or is still running, then creates its own.
+The Job is named `<release reference>-job` in the deployment's namespace, has the label `styrmin.io/action-job=true`, and ends at its first failed pod (`backoffLimit: 0`). It stays in the cluster after it ends, so you can read its output with `kubectl logs`. The next `execute_commands` call on the same deployment deletes that Job and its pods once it has ended, completed or failed, then creates its own; the hook step that runs the action shows a line that names the deleted Job. The call fails instead of deleting anything when:
+
+- the Job of that name is still running, for example because another change of the deployment runs its action at the same time (`JobStillRunningError`). Wait until the Job ends and request the change again.
+- a Job of that name exists that no driver action created: it has no `styrmin.io/action-job=true` label, and its only container is not `user-job` (`JobNotFromActionError`).
+
+When the Job is deleted while the call waits for it to end, the call fails with `JobDeletedError`.
 
 ```python
 await execute_commands(

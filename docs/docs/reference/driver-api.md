@@ -56,13 +56,24 @@ author:
   200 lines, at most 64 KiB. Every signed-in user, including Read-only
   users, can read it on the deployment page and through the API. Action
   commands must therefore not print secrets, such as passwords or tokens.
+- When an action's flow run crashes, its first log line of level `ERROR`
+  becomes part of the error of its hook step, which the same users can
+  read. Styrmin replaces the action's API token and some common forms of
+  secrets in that line with `<redacted>`, but not every form, so actions
+  must not write secrets to their logs either (see
+  [Logs of a crashed action are shown on its hook step](../drivers/loading-drivers.md#logs-of-a-crashed-action-are-shown-on-its-hook-step)).
 - `execute_commands` names its Job `<release reference>-job`, in the
-  deployment's namespace. The Job stays in the cluster after it ends. The
-  next `execute_commands` call on the same deployment, in the same action
-  or in a later one, deletes that Job and its pods, even when it failed or
-  is still running, then creates its own Job. So an action can call
+  deployment's namespace, with the label `styrmin.io/action-job=true`. The
+  Job ends at its first failed pod and stays in the cluster after it ends.
+  The next `execute_commands` call on the same deployment, in the same
+  action or in a later one, deletes that Job and its pods once it has
+  ended, completed or failed, then creates its own Job; the hook step
+  shows a line that names the deleted Job. So an action can call
   `execute_commands` several times, and each upgrade of a deployment can
-  run its upgrade action again.
+  run its upgrade action again. The call fails, and deletes nothing, when
+  the Job of that name is still running, for example because another
+  change of the deployment runs its action at the same time, or when a Job
+  of that name exists that no driver action created.
 - `stop_components`, `start_components` and `upgrade_deployment_version`
   link the task they start to the hook step that runs the action. The
   deployment page lists the started task under that step, and the hook's
