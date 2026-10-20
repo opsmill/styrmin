@@ -93,14 +93,14 @@ The requirements are in [spec 029](../../specs/029-recorded-feature-demos/spec.m
 and the options, output and exit codes in the
 [record command contract](../../specs/029-recorded-feature-demos/contracts/record-command.md).
 
-### The four demos and which ones can be recorded today
+### The four demos and what each video shows
 
-| Slug | Video file | Environments the demo creates | What the video shows | Can be recorded today |
-|------|------------|-------------------------------|----------------------|-----------------------|
-| `deploy-upgrade` | `1-deploy-upgrade.mp4` | `network-lab-upgrade` | Infrahub deployed at the `previous` version and upgraded to `latest`, then the upgrade task with the step that runs the driver's upgrade action | Yes |
-| `component-overrides` | `2-component-overrides.mp4` | `network-lab-overrides` | An image override on the Semaphore `server` component and a replica override of 2 on the Infrahub `server` component | Yes |
-| `backup-restore` | `3-backup-restore.mp4` | `network-lab-backup` | An environment backup, a device deleted in Infrahub and a task template deleted in Semaphore, an environment restore, and the device and the template back | Yes |
-| `clone` | `4-clone.mp4` | `network-lab` and `network-lab-clone` | An environment clone whose Semaphore lists a device added in the clone's Infrahub, while the source's Semaphore does not | Yes |
+| Slug | Video file | Environments the demo creates | What the video shows |
+|------|------------|-------------------------------|----------------------|
+| `deploy-upgrade` | `1-deploy-upgrade.mp4` | `network-lab-upgrade` | Infrahub deployed at the `previous` version and upgraded to `latest`, then the upgrade task with the step that runs the driver's upgrade action |
+| `component-overrides` | `2-component-overrides.mp4` | `network-lab-overrides` | An image override on the Semaphore `server` component and a replica override of 2 on the Infrahub `server` component |
+| `backup-restore` | `3-backup-restore.mp4` | `network-lab-backup` | An environment backup, a device deleted in Infrahub and a task template deleted in Semaphore, an environment restore, and the device and the template back |
+| `clone` | `4-clone.mp4` | `network-lab` and `network-lab-clone` | An environment clone whose Semaphore lists a device added in the clone's Infrahub, while the source's Semaphore does not |
 
 `uv run invoke record` without `--demo` records the four demos.
 
@@ -110,8 +110,10 @@ and starts them again. The demo stack loads the driver from
 `/styrmin/drivers/infrahub`, and the Styrmin agent runs the action from that
 path in the agent pod, where the Styrmin image holds the driver too
 ([Actions of a driver loaded from a local directory](../../docs/docs/drivers/loading-drivers.md#actions-of-a-driver-loaded-from-a-local-directory)).
-Before the fix to [#372](https://github.com/opsmill/styrmin/issues/372), the
-upgrade did not run the action
+The demo needs a Styrmin image that holds the fix to
+[#372](https://github.com/opsmill/styrmin/issues/372)
+([PR #535](https://github.com/opsmill/styrmin/pull/535), merged into `develop`
+on 2026-10-20). Before that fix, the upgrade did not run the action
 ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#the-upgrade-runs-the-drivers-upgrade-action-since-the-fix-to-372)).
 The demo fails unless the upgrade task lists the step "Run the upgrade hook"
 as succeeded.
@@ -124,10 +126,12 @@ Enterprise, and the `infrahub` driver deploys the community edition
 The demo loads that driver from `/styrmin/drivers/infrahub-enterprise` in the
 Styrmin image, and the driver stays loaded after the demo.
 
-Demo 4 (`clone`) needs the fix to
-[#530](https://github.com/opsmill/styrmin/issues/530) in the Styrmin image:
-since that fix, an environment clone writes its own service aliases, so the
-clone's Semaphore reaches the clone's Infrahub by the short name `infrahub`
+Demo 4 (`clone`) needs a Styrmin image that holds the fix to
+[#530](https://github.com/opsmill/styrmin/issues/530)
+([PR #531](https://github.com/opsmill/styrmin/pull/531), merged into `develop`
+on 2026-10-19). Since that fix, an environment clone writes its own service
+aliases, so the clone's Semaphore reaches the clone's Infrahub by the short
+name `infrahub`
 ([E2E evidence](../../specs/029-recorded-feature-demos/e2e-evidence.md#the-defect-is-fixed-by-531-which-carries-its-own-alias-check)).
 Like demo 3, it deploys the `infrahub-enterprise` driver.
 
@@ -149,16 +153,24 @@ Like demo 3, it deploys the `infrahub-enterprise` driver.
     from PyPI (`general.additionalPythonPackages` in the `semaphore`
     driver's values).
 - Memory: demo 4 (`clone`) runs Infrahub and Semaphore in two environments
-  at the same time. In one recording, the host's memory in use rose from
-  17,330 MiB to at most 26,993 MiB while both environments ran, with other
-  processes on the host
-  ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#memory-during-the-run)).
-  How much of that the two environments used is not measured.
+  at the same time. Measured with `free -m` every 20 seconds on a Linux host
+  with 31,465 MiB of memory, no swap, and other processes running:
+  - in the run of the four demos on 2026-10-20, the memory in use rose from
+    17,604 MiB before demo 4 to at most 26,672 MiB during it, and the
+    available memory fell to 4,792 MiB
+    ([full run log](../../specs/029-recorded-feature-demos/full-run.log));
+  - in a recording of demo 4 alone on the same day, the memory in use rose
+    from 17,330 MiB to at most 26,993 MiB, and the available memory fell to
+    4,472 MiB
+    ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#memory-during-the-run)).
+
+  How much of that the two environments used, and how much the other
+  processes used, is not measured.
 
 ### Commands to record the demos
 
 ```bash
-uv run invoke record                            # every available demo, in order
+uv run invoke record                            # the four demos, in order
 uv run invoke record --demo backup-restore      # one demo
 uv run invoke record --output-dir /tmp/videos   # write the videos to another directory
 uv run invoke record --build-image              # rebuild the demo Semaphore image first
@@ -244,7 +256,7 @@ Length. The Result column holds one of these values:
 
 The exit code is 0 when every requested demo was recorded, 1 when at least
 one demo failed, and 2 when the prerequisites check failed or `--demo` names
-a demo that does not exist or is not available yet.
+a slug that is not one of the four in the table above.
 
 ### What to do after a failed demo
 
@@ -270,30 +282,36 @@ a demo that does not exist or is not available yet.
 
 ### Time a run takes
 
-Measured on 2026-10-18 on one Linux host
+Measured on one Linux host
 ([full run log](../../specs/029-recorded-feature-demos/full-run.log)):
 
-- `uv run invoke reset`: 2 min 52 s, and 2 min 9 s in an earlier
-  measurement ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#time-each-operation-took)).
-- `uv run invoke record` with the two available demos, `component-overrides`
-  and `backup-restore`: 22 min 15 s. The videos last 0:45 and 1:03.
-- `uv run invoke record --demo backup-restore` after a failed run of demo 3:
-  20 min 40 s, of which about 5 min 45 s went to deleting the environment the
-  failed run kept. The video lasts 1:09.
-- `uv run invoke record --demo deploy-upgrade`, measured on 2026-10-20 on a
-  fresh demo stack: 8 min 21 s. The video lasts 0:35
+- `uv run invoke reset`: 2 min 24 s on 2026-10-20, and 2 min 52 s and
+  2 min 9 s in earlier measurements
+  ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#time-each-operation-took)).
+- `uv run invoke record` with the four demos, on 2026-10-20 on a fresh demo
+  stack: 48 min 28 s. Each demo took, including its setup, recording,
+  encoding and cleanup:
+  - `deploy-upgrade`: 8 min 13 s, for a video of 0:35;
+  - `component-overrides`: 10 min 8 s, for a video of 0:45;
+  - `backup-restore`: 19 min 56 s, for a video of 1:08;
+  - `clone`: 10 min 10 s, for a video of 1:08.
+- `uv run invoke record --demo backup-restore` after a failed run of demo 3,
+  on 2026-10-18: 20 min 40 s, of which about 5 min 45 s went to deleting the
+  environment the failed run kept. The video lasts 1:09.
+- `uv run invoke record --demo deploy-upgrade` alone, on 2026-10-20 on a
+  fresh demo stack: 8 min 21 s
   ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#demo-1-recorded-tasks-t033-and-t034)).
-- `uv run invoke record --demo clone`, measured on 2026-10-20 on a fresh
-  demo stack: 13 min 30 s. The video lasts 1:08
+- `uv run invoke record --demo clone` alone, on 2026-10-20 on a fresh demo
+  stack: 13 min 30 s
   ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#demo-4-recorded-tasks-t039-and-t040)).
 
 The setup, which deploys Infrahub and Semaphore and waits for them, and the
 waits for the cluster take most of the time. The environment restore of
-demo 3 took between 1 min 9 s and 5 min 19 s over five runs, and the cause
-of the difference is not known
-([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#real-duration-of-each-wait-1)).
-A run with all four demos is not measured. Before any measurement, research
-expected 60 to 90 minutes for it
+demo 3 took between 1 min 9 s and 5 min 19 s over five earlier runs
+([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#real-duration-of-each-wait-1))
+and 5 min 40 s in the run of the four demos. The cause of the difference is
+not known. Before any measurement, research expected 60 to 90 minutes for a
+run with all four demos
 ([research R-017](../../specs/029-recorded-feature-demos/research.md#r-017-how-long-a-full-run-takes)).
 
 ### Problems seen when recording the demos
@@ -304,7 +322,7 @@ expected 60 to 90 minutes for it
   `uv run playwright install chromium` and record again.
 - kr8s prints `UserWarning: Kubernetes version v1.36.0 is not supported`:
   the vCluster runs a Kubernetes version that kr8s 0.20.15 does not list. The
-  warning did not affect the runs of 2026-10-18.
+  warning did not affect the runs of 2026-10-18 and 2026-10-20.
 - `uv run invoke start` or `uv run invoke reset` fails before the recording
   can start: see the Traefik and Helm items in
   [Troubleshooting](#troubleshooting).
