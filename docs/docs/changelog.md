@@ -8,6 +8,69 @@ description: Notable user-visible changes to the Styrmin platform.
 
 Notable user-visible changes are recorded here. For full commit history, see the [GitHub repository](https://github.com/opsmill/styrmin).
 
+### A restore lands only in the deployment its backup was taken of
+
+Styrmin now restores a backup into the deployment it was taken of, in
+that deployment's namespace `styrmin-<deployment id>`, and you name only
+the backup ([#532](https://github.com/opsmill/styrmin/issues/532)).
+Before, `createRestore` took the namespace from the caller, and the
+restore deleted that namespace before it restored the backup into it. A
+user with the `READ_WRITE` role could therefore delete the namespace of
+another deployment, or a namespace such as `kube-system`. See [What
+happens when you
+restore](./concepts-and-architecture/backups-and-restores.md#what-happens-when-you-restore).
+
+#### What's new
+
+- The Backups tab, `styrminctl backups restore`, `create_restore()` in
+  the Python SDK, `createRestore` and an environment restore all
+  restore a backup into the deployment it was taken of. The deployment
+  keeps its active instance, also when the backup belongs to an earlier
+  instance.
+- Before it changes anything in the cluster, the restore fails when the
+  namespace it received is not the namespace of its deployment. The
+  error says that nothing changed in the cluster.
+- The Restore dialog shows, as text, the deployment and the namespace
+  the backup is restored into.
+- `styrminctl backups restore --last --target-instance-id` asks for
+  confirmation when the backup was taken of an earlier instance or at
+  another application version, as `--target-deployment` and
+  `--target-deployment-id` already did. `--target-deployment` and
+  `--target-deployment-id` no longer refuse a deployment without an
+  active instance.
+- The "Restore already in progress" error says to wait until that
+  restore completes or fails, and where to view its status.
+
+#### Migration
+
+- Upgrade the server, `styrminctl` and the Python SDK together:
+  - A `styrminctl`, Python SDK or web page from before this change sends
+    `targetNamespace` on every restore, `--last` included. The server
+    refuses it with an error that starts with "createRestore no longer
+    takes the argument targetNamespace" and says to upgrade.
+  - A server from before this change requires `targetNamespace`, so it
+    refuses a restore from a newer `styrminctl`, Python SDK or web page.
+    The newer `styrminctl` and Python SDK then raise
+    `IncompatibleServerError`, which says to upgrade the server.
+- Reload the web pages that were open during the upgrade.
+- Remove `targetNamespace` and `targetInstanceId` from your GraphQL
+  requests, `target_namespace` and `target_instance_id` from your calls
+  to `create_restore()`, and `--target-namespace` from your
+  `styrminctl backups restore` commands.
+- Run `styrminctl backups restore <backup-id>` with the backup id alone.
+  The command now refuses a backup id combined with
+  `--target-deployment`, `--target-deployment-id`,
+  `--target-instance-id` or `--environment`, and exits with status 1.
+  The earlier example of the `styrminctl` README,
+  `styrminctl backups restore <backup-id> --target-deployment my-app`,
+  fails this way. These options work only with `--last`, where they
+  choose which backups the newest completed backup is picked from.
+- A restore that an earlier version created with another namespace, and
+  whose flow starts after the upgrade, fails. Start a new restore of the
+  backup.
+- Apart from an environment clone, Styrmin offers no way to restore a
+  backup into another deployment.
+
 ### FluxCD installs and upgrades deployments with Helm v4's defaults
 
 The agent now runs FluxCD's helm-controller with the defaults of Helm

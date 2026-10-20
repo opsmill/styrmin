@@ -145,11 +145,18 @@ the active instance.
 Before such a restore:
 
 - The Restore dialog on the Backups tab shows the backup's application
-  version and the deployment's current application version, and warns
-  that the backup was taken of an earlier instance.
+  version, the deployment's current application version, and the
+  deployment and namespace the backup is restored into. It warns that
+  the backup was taken of an earlier instance, or at another application
+  version.
 - `styrminctl backups restore --last` shows both versions and asks for
   confirmation. Pass `--yes` to restore without the question. Without a
   terminal and without `--yes`, the command refuses the restore.
+
+A deployment without an active instance can also receive a restore. It
+has no instance that the backup could be earlier than, so the dialog and
+`styrminctl` warn only when the backup was taken at another application
+version. The restore does not give the deployment an active instance.
 
 A restore of a backup whose ID you pass to `styrminctl backups restore`
 asks no question.
@@ -185,7 +192,10 @@ history, which you reach by its id.
 A restore is the same machinery, run in reverse:
 
 1. You pick a backup. Styrmin restores it into the deployment it was
-   taken of, in that deployment's namespace.
+   taken of, in that deployment's namespace `styrmin-<deployment id>`.
+   Before it changes anything in the cluster, the restore fails when the
+   namespace it received is not that one, for example for a restore
+   that an earlier version of Styrmin queued with another namespace.
 2. Styrmin asks each strategy "what do I need to do to bring this
    backup back?" — for a Postgres component, that means restoring the
    dump and replaying it.

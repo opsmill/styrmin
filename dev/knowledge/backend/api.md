@@ -23,6 +23,7 @@ styrmin_backend/api/
 ├── __init__.py           # init_graphql_router, init_rest_router, schema construction
 ├── dependency.py         # Context injection (UnitOfWork) — see get_context
 ├── errors.py             # StructuredErrorExtension middleware
+├── removed_arguments.py  # ExplainRemovedArguments: the message for an argument the server removed
 ├── resolvers.py          # Shared resolver helpers
 ├── scalars.py            # Custom scalars (JSON, ...)
 ├── rest/                 # REST endpoints (legacy + utility routes)
@@ -238,6 +239,8 @@ Mutations return the resource type directly (nullable) and let service-layer exc
 | Service error | a `ServiceError` subclass | `str(exc)` (the exception's own message) | `exc.error_code` (e.g. `NOT_FOUND`, `ALREADY_EXISTS`, `DEPLOYMENT_RESTORING`) | merged from `exc.error_metadata` | `warning` |
 | Request validation | `None` or another `GraphQLError` (parse / validate / variable coercion produced by graphql-core itself) | preserved verbatim from graphql-core | `VALIDATION_ERROR` (set only if not already present) | preserved if graphql-core attached any | `info` |
 | Unexpected | any other Python exception | masked as `"An internal error occurred"` | `INTERNAL_ERROR` | none | `error` (with `exc_info`) |
+
+A client older than the server can send an argument that the server removed. graphql-core refuses it with `Unknown argument '<name>' on field '<type>.<field>'.`, which does not say that the client is out of date. `ExplainRemovedArguments` (`api/removed_arguments.py`) replaces graphql-core's `KnownArgumentNamesRule` with a subclass that reports the message listed in `REMOVED_ARGUMENTS` for each removed argument, and keeps graphql-core's message for any other unknown argument. The request is still refused by validation. Today the list holds `targetNamespace` and `targetInstanceId` of `createRestore`, removed in [#532](https://github.com/opsmill/styrmin/issues/532). When you remove an argument that released clients send, add it to the list. The opposite case, an SDK newer than the server, is handled in the SDK with `IncompatibleServerError` (see [`dev/guidelines/backend/python.md`](../../guidelines/backend/python.md#send-a-new-optional-graphql-argument-in-its-own-operation)).
 
 The "request validation" branch is what surfaces messages like `Variable '$status' got invalid value 'NOT_A_REAL_STATUS'; Value 'NOT_A_REAL_STATUS' does not exist in 'BackupStatus' enum.` — a resolver that explicitly raises a `GraphQLError` will also flow through this branch (intentional: explicit `GraphQLError` is a deliberate choice to expose). Any other resolver-raised exception is masked.
 

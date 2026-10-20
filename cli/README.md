@@ -57,8 +57,9 @@ The `backups` commands take a deployment: `create` and `list` by name or by
 - `backups restore --last` restores the newest completed backup in that
   history that has not expired. The backup can belong to the active instance
   or to an earlier instance of the deployment. For a backup of an earlier
-  instance, the command shows the backup's application version and the
-  deployment's current one, and asks for confirmation. Pass `--yes` to skip the
+  instance, or one taken at another application version, the command shows the
+  backup's application version and the deployment's current one, and asks for
+  confirmation. Pass `--yes` to skip the
   question; without a terminal, the command refuses unless you pass `--yes`.
   The restore puts the earlier instance's `StyrminDeployment` and `HelmRelease`
   back in the namespace, and the deployment keeps its active instance.
@@ -103,9 +104,10 @@ Name lookups search every environment by default; pass `--environment` when the
 same deployment name exists in more than one.
 
 `restore` always restores a backup into the deployment it was taken of, in that
-deployment's namespace. `--target-deployment`, `--target-deployment-id` and
-`--target-instance-id` work only with `--last`: they choose whose newest
-completed backup is restored, not where it is restored. The command refuses a
+deployment's namespace, also when the deployment has no active instance.
+`--target-deployment`, `--target-deployment-id`, `--target-instance-id` and
+`--environment` work only with `--last`: they choose which backups the newest
+completed backup is picked from, not where it is restored. The command refuses a
 backup id combined with one of these options, before it contacts the server,
 and exits with status 1. Run it again with the backup id alone.
 

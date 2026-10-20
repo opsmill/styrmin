@@ -104,6 +104,13 @@ both the **server** and the **agent** act on. Embedded in both the
 Frozen for the lifetime of an Instance. See [the Context
 page](../drivers/context.md).
 
+**Cross-target restore** — The restore of a **constituent backup** of
+one Deployment into another Deployment: the deployment that an
+environment clone creates for it in the new Environment, in that
+deployment's own namespace. Only an environment clone makes one. See
+[Cloning an
+environment](./backups-and-restores.md#cloning-an-environment).
+
 ### D
 
 **Deployment** — The long-lived record carrying the desired state of
@@ -185,6 +192,15 @@ of one Deployment, applied to its **Component container** after the
 Helm chart renders. A full reference with an explicit tag or digest; a
 `{{ app.version }}` token follows the Application Version, and a literal
 tag pins the image. See [Image overrides](./image-overrides.md).
+
+**In-place restore** — The restore of a backup into the Deployment it
+was taken of, in that deployment's namespace `styrmin-<deployment id>`,
+whichever **Instance** of the deployment the backup belongs to. Started
+from the Backups tab, `styrminctl backups restore`, the Python SDK,
+GraphQL or an **Environment restore**. You name only the backup. The
+restore does not change the deployment's **Active instance**. See [What
+happens when you
+restore](./backups-and-restores.md#what-happens-when-you-restore).
 
 **Instance (ApplicationInstance)** — A frozen snapshot of what was
 deployed at a point in time. Generated from a Deployment at
