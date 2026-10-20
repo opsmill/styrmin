@@ -832,7 +832,9 @@ def _ensure_pin_supports_version(
         )
 
 
-@inject(cast_result=False)  # type: ignore[arg-type]
+# ``cast=False``: the arguments reach the function as given, as before it took a
+# dependency; fast_depends would otherwise copy and validate each one.
+@inject(cast=False, cast_result=False)  # type: ignore[arg-type]
 async def update_deployment_version(
     deployment_id: UUID,
     version: str,
@@ -2015,11 +2017,14 @@ async def delete_deployment(
     ``DeploymentNotFoundError`` (intentional conflation with unknown id).
 
     When the CR does not exist, for example because the create failed before
-    it wrote the CR, the cluster holds nothing to tear down: the deployment
+    it wrote the CR, the operator has nothing to tear down: the deployment
     goes to ``DELETING`` at once, and the status reporter's ``Deleted`` report
-    for a ``DELETING`` deployment without a CR tombstones it. While a change
-    is still applied (``PENDING`` or ``DEPLOYING``), its flow can still write
-    the CR, so the deletion is refused.
+    for a ``DELETING`` deployment without a CR tombstones it. A namespace that
+    the create wrote before it failed stays in the cluster. For a ``RUNNING``
+    deployment, a missing CR means that something other than Styrmin deleted
+    it; the deletion goes on and logs a warning. While a change is still
+    applied (``PENDING`` or ``DEPLOYING``), its flow can still write the CR,
+    so the deletion is refused.
 
     Raises:
         DeploymentNotFoundError: id is unknown OR the deployment is already
@@ -2075,19 +2080,34 @@ async def delete_deployment(
             # StyrminDeployment after this request.
             if deployment.status in _ROLLOUT_STATES:
                 raise DeploymentRolloutInProgressError(
-                    deployment_id=deployment_id, status=deployment.status.value
+                    deployment_id=deployment_id,
+                    deployment_name=deployment.name,
+                    status=deployment.status.value,
                 ) from exc
-            # The cluster holds nothing of the deployment, for example after a
-            # create that failed before it wrote the namespace and the
-            # StyrminDeployment. The status reporter reports a DELETING
+            # The operator has nothing to tear down, for example after a create
+            # that failed before it wrote the StyrminDeployment. A namespace
+            # that the create wrote before it failed stays in the cluster
+            # (spec 029 follow-ups.md). The status reporter reports a DELETING
             # deployment without a StyrminDeployment as Deleted, which
             # tombstones it and ends the teardown step.
-            logger.info(
-                "deployment_delete_without_styrmin_deployment deployment_id={} "
-                "status={}: no StyrminDeployment to patch, marking it deleting",
-                deployment_id,
-                deployment.status.value,
-            )
+            if deployment.status == DeploymentState.FAILED:
+                logger.info(
+                    "deployment_delete_without_styrmin_deployment deployment_id={} "
+                    "status={}: no StyrminDeployment to patch, marking it deleting",
+                    deployment_id,
+                    deployment.status.value,
+                )
+            else:
+                # A running deployment has a StyrminDeployment unless something
+                # other than Styrmin deleted it; its resources may remain.
+                logger.warning(
+                    "deployment_delete_without_styrmin_deployment deployment_id={} "
+                    "status={}: the StyrminDeployment of a deployment that is not "
+                    "failed is missing, so the operator removes nothing; marking it "
+                    "deleting. Remove what remains in its namespace by hand.",
+                    deployment_id,
+                    deployment.status.value,
+                )
             deployment.set_status(DeploymentState.DELETING)
             await uow.deployments.save(deployment)
         patched_at = datetime.now(UTC)

@@ -237,24 +237,29 @@ class DeploymentRolloutInProgressError(ServiceError):
 
     error_code = "ALREADY_IN_PROGRESS"
     default_message = (
-        "Cannot delete the deployment while a change is applied and its "
-        "StyrminDeployment does not exist yet. Delete the deployment again "
-        "when the change has ended."
+        "Cannot delete the deployment yet: Styrmin is still applying a change to "
+        "it. Delete it again when its status is running or failed."
     )
 
-    def __init__(self, *, deployment_id: UUID, status: str) -> None:
+    def __init__(
+        self, *, deployment_id: UUID, deployment_name: str, status: str
+    ) -> None:
         self.deployment_id = deployment_id
+        self.deployment_name = deployment_name
         self.status = status
         super().__init__(
-            f"Cannot delete deployment {deployment_id} yet: a change of the "
-            f"deployment is applied (status {status}) and its StyrminDeployment "
-            "does not exist yet. Delete the deployment again when the change "
-            "has ended."
+            f"Cannot delete deployment {deployment_name} yet: Styrmin is still "
+            f"applying a change to it (status {status}). Delete it again when its "
+            "status is running or failed."
         )
 
     @property
     def error_metadata(self) -> dict[str, Any]:
-        return {"deploymentId": str(self.deployment_id), "status": self.status}
+        return {
+            "deploymentId": str(self.deployment_id),
+            "deploymentName": self.deployment_name,
+            "status": self.status,
+        }
 
 
 class DeploymentNameValidationError(ServiceError):
