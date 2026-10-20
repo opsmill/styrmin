@@ -1,100 +1,125 @@
 # Implementation Report: Recorded Demos of Four Styrmin Features
 
-Status: INCOMPLETE. Demos 1 and 4 wait for open issues, and task T047 needs a person with Keynote, PowerPoint and Google Slides.
+Status: INCOMPLETE. All four demos record in one run, and every task but one is done. Task T047 (play a video in Keynote, PowerPoint and Google Slides) needs a person with those applications.
 
 - Feature: recorded demos of four Styrmin features for the beta presentation ([#518](https://github.com/opsmill/styrmin/issues/518))
 - Spec directory: `specs/029-recorded-feature-demos`
-- Base commit: `11a4b58b` (tasks T001 to T032 and T035 to T038 were already done before this run)
-- Head commit: the commit that adds this report, on top of `0e711e19`
-- Wall-clock time: about 1 h 35 min, the sum of the run times of the three implementation agents and the review. The time from start to end was not measured.
+- This report covers two sessions of `speckit-opsmill-implement`:
+  - 2026-10-18, from base commit `11a4b58b`: phases 7, 8 and 9 for demos 2 and 3, while demos 1 and 4 waited for [#372](https://github.com/opsmill/styrmin/issues/372) and [#530](https://github.com/opsmill/styrmin/issues/530).
+  - 2026-10-20, after the maintainer said both issues are fixed: drop commit `472fe403`, rebase on `develop` at `bb56eac9`, then phases 3 and 6, the run of all four demos, and the documentation, from base commit `17468791`.
+- Head commit: the commit that adds this report, on top of `4358d79c`.
+- Wall-clock time: not measured from start to end. The four-demo recording run took 48 min 28 s.
+
+## Branch history changes on 2026-10-20
+
+- Commit `472fe403` (the FR-016 alias check in `test_environment_clone_lifecycle`) was dropped. PR [#531](https://github.com/opsmill/styrmin/pull/531), which fixes #530, adds its own alias check to the same test on `develop`.
+- The branch was rebased on `origin/develop` at `bb56eac9`. Two conflicts were resolved by keeping both sides:
+  - `CLAUDE.md`: the `Active plan` line keeps this branch's plan; `develop` named the archived plan of the #372 fix.
+  - `backend/tests/e2e/pages/drivers_list.py`: `develop` added a `driver_directory` field to `load_remote_version`; it goes through `enter_text` like the other two fields.
+- The rebase rewrote the SHAs of the 2026-10-18 commits. For example, the page-object commit `b6c85a35` is now `fb749950`.
+- The branch before these changes is kept in the local ref `backup/demo-beta-presentation-before-rebase-20261020`.
+- `origin/fac/demo-beta-presentation-bhshh` is at `11a4b58b` (pushed on 2026-10-18) and still holds `472fe403`. Publishing the rebased branch needs `git push --force-with-lease`. Nothing was pushed.
+- `git fetch` over SSH is refused on this host (`Permission denied (publickey)`); `develop` was fetched over HTTPS with the `gh` credentials.
 
 ## Chunk ledger
 
-| Chunk | Tasks | Done / partial / blocked | Commit |
+| Chunk | Tasks | Done / partial / blocked | Commits (after the rebase) |
 |---|---|---|---|
-| Phase 3: demo 1, deploy and upgrade | T033, T034 | 0 / 0 / 2 (not dispatched) | none |
-| Phase 6: demo 4, environment clone | T039, T040 | 0 / 0 / 2 (not dispatched) | none |
-| Phase 7: record all demos with one command | T041, T042 | 2 / 0 / 0 | `4c31ee69` |
-| Phase 8: re-record one demo after a failed run | T043 | 1 / 0 / 0 | `150e84a9` |
-| Phase 9: documentation, checks and pull request notes | T044, T045, T046, T048 | 4 / 0 / 0 | `fd96cf9b` |
+| Phase 7: record the available demos with one command (2026-10-18) | T041, T042 | 2 / 0 / 0 | `6e5af7ee` |
+| Phase 8: re-record one demo after a failed run (2026-10-18) | T043 | 1 / 0 / 0 | `0b66311e` |
+| Phase 9: documentation, checks and pull request notes (2026-10-18) | T044, T045, T046, T048 | 4 / 0 / 0 | `8d060696` |
+| Review fixes (2026-10-18) | none | not applicable | `65b1b32a` |
+| Phase 3: demo 1, deploy and upgrade | T033, T034 | 2 / 0 / 0 | `888d4c99` |
+| Phase 6: demo 4, environment clone | T039, T040 | 2 / 0 / 0 | `249fee29` |
+| Run of all four demos and documentation update | T042, T044, T045, T046, T048 (again) | 5 / 0 / 0 | `b13b47d3`, `63b21856` |
+| Review fixes (2026-10-20) | none | not applicable | `25a35791`, `4358d79c` |
 | Phase 9: play a video in three presentation applications | T047 | 0 / 0 / 1 (not dispatched) | none |
-| Review fixes | none | not applicable | `0e711e19` |
 
-Decisions and surprises the agents reported:
+Decisions and findings the agents reported:
 
-- Phase 7, T041: with ffmpeg missing, `uv run invoke record` exited with code 2 and printed the contract's ffmpeg message. With the demo stack stopped, it exited with code 2 and printed the demo stack message.
-- Phase 7, T042: on a fresh demo stack, `uv run invoke record` exited with code 0 and recorded two videos:
-  - `2-component-overrides.mp4`, 0:45;
-  - `3-backup-restore.mp4`, 1:03.
-
-  Both are `h264,1920,1080,yuv420p` at 30 frames per second, with no audio and with `faststart`. Only the `local` environment remained.
-- Phase 7: the run hit three host problems outside the demo code, and the agent fixed each one on the host:
-  - the kernel had not loaded `br_netfilter`, so Flannel crashed and Traefik never became ready (`sudo modprobe br_netfilter`);
-  - `uv run invoke start` skips `uv run invoke build`, and with it `helm dependency update`, when the Styrmin image exists, so a worktree without `helm/styrmin/charts/` failed until `uv run invoke build` ran;
-  - the Chromium build for Playwright 1.64 was not installed (`uv run playwright install chromium`).
-- Phase 7: `uv run invoke record` builds a missing demo Semaphore image before it runs the prerequisites check.
-- Phase 7: `full-run.log` matches `*.log` in `.gitignore`, so it was added with `git add -f`.
-- Phase 8, T043: with Velero scaled to 0, demo 3 failed in step "Back up the whole environment" with `ScenarioTimeout` after 600 s. The command exited with code 1, kept `network-lab-backup`, and wrote no new video. With Velero back at 1, the next run deleted `network-lab-backup` before the setup, exited with code 0 and rewrote only `3-backup-restore.mp4` (1:09). When Velero restarted, one of the two backups left by the failed run ended `PartiallyFailed`; the cause was not examined.
-- Phase 9: no towncrier fragment, because [spec.md](spec.md) Clarifications decided on none and only development tooling changes.
-- Phase 9: no local E2E test ran after the page-object commit `b6c85a35`. The UI cells of the `e2e-tests` job in CI are the check of that change ([pr-notes.md](pr-notes.md)).
-- Phase 9: `develop` has 77 commits that the branch does not have.
+- Phase 3 (demo 1):
+  - The upgrade now runs the `infrahub` driver's upgrade action. The upgrade Job logged "Database version 75, Target 79", "Applied 4 migrations" and "Upgrade complete SUCCESS", and the Infrahub server started after it logged no `Expected database graph version` line.
+  - `read_task_ids()` moved to the end of the first chapter, because in the first recording the timeline appeared and the page reloaded at once.
+  - New page-object method `DeploymentDetailPage.show_timeline_entry(task_id)`, because the upgrade task was below the bottom of the page in the first recording.
+  - Two product observations are written in [spike-notes.md](spike-notes.md): a 1.11.7 server starts before the action stops it and logs the graph-version warning twice, and three steps of the upgrade task show as "Superseded by Stop Components".
+- Phase 6 (demo 4):
+  - Counts 2, then 3 in the clone, then 2 in the source, readable on screen.
+  - The clone's alias Services point only to namespaces of the clone.
+  - `infrahub-enterprise`, loaded from its local directory, ran its setup actions to `Completed`. The #372 follow-ups had listed this driver as never run that way.
+  - Two recorded waits were added after the clone ("The clone's Infrahub starts", "The clone's Semaphore starts"), because the logins cut from the video need both applications to answer.
+- Run of all four demos, 2026-10-20T14:09:56Z to 14:58:24Z, exit code 0:
+  - videos of 0:35, 0:45, 1:08 and 1:08, all `h264,1920,1080,yuv420p` at 30 frames per second;
+  - memory peaked at 26,672 MiB used with 4,792 MiB available while ffmpeg encoded demo 4's video, on a host with 31,465 MiB and no swap;
+  - afterwards only the `local` environment and no `styrmin-` namespace were left.
+- Review fixes, 2026-10-20: demo 1 was recorded again (exit code 0, 0:35) to confirm the new version check. Its upgrade wait took 5 min 56 s, against 2 min 55 s in the earlier runs, and the "Stop Components" task showed Superseded instead of Succeeded. The cause was not examined.
+- 2026-10-18 session: the host problems found then (the `br_netfilter` module, Helm chart dependencies skipped by `uv run invoke start`, the Playwright 1.64 Chromium) are described in [dev/guides/local-demo.md](../../dev/guides/local-demo.md). With Velero at 0, demo 3 failed in its backup chapter with exit code 1 and kept its environment; the next run deleted it before the setup.
 
 ## Tasks not completed
 
-- T033 and T034 (demo 1, deploy and upgrade): wait for [#372](https://github.com/opsmill/styrmin/issues/372), which is open. A driver loaded from a local directory does not register its upgrade action, so the upgrade does not run `infrahub upgrade`. The maintainer decided on 2026-10-18 that demo 1 waits for the fix ([spike-notes.md](spike-notes.md)).
-- T039 and T040 (demo 4, environment clone): wait for [#530](https://github.com/opsmill/styrmin/issues/530), which is open. A clone keeps the source's service aliases. The maintainer decided on 2026-10-18 that demo 4 waits for the fix ([e2e-evidence.md](e2e-evidence.md)).
-- T047 (play one video in Keynote, PowerPoint and Google Slides): needs a person with a Mac or Windows machine and the three applications.
+- T047 (play one video in Keynote, PowerPoint and Google Slides without conversion, SC-003): needs a person with a Mac or Windows machine and the three applications.
 
 ## Local-pass evidence
 
-n/a: this run added or modified no tests. The three chunks changed only documentation, logs, `tasks.md` and the pull request notes, which `git diff --stat 11a4b58b..0e711e19` shows. The checks that ran:
+Unit tests added or modified on 2026-10-20 (the 2026-10-18 session added or modified none). Environment for every row: this host, Python 3.14.4, no demo stack needed.
 
-- `uv run invoke test`, ended 2026-10-18T23:44:51Z, exit code 0: `5081 passed, 3 skipped, 36 warnings in 213.39s (0:03:33)`.
-- `uv run invoke format lint`, exit code 0 at 2026-10-18T23:48:30Z, and again after the review fixes.
+| Test id | Type | Run command | Passed at | Verbatim pass line |
+|---|---|---|---|---|
+| `backend/tests/unit/demos/test_deploy_upgrade.py` (all tests, added in `888d4c99`, changed in `25a35791`) | unit | `uv run pytest backend/tests/unit/demos backend/tests/unit/test_e2e_page_typing.py backend/tests/unit/test_e2e_timeline_wait.py -v` | 2026-10-20T15:19:22Z | `PASSED` per test |
+| `backend/tests/unit/demos/test_clone.py` (12 tests added in `249fee29`; `test_the_count_pattern_matches_the_line_the_playbook_prints` and `test_device_count_hides_the_infrahub_token_in_the_last_lines` added or changed in `25a35791`) | unit | same | 2026-10-20T15:19:22Z | `PASSED` per test |
+| `backend/tests/unit/demos/test_catalog.py::test_the_registered_demos_follow_the_catalog_rules` (changed) | unit | same | 2026-10-20T15:19:22Z | `PASSED` |
+| `backend/tests/unit/demos/test_main.py::test_an_unknown_slug_lists_the_four_slugs_and_exits_2` (changed; two tests of the removed "not available yet" path deleted) | unit | same | 2026-10-20T15:19:22Z | `PASSED` |
+| `backend/tests/unit/test_e2e_timeline_wait.py::test_show_timeline_entry_names_a_task_the_open_tab_does_not_list` and `::test_show_timeline_entry_names_an_entry_that_does_not_expand` (added) | unit | same | 2026-10-20T15:19:22Z | `PASSED`; selection summary `62 passed, 1 warning in 0.37s` |
+| The three unit suites above, together | unit | `uv run pytest backend/tests/unit/demos backend/tests/unit/test_e2e_page_typing.py backend/tests/unit/test_e2e_timeline_wait.py -q` | 2026-10-20T15:19:29Z | `174 passed, 1 warning in 0.58s` |
+| Full backend suite after the review fixes | unit, functional | `uv run invoke test` | 2026-10-20T15:33:56Z | `5631 passed, 3 skipped, 36 warnings in 231.91s (0:03:51)` |
+
+The demo scenarios have no E2E test (approved exception). Their proof is the run of all four demos on a demo stack that `uv run invoke reset` had just created, in [full-run.log](full-run.log) ("T042, second run").
+
+No E2E test was run locally after the page-object changes:
+- `enter_text` in every page object (`fb749950`, 2026-10-18);
+- `show_timeline_entry`, and `read_timeline` now reading each entry through the extracted `_read_timeline_entry` (`888d4c99`, `25a35791`). The demo 1 re-run used `_read_timeline_entry` on a real page.
+
+`read_timeline` is used by `backend/tests/e2e/test_task_steps.py`. The UI cells of the `e2e-tests` job in CI check these changes ([pr-notes.md](pr-notes.md)).
 
 ## Review findings
 
-Two reviews ran on the diff from `11a4b58b`: one checked the documents against the project rules and the writing rules, and one checked each claim against the code and the logs. The tests, errors, types and simplify reviews did not run, because no code or test changed.
+The 2026-10-18 review findings and their outcome are in the earlier version of this report (commit `17468791`). The review of `17468791..HEAD` on 2026-10-20 ran all six review aspects in three agents. It found no critical or high finding.
 
-Fixed in `0e711e19`:
+Fixed in `25a35791` and `4358d79c`:
 
 | Severity | File | Finding |
 |---|---|---|
-| High | `specs/029-recorded-feature-demos/pr-notes.md` | Called the run of demos 2 and 3 the full proof of the E2E exception, which asked for all four demos. Now asks the maintainer to confirm. |
-| Medium | `dev/guides/local-demo.md` | Said every wait is sped up; only waits longer than 6 s are. |
-| Medium | `dev/guides/local-demo.md` | Said the command deletes namespaces through the kube context; it deletes environments through the Styrmin API and only reads namespaces. |
-| Medium | `dev/knowledge/backend/e2e-testing.md` | Said every Styrmin action goes through the page objects; the setup uses the SDK. |
-| Medium | `specs/029-recorded-feature-demos/pr-notes.md` | Left out the `CLAUDE.md` change and the reason the Playwright upgrade needs no fragment. |
-| Low | `specs/029-recorded-feature-demos/pr-notes.md` | Heading "Changelog fragment" did not say what is below it. |
-| Low | `specs/029-recorded-feature-demos/tasks.md` | T042 was ticked without saying that only two demos were recorded. |
+| Medium | `backend/tests/e2e/demos/scenarios/deploy_upgrade.py` | The version check after the upgrade read `deployment.applicationVersion`, which Styrmin sets when it accepts the request, so it could not fail. It now reads the upgrade task's timeline entry. |
+| Medium | `backend/tests/e2e/demos/__main__.py`, `tasks/demo.py` | The "not available yet" code path could no longer run, and the help text said "every available demo". |
+| Medium | `specs/029-recorded-feature-demos/spike-notes.md`, `e2e-evidence.md` | Wrong rebase base commit, an outdated critique citation, a tense contradiction, and no note that `472fe403` had been pushed. |
+| Medium | `dev/knowledge/backend/e2e-testing.md` | Did not say that `show_timeline_entry` needs the Timeline tab already open. |
+| Medium | `spike-notes.md`, `deploy_upgrade.py` | "step" used for a recorded chapter next to the glossary term Step. |
+| Low | `backend/tests/e2e/pages/deployment_detail.py` | `show_timeline_entry` re-raised `from None`, and did not wrap the expand assertion. |
+| Low | `backend/tests/e2e/demos/scenarios/clone.py` | The error text with the last log lines did not hide the Infrahub token; two docstrings were inaccurate. |
+| Low | `backend/tests/unit/demos/test_clone.py`, `test_deploy_upgrade.py` | The count-pattern test did not use the pattern; only the FAILED status was tested. |
 
 Not fixed:
 
 | Severity | File | Finding |
 |---|---|---|
-| Medium | `dev/guides/local-demo.md` | The `br_netfilter` problem also affects the public quickstart (`docs/docs/installation/quickstart.md`), which does not mention it. |
-| Medium | `dev/guides/local-demo.md`, `pr-notes.md` | "today" and values copied from the versions file go out of date; use a date or point to the file. |
-| Medium | `dev/guides/local-demo.md`, `e2e-testing.md`, `pr-notes.md` | Some sources are not linked, and "five runs" cites only spike-notes.md, which counts three. |
-| Medium | `dev/guides/local-demo.md`, `pr-notes.md` | Lists of three or more items inside sentences, and terms such as "spike notes", "grilling session" and "run loop". |
-| Medium | `specs/029-recorded-feature-demos/pr-notes.md` | Headings "Evidence" and "Governance gates crossed" do not say what is below them. |
-| Low | `dev/guides/local-demo.md` | "step" can be confused with the glossary term Step; `ffprobe` is not listed as a prerequisite. |
-| Low | `specs/029-recorded-feature-demos/full-run.log` | Contains the host kernel version, the user name and a worktree path. Renaming it to `full-run.md` would remove the need for `git add -f`. |
-| Low | `dev/knowledge/backend/e2e-testing.md` | The Key Files link to `backend/tests/e2e/demos/` does not resolve from this file; nearby rows use the same pattern. |
-| Low | `specs/029-recorded-feature-demos/pr-notes.md` | Playwright was a transitive dependency locked at 1.58.0, not a direct one; FR-018 does not mention CI workflows; the quoted test results are in no log file. |
+| Medium | `backend/tests/e2e/demos/scenarios/clone.py` | The setup and the `Lab` type repeat `backup_restore.py` field for field, and `SEMAPHORE_VERSION` is copied in three scenarios. Suggested: a `network_lab.py` module with `deploy_network_lab(context, environment_name)`. Deferred because it changes demos 3 and 4, which would need to be recorded again. |
+| Low | `clone.py`, `deploy_upgrade.py` | `clone.Lab.infrahub_url` is never read; two different types are named `Lab`. |
+| Low | `clone.py` | Repeats the "last 10 log lines" code of `pages/semaphore.py`. |
+| Low | `spike-notes.md` | The demo 2 and demo 3 sections still use "step" for a recorded chapter. |
 
 ## Autonomous decisions
 
-- Phases 3 and 6 were not dispatched, because the maintainer's decisions of 2026-10-18 make demos 1 and 4 wait for #372 and #530, and both issues are still open.
-- T042 ran plain `uv run invoke record`, which records every registered demo (2 and 3), instead of the task's fallback of three `--demo` runs, because demo 1 also waits.
+- On 2026-10-18, phases 3 and 6 were not dispatched because the maintainer had decided that demos 1 and 4 wait for #372 and #530. On 2026-10-20 the maintainer said both are fixed, and both phases were done.
+- `472fe403` was dropped rather than kept, as the maintainer asked; PR #531's alias check on `develop` covers the same assertion. On 2026-10-20 the orchestrator stated in [e2e-evidence.md](e2e-evidence.md) that PR #531's runs meet the dependency of Phase 6 on T006 and T007.
+- T042, T044, T045, T046 and T048 were done again after demos 1 and 4 landed, so the run of all four demos that the approved exception asks for exists and the documents describe the current state.
+- The version check of demo 1 was changed after the run of all four demos; demo 1 was recorded again alone to confirm it ([full-run.log](full-run.log)).
+- The shared setup helper for demos 3 and 4 was deferred.
 - T047 was not dispatched, because no agent can open Keynote, PowerPoint or Google Slides.
-- The pull request notes were written to `specs/029-recorded-feature-demos/pr-notes.md`; the task does not name a file.
-- The orchestrator fixed the high finding and the medium factual errors itself, and left the writing-rule findings for a later pass.
-- The host problems of Phase 7 were fixed on the host and documented in the guide; `uv run invoke start` was not changed.
+- `full-run.log` is committed with `git add -f`, because it matches `*.log` in `.gitignore`.
 
 ## Suggested next steps
 
-1. Decide whether the run of demos 2 and 3 is enough for the approved E2E exception (pr-notes.md, "Questions for the maintainer").
+1. Review the rebased branch and push it with `git push --force-with-lease origin fac/demo-beta-presentation-bhshh`; the remote branch still holds `472fe403`. Then open the pull request from [pr-notes.md](pr-notes.md).
 2. Play one video in Keynote, PowerPoint and Google Slides (T047) and record the result in `full-run.log`.
-3. Move commit `472fe403` off the branch and rebase on `develop` before pushing.
-4. Address the review findings that are not fixed, in particular the `br_netfilter` item in the public quickstart.
-5. When #372 and #530 are fixed, rerun `speckit-opsmill-implement` for T033, T034, T039 and T040.
+3. Confirm that demos 3 and 4 may show the `infrahub-enterprise` driver (question in [pr-notes.md](pr-notes.md)).
+4. Decide whether to run `test_task_steps.py` in the `ui-chromium` variant locally before pushing, or to rely on the `ui / task_steps` CI cell for the `read_timeline` change.
+5. Consider the deferred shared setup helper for demos 3 and 4, and look into the slower upgrade (5 min 56 s) seen in the last demo 1 run.
