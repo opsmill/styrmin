@@ -400,7 +400,13 @@ class RestoreAlreadyInProgressError(ServiceError):
     def __init__(self, existing_restore_id: str, message: str = "") -> None:
         self.existing_restore_id = existing_restore_id
         super().__init__(
-            message or f"Restore already in progress: {existing_restore_id}"
+            message
+            or (
+                f"Restore already in progress: {existing_restore_id}. Wait until "
+                "it completes or fails, then start this restore again. The "
+                "deployment's Backups tab and 'styrminctl backups restore-get "
+                f"{existing_restore_id}' show its status."
+            )
         )
 
     @property

@@ -298,6 +298,10 @@ class TestCreateRestore:
 
         # The refusal names the restore it collided with — never "unknown".
         assert excinfo.value.existing_restore_id == str(existing_restore.id)
+        # And tells the user what to do next.
+        message = str(excinfo.value)
+        assert "Wait until it completes or fails" in message
+        assert f"styrminctl backups restore-get {existing_restore.id}" in message
 
     @pytest.mark.anyio
     async def test_create_restore_blocks_while_the_first_is_still_pending(self) -> None:
