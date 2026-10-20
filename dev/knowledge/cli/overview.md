@@ -341,6 +341,21 @@ later status report can change that step. The CLI prints the reason on the `fail
 lasts 600 seconds by default (`WAIT_TIMEOUT_SECONDS`, `--max-wait`, SDK `max_wait`); a wait that
 runs out reports `wait timeout` instead of the failed step.
 
+<!-- Extracted from specs/029-local-driver-actions on 2026-10-20 -->
+
+**A version change that returns a failed task.** The server can refuse a version change before it
+writes anything and still return a task, whose status is already `failed` and whose message says
+why. Today this happens for an upgrade whose driver action has no registered flow
+([hooks-and-actions.md](../backend/hooks-and-actions.md#request-check-before-an-upgrade)). The
+deployment keeps its version. The SDK (`styrmin_sdk/resources/deployments.py`) compares
+`task.status` with `FAILED_TASK_STATUS` (`"failed"`) and words the reason with
+`failed_task_reason(task_id, message)`: `task <id> failed: <message>`.
+
+- `update_version()` returns that task and does not raise. Callers check `status`.
+- `apply` returns the outcome `action="failed"` with the task id and that reason as
+  `failure_reason`, and does not wait, with or without `--wait`.
+- `styrminctl deployments update-version` prints the reason as an error and exits with status 1.
+
 ## Driver load warnings
 
 <!-- Extracted from specs/020-driver-info-display on 2026-10-13 -->

@@ -603,6 +603,20 @@ For debugging, prefer `-v -s --pdb` (see `dev/CLAUDE.md`).
 | [tests/e2e/test_deploy_app.py](backend/tests/e2e/test_deploy_app.py) | Canonical end-to-end deploy test |
 | [driver/examples/simple-app/](driver/examples/simple-app/) | Test application (FastAPI + PostgreSQL + Helm chart) |
 | [python_sdk/](python_sdk/) | Python SDK used by the api driver |
+| [tests/e2e/helpers/drivers.py](backend/tests/e2e/helpers/drivers.py) | `kubectl_cp`, `styrmin_pod_name`, `agent_pod_name`: copy driver files into the server pod or the agent pod |
+| [tests/e2e/test_local_driver_actions.py](backend/tests/e2e/test_local_driver_actions.py) | Actions of driver versions loaded from a local directory (`ci`, `shard_general`, `api_only`) |
+
+<!-- Extracted from specs/029-local-driver-actions on 2026-10-20 -->
+
+## Driver files in the server pod and the agent pod
+
+The server reads a local driver version's files when the driver is loaded. The agent runs each action as a process in the agent pod and reads the files at the same path there, after it checks that they have the driver version's provenance fingerprint. Tests of local driver actions therefore control what each pod holds at a path:
+
+- **The same files in both pods.** The Styrmin image holds the `backend/` tree at `/source/backend` (`docker/Dockerfile`), and the server and the agent both run that image. `test_local_driver_actions.py` loads the `local-actions` test driver from `/source/backend/tests/e2e/fixtures/drivers/local-actions`, so its actions run without a copy. The test driver uses the `simple-app` chart at the fixed chart server URL, and its `pre_setup`, `post_setup` and `upgrade` actions log a marker that the test reads in each action's Prefect flow run logs.
+- **Different files in each pod.** The test writes a variant of the driver with its own name (`local-actions-check`) and copies it with `kubectl_cp` into the server pod (`styrmin_pod_name`, container `styrmin-server`) at a path that holds a random part per session, such as `/tmp/local-actions-check-<hex>`. It copies an edited `actions.py` to the same path in the agent pod (`agent_pod_name`, container `agent`), or copies nothing there. The create then fails at `hook:setup:pre` with the fingerprint error or with the missing files error. `kubectl_cp` needs a path that does not exist in the pod yet.
+- **A bundled driver.** `test_infrahub_local_driver_actions.py` loads `/styrmin/drivers/infrahub`, creates a deployment and upgrades it from 1.6.0 to 1.7.0. It has no `ci` marker, because it boots a full Infrahub stack, and is run by hand after a change to how actions run.
+
+Every create and version change in these modules pins `driver_version_id`, so the latest-wins rule cannot bind a deployment to another variant of the driver (see [Testing](../../guidelines/backend/python.md#testing)).
 
 <!-- Extracted from specs/012-deployment-pods-tab on 2026-05-15 -->
 

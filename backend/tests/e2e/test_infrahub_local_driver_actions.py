@@ -12,7 +12,7 @@ Not in CI: this test has no ``ci`` marker, because it boots a full Infrahub
 stack (about 10 to 15 minutes) and the ``shard_infrahub`` shard already boots
 one. ``test_local_driver_actions.py`` covers the same code paths in CI with a
 small test driver. Run it by hand after a change to how actions run, and
-record the run in ``specs/029-local-driver-actions/e2e-evidence.md``::
+record the run in ``specs/archive/029-local-driver-actions/e2e-evidence.md``::
 
     sleep infinity | uv run pytest \\
         backend/tests/e2e/test_infrahub_local_driver_actions.py -v -s --pdb

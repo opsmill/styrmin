@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-19
 
-**Status**: Draft
+**Status**: Extracted
 
 **Input**: PRD "Run the actions of drivers loaded from a local directory" — [opsmill/styrmin#372 (comment)](https://github.com/opsmill/styrmin/issues/372#issuecomment-6262219647). Seed issue: [#372](https://github.com/opsmill/styrmin/issues/372). Builds on [ADR-053](../../dev/adr/0053-driver-version-provenance-fingerprint.md) (provenance fingerprint), [ADR-059](../../dev/adr/0059-driver-action-api-tokens.md) (action token), [ADR-060](../../dev/adr/0060-steps-and-derived-task-result.md) (steps and derived task result), [ADR-079](../../dev/adr/0079-driver-actions-import-only-from-their-driver-directory.md) and [ADR-080](../../dev/adr/0080-action-deployments-keyed-by-driver-directory.md) (action registration of git driver versions, spec 028).
 

@@ -527,7 +527,7 @@ chart one. A component whose workload does not exist yet still fails the lookup.
 
 The agent polls `user-work-pool` with a `ProcessWorker`, so every user action runs as a process in the agent pod, in a temporary folder that the worker creates for the flow run. No Kubernetes Job is created for an action. As a result:
 
-- An action's `image` (the deployment's `image` job variable) has no effect today, for driver versions loaded from git and from a local directory. [`specs/029-local-driver-actions/follow-ups.md`](../../../specs/029-local-driver-actions/follow-ups.md#decide-what-the-image-of-an-action-does) lists this, and it is not yet opened as an issue.
+- An action's `image` (the deployment's `image` job variable) has no effect today, for driver versions loaded from git and from a local directory. [`specs/archive/029-local-driver-actions/follow-ups.md`](../../../specs/archive/029-local-driver-actions/follow-ups.md#decide-what-the-image-of-an-action-does) lists this, and it is not yet opened as an issue.
 - The actions of a local driver version read the driver from the agent pod's file system, at the same path as the server. The agent pod must hold the driver there; in a standard install, the server and the agent run the same Styrmin image, which holds the bundled drivers at `/styrmin/drivers/<name>`.
 - The image that the errors of the local driver check name is the action's `image` when it sets one, otherwise the default image of `user-work-pool` (see [Pull step of a local driver version](#pull-step-of-a-local-driver-version-the-check-of-the-driver-files)).
 
