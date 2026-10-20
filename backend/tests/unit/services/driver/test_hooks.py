@@ -1,7 +1,8 @@
 """Unit tests for hook resolution (spec 029, contracts/hook-resolution.md).
 
-The truth table of ``resolve_hook_flow``: a hook and mode with no declared
-action resolves to None without a lookup; a declared one resolves to its
+The truth table of hook resolution, read through ``resolve_setup_hooks`` and
+``resolve_upgrade_hooks``: a hook and mode with no declared action resolves to
+None without a lookup; a declared one resolves to its
 registered flow; a declared one without a registered flow raises
 ``ActionNotRegisteredError``, whose message names every declared action of
 the pair and the command that loads the driver again (FR-005).
@@ -20,7 +21,6 @@ from styrmin_backend.services.driver.hooks import (
     ActionRegistrationKey,
     UpgradeHookFlows,
     load_command_for,
-    resolve_hook_flow,
     resolve_setup_hooks,
     resolve_upgrade_hooks,
 )
@@ -114,7 +114,7 @@ async def _declare(
         )
 
 
-# --- resolve_hook_flow: the truth table -----------------------------------
+# --- The truth table --------------------------------------------------------
 
 
 async def test_no_declared_action_resolves_to_none_without_a_lookup(uow) -> None:
@@ -122,19 +122,15 @@ async def test_no_declared_action_resolves_to_none_without_a_lookup(uow) -> None
     # Actions of another hook and mode, and of another driver version, do not count.
     await _declare(uow, driver_version, ("post_setup", "setup", "post"))
     await _declare(uow, _local_version(), ("pre_setup", "setup", "pre"))
-    prefect_manager = FakePrefectManager()
+    post_flow = uuid4()
+    prefect_manager = FakePrefectManager({(HookKind.SETUP, "post"): post_flow})
 
-    flow = await resolve_hook_flow(
-        driver_version,
-        DRIVER,
-        HookKind.SETUP,
-        "pre",
-        uow=uow,
-        prefect_manager=prefect_manager,
+    pre, post = await resolve_setup_hooks(
+        driver_version, DRIVER, uow=uow, prefect_manager=prefect_manager
     )
 
-    assert flow is None
-    assert prefect_manager.lookups == []
+    assert (pre, post) == (None, post_flow)
+    assert prefect_manager.looked_up() == {(HookKind.SETUP, "post")}
 
 
 async def test_declared_and_registered_action_resolves_to_its_flow(uow) -> None:
@@ -143,16 +139,11 @@ async def test_declared_and_registered_action_resolves_to_its_flow(uow) -> None:
     flow_id = uuid4()
     prefect_manager = FakePrefectManager({(HookKind.SETUP, "pre"): flow_id})
 
-    flow = await resolve_hook_flow(
-        driver_version,
-        DRIVER,
-        HookKind.SETUP,
-        "pre",
-        uow=uow,
-        prefect_manager=prefect_manager,
+    pre, post = await resolve_setup_hooks(
+        driver_version, DRIVER, uow=uow, prefect_manager=prefect_manager
     )
 
-    assert flow == flow_id
+    assert (pre, post) == (flow_id, None)
 
 
 async def test_declared_action_without_a_flow_raises_naming_every_action_of_the_pair(
@@ -168,13 +159,8 @@ async def test_declared_action_without_a_flow_raises_naming_every_action_of_the_
     )
 
     with pytest.raises(ActionNotRegisteredError) as raised:
-        await resolve_hook_flow(
-            driver_version,
-            DRIVER,
-            HookKind.UPGRADE,
-            "core",
-            uow=uow,
-            prefect_manager=FakePrefectManager(),
+        await resolve_upgrade_hooks(
+            driver_version, DRIVER, uow=uow, prefect_manager=FakePrefectManager()
         )
 
     error = raised.value

@@ -204,32 +204,6 @@ async def _resolve_pairs(
     return list(flows)
 
 
-async def resolve_hook_flow(
-    driver_version: ApplicationDriverVersion,
-    application_name: str,
-    hook: HookKind,
-    mode: HookMode,
-    *,
-    uow: UnitOfWork,
-    prefect_manager: PrefectManager,
-) -> UUID | None:
-    """Return the registered flow of a hook and mode of a driver version.
-
-    None when the driver version declares no action for the hook and mode.
-    Raises ``ActionNotRegisteredError`` when it declares one and no flow is
-    registered. Reads through ``uow`` in the caller's transaction.
-    """
-    declared = await uow.actions.list_by_driver_version(driver_version.id)
-    (flow,) = await _resolve_pairs(
-        driver_version,
-        application_name,
-        [(hook, mode)],
-        declared=declared,
-        prefect_manager=prefect_manager,
-    )
-    return flow
-
-
 async def resolve_setup_hooks(
     driver_version: ApplicationDriverVersion,
     application_name: str,
