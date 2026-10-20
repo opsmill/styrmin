@@ -83,6 +83,31 @@ raise DriverLoadingError(
 such as `git@github.com:o/r.git` has no scheme and is kept as it is. Reference:
 `GitDriverProvider.provide` in `services/driver/provider.py`.
 
+### Redact the text of a flow run's logs before it goes into a step or a task
+
+<!-- Extracted from specs/029-local-driver-actions on 2026-10-20 -->
+
+Every signed-in user who can read a task can read the errors of its steps and its message,
+Read-only users included: on the deployment page, with `styrminctl tasks get` and through the
+GraphQL API. A flow run's logs can hold secrets, such as the action token or a password that an
+action printed. Before text from a flow run's logs goes into a step error or a task message, pass
+it through `redact_secrets` (`agent/tasks/utils.py`) with the secrets that the code knows, such as
+the action token:
+
+```python
+first_error = await _first_error_log(flow_run.id)
+if first_error:
+    detail = f"{redact_secrets(first_error, crash_log_secrets)} ({detail})"
+```
+
+`redact_secrets` replaces the given values, the user info of every `scheme://` URL, the credential
+after `Bearer` or `Basic`, and the value after `=` or `:` of a key whose name contains `password`,
+`passwd`, `secret`, `token`, `api_key`, `private_key` or `credential`. It keeps a secret written in
+any other form, so copy only the text that users need, such as the first `ERROR` log, cut to a
+fixed length. Reference: `_run_deployment_or_fail` and `run_driver_action_or_fail` in
+`agent/tasks/utils.py`
+([ADR-081](../../adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md), R-002).
+
 ## Service Layer
 
 Services are **module-level async functions**, not classes:
@@ -332,6 +357,55 @@ every deployment in one transaction. Work added to it must not be able to roll t
 
 Reference: `_record_operator_steps` and `_run_cluster_config_fanout_hook` in
 `services/deployment_status.py`.
+
+### Look up the flows of a hook only through `services/driver/hooks.py`
+
+<!-- Extracted from specs/029-local-driver-actions on 2026-10-20 -->
+
+To find the registered flows that a hook runs, call `resolve_setup_hooks` or
+`resolve_upgrade_hooks` in `services/driver/hooks.py`. Do not call
+`PrefectManager.get_user_action_deployment_id` for a hook. That lookup returns `None` both when the
+driver version declares no action and when the declared action has no registered flow, so code
+that calls it directly skips the hook with no error, which is the defect of
+[#372](https://github.com/opsmill/styrmin/issues/372).
+
+The helpers read the declared actions (`uow.actions.list_by_driver_version`), look up only the
+declared hook and mode pairs, and raise `ActionNotRegisteredError` when a declared pair has no
+registered flow. The error names the driver version, the hook, the mode and the actions, and gives
+the command that loads the driver again.
+
+```python
+upgrade = await resolve_upgrade_hooks(
+    driver_version, application_name, uow=uow, prefect_manager=prefect_manager
+)
+if upgrade is None:
+    ...  # no upgrade/core action declared: a plain update
+```
+
+The only other caller of `get_user_action_deployment_id` is `ensure_action_registrations` in
+`services/applications.py`, which uses the same key to decide which actions a load registers
+([ADR-081](../../adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md)).
+
+### Record a failure that a request check finds on a failed task with no flow run
+
+<!-- Extracted from specs/029-local-driver-actions on 2026-10-20 -->
+
+When a request check finds that a change cannot run, and users must view why in the deployment's
+task history, do not raise a GraphQL error and do not write the change:
+
+1. Leave the record unchanged, so that the next identical request is not a no-op once the cause is
+   fixed.
+2. Save a task of the change's type with status `failed`, no flow run, and the error text as its
+   message.
+3. Record the step that could not run as failed, with `open_step` and `fail_step` from the step
+   recorder.
+4. Commit and return the task. Clients then report it as they report any failed task.
+
+Run the check with the other validations, before any step that starts a flow run (see
+[Validate before any step that starts a flow run](#validate-before-any-step-that-starts-a-flow-run)).
+Reference: `_fail_upgrade_of_unregistered_action` in `services/deployment.py`, called from
+`update_deployment_version` when the target driver version's upgrade action has no registered flow
+([ADR-081](../../adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md), R-009).
 
 ## Repository Pattern
 
@@ -1090,6 +1164,31 @@ Do not pass a record's name to a flow that acts on cluster objects. Pass the id.
 
 See [ADR-073](../../adr/0073-kubernetes-objects-named-and-found-by-record-id.md).
 
+### Delete the earlier Job of a name built from an id only when it has ended and Styrmin created it
+
+<!-- Extracted from specs/029-local-driver-actions on 2026-10-20 -->
+
+A Job named only from a record's id has the same name on every run, so the second run's create
+fails while the first run's Job exists. Before you create such a Job, read the Job that holds the
+name and:
+
+- Delete it only when Styrmin created it for this purpose. Check a label that Styrmin sets on it,
+  such as `styrmin.io/action-job=true`. Otherwise raise a typed error that gives the
+  `kubectl delete job` command.
+- Delete it only when it has ended: it has the `Complete` or the `Failed` condition with status
+  `True`. A Job with a failed pod and no `Failed` condition can still start a pod. While the Job
+  runs, raise a typed error that tells the user to wait for the Job to end and request the change
+  again. Another change of the same record may be running it.
+- Delete it with the `Foreground` propagation policy and a `uid` precondition, then wait until a
+  read answers 404 or finds another `uid`. Kubernetes then removes the Job only after its pods,
+  and the delete never removes a Job that another writer created after the read.
+- Record a line that names the deleted Job and how it ended, because the wait can take time.
+
+Reference: `_delete_earlier_job` in `agent/service/kubernetes/primitives.py`, which `run_job` calls
+before it creates the Job of `execute_commands`
+([ADR-081](../../adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md),
+"The Job of `execute_commands`").
+
 ### Delete an object that another writer can replace with a `resourceVersion` precondition
 
 <!-- Extracted from specs/026-delete-service-aliases on 2026-10-17 -->
@@ -1432,6 +1531,35 @@ driver directory that goes into the `set_working_directory` step
 did not check whether the repository URL that goes into the `git_clone` step needs the same
 check.
 
+<!-- Extracted from specs/029-local-driver-actions on 2026-10-20 -->
+
+Spec 029 applies the same check to the path of a local driver version that declares actions,
+which goes into the `check_local_driver` pull step (`ensure_action_registrations` in
+`services/applications.py`).
+
+### Log the error of a pull step in the flow run before it raises
+
+<!-- Extracted from specs/029-local-driver-actions on 2026-10-20 -->
+
+Prefect runs a deployment's pull steps before the flow run's engine starts. When a step raises,
+Prefect prints the traceback to the process output, logs nothing in the flow run, and the flow run
+crashes with only an exit status in its state message. The only text that reaches the hook step is
+the first `ERROR` log of the crashed flow run, which `run_driver_action_or_fail` reads. A pull
+step that Styrmin writes must therefore log its error at `ERROR` in the flow run, then raise:
+
+```python
+try:
+    fingerprint = check_local_driver_files(...)
+except (DriverFilesNotFoundError, DriverFingerprintMismatchError) as exc:
+    _logger().error("%s", exc)  # flow_run_logger(flow_run_id=...) inside a flow run
+    raise
+```
+
+Log any other exception at `ERROR` with its type before it is raised again, so an unexpected
+failure also reaches the hook step. Write the error so that a user can fix the problem from its
+text alone. Reference: `check_local_driver` in `workflows/local_driver.py`
+([ADR-081](../../adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md), R-002).
+
 ## Outbound HTTP requests
 
 <!-- Extracted from specs/020-backend-telemetry on 2026-10-10 -->
@@ -1553,3 +1681,15 @@ def my_task(context: Context) -> None:  # noqa: ARG001
   `spec.values` from the test either: the next Styrmin update of the deployment rewrites
   `spec.values`. Example: `preUpgradeHookJob.enabled` in the `simple-app` chart, turned on by the
   `hook-job` test driver that `test_pod_scheduling.py` uses.
+
+<!-- Extracted from specs/029-local-driver-actions on 2026-10-20 -->
+
+- **In an E2E test that loads more than one variant of a driver, give each variant its own driver
+  name, and pin `driver_version_id` on every create and version change.** Without a pin, a create
+  or a version change binds the deployment to the latest version of its driver that supports the
+  application version (latest-wins, see `CONTEXT.md`), which can be a variant that a test loaded
+  later in the same session. A name of its own keeps the variants away from the deployments of
+  other tests that use the original driver. The pin keeps each deployment on its own variant when
+  several variants share a name. Example: `backend/tests/e2e/test_local_driver_actions.py`, whose
+  variants share the name `local-actions-check` and whose `_create_pinned_deployment` pins every
+  create.

@@ -348,6 +348,13 @@ The three CRD flows record their steps with `StepReporter.from_env()`. Keys, nam
 
 A hook step covers one run of a hook mode. The flow passes the hook step's id to `run_driver_action_or_fail(step_id=...)`, which sends it to the action's flow run as `STYRMIN_STEP_ID`.
 
+<!-- Extracted from specs/029-local-driver-actions on 2026-10-20 -->
+
+Two other writers record a hook step, always as failed, when the driver version declares an action for the hook and mode and no registered flow exists for it (`ActionNotRegisteredError`, see [Hook Resolution](hooks-and-actions.md#hook-resolution)):
+
+- `apply_state`, when planning raises the error. It ends the `plan` step without an error, then records the hook step of the error's hook and mode as failed, and the flow fails.
+- `update_deployment_version`, from server code, before it writes anything. It saves a failed `upgrade_instance` task with no flow run and records its `hook:upgrade:*` step as failed. The deployment keeps its version and active instance.
+
 The flows do not record the operator's work. When `resource:styrmindeployment` succeeds, the recorder:
 
 1. Creates this task's operator-phase steps: `operator:prerequisites` ("Create network policies and secrets") as running, then `operator:helmrelease` ("Install or upgrade the HelmRelease"), `operator:services` ("Create services and middlewares") and `operator:ready` ("Wait for the deployment to be ready") as pending. An internal deployment gets none, because users cannot open its tasks.

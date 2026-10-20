@@ -3,8 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-10-19, amended 2026-10-20 after the review of #372
 **Decision-makers**: Fatih Acar
-**Source**: specs/029-local-driver-actions/spec.md ("Decisions and Rejected Alternatives"),
-specs/029-local-driver-actions/research.md (R-001 to R-010);
+**Source**: specs/archive/029-local-driver-actions/spec.md ("Decisions and Rejected Alternatives"),
+specs/archive/029-local-driver-actions/research.md (R-001 to R-010);
 [issue #372](https://github.com/opsmill/styrmin/issues/372) and its
 [PRD](https://github.com/opsmill/styrmin/issues/372#issuecomment-6262219647)
 **Related**: [ADR-053](0053-driver-version-provenance-fingerprint.md) (provenance fingerprint),
@@ -41,7 +41,7 @@ Where actions run: the agent polls the work pool `user-work-pool` with a Prefect
 git or from a local directory, runs as a process in the agent pod. No Kubernetes Job is created
 for an action, and an action's `image:` has no effect. The spec and research R-006 assumed that
 each action ran as a Kubernetes Job in its `image:`; the first E2E runs of user story 2 showed
-that this is false (`specs/029-local-driver-actions/e2e-evidence.md`, "What the earlier runs of
+that this is false (`specs/archive/029-local-driver-actions/e2e-evidence.md`, "What the earlier runs of
 T028 found"). The decisions below hold for the agent pod in the same way: the agent reads the
 driver from the same path as the server.
 
@@ -78,7 +78,7 @@ Facts about Prefect 3.8.6 that shape the decisions:
 ## Decision
 
 We chose option 4. Option 1 blocks the documented way to load the bundled drivers. Option 2 was
-rejected in the PRD. Option 3 is a follow-up, listed in [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md) of spec 029 and not yet
+rejected in the PRD. Option 3 is a follow-up, listed in [`follow-ups.md`](../../specs/archive/029-local-driver-actions/follow-ups.md) of spec 029 and not yet
 opened as an issue: it needs a Helm change, and the bundled drivers are already in the Styrmin
 image.
 
@@ -157,7 +157,7 @@ image.
 - Because Prefect logs nothing in the flow run when a pull step raises, `check_local_driver` logs
   its error at `ERROR` in the flow run before it raises.
 - Rejected: an upstream Prefect change that puts the exception text in the `Crashed` state, which
-  is the right fix but reaches only later Prefect releases (a follow-up in [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md)
+  is the right fix but reaches only later Prefect releases (a follow-up in [`follow-ups.md`](../../specs/archive/029-local-driver-actions/follow-ups.md)
   proposes it, not yet opened as an issue); a
   `Failed` state proposed by the step before it raises, because which of two final states wins
   depends on Prefect's rules; recording the error on the hook step through `recordStep`, which
@@ -255,16 +255,16 @@ not record which hooks were skipped. The changelog tells operators about it.
   version whose registrations are missing. The same upgrade request then starts a new task.
 - Bad, because the agent pod must hold each local driver at the same path as the server. A driver
   that only the server container holds fails its actions. A shared driver volume is a follow-up,
-  listed in [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md) and not yet opened as an issue.
+  listed in [`follow-ups.md`](../../specs/archive/029-local-driver-actions/follow-ups.md) and not yet opened as an issue.
 - Bad, because any edit of the three files at a path makes every driver version loaded earlier from
   that path fail its actions. After a Styrmin upgrade that ships a newer bundled driver, operators
   load the bundled drivers again.
 - Bad, because an action's `image:` has no effect: the action runs in the agent pod.
-  [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md) lists it as a follow-up, not yet opened as an issue.
+  [`follow-ups.md`](../../specs/archive/029-local-driver-actions/follow-ups.md) lists it as a follow-up, not yet opened as an issue.
 - Bad, because the check does not cover the modules that `actions.py` imports.
 - Bad, because when the check fails during an upgrade, the failed instance stays active: the same
   request is a no-op, and a request for another driver version at the same application version runs
-  as an update without the upgrade action. This is true of every failed upgrade; [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md)
+  as an update without the upgrade action. This is true of every failed upgrade; [`follow-ups.md`](../../specs/archive/029-local-driver-actions/follow-ups.md)
   lists it as a follow-up, not yet opened as an issue.
 - Bad, because the hook step's error now holds the first `ERROR` log of a crashed action, which
   every signed-in user who can read the task can read. It is redacted, but only for the forms that
@@ -303,7 +303,7 @@ not record which hooks were skipped. The changelog tells operators about it.
   `test_upgrade_whose_upgrade_action_has_no_registered_flow_leaves_the_deployment_unchanged`,
   `test_the_check_runs_exactly_when_the_flow_takes_the_upgrade_path`.
 - `backend/tests/e2e/test_local_driver_actions.py`, run as `[api-chromium]`, with the passing runs
-  recorded in `specs/029-local-driver-actions/e2e-evidence.md`:
+  recorded in `specs/archive/029-local-driver-actions/e2e-evidence.md`:
   - `test_local_driver_actions_run_on_create_and_upgrade` (T021);
   - `test_changed_local_driver_fails_with_the_fingerprint_error` and
     `test_driver_missing_from_the_agent_pod_fails_with_the_missing_files_error` (T027);
@@ -311,7 +311,7 @@ not record which hooks were skipped. The changelog tells operators about it.
 - `backend/tests/e2e/test_infrahub_local_driver_actions.py`, outside CI: the bundled `infrahub`
   driver loaded from `/styrmin/drivers/infrahub` runs its setup actions on a create and its upgrade
   action, with its migration Job, on an upgrade from 1.6.0 to 1.7.0. Run by hand; the run is
-  recorded in `specs/029-local-driver-actions/e2e-evidence.md`.
+  recorded in `specs/archive/029-local-driver-actions/e2e-evidence.md`.
 - Also: `test_local_path_with_a_brace_is_refused_for_a_driver_with_actions`,
   `test_relative_local_path_is_refused_for_a_driver_with_actions`,
   `test_local_action_located_outside_the_actions_file_is_refused` and
@@ -335,6 +335,6 @@ not record which hooks were skipped. The changelog tells operators about it.
   in [hooks-and-actions.md](../knowledge/backend/hooks-and-actions.md).
 - The errors and how operators fix them are described in
   [Loading a Driver](../../docs/docs/drivers/loading-drivers.md#actions-of-a-driver-loaded-from-a-local-directory).
-- The follow-ups of this change are listed in [`follow-ups.md`](../../specs/029-local-driver-actions/follow-ups.md) of spec 029, with the
+- The follow-ups of this change are listed in [`follow-ups.md`](../../specs/archive/029-local-driver-actions/follow-ups.md) of spec 029, with the
   follow-ups of `research.md` ("Follow-ups to open after this change ships"). None of them is opened
   as an issue yet.

@@ -7,7 +7,7 @@ the driver version's :class:`ActionRegistrationKey`. Resolution reads the
 declared actions, looks up only the declared hook and mode pairs, and raises
 :class:`ActionNotRegisteredError` when a declared pair has no registered flow,
 so a hook is never skipped silently. See
-``specs/029-local-driver-actions/contracts/hook-resolution.md``.
+``specs/archive/029-local-driver-actions/contracts/hook-resolution.md``.
 """
 
 import asyncio

@@ -102,7 +102,7 @@ def action_directory_of(*, source_type: str, source_path: str | None) -> str | N
     the same registration key as a git row of the same driver and supported
     versions loaded from the driver directory ``drivers/a`` when their short
     fingerprints are equal (listed in
-    ``specs/029-local-driver-actions/follow-ups.md``). Unlike
+    ``specs/archive/029-local-driver-actions/follow-ups.md``). Unlike
     :func:`driver_directory_of`, which gives the GraphQL field
     ``driverDirectory``, this gives a local row its path.
 

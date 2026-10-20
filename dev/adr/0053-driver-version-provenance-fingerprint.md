@@ -114,7 +114,7 @@ declaring the same action (#373), overwrite the deployment. Rows
 registered before #375 keep their branch-tip deployment: a repeated load is a
 no-op, so nothing re-registers them.
 
-Amended 2026-10-19 (specs/029-local-driver-actions,
+Amended 2026-10-19 (specs/archive/029-local-driver-actions,
 [ADR-081](0081-local-driver-actions-check-their-files-at-the-driver-path.md)):
 a repeated load is no longer a no-op for actions. When the identity matches,
 the load registers the declared actions whose hook and mode have no registered
