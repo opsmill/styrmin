@@ -1,7 +1,7 @@
 Full run of the recorded demos (feature 029)
 ============================================
 
-Host: Linux 7.0.0-1014-aws. The sections of 2026-10-18 ran on branch fac/demo-beta-presentation-bhshh before its rebase on develop: T041 and the first T042 run at 11a4b58b, T043 at 4c31ee69 (as its section says). The second T042 run, of 2026-10-20, at the end of this file, gives its own commit.
+Host: Linux 7.0.0-1014-aws. The sections of 2026-10-18 ran on branch fac/demo-beta-presentation-bhshh before its rebase on develop: T041 and the first T042 run at 11a4b58b, T043 at 4c31ee69 (as its section says). The second T042 run and the review-fix run of demo 1 after it, both of 2026-10-20, give their own commits.
 Terminal colour codes are removed from the outputs below.
 
 T041: prerequisites check (quickstart section 6)
@@ -58,7 +58,7 @@ The stack was then restarted as part of T042, by 'uv run invoke reset', which de
 T042, first run (2026-10-18): demos 2 and 3 only, superseded
 -------------------------------------------------------------
 
-This section is kept as a record and is superseded by "T042, second run (2026-10-20): all four demos on a fresh demo stack" at the end of this file. On 2026-10-18, demos 1 and 4 were not registered in the catalog, so this run recorded two demos and not the four that T042 asks for.
+This section is kept as a record and is superseded by "T042, second run (2026-10-20): all four demos on a fresh demo stack" further down. On 2026-10-18, demos 1 and 4 were not registered in the catalog, so this run recorded two demos and not the four that T042 asks for.
 
 Which demos run
 
@@ -543,3 +543,92 @@ Only the 'local' environment remains, with no deployment, and no namespace of a 
 Result
 
 Exit code 0, four 'recorded' lines, four videos of 3:00 or less with the ffprobe values of quickstart section 3, and only the 'local' environment left (SC-001, SC-002, SC-005). This is the run that the approved exception to Constitution section V asks for (spec Clarifications): one run of all four demos on a demo stack that 'uv run invoke start' just created. 'uv run invoke reset' runs 'uv run invoke destroy' and then 'uv run invoke start'.
+
+Review fix (2026-10-20): demo 1 alone, to check its new version check on the real page
+-------------------------------------------------------------------------------------
+
+Why this run: the review of the branch found that demo 1's check of the version after the upgrade could not fail. It read the version on the deployment page, which comes from the deployment's applicationVersion, and Styrmin sets that field when it accepts the upgrade request, before the upgrade task runs (backend/styrmin_backend/services/deployment.py). Commit 25a35791 makes the demo read the version on the upgrade task's entry on the Timeline tab (the entry's data-application-version attribute, set in frontend/src/components/deployment/DeploymentTimeline.tsx) and fail unless it is the 'latest' version (check_upgrade_task in scenarios/deploy_upgrade.py). The run of the four demos above (T042, second run) used the earlier check.
+
+Branch fac/demo-beta-presentation-bhshh: when the run started, the working tree held the changes of commit 25a35791 on top of 63b21856. 25a35791 was committed during the run, with the same code. The demo stack was the one that the T042 second run above created (reset from 2026-10-20T14:07:11Z to 14:09:35Z), and it was not reset again before this run. After the run, it held only the 'local' environment, with no deployment.
+
+Started 2026-10-20T15:17:12Z, ended 2026-10-20T15:27:12Z (10 min 0 s). Command: uv run invoke record --demo deploy-upgrade. Exit code: 0.
+
+```text
+✓ Reusing existing image styrmin-demo/semaphore:v2.16.47 (pass --build-image to 
+rebuild)
+──────────────────────────── Demo 1: deploy-upgrade ────────────────────────────
+Setting up deploy-upgrade
+Step: Deploy Infrahub 1.10.11
+Wait: Infrahub 1.10.11 is starting took 2 min 31 s
+Step: Upgrade to Infrahub 1.11.7
+Wait: Upgrade in progress took 5 min 56 s
+Step: The upgrade task and its steps
+Encoding demo-videos/1-deploy-upgrade.mp4
+Deleting the environments of deploy-upgrade
+Deleting environment network-lab-upgrade
+/home/ubuntu/emdash/worktrees/styrmin-fatih2-ef968ca0/fac-demo-beta-presentation-bhshh/.venv/lib/python3.14/site-packages/kr8s/_api.py:91: UserWarning: Kubernetes version v1.36.0 is not supported. Supported versions for kr8s 0.20.15 are 1.28 to 1.35.
+  await self._check_version()
+
+Demo            Result    Video                             Length
+deploy-upgrade  recorded  demo-videos/1-deploy-upgrade.mp4  0:35  
+```
+
+Time of each line, from the copy of the output with the time of each line:
+
+```text
+15:17:13Z Demo 1: deploy-upgrade
+15:17:13Z Setting up deploy-upgrade
+15:17:14Z Step: Deploy Infrahub 1.10.11
+15:19:54Z Wait: Infrahub 1.10.11 is starting took 2 min 31 s
+15:19:57Z Step: Upgrade to Infrahub 1.11.7
+15:26:00Z Wait: Upgrade in progress took 5 min 56 s
+15:26:00Z Step: The upgrade task and its steps
+15:26:08Z Encoding demo-videos/1-deploy-upgrade.mp4
+15:26:17Z Deleting the environments of deploy-upgrade
+15:26:17Z Deleting environment network-lab-upgrade
+15:27:11Z deploy-upgrade  recorded  demo-videos/1-deploy-upgrade.mp4  0:35
+```
+
+Video checks (quickstart section 3)
+
+```text
+2026-10-20T15:27:26Z
+demo-videos/1-deploy-upgrade.mp4 2026-10-20 15:26:17.530511136 +0000
+demo-videos/1-deploy-upgrade.mp4: 3381565 bytes
+$ ffprobe -v error -show_entries stream=codec_name,width,height,pix_fmt -of csv=p=0 demo-videos/1-deploy-upgrade.mp4
+h264,1920,1080,yuv420p
+$ ffprobe -v error -show_entries format=duration:stream=codec_type,r_frame_rate -of default=nw=1 demo-videos/1-deploy-upgrade.mp4
+codec_type=video
+r_frame_rate=30/1
+duration=35.433008
+faststart (moov before mdat):
+ftyp moov free mdat
+```
+
+The video is H.264, yuv420p, 1920x1080, 30 frames per second, with no audio stream, has the moov atom before mdat, and lasts 0:35 (35.4 s).
+
+What the new check read
+
+The run exited with code 0, so check_upgrade_task passed: the upgrade task's entry on the Timeline tab had the data-application-version 1.11.7. The check raises on any other value and on an empty attribute. A frame extracted at 0:33 of the video shows the same entry: "Upgrade", "Succeeded" and "v1.11.7", with the step "Run the upgrade hook" Succeeded after 4m 20s. Under the steps, the entry shows the change of app.version from 1.10.11 to 1.11.7. The recording shows the same three chapters as the earlier recordings; the code change does not add or remove an action on the page.
+
+Observed, not investigated:
+
+- The wait "Upgrade in progress" took 5 min 56 s, against 2 min 55 s in the earlier recordings of demo 1.
+- The started task "Stop Components" of the step "Run the upgrade hook" shows Superseded, and "Start Components" shows Succeeded. The earlier recordings showed both as Succeeded (spike-notes.md, "Since the fix (2026-10-20)"). The upgrade task's result was Succeeded.
+
+Environments and namespaces left after the run
+
+```text
+2026-10-20T15:27:34Z
+$ kubectl get ns --no-headers | grep -c '^styrmin-'
+0
+2026-10-20T15:28:02Z
+environments: local
+  local: deployments: []
+```
+
+The environments were listed with a throwaway StyrminClient script in the session scratchpad, as in the T042 second run.
+
+Result
+
+Exit code 0, one 'recorded' line, a video of 3:00 or less with the ffprobe values of quickstart section 3, and only the 'local' environment left. Demo 1's new version check passed on the real page.
