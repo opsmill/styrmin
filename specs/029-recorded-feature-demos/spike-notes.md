@@ -58,9 +58,9 @@ Decision (maintainer, 2026-10-18): demo 1 (tasks T033 and T034) waits for the fi
 
 ### Since the fix (2026-10-20)
 
-[PR #535](https://github.com/opsmill/styrmin/pull/535) fixed #372 on `develop`, and this branch was rebased on `develop` (commit `17468791`). The agent now runs the actions of a driver loaded from a local directory as processes in the agent pod, from the driver version's path ([loading drivers](../../docs/docs/drivers/loading-drivers.md#actions-of-a-driver-loaded-from-a-local-directory)). The Styrmin image holds the driver at `/styrmin/drivers/infrahub` in the agent pod as well, so the demo stack needed no change.
+[PR #535](https://github.com/opsmill/styrmin/pull/535) fixed #372 on `develop`, and this branch was rebased on `develop` at `bb56eac9`. The agent now runs the actions of a driver loaded from a local directory as processes in the agent pod, from the driver version's path ([loading drivers](../../docs/docs/drivers/loading-drivers.md#actions-of-a-driver-loaded-from-a-local-directory)). The Styrmin image holds the driver at `/styrmin/drivers/infrahub` in the agent pod as well, so the demo stack needed no change.
 
-Observed in the two recordings of demo 1 on 2026-10-20, each on a demo stack created just before from an image that `uv run invoke build` built from commit `17468791` (times are from the second recording):
+Observed in the two recordings of demo 1 on 2026-10-20, each on a demo stack created just before from an image that `uv run invoke build` built from the branch commit `17468791` (times are from the second recording):
 
 - The task worker logged `Upgrade core hook found` and `Upgrade remediation ready: application=infrahub target_version=1.11.7 prehook=False posthook=False`, and no longer `No upgrade core hook defined`.
 - The agent ran the flow run "Upgrade infrahub to 1.11.7". Its pull step `check_local_driver` logged, verbatim:
@@ -82,7 +82,7 @@ Observed in the two recordings of demo 1 on 2026-10-20, each on a demo stack cre
 
 Not investigated: whether the three Superseded steps are what the product means to show for an upgrade that runs a core action. The task's result is Succeeded.
 
-Effect on the plan: on the demo stack, the upgrade from 1.10.11 to 1.11.7 now runs the driver's upgrade action with Infrahub's migrations, as research R-015 expected, and demo 1 step 3 shows it.
+Effect on the plan: on the demo stack, the upgrade from 1.10.11 to 1.11.7 now runs the driver's upgrade action with Infrahub's migrations, as research R-015 expected, and chapter 3 of demo 1 shows it.
 
 ## infrahub-enterprise 1.11.7 backs up and restores
 
@@ -249,11 +249,11 @@ Recorded on 2026-10-20 with `uv run invoke record --demo deploy-upgrade` on a de
 The video `demo-videos/1-deploy-upgrade.mp4`:
 
 - `ffprobe` gives `h264,1920,1080,yuv420p` at 30 frames per second and a length of 35.4 s, which the summary shows as 0:35.
-- Each of the three steps starts with its chapter title: "Deploy Infrahub 1.10.11", "Upgrade to Infrahub 1.11.7" and "The upgrade task and its steps".
+- Each of the three chapters starts with its title: "Deploy Infrahub 1.10.11", "Upgrade to Infrahub 1.11.7" and "The upgrade task and its steps".
 - The deployment name `infrahub`, the application version `1.10.11` and the new version `1.11.7` appear one key at a time; frames show the partial values `i`, `1.10`, `1.10.1` and `1.1`. The cursor and the blue outline are on each element the demo clicks or types into, including the driver version select and its option "infrahub v5@751f957", "Deploy", "Upgrade", the Upgrade button of the dialog, and the Timeline tab.
 - Both waits are sped up with their labels: "Sped up 41×: Infrahub 1.10.11 is starting took 2 min 41 s" and "Sped up 44×: Upgrade in progress took 2 min 55 s". The first recording gave the same two durations.
-- Step 1 ends on the Timeline tab with the task "Create" Succeeded at v1.10.11. During the upgrade wait, the timeline shows the upgrade task expanded with the step "Run the upgrade hook" running and its started task "Stop Components".
-- Step 3 ends with the upgrade task Succeeded and its steps on screen, as listed in "Since the fix (2026-10-20)" above, with the change of `app.version` from 1.10.11 to 1.11.7 under the steps.
+- Chapter 1 ends on the Timeline tab with the task "Create" Succeeded at v1.10.11. During the upgrade wait, the timeline shows the upgrade task expanded with the step "Run the upgrade hook" running and its started task "Stop Components".
+- Chapter 3 ends with the upgrade task Succeeded and its steps on screen, as listed in "Since the fix (2026-10-20)" above, with the change of `app.version` from 1.10.11 to 1.11.7 under the steps.
 - No password, token or login form is on screen; the recording starts on the page of the environment `network-lab-upgrade`.
 
 After each run, only the `local` environment existed, and no `styrmin-<deployment id>` namespace was left.
@@ -262,11 +262,11 @@ With the fix to #372, the agent also ran the driver's setup actions while Infrah
 
 ### What changed after watching the first recording
 
-- Step 3 of the first recording showed the tasks "Start Components" and "Stop Components", which the timeline lists above the upgrade task, and the upgrade task was below the bottom of the page. A new page-object method, `DeploymentDetailPage.show_timeline_entry(task_id)`, expands a task's entry when it is collapsed, scrolls it to the top of the page or as far as the page scrolls, and returns its steps. Step 3 uses it, and the demo fails unless the steps hold "Run the upgrade hook" (step key `hook:upgrade:core`) with the status Succeeded.
-- The first recording read the task ids at the start of step 2, as task T033 orders: the Timeline tab opened, and the page reloaded at once to open the Upgrade dialog. The demo now reads the task ids at the end of step 1, so step 1 ends on the timeline with the succeeded "Create" task.
-- The demo also fails unless the deployment page shows the version 1.10.11 after step 1 and 1.11.7 after the upgrade.
+- Chapter 3 of the first recording showed the tasks "Start Components" and "Stop Components", which the timeline lists above the upgrade task, and the upgrade task was below the bottom of the page. A new page-object method, `DeploymentDetailPage.show_timeline_entry(task_id)`, expands a task's entry when it is collapsed, scrolls it to the top of the page or as far as the page scrolls, and returns its steps. Chapter 3 uses it, and the demo fails unless the steps hold "Run the upgrade hook" (step key `hook:upgrade:core`) with the status Succeeded.
+- The first recording read the task ids at the start of chapter 2, as task T033 orders: the Timeline tab opened, and the page reloaded at once to open the Upgrade dialog. The demo now reads the task ids at the end of chapter 1, so chapter 1 ends on the timeline with the succeeded "Create" task.
+- The demo also fails unless the deployment page shows the version 1.10.11 after chapter 1, and unless the upgrade task's entry on the Timeline tab shows the version 1.11.7. Until the review of 2026-10-20, the demo read 1.11.7 from the deployment page. That check could not fail, because Styrmin sets the deployment's version when it accepts the upgrade request, before the task runs ([`services/deployment.py`](../../backend/styrmin_backend/services/deployment.py)). The timeline shows each task with the version of the newest instance created at or before the task ([`services/deployment_timeline.py`](../../backend/styrmin_backend/services/deployment_timeline.py), `_correlate_version`).
 
-Not changed: `upgrade_deployment` opens the deployment page by its address before it opens the Upgrade dialog, so after the chapter title of step 2 the page switches from the Timeline tab to the Overview tab.
+Not changed: `upgrade_deployment` opens the deployment page by its address before it opens the Upgrade dialog, so after the title of chapter 2 the page switches from the Timeline tab to the Overview tab.
 
 ## Demo 4 recorded (tasks T039 and T040)
 
@@ -279,12 +279,12 @@ The demo depends on the fix to [#530](https://github.com/opsmill/styrmin/issues/
 The video `demo-videos/4-clone.mp4`:
 
 - `ffprobe` gives `h264,1920,1080,yuv420p` at 30 frames per second and a length of 67.8 s, which the summary shows as 1:08.
-- Each of the five steps starts with its chapter title: "Semaphore reads its inventory from Infrahub", "Clone the environment", "Add a device in the clone's Infrahub", "The clone's Semaphore lists the new device" and "The source is unchanged".
-- Step 1 starts on the template "List network devices" in the source Semaphore. The demo clicks "Run", then "Run" in the "New Task" dialog. The log of "Task #1" shows `Devices in the inventory: 2` and `Device names: sw1, sw2`.
-- Step 2 opens the environment `network-lab` in Styrmin, its Clones tab and the "Clone Environment" dialog. The dialog suggests the name `network-lab-rehearsal`; the demo replaces it with `network-lab-clone`, typed one key at a time, keeps both applications selected and clicks "Start Clone". The clone row shows Pending, then the sped-up wait, then "Complete" and "2/2 cloned".
-- Step 3 shows the clone's Infrahub device list with `sw1`, `sw2` and "2 counts". The demo clicks "Add Network device", types `sw3` and clicks "Save". The list then shows `sw1`, `sw2`, `sw3`, "3 counts" and the message "Device created".
-- Step 4 opens the same template in the clone's Semaphore, whose task list holds task #1 of the source, and runs it with no setting changed. The log of "Task #2" shows `Devices in the inventory: 3` and `Device names: sw1, sw2, sw3`.
-- Step 5 runs the template in the source Semaphore again. The log of "Task #2" shows `Devices in the inventory: 2` and `Device names: sw1, sw2`. Both runs after the clone have the number 2, because the clone's Semaphore database is a copy of the source's, which held task #1.
+- Each of the five chapters starts with its title: "Semaphore reads its inventory from Infrahub", "Clone the environment", "Add a device in the clone's Infrahub", "The clone's Semaphore lists the new device" and "The source is unchanged".
+- Chapter 1 starts on the template "List network devices" in the source Semaphore. The demo clicks "Run", then "Run" in the "New Task" dialog. The log of "Task #1" shows `Devices in the inventory: 2` and `Device names: sw1, sw2`.
+- Chapter 2 opens the environment `network-lab` in Styrmin, its Clones tab and the "Clone Environment" dialog. The dialog suggests the name `network-lab-rehearsal`; the demo replaces it with `network-lab-clone`, typed one key at a time, keeps both applications selected and clicks "Start Clone". The clone row shows Pending, then the sped-up wait, then "Complete" and "2/2 cloned".
+- Chapter 3 shows the clone's Infrahub device list with `sw1`, `sw2` and "2 counts". The demo clicks "Add Network device", types `sw3` and clicks "Save". The list then shows `sw1`, `sw2`, `sw3`, "3 counts" and the message "Device created".
+- Chapter 4 opens the same template in the clone's Semaphore, whose task list holds task #1 of the source, and runs it with no setting changed. The log of "Task #2" shows `Devices in the inventory: 3` and `Device names: sw1, sw2, sw3`.
+- Chapter 5 runs the template in the source Semaphore again. The log of "Task #2" shows `Devices in the inventory: 2` and `Device names: sw1, sw2`. Both runs after the clone have the number 2, because the clone's Semaphore database is a copy of the source's, which held task #1.
 - The three count lines are readable in frames extracted at 1920×1080. Each stays on screen for 2 to 3 s before the next chapter title covers it or the video ends.
 - The cursor and the blue outline are on each element the demo clicks or types into.
 - The logins to the clone's Infrahub and Semaphore are cut from the video (research [R-016](research.md#r-016-logging-in-without-recording-it)): the frame after the last wait label shows the next chapter title. No password, token or login form is on screen.
@@ -298,12 +298,12 @@ After the run, only the `local` environment existed, and no `styrmin-<deployment
 
 | Wait | Real duration | Shown |
 | --- | --- | --- |
-| "Ansible reads the inventory", step 1 | 2 s | At normal speed, with no label |
+| "Ansible reads the inventory", chapter 1 | 2 s | At normal speed, with no label |
 | "Clone in progress" | 2 min 18 s | 35 times faster |
 | "The clone's Infrahub starts" | 27 s | 7 times faster |
 | "The clone's Semaphore starts" | 36 s | 10 times faster |
-| "Ansible reads the inventory", step 4 | 2 s | At normal speed, with no label |
-| "Ansible reads the inventory", step 5 | 1 s | At normal speed, with no label |
+| "Ansible reads the inventory", chapter 4 | 2 s | At normal speed, with no label |
+| "Ansible reads the inventory", chapter 5 | 1 s | At normal speed, with no label |
 
 The two waits after the clone are not in task T039. The demo waits until the clone's Infrahub answers `GET /api/schema/summary` and the clone's Semaphore answers `GET /api/ping`, because it logs in to both right after, as demo 3 waits after its restore.
 
@@ -323,7 +323,7 @@ A script in the session scratchpad listed, every 3 seconds, the Services labelle
 - The source's aliases did not change during the run.
 - The list of the clone's deployments held the two counterparts and no other deployment.
 
-This is the case that the alias check in `test_environment_clone_lifecycle` cannot show alone: in demo 4, the clone's Semaphore reaches the clone's Infrahub through the alias `infrahub` and lists the device added there (critique E5).
+PR #531's check in `test_environment_clone_lifecycle` reads the alias Service objects. Demo 4 shows that the clone's Semaphore reaches the clone's Infrahub: through the alias `infrahub`, it lists the device added in the clone's Infrahub.
 
 ### The infrahub-enterprise driver's setup actions ran
 

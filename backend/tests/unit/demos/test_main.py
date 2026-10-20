@@ -355,21 +355,6 @@ async def test_a_failed_prerequisite_exits_2_before_any_setup(
     ]
 
 
-async def test_an_empty_catalog_checks_the_prerequisites_and_exits_0(
-    stack, versions_path, tmp_path, capsys
-) -> None:
-    code = await record_demos(
-        [], SETTINGS, tmp_path / "videos", stack.runtime(versions_path)
-    )
-
-    output = capsys.readouterr().out
-    assert code == 0
-    assert stack.calls == [("check", "http://styrmin.test:8080", "admin")]
-    assert "nothing to record" in output
-    assert "Demo" in output
-    assert "Result" in output
-
-
 def test_an_unknown_slug_lists_the_four_slugs_and_exits_2(capsys) -> None:
     with pytest.raises(SystemExit) as raised:
         main(
@@ -379,16 +364,9 @@ def test_an_unknown_slug_lists_the_four_slugs_and_exits_2(capsys) -> None:
     assert raised.value.code == 2
     error = capsys.readouterr().err
     assert (
-        "'nope' is not a demo. The demos are: deploy-upgrade (not available yet), "
-        "component-overrides, backup-restore (not available yet), clone (not available yet)"
+        "'nope' is not a demo. The demos are: deploy-upgrade, "
+        "component-overrides, backup-restore, clone"
     ) in error
-
-
-def test_a_slug_without_a_scenario_is_not_available_yet() -> None:
-    with pytest.raises(
-        ValueError, match="^'clone' is not available yet. The demos are: deploy-upgrade"
-    ):
-        select_demos("clone", [_demo("deploy-upgrade", 1)])
 
 
 def test_select_demos_returns_one_demo_or_all_of_them() -> None:

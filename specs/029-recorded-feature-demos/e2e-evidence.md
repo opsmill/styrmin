@@ -2,7 +2,7 @@
 
 ## Overview
 
-This file records each run of an E2E test that spec 029 changes, as Constitution §V requires. Spec 029 changes one E2E test: the FR-016 alias check in `test_environment_clone_lifecycle` ([`backend/tests/e2e/test_backup_restore.py`](../../backend/tests/e2e/test_backup_restore.py), task T005). That change was dropped from the branch on 2026-10-20, because PR #531 adds its own alias check to the same test (see [The defect is fixed by #531](#the-defect-is-fixed-by-531-which-carries-its-own-alias-check)).
+This file records each run of an E2E test that spec 029 changed, as Constitution §V requires. Spec 029 changed one E2E test: the FR-016 alias check in `test_environment_clone_lifecycle` ([`backend/tests/e2e/test_backup_restore.py`](../../backend/tests/e2e/test_backup_restore.py), task T005). That change was dropped from the branch on 2026-10-20, because PR #531 adds its own alias check to the same test (see [The defect is fixed by #531](#the-defect-is-fixed-by-531-which-carries-its-own-alias-check)).
 
 ## FR-016 alias check fails on both variants
 
@@ -168,6 +168,8 @@ The defect is filed as [#530](https://github.com/opsmill/styrmin/issues/530), "a
 
 Until the check passes, the T005 commit `472fe403` stays on the branch and is not pushed, and the check is not marked `xfail` (critique X1). Before the branch is pushed, `472fe403` must be moved off it, because later commits sit on top of it.
 
+Note (2026-10-20): `472fe403` was pushed with the branch on 2026-10-18. It is in `origin/fac/demo-beta-presentation-bhshh` at `11a4b58b`. It was dropped from the local branch on 2026-10-20, before the rebase on `develop`.
+
 ## The defect is fixed by #531, which carries its own alias check
 
 [PR #531](https://github.com/opsmill/styrmin/pull/531), "fix(clone): a clone writes its own service aliases (#530)", fixed [#530](https://github.com/opsmill/styrmin/issues/530). It was merged into `develop` on 2026-10-19, and this branch is rebased on `develop`.
@@ -177,4 +179,4 @@ PR #531 adds its own alias check to `test_environment_clone_lifecycle` in [`back
 - `api-chromium`: `2 passed, 2 deselected, 6 warnings in 678.83s (0:11:18)`;
 - `ui-chromium`: `2 passed, 2 deselected, 6 warnings in 752.53s (0:12:32)`.
 
-Because PR #531 carries this check, the T005 commit of this branch (`472fe403`) was dropped from the branch on 2026-10-20. Spec 029 therefore no longer changes an E2E test. The runs of PR #531 meet the dependency of Phase 6 on T006 and T007, and demo 4 shows the case the check cannot show: the clone's Semaphore reaches the clone's Infrahub ([spike notes](spike-notes.md#demo-4-recorded-tasks-t039-and-t040)).
+Because PR #531 carries this check, the T005 commit of this branch (`472fe403`) was dropped from the branch on 2026-10-20. Spec 029 therefore no longer changes an E2E test. The maintainer decided that the runs of PR #531 meet the dependency of Phase 6 on T006 and T007: on 2026-10-20, the maintainer stated that #372 and #530 are fixed and asked for demos 1 and 4 to be completed. Demo 4 shows the case the check cannot show: the clone's Semaphore reaches the clone's Infrahub ([spike notes](spike-notes.md#demo-4-recorded-tasks-t039-and-t040)).

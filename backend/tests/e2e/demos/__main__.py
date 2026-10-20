@@ -354,8 +354,6 @@ async def record_demos(
             console.print(Text(problem, style="bold red"))
         print_summary([DemoResult(demo.slug, "skipped") for demo in demos])
         return EXIT_PREREQUISITES
-    if not demos:
-        console.print("No demo is available yet, so there is nothing to record.")
     versions = load_versions(runtime.versions_path)
     results: list[DemoResult] = []
     for demo in demos:
@@ -373,11 +371,7 @@ def select_demos(slug: str, demos: Sequence[Demo[Any]]) -> tuple[Demo[Any], ...]
     by_slug = {demo.slug: demo for demo in demos}
     if slug in by_slug:
         return (by_slug[slug],)
-    listing = ", ".join(
-        name if name in by_slug else f"{name} (not available yet)" for name in SLUGS
-    )
-    reason = "is not available yet" if slug in SLUGS else "is not a demo"
-    raise ValueError(f"{slug!r} {reason}. The demos are: {listing}")
+    raise ValueError(f"{slug!r} is not a demo. The demos are: {', '.join(SLUGS)}")
 
 
 def parse_arguments(
@@ -391,7 +385,7 @@ def parse_arguments(
     parser.add_argument(
         "--demo",
         default="",
-        help=f"The one demo to record: {', '.join(SLUGS)}. Default: every available demo.",
+        help=f"The one demo to record: {', '.join(SLUGS)}. Default: all four demos.",
     )
     parser.add_argument(
         "--output-dir",

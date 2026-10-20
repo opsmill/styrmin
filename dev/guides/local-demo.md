@@ -116,7 +116,7 @@ The demo needs a Styrmin image that holds the fix to
 on 2026-10-20). Before that fix, the upgrade did not run the action
 ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#the-upgrade-runs-the-drivers-upgrade-action-since-the-fix-to-372)).
 The demo fails unless the upgrade task lists the step "Run the upgrade hook"
-as succeeded.
+as succeeded and its entry on the Timeline tab shows the `latest` version.
 
 Demo 3 (`backup-restore`) deploys the `infrahub-enterprise` application
 driver instead of `infrahub`. The environment backup runs
@@ -157,7 +157,9 @@ Like demo 3, it deploys the `infrahub-enterprise` driver.
   with 31,465 MiB of memory, no swap, and other processes running:
   - in the run of the four demos on 2026-10-20, the memory in use rose from
     17,604 MiB before demo 4 to at most 26,672 MiB during it, and the
-    available memory fell to 4,792 MiB
+    available memory fell to 4,792 MiB. The memory in use was highest, and
+    the available memory lowest, at 14:56:17 UTC, while ffmpeg was encoding
+    the video of demo 4 and the two environments still ran
     ([full run log](../../specs/029-recorded-feature-demos/full-run.log));
   - in a recording of demo 4 alone on the same day, the memory in use rose
     from 17,330 MiB to at most 26,993 MiB, and the available memory fell to
@@ -282,22 +284,27 @@ a slug that is not one of the four in the table above.
 
 ### Time a run takes
 
-Measured on one Linux host
-([full run log](../../specs/029-recorded-feature-demos/full-run.log)):
+Measured on one Linux host:
 
-- `uv run invoke reset`: 2 min 24 s on 2026-10-20, and 2 min 52 s and
-  2 min 9 s in earlier measurements
-  ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#time-each-operation-took)).
+- `uv run invoke reset`:
+  - 2 min 24 s on 2026-10-20
+    ([full run log](../../specs/029-recorded-feature-demos/full-run.log));
+  - 2 min 52 s on 2026-10-18
+    ([full run log](../../specs/029-recorded-feature-demos/full-run.log));
+  - 2 min 9 s on 2026-10-18
+    ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#time-each-operation-took)).
 - `uv run invoke record` with the four demos, on 2026-10-20 on a fresh demo
-  stack: 48 min 28 s. Each demo took, including its setup, recording,
-  encoding and cleanup:
+  stack: 48 min 28 s
+  ([full run log](../../specs/029-recorded-feature-demos/full-run.log)).
+  Each demo took, including its setup, recording, encoding and cleanup:
   - `deploy-upgrade`: 8 min 13 s, for a video of 0:35;
   - `component-overrides`: 10 min 8 s, for a video of 0:45;
   - `backup-restore`: 19 min 56 s, for a video of 1:08;
   - `clone`: 10 min 10 s, for a video of 1:08.
 - `uv run invoke record --demo backup-restore` after a failed run of demo 3,
   on 2026-10-18: 20 min 40 s, of which about 5 min 45 s went to deleting the
-  environment the failed run kept. The video lasts 1:09.
+  environment the failed run kept. The video lasts 1:09
+  ([full run log](../../specs/029-recorded-feature-demos/full-run.log)).
 - `uv run invoke record --demo deploy-upgrade` alone, on 2026-10-20 on a
   fresh demo stack: 8 min 21 s
   ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#demo-1-recorded-tasks-t033-and-t034)).
