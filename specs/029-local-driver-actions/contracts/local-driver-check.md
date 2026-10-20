@@ -49,13 +49,7 @@ Order of operations:
 
 The step never imports `actions.py`.
 
-Image named in the errors (R-006), resolved only on the error path by `_action_image()`, which returns the image name and the work pool name:
-
-1. The deployment's `job_variables["image"]` of the flow run in `PREFECT__FLOW_RUN_ID`.
-2. Otherwise the `default` of `variables.properties.image` in the base job template of the flow run's work pool.
-3. Otherwise no image name. The error then names the image with the work pool: `in the default image of the work pool <name>`, or `in the image of this action's Job` when the work pool is unknown too ([errors.md](errors.md#words-that-name-the-image-of-the-actions-job)).
-
-A failure to read Prefect's API in this resolution never hides the original error: the check logs a warning in the flow run and raises its error with the work pool read before the failure, if any.
+Pod named in the errors (R-006, corrected after the review of #372): the step passes `socket.gethostname()`, the agent pod's name in Kubernetes, as `agent_pod` ([errors.md](errors.md#words-that-name-the-agent-pod)). The errors name no image, and the check reads nothing from the Prefect API.
 
 Import constraints: importing `workflows/local_driver.py` must succeed with an empty environment, read no server settings and open no database connection, because the Job has neither. It imports `services/driver/hash.py` and `services/driver/exceptions.py`, which load the driver package and its Pydantic models; that import was checked to succeed with an empty environment. A unit test imports the module in a subprocess with an empty environment (critique E1).
 
@@ -63,32 +57,38 @@ Logging: on success, the step logs one `INFO` line in the flow run, with the pat
 
 ## How the error reaches the hook step
 
-`run_deployment_or_fail` (`agent/tasks/utils.py`):
+`run_driver_action_or_fail` (`agent/tasks/utils.py`), for driver actions only:
 
 ```python
 if flow_run.state and flow_run.state.is_crashed():
-    first_error = await _first_error_log(flow_run.id)   # None when absent or unreadable
-    detail = f"{first_error} ({flow_run.state.message})" if first_error else flow_run.state.message
+    detail = flow_run.state.message
+    if crash_log_secrets is not None:  # set by run_driver_action_or_fail only
+        first_error = await _first_error_log(flow_run.id)   # None when absent or unreadable
+        if first_error:
+            detail = f"{redact_secrets(first_error, crash_log_secrets)} ({detail})"
     raise RuntimeError(f"Deployment flow run {flow_run.id} crashed: {detail}")
 ```
 
+- `run_deployment_or_fail`, which the orchestration flows and the remediations use, keeps the state message alone, so the logs of those flows never reach a task.
+- `redact_secrets` replaces the action token, the user info of URLs, the credential after `Bearer` or `Basic`, and the value of a key whose name says it holds a secret, with `<redacted>`.
+
 - The first `ERROR` log of a flow run whose check failed is the error that the check step logged before it raised (see "Logging" above).
 - `_first_error_log` calls `client.read_logs(LogFilter(flow_run_id=LogFilterFlowRunId(any_=[id]), level=LogFilterLevel(ge_=40)), limit=1, sort=LogSort.TIMESTAMP_ASC)` and returns the message cut to 4,000 characters (`FIRST_ERROR_LOG_MAX_LENGTH`).
-- When the flow run has no `ERROR` log, or any exception occurs while reading logs, it returns `None` and logs a warning.
+- When the flow run has no `ERROR` log, or any exception occurs while reading logs, it returns `None` and logs a warning in the calling flow run.
 - The failed-state branch is unchanged.
 
 Text of the hook step error: `Deployment flow run <id> crashed: <first ERROR log> (<state message>)`, or `Deployment flow run <id> crashed: <state message>` without a first `ERROR` log.
 
-Example of the hook step error for FR-003, when the check read the image of the action:
+Example of the hook step error for FR-003:
 
 ```text
-RuntimeError: Deployment flow run 6f0c… crashed: The driver files at /styrmin/drivers/my-app in the image registry.opsmill.io/opsmill/styrmin:latest are not the files of this driver version: their provenance fingerprint is 9b1e2c4, and the driver version was loaded with 0a7d3f1. The files changed after the driver was loaded. Rebuild the image with the files you loaded and load the driver again, or load the driver again from /styrmin/drivers/my-app and use the new driver version. (Process exited with status code: 1. …)
+RuntimeError: Deployment flow run 6f0c… crashed: The driver files at /styrmin/drivers/my-app in the Styrmin agent pod styrmin-agent-7c9d8-x2k4q are not the files of this driver version: their provenance fingerprint is 9b1e2c4, and the driver version was loaded with 0a7d3f1. If the files changed after the driver was loaded, load the driver again and use the new driver version: styrminctl drivers load-local-version /styrmin/drivers/my-app. If the agent pod holds other files at /styrmin/drivers/my-app than the Styrmin server, give both the same files first. (Process exited with status code: 1. …)
 ```
 
-Example of the hook step error for FR-004, when the check read only the work pool:
+Example of the hook step error for FR-004:
 
 ```text
-RuntimeError: Deployment flow run 6f0c… crashed: The driver files are not at /styrmin/drivers/my-app in the default image of the work pool user-work-pool: actions.py not found. An action's image must hold the driver at the same path as the Styrmin server. Add the driver to the image at /styrmin/drivers/my-app, or load the driver from a path that the image holds. (Process exited with status code: 1. …)
+RuntimeError: Deployment flow run 6f0c… crashed: The driver files are not at /styrmin/drivers/my-app in the Styrmin agent pod styrmin-agent-7c9d8-x2k4q: actions.py not found. The agent pod runs every driver action, so it must hold the driver at the same path as the Styrmin server. Mount or copy the driver into the agent pod at /styrmin/drivers/my-app, or load the driver from a path that both the server and the agent pod hold. (Process exited with status code: 1. …)
 ```
 
 ## Observable results (tests)

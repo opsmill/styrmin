@@ -4,74 +4,74 @@
 
 The message texts are part of the contract: SC-003 requires that a user can fix the problem from the message alone, and tests assert the parts listed under "Must contain".
 
-## Words that name the image of the action's Job
+## Words that name the agent pod
 
-The two errors of the check name the image that runs the action's Job ([local-driver-check.md](local-driver-check.md#the-pull-step), research R-006). The check passes the image name and the work pool that it read from the Prefect API; either is `None` when the API does not give it. `describe_action_image(image, work_pool)` in the same module builds the words `{image words}` that follow "in" in both messages:
+The two errors of the check name the pod where the action runs: the agent's Prefect process worker runs every action as a process in the agent pod, and an action's `image:` has no effect, so the errors name no image (research R-006, corrected after the review of #372; [ADR-081](../../../dev/adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md)). The pull step passes its host name, which is the pod name in Kubernetes, as `agent_pod`; `get_function` passes none. `describe_agent_pod(agent_pod)` in the same module builds the words `{agent pod words}`:
 
-| What the check read | `{image words}` |
-|---------------------|-----------------|
-| The image name | `the image {image}`, for example `the image registry.opsmill.io/opsmill/styrmin:latest` |
-| Only the work pool | `the default image of the work pool {work_pool}`, for example `the default image of the work pool user-work-pool` |
-| Neither | `the image of this action's Job` |
+| `agent_pod` | `{agent pod words}` |
+|-------------|---------------------|
+| A name | `the Styrmin agent pod {agent_pod}`, for example `the Styrmin agent pod styrmin-agent-7c9d8-x2k4q` |
+| `None` | `the Styrmin agent pod` |
 
 ## DriverFilesNotFoundError (FR-004)
 
 ```python
 class DriverFilesNotFoundError(DriverError):
     error_code = "NOT_FOUND"
-    default_message = "The driver files are not in the action's image"
+    default_message = "The driver files are not in the agent pod, where the action runs"
 
     def __init__(
         self,
         *,
         path: str,
-        image: str | None,
         missing: list[str],
-        work_pool: str | None = None,
+        agent_pod: str | None = None,
     ) -> None: ...
 ```
 
 - Raised by `check_local_driver` when `path` is not a directory, or when the driver specification file or the actions file is missing in it. A missing values template is not an error: the fingerprint uses empty bytes for it, as the loader does.
 - `missing` holds the missing file names, or the path itself when the directory is missing.
-- `error_metadata`: `{"path": path, "image": image, "work_pool": work_pool, "missing": missing}`.
+- `error_metadata`: `{"path": path, "agent_pod": agent_pod, "missing": missing}`.
 
 Message:
 
 ```text
-The driver files are not at {path} in {image words}: {missing, joined with ", "} not found. An action's image must hold the driver at the same path as the Styrmin server. Add the driver to the image at {path}, or load the driver from a path that the image holds.
+The driver files are not at {path} in {agent pod words}: {missing, joined with ", "} not found. The agent pod runs every driver action, so it must hold the driver at the same path as the Styrmin server. Mount or copy the driver into the agent pod at {path}, or load the driver from a path that both the server and the agent pod hold.
 ```
 
-Must contain: the path, the image when the check read it (otherwise the work pool when it read that), each missing name.
+Must contain: the path, the agent pod, each missing name, the two fixes.
 
 ## DriverFingerprintMismatchError (FR-003)
 
 ```python
 class DriverFingerprintMismatchError(DriverError):
     error_code = "VALIDATION_ERROR"
-    default_message = "The driver files in the action's image differ from the driver version"
+    default_message = (
+        "The driver files in the agent pod, where the action runs, differ from the "
+        "driver version"
+    )
 
     def __init__(
         self,
         *,
         path: str,
-        image: str | None,
         expected: str,
         actual: str,
-        work_pool: str | None = None,
+        agent_pod: str | None = None,
     ) -> None: ...
 ```
 
 - Raised by `check_local_driver` when `compute_driver_directory_fingerprint` of the files at `path` differs from `expected`.
 - `expected` and `actual` are full SHA-256 hex digests; the message shows their first 7 characters, as driver version labels do.
-- `error_metadata`: `{"path": path, "image": image, "work_pool": work_pool, "expected": expected, "actual": actual}`.
+- `error_metadata`: `{"path": path, "agent_pod": agent_pod, "expected": expected, "actual": actual}`.
 
 Message:
 
 ```text
-The driver files at {path} in {image words} are not the files of this driver version: their provenance fingerprint is {actual[:7]}, and the driver version was loaded with {expected[:7]}. The files changed after the driver was loaded. Rebuild the image with the files you loaded and load the driver again, or load the driver again from {path} and use the new driver version.
+The driver files at {path} in {agent pod words} are not the files of this driver version: their provenance fingerprint is {actual[:7]}, and the driver version was loaded with {expected[:7]}. If the files changed after the driver was loaded, load the driver again and use the new driver version: styrminctl drivers load-local-version {path, shell-quoted}. If the agent pod holds other files at {path} than the Styrmin server, give both the same files first.
 ```
 
-Must contain: the path, the image when the check read it (otherwise the work pool when it read that), both short fingerprints, "Rebuild the image", "load the driver again".
+Must contain: the path, the agent pod, both short fingerprints, the `styrminctl drivers load-local-version` command.
 
 ## ActionNotRegisteredError (FR-005)
 

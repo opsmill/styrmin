@@ -10,6 +10,11 @@ The issues come from three sources:
 - the findings made while the feature was implemented that this branch does not fix;
 - the run of the quickstart on the dev stack (task T050, recorded in [e2e-evidence.md](e2e-evidence.md#t050-the-quickstart-sections)).
 
+The review of #372 resolved two earlier entries in this branch, so they are no longer listed:
+
+- "Give a local driver version loaded from a relative path its own action registrations": a load from a local directory of a driver that declares actions is now refused when the path is relative, so such a driver version always has an absolute path and never gets the registration key of a git driver version ([`services/applications.py`](../../backend/styrmin_backend/services/applications.py), `_refuse_local_actions_that_the_check_cannot_cover`).
+- The error text part of "Decide what the `image:` of an action does": the errors of the local driver check now name the agent pod and no image ([ADR-081](../../dev/adr/0081-local-driver-actions-check-their-files-at-the-driver-path.md), "Where the errors say the action runs").
+
 ## Follow-ups that research lists
 
 ### Prefect: report why a flow run could not load its flow
@@ -64,16 +69,16 @@ This is a comment to add to [#10](https://github.com/opsmill/styrmin/issues/10) 
 
 ### Decide what the `image:` of an action does
 
-What is wrong: a driver can set `image:` on an action, and Styrmin passes it to the action's Prefect deployment as `job_variables["image"]` (`WorkflowDefinition.to_deployment` in [`workflows/models.py`](../../backend/styrmin_backend/workflows/models.py)). The agent runs every action with a Prefect `ProcessWorker` on the work pool `user-work-pool`, as a process in the agent pod ([`entrypoint/combined.py`](../../backend/styrmin_backend/entrypoint/combined.py)). So `image:` has no effect. The first E2E run of T028 showed it: an action whose `image:` held the driver failed with "The driver files are not at … in the image …", because the action ran in the agent pod ([e2e-evidence.md](e2e-evidence.md#what-the-earlier-runs-of-t028-found)). The errors of the local driver check still name an image: the action's `image:` or the default image of the work pool. That text was kept on purpose.
+What is wrong: a driver can set `image:` on an action, and Styrmin passes it to the action's Prefect deployment as `job_variables["image"]` (`WorkflowDefinition.to_deployment` in [`workflows/models.py`](../../backend/styrmin_backend/workflows/models.py)). The agent runs every action with a Prefect `ProcessWorker` on the work pool `user-work-pool`, as a process in the agent pod ([`entrypoint/combined.py`](../../backend/styrmin_backend/entrypoint/combined.py)). So `image:` has no effect. The first E2E run of T028 showed it: an action whose `image:` held the driver failed with "The driver files are not at … in the image …", because the action ran in the agent pod ([e2e-evidence.md](e2e-evidence.md#what-the-earlier-runs-of-t028-found)). Since the review of #372, the errors of the local driver check name the agent pod instead of an image.
 
-Effect: a driver author who sets `image:` expects the action to run in that image with its packages. The action runs in the agent pod with the agent's packages instead, and a failed check names an image that did not run the action.
+Effect: a driver author who sets `image:` expects the action to run in that image with its packages. The action runs in the agent pod with the agent's packages instead.
 
 Options, not decided:
 
-- Run actions in their image, for example with a work pool whose worker creates a Kubernetes Job for each flow run, for the actions that set `image:` or for all actions. The image would then need the driver at the driver version's path, and the image that the check names would again be the image that ran the action.
+- Run actions in their image, for example with a work pool whose worker creates a Kubernetes Job for each flow run, for the actions that set `image:` or for all actions. The image would then need the driver at the driver version's path, and the errors of the check would have to name that image again.
 - Remove the field: refuse `image:` when a driver is loaded, with a note for the drivers that set it.
 - Deprecate the field: keep accepting it, show a load warning that says it has no effect, and remove it in a later release.
-- Keep the field, document that it has no effect, and change the error text to name the agent pod.
+- Keep the field and document that it has no effect.
 
 ### Delete the empty namespace of a create whose `StyrminDeployment` write failed
 
@@ -83,24 +88,13 @@ Effect: after the deployment is deleted, an empty namespace named after the depl
 
 Code: [`services/deployment.py`](../../backend/styrmin_backend/services/deployment.py) (`delete_deployment`), [`agent/tasks/orchestration.py`](../../backend/styrmin_backend/agent/tasks/orchestration.py) (`create_instance_crd`). Task: T052 in [tasks.md](tasks.md).
 
-### Give a local driver version loaded from a relative path its own action registrations
+### Run the bundled `infrahub-enterprise` and `slurpit` drivers once after a load from a local directory
 
-What is wrong: the key under which the actions of a driver version are registered and looked up holds no source type. Its `directory/` tag holds the driver directory of a git driver version and the path of a local driver version as it was given on the server (`action_directory_of` in [`services/driver/labels.py`](../../backend/styrmin_backend/services/driver/labels.py)). A git driver directory never starts with `/`, because `normalise_driver_directory` refuses it. A local path starts with `/` only when it was given as an absolute path: the CLI (`styrminctl drivers load-local-version`), the SDK (`load_local_version`), the GraphQL mutation `loadLocalApplicationDriverVersion` and `LocalDriverProvider` ([`services/driver/provider.py`](../../backend/styrmin_backend/services/driver/provider.py)) pass the path on as given. `LocalDriverProvider` checks only that the path exists and is a folder, relative to the working directory of the server process.
+What is missing: SC-001 says that the five bundled drivers, loaded from a local directory, run their actions. A create and an upgrade were run for `semaphore`, a copy of `simple-app` (T050) and `infrahub` ([e2e-evidence.md](e2e-evidence.md)), and the test driver `local-actions` runs in CI. `infrahub-enterprise` and `slurpit` were loaded and their actions registered, but no create or upgrade ran them. `infrahub-enterprise` has the same `actions.py` as `infrahub` apart from its image name; `slurpit` declares setup and upgrade actions of its own.
 
-A local driver version loaded from a relative path, such as `drivers/my-app`, therefore gets the same tags, and for an action of the same name the same Prefect deployment name, as a git driver version of the same driver and supported versions loaded from the driver directory `drivers/my-app`, when the first 7 characters of its `content_hash` equal those of the git commit SHA. By chance, two 7-character fingerprints are equal for about 1 in 268 million pairs.
+Effect: an error that only these two drivers' actions meet, such as a missing package in the agent pod, would be found by an operator.
 
-Effect, read from the code and not tested:
-
-- When the two keys are equal, `ensure_action_registrations` finds the flows of the driver version loaded first and registers nothing for the second one, so the hooks of the second driver version run the actions of the first one. When the git driver version was loaded first, the local driver version runs the git code, and the check of its own files does not run.
-- Without an equal key, the check of a local action resolves a relative path against the working directory of the flow run's process, which is a temporary folder that the agent's `ProcessWorker` creates. The actions of a local driver version loaded from a relative path are therefore expected to fail with `DriverFilesNotFoundError`.
-
-These texts say that a local value always starts with `/` and must be corrected with the fix: [research R-003](research.md#r-003-registration-key-of-a-local-driver-versions-actions) ("A `directory/` value of a local version starts with `/` and a git value never does, so the two cannot match").
-
-Options, not decided:
-
-- Refuse a relative path when a driver is loaded from a local directory.
-- Make the path absolute on the server when a driver is loaded. The stored `source_path` then differs from the path that the user gave.
-- Add the source type to the registration key, as a tag and in the deployment name. Registrations made before the change would then need to be found without that tag.
+How to close it: run `backend/tests/e2e/test_infrahub_local_driver_actions.py` with the driver and versions of each, or the quickstart scenario "Setup and upgrade actions of the bundled Infrahub driver", and record the run in [e2e-evidence.md](e2e-evidence.md). Owner: to be named by the maintainer.
 
 ### Reconcile the spec, research and contracts of 029 with actions that run in the agent pod
 
@@ -108,10 +102,10 @@ What is wrong: these texts describe a local action as a Kubernetes Job that runs
 
 - [spec.md](spec.md): the summary; the clarifications on the image the error names and on checking the image at load; user story 1 and its scenario 4 ("its Job runs in that image"); user story 2 and its scenarios 1 and 3; the edge case of an `image:` that does not hold the driver; FR-002, FR-003 and FR-004; the entry "Provenance fingerprint" under key entities; assumptions A-1 and A-2; the "Out of Scope" item on running an upgrade again; the "Decisions and Rejected Alternatives" on where the Job reads the driver.
 - [research.md](research.md): R-001 (the `image:` reaches the Job), R-004 (the environment of the action's Job), R-006 (the image that the error names), R-011 (the derived image proves that the action ran in its `image:`), R-013 (what a custom action image must hold).
-- [contracts/local-driver-check.md](contracts/local-driver-check.md): the title and the resolution of the image named in the errors. [contracts/errors.md](contracts/errors.md): "Words that name the image of the action's Job".
+- [contracts/local-driver-check.md](contracts/local-driver-check.md): the title.
 - [quickstart.md](quickstart.md): section 2 (the derived image, and `kubectl get jobs` to inspect actions) and the section 3 scenario "An edited action without an image rebuild", which fails only when the files in the agent pod differ from the files the server loaded.
 
-Effect: a reader of the spec expects behaviour that the code does not have. The error text keeps naming an image, as decided; the reconciliation should state which image that is and that it does not run the action.
+Effect: a reader of the spec expects behaviour that the code does not have. Since the review of #372, the error texts name the agent pod, and [contracts/errors.md](contracts/errors.md) and [contracts/local-driver-check.md](contracts/local-driver-check.md) describe them so.
 
 Evidence: [e2e-evidence.md](e2e-evidence.md#what-the-earlier-runs-of-t028-found) and the list of differences in [e2e-evidence.md](e2e-evidence.md#differences-between-the-quickstart-or-the-spec-and-the-observed-behaviour).
 

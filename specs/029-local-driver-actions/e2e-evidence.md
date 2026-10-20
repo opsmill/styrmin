@@ -609,3 +609,48 @@ The T049 selection ran again, because `test_task_steps.py::test_command_output_o
 - `uv run pytest python_sdk/tests -q`: `306 passed in 0.46s`.
 - `uv run pytest cli/tests -q`: `402 passed in 22.77s`.
 - `uv run invoke format lint` (with `npm_config_ignore_workspace=true`, changes staged): exit code 0, and no generated file changed.
+
+## T054 to T061: the review fixes, and one run of the bundled `infrahub` driver (T056)
+
+One session ran the E2E module of spec 029, the E2E test of a failed `execute_commands` command, and the new test of the bundled `infrahub` driver, after the fixes of the review of #372. The working tree held the fixes, not yet committed, on top of commit `dd193d14`.
+
+- Node IDs, each `[api-chromium]`; each `[ui-chromium]` variant is skipped by its `api_only` marker:
+  - `backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade`
+  - `backend/tests/e2e/test_local_driver_actions.py::test_changed_local_driver_fails_with_the_fingerprint_error`
+  - `backend/tests/e2e/test_local_driver_actions.py::test_driver_missing_from_the_agent_pod_fails_with_the_missing_files_error`
+  - `backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it`
+  - `backend/tests/e2e/test_task_steps.py::test_command_output_on_failed_step`
+  - `backend/tests/e2e/test_infrahub_local_driver_actions.py::test_bundled_infrahub_driver_loaded_from_a_local_directory_runs_its_actions`, which has no `ci` marker
+- Command. Stdin is a FIFO that the shell keeps open, so `--pdb` waits instead of reading end of file, and the shell does not wait for a `sleep infinity` after pytest exits:
+
+  ```shell
+  export STYRMIN_IMAGE_VER=fac-029-review
+  docker compose build server
+  uv run pytest backend/tests/e2e/test_local_driver_actions.py \
+    "backend/tests/e2e/test_task_steps.py::test_command_output_on_failed_step" \
+    backend/tests/e2e/test_infrahub_local_driver_actions.py \
+    -v -s --pdb -p no:cacheprovider <&3
+  ```
+
+- Start: 2026-10-20T08:12:21Z. End: 2026-10-20T08:22:42Z (619.92 s).
+- vCluster: `pytest-b5154eba-d1a1-4f83-94e7-f5ea5d6d1ed5`, kubeconfig `/tmp/pytest-of-ubuntu/pytest-146/vcluster0/kubeconfig`. Torn down at the end of the session.
+- Styrmin image: `registry.opsmill.io/opsmill/styrmin:fac-029-review`, image id `sha256:4236ad75343bf301dcb47604b44b1861d7d4f8a8f89d7a939d24c25dcd2a0206`. A `grep` in the image found `JobStillRunningError` and `describe_agent_pod` in `/source/backend/styrmin_backend`.
+- What the changed tests checked:
+  - The fingerprint error and the missing-files error name the agent pod (`agent_pod_name`), give the `styrminctl drivers load-local-version` command or the fix in the agent pod, and do not contain "image".
+  - `test_missing_registration_fails_and_loading_again_repairs_it`: the `hook:upgrade:core` step of the second upgrade has the output `Deleting Job styrmin-<deployment id>-job, which an earlier action left (completed), and its pods before the new Job is created. This waits up to 120 seconds.`
+  - The `infrahub` test: the driver loaded from `/styrmin/drivers/infrahub`; the create at 1.6.0 succeeded with `hook:setup:pre` and `hook:setup:post` succeeded; the deployment ran at 1.6.0; the upgrade to 1.7.0 succeeded with `hook:upgrade:core` succeeded; the deployment ran at 1.7.0; the Job `styrmin-<deployment id>-job` succeeded, has the label `styrmin.io/action-job=true`, and ran an image whose name ends with `/infrahub:1.7.0`.
+- Result lines:
+
+  ```text
+  backend/tests/e2e/test_local_driver_actions.py::test_local_driver_actions_run_on_create_and_upgrade[api-chromium]
+  PASSED
+  backend/tests/e2e/test_local_driver_actions.py::test_changed_local_driver_fails_with_the_fingerprint_error[api-chromium] PASSED
+  backend/tests/e2e/test_local_driver_actions.py::test_driver_missing_from_the_agent_pod_fails_with_the_missing_files_error[api-chromium] PASSED
+  backend/tests/e2e/test_local_driver_actions.py::test_missing_registration_fails_and_loading_again_repairs_it[api-chromium] PASSED
+  backend/tests/e2e/test_task_steps.py::test_command_output_on_failed_step[api-chromium] PASSED
+  backend/tests/e2e/test_infrahub_local_driver_actions.py::test_bundled_infrahub_driver_loaded_from_a_local_directory_runs_its_actions[api-chromium] PASSED
+  ============= 6 passed, 6 skipped, 7 warnings in 619.92s (0:10:19) =============
+  ```
+
+- Not run: `infrahub-enterprise` and `slurpit` ([follow-ups.md](follow-ups.md#run-the-bundled-infrahub-enterprise-and-slurpit-drivers-once-after-a-load-from-a-local-directory)).
+- Other checks of the same working tree: `uv run pytest backend/tests/unit -q -n 4` gave 4557 passed and 1 skipped; `uv run pytest backend/tests/functional/test_user_action_registration.py -q` gave 11 passed; `uv run invoke format lint` passed, with the two yamllint warnings on files that this branch does not change; Prettier and the Vitest tests of `src/pages/deployments` (44 passed) for the changed delete dialog.
