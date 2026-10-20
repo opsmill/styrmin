@@ -5,6 +5,7 @@ from strawberry.schema.config import StrawberryConfig
 from styrmin_backend.api.auth.extensions import RequiresAuthentication
 from styrmin_backend.api.dependency import get_context
 from styrmin_backend.api.errors import StructuredErrorExtension
+from styrmin_backend.api.removed_arguments import ExplainRemovedArguments
 from styrmin_backend.api.logging.request_log import RequestLoggingExtension
 from styrmin_backend.api.scalars import SCALAR_MAP
 from styrmin_backend.api.schema.mutation import Mutation
@@ -22,10 +23,13 @@ def init_graphql_router() -> GraphQLRouter:
         # RequestLoggingExtension emits the masked request line at DEBUG
         # before authentication runs — masking is name-based and the line
         # is purely informational, so ordering does not affect either.
+        # ExplainRemovedArguments only changes the validation rules, so its
+        # place in the list does not matter.
         extensions=[
             RequestLoggingExtension,
             RequiresAuthentication,
             StructuredErrorExtension,
+            ExplainRemovedArguments,
         ],
     )
 
