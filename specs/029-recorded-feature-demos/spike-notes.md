@@ -11,6 +11,7 @@ Results of the checks of tasks T009 and T010 ([tasks.md](tasks.md)), run on 2026
 - One screencast records the whole run, including a navigation to a second origin, with the cursor still visible after it. The recorder does not need one recorded page per web application (research [R-001](research.md#r-001-playwright-version-and-the-screencast-api)).
 - Demo 2 (`component-overrides`) records end to end on a fresh demo stack: a video of 0:45, and the whole command takes 8 min 15 s. Watching the first recordings showed that Playwright draws no highlight unless the recorder gives it a style, so the recorder now sets one (FR-004). See "Demo 2 recorded (tasks T035 and T036)".
 - Demo 3 (`backup-restore`) records end to end on a fresh demo stack: a video of 1:06, and the whole command takes 13 min. After the restore, Infrahub lists `sw2` again and Semaphore lists the template "List network devices" again, so User Story 3's acceptance scenario passes. The `semaphore` driver backs up Semaphore's PostgreSQL database, and that is where the template is stored. See "Demo 3 recorded (tasks T037 and T038)".
+- Demo 4 (`clone`) records end to end on a fresh demo stack since the fix to [#530](https://github.com/opsmill/styrmin/issues/530): a video of 1:08, and the whole command takes 13 min 30 s. The source Semaphore lists 2 devices, the clone's Semaphore lists 3 after a device is added in the clone's Infrahub, and the source Semaphore still lists 2, so User Story 4's acceptance scenario passes. Every alias Service in the clone points to a namespace of the clone (FR-016, positive case). See "Demo 4 recorded (tasks T039 and T040)".
 
 The throwaway scripts that ran the checks stayed in the session scratchpad and are not committed.
 
@@ -119,6 +120,7 @@ Wall-clock times from the request to the state named, measured by the spike scri
 - Environment backup to `COMPLETED`: 52 s.
 - Environment restore to `COMPLETED`: 135 s, then about 36 s until Infrahub answered.
 - Delete an environment with one Infrahub deployment until its namespace was gone: 170 s (`spike-upgrade`) and 224 s (`spike-backup`). The 600 s timeout of `stack.delete_environments` (task T021) covers both.
+- Environment clone of `infrahub-enterprise` and `semaphore` until the clone row showed Complete (demo 4, 2026-10-20): 2 min 18 s, then 27 s until the clone's Infrahub answered and 36 s more until the clone's Semaphore answered.
 
 ## One screencast records both origins
 
@@ -265,3 +267,80 @@ With the fix to #372, the agent also ran the driver's setup actions while Infrah
 - The demo also fails unless the deployment page shows the version 1.10.11 after step 1 and 1.11.7 after the upgrade.
 
 Not changed: `upgrade_deployment` opens the deployment page by its address before it opens the Upgrade dialog, so after the chapter title of step 2 the page switches from the Timeline tab to the Overview tab.
+
+## Demo 4 recorded (tasks T039 and T040)
+
+Recorded on 2026-10-20 with `uv run invoke record --demo clone` on a demo stack that `uv run invoke reset` had just created (13:43:46 to 13:46:05 UTC), from the same Styrmin image as demo 1 (built from commit `17468791`). The run lasted from 13:46:25 to 13:59:55 UTC (13 min 30 s), printed one `recorded` line and exited with code 0. It was the first recording of demo 4; no change followed it.
+
+The demo depends on the fix to [#530](https://github.com/opsmill/styrmin/issues/530) ([PR #531](https://github.com/opsmill/styrmin/pull/531)), which this branch holds since its rebase on `develop` ([E2E evidence](e2e-evidence.md#the-defect-is-fixed-by-531-which-carries-its-own-alias-check)).
+
+### The video
+
+The video `demo-videos/4-clone.mp4`:
+
+- `ffprobe` gives `h264,1920,1080,yuv420p` at 30 frames per second and a length of 67.8 s, which the summary shows as 1:08.
+- Each of the five steps starts with its chapter title: "Semaphore reads its inventory from Infrahub", "Clone the environment", "Add a device in the clone's Infrahub", "The clone's Semaphore lists the new device" and "The source is unchanged".
+- Step 1 starts on the template "List network devices" in the source Semaphore. The demo clicks "Run", then "Run" in the "New Task" dialog. The log of "Task #1" shows `Devices in the inventory: 2` and `Device names: sw1, sw2`.
+- Step 2 opens the environment `network-lab` in Styrmin, its Clones tab and the "Clone Environment" dialog. The dialog suggests the name `network-lab-rehearsal`; the demo replaces it with `network-lab-clone`, typed one key at a time, keeps both applications selected and clicks "Start Clone". The clone row shows Pending, then the sped-up wait, then "Complete" and "2/2 cloned".
+- Step 3 shows the clone's Infrahub device list with `sw1`, `sw2` and "2 counts". The demo clicks "Add Network device", types `sw3` and clicks "Save". The list then shows `sw1`, `sw2`, `sw3`, "3 counts" and the message "Device created".
+- Step 4 opens the same template in the clone's Semaphore, whose task list holds task #1 of the source, and runs it with no setting changed. The log of "Task #2" shows `Devices in the inventory: 3` and `Device names: sw1, sw2, sw3`.
+- Step 5 runs the template in the source Semaphore again. The log of "Task #2" shows `Devices in the inventory: 2` and `Device names: sw1, sw2`. Both runs after the clone have the number 2, because the clone's Semaphore database is a copy of the source's, which held task #1.
+- The three count lines are readable in frames extracted at 1920×1080. Each stays on screen for 2 to 3 s before the next chapter title covers it or the video ends.
+- The cursor and the blue outline are on each element the demo clicks or types into.
+- The logins to the clone's Infrahub and Semaphore are cut from the video (research [R-016](research.md#r-016-logging-in-without-recording-it)): the frame after the last wait label shows the next chapter title. No password, token or login form is on screen.
+- A white page shows while each Semaphore page loads after a switch from another web application, as in demo 3.
+
+So User Story 4's acceptance scenario passes: the source Semaphore lists 2 devices, the clone's Semaphore lists 3 after `sw3` is added in the clone's Infrahub, with no change to its settings, and the source Semaphore still lists 2. The demo checks the three counts in the task logs and fails on another count (`check_device_count` in [`clone.py`](../../backend/tests/e2e/demos/scenarios/clone.py)).
+
+After the run, only the `local` environment existed, and no `styrmin-<deployment id>` namespace was left.
+
+### Real duration of each wait
+
+| Wait | Real duration | Shown |
+| --- | --- | --- |
+| "Ansible reads the inventory", step 1 | 2 s | At normal speed, with no label |
+| "Clone in progress" | 2 min 18 s | 35 times faster |
+| "The clone's Infrahub starts" | 27 s | 7 times faster |
+| "The clone's Semaphore starts" | 36 s | 10 times faster |
+| "Ansible reads the inventory", step 4 | 2 s | At normal speed, with no label |
+| "Ansible reads the inventory", step 5 | 1 s | At normal speed, with no label |
+
+The two waits after the clone are not in task T039. The demo waits until the clone's Infrahub answers `GET /api/schema/summary` and the clone's Semaphore answers `GET /api/ping`, because it logs in to both right after, as demo 3 waits after its restore.
+
+### The clone's alias Services point to the clone (FR-016, positive case)
+
+A script in the session scratchpad listed, every 3 seconds, the Services labelled `styrmin.io/service-alias=true` in the namespace of each deployment of `network-lab` and `network-lab-clone` (deployments from `client.deployments.list(..., include_internal=True)`, Services from `kubectl get svc -l styrmin.io/service-alias=true`). It wrote each change with its time.
+
+| Environment | Deployment | Namespace | Alias Services and the namespace each points to |
+| --- | --- | --- | --- |
+| `network-lab` | `infrahub` | `styrmin-26de2b68-…` | `semaphore` to `styrmin-50293a6e-…` |
+| `network-lab` | `semaphore` | `styrmin-50293a6e-…` | `infrahub` and `task-manager` to `styrmin-26de2b68-…` |
+| `network-lab-clone` | `infrahub` (counterpart) | `styrmin-6776c4ea-…` | `semaphore` to `styrmin-17da5ec0-…` |
+| `network-lab-clone` | `semaphore` (counterpart) | `styrmin-17da5ec0-…` | `infrahub` and `task-manager` to `styrmin-6776c4ea-…` |
+
+- At 13:52:38 UTC the two counterpart namespaces existed and held no alias Service. From 13:53:29 UTC until the cleanup deleted the environments (the read at 13:55:41 found neither), they held the aliases in the table, and no read showed another alias.
+- Every alias in a namespace of the clone points to a namespace of the clone. None points to `styrmin-26de2b68-…` or `styrmin-50293a6e-…`, the source's namespaces.
+- The source's aliases did not change during the run.
+- The list of the clone's deployments held the two counterparts and no other deployment.
+
+This is the case that the alias check in `test_environment_clone_lifecycle` cannot show alone: in demo 4, the clone's Semaphore reaches the clone's Infrahub through the alias `infrahub` and lists the device added there (critique E5).
+
+### The infrahub-enterprise driver's setup actions ran
+
+The `infrahub-enterprise` driver was loaded from `/styrmin/drivers/infrahub-enterprise`, and since the fix to #372 its actions run in the agent pod. During the setup, the agent ran the flow runs "Run infrahub-enterprise pre-hook" and "Run infrahub-enterprise post-hook", and both finished in state `Completed`. Their pull step `check_local_driver` logged, verbatim:
+
+```text
+The driver files at /styrmin/drivers/infrahub-enterprise have the provenance fingerprint d15d2e2 of the driver version. The action runs from /styrmin/drivers/infrahub-enterprise.
+```
+
+The deployment then reached Running, so its setup action did not fail.
+
+### Memory during the run
+
+The host has 31,465 MiB of memory and no swap, and other processes ran on it. `free -m`, read every 20 seconds:
+
+- Before the run (13:46:15 UTC): 17,330 MiB used, 14,134 MiB available.
+- While the source and the clone both ran: at most 26,993 MiB used and at least 4,472 MiB available (13:55:35 UTC).
+- After the cleanup (14:00:15 UTC): 17,424 MiB used, 14,040 MiB available.
+
+How much of the difference the two environments used, and how much other processes on the host used, was not measured.
