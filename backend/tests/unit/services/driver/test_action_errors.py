@@ -20,107 +20,86 @@ from styrmin_backend.services.driver.exceptions import (
 from styrmin_backend.services.driver.models.resources.actions import HookKind
 
 PATH = "/styrmin/drivers/my-app"
-IMAGE = "registry.opsmill.io/opsmill/styrmin:latest"
+AGENT_POD = "styrmin-agent-7c9d8-x2k4q"
 EXPECTED = "0a7d3f1" + "e" * 57
 ACTUAL = "9b1e2c4" + "f" * 57
 
 
-def test_driver_files_not_found_error_names_path_image_and_missing_files() -> None:
+def test_driver_files_not_found_error_names_path_agent_pod_and_missing_files() -> None:
     error = DriverFilesNotFoundError(
-        path=PATH, image=IMAGE, missing=["driver.styrmin.yml", "actions.py"]
+        path=PATH, missing=["driver.styrmin.yml", "actions.py"], agent_pod=AGENT_POD
     )
 
-    message = str(error)
     assert isinstance(error, DriverError)
     assert error.error_code == "NOT_FOUND"
-    for part in (PATH, IMAGE, "driver.styrmin.yml", "actions.py"):
-        assert part in message
+    assert str(error) == (
+        f"The driver files are not at {PATH} in the Styrmin agent pod {AGENT_POD}: "
+        "driver.styrmin.yml, actions.py not found. The agent pod runs every driver "
+        "action, so it must hold the driver at the same path as the Styrmin server. "
+        f"Mount or copy the driver into the agent pod at {PATH}, or load the driver "
+        "from a path that both the server and the agent pod hold."
+    )
     assert error.error_metadata == {
         "path": PATH,
-        "image": IMAGE,
-        "work_pool": None,
+        "agent_pod": AGENT_POD,
         "missing": ["driver.styrmin.yml", "actions.py"],
     }
 
 
 def test_driver_files_not_found_error_names_a_missing_directory() -> None:
-    error = DriverFilesNotFoundError(path=PATH, image=IMAGE, missing=[PATH])
+    error = DriverFilesNotFoundError(path=PATH, missing=[PATH])
 
     assert f"{PATH} not found" in str(error)
 
 
-def test_driver_fingerprint_mismatch_error_shows_both_short_fingerprints() -> None:
+def test_driver_fingerprint_mismatch_error_shows_both_short_fingerprints_and_the_fix() -> (
+    None
+):
     error = DriverFingerprintMismatchError(
-        path=PATH, image=IMAGE, expected=EXPECTED, actual=ACTUAL
+        path=PATH, expected=EXPECTED, actual=ACTUAL, agent_pod=AGENT_POD
     )
 
-    message = str(error)
     assert isinstance(error, DriverError)
     assert error.error_code == "VALIDATION_ERROR"
-    for part in (
-        PATH,
-        IMAGE,
-        "9b1e2c4",
-        "0a7d3f1",
-        "Rebuild the image",
-        "load the driver again",
-    ):
-        assert part in message
     # The message shows the short forms only, as driver version labels do.
-    assert EXPECTED not in message
-    assert ACTUAL not in message
+    assert str(error) == (
+        f"The driver files at {PATH} in the Styrmin agent pod {AGENT_POD} are not the "
+        "files of this driver version: their provenance fingerprint is 9b1e2c4, and "
+        "the driver version was loaded with 0a7d3f1. If the files changed after the "
+        "driver was loaded, load the driver again and use the new driver version: "
+        f"styrminctl drivers load-local-version {PATH}. If the agent pod holds other "
+        f"files at {PATH} than the Styrmin server, give both the same files first."
+    )
     assert error.error_metadata == {
         "path": PATH,
-        "image": IMAGE,
-        "work_pool": None,
+        "agent_pod": AGENT_POD,
         "expected": EXPECTED,
         "actual": ACTUAL,
     }
 
 
-# The errors name the image in a sentence that reads correctly
-# whether the image, only its work pool, or neither is known (research R-006).
-IMAGE_CASES = [
-    pytest.param(IMAGE, "user-work-pool", f"the image {IMAGE}", id="image-known"),
-    pytest.param(
-        None,
-        "user-work-pool",
-        "the default image of the work pool user-work-pool",
-        id="work-pool-known",
-    ),
-    pytest.param(None, None, "the image of this action's Job", id="nothing-known"),
-]
-
-
-@pytest.mark.parametrize(("image", "work_pool", "image_words"), IMAGE_CASES)
-def test_driver_files_not_found_error_names_the_image_in_a_sentence(
-    image: str | None, work_pool: str | None, image_words: str
-) -> None:
-    error = DriverFilesNotFoundError(
-        path=PATH, image=image, work_pool=work_pool, missing=["actions.py"]
+def test_the_errors_name_the_agent_pod_without_its_name_when_it_is_not_known() -> None:
+    missing = DriverFilesNotFoundError(path=PATH, missing=["actions.py"])
+    mismatch = DriverFingerprintMismatchError(
+        path=PATH, expected=EXPECTED, actual=ACTUAL
     )
 
-    assert str(error).startswith(
-        f"The driver files are not at {PATH} in {image_words}: actions.py not found. "
+    assert str(missing).startswith(
+        f"The driver files are not at {PATH} in the Styrmin agent pod: actions.py "
+        "not found. "
     )
-    assert error.error_metadata["image"] == image
-    assert error.error_metadata["work_pool"] == work_pool
+    assert str(mismatch).startswith(
+        f"The driver files at {PATH} in the Styrmin agent pod are not the files of "
+        "this driver version: "
+    )
 
 
-@pytest.mark.parametrize(("image", "work_pool", "image_words"), IMAGE_CASES)
-def test_driver_fingerprint_mismatch_error_names_the_image_in_a_sentence(
-    image: str | None, work_pool: str | None, image_words: str
-) -> None:
+def test_the_load_command_in_the_fingerprint_error_quotes_the_path() -> None:
     error = DriverFingerprintMismatchError(
-        path=PATH, image=image, work_pool=work_pool, expected=EXPECTED, actual=ACTUAL
+        path="/srv/my drivers/app", expected=EXPECTED, actual=ACTUAL
     )
 
-    assert str(error).startswith(
-        f"The driver files at {PATH} in {image_words} are not the files of this "
-        "driver version: "
-    )
-    assert error.error_metadata["image"] == image
-    assert error.error_metadata["work_pool"] == work_pool
+    assert "styrminctl drivers load-local-version '/srv/my drivers/app'." in str(error)
 
 
 @pytest.mark.parametrize(
