@@ -57,6 +57,8 @@ MODULE = "styrmin_backend.workflows.templates.backup"
 SERVICE_MODULE = "styrmin_backend.services.backup.service"
 RECOVERY_MODULE = "styrmin_backend.operator.restore_recovery"
 TARGET_NAMESPACE = "styrmin-app"
+#: The deployment an in-place restore of ``execute_restore_workflow`` lands in.
+DEPLOYMENT_ID = UUID("0d5a1c3e-7b2f-4e8a-9c61-2f4b8d7e3a10")
 
 Event = tuple[Any, ...]
 
@@ -664,7 +666,14 @@ async def _internal_restore_flow(
     token_error: Exception | None = None,
     velero_result: dict[str, Any] | None = None,
     counterpart: Deployment | None = None,
+    deployment_id: UUID = DEPLOYMENT_ID,
 ) -> AsyncIterator[SimpleNamespace]:
+    """Fake every boundary of ``execute_restore_workflow``.
+
+    The restore row records the namespace of the deployment the restore
+    lands in: the counterpart's when one is given, ``deployment_id``'s
+    otherwise. Pass the same deployment to ``_run_restore_workflow``.
+    """
     backup = MagicMock()
     backup.name = "styrmin-backup-1"
     backup.instance_id = uuid4()
@@ -673,6 +682,9 @@ async def _internal_restore_flow(
     restore.name = "styrmin-restore-1"
     restore.metadata_ = {"timeout": 1800}
     restore.target_instance_id = None
+    restore.target_namespace = (
+        f"styrmin-{counterpart.id if counterpart is not None else deployment_id}"
+    )
 
     flow_run = MagicMock()
     flow_run.id = uuid4()
@@ -740,10 +752,9 @@ async def _internal_restore_flow(
 async def _run_restore_workflow(
     restore_id: UUID,
     *,
-    deployment_id: UUID | None = None,
+    deployment_id: UUID = DEPLOYMENT_ID,
     source_deployment_id: UUID | None = None,
 ) -> None:
-    deployment_id = deployment_id or uuid4()
     await execute_restore_workflow.fn(
         restore_id=str(restore_id),
         backup_id=str(uuid4()),
@@ -873,7 +884,9 @@ async def test_a_failed_recovery_fails_the_restore_and_the_deployment(
         "recovery": {"recovered": False, "error": error, "aliases_error": None},
     }
 
-    async with _internal_restore_flow(events, velero_result=velero_result) as flow:
+    async with _internal_restore_flow(
+        events, velero_result=velero_result, deployment_id=deployment_id
+    ) as flow:
         await _run_restore_workflow(uuid4(), deployment_id=deployment_id)
 
     kwargs = flow.status.await_args.kwargs

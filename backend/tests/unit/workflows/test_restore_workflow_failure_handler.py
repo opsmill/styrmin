@@ -89,6 +89,8 @@ async def _run_restore_workflow(
     capture_exception: bool = False,
     source_deployment_id: UUID | None = None,
     target_instance_id: UUID | None = None,
+    target_namespace: str | None = None,
+    recorded_namespace: str | None = None,
 ) -> RestoreRun:
     """Drive the flow body once with every boundary faked.
 
@@ -109,6 +111,10 @@ async def _run_restore_workflow(
             drives the shipped in-place path.
         target_instance_id: The counterpart instance recorded on the restore
             row, used for the cross-target Restore CR label (research D2.6).
+        target_namespace: The ``target_namespace`` flow parameter. ``None``
+            passes ``styrmin-<deployment_id>``, as every Styrmin caller does.
+        recorded_namespace: The namespace recorded on the restore row.
+            ``None`` records ``styrmin-<deployment_id>``.
 
     Returns:
         A :class:`RestoreRun` recording what the body did.
@@ -127,10 +133,16 @@ async def _run_restore_workflow(
     backup.instance_id = uuid4()
     backup.component_statuses = None
 
+    own_namespace = f"styrmin-{deployment_uuid}"
+    flow_namespace = own_namespace if target_namespace is None else target_namespace
+
     restore = MagicMock()
     restore.name = "styrmin-restore-1"
     restore.metadata_ = {"timeout": 1800}
     restore.target_instance_id = target_instance_id
+    restore.target_namespace = (
+        own_namespace if recorded_namespace is None else recorded_namespace
+    )
 
     def _record_status(**kwargs: Any) -> None:
         run.status_calls.append(kwargs)
@@ -210,7 +222,7 @@ async def _run_restore_workflow(
                     restore_id=str(restore_uuid),
                     backup_id=str(backup_uuid),
                     deployment_id=str(deployment_uuid),
-                    target_namespace=f"styrmin-{deployment_uuid}",
+                    target_namespace=flow_namespace,
                     source_deployment_id=(
                         str(source_deployment_id)
                         if source_deployment_id is not None
@@ -224,7 +236,7 @@ async def _run_restore_workflow(
                 restore_id=str(restore_uuid),
                 backup_id=str(backup_uuid),
                 deployment_id=str(deployment_uuid),
-                target_namespace=f"styrmin-{deployment_uuid}",
+                target_namespace=flow_namespace,
                 source_deployment_id=(
                     str(source_deployment_id)
                     if source_deployment_id is not None
@@ -398,3 +410,48 @@ async def test_cross_target_failure_marks_the_counterpart_not_the_source() -> No
         run.deployment_id
     ]
     assert run.deployment_running_calls == []
+
+
+# ---------------------------------------------------------------------------
+# A restore lands only in the namespace of its deployment (#532)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("target_namespace", "recorded_namespace"),
+    [
+        pytest.param("kube-system", "kube-system", id="queued-by-an-earlier-release"),
+        pytest.param("kube-system", None, id="parameter-differs-from-the-row"),
+        pytest.param(None, "kube-system", id="row-differs-from-the-deployment"),
+    ],
+)
+async def test_a_restore_into_another_namespace_fails_before_the_cluster_is_changed(
+    target_namespace: str | None, recorded_namespace: str | None
+) -> None:
+    """The flow refuses a namespace that is not ``styrmin-<deployment id>``.
+
+    The USER flow deletes the namespace it receives. A flow run started
+    through the Prefect API, or queued by a release whose ``createRestore``
+    took the namespace from the caller, can carry another one, so the flow
+    checks both the parameter and the namespace recorded on the row.
+    """
+    run = await _run_restore_workflow(
+        target_namespace=target_namespace,
+        recorded_namespace=recorded_namespace,
+        capture_exception=True,
+    )
+
+    assert isinstance(run.raised, ValueError), run.raised
+    # Nothing was built or dispatched, so nothing reached the cluster.
+    assert run.velero_kwargs is None
+    assert run.dispatch_parameters is None
+
+    failed = run.status_calls[-1]
+    assert failed["status"].name == "FAILED"
+    assert "changed nothing in the cluster" in failed["error_message"]
+    assert f"styrmin-{run.deployment_id}" in failed["error_message"]
+    assert "kube-system" in failed["error_message"]
+    assert [call["deployment_id"] for call in run.deployment_failed_calls] == [
+        run.deployment_id
+    ]

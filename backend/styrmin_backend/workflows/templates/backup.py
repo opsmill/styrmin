@@ -33,7 +33,10 @@ from styrmin_backend.agent.service.kubernetes.resources.builders.backup import (
     build_velero_backup,
     build_velero_restore,
 )
-from styrmin_backend.agent.service.kubernetes.utils import describe_api_answer
+from styrmin_backend.agent.service.kubernetes.utils import (
+    describe_api_answer,
+    get_kubernetes_reference,
+)
 from styrmin_backend.agent.service.kubernetes.velero.client import failure_message
 from styrmin_backend.agent.service.kubernetes.velero.resources import (
     VeleroBackupHook,
@@ -875,6 +878,34 @@ async def _build_counterpart_crd_body(deployment_id: UUID, uow: Any) -> dict[str
         )
 
 
+def _check_restore_namespace(
+    *, target_namespace: str, deployment_id: UUID, recorded_namespace: str
+) -> None:
+    """Refuse a restore whose namespace is not the one of its deployment.
+
+    The USER flow deletes *target_namespace* before Velero restores into it,
+    so the namespace must be ``styrmin-<deployment_id>`` and the namespace
+    that ``create_restore`` recorded on the ``Restore`` row (#532). A flow
+    run started directly through the Prefect API, or queued by a release
+    that took the namespace from the caller, can carry another namespace.
+
+    Raises:
+        ValueError: When either namespace differs from
+            ``styrmin-<deployment_id>``. The flow has changed nothing in the
+            cluster at that point.
+    """
+    expected = get_kubernetes_reference(deployment_id)
+    if target_namespace == expected and recorded_namespace == expected:
+        return
+    raise ValueError(
+        f"Styrmin did not run this restore and changed nothing in the cluster: "
+        f"it restores into the namespace of deployment {deployment_id}, "
+        f"{expected}, but the restore named the namespace {target_namespace} "
+        f"and recorded the namespace {recorded_namespace}. Start a new restore "
+        f"of the backup."
+    )
+
+
 @flow(name="execute_restore")
 async def execute_restore_workflow(
     restore_id: str,
@@ -910,7 +941,10 @@ async def execute_restore_workflow(
         backup_id: The Styrmin backup ID.
         deployment_id: The Styrmin deployment ID that receives the restore
             and whose status this flow writes (the counterpart, for a clone).
-        target_namespace: The target Kubernetes namespace for the restore.
+        target_namespace: The namespace that the USER flow deletes and
+            restores into. The flow fails the restore before it changes
+            anything in the cluster unless this is ``styrmin-<deployment_id>``
+            and the namespace recorded on the ``Restore`` row (#532).
         source_deployment_id: The deployment the backup was taken from, used
             solely to derive the Velero source namespace and the recreated
             CR's name. Defaults to ``deployment_id`` (in-place restore).
@@ -941,6 +975,12 @@ async def execute_restore_workflow(
         async with get_unit_of_work() as uow:
             restore = await get_restore(restore_uuid, uow)
         velero_restore_name = restore.name
+
+        _check_restore_namespace(
+            target_namespace=target_namespace,
+            deployment_id=UUID(deployment_id),
+            recorded_namespace=restore.target_namespace,
+        )
 
         velero_namespace = "styrmin"
         source_namespace = f"styrmin-{resolved_source_deployment_id}"
