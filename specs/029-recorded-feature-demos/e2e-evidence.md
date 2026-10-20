@@ -180,3 +180,31 @@ PR #531 adds its own alias check to `test_environment_clone_lifecycle` in [`back
 - `ui-chromium`: `2 passed, 2 deselected, 6 warnings in 752.53s (0:12:32)`.
 
 Because PR #531 carries this check, the T005 commit of this branch (`472fe403`) was dropped from the branch on 2026-10-20. Spec 029 therefore no longer changes an E2E test. The maintainer decided that the runs of PR #531 meet the dependency of Phase 6 on T006 and T007: on 2026-10-20, the maintainer stated that #372 and #530 are fixed and asked for demos 1 and 4 to be completed. Demo 4 shows the case the check cannot show: the clone's Semaphore reaches the clone's Infrahub ([spike notes](spike-notes.md#demo-4-recorded-tasks-t039-and-t040)).
+
+## The timeline test passes in the UI variant after the page-object changes
+
+On 2026-10-20 the maintainer asked for a local run of `test_task_steps.py` in the `ui-chromium` variant before the branch is pushed. Spec 029 does not change the test. The run checks two page-object changes that the test uses through `UiScenarioDriver.get_deployment_timeline`:
+
+- every page object enters text through `enter_text` (commit `fb749950`), which calls `fill` when the delay is `None`, as in the E2E suite;
+- `DeploymentDetailPage.read_timeline` reads each entry through `_read_timeline_entry`, which was moved out of its loop in commit `25a35791`.
+
+Only `test_helmrelease_failure_shows_fluxcd_reason` runs in the `ui-chromium` variant; the four other tests of the file are marked `api_only` and were skipped.
+
+- Node ID: `backend/tests/e2e/test_task_steps.py::test_helmrelease_failure_shows_fluxcd_reason[ui-chromium]`
+- Branch commit: `28b1d20a`, rebased on `develop` at `bb56eac9`. Server image built before the session with `docker compose build server` (`registry.opsmill.io/opsmill/styrmin:latest`). `playwright` 1.64.0.
+- Command, from the repository root, from a non-interactive shell:
+
+  ```bash
+  sleep infinity | uv run pytest backend/tests/e2e/test_task_steps.py -m "ci and shard_task_steps" -k "ui-chromium" -v -s --pdb
+  ```
+
+- Started 2026-10-20T15:55:16Z, ended 2026-10-20T16:02:37Z.
+- vCluster: `pytest-b6282f18-4a55-4a2b-8107-0d5dd70e187c`, created and deleted by the session fixture. Its kubeconfig was in the pytest temporary directory and was not kept.
+- Verbatim result lines:
+
+  ```text
+  backend/tests/e2e/test_task_steps.py::test_helmrelease_failure_shows_fluxcd_reason[ui-chromium] PASSED
+  ====== 1 passed, 4 skipped, 5 deselected, 4 warnings in 434.65s (0:07:14) ======
+  ```
+
+  In the log, `PASSED` is followed on the same line by the fixture's message `Removing vCluster container ...`, because both write to the terminal at the same time.

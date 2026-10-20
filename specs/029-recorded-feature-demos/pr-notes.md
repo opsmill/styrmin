@@ -105,9 +105,9 @@ Task T047: play one video in Keynote, PowerPoint and Google Slides (uploaded to 
 
 ## Check of the page-object change in CI
 
-The local UI smoke run of task T011 ended at 2026-10-18T10:07:20Z, before the page-object change (commit `b6c85a35` before the rebase, `fb749950` after it). It checks the Playwright upgrade, not the page-object change. [e2e-evidence.md](e2e-evidence.md) records no other E2E run of this branch after the page-object change. The demos ran the page objects with a delay of 45 ms, and the unit test `backend/tests/unit/test_e2e_page_typing.py` checks that `enter_text` calls only `fill(text)` when the delay is `None`.
+The local UI smoke run of task T011 ended at 2026-10-18T10:07:20Z, before the page-object change (commit `b6c85a35` before the rebase, `fb749950` after it). It checks the Playwright upgrade, not the page-object change. After the rebase, on 2026-10-20, `backend/tests/e2e/test_task_steps.py::test_helmrelease_failure_shows_fluxcd_reason[ui-chromium]` passed locally (`1 passed, 4 skipped, 5 deselected` in 7 min 14 s). It reads the timeline through `read_timeline` and runs the page objects with the default `None` ([e2e-evidence.md](e2e-evidence.md#the-timeline-test-passes-in-the-ui-variant-after-the-page-object-changes)). No other UI E2E test ran locally after the page-object change. The demos ran the page objects with a delay of 45 ms, and the unit test `backend/tests/unit/test_e2e_page_typing.py` checks that `enter_text` calls only `fill(text)` when the delay is `None`.
 
-The check of the page-object change with the default `None` is the UI cells of the `e2e-tests` job in [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml). They run `pytest -m "ci and shard_<shard>" -k "ui-chromium"`. Counted after the rebase, on 2026-10-20, there are seven:
+The check of the page-object change in the other UI tests is the UI cells of the `e2e-tests` job in [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml). They run `pytest -m "ci and shard_<shard>" -k "ui-chromium"`. Counted after the rebase, on 2026-10-20, there are seven:
 
 - `E2E Tests (ui / general)`
 - `E2E Tests (ui / env)`

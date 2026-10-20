@@ -71,14 +71,11 @@ Unit tests added or modified on 2026-10-20 (the 2026-10-18 session added or modi
 | `backend/tests/unit/test_e2e_timeline_wait.py::test_show_timeline_entry_names_a_task_the_open_tab_does_not_list` and `::test_show_timeline_entry_names_an_entry_that_does_not_expand` (added) | unit | same | 2026-10-20T15:19:22Z | `PASSED`; selection summary `62 passed, 1 warning in 0.37s` |
 | The three unit suites above, together | unit | `uv run pytest backend/tests/unit/demos backend/tests/unit/test_e2e_page_typing.py backend/tests/unit/test_e2e_timeline_wait.py -q` | 2026-10-20T15:19:29Z | `174 passed, 1 warning in 0.58s` |
 | Full backend suite after the review fixes | unit, functional | `uv run invoke test` | 2026-10-20T15:33:56Z | `5631 passed, 3 skipped, 36 warnings in 231.91s (0:03:51)` |
+| `backend/tests/e2e/test_task_steps.py::test_helmrelease_failure_shows_fluxcd_reason[ui-chromium]` (not changed; run for the page-object changes) | e2e | `sleep infinity \| uv run pytest backend/tests/e2e/test_task_steps.py -m "ci and shard_task_steps" -k "ui-chromium" -v -s --pdb` | 2026-10-20T16:02:37Z | `PASSED`; `1 passed, 4 skipped, 5 deselected, 4 warnings in 434.65s (0:07:14)` (vCluster `pytest-b6282f18-4a55-4a2b-8107-0d5dd70e187c`, commit `28b1d20a`) |
 
 The demo scenarios have no E2E test (approved exception). Their proof is the run of all four demos on a demo stack that `uv run invoke reset` had just created, in [full-run.log](full-run.log) ("T042, second run").
 
-No E2E test was run locally after the page-object changes:
-- `enter_text` in every page object (`fb749950`, 2026-10-18);
-- `show_timeline_entry`, and `read_timeline` now reading each entry through the extracted `_read_timeline_entry` (`888d4c99`, `25a35791`). The demo 1 re-run used `_read_timeline_entry` on a real page.
-
-`read_timeline` is used by `backend/tests/e2e/test_task_steps.py`. The UI cells of the `e2e-tests` job in CI check these changes ([pr-notes.md](pr-notes.md)).
+One UI E2E test ran locally after the page-object changes, at the maintainer's request: `test_task_steps.py` in the `ui-chromium` variant, which reads the timeline through `read_timeline` and enters text through `enter_text` with the default `None` ([e2e-evidence.md](e2e-evidence.md#the-timeline-test-passes-in-the-ui-variant-after-the-page-object-changes)). The UI cells of the `e2e-tests` job in CI check the other UI tests ([pr-notes.md](pr-notes.md)).
 
 ## Review findings
 
@@ -118,8 +115,7 @@ Not fixed:
 
 ## Suggested next steps
 
-1. Review the rebased branch and push it with `git push --force-with-lease origin fac/demo-beta-presentation-bhshh`; the remote branch still holds `472fe403`. Then open the pull request from [pr-notes.md](pr-notes.md).
+1. Push the rebased branch with `--force-with-lease` (the remote branch holds `472fe403`) and open the pull request from [pr-notes.md](pr-notes.md). The maintainer asked for both on 2026-10-20, after the local run of `test_task_steps.py`.
 2. Play one video in Keynote, PowerPoint and Google Slides (T047) and record the result in `full-run.log`.
 3. Confirm that demos 3 and 4 may show the `infrahub-enterprise` driver (question in [pr-notes.md](pr-notes.md)).
-4. Decide whether to run `test_task_steps.py` in the `ui-chromium` variant locally before pushing, or to rely on the `ui / task_steps` CI cell for the `read_timeline` change.
-5. Consider the deferred shared setup helper for demos 3 and 4, and look into the slower upgrade (5 min 56 s) seen in the last demo 1 run.
+4. Consider the deferred shared setup helper for demos 3 and 4, and look into the slower upgrade (5 min 56 s) seen in the last demo 1 run.
