@@ -1201,12 +1201,15 @@ class DeploymentDetailPage:
     ) -> RestoreRef:
         """Click the row's Restore, confirm in the dialog, return the new restore ref.
 
-        The dialog's "Target Namespace" is a read-only field that shows where
-        the restore lands. The mutation sends only the backup id and the
-        server restores into the namespace of the backup's deployment (#532),
-        so the field must show ``expected_namespace``, the namespace of the
-        deployment on this page. A mismatch fails the scenario before the
-        restore is submitted.
+        The dialog shows, as text, the namespace the restore lands in. The
+        mutation sends only the backup id and the server restores into the
+        namespace of the backup's deployment (#532). Two checks follow:
+
+        - before the restore is submitted, the dialog must show
+          ``expected_namespace``, the namespace of the deployment on this page;
+        - after it, the new restore row, which renders the namespace the
+          server recorded, must show the namespace the dialog showed, so a
+          disagreement between the dialog and the server fails the scenario.
         """
         await self.open_backups_tab()
         row = self._page.locator(
@@ -1216,7 +1219,9 @@ class DeploymentDetailPage:
         dialog = self._page.get_by_role("dialog", name="Restore Backup")
         await dialog.wait_for()
 
-        shown_namespace = await dialog.get_by_label("Target Namespace").input_value()
+        shown_namespace = (
+            await dialog.get_by_test_id("restore-target-namespace").inner_text()
+        ).strip()
         if shown_namespace != expected_namespace:
             raise ScenarioActionError(
                 f"Restore dialog shows target namespace {shown_namespace!r} but "
@@ -1244,6 +1249,15 @@ class DeploymentDetailPage:
                 rid = await _required_attr(r, "data-restore-id", context="restore row")
                 if rid in existing_ids:
                     continue
+                recorded_namespace = await _required_attr(
+                    r, "data-target-namespace", context=f"restore row {rid}"
+                )
+                if recorded_namespace != shown_namespace:
+                    raise ScenarioActionError(
+                        f"Restore dialog showed target namespace "
+                        f"{shown_namespace!r} but the server recorded "
+                        f"{recorded_namespace!r} on restore {rid}"
+                    )
                 return RestoreRef(
                     id=rid,
                     status=await _required_attr(
