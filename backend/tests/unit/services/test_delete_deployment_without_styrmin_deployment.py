@@ -3,19 +3,23 @@
 A create that fails at its ``hook:setup:pre`` step stops before it writes the
 namespace and the ``StyrminDeployment``. The Kubernetes API then answers the
 deletion request's patch with 404, which ``patch_custom_resource`` raises as
-``CustomResourceNotFound``. The cluster holds nothing of the deployment, so
-``delete_deployment`` moves it to ``DELETING``, and the agent's status reporter,
-which finds no ``StyrminDeployment`` for a ``DELETING`` deployment, reports it
-as ``Deleted``. While a change of the deployment is still being applied, its
-flow can still write the ``StyrminDeployment``, so the deletion is refused.
+``CustomResourceNotFound``. The operator has nothing to tear down, so
+``delete_deployment`` moves the deployment to ``DELETING``, and the agent's
+status reporter, which finds no ``StyrminDeployment`` for a ``DELETING``
+deployment, reports it as ``Deleted``. For a ``RUNNING`` deployment the
+deletion also goes on, with a warning. While a change of the deployment is
+still being applied, its flow can still write the ``StyrminDeployment``, so
+the deletion is refused.
 """
 
 from __future__ import annotations
 
+import io
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from kubernetes_asyncio.client.api_client import ApiException
+from loguru import logger
 
 from styrmin_backend.agent.service.kubernetes.exceptions import CustomResourceNotFound
 from styrmin_backend.agent.service.kubernetes.primitives import patch_custom_resource
@@ -157,12 +161,18 @@ async def test_delete_without_styrmin_deployment_is_refused_while_a_change_is_ap
     await _set_status(uow, parents, status)
     patch_crd.side_effect = _not_found(parents.deployment_id)
 
+    stored = await uow.deployments.find(id=parents.deployment_id)
+    assert stored is not None
+
     with pytest.raises(DeploymentRolloutInProgressError) as refused:
         await delete_deployment(parents.deployment_id, uow)
 
-    assert str(parents.deployment_id) in str(refused.value)
-    assert status.value in str(refused.value)
-    assert "Delete the deployment again" in str(refused.value)
+    # The message names the deployment and the statuses that end the wait.
+    assert str(refused.value) == (
+        f"Cannot delete deployment {stored.name} yet: Styrmin is still applying a "
+        f"change to it (status {status.value}). Delete it again when its status is "
+        "running or failed."
+    )
     assert refused.value.error_code == "ALREADY_IN_PROGRESS"
     await uow.rollback()
     deployment = await uow.deployments.find(id=parents.deployment_id)
@@ -170,3 +180,28 @@ async def test_delete_without_styrmin_deployment_is_refused_while_a_change_is_ap
     assert deployment.status == status
     tasks = await uow.tasks.find_by_deployment(parents.deployment_id)
     assert TaskType.DELETE_DEPLOYMENT not in {task.type for task in tasks}
+
+
+async def test_delete_of_a_running_deployment_without_styrmin_deployment_logs_a_warning(
+    uow: SqlModelUnitOfWork, parents: Parents, patch_crd
+) -> None:
+    """Something other than Styrmin deleted the ``StyrminDeployment``; its resources may remain (#372 review)."""
+    await _set_status(uow, parents, DeploymentState.RUNNING)
+    patch_crd.side_effect = _not_found(parents.deployment_id)
+    sink = io.StringIO()
+    handler_id = logger.add(sink, level="WARNING", format="{level}|{message}")
+    try:
+        task = await delete_deployment(parents.deployment_id, uow)
+    finally:
+        logger.remove(handler_id)
+
+    assert task.type == TaskType.DELETE_DEPLOYMENT
+    deployment = await uow.deployments.find(id=parents.deployment_id)
+    assert deployment is not None
+    assert deployment.status == DeploymentState.DELETING
+    warning = sink.getvalue()
+    assert warning.startswith(
+        "WARNING|deployment_delete_without_styrmin_deployment "
+        f"deployment_id={parents.deployment_id} status=running: "
+    )
+    assert "Remove what remains in its namespace by hand." in warning

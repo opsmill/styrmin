@@ -443,6 +443,40 @@ async def test_upgrade_whose_upgrade_actions_resolve_starts_the_reconcile(
     assert after.application_driver_version_id == seeded.target.id
 
 
+@pytest.mark.asyncio
+@patch(f"{MODULE}._ensure_ingress_controller", new_callable=AsyncMock)
+@patch(f"{MODULE}.apply_state", new_callable=AsyncMock)
+async def test_the_arguments_reach_the_request_as_given(
+    mock_apply_state: AsyncMock,
+    _mock_ingress: AsyncMock,
+) -> None:
+    """The ``prefect_manager`` dependency turns on no argument casting (#372 review).
+
+    fast_depends casts the arguments of an ``@inject`` function by default: it
+    would copy each dict and validate it with pydantic.
+    """
+    mock_apply_state.side_effect = _fake_apply_state
+    seeded = await _seed(target_actions=[])
+    parameters = {"admin_email": "admin@example.com"}
+
+    with (
+        patch(f"{MODULE}.drop_retired_parameters", return_value={}) as drop_retired,
+        patch(f"{MODULE}.validate_parameter_values", return_value={}),
+    ):
+        async with seeded.uow:
+            await update_deployment_version(
+                deployment_id=seeded.deployment.id,
+                version="0.2.0",
+                uow=seeded.uow,
+                driver_version_id=seeded.target.id,
+                deployment_parameters=parameters,
+                prefect_manager=_FakePrefectManager(registered=[]),
+            )
+
+    # The target is another driver version, so the parameters go through this first.
+    assert drop_retired.call_args.args[0] is parameters
+
+
 def _yields_application_version_change(
     current_instance: Instance, new_instance: Instance
 ) -> bool:

@@ -978,9 +978,10 @@ export default function DeploymentDetailPage() {
             <DialogDescription>
               This will tear down all workload resources for{" "}
               <code className="font-mono">{deployment.name}</code> and remove
-              its namespace. Backups are retained against this deployment. The
-              deleted deployment will appear in the deleted view for the
-              configured forensic-retention window.
+              its namespace. If its create failed partway, its empty namespace
+              can remain in the cluster. Backups are retained against this
+              deployment. The deleted deployment will appear in the deleted view
+              for the configured forensic-retention window.
             </DialogDescription>
           </DialogHeader>
           {deleteDeploymentError && (
