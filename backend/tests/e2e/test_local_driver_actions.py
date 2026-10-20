@@ -45,7 +45,10 @@ of that name exists (#372). The test deletes the deployment at its end.
 
 The module-scoped ``local_actions_deployment`` keeps the deployment for the
 later tests of the module and deletes it when the module ends, unless a test
-deleted it already. Every create and version change pins the
+deleted it already. Every delete waits until the deployment is ``deleted``, so
+the operator's teardown does not change what later tests of the session read,
+such as the deployment counts of the telemetry report. Every create and
+version change pins the
 driver version, so the latest-wins rule cannot bind the deployment to another
 driver version (research R-011).
 
@@ -156,6 +159,9 @@ INGRESS_TEARDOWN_TIMEOUT = 300.0
 LOG_TIMEOUT = 120.0
 RUNNING_TIMEOUT = 120.0
 DELETE_TIMEOUT = 120.0
+# The operator removes the HelmRelease and the namespace of a running deployment
+# before the status reporter reports it deleted.
+RUNNING_DELETE_TIMEOUT = 300.0
 POLL_INTERVAL = 3.0
 
 
@@ -265,9 +271,13 @@ async def local_actions_deployment(
         )
     finally:
         try:
-            await client.deployments.delete(deployment_id)
-        except StyrminError as exc:
+            deployment = await client.deployments.get(deployment_id)
             # A test of the module may have deleted it already.
+            if deployment.status != "deleted":
+                await _delete_and_wait_for_tombstone(
+                    client, deployment_id, timeout=RUNNING_DELETE_TIMEOUT
+                )
+        except StyrminError as exc:
             _LOG.warning("Could not delete deployment %s: %s", deployment_id, exc)
 
 
@@ -344,26 +354,28 @@ def _assert_steps_succeeded(task: GetTaskTask, *keys: str) -> None:
 
 
 async def _delete_and_wait_for_tombstone(
-    client: StyrminClient, deployment_id: str
+    client: StyrminClient, deployment_id: str, *, timeout: float = DELETE_TIMEOUT
 ) -> None:
     """Delete the deployment with ``deleteDeployment`` and read it until it is ``deleted``.
 
     For a deployment whose create failed before it wrote the
     ``StyrminDeployment``, the agent's status reporter finds no
     ``StyrminDeployment`` and reports the deployment as deleted, which
-    succeeds the teardown step of the delete task.
+    succeeds the teardown step of the delete task. For a running deployment,
+    the operator first removes its resources, so the caller passes
+    ``RUNNING_DELETE_TIMEOUT``.
     """
     task = await client.deployments.delete(deployment_id)
     assert task.type_ == "delete_deployment", task
     assert task.status == "success", task
-    deadline = time.monotonic() + DELETE_TIMEOUT
+    deadline = time.monotonic() + timeout
     while True:
         deployment = await client.deployments.get(deployment_id)
         if deployment.status == "deleted":
             break
         if time.monotonic() >= deadline:
             raise AssertionError(
-                f"Deployment {deployment_id} is not deleted after {DELETE_TIMEOUT}s: "
+                f"Deployment {deployment_id} is not deleted after {timeout}s: "
                 f"status={deployment.status}"
             )
         await asyncio.sleep(POLL_INTERVAL)
@@ -841,5 +853,6 @@ async def test_missing_registration_fails_and_loading_again_repairs_it(
         "120 seconds."
     ), step_output.output
 
-    deleted = await client.deployments.delete(deployment_id)
-    assert deleted.type_ == "delete_deployment", deleted
+    await _delete_and_wait_for_tombstone(
+        client, deployment_id, timeout=RUNNING_DELETE_TIMEOUT
+    )
