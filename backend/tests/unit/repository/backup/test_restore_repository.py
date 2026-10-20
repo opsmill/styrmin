@@ -272,3 +272,36 @@ async def test_get_non_terminal_by_source_deployment_id(
         other_deployment.id
     )
     assert [r.name for r in other_results] == ["restore-other"]
+
+
+@pytest.mark.asyncio
+async def test_get_non_terminal_by_target_namespace(
+    repository: SQLModelRestoreRepository,
+    deployment: Deployment,
+    backup: Backup,
+):
+    """Returns only the PENDING and IN_PROGRESS restores into the namespace, newest first."""
+    namespace = f"styrmin-{deployment.id}"
+    created = {}
+    for name, status, target_namespace in [
+        ("restore-pending", RestoreStatus.PENDING, namespace),
+        ("restore-completed", RestoreStatus.COMPLETED, namespace),
+        ("restore-failed", RestoreStatus.FAILED, namespace),
+        ("restore-elsewhere", RestoreStatus.IN_PROGRESS, "styrmin-other"),
+        ("restore-in-progress", RestoreStatus.IN_PROGRESS, namespace),
+    ]:
+        created[name] = await repository.create(
+            Restore(
+                name=name,
+                status=status,
+                target_namespace=target_namespace,
+                backup_id=backup.id,
+            )
+        )
+
+    results = await repository.get_non_terminal_by_target_namespace(namespace)
+
+    assert {r.name for r in results} == {"restore-pending", "restore-in-progress"}
+    assert [r.created_on for r in results] == sorted(
+        (r.created_on for r in results), reverse=True
+    )

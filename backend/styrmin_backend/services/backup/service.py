@@ -46,7 +46,9 @@ if TYPE_CHECKING:
 DEFAULT_BACKUP_TIMEOUT: int = 3600  # 1 hour
 DEFAULT_RESTORE_TIMEOUT: int = 7200  # 2 hours
 
-# Every deployment runs in its own ``styrmin-<deployment id>`` namespace.
+# Every deployment runs in its own ``styrmin-<deployment id>`` namespace, which
+# ``get_kubernetes_reference`` builds. The prefix only reads the deployment id
+# back from a namespace that a restore recorded.
 _DEPLOYMENT_NAMESPACE_PREFIX = "styrmin-"
 
 STRATEGY_MAP: dict[str, type[BackupStrategy]] = {
@@ -365,39 +367,33 @@ async def update_backup_component_status(
 
 
 async def find_in_flight_restore(
-    uow: UnitOfWork, deployment_id: UUID, target_namespace: str
+    uow: UnitOfWork, deployment_id: UUID
 ) -> Restore | None:
     """Return a non-terminal restore already landing in *deployment_id*, if any.
 
     A restore records its target as a namespace rather than a deployment FK.
-    Both callers pass the deployment's own namespace,
-    ``styrmin-<deployment_id>``, as *target_namespace*: ``create_restore``
-    passes the namespace that ``resolve_restore_target`` returns, and
-    ``has_in_flight_restore`` builds it. The first lookup finds the restores
-    that record that namespace. A restore created by an earlier release may
-    record another namespace, and a restore already in flight for the
-    deployment must be found whichever namespace it was created with: the
-    second lookup, by the deployment the restored backup was taken of, finds it
-    whatever namespace it targets, unless that namespace belongs to another
-    deployment. An environment clone restoring one of these backups into its
-    counterpart lands elsewhere and is not a conflict.
+    The first lookup finds the restores that record the deployment's own
+    namespace, ``styrmin-<deployment_id>``, which every restore since #532
+    records. A restore created by an earlier release may record another
+    namespace, and a restore already in flight for the deployment must be
+    found whichever namespace it was created with: the second lookup, by the
+    deployment the restored backup was taken of, finds it whatever namespace it
+    targets, unless that namespace belongs to another deployment. An
+    environment clone restoring one of these backups into its counterpart
+    lands elsewhere and is not a conflict.
 
     ``PENDING`` counts as in flight: ``create_restore`` writes rows ``PENDING``
     and only ``execute_restore_workflow`` promotes them to ``IN_PROGRESS``, so a
     guard reading ``IN_PROGRESS`` alone would be blind for the whole dispatch
     window.
     """
-    canonical_namespace = f"{_DEPLOYMENT_NAMESPACE_PREFIX}{deployment_id}"
-    namespaces = [target_namespace]
-    if canonical_namespace != target_namespace:
-        namespaces.append(canonical_namespace)
-
-    for namespace in namespaces:
-        # Ordered newest-first by the repository, so the most recent
-        # non-terminal restore is the one named in the refusal.
-        for restore in await uow.restores.get_by_target_namespace(namespace):
-            if restore.status in NON_TERMINAL_RESTORE_STATUSES:
-                return restore
+    # Ordered newest-first by the repository, so the most recent non-terminal
+    # restore is the one named in the refusal.
+    in_flight = await uow.restores.get_non_terminal_by_target_namespace(
+        get_kubernetes_reference(deployment_id)
+    )
+    if in_flight:
+        return in_flight[0]
 
     for restore in await uow.restores.get_non_terminal_by_source_deployment_id(
         deployment_id
@@ -424,11 +420,7 @@ async def has_in_flight_restore(uow: UnitOfWork, deployment_id: UUID) -> bool:
     Uses the same lookup as the concurrent-restore guard in ``create_restore``
     (``find_in_flight_restore``), so both agree on what is in flight.
     """
-    canonical_namespace = f"{_DEPLOYMENT_NAMESPACE_PREFIX}{deployment_id}"
-    return (
-        await find_in_flight_restore(uow, deployment_id, canonical_namespace)
-        is not None
-    )
+    return await find_in_flight_restore(uow, deployment_id) is not None
 
 
 @dataclass(frozen=True)
@@ -440,10 +432,13 @@ class RestoreTarget:
     """
 
     deployment: DeploymentEntity
-    #: ``styrmin-<deployment id>`` of ``deployment``.
-    namespace: str
     #: The active instance of ``deployment``, or ``None`` when it has none.
     instance_id: UUID | None
+
+    @property
+    def namespace(self) -> str:
+        """``styrmin-<deployment id>`` of ``deployment``."""
+        return get_kubernetes_reference(self.deployment.id)
 
 
 async def resolve_restore_target(
@@ -494,7 +489,6 @@ async def resolve_restore_target(
     active_instance = deployment.active_instance
     return RestoreTarget(
         deployment=deployment,
-        namespace=get_kubernetes_reference(deployment.id),
         instance_id=active_instance.id if active_instance is not None else None,
     )
 
@@ -580,9 +574,7 @@ async def create_restore(
         # that populates it — naming no restore, because there was none. A
         # refusal always names the row it collided with; when no row can be
         # named there is nothing to collide with.
-        in_flight = await find_in_flight_restore(
-            uow, deployment_id=deployment_id, target_namespace=target.namespace
-        )
+        in_flight = await find_in_flight_restore(uow, deployment_id=deployment_id)
         if in_flight is not None:
             raise RestoreAlreadyInProgressError(existing_restore_id=str(in_flight.id))
 

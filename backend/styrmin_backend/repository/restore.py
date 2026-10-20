@@ -27,8 +27,8 @@ class RestoreRepository(BaseRepository[Restore], ABC):
         raise NotImplementedError()
 
     @abstractmethod
-    async def get_by_target_namespace(
-        self, target_namespace: str, status: RestoreStatus | None = None
+    async def get_non_terminal_by_target_namespace(
+        self, target_namespace: str
     ) -> Sequence[Restore]:
         raise NotImplementedError()
 
@@ -57,16 +57,16 @@ class SQLModelRestoreRepository(BaseSQLModelRepository[Restore], RestoreReposito
         result = await self.session.exec(statement)
         return result.all()
 
-    async def get_by_target_namespace(
-        self, target_namespace: str, status: RestoreStatus | None = None
+    async def get_non_terminal_by_target_namespace(
+        self, target_namespace: str
     ) -> Sequence[Restore]:
-        """Get restores targeting a namespace, optionally filtered by status."""
-        statement = select(self.model_class).where(
-            self.model_class.target_namespace == target_namespace
+        """Get the non-terminal restores that target a namespace, newest first."""
+        statement = (
+            select(self.model_class)
+            .where(self.model_class.target_namespace == target_namespace)
+            .where(self.model_class.status.in_(NON_TERMINAL_RESTORE_STATUSES))  # type: ignore[attr-defined]
+            .order_by(self.model_class.created_on.desc())  # type: ignore[union-attr]
         )
-        if status is not None:
-            statement = statement.where(self.model_class.status == status)
-        statement = statement.order_by(self.model_class.created_on.desc())  # type: ignore[union-attr]
         result = await self.session.exec(statement)
         return result.all()
 
