@@ -902,6 +902,26 @@ class DeploymentDetailPage:
         await self.open_timeline()
         return {task.id for task in await self._read_timeline_tasks()}
 
+    async def show_timeline_entry(self, task_id: str) -> tuple[StepRef, ...]:
+        """On the open Timeline tab, expand the entry of ``task_id``, scroll it to
+        the top of the page and return its steps."""
+        entry = self._page.locator(
+            f"[data-testid=timeline-entry][data-task-id='{task_id}']"
+        )
+        try:
+            await entry.wait_for(state="visible", timeout=10_000)
+        except PlaywrightTimeoutError:
+            raise ScenarioActionError(
+                f"the timeline does not list task {task_id}"
+            ) from None
+        if await entry.get_attribute("data-expanded") != "true":
+            await entry.locator("[data-testid=timeline-entry-trigger]").first.click()
+            await expect(entry).to_have_attribute("data-expanded", "true")
+        await entry.evaluate(
+            "entry => entry.scrollIntoView({block: 'start', behavior: 'smooth'})"
+        )
+        return await _read_steps(entry, context=f"timeline entry {task_id}")
+
     async def wait_for_new_task(
         self, task_type: str, *, known_task_ids: set[str], timeout: float
     ) -> str:
