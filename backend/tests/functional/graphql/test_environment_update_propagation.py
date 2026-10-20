@@ -34,24 +34,6 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from styrmin_backend.context.models.config import EnvironmentConfig
-from styrmin_backend.context.models.contexts import (
-    ApplicationContext,
-    ClusterContext,
-    DeploymentContext,
-    EnvironmentContext,
-    GlobalContext,
-    InstanceContext,
-)
-from styrmin_backend.context.models.helm import (
-    ChartInfo,
-    HelmInfo,
-    RepositoryInfo,
-)
-from styrmin_backend.context.models.config import (
-    ClusterConfig,
-    DeploymentConfig,
-    ResolvedConfig,
-)
 from styrmin_backend.db.models import (
     ApplicationInstance,
     Deployment,
@@ -63,55 +45,13 @@ from styrmin_backend.db.models import (
 from ._queries import load_query  # noqa: F401  — kept for parity with 008
 from .conftest import gql
 from .seeds import (
+    global_context_dict,
     seed_application_driver_version,
     seed_deployment,
     seed_environment,
 )
 
 __all__ = ["gql"]
-
-
-def _make_global_context_dict(env_config_dict: dict | None) -> dict:
-    """Build a serialised ``GlobalContext`` JSON dict whose
-    ``environment.config`` slice equals ``env_config_dict``.
-
-    Mirrors the unit-test helper in ``test_environment_services.py``;
-    used here to pre-seed an ``ApplicationInstance.context`` JSON column
-    that ``_deployment_already_at_config`` can read back.
-    """
-    deployment_id = uuid4()
-    chart_id = uuid4()
-    repo_id = uuid4()
-    env_config = (
-        EnvironmentConfig.model_validate(env_config_dict)
-        if env_config_dict is not None
-        else EnvironmentConfig()
-    )
-    ctx = GlobalContext(
-        cluster=ClusterContext(config=ClusterConfig()),
-        environment=EnvironmentContext(name="prop-env", config=env_config),
-        deployment=DeploymentContext(config=DeploymentConfig()),
-        instance=InstanceContext(
-            config=ResolvedConfig(),
-            deployment_id=deployment_id,
-            namespace="prop-ns",
-            release_reference="prop-ref",
-        ),
-        app=ApplicationContext(
-            name="prop-app",
-            version="1.0.0",
-            helm=HelmInfo(
-                chart=ChartInfo(
-                    id=chart_id,
-                    name="prop-chart",
-                    version="0.1.0",
-                    values_template="",
-                ),
-                repository=RepositoryInfo(id=repo_id, url="https://example.com"),
-            ),
-        ),
-    )
-    return ctx.model_dump(mode="json")
 
 
 async def _attach_instance_at_config(
@@ -130,7 +70,7 @@ async def _attach_instance_at_config(
         status=InstanceStatus.PENDING,
         deployment_id=deployment.id,
         application_driver_version_id=deployment.application_driver_version_id,
-        context=_make_global_context_dict(env_config_dict),
+        context=global_context_dict(environment_config=env_config_dict),
         sequence=1,
     )
     session.add(instance)

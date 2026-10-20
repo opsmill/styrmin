@@ -28,21 +28,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from styrmin_backend.context.models.config import (
-    ClusterConfig,
-    DeploymentConfig,
-    EnvironmentConfig,
-    ResolvedConfig,
-)
-from styrmin_backend.context.models.contexts import (
-    ApplicationContext,
-    ClusterContext,
-    DeploymentContext,
-    EnvironmentContext,
-    GlobalContext,
-    InstanceContext,
-)
-from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryInfo
 from styrmin_backend.db.models import (
     ApplicationDriverVersion,
     ApplicationInstance,
@@ -64,6 +49,7 @@ from styrmin_backend.services.auth.session import create_session
 from ._queries import load_query
 from .conftest import gql
 from .seeds import (
+    global_context_dict,
     seed_application_driver_version,
     seed_deployment,
     seed_environment,
@@ -122,39 +108,6 @@ async def read_write_client_fixture(session: AsyncSession):
     app.dependency_overrides.clear()
 
 
-def _global_context_dict() -> dict:
-    """A serialised ``GlobalContext`` for the instance's ``context`` column.
-
-    The deployment repository rehydrates every active instance through
-    ``GlobalContext.model_validate``, so a seeded instance without a valid
-    context is invisible to the fan-out.
-    """
-    return GlobalContext(
-        cluster=ClusterContext(config=ClusterConfig()),
-        environment=EnvironmentContext(name="prop-env", config=EnvironmentConfig()),
-        deployment=DeploymentContext(config=DeploymentConfig()),
-        instance=InstanceContext(
-            config=ResolvedConfig(),
-            deployment_id=uuid4(),
-            namespace="prop-ns",
-            release_reference="prop-ref",
-        ),
-        app=ApplicationContext(
-            name="prop-app",
-            version="1.0.0",
-            helm=HelmInfo(
-                chart=ChartInfo(
-                    id=uuid4(),
-                    name="prop-chart",
-                    version="0.1.0",
-                    values_template="",
-                ),
-                repository=RepositoryInfo(id=uuid4(), url="https://example.com"),
-            ),
-        ),
-    ).model_dump(mode="json")
-
-
 async def seed_running_deployment(
     session: AsyncSession,
     *,
@@ -175,7 +128,7 @@ async def seed_running_deployment(
         status=InstanceStatus.RUNNING,
         deployment_id=deployment.id,
         application_driver_version_id=deployment.application_driver_version_id,
-        context=_global_context_dict(),
+        context=global_context_dict(),
         sequence=1,
     )
     session.add(instance)

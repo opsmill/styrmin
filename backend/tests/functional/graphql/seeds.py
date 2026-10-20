@@ -9,11 +9,27 @@ propagation test contract.
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import uuid4
+from typing import Any
+from uuid import UUID, uuid4
 
 from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from styrmin_backend.context.models.config import (
+    ClusterConfig,
+    DeploymentConfig,
+    EnvironmentConfig,
+    ResolvedConfig,
+)
+from styrmin_backend.context.models.contexts import (
+    ApplicationContext,
+    ClusterContext,
+    DeploymentContext,
+    EnvironmentContext,
+    GlobalContext,
+    InstanceContext,
+)
+from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryInfo
 from styrmin_backend.db.models import (
     ApplicationDriver,
     ApplicationDriverVersion,
@@ -35,6 +51,49 @@ from styrmin_backend.db.models import (
 from styrmin_backend.services.auth.password import hash_password
 
 VALID_CLUSTER_CONFIG = {"runtime_class": "example_runtime_class"}
+
+
+def global_context_dict(
+    *,
+    deployment_id: UUID | None = None,
+    environment_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A serialised ``GlobalContext`` for an instance's ``context`` column.
+
+    The deployment repository rehydrates an active instance through
+    ``GlobalContext.model_validate``, so an active instance without a valid
+    context cannot be loaded. ``deployment_id`` sets the instance's deployment
+    and its ``styrmin-<deployment id>`` namespace; ``environment_config`` sets
+    the ``environment.config`` slice.
+    """
+    deployment_id = deployment_id or uuid4()
+    return GlobalContext(
+        cluster=ClusterContext(config=ClusterConfig()),
+        environment=EnvironmentContext(
+            name="seed-env",
+            config=EnvironmentConfig.model_validate(environment_config or {}),
+        ),
+        deployment=DeploymentContext(config=DeploymentConfig()),
+        instance=InstanceContext(
+            config=ResolvedConfig(),
+            deployment_id=deployment_id,
+            namespace=f"styrmin-{deployment_id}",
+            release_reference="seed-ref",
+        ),
+        app=ApplicationContext(
+            name="seed-app",
+            version="1.0.0",
+            helm=HelmInfo(
+                chart=ChartInfo(
+                    id=uuid4(),
+                    name="seed-chart",
+                    version="0.1.0",
+                    values_template="",
+                ),
+                repository=RepositoryInfo(id=uuid4(), url="https://example.com"),
+            ),
+        ),
+    ).model_dump(mode="json")
 
 
 async def seed_backup_storage_location(
