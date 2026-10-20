@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from styrmin_sdk.exceptions import OperationFailedError, ResourceNotFoundError
+from styrmin_sdk.exceptions import IncompatibleServerError, OperationFailedError, ResourceNotFoundError
 from styrmin_sdk.graphql._generated.enums import BackupStatus  # noqa: PLC2701 — not re-exported
 
 if TYPE_CHECKING:
@@ -219,6 +219,27 @@ class TestBackupResource:
             await client.backups.create_restore(backup_id="00000000-0000-0000-0000-000000000001", **{argument: value})
 
         mock_transport.execute.assert_not_called()
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_restore_on_a_server_from_before_532_raises(
+        client: StyrminClient, mock_transport: AsyncMock
+    ) -> None:
+        """A server that still requires ``targetNamespace`` gets an error that says to upgrade it."""
+        mock_transport.execute.return_value = {
+            "data": None,
+            "errors": [
+                {
+                    "message": (
+                        "Field 'createRestore' argument 'targetNamespace' of type 'String!' is required, "
+                        "but it was not provided."
+                    ),
+                }
+            ],
+        }
+
+        with pytest.raises(IncompatibleServerError, match="Upgrade the Styrmin server"):
+            await client.backups.create_restore(backup_id="00000000-0000-0000-0000-000000000001")
 
     @staticmethod
     @pytest.mark.asyncio
