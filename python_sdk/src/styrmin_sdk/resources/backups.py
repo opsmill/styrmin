@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from styrmin_sdk._queries import load_query
+from styrmin_sdk.exceptions import IncompatibleServerError
 from styrmin_sdk.graphql._generated.create_backup import CreateBackup, CreateBackupCreateBackup
 from styrmin_sdk.graphql._generated.create_restore import CreateRestore, CreateRestoreCreateRestore
 from styrmin_sdk.graphql._generated.enums import BackupStatus, RestoreStatus
@@ -15,6 +16,21 @@ from styrmin_sdk.graphql._generated.get_restore import GetRestore, GetRestoreRes
 from styrmin_sdk.graphql._generated.list_backups import ListBackups, ListBackupsBackups
 from styrmin_sdk.graphql._generated.list_restores import ListRestores, ListRestoresRestores
 from styrmin_sdk.resources._base import BaseResource
+
+#: How a server from before #532 refuses a restore that names only the backup.
+_TARGET_NAMESPACE_REQUIRED = "Field 'createRestore' argument 'targetNamespace' of type 'String!' is required"
+
+
+def _raise_if_server_requires_target_namespace(result: dict[str, Any]) -> None:
+    """Raise :class:`IncompatibleServerError` when the server predates #532 and requires ``targetNamespace``."""
+    for error in result.get("errors") or []:
+        if str(error.get("message", "")).startswith(_TARGET_NAMESPACE_REQUIRED):
+            raise IncompatibleServerError(
+                "the Styrmin server is older than this styrminctl or SDK: before #532, createRestore requires "
+                "a 'targetNamespace' argument, and this styrminctl or SDK sends only the backup id. Upgrade the "
+                "Styrmin server, or restore with the styrminctl or SDK of the server's version.",
+                "",
+            )
 
 
 def _coerce_backup_status(value: BackupStatus | str | None) -> str | None:
@@ -98,8 +114,13 @@ class BackupResource(BaseResource):
 
         The server records that deployment's namespace and active instance on
         the restore; the caller names neither.
+
+        Raises:
+            IncompatibleServerError: The server predates #532 and requires a
+                target namespace.
         """
         result = await self._transport.execute(load_query("create_restore"), {"backupId": str(backup_id)})
+        _raise_if_server_requires_target_namespace(result)
         self._check_graphql_errors(result)
         return self._parse(CreateRestore, result["data"], "create_restore", CreateRestoreCreateRestore)
 
