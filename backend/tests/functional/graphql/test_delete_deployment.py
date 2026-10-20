@@ -433,7 +433,9 @@ async def test_delete_deployment_without_styrmin_deployment_during_a_change_is_r
     assert [error["extensions"]["code"] for error in errors] == [
         "ALREADY_IN_PROGRESS"
     ], errors
-    assert "Delete the deployment again" in errors[0]["message"], errors
+    assert (
+        "Delete it again when its status is running or failed" in errors[0]["message"]
+    ), errors
     session.expire_all()
     deployment_db = await session.get(Deployment, deployment_id)
     assert deployment_db is not None
