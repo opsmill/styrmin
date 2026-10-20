@@ -404,6 +404,8 @@ def test_backups_restore_backup_id_alone_sends_only_the_backup_id(
         pytest.param(["--target-deployment", "demo"], id="by-deployment-name"),
         pytest.param(["--target-deployment-id", DEPLOYMENT_UUID], id="by-deployment-id"),
         pytest.param(["--target-instance-id", INSTANCE_UUID], id="by-instance-id"),
+        # --environment narrows --target-deployment, so it is refused next to a backup id too.
+        pytest.param(["--environment", "prod"], id="environment"),
         # This refusal comes before the "only one of" refusal.
         pytest.param(
             ["--target-deployment-id", DEPLOYMENT_UUID, "--target-instance-id", INSTANCE_UUID],
@@ -859,6 +861,89 @@ def test_backups_restore_last_of_an_instance_id_of_a_deleted_deployment_is_refus
     output = capsys.readouterr().out
     assert "Deployment 'demo' was deleted" in output
     assert f"styrminctl backups list --id {DEPLOYMENT_UUID}" in output
+
+
+# --- restore --last into a deployment without an active instance (#532 review) --
+
+
+@pytest.mark.parametrize(
+    "target_args",
+    [
+        pytest.param(["--target-deployment", "demo"], id="by-deployment-name"),
+        pytest.param(["--target-deployment-id", DEPLOYMENT_UUID], id="by-deployment-id"),
+    ],
+)
+def test_backups_restore_last_into_a_deployment_without_an_active_instance_restores(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    target_args: list[str],
+) -> None:
+    """``--last`` reads only the deployment's backup history, so it needs no active instance.
+
+    The server restores into a deployment without one, as ``--target-instance-id`` and a bare
+    backup id already do.
+    """
+    monkeypatch.setattr(backups_commands, "_stdin_is_terminal", lambda: False)
+    without_instance = _make_deployment(name="demo", instance_id=None)
+    _seed_name_lookup(mock_client, deployments=[without_instance])
+    _arm_restore_last(mock_client, [_make_completed_backup()], deployment=without_instance)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "restore", "--last", *target_args])
+    assert exc.value.code == 0
+    mock_client.backups.list_backups.assert_called_once_with(deployment_id=DEPLOYMENT_UUID, status="completed")
+    mock_client.backups.create_restore.assert_called_once_with(backup_id=BACKUP_UUID)
+    assert "Warning" not in capsys.readouterr().out
+
+
+def test_backups_restore_last_at_another_version_into_a_deployment_without_an_active_instance_warns(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The warning does not say that Styrmin keeps a current instance the deployment does not have."""
+    monkeypatch.setenv("COLUMNS", "200")
+    monkeypatch.setattr(backups_commands, "_stdin_is_terminal", lambda: False)
+    _arm_restore_last(
+        mock_client,
+        [_make_completed_backup(application_version="1.4.1")],
+        deployment=_make_deployment(name="demo", instance_id=None),
+    )
+
+    assert _restore_last() == 1
+    mock_client.backups.create_restore.assert_not_called()
+    output = " ".join(capsys.readouterr().out.split())
+    assert "was taken of deployment 'demo', at application version 1.4.1" in output
+    assert "has no active instance, and the restore does not give it one" in output
+    assert "keeps the current instance" not in output
+    assert "Pass --yes" in output
+
+
+def test_backups_restore_last_of_an_instance_id_with_environment_is_refused(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "restore", "--last", "--target-instance-id", INSTANCE_UUID, "--environment", "prod"])
+    assert exc.value.code == 1
+    mock_client.backups.list_backups.assert_not_called()
+    mock_client.backups.create_restore.assert_not_called()
+    assert "--environment only applies when looking up a deployment by name" in capsys.readouterr().out
+
+
+def test_backups_restore_last_unknown_deployment_name_does_not_point_to_backups_list(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ``--id`` hint belongs to ``backups list``; a deleted deployment cannot be restored into."""
+    monkeypatch.setenv("COLUMNS", "200")
+    _seed_name_lookup(mock_client, deployments=[_make_deployment(name="other")])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "restore", "--last", "--target-deployment", "demo"])
+    assert exc.value.code == 1
+    mock_client.backups.create_restore.assert_not_called()
+    output = capsys.readouterr().out
+    assert "No deployment named 'demo'." in output
+    assert "--id" not in output
 
 
 # --- list: pointing to --id for a deleted deployment (#304 review) -------

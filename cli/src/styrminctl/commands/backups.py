@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from styrmin_sdk import StyrminClient
     from styrmin_sdk.graphql._generated.list_backups import ListBackupsBackups
 
-    from styrminctl.resolve import ResolvedTarget
 from styrminctl.types import (
     BackupId,
     DeploymentName,
@@ -197,23 +196,24 @@ def _has_expired(backup: ListBackupsBackups, now: datetime) -> bool:
 
 async def _latest_completed_backup(
     sdk: StyrminClient,
-    target: ResolvedTarget,
     *,
+    deployment_id: str | None,
+    instance_id: str | None,
     deployment_label: str | None,
 ) -> ListBackupsBackups:
     """Return the newest completed backup that has not expired.
 
-    It comes from the target deployment's backup history, or from a raw target
-    instance's backups. The server lists backups newest first.
-    ``deployment_label`` names the deployment in the error message; the
-    deployment id is used when it is ``None``.
+    It comes from the backup history of ``deployment_id``, or from the backups
+    of ``instance_id`` when no deployment is given. The server lists backups
+    newest first. ``deployment_label`` names the deployment in the error
+    message; the deployment id is used when it is ``None``.
     """
-    if target.deployment_id is not None:
-        backups_list = await sdk.backups.list_backups(deployment_id=target.deployment_id, status="completed")
-        scope = f"deployment '{deployment_label or target.deployment_id}'"
+    if deployment_id is not None:
+        backups_list = await sdk.backups.list_backups(deployment_id=deployment_id, status="completed")
+        scope = f"deployment '{deployment_label or deployment_id}'"
     else:
-        backups_list = await sdk.backups.list_backups(instance_id=target.instance_id, status="completed")
-        scope = f"instance {target.instance_id}"
+        backups_list = await sdk.backups.list_backups(instance_id=instance_id, status="completed")
+        scope = f"instance {instance_id}"
 
     now = datetime.now(UTC)
     for skipped, backup in enumerate(backups_list):
@@ -266,10 +266,14 @@ async def _confirm_backup_of_earlier_instance(
         f"at application version {backup_version}. The deployment runs application version "
         f"{current_version} now."
     )
+    instance_outcome = (
+        "Styrmin keeps the current instance as the deployment's active instance."
+        if active_instance is not None
+        else "The deployment has no active instance, and the restore does not give it one."
+    )
     console.print(
         "The restore puts back the StyrminDeployment and HelmRelease that the backup holds, with "
-        "that application version and config. Styrmin keeps the current instance as the "
-        "deployment's active instance."
+        f"that application version and config. {instance_outcome}"
     )
     if yes:
         return
@@ -279,8 +283,8 @@ async def _confirm_backup_of_earlier_instance(
         raise ValueError("Restore cancelled.")
 
 
-#: The options that choose, with ``--last``, whose backup history the newest backup comes from.
-_TARGET_OPTIONS = "--target-deployment, --target-deployment-id and --target-instance-id"
+#: The options that choose, with ``--last``, which backups the newest backup is picked from.
+_TARGET_OPTIONS = "--target-deployment, --target-deployment-id, --target-instance-id and --environment"
 
 
 def _refuse_target_options_with_backup_id(
@@ -288,11 +292,13 @@ def _refuse_target_options_with_backup_id(
     target_deployment: str | None,
     target_deployment_id: str | None,
     target_instance_id: str | None,
+    environment: str | None,
 ) -> None:
     """Refuse a backup id combined with a target option, before anything is sent to the server.
 
     A backup is always restored into the deployment it was taken of, so a
     target option next to a backup id would only mislead the user.
+    ``--environment`` narrows ``--target-deployment``, so it is refused too.
     """
     given = [
         option
@@ -300,6 +306,7 @@ def _refuse_target_options_with_backup_id(
             ("--target-deployment", target_deployment),
             ("--target-deployment-id", target_deployment_id),
             ("--target-instance-id", target_instance_id),
+            ("--environment", environment),
         )
         if value is not None
     ]
@@ -337,14 +344,22 @@ async def _prepare_restore(
                 "--last requires a target deployment (--target-deployment/--target-deployment-id) "
                 "or --target-instance-id"
             )
-        target = await resolve_active_instance(
-            sdk,
-            deployment_name=target_deployment,
-            deployment_id=target_deployment_id,
-            instance_id=target_instance_id,
-            environment=environment,
+        # Only the backup history is read here, so the deployment does not need an active
+        # instance: the server restores into a deployment without one.
+        deployment_id = None
+        if target_instance_id is None:
+            deployment_id = await resolve_deployment_id(
+                sdk,
+                deployment_name=target_deployment,
+                deployment_id=target_deployment_id,
+                environment=environment,
+                not_found_hint="",
+            )
+        elif environment is not None:
+            raise ValueError("--environment only applies when looking up a deployment by name.")
+        backup = await _latest_completed_backup(
+            sdk, deployment_id=deployment_id, instance_id=target_instance_id, deployment_label=target_deployment
         )
-        backup = await _latest_completed_backup(sdk, target, deployment_label=target_deployment)
         backup_id = str(backup.id)
         console.print(
             f"Selected the newest completed backup: {backup_id} "
@@ -354,7 +369,7 @@ async def _prepare_restore(
         # one. The server restores the backup into the deployment its instance belongs to, so
         # compare against that deployment.
         await _confirm_backup_of_earlier_instance(
-            sdk, target.deployment_id or str(backup.instance.deployment_id), backup, yes=yes
+            sdk, deployment_id or str(backup.instance.deployment_id), backup, yes=yes
         )
 
     if backup_id is None:
@@ -382,7 +397,8 @@ async def restore(
                 "taken of. --target-deployment or --target-deployment-id chooses the deployment whose "
                 "backup history it comes from; that history holds the backups of the deployment's current "
                 "and earlier instances. --target-instance-id chooses the instance whose backups it comes "
-                "from. Restoring a backup of an earlier instance needs confirmation, or --yes."
+                "from. Restoring a backup of an earlier instance, or one taken at another application "
+                "version, needs confirmation, or --yes."
             )
         ),
     ] = False,
@@ -391,7 +407,10 @@ async def restore(
         Parameter(
             name=["--yes", "-y"],
             negative="",
-            help="With --last, restore a backup of an earlier instance without asking for confirmation.",
+            help=(
+                "With --last, restore a backup of an earlier instance, or one taken at another "
+                "application version, without asking for confirmation."
+            ),
         ),
     ] = False,
     wait: Annotated[bool, Parameter(help="Wait for restore to complete.")] = False,
@@ -403,8 +422,9 @@ async def restore(
     Pass a backup id to restore that backup. Or pass --last with
     --target-deployment (and --environment), --target-deployment-id or
     --target-instance-id to restore the newest completed backup from that
-    deployment's backup history, or from that instance's backups. The target
-    options work only with --last.
+    deployment's backup history, or from that instance's backups. These
+    options choose which backups --last picks from, not where the backup is
+    restored, and work only with --last.
     """
     with styrmin_error_handler():
         if last and backup_id is not None:
@@ -414,6 +434,7 @@ async def restore(
                 target_deployment=target_deployment,
                 target_deployment_id=target_deployment_id,
                 target_instance_id=target_instance_id,
+                environment=environment,
             )
 
         async with client.get_client() as sdk:

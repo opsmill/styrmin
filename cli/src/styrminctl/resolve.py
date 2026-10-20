@@ -114,6 +114,7 @@ async def resolve_deployment_id(
     deployment_name: str | None,
     deployment_id: str | None,
     environment: str | None,
+    not_found_hint: str = DELETED_DEPLOYMENT_HINT,
 ) -> str:
     """Resolve a deployment name or id to the deployment's id.
 
@@ -121,12 +122,11 @@ async def resolve_deployment_id(
     ``environment`` only applies to the name lookup. Unlike
     :func:`resolve_active_instance`, the deployment does not need an active
     instance. ``deployment_id`` also reaches a deleted deployment, which the
-    name lookup does not list.
+    name lookup does not list. ``not_found_hint`` is appended to the error
+    when no deployment has the name.
     """
     _validate_selectors(deployment_name, deployment_id, None, environment)
-    deployment = await _find_deployment(
-        sdk, deployment_name, deployment_id, environment, not_found_hint=DELETED_DEPLOYMENT_HINT
-    )
+    deployment = await _find_deployment(sdk, deployment_name, deployment_id, environment, not_found_hint=not_found_hint)
     return str(deployment.id)
 
 
