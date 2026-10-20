@@ -75,14 +75,20 @@ TargetDeploymentName = Annotated[
     str | None,
     Parameter(
         name="--target-deployment",
-        help="With --last: name of the deployment whose newest completed backup is restored.",
+        help=(
+            "With --last: name of the deployment whose backup history --last picks the newest "
+            "completed backup from. The backup is restored into that deployment."
+        ),
     ),
 ]
 TargetDeploymentId = Annotated[
     str | None,
     Parameter(
         name="--target-deployment-id",
-        help="With --last: UUID of the deployment whose newest completed backup is restored.",
+        help=(
+            "With --last: UUID of the deployment whose backup history --last picks the newest "
+            "completed backup from. The backup is restored into that deployment."
+        ),
         validator=validate_uuid,
     ),
 ]
@@ -119,7 +125,10 @@ InstanceId = Annotated[str, Parameter(help="UUID of the application instance.", 
 OptionalInstanceId = Annotated[
     str | None,
     Parameter(
-        help="With --last: UUID of the application instance whose newest completed backup is restored.",
+        help=(
+            "With --last: UUID of the application instance whose backups --last picks the newest "
+            "completed backup from. The backup is restored into the instance's deployment."
+        ),
         validator=validate_uuid,
     ),
 ]
