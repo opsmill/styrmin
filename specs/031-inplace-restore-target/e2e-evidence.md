@@ -289,3 +289,55 @@ No node was skipped. Of the 203 deselected nodes, 201 are outside `shard_env_bac
 ### Cleanup after the session
 
 pytest and `tee` exited after the summary line. The `sleep infinity` process of this run (PID 2609648) was then stopped by its PID. `vcluster list --driver=docker` listed no vcluster afterwards, and no Docker container or network with the name `744262fa` remained.
+
+## Review of PR #536: three E2E sessions after the review changes
+
+The review of PR #536 changed the restore flow (`execute_restore_workflow` now refuses a namespace that is not `styrmin-<deployment id>`), the Restore dialog (it shows the target as text) and the E2E page object (it compares the namespace the dialog showed with the one the server recorded on the new restore row). These three sessions run the nodes that exercise those changes. Each session ran `scratchpad/run-e2e.sh`, which runs `uv run pytest <selection> -v -s --pdb` with `STYRMIN_IMAGE_VER=inplace-restore-7a1b1cc5` and keeps pytest's stdin open with a FIFO fed by `sleep infinity`, then stops that `sleep` when pytest exits.
+
+The fixture `styrmin_deployment` in `backend/tests/e2e/conftest.py` runs `docker compose build` at the start of each session, so each session built the image tag `inplace-restore-7a1b1cc5` again from the working tree as it was then:
+
+| Session | Start and end (UTC) | Code in the working tree | Image manifest from the build log | vcluster | pytest summary |
+|---|---|---|---|---|---|
+| `shard_backup`, `ui-chromium` | `2026-10-20T08:38:27+00:00` to `2026-10-20T08:50:50+00:00` | commit `a2de3b92` (named `7a1b1cc5` before the rewrite below) | `sha256:882c4de4e7630da2f5e0895dbe1c59c263029b4f13ae4b2f0778402dff4e1453` | `pytest-b7206615-473c-452b-a9ee-2477ff0c78e2` | `3 passed, 3 skipped, 199 deselected, 6 warnings in 739.95s (0:12:19)` |
+| `shard_backup`, `api-chromium` | `2026-10-20T08:50:50+00:00` to `2026-10-20T09:05:44+00:00` | commit `7fce67db` | `sha256:4b156bca5ce237d1308d714b0e259b537beb5215a28cb4e921ffccbfae295b83` | `pytest-631a5681-8de0-4072-804e-dfe41eea12f0` | `6 passed, 199 deselected, 7 warnings in 890.81s (0:14:50)` |
+| `shard_env_backup`, `api-chromium` | `2026-10-20T09:05:44+00:00` to `2026-10-20T09:17:12+00:00` | commit `7fce67db` | `sha256:fb6671bb89cbe0479b56e0e4ca36808950c2c67a4b28e97e4c314b217cea0cf7` | `pytest-967b5772-83a0-4682-a798-39a11c7e5e00` | `2 passed, 203 deselected, 6 warnings in 685.46s (0:11:25)` |
+
+The commands were, in order:
+
+```bash
+run-e2e.sh <scratchpad>/e2e-backup-ui.log backend/tests/e2e -m shard_backup -k ui-chromium
+run-e2e.sh <scratchpad>/e2e-backup-api.log backend/tests/e2e -m shard_backup -k api-chromium
+run-e2e.sh <scratchpad>/e2e-env-backup-api.log backend/tests/e2e -m shard_env_backup -k api-chromium
+```
+
+Nodes per session:
+
+- `shard_backup`, `ui-chromium`:
+  - passed: `test_backup_and_restore_lifecycle[ui-chromium]`, `test_restore_lifecycle_transitions[ui-chromium]` and `test_mariadb_mongodb_backup_and_restore_lifecycle[ui-chromium]`. Each restore of these nodes goes through the page object, which checks the namespace the dialog shows before it submits and the namespace the server recorded after;
+  - skipped by their `api_only` marker: `test_restore_failure_marks_failed_not_indefinite[ui-chromium]`, `test_restore_of_removed_velero_backup_fails_velero_step[ui-chromium]` and `test_renamed_bsl_cluster_objects_follow_the_location_id[ui-chromium]`.
+- `shard_backup`, `api-chromium`: the six nodes passed, `test_backup_and_restore_lifecycle`, `test_restore_lifecycle_transitions`, `test_restore_failure_marks_failed_not_indefinite`, `test_restore_of_removed_velero_backup_fails_velero_step`, `test_renamed_bsl_cluster_objects_follow_the_location_id` and `test_mariadb_mongodb_backup_and_restore_lifecycle`, each `[api-chromium]`.
+- `shard_env_backup`, `api-chromium`: `test_environment_backup_and_restore_lifecycle[api-chromium]` and `test_environment_clone_lifecycle[api-chromium]` passed. Their restores go through the new namespace check of `execute_restore_workflow`, the clone's with the counterpart's namespace.
+
+Some `PASSED` lines share their line with the test's own output, so the log shows them as a bare `PASSED`; the summary lines above give the counts. The warnings are the `kr8s` `DeprecationWarning` and `UserWarning` lines described for the earlier sessions. After the last session, `vcluster list --driver=docker` listed no vcluster, and no `sleep infinity` process of these runs remained.
+
+Not run locally after the review: `shard_infrahub` (`test_infrahub_enterprise_backup_and_restore_lifecycle`, which restores through the same in-place path) and the `ui-chromium` variants of `shard_env_backup`. CI runs them.
+
+### Commit hashes before and after the history rewrite
+
+To keep every commit building, the review asked to squash the commits that did not build on their own. The branch was rewritten twice on 2026-10-20: the first rewrite folded `bb2b67b0`, `65928329`, `1d38c549` and `654bebb9` into one commit, and the second also folded `f7e72e01`, which updated the CLI tests. The sections above name commits by their hash before the rewrite. The trees are unchanged, so each new commit has the same files as the old one.
+
+| Before | After | Subject |
+|---|---|---|
+| `bb2b67b0`, `65928329`, `1d38c549`, `654bebb9`, `f7e72e01` | `5ab09621` | fix(backup): restore a backup only into the deployment it was taken of (#532) |
+| `05c067d9` | `32ac59c0` | test(backup): environment restore and clone rows record the active instance (#532) |
+| `cf988802` | `90ae4a79` | docs(backup): a restore takes only the backup id (#532) |
+| `133ed150` | `967b6d5c` | docs(spec): run the quickstart one pytest session per package (#532) |
+| `3e9e3a31` | `06ca3017` | test(e2e): record the shard_backup api-chromium pass for T038 (#532) |
+| `463fa1a6` | `0d4c4b0c` | test(e2e): record the shard_backup ui-chromium pass for T039 (#532) |
+| `d8b25aca` | `da197fe0` | test(e2e): record the shard_infrahub enterprise pass and the PR notes for T040 and T041 (#532) |
+| `4f8d5275` | `94117d48` | fix(cli): restore --last --target-instance-id asks before restoring an earlier instance's backup (#532) |
+| `3fe82a95` | `f47585cc` | test(backup): check each environment restore's dispatched namespace, and correct restore comments and line references (#532) |
+| `fc4532f3` | `709b90ca` | fix(cli): restore --last --target-instance-id keeps restoring into a deployment without an active instance (#532) |
+| `df0ee788` | `48905136` | test(e2e): record the shard_env_backup api-chromium pass for the review follow-up (#532) |
+| `85a228ce` | `83de108a` | docs(changelog): record the --target-instance-id confirmation and the SDK deployment id (#532) |
+| `adda73ee` | `8df355fe` | docs(specs): report the implementation of the in-place restore fix (#532) |
