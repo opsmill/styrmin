@@ -4,23 +4,9 @@
 
 ## Functions
 
+`resolve_hook_flow`, for one hook and mode, was planned and built, then deleted after the review of #372 because no production code called it; the two functions below resolve each pair with the same rule.
+
 ```python
-async def resolve_hook_flow(
-    driver_version: ApplicationDriverVersion,
-    application_name: str,
-    hook: HookKind,
-    mode: Literal["pre", "core", "post"],
-    *,
-    uow: UnitOfWork,
-    prefect_manager: PrefectManager,
-) -> UUID | None:
-    """The registered flow of a hook and mode of a driver version.
-
-    None when the version declares no action for the hook and mode.
-    Raises ActionNotRegisteredError when it declares one and no flow is registered.
-    """
-
-
 async def resolve_setup_hooks(
     driver_version: ApplicationDriverVersion,
     application_name: str,
@@ -41,7 +27,7 @@ async def resolve_upgrade_hooks(
     """None when the version declares no upgrade/core action; otherwise core, pre and post."""
 ```
 
-Truth table of `resolve_hook_flow`:
+Truth table of each hook and mode that the two functions resolve:
 
 | Declared actions for the hook and mode | Lookup result | Returns |
 |----------------------------------------|---------------|---------|
