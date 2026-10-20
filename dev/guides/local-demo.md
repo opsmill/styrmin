@@ -100,17 +100,9 @@ and the options, output and exit codes in the
 | `deploy-upgrade` | `1-deploy-upgrade.mp4` | `network-lab-upgrade` | Infrahub deployed at the `previous` version and upgraded to `latest`, then the upgrade task with the step that runs the driver's upgrade action | Yes |
 | `component-overrides` | `2-component-overrides.mp4` | `network-lab-overrides` | An image override on the Semaphore `server` component and a replica override of 2 on the Infrahub `server` component | Yes |
 | `backup-restore` | `3-backup-restore.mp4` | `network-lab-backup` | An environment backup, a device deleted in Infrahub and a task template deleted in Semaphore, an environment restore, and the device and the template back | Yes |
-| `clone` | `4-clone.mp4` | `network-lab` and `network-lab-clone` (planned) | An environment clone whose Semaphore lists a device added in the clone's Infrahub, while the source's Semaphore does not | No, waits for [#530](https://github.com/opsmill/styrmin/issues/530) |
+| `clone` | `4-clone.mp4` | `network-lab` and `network-lab-clone` | An environment clone whose Semaphore lists a device added in the clone's Infrahub, while the source's Semaphore does not | Yes |
 
-Why `clone` is not available yet: an environment clone keeps the source's
-service aliases, which point to the namespaces of the source environment, so
-the clone's Semaphore would read the source's Infrahub
-([E2E evidence](../../specs/029-recorded-feature-demos/e2e-evidence.md)).
-
-`uv run invoke record` without `--demo` records every demo that is
-available, so today it records `deploy-upgrade`, `component-overrides` and
-`backup-restore`. `--demo clone` stops with exit code 2 and a message that
-the demo is not available yet.
+`uv run invoke record` without `--demo` records the four demos.
 
 Demo 1 (`deploy-upgrade`) shows the `infrahub` driver's upgrade action, which
 stops the Infrahub server and task workers, runs `infrahub upgrade` in a job,
@@ -132,6 +124,13 @@ Enterprise, and the `infrahub` driver deploys the community edition
 The demo loads that driver from `/styrmin/drivers/infrahub-enterprise` in the
 Styrmin image, and the driver stays loaded after the demo.
 
+Demo 4 (`clone`) needs the fix to
+[#530](https://github.com/opsmill/styrmin/issues/530) in the Styrmin image:
+since that fix, an environment clone writes its own service aliases, so the
+clone's Semaphore reaches the clone's Infrahub by the short name `infrahub`
+([E2E evidence](../../specs/029-recorded-feature-demos/e2e-evidence.md#the-defect-is-fixed-by-531-which-carries-its-own-alias-check)).
+Like demo 3, it deploys the `infrahub-enterprise` driver.
+
 ### Prerequisites for recording
 
 - The tools in [Prerequisites](#prerequisites) and a demo stack that
@@ -149,9 +148,12 @@ Styrmin image, and the driver stays loaded after the demo.
   - each start of Semaphore in the vCluster runs `pip install infrahub-sdk`
     from PyPI (`general.additionalPythonPackages` in the `semaphore`
     driver's values).
-- Memory: demo 4 (`clone`), once it is available, runs Infrahub and
-  Semaphore in two environments at the same time. How much memory that needs
-  is not measured.
+- Memory: demo 4 (`clone`) runs Infrahub and Semaphore in two environments
+  at the same time. In one recording, the host's memory in use rose from
+  17,330 MiB to at most 26,993 MiB while both environments ran, with other
+  processes on the host
+  ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#memory-during-the-run)).
+  How much of that the two environments used is not measured.
 
 ### Commands to record the demos
 
@@ -281,6 +283,9 @@ Measured on 2026-10-18 on one Linux host
 - `uv run invoke record --demo deploy-upgrade`, measured on 2026-10-20 on a
   fresh demo stack: 8 min 21 s. The video lasts 0:35
   ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#demo-1-recorded-tasks-t033-and-t034)).
+- `uv run invoke record --demo clone`, measured on 2026-10-20 on a fresh
+  demo stack: 13 min 30 s. The video lasts 1:08
+  ([spike notes](../../specs/029-recorded-feature-demos/spike-notes.md#demo-4-recorded-tasks-t039-and-t040)).
 
 The setup, which deploys Infrahub and Semaphore and waits for them, and the
 waits for the cluster take most of the time. The environment restore of

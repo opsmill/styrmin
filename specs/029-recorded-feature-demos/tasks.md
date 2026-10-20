@@ -161,9 +161,9 @@ description: "Task list for the recorded demos of four Styrmin features"
 
 **Independent Test**: `uv run invoke record --demo clone` on a fresh demo stack writes `demo-videos/4-clone.mp4` with the counts 2, 3 and 2.
 
-**Dependency**: T008. If the alias check failed, this phase starts only after the product fix lands and T006 and T007 pass.
+**Dependency**: T008. If the alias check failed, this phase starts only after the product fix lands and T006 and T007 pass. Met on 2026-10-20: PR #531 fixed #530 and adds its own alias check to `test_environment_clone_lifecycle`, which passed in both variants (see [e2e-evidence.md](e2e-evidence.md#the-defect-is-fixed-by-531-which-carries-its-own-alias-check)).
 
-- [ ] T039 [US4] Create `demos/scenarios/clone.py`: setup creates `network-lab`, loads the enterprise driver, deploys `infrahub-enterprise` at `latest` and `semaphore` with `docker_image=styrmin-demo/semaphore`, loads `sw1` and `sw2`, runs `semaphore_setup.configure`, and logs in to both applications before the recording. Recorded steps:
+- [X] T039 [US4] Create `demos/scenarios/clone.py`: setup creates `network-lab`, loads the enterprise driver, deploys `infrahub-enterprise` at `latest` and `semaphore` with `docker_image=styrmin-demo/semaphore`, loads `sw1` and `sw2`, runs `semaphore_setup.configure`, and logs in to both applications before the recording. Recorded steps:
   1. step "Semaphore reads its inventory from Infrahub": run the template, `wait("Ansible reads the inventory")` around `wait_for_output`, and fail unless the output says 2 devices;
   2. step "Clone the environment": `clone_environment(environment_id=..., name="network-lab-clone", deployment_ids=None)`, `wait("Clone in progress")` around `wait_for_environment_clone`; read the clone's Infrahub and Semaphore URLs from the counterpart deployments with the SDK; log in to both on `recorder.unrecorded()` pages (research R-016);
   3. step "Add a device in the clone's Infrahub": `add_device("sw3")`;
@@ -171,7 +171,7 @@ description: "Task list for the recorded demos of four Styrmin features"
   5. step "The source is unchanged": run the template in the source Semaphore again, fail unless it says 2 devices.
 
   Register it with environment names `("network-lab-clone", "network-lab")`, the clone first so cleanup deletes it first
-- [ ] T040 [US4] Record demo 4 alone on a fresh demo stack and check it as in T034, plus the acceptance scenario of User Story 4 (counts 2, 3, 2); note the length in `specs/029-recorded-feature-demos/spike-notes.md`
+- [X] T040 [US4] Record demo 4 alone on a fresh demo stack and check it as in T034, plus the acceptance scenario of User Story 4 (counts 2, 3, 2); note the length in `specs/029-recorded-feature-demos/spike-notes.md`
 
 ---
 

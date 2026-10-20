@@ -12,6 +12,7 @@ from packaging.version import InvalidVersion, Version
 
 from tests.e2e.demos.scenarios import (
     backup_restore,
+    clone,
     component_overrides,
     deploy_upgrade,
 )
@@ -143,6 +144,14 @@ DEMOS: tuple[Demo[Any], ...] = (
         environment_names=(backup_restore.ENVIRONMENT_NAME,),
         setup=backup_restore.setup,
         record=backup_restore.record,
+    ),
+    Demo(
+        slug="clone",
+        number=4,
+        # The clone first, so the deletion of the leftovers and the cleanup delete it before its source.
+        environment_names=(clone.CLONE_NAME, clone.ENVIRONMENT_NAME),
+        setup=clone.setup,
+        record=clone.record,
     ),
 )
 check_catalog(DEMOS)
