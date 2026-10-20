@@ -24,21 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from styrmin_backend.context.models.config import (
-    ClusterConfig,
-    DeploymentConfig,
-    EnvironmentConfig,
-    ResolvedConfig,
-)
-from styrmin_backend.context.models.contexts import (
-    ApplicationContext,
-    ClusterContext,
-    DeploymentContext,
-    EnvironmentContext,
-    GlobalContext,
-    InstanceContext,
-)
-from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryInfo
 from styrmin_backend.db.models import (
     Backup,
     BackupStatus,
@@ -50,7 +35,7 @@ from styrmin_backend.db.models import (
 
 from ._queries import load_query
 from .conftest import gql
-from .seeds import seed_application_instance
+from .seeds import global_context_dict, seed_application_instance
 
 
 async def _read_back[T](session: AsyncSession, model: type[T], row_id: UUID) -> T:
@@ -61,39 +46,6 @@ async def _read_back[T](session: AsyncSession, model: type[T], row_id: UUID) -> 
         row = await fresh_session.get(model, row_id)
     assert row is not None
     return row
-
-
-def _global_context_dict(deployment_id: UUID) -> dict:
-    """A serialised ``GlobalContext`` for an instance's ``context`` column.
-
-    The deployment repository rehydrates the active instance through
-    ``GlobalContext.model_validate``, so an active instance without a valid
-    context cannot be loaded.
-    """
-    return GlobalContext(
-        cluster=ClusterContext(config=ClusterConfig()),
-        environment=EnvironmentContext(name="restore-env", config=EnvironmentConfig()),
-        deployment=DeploymentContext(config=DeploymentConfig()),
-        instance=InstanceContext(
-            config=ResolvedConfig(),
-            deployment_id=deployment_id,
-            namespace=f"styrmin-{deployment_id}",
-            release_reference="restore-ref",
-        ),
-        app=ApplicationContext(
-            name="restore-app",
-            version="1.0.0",
-            helm=HelmInfo(
-                chart=ChartInfo(
-                    id=uuid4(),
-                    name="restore-chart",
-                    version="0.1.0",
-                    values_template="",
-                ),
-                repository=RepositoryInfo(id=uuid4(), url="https://example.com"),
-            ),
-        ),
-    ).model_dump(mode="json")
 
 
 @pytest.mark.asyncio
@@ -193,7 +145,7 @@ async def test_create_restore_records_the_namespace_and_active_instance_of_the_b
     deployment = await session.get(Deployment, first.deployment_id)
     assert deployment is not None
     second = await seed_application_instance(session, deployment=deployment)
-    second.context = _global_context_dict(deployment.id)
+    second.context = global_context_dict(deployment_id=deployment.id)
     deployment.active_application_instance_id = second.id
     backup = Backup(
         name="restore-propagation-seed",
