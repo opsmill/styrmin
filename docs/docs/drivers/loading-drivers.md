@@ -97,7 +97,8 @@ async with StyrminClient(server_address="https://styrmin.example") as client:
 ```
 
 A refused or failed load raises `OperationFailedError` with the server's
-message. A load with a driver directory needs a Styrmin server that
+message and the error's `extensions`; see
+[Python SDK errors](../reference/python-sdk-errors.md). A load with a driver directory needs a Styrmin server that
 accepts the `driverDirectory` argument; an older server makes the SDK
 raise `IncompatibleServerError`, and `styrminctl` prints it as an error.
 A load without a driver directory works against older servers too.

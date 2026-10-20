@@ -13,6 +13,11 @@ All notable changes to the Styrmin Python SDK will be documented in this file.
   stored enum values that `clusters.get()` returns. An unknown key at any depth raises
   `ValueError` before any request. With `dry_run=True`, nothing is saved. The call waits
   up to 600 seconds.
+- **`ApplyOutcome.error_extensions`** gives all the extensions of the GraphQL error,
+  `code` included, when the server refuses a manifest in `deployments.apply()` or
+  `apply_files()`. A program reads, for example, the `path` of a refused affinity term
+  without parsing `failure_reason`. A failure without a server error gives an empty dict.
+  ([#522](https://github.com/opsmill/styrmin/issues/522))
 
 ### Fixed
 
@@ -22,7 +27,12 @@ All notable changes to the Styrmin Python SDK will be documented in this file.
   and `extensions.code` (`typename`), so a program had to parse the message to read,
   for example, the `path` of a refused affinity term or the `deployments` of a refused
   `environment_clones.create()` request. An error without extensions gives an empty
-  dict. ([#522](https://github.com/opsmill/styrmin/issues/522))
+  dict. An exception that the SDK raises itself, such as `ResourceNotFoundError` when a
+  read returns no data, gives `{"code": typename}`. `extensions` is a deep copy, and the
+  exceptions can be pickled and copied. ([#522](https://github.com/opsmill/styrmin/issues/522))
+- **`extensions: null` in a GraphQL error** raises the SDK exception that matches the
+  error, with the server's message. Before, it raised `AttributeError`.
+  ([#522](https://github.com/opsmill/styrmin/issues/522))
 
 ### Breaking changes
 

@@ -278,6 +278,13 @@ def _error_code(exc: BaseException) -> str | None:
     return None
 
 
+def _error_extensions(exc: BaseException) -> dict[str, Any]:
+    """All the extensions of the server's error carried by ``exc``, if any."""
+    if isinstance(exc, StyrminAPIError):
+        return exc.extensions
+    return {}
+
+
 def _effective_image_overrides(update_input: UpdateDeploymentInput, stored_config: object) -> dict[str, str | None]:
     """Image override per component once ``update_input`` lands (research D-011).
 
@@ -768,8 +775,8 @@ class DeploymentResource(BaseResource):
         dispatched even when the version is unchanged: the backend re-resolves the
         driver version and owns no-op detection, returning ``None`` when nothing
         changes (``action="unchanged"``). A rejected call returns ``action="failed"``
-        with the server's message and ``error_code``; nothing was written. An
-        ``updated`` outcome that changes the application version also carries
+        with the server's message, ``error_code`` and ``error_extensions``; nothing
+        was written. An ``updated`` outcome that changes the application version also carries
         ``target_version`` and the token-free ``pinned_image_components`` (FR-008),
         and ``inapplicable_overrides`` lists, per component, the manifest's overrides that
         the bound driver version cannot apply; ``apply`` never prompts.
@@ -791,6 +798,7 @@ class DeploymentResource(BaseResource):
                 deployment_id=existing.id,
                 failure_reason=str(exc),
                 error_code=_error_code(exc),
+                error_extensions=_error_extensions(exc),
             )
         if task is None:
             return ApplyOutcome(
@@ -941,7 +949,8 @@ class DeploymentResource(BaseResource):
         * ``--name`` + multi-manifest is a whole-batch error
           (:class:`BatchNameConflictError`) BEFORE per-manifest dispatch.
         * Per-manifest exceptions are caught and turned into
-          ``ApplyOutcome(action="failed", failure_reason=...)``.
+          ``ApplyOutcome(action="failed", failure_reason=...)``; for a server
+          error, the outcome also carries ``error_code`` and ``error_extensions``.
         * ``max_wait`` bounds the wait of each manifest, as in :meth:`apply`.
         """
         _check_max_wait(max_wait)
@@ -985,6 +994,7 @@ class DeploymentResource(BaseResource):
                 action="failed",
                 failure_reason=f"manifest {resolved.source_path}: {exc}",
                 error_code=_error_code(exc),
+                error_extensions=_error_extensions(exc),
             )
 
         if wait and on_event is not None:

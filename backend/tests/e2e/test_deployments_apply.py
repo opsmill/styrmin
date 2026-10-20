@@ -177,6 +177,9 @@ async def test_apply_creates_updates_then_noops(
       and the config is replaced, not merged (US1, ``contracts/sdk-apply.md``).
     - Re-apply the byte-identical manifest: ``unchanged``, no new task, and
       the active instance and status untouched (SC-001/002).
+    - Re-apply with an affinity term that names a deployment the environment
+      does not have: ``failed``, with the term's ``path`` and the name in
+      ``error_extensions``, and nothing saved (#522).
     """
     driver, client = session_scenario_driver
 
@@ -277,6 +280,33 @@ async def test_apply_creates_updates_then_noops(
     assert after.status == before.status, (
         f"no-op re-apply must not change deployment status; "
         f"{before.status!r} -> {after.status!r}"
+    )
+
+    # --- Refused: the outcome gives the server error's extensions (#522) ----
+    missing_name = f"missing-{tmp_path.name[-8:]}"
+    term = {
+        "topology_key": "kubernetes.io/hostname",
+        "deployment_ref": {"deployment_name": missing_name},
+    }
+    manifest_doc["spec"]["config"] = {
+        **new_config,
+        "scheduling": {
+            "pod_anti_affinity": {"preferred": [{"weight": 100, "term": term}]}
+        },
+    }
+    refused_outcome = await client.deployments.apply(
+        _resolve_manifest_from_doc(manifest_doc, manifest_path)
+    )
+    assert refused_outcome.action == "failed", refused_outcome
+    assert refused_outcome.error_code == "VALIDATION_ERROR", refused_outcome
+    assert refused_outcome.error_extensions == {
+        "code": "VALIDATION_ERROR",
+        "deployment_name": missing_name,
+        "path": "deployment.config.scheduling.pod_anti_affinity.preferred[0].term",
+    }, refused_outcome
+    refused_after = await client.deployments.get(deployment_id)
+    assert refused_after.config == new_config, (
+        f"a refused apply must save nothing; config is {refused_after.config!r}"
     )
 
 

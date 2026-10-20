@@ -111,6 +111,9 @@ class ApplyOutcome(BaseModel):
     failure_reason: str | None = None
     # The server's error code (`extensions.code`) when the server rejected the manifest.
     error_code: str | None = None
+    # All the extensions of that error, `code` included, for example the `path` of a refused
+    # affinity term; empty for a failure that carries no server error.
+    error_extensions: dict[str, JsonValue] = Field(default_factory=dict)
     # Set only when `apply` changes an existing deployment's application version.
     target_version: str | None = None
     # Components whose effective image override has no `{{ app.version }}` token (FR-008).

@@ -802,6 +802,30 @@ async def test_apply_returns_a_failed_outcome_when_the_server_rejects_the_manife
     assert outcome.error_code == "COMPONENT_CONTAINER_NOT_DECLARED"
 
 
+async def test_apply_failed_outcome_gives_the_extensions_of_the_server_error(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """A refused affinity term gives the term's ``path`` in ``error_extensions`` (#522)."""
+    path = "deployment.config.scheduling.pod_affinity.preferred[0].term"
+    message = f"Affinity term at {path} names deployment 'peer', which is not a deployment of environment 'prod'."
+    extensions = {"code": "VALIDATION_ERROR", "deployment_name": "peer", "path": path}
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        {"data": None, "errors": [{"message": message, "extensions": extensions}]},
+    ]
+    term = {"topologyKey": "kubernetes.io/hostname", "deploymentRef": {"deploymentName": "peer"}}
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(config={"scheduling": {"podAffinity": {"preferred": [{"weight": 100, "term": term}]}}})
+    )
+
+    assert outcome.action == "failed"
+    assert outcome.failure_reason == message
+    assert outcome.error_code == "VALIDATION_ERROR"
+    assert outcome.error_extensions == extensions
+
+
 async def test_apply_lists_components_whose_overrides_the_driver_version_cannot_apply(
     client: StyrminClient, mock_transport: AsyncMock
 ) -> None:
@@ -1384,6 +1408,25 @@ async def test_apply_files_per_apply_exception_becomes_failed_outcome(
     assert outcomes[1].failure_reason is not None
     assert outcomes[1].failure_reason.startswith(f"manifest {b}: ")
     assert "driver mismatch boom" in outcomes[1].failure_reason
+    assert outcomes[1].error_code is None
+    assert outcomes[1].error_extensions == {}
+
+
+async def test_apply_files_server_error_gives_its_extensions(
+    client: StyrminClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A server error that ``apply()`` raises, such as a refused new deployment, gives its
+    code and all its extensions in the failed outcome (#522)."""
+    a = _write_manifest(tmp_path / "a.yaml", name="a")
+    extensions = {"code": "VALIDATION_ERROR", "deployment_name": "peer", "path": "deployment.config.scheduling"}
+    apply_mock = AsyncMock(side_effect=[OperationFailedError("refused", "VALIDATION_ERROR", extensions)])
+    monkeypatch.setattr(client.deployments, "apply", apply_mock)
+
+    [outcome] = await client.deployments.apply_files([a])
+
+    assert outcome.action == "failed"
+    assert outcome.error_code == "VALIDATION_ERROR"
+    assert outcome.error_extensions == extensions
 
 
 async def test_apply_files_empty_directory_raises_apply_error(client: StyrminClient, tmp_path: Path) -> None:

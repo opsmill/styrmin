@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -28,15 +29,24 @@ class StyrminGraphQLError(StyrminError):
 class StyrminAPIError(StyrminError):
     """The server answered with a GraphQL error; the subclass depends on its ``extensions.code``.
 
-    ``typename`` is the ``extensions.code`` of the error. ``extensions`` holds all the
-    extensions of the error, ``code`` included: for example the ``path`` of a refused
-    affinity term, or the ``deployments`` of a refused ``cloneEnvironment`` request.
+    ``typename`` is the ``extensions.code`` of the error. ``extensions`` holds a copy of
+    all the extensions of the error, ``code`` included: for example the ``path`` of a
+    refused affinity term, or the ``deployments`` of a refused
+    ``environment_clones.create()`` request. When the SDK raises the exception itself,
+    without a server error, ``extensions`` holds only ``code``, or nothing when
+    ``typename`` is empty.
     """
 
     def __init__(self, message: str, typename: str, extensions: Mapping[str, Any] | None = None) -> None:
         self.typename = typename
-        self.extensions: dict[str, Any] = dict(extensions or {})
+        self.extensions: dict[str, Any] = copy.deepcopy(dict(extensions or {}))
+        if typename and "code" not in self.extensions:
+            self.extensions["code"] = typename
         super().__init__(message)
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        # The default reduction calls ``cls(message)``, which lacks ``typename``.
+        return (type(self), (str(self), self.typename, self.extensions))
 
 
 class ResourceNotFoundError(StyrminAPIError):

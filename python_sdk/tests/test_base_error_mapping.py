@@ -7,9 +7,14 @@ and is exercised by every resource; we test it directly here so a new code
 
 from __future__ import annotations
 
+import copy
+import pickle  # noqa: S403 — the test pickles an exception it builds itself
+from typing import TYPE_CHECKING
+
 import pytest
 from styrmin_sdk.exceptions import (
     DeploymentRestoringError,
+    IncompatibleServerError,
     OperationFailedError,
     ResourceAlreadyExistsError,
     ResourceNotFoundError,
@@ -18,6 +23,9 @@ from styrmin_sdk.exceptions import (
     StyrminAuthorizationError,
 )
 from styrmin_sdk.resources._base import BaseResource  # noqa: PLC2701 — intentionally testing a private helper
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def _make_result(code: str, message: str = "boom") -> dict:
@@ -90,12 +98,20 @@ def test_unmapped_codes_fall_back_to_operation_failed(code: str) -> None:
     assert exc_info.value.typename == code
 
 
-def test_error_without_extensions_falls_back() -> None:
-    """A bare error with no ``extensions`` block defaults to OperationFailed."""
+@pytest.mark.parametrize(
+    "error",
+    [{"message": "no extensions here"}, {"message": "no extensions here", "extensions": None}],
+)
+def test_error_without_extensions_falls_back(error: dict) -> None:
+    """An error with no ``extensions``, or ``extensions: null``, defaults to OperationFailed.
+
+    Before #522, ``extensions: null`` raised ``AttributeError`` instead of an SDK exception.
+    """
     with pytest.raises(OperationFailedError) as exc_info:
-        BaseResource._check_graphql_errors({"errors": [{"message": "no extensions here"}]})
+        BaseResource._check_graphql_errors({"errors": [error]})
     # Code defaults to empty string when extensions is absent.
     assert not exc_info.value.typename
+    assert exc_info.value.extensions == {}
     assert "no extensions" in str(exc_info.value)
 
 
@@ -144,28 +160,58 @@ def test_exception_carries_extensions_of_first_error_only() -> None:
 
 
 def test_exception_extensions_are_a_copy() -> None:
-    """Changing the exception's extensions does not change the response the caller holds."""
-    extensions = {"code": "VALIDATION_ERROR", "path": "a"}
+    """Changing the exception's extensions, at any depth, does not change the response."""
+    extensions = {"code": "VALIDATION_ERROR", "deployments": [{"deployment_name": "primary", "paths": ["a"]}]}
     result = {"errors": [{"message": "boom", "extensions": extensions}]}
 
     with pytest.raises(OperationFailedError) as exc_info:
         BaseResource._check_graphql_errors(result)
-    exc_info.value.extensions["path"] = "changed"
+    exc_info.value.extensions["code"] = "changed"
+    exc_info.value.extensions["deployments"][0]["paths"].append("b")
 
-    assert extensions == {"code": "VALIDATION_ERROR", "path": "a"}
-
-
-@pytest.mark.parametrize("error", [{"message": "boom"}, {"message": "boom", "extensions": None}])
-def test_error_without_extensions_gives_empty_extensions(error: dict) -> None:
-    """An error with no ``extensions``, or ``extensions: null``, gives an empty dict."""
-    with pytest.raises(OperationFailedError) as exc_info:
-        BaseResource._check_graphql_errors({"errors": [error]})
-    assert exc_info.value.extensions == {}
-    assert not exc_info.value.typename
+    assert extensions == {"code": "VALIDATION_ERROR", "deployments": [{"deployment_name": "primary", "paths": ["a"]}]}
 
 
-def test_exception_built_without_extensions_has_empty_extensions() -> None:
-    """Code that builds an SDK exception with only a message and a code still works."""
-    error = OperationFailedError("boom", "VALIDATION_ERROR")
+@pytest.mark.parametrize(
+    "exception_class",
+    [ResourceNotFoundError, ResourceAlreadyExistsError, OperationFailedError, IncompatibleServerError],
+)
+def test_exception_built_without_extensions_gives_its_code(exception_class: type[StyrminAPIError]) -> None:
+    """An exception that the SDK builds from a message and a code gives the code in ``extensions``.
+
+    The SDK does this when the server returns no data for a read, so ``extensions["code"]``
+    and ``typename`` agree for every exception that has a code.
+    """
+    error = exception_class("boom", "GROUP_NOT_FOUND")
+    assert error.extensions == {"code": "GROUP_NOT_FOUND"}
+    assert error.typename == "GROUP_NOT_FOUND"
+
+
+def test_exception_built_without_a_code_has_empty_extensions() -> None:
+    """``IncompatibleServerError`` is raised with an empty code, so it gives no extensions."""
+    error = IncompatibleServerError("upgrade the server", "")
     assert error.extensions == {}
-    assert error.typename == "VALIDATION_ERROR"
+    assert not error.typename
+
+
+def test_exception_keeps_the_code_of_its_extensions() -> None:
+    """The ``code`` of the server's extensions is kept as the server gave it."""
+    error = OperationFailedError("boom", "VALIDATION_ERROR", {"code": "VALIDATION_ERROR", "path": "a"})
+    assert error.extensions == {"code": "VALIDATION_ERROR", "path": "a"}
+
+
+@pytest.mark.parametrize(
+    "copy_exception",
+    [lambda e: pickle.loads(pickle.dumps(e)), copy.copy, copy.deepcopy],  # noqa: S301 — data the test built
+    ids=["pickle", "copy", "deepcopy"],
+)
+def test_exception_survives_pickle_and_copy(copy_exception: Callable[[StyrminAPIError], StyrminAPIError]) -> None:
+    """A program that sends an SDK exception to another process, or copies it, keeps all of it."""
+    error = ResourceNotFoundError("boom", "NOT_FOUND", {"code": "NOT_FOUND", "path": "a"})
+
+    copied = copy_exception(error)
+
+    assert type(copied) is ResourceNotFoundError
+    assert str(copied) == "boom"
+    assert copied.typename == "NOT_FOUND"
+    assert copied.extensions == {"code": "NOT_FOUND", "path": "a"}

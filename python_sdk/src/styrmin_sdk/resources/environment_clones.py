@@ -110,10 +110,15 @@ class EnvironmentCloneResource(BaseResource):
         target name, an unknown source or selected deployment, an invalid
         override, another environment-level operation already running on the
         source — raise before anything is created (FR-011). A selection that
-        leaves out a deployment that a copied affinity term names raises
-        ``OperationFailedError`` with ``VALIDATION_ERROR``; its
-        ``extensions["deployments"]`` lists each such deployment with the
-        ``paths`` of the terms that name it.
+        leaves out a deployment that a copied affinity term names, or that
+        includes such a deployment when it is not eligible, raises
+        ``OperationFailedError`` with ``VALIDATION_ERROR``. Its
+        ``extensions["deployments"]`` lists each such deployment with its
+        ``deployment_id``, ``deployment_name``, ``reason`` and the ``paths`` of
+        the terms that name it. ``deployment_id`` is ``None`` for a name that no
+        live deployment of the source environment has, and ``deployment_name``
+        is ``None`` for an id that is not a deployment of the source
+        environment. ``reason`` is text for people to read.
         """
         variables: dict[str, Any] = {"name": name}
         if environment_id is not None:

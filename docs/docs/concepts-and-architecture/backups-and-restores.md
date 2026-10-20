@@ -761,23 +761,45 @@ What happens depends on what you name, and the difference matters:
 | An eligible deployment | It's included. |
 | A selection that leaves out a deployment, or includes one that isn't eligible, when an affinity term that the clone copies names that deployment | The whole request is **rejected up front** with `VALIDATION_ERROR`. The error message lists each such deployment, the reason the clone does not copy it, and the path of every term that names it. Nothing is created and no backup is taken. Add the deployment to the selection, leave out the deployment whose term names it, or, for a term in the environment's config, clear or override `scheduling`. |
 
-For a program, the GraphQL error of the last row gives the same details in
-`extensions.deployments`: one entry per deployment, with its
-`deployment_id`, `deployment_name`, `reason` and the `paths` of the terms
-that name it. The Python SDK raises `OperationFailedError`, and its
-`extensions` attribute holds these extensions:
+For a program, the GraphQL error of a selection refused because of an
+affinity term gives the same details in `extensions.deployments`: one
+entry per deployment, with its `deployment_id`, `deployment_name`,
+`reason` and the `paths` of the terms that name it.
+
+- `deployment_id` is `null` when a term names a deployment by a name that
+  no live deployment of the source environment has.
+- `deployment_name` is `null` when a term gives an id that is not a
+  deployment of the source environment.
+- `reason` is a sentence for people to read, such as `not included in
+  the requested deployment selection`. A program compares
+  `deployment_id` or `deployment_name`, not `reason`.
+
+The Python SDK raises `OperationFailedError`, and its `extensions`
+attribute holds these extensions. The same call raises
+`OperationFailedError` for other refusals too, such as another
+environment-level operation already running on the source, so a program
+handles only the error that has a `deployments` list and raises every
+other error again:
 
 ```python
 from styrmin_sdk.exceptions import OperationFailedError
 
 try:
     await client.environment_clones.create(
-        "prod-rehearsal", environment_id=environment_id, deployment_ids=[peer_id]
+        "prod-rehearsal",
+        environment_id=source_environment_id,
+        deployment_ids=selected_deployment_ids,
     )
 except OperationFailedError as refused:
-    for entry in refused.extensions.get("deployments", []):
-        print(entry["deployment_name"], entry["paths"])
+    if "deployments" not in refused.extensions:
+        raise
+    for entry in refused.extensions["deployments"]:
+        print(entry["deployment_name"] or entry["deployment_id"], entry["paths"])
 ```
+
+[Python SDK errors](../reference/python-sdk-errors.md) lists the
+exceptions that the SDK raises and how to read the details of any
+refused request.
 
 An affinity term can name another deployment of the same environment, in
 `scheduling.pod_affinity` or `scheduling.pod_anti_affinity`. Styrmin stores
