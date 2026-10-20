@@ -51,6 +51,8 @@ class FakeKubernetes:
     #: When set, another writer creates a new Job of the same name as soon as
     #: a deleted Job is removed.
     recreated_after_delete: bool = False
+    #: When set, another writer deletes the Job before its first status read.
+    removed_before_status: bool = False
     #: The pods that the Job controller starts: each one joins ``pods`` when
     #: the Job named by its ``batch.kubernetes.io/job-name`` label is created.
     pods_on_create: list[FakePod] = field(default_factory=list)
@@ -177,6 +179,8 @@ class FakeKubernetes:
     async def _read_job_status(self, request: web.Request) -> web.Response:
         name = request.match_info["job"]
         self.job_requests.append(("status", name))
+        if self.removed_before_status:
+            self.jobs.pop(name, None)
         job = self.jobs.get(name)
         if job is None:
             return _status(404, f'jobs.batch "{name}" not found')

@@ -15,6 +15,7 @@ that the reconcile passes to each action in ``STYRMIN_TOKEN`` (ADR-059).
 """
 
 import asyncio
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -26,13 +27,15 @@ from prefect import task
 from styrmin_backend import config
 from styrmin_backend.agent.service.kubernetes.exceptions import JobFailedError
 from styrmin_backend.agent.service.kubernetes.primitives import (
+    ACTION_JOB_CONTAINER,
+    ACTION_JOB_LABEL,
     get_component_env,
     get_component_images as _k8s_get_component_images,
     get_component_labels as _k8s_get_component_labels,
     run_job,
 )
 from styrmin_backend.agent.steps.reporter import StepReporter, uuid_from_env
-from styrmin_backend.agent.tasks.utils import STEP_ID_ENV
+from styrmin_backend.agent.tasks.utils import STEP_ID_ENV, log_in_run
 from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.services.component_container.overrides import (
     applicable_overrides,
@@ -266,10 +269,13 @@ async def execute_commands(
     """
     Executes a list of commands as kubernetes job with the given context.
 
-    The Job is named ``<release reference>-job`` in the deployment's namespace.
-    The Job of an earlier call on the same deployment, which stays in the
-    cluster after it ends, is deleted with its pods before the new Job is
-    created (``run_job``).
+    The Job is named ``<release reference>-job`` in the deployment's namespace,
+    has the label ``styrmin.io/action-job=true``, and ends at its first failed
+    pod (``backoffLimit: 0``). The Job of an earlier call on the same
+    deployment, which stays in the cluster after it ends, is deleted with its
+    pods before the new Job is created (``run_job``); a line on the hook step
+    that runs this action (``STYRMIN_STEP_ID``) names it. A Job of that name
+    that is still running is never deleted.
 
     Args:
         commands (list[str]): A list of commands to execute.
@@ -288,12 +294,17 @@ async def execute_commands(
         ValueError: If a component is not found or no matching K8s resource exists.
         JobFailedError: If the Job fails. The end of its output is first recorded
             on the hook step that runs this action (``STYRMIN_STEP_ID``).
+        JobStillRunningError: If the Job of an earlier call has not ended, for
+            example because another change of the deployment runs its action.
+        JobNotFromActionError: If a Job of the same name exists that no driver
+            action created.
         JobNotDeletedError: If the Job of an earlier call is not deleted in time.
         JobAlreadyExistsError: If another Job of the same name is created after
             the Job of the earlier call is deleted.
+        JobDeletedError: If the Job is deleted before it ends.
     """
     container_spec: dict = {
-        "name": "user-job",
+        "name": ACTION_JOB_CONTAINER,
         "image": image,
         "command": commands,
     }
@@ -334,25 +345,42 @@ async def execute_commands(
         "metadata": {
             "name": f"{context.instance.release_reference}-job",
             "namespace": context.instance.namespace,
+            "labels": {
+                "app.kubernetes.io/managed-by": "styrmin",
+                ACTION_JOB_LABEL: "true",
+            },
         },
         "spec": {
+            # ``run_job`` reports the first failed pod as the Job's failure, so
+            # the Job ends there instead of starting more pods nobody waits for.
+            "backoffLimit": 0,
             "template": {
                 "spec": {
                     "containers": [container_spec],
                     "restartPolicy": "Never",
                 }
-            }
+            },
         },
     }
 
     if template_metadata:
         body["spec"]["template"]["metadata"] = template_metadata
 
+    reporter = StepReporter.from_env()
+
+    async def record_deletion(line: str) -> None:
+        # The wait for the deletion can last minutes; the hook step says why.
+        log_in_run(logging.INFO, line)
+        await reporter.record_output(reporter.step_id, line, truncated=False)
+
     try:
-        await run_job(namespace=context.instance.namespace, body=body)
+        await run_job(
+            namespace=context.instance.namespace,
+            body=body,
+            on_delete=record_deletion,
+        )
     except JobFailedError as exc:
         if exc.output is not None:
-            reporter = StepReporter.from_env()
             await reporter.record_output(reporter.step_id, exc.output, exc.truncated)
         raise
 

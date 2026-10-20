@@ -139,7 +139,17 @@ async def test_failed_job_of_an_earlier_run_is_replaced_and_the_new_output_is_re
     fake = FakeKubernetes(
         pods=[earlier_pod],
         jobs={
-            JOB: {"metadata": {"name": JOB, "uid": "earlier"}, "status": {"failed": 1}}
+            JOB: {
+                "metadata": {
+                    "name": JOB,
+                    "uid": "earlier",
+                    "labels": {"styrmin.io/action-job": "true"},
+                },
+                "status": {
+                    "failed": 1,
+                    "conditions": [{"type": "Failed", "status": "True"}],
+                },
+            }
         },
         pods_on_create=[_job_pod(b"step-output-1\nstep-output-2\n")],
     )
@@ -149,10 +159,30 @@ async def test_failed_job_of_an_earlier_run_is_replaced_and_the_new_output_is_re
             await _execute()
 
     assert str(raised.value) == f"Job {JOB} failed in namespace {NAMESPACE}"
-    (output,) = _outputs(step_api)
+    # The hook step first names the deleted Job, then holds the new Job's output.
+    deletion, output = _outputs(step_api)
+    assert deletion["stepId"] == str(step_api.ids[HOOK_STEP])
+    assert deletion["output"] == (
+        f"Deleting Job {JOB}, which an earlier action left (failed), and its pods "
+        "before the new Job is created. This waits up to 120 seconds."
+    )
     assert output["output"] == "step-output-1\nstep-output-2\n"
     assert fake.jobs[JOB]["metadata"]["uid"] != "earlier"
     assert [pod.name for pod in fake.pods] == [f"{JOB}-abcde"]
+
+
+async def test_job_is_labelled_as_an_action_job_and_ends_at_its_first_failed_pod(
+    step_api: FakeStepApi, cluster: Callable[[FakeKubernetes], Any]
+) -> None:
+    async with cluster(FakeKubernetes(job_succeeds=True)) as fake:
+        await _execute()
+
+    job = fake.jobs[JOB]
+    assert job["metadata"]["labels"] == {
+        "app.kubernetes.io/managed-by": "styrmin",
+        "styrmin.io/action-job": "true",
+    }
+    assert job["spec"]["backoffLimit"] == 0
 
 
 async def test_cut_output_is_recorded_as_truncated(
