@@ -76,14 +76,14 @@ async def test_explicit_poll_interval_is_kept() -> None:
     assert run.await_args.kwargs["poll_interval"] == 10
 
 
-# The error of a crashed flow run holds its first ERROR log (spec 029, research R-002).
+# The error of a crashed driver action holds its first ERROR log (spec 029, research R-002).
 
 CRASH_MESSAGE = "Process exited with status code: 1"
 CHECK_ERROR = (
-    "The driver files at /styrmin/drivers/my-app in the image "
-    "registry.opsmill.io/opsmill/styrmin:latest are not the files of this driver "
-    "version: their provenance fingerprint is 9b1e2c4, and the driver version was "
-    "loaded with 0a7d3f1."
+    "The driver files at /styrmin/drivers/my-app in the Styrmin agent pod "
+    "styrmin-agent-7c9d8-x2k4q, where the action runs, are not the files of this "
+    "driver version: their provenance fingerprint is 9b1e2c4, and the driver version "
+    "was loaded with 0a7d3f1."
 )
 _START = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
 
@@ -146,14 +146,17 @@ def warnings_log() -> Iterator[io.StringIO]:
     logger.remove(handler_id)
 
 
-async def _run_and_fail(flow_run: FlowRun, client: FakePrefectClient) -> str:
-    """Run a deployment whose flow run ends as ``flow_run``; return the error's text."""
+async def _run_and_fail(
+    flow_run: FlowRun, client: FakePrefectClient, *, driver_action: bool = True
+) -> str:
+    """Run a driver action, or another deployment, whose flow run ends as ``flow_run``; return the error's text."""
+    run = run_driver_action_or_fail if driver_action else run_deployment_or_fail
     with (
         patch(f"{MODULE}.arun_deployment", AsyncMock(return_value=flow_run)),
         patch(f"{MODULE}.get_client", return_value=client),
         pytest.raises(RuntimeError) as raised,
     ):
-        await run_deployment_or_fail(name="flow/deployment", parameters={})
+        await run(name="flow/deployment", parameters={})
     return str(raised.value)
 
 
@@ -181,6 +184,41 @@ async def test_crashed_run_error_holds_its_first_error_log_and_the_state_message
 
     assert message == (
         f"Deployment flow run {flow_run.id} crashed: {CHECK_ERROR} ({CRASH_MESSAGE})"
+    )
+
+
+@pytest.mark.asyncio
+async def test_crashed_run_of_another_deployment_keeps_the_state_message_without_its_logs() -> (
+    None
+):
+    """Only a driver action's error holds its logs: other flows' logs are not exposed on a task."""
+    flow_run = FlowRun(flow_id=uuid4(), state=Crashed(message=CRASH_MESSAGE))
+    client = FakePrefectClient([_log(flow_run.id, logging.ERROR, CHECK_ERROR, 0)])
+
+    message = await _run_and_fail(flow_run, client, driver_action=False)
+
+    assert message == f"Deployment flow run {flow_run.id} crashed: {CRASH_MESSAGE}"
+    assert client.reads == 0
+
+
+@pytest.mark.asyncio
+async def test_crashed_run_error_has_the_action_token_and_other_secrets_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config.SETTINGS.agent, "api_token", SecretStr("t0k3n-value"))
+    flow_run = FlowRun(flow_id=uuid4(), state=Crashed(message=CRASH_MESSAGE))
+    error_log = (
+        "Login failed with STYRMIN_TOKEN t0k3n-value: password=hunter2, "
+        "url https://admin:s3cret@infrahub:8000/api, Authorization: Bearer abc.def"
+    )
+    client = FakePrefectClient([_log(flow_run.id, logging.ERROR, error_log, 0)])
+
+    message = await _run_and_fail(flow_run, client)
+
+    assert message == (
+        f"Deployment flow run {flow_run.id} crashed: Login failed with STYRMIN_TOKEN "
+        "<redacted>: password=<redacted>, url https://infrahub:8000/api, "
+        f"Authorization: Bearer <redacted> ({CRASH_MESSAGE})"
     )
 
 
