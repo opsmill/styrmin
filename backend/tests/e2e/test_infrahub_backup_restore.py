@@ -31,6 +31,7 @@ from styrmin_sdk import StyrminClient
 from styrmin_sdk.exceptions import ResourceNotFoundError
 
 from tests.e2e.conftest import _portforward, _wait_for_http
+from tests.e2e.helpers.infrahub import INFRAHUB_ADMIN_TOKEN
 from tests.e2e.test_backup_restore import (
     assert_velero_backup_uses_bsl,
     wait_for_pods_ready,
@@ -39,13 +40,6 @@ from tests.e2e.test_backup_restore import (
 pytestmark = [
     pytest.mark.shard_infrahub,
 ]
-
-# Default admin token baked into the upstream Infrahub Helm chart values
-# (`infrahubServer.admin.INFRAHUB_API_TOKEN`). The chart preseeds the same
-# value at `INFRAHUB_INITIAL_ADMIN_TOKEN`, so the running instance accepts
-# it as the admin token immediately after the initial setup completes.
-# Infrahub 1.6+ requires authentication for writes through the SDK.
-_INFRAHUB_ADMIN_TOKEN = "06438eb2-8019-4776-878c-0941b1f1d1ec"
 
 # Distinctive payload uploaded to the Infrahub object store. Object-store
 # content is exactly where rendered artifact content and file objects are
@@ -63,7 +57,7 @@ _ARTIFACT_CONTENT = (
 def _make_infrahub_client(port: int) -> InfrahubSDKClient:
     """Build an authenticated Infrahub SDK client against a forwarded port."""
     config = InfrahubConfig(
-        address=f"http://localhost:{port}", api_token=_INFRAHUB_ADMIN_TOKEN
+        address=f"http://localhost:{port}", api_token=INFRAHUB_ADMIN_TOKEN
     )
     return InfrahubSDKClient(config=config)
 

@@ -16,6 +16,8 @@ from tests.e2e.demos.scenarios import (
     component_overrides,
     deploy_upgrade,
 )
+from tests.e2e.demos.semaphore_image import IMAGE as SEMAPHORE_IMAGE
+from tests.e2e.demos.video import ClosingCard
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -88,13 +90,32 @@ class DemoContext:
 
 @dataclass(frozen=True)
 class Demo[S]:
-    """One demo: ``setup`` runs before the recording starts and returns what ``record`` needs."""
+    """One demo: ``setup`` runs before the recording starts and returns what ``record`` needs.
+
+    ``summary`` holds the lines of the closing card; ``{previous}``, ``{latest}`` and ``{semaphore_image}``
+    in them are replaced by the Infrahub versions and the demo Semaphore image. ``expected_minutes`` is how
+    long a run of the demo usually takes, setup and cleanup included.
+    """
 
     slug: str
     number: int
+    title: str
     environment_names: tuple[str, ...]
     setup: Callable[[DemoContext], Awaitable[S]]
     record: Callable[[DemoContext, S], Awaitable[None]]
+    summary: tuple[str, ...] = ()
+    expected_minutes: int = 10
+    uses_semaphore_image: bool = False
+
+    def closing_card(self, versions: InfrahubVersions) -> ClosingCard:
+        values = {
+            "previous": versions.previous,
+            "latest": versions.latest,
+            "semaphore_image": SEMAPHORE_IMAGE,
+        }
+        return ClosingCard(
+            self.title, tuple(line.format(**values) for line in self.summary)
+        )
 
     def __post_init__(self) -> None:
         if self.slug not in SLUGS:
@@ -123,36 +144,69 @@ def check_catalog(demos: Sequence[Demo[Any]]) -> None:
         )
 
 
+# The expected durations come from the measured runs in dev/guides/local-demo.md, rounded up.
 DEMOS: tuple[Demo[Any], ...] = (
     Demo(
         slug="deploy-upgrade",
         number=1,
+        title="Deploy and upgrade Infrahub",
         environment_names=(deploy_upgrade.ENVIRONMENT_NAME,),
         setup=deploy_upgrade.setup,
         record=deploy_upgrade.record,
+        summary=(
+            "Infrahub {previous} deployed from the Styrmin UI, then upgraded to {latest}.",
+            "The upgrade ran the Infrahub driver's upgrade action: it stopped Infrahub, "
+            "ran 'infrahub upgrade' and started Infrahub again.",
+            "The upgrade task lists each step that it ran.",
+        ),
+        expected_minutes=9,
     ),
     Demo(
         slug="component-overrides",
         number=2,
+        title="Override the image and the replicas of a component",
         environment_names=(component_overrides.ENVIRONMENT_NAME,),
         setup=component_overrides.setup,
         record=component_overrides.record,
+        summary=(
+            "The Semaphore server runs {semaphore_image}, an image that adds the Infrahub Ansible collection.",
+            "Infrahub runs two server pods.",
+            "Each change is an override of one component; the application driver stays the same.",
+        ),
+        expected_minutes=11,
+        uses_semaphore_image=True,
     ),
     Demo(
         slug="backup-restore",
         number=3,
+        title="Back up and restore an environment",
         environment_names=(backup_restore.ENVIRONMENT_NAME,),
         setup=backup_restore.setup,
         record=backup_restore.record,
+        summary=(
+            f"One backup covers Infrahub and Semaphore in the environment {backup_restore.ENVIRONMENT_NAME}.",
+            "The restore brought back the device deleted in Infrahub and the task template deleted in Semaphore.",
+        ),
+        expected_minutes=21,
+        uses_semaphore_image=True,
     ),
     Demo(
         slug="clone",
         number=4,
+        title="Clone an environment",
         # The clone first, so the deletion of the environments an earlier failed run kept, and the
         # cleanup, delete it before its source.
         environment_names=(clone.CLONE_NAME, clone.ENVIRONMENT_NAME),
         setup=clone.setup,
         record=clone.record,
+        summary=(
+            f"{clone.CLONE_NAME} is a copy of {clone.ENVIRONMENT_NAME} with its own Infrahub and Semaphore.",
+            "A device added in the clone's Infrahub shows only in the clone's Semaphore: "
+            f"{len(clone.DEVICES) + 1} devices.",
+            f"The Semaphore of {clone.ENVIRONMENT_NAME} still lists {len(clone.DEVICES)} devices.",
+        ),
+        expected_minutes=14,
+        uses_semaphore_image=True,
     ),
 )
 check_catalog(DEMOS)

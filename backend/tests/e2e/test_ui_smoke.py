@@ -157,6 +157,22 @@ async def test_pods_tab_copy_logs_command(
         f"logs command. expected={expected!r}, got={clipboard_text!r}"
     )
 
+    # 6. The methods that the component overrides demo ends each chapter with
+    # (backend/tests/e2e/demos/scenarios/component_overrides.py): open the
+    # section of one declared component, wait for its running pods, and expand
+    # one of them to show its containers. simple-app's database is a
+    # singleton PostgreSQL.
+    await pods_tab.expand_section("database")
+    assert await pods_tab.section("database").get_attribute("data-open") == "true"
+    [database_pod] = await pods_tab.wait_for_running_pods(
+        "database", count=1, timeout=120.0
+    )
+    row_text = await pods_tab.show_pod(database_pod)
+    assert database_pod in row_text
+    assert "postgresql" in row_text, (
+        f"the expanded pod row should list the postgresql container, got {row_text!r}"
+    )
+
 
 # ---- from test_driver_detail.py ----
 async def test_driver_detail_inspects_versions_via_tabs(

@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
 
-from tests.e2e.demos import infrahub_setup
 from tests.e2e.demos.catalog import DEMOS
 from tests.e2e.demos.scenarios import clone
 from tests.e2e.drivers.errors import ScenarioActionError
+from tests.e2e.helpers.infrahub import INFRAHUB_ADMIN_TOKEN
 from tests.e2e.drivers.refs import (
     EnvironmentCloneDeploymentResultRef,
     EnvironmentCloneRef,
@@ -72,15 +71,6 @@ def test_demo_4_is_registered_with_the_clone_first() -> None:
     assert demo.record is clone.record
 
 
-def test_the_semaphore_image_is_the_one_the_record_task_builds() -> None:
-    task_source = (REPOSITORY_ROOT / "tasks" / "demo.py").read_text()
-
-    match = re.search(r'^SEMAPHORE_DEMO_IMAGE = "([^"]+)"$', task_source, re.MULTILINE)
-    assert match is not None
-    image = f"{clone.SEMAPHORE_IMAGE_REPOSITORY}:v{clone.SEMAPHORE_VERSION}"
-    assert image == match.group(1)
-
-
 def test_the_count_pattern_matches_the_line_the_playbook_prints() -> None:
     playbook = (
         REPOSITORY_ROOT / "backend/tests/e2e/demos/semaphore/ansible/list_hosts.yml"
@@ -109,7 +99,7 @@ def test_device_count_names_a_log_without_a_count_and_shows_its_last_lines() -> 
 
 
 def test_device_count_hides_the_infrahub_token_in_the_last_lines() -> None:
-    token = infrahub_setup.INFRAHUB_TOKEN
+    token = INFRAHUB_ADMIN_TOKEN
     log = f"fatal: Infrahub refused the token {token}\nPLAY RECAP ****\n"
 
     with pytest.raises(ScenarioActionError) as raised:
@@ -136,8 +126,9 @@ def test_check_device_count_names_where_the_count_was_wrong() -> None:
         clone.check_device_count(LOG, 3, where="The clone's Semaphore")
 
     assert str(raised.value) == (
-        "The clone's Semaphore lists 2 devices in its inventory, not 3"
+        f"The clone's Semaphore lists 2 devices in its inventory, not 3. {clone.IMAGE_HINT}"
     )
+    assert "#530 (PR #531)" in clone.IMAGE_HINT
 
 
 def test_check_clone_returns_the_counterpart_of_each_deployment() -> None:

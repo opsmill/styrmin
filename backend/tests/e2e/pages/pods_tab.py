@@ -18,9 +18,8 @@ if TYPE_CHECKING:
 class PodsTabPage:
     """Pods tab — sections, expand, kubectl Copy helpers."""
 
-    def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
+    def __init__(self, page: Page) -> None:
         self._page = page
-        self._keystroke_delay_ms = keystroke_delay_ms
 
     async def open(self) -> None:
         """Click the Pods tab in the deployment-detail tab strip."""
@@ -60,6 +59,53 @@ class PodsTabPage:
         name = await running_rows.first.get_attribute("data-pod-name")
         assert name, "pod row rendered without a data-pod-name attribute"
         return name
+
+    def section(self, component: str) -> Locator:
+        """Locator for the section of the declared component ``component``."""
+        return self._page.locator(
+            f'[data-testid="pod-section"][data-variant="declared"][data-component="{component}"]'
+        )
+
+    async def expand_section(self, component: str) -> None:
+        """Open the section of the declared component ``component`` and scroll it to the top of the page."""
+        section = self.section(component)
+        await expect(section).to_be_visible()
+        if await section.get_attribute("data-open") != "true":
+            await section.locator("button").first.click()
+            await expect(section).to_have_attribute("data-open", "true", timeout=5_000)
+        await section.evaluate(
+            "section => section.scrollIntoView({block: 'start', behavior: 'smooth'})"
+        )
+
+    async def wait_for_running_pods(
+        self, component: str, *, count: int, timeout: float = 120.0
+    ) -> list[str]:
+        """Wait until the open section of ``component`` lists exactly ``count`` pods, all RUNNING, and return
+        their names. The tab refreshes every 10 s, so a pod that an update replaced leaves the list."""
+        rows = self.section(component).locator('[data-testid="pod-row"]')
+        running = rows.filter(has=self._page.locator('[data-pod-phase="RUNNING"]'))
+        timeout_ms = int(timeout * 1000)
+        await expect(rows).to_have_count(count, timeout=timeout_ms)
+        await expect(running).to_have_count(count, timeout=timeout_ms)
+        names = [
+            await row.get_attribute("data-pod-name") for row in await running.all()
+        ]
+        if not all(names):
+            raise AssertionError("pod row rendered without a data-pod-name attribute")
+        return [name for name in names if name]
+
+    async def show_pod(self, pod_name: str) -> str:
+        """Expand the row of ``pod_name`` when it is collapsed, scroll it to the middle of the page and return
+        its text, which lists each container with its image."""
+        row = self._page.locator(f'[data-testid="pod-row"][data-pod-name="{pod_name}"]')
+        toggle = row.get_by_role("button", name=pod_name, exact=False)
+        if await toggle.get_attribute("aria-expanded") != "true":
+            await toggle.click()
+            await expect(toggle).to_have_attribute("aria-expanded", "true")
+        await row.evaluate(
+            "row => row.scrollIntoView({block: 'center', behavior: 'smooth'})"
+        )
+        return await row.inner_text()
 
     async def expand_pod(self, pod_name: str) -> None:
         """Click the pod row identified by ``pod_name`` to expand it."""

@@ -11,14 +11,14 @@ import httpx
 import yaml
 from infrahub_sdk import Config, InfrahubClient
 
+from tests.e2e.demos.progress import report
+from tests.e2e.helpers.infrahub import INFRAHUB_ADMIN_TOKEN
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 SCHEMA_PATH = Path(__file__).parent / "infrahub" / "schema.yml"
 DEVICE_KIND = "InfraDevice"
-# Both Infrahub charts the drivers use (4.33.2 and 4.19.2) preset this admin token
-# as INFRAHUB_INITIAL_ADMIN_TOKEN. Never print it.
-INFRAHUB_TOKEN = "06438eb2-8019-4776-878c-0941b1f1d1ec"  # noqa: S105
 POLL_INTERVAL = 3.0
 
 
@@ -28,11 +28,14 @@ class InfrahubSetupError(RuntimeError):
 
 def client(url: str) -> InfrahubClient:
     """Return an Infrahub SDK client for ``url`` that authenticates with the preset admin token."""
-    return InfrahubClient(config=Config(address=url, api_token=INFRAHUB_TOKEN))
+    return InfrahubClient(config=Config(address=url, api_token=INFRAHUB_ADMIN_TOKEN))
 
 
 async def load_devices(url: str, names: Sequence[str]) -> None:
     """Load the device schema into the Infrahub at ``url``, then create one device per name."""
+    report(
+        f"Loading the device schema and the devices {', '.join(names)} into Infrahub at {url}"
+    )
     infrahub = client(url)
     schema = yaml.safe_load(SCHEMA_PATH.read_text())
     response = await infrahub.schema.load(schemas=[schema], wait_until_converged=True)

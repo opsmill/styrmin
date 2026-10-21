@@ -13,10 +13,13 @@ from tests.e2e.demos.encode import FfmpegError
 from tests.e2e.demos.recorder import (
     ACTION_MS,
     ACTION_STYLE,
+    CURSOR_REST,
+    RESULT_HOLD_SECONDS,
     DemoRecorder,
+    Recording,
     probe_duration,
 )
-from tests.e2e.demos.video import Cut, Wait
+from tests.e2e.demos.video import Chapter, Cut, Wait
 
 RAW_DURATION = 42.5
 
@@ -48,6 +51,27 @@ class FakeScreencast:
     async def stop(self) -> None:
         self.calls.append(("stop",))
 
+    async def show_overlay(self, html: str) -> FakeOverlay:
+        self.calls.append(("show_overlay", html))
+        return FakeOverlay(self.calls, html)
+
+
+class FakeOverlay:
+    def __init__(self, calls: list[tuple], html: str) -> None:
+        self.calls = calls
+        self.html = html
+
+    async def __aexit__(self, *args) -> None:
+        self.calls.append(("remove_overlay", self.html))
+
+
+class FakeMouse:
+    def __init__(self, calls: list[tuple]) -> None:
+        self.calls = calls
+
+    async def move(self, x: float, y: float) -> None:
+        self.calls.append(("mouse_move", x, y))
+
 
 class FakeContext:
     def __init__(self, calls: list[tuple]) -> None:
@@ -66,6 +90,7 @@ class FakePage:
         self.calls = calls
         self.context = context or FakeContext(calls)
         self.screencast = FakeScreencast(calls)
+        self.mouse = FakeMouse(calls)
         self.closed = False
 
     async def close(self) -> None:
@@ -116,15 +141,17 @@ async def test_waits_are_recorded_in_seconds_since_start_and_printed(
     async with started.wait("Restore in progress"):
         clock.advance(38.0)
 
-    waits, cuts, duration = await started.stop()
+    recording = await started.stop()
 
-    assert waits == [
+    assert recording.waits == (
         Wait("Backup in progress", 3.0, 255.0),
         Wait("Restore in progress", 257.0, 295.0),
-    ]
-    assert cuts == []
-    assert duration == RAW_DURATION
+    )
+    assert recording.cuts == ()
+    assert recording.raw_duration == RAW_DURATION
     output = capsys.readouterr().out
+    # A line when each wait starts, so a long wait does not look like a hang, and one when it ends.
+    assert "Wait: Backup in progress\n" in output
     assert "Wait: Backup in progress took 4 min 12 s" in output
     assert "Wait: Restore in progress took 38 s" in output
 
@@ -137,8 +164,7 @@ async def test_a_wait_whose_block_raises_is_not_recorded(
             clock.advance(5.0)
             raise RuntimeError("restore failed")
 
-    waits, _cuts, _duration = await started.stop()
-    assert waits == []
+    assert (await started.stop()).waits == ()
 
 
 async def test_unrecorded_yields_a_new_page_of_the_same_context_and_records_a_cut(
@@ -151,8 +177,7 @@ async def test_unrecorded_yields_a_new_page_of_the_same_context_and_records_a_cu
         clock.advance(7.5)
 
     assert page.closed
-    _waits, cuts, _duration = await started.stop()
-    assert cuts == [Cut(10.0, 17.5)]
+    assert (await started.stop()).cuts == (Cut(10.0, 17.5),)
 
 
 async def test_unrecorded_records_the_cut_and_closes_the_page_when_its_block_raises(
@@ -165,8 +190,7 @@ async def test_unrecorded_records_the_cut_and_closes_the_page_when_its_block_rai
             raise ValueError("login failed")
 
     assert page.closed
-    _waits, cuts, _duration = await started.stop()
-    assert cuts == [Cut(4.0, 6.0)]
+    assert (await started.stop()).cuts == (Cut(4.0, 6.0),)
 
 
 async def test_step_shows_a_chapter_and_stays_current_when_its_block_raises(
@@ -190,17 +214,78 @@ async def test_step_shows_a_chapter_and_stays_current_when_its_block_raises(
     assert "Step: Restore the backup" in output
 
 
-async def test_stop_stops_the_screencast_and_returns_copies(
-    started: DemoRecorder, calls: list[tuple]
+async def test_stop_stops_the_screencast_and_returns_the_chapters_with_their_start(
+    started: DemoRecorder, clock: FakeClock, calls: list[tuple]
 ) -> None:
-    waits, cuts, _duration = await started.stop()
-    waits.append(Wait("x", 1.0, 2.0))
-    cuts.append(Cut(1.0, 2.0))
+    clock.advance(1.5)
+    async with started.step("Back up the whole environment"):
+        clock.advance(20.0)
+    async with started.step("Restore the backup"):
+        pass
+
+    recording = await started.stop()
 
     assert calls[-1] == ("stop",)
-    again_waits, again_cuts, _ = await started.stop()
-    assert again_waits == []
-    assert again_cuts == []
+    assert recording == Recording(
+        waits=(),
+        cuts=(),
+        chapters=(
+            Chapter("Back up the whole environment", 1.5),
+            Chapter("Restore the backup", 21.5),
+        ),
+        raw_duration=RAW_DURATION,
+    )
+
+
+async def test_cut_records_the_block_on_the_recorded_page(
+    started: DemoRecorder, clock: FakeClock, calls: list[tuple]
+) -> None:
+    clock.advance(30.0)
+    async with started.cut():
+        clock.advance(1.5)
+
+    assert ("new_page",) not in calls
+    assert (await started.stop()).cuts == (Cut(30.0, 31.5),)
+
+
+async def test_a_caption_replaces_the_previous_one_and_escapes_its_text(
+    started: DemoRecorder, calls: list[tuple]
+) -> None:
+    await started.caption("Semaphore in network-lab (source)")
+    await started.caption("Infrahub in network-lab-clone & co")
+
+    overlays = [call for call in calls if call[0] in {"show_overlay", "remove_overlay"}]
+    assert [call[0] for call in overlays] == [
+        "show_overlay",
+        "remove_overlay",
+        "show_overlay",
+    ]
+    assert "Semaphore in network-lab (source)" in overlays[0][1]
+    assert overlays[1][1] == overlays[0][1]
+    assert "network-lab-clone &amp; co" in overlays[2][1]
+    # The caption never takes a click from the page.
+    assert "pointer-events: none" in overlays[2][1]
+
+
+async def test_hold_rests_the_cursor_then_waits(
+    started: DemoRecorder, calls: list[tuple], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(recorder_module.asyncio, "sleep", fake_sleep)
+
+    await started.hold()
+    await started.hold(2.5)
+
+    assert [call for call in calls if call[0] == "mouse_move"] == [
+        ("mouse_move", *CURSOR_REST),
+        ("mouse_move", *CURSOR_REST),
+    ]
+    assert slept == [RESULT_HOLD_SECONDS, 2.5]
+    assert RESULT_HOLD_SECONDS >= 5.0
 
 
 async def test_a_wait_and_a_cut_cannot_nest(started: DemoRecorder) -> None:

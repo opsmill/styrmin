@@ -1,12 +1,13 @@
-"""Plan the final demo video from the recorded waits and cuts, and build its ffmpeg arguments (research R-005).
+"""Plan the final demo video from the recorded waits, cuts and chapters, and build its ffmpeg arguments (research R-005).
 
 Pure functions only, unit tested without a browser or ffmpeg.
 """
 
 from __future__ import annotations
 
+import json
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from itertools import pairwise
 from operator import attrgetter
 from typing import TYPE_CHECKING, Literal
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 type SegmentKind = Literal["normal", "sped_up", "cut"]
+SEGMENT_KINDS = ("normal", "sped_up", "cut")
 
 # Waits are timed with time.monotonic(), not from the frames,
 # so a wait can end just after the last frame.
@@ -24,6 +26,11 @@ END_TOLERANCE = 1.0
 # or reads the input to its end.
 SHORTEST_PART = 0.1
 LABEL_BOTTOM_MARGIN = 64
+VIDEO_SIZE = (1920, 1080)
+# How long the closing card stays on screen at the end of each video.
+CLOSING_SECONDS = 6.0
+RAW_NAME = "raw.webm"
+CLOSING_CHAPTER = "Summary"
 OUTPUT_OPTIONS = (
     *("-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p"),
     *("-r", "30", "-movflags", "+faststart", "-an"),
@@ -70,11 +77,65 @@ class Segment:
 
     def __post_init__(self) -> None:
         _check_range(self.start, self.end)
+        if self.kind not in SEGMENT_KINDS:
+            raise ValueError(f"Unknown segment kind {self.kind!r}: {self}")
         sped_up = self.kind == "sped_up"
         if sped_up != (self.factor > 1) or sped_up != (self.label is not None):
             raise ValueError(
                 f"Only a sped_up segment has a factor above 1 and a label: {self}"
             )
+
+
+@dataclass(frozen=True)
+class Chapter:
+    """A step title and when the step started, in seconds since the recording started."""
+
+    title: str
+    start: float
+
+
+@dataclass(frozen=True)
+class ClosingCard:
+    """The card that ends each video: the demo's title and what the video showed."""
+
+    title: str
+    lines: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class VideoPlan:
+    """What the encoder needs besides the raw video, saved as JSON next to it so that a failed encoding can run again.
+
+    ``chapters`` hold times of the raw video; ``video_name`` is the name of the MP4 file, for example
+    ``1-deploy-upgrade.mp4``.
+    """
+
+    video_name: str
+    segments: tuple[Segment, ...]
+    chapters: tuple[Chapter, ...]
+    closing: ClosingCard
+    raw_name: str = RAW_NAME
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), indent=2) + "\n"
+
+    @classmethod
+    def from_json(cls, text: str) -> VideoPlan:
+        """Read a plan that ``to_json`` wrote; raise ``ValueError`` when ``text`` is not one."""
+        try:
+            data = json.loads(text)
+            return cls(
+                video_name=data["video_name"],
+                segments=tuple(Segment(**segment) for segment in data["segments"]),
+                chapters=tuple(Chapter(**chapter) for chapter in data["chapters"]),
+                closing=ClosingCard(
+                    title=data["closing"]["title"],
+                    lines=tuple(data["closing"]["lines"]),
+                ),
+                raw_name=data["raw_name"],
+            )
+        except (KeyError, TypeError, json.JSONDecodeError) as error:
+            raise ValueError(f"Not a video plan: {error!r}") from None
 
 
 @dataclass
@@ -98,8 +159,15 @@ def format_duration(seconds: float) -> str:
 
 
 def label_text(label: str, real_seconds: float, factor: int) -> str:
-    """Return the text shown on a sped-up part (research R-003)."""
-    return f"Sped up {factor}×: {label} took {format_duration(real_seconds)}"
+    """Return the text shown on a sped-up part (research R-003), for example
+    ``"The upgrade runs (2 min 55 s, shown 44× faster)"``."""
+    return f"{label} ({format_duration(real_seconds)}, shown {factor}× faster)"
+
+
+def format_timestamp(seconds: float) -> str:
+    """Return a position in the video rounded down to the second, for example ``"1:05"``."""
+    minutes, rest = divmod(math.floor(seconds), 60)
+    return f"{minutes}:{rest:02d}"
 
 
 def planned_length(segments: Sequence[Segment]) -> float:
@@ -109,6 +177,30 @@ def planned_length(segments: Sequence[Segment]) -> float:
         for segment in segments
         if segment.kind != "cut"
     )
+
+
+def final_time(raw_time: float, segments: Sequence[Segment]) -> float:
+    """Return where ``raw_time`` of the raw video plays in the final video.
+
+    A time inside a cut maps to the first frame after the cut.
+    """
+    elapsed = 0.0
+    for segment in segments:
+        if raw_time <= segment.start:
+            break
+        if segment.kind != "cut":
+            elapsed += (min(raw_time, segment.end) - segment.start) / segment.factor
+    return elapsed
+
+
+def chapter_lines(plan: VideoPlan) -> list[str]:
+    """Return one line per chapter of the final video, then one for the closing card, for example ``"0:14 Upgrade"``."""
+    lines = [
+        f"{format_timestamp(final_time(chapter.start, plan.segments))} {chapter.title}"
+        for chapter in plan.chapters
+    ]
+    lines.append(f"{format_timestamp(planned_length(plan.segments))} {CLOSING_CHAPTER}")
+    return lines
 
 
 def plan_segments(
@@ -229,8 +321,13 @@ def ffmpeg_arguments(
     segments: Sequence[Segment],
     label_paths: Sequence[Path],
     output_path: Path,
+    *,
+    closing_card: Path,
+    closing_seconds: float = CLOSING_SECONDS,
+    size: tuple[int, int] = VIDEO_SIZE,
 ) -> list[str]:
-    """Return the ffmpeg arguments, without the program name, that encode ``segments`` of ``raw_path``.
+    """Return the ffmpeg arguments, without the program name, that encode ``segments`` of ``raw_path``, then
+    ``closing_card`` for ``closing_seconds``, at ``size``.
 
     ``label_paths`` holds one label image per ``sped_up`` segment, in the order of those segments.
     """
@@ -241,6 +338,10 @@ def ffmpeg_arguments(
     if len(label_paths) != sped_up_count:
         raise ValueError(
             f"Got {len(label_paths)} label images for {sped_up_count} sped-up segments"
+        )
+    if closing_seconds <= 0:
+        raise ValueError(
+            f"The closing card must last a positive time: {closing_seconds}"
         )
 
     arguments = ["-hide_banner", "-nostdin", "-loglevel", "error", "-y"]
@@ -255,20 +356,30 @@ def ffmpeg_arguments(
         ]
     for label_path in label_paths:
         arguments += ["-i", str(label_path)]
+    card_input = len(kept) + len(label_paths)
+    arguments += [
+        *("-loop", "1", "-framerate", "30", "-t", f"{closing_seconds:.3f}"),
+        *("-i", str(closing_card)),
+    ]
 
+    # Every part gets the same size and square pixels, which the concat filter requires.
+    width, height = size
+    fit = f"scale={width}:{height},setsar=1"
     filters: list[str] = []
-    label_inputs = iter(range(len(kept), len(kept) + len(label_paths)))
+    label_inputs = iter(range(len(kept), card_input))
     for index, segment in enumerate(kept):
         if segment.kind == "sped_up":
             filters.append(
-                f"[{index}:v]setpts=(PTS-STARTPTS)/{segment.factor}[s{index}]"
+                f"[{index}:v]setpts=(PTS-STARTPTS)/{segment.factor},{fit}[s{index}]"
             )
             overlay = f"overlay=(W-w)/2:H-h-{LABEL_BOTTOM_MARGIN}"
             filters.append(f"[s{index}][{next(label_inputs)}:v]{overlay}[v{index}]")
         else:
-            filters.append(f"[{index}:v]setpts=PTS-STARTPTS[v{index}]")
-    joined = "".join(f"[v{index}]" for index in range(len(kept)))
-    filters.append(f"{joined}concat=n={len(kept)}:v=1:a=0,fps=30,format=yuv420p[out]")
+            filters.append(f"[{index}:v]setpts=PTS-STARTPTS,{fit}[v{index}]")
+    card = len(kept)
+    filters.append(f"[{card_input}:v]setpts=PTS-STARTPTS,{fit}[v{card}]")
+    joined = "".join(f"[v{index}]" for index in range(card + 1))
+    filters.append(f"{joined}concat=n={card + 1}:v=1:a=0,fps=30,format=yuv420p[out]")
 
     return [
         *arguments,

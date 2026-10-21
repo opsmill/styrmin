@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import kr8s
@@ -12,6 +13,8 @@ from kr8s.asyncio.objects import Namespace
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.exceptions import ResourceNotFoundError
 from styrmin_sdk.graphql._generated.input_types import ParameterValueInput
+
+from tests.e2e.demos.progress import report, waiting
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -25,6 +28,7 @@ ENTERPRISE_DRIVER_PATH = "/styrmin/drivers/infrahub-enterprise"
 # The context `vcluster connect styrmin --driver=docker` writes; selected without changing the current context.
 KUBE_CONTEXT = "vcluster-docker_styrmin"
 POLL_INTERVAL = 5.0
+DELETE_TIMEOUT = 600.0
 
 
 class StackError(RuntimeError):
@@ -48,31 +52,19 @@ async def connect(
     return client
 
 
-async def existing_environments(
+@dataclass(frozen=True)
+class EnvironmentRecord:
+    """An environment on the ``local`` cluster: its name and its Styrmin id."""
+
+    name: str
+    id: str
+
+
+async def find_environments(
     client: StyrminClient, names: Sequence[str]
-) -> list[str]:
+) -> list[EnvironmentRecord]:
     """Return the environments of ``names`` that exist on the ``local`` cluster, in the given order."""
-    found: list[str] = []
-    for name in names:
-        try:
-            await client.environments.get(
-                environment_name=name, cluster_name=CLUSTER_NAME
-            )
-        except ResourceNotFoundError:
-            continue
-        found.append(name)
-    return found
-
-
-async def delete_environments(
-    client: StyrminClient,
-    names: Sequence[str],
-    *,
-    timeout: float = 600.0,
-    kube_context: str = KUBE_CONTEXT,
-) -> None:
-    """Delete each environment of ``names`` that exists on the ``local`` cluster, in order, then wait for its namespaces."""
-    namespaces: list[str] = []
+    found: list[EnvironmentRecord] = []
     for name in names:
         try:
             environment = await client.environments.get(
@@ -80,15 +72,39 @@ async def delete_environments(
             )
         except ResourceNotFoundError:
             continue
+        found.append(EnvironmentRecord(name=name, id=str(environment.id)))
+    return found
+
+
+async def delete_environments(
+    client: StyrminClient,
+    environments: Sequence[EnvironmentRecord],
+    *,
+    timeout: float = DELETE_TIMEOUT,
+    kube_context: str = KUBE_CONTEXT,
+) -> None:
+    """Delete ``environments`` by id, in order, then wait until the namespaces of their deployments are gone."""
+    namespaces: list[str] = []
+    for environment in environments:
         deployments = await client.deployments.list(
             environment.id, include_deleted=True, include_internal=True
         )
         namespaces += [namespace_name(deployment.id) for deployment in deployments]
-        print(f"Deleting environment {name}", flush=True)
+        report(f"Deleting environment {environment.name}")
         await client.environments.delete(environment_id=environment.id)
     await wait_for_namespaces_gone(
         namespaces, timeout=timeout, kube_context=kube_context
     )
+
+
+async def check_kube_context(kube_context: str = KUBE_CONTEXT) -> str | None:
+    """Return why the cluster of ``kube_context`` cannot be reached, or ``None`` when it answers."""
+    try:
+        api = await kr8s.asyncio.api(context=kube_context)
+        await api.version()
+    except Exception as error:  # noqa: BLE001 - every failure means the same thing to the caller
+        return f"{type(error).__name__}: {error}"
+    return None
 
 
 async def wait_for_namespaces_gone(
@@ -99,19 +115,21 @@ async def wait_for_namespaces_gone(
     api = await kr8s.asyncio.api(context=kube_context)
     deadline = time.monotonic() + timeout
     remaining = list(namespaces)
-    while True:
-        remaining = [
-            namespace
-            for namespace in remaining
-            if await _namespace_exists(api, namespace)
-        ]
-        if not remaining:
-            return
-        if time.monotonic() >= deadline:
-            raise StackError(
-                f"These namespaces still exist after {timeout:.0f} s: {', '.join(remaining)}"
-            )
-        await asyncio.sleep(POLL_INTERVAL)
+    what = f"the {len(namespaces)} namespaces of the deleted deployments are gone"
+    async with waiting(what, limit=timeout):
+        while True:
+            remaining = [
+                namespace
+                for namespace in remaining
+                if await _namespace_exists(api, namespace)
+            ]
+            if not remaining:
+                return
+            if time.monotonic() >= deadline:
+                raise StackError(
+                    f"These namespaces still exist after {timeout:.0f} s: {', '.join(remaining)}"
+                )
+            await asyncio.sleep(POLL_INTERVAL)
 
 
 async def _namespace_exists(api: kr8s.asyncio.Api, namespace: str) -> bool:
@@ -133,6 +151,7 @@ async def create_environment(client: StyrminClient, name: str) -> str:
             f"The demo stack has no backup storage location named {BACKUP_STORAGE_LOCATION_NAME!r}. "
             "Run 'uv run invoke start' first."
         )
+    report(f"Creating environment {name}")
     environment = await client.environments.create(
         name=name, cluster_name=CLUSTER_NAME, config={}
     )
@@ -142,6 +161,7 @@ async def create_environment(client: StyrminClient, name: str) -> str:
 
 async def load_enterprise_driver(client: StyrminClient) -> None:
     # Loading a version that is already loaded returns that version without an error (spike-notes.md).
+    report(f"Loading the driver at {ENTERPRISE_DRIVER_PATH}")
     await client.drivers.load_local_version(ENTERPRISE_DRIVER_PATH)
 
 
@@ -175,20 +195,21 @@ async def deploy(
     described = f"Deployment {name!r} ({driver} {version})"
     deadline = time.monotonic() + timeout
     status = "unknown"
-    while time.monotonic() < deadline:
-        deployment = await client.deployments.get(task.deployment_id)
-        status = deployment.status
-        if status == "running":
-            return deployment
-        if status == "failed":
-            step = await client.tasks.failed_step(task.id)
-            reason = (
-                f'step "{step.name}" failed: {step.error}'
-                if step is not None
-                else "no step failed"
-            )
-            raise StackError(f"{described} failed: {reason}")
-        await asyncio.sleep(POLL_INTERVAL)
+    async with waiting(f"{described} runs", limit=timeout):
+        while time.monotonic() < deadline:
+            deployment = await client.deployments.get(task.deployment_id)
+            status = deployment.status
+            if status == "running":
+                return deployment
+            if status == "failed":
+                step = await client.tasks.failed_step(task.id)
+                reason = (
+                    f'step "{step.name}" failed: {step.error}'
+                    if step is not None
+                    else "no step failed"
+                )
+                raise StackError(f"{described} failed: {reason}")
+            await asyncio.sleep(POLL_INTERVAL)
     raise StackError(
         f"{described} is not Running after {timeout:.0f} s (status: {status})"
     )

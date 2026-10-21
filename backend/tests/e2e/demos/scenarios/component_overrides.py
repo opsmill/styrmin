@@ -2,29 +2,28 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from tests.e2e.demos import stack
+from tests.e2e.demos.semaphore_image import IMAGE as SEMAPHORE_IMAGE
+from tests.e2e.demos.semaphore_image import SEMAPHORE_VERSION
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.ui_driver import UiScenarioDriver
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
+from tests.e2e.pages.pods_tab import PodsTabPage
 
 if TYPE_CHECKING:
     from tests.e2e.demos.catalog import DemoContext
 
 ENVIRONMENT_NAME = "network-lab-overrides"
-# The `semaphore` driver's default version; the demo image's tag follows it (tasks/demo.py builds it).
-SEMAPHORE_VERSION = "2.16.47"
-SEMAPHORE_IMAGE = f"styrmin-demo/semaphore:v{SEMAPHORE_VERSION}"
 SERVER_COMPONENT = "server"
 INFRAHUB_SERVERS = 2
 KEYSTROKE_DELAY_MS = 45
 UPDATE_TIMEOUT = 900.0
-# How long the video shows the succeeded task, then the Component Overrides card, after each update.
-TASK_HOLD_SECONDS = 1.5
-RESULT_HOLD_SECONDS = 3.0
+PODS_TIMEOUT = 300.0
+# How long the video shows the succeeded task before it opens the Settings tab.
+TASK_HOLD_SECONDS = 2.5
 
 
 @dataclass(frozen=True)
@@ -36,6 +35,15 @@ class Deployments:
     semaphore_id: str
     infrahub_task_ids: frozenset[str]
     semaphore_task_ids: frozenset[str]
+
+
+def check_pod_image(pod_text: str, expected: str, *, pod: str) -> None:
+    """Raise ``ScenarioActionError`` unless the expanded pod row lists a container with the image ``expected``."""
+    if expected not in pod_text:
+        shown = " ".join(pod_text.split())
+        raise ScenarioActionError(
+            f"Pod {pod} runs no container with the image {expected!r}; its row shows {shown!r}"
+        )
 
 
 def check_override(row_text: str, expected: str, *, deployment: str) -> None:
@@ -91,7 +99,11 @@ async def record(context: DemoContext, deployments: Deployments) -> None:
     )
     driver.attach_to_deployment(environment_id=deployments.environment_id)
     detail = DeploymentDetailPage(context.page, keystroke_delay_ms=KEYSTROKE_DELAY_MS)
+    pods = PodsTabPage(context.page)
 
+    await recorder.caption(
+        f"Styrmin: deployment semaphore in environment {ENVIRONMENT_NAME}"
+    )
     async with recorder.step("Use an image with the Infrahub Ansible collection"):
         await driver.set_component_image(
             deployment_id=deployments.semaphore_id,
@@ -105,12 +117,24 @@ async def record(context: DemoContext, deployments: Deployments) -> None:
                 known_task_ids=set(deployments.semaphore_task_ids),
                 timeout=UPDATE_TIMEOUT,
             )
-        await asyncio.sleep(TASK_HOLD_SECONDS)
+        await recorder.hold(TASK_HOLD_SECONDS)
         row = await detail.show_component_overrides(component=SERVER_COMPONENT)
         check_override(row, SEMAPHORE_IMAGE, deployment="semaphore")
-        await asyncio.sleep(RESULT_HOLD_SECONDS)
+        await recorder.hold()
+        # The Pods tab shows the effect of the override: the server pod runs the new image.
+        await pods.open()
+        await pods.expand_section(SERVER_COMPONENT)
+        async with recorder.wait("The pod with the old image stops"):
+            [pod] = await pods.wait_for_running_pods(
+                SERVER_COMPONENT, count=1, timeout=PODS_TIMEOUT
+            )
+        check_pod_image(await pods.show_pod(pod), SEMAPHORE_IMAGE, pod=pod)
+        await recorder.hold()
 
     await _open_deployment(detail, deployments.environment_id, deployments.infrahub_id)
+    await recorder.caption(
+        f"Styrmin: deployment infrahub in environment {ENVIRONMENT_NAME}"
+    )
     async with recorder.step("Run two Infrahub servers"):
         await driver.set_component_replicas(
             deployment_id=deployments.infrahub_id,
@@ -124,10 +148,18 @@ async def record(context: DemoContext, deployments: Deployments) -> None:
                 known_task_ids=set(deployments.infrahub_task_ids),
                 timeout=UPDATE_TIMEOUT,
             )
-        await asyncio.sleep(TASK_HOLD_SECONDS)
+        await recorder.hold(TASK_HOLD_SECONDS)
         row = await detail.show_component_overrides(component=SERVER_COMPONENT)
         check_override(row, f"{INFRAHUB_SERVERS} (override)", deployment="infrahub")
-        await asyncio.sleep(RESULT_HOLD_SECONDS)
+        await recorder.hold()
+        # The Pods tab shows the effect of the override: two server pods run.
+        await pods.open()
+        await pods.expand_section(SERVER_COMPONENT)
+        async with recorder.wait("The Pods tab lists both servers"):
+            await pods.wait_for_running_pods(
+                SERVER_COMPONENT, count=INFRAHUB_SERVERS, timeout=PODS_TIMEOUT
+            )
+        await recorder.hold()
 
 
 async def _open_deployment(

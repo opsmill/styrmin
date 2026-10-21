@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from tests.e2e.demos import infrahub_setup, semaphore_setup, stack
+from tests.e2e.demos import infrahub_setup, semaphore_image, semaphore_setup, stack
 from tests.e2e.demos.pages.infrahub import InfrahubDevicesPage
 from tests.e2e.demos.pages.semaphore import SemaphoreTemplatesPage
+from tests.e2e.demos.recorder import LIST_HOLD_SECONDS
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.ui_driver import UiScenarioDriver
+from tests.e2e.helpers.infrahub import INFRAHUB_ADMIN_TOKEN
 from tests.e2e.pages.environments import EnvironmentDetailPage
 
 if TYPE_CHECKING:
@@ -21,9 +22,6 @@ if TYPE_CHECKING:
 
 ENVIRONMENT_NAME = "network-lab-backup"
 INFRAHUB_DRIVER = "infrahub-enterprise"
-# The `semaphore` driver's default version; the demo image's tag follows it (tasks/demo.py builds it).
-SEMAPHORE_VERSION = "2.16.47"
-SEMAPHORE_IMAGE_REPOSITORY = "styrmin-demo/semaphore"
 DEPLOYMENT_NAMES = ("infrahub", "semaphore")
 DEVICES = ("sw1", "sw2")
 DELETED_DEVICE = "sw2"
@@ -31,10 +29,6 @@ KEYSTROKE_DELAY_MS = 45
 BACKUP_TIMEOUT = 600.0
 RESTORE_TIMEOUT = 900.0
 READY_TIMEOUT = 300.0
-# How long the video shows a list before and after a change, and each finished operation.
-LIST_HOLD_SECONDS = 1.5
-RESULT_HOLD_SECONDS = 2.0
-FINAL_HOLD_SECONDS = 3.0
 
 
 @dataclass(frozen=True)
@@ -105,16 +99,16 @@ async def setup(context: DemoContext) -> Lab:
         client,
         environment_id=environment_id,
         driver="semaphore",
-        version=SEMAPHORE_VERSION,
+        version=semaphore_image.SEMAPHORE_VERSION,
         name="semaphore",
-        parameters={"docker_image": SEMAPHORE_IMAGE_REPOSITORY},
+        parameters={"docker_image": semaphore_image.REPOSITORY},
     )
     infrahub_url = stack.service_url(infrahub, "infrahub")
     semaphore_url = stack.service_url(semaphore, "semaphore")
     await infrahub_setup.wait_until_ready(infrahub_url, timeout=READY_TIMEOUT)
     await infrahub_setup.load_devices(infrahub_url, DEVICES)
     project = await semaphore_setup.configure(
-        semaphore_url, infrahub_token=infrahub_setup.INFRAHUB_TOKEN
+        semaphore_url, infrahub_token=INFRAHUB_ADMIN_TOKEN
     )
     # Log in before the recording; the sessions exist before the backup, so the restore keeps them.
     await InfrahubDevicesPage(context.page).log_in(infrahub_url)
@@ -143,18 +137,20 @@ async def record(context: DemoContext, lab: Lab) -> None:
     project_id = lab.semaphore.project_id
     template = semaphore_setup.TEMPLATE_NAME
 
+    await recorder.caption(f"Styrmin: environment {ENVIRONMENT_NAME}")
     async with recorder.step("Back up the whole environment"):
         created = await driver.create_environment_backup(
             environment_id=lab.environment_id
         )
-        async with recorder.wait("Backup in progress"):
+        async with recorder.wait("The backup runs"):
             backup = await driver.wait_for_environment_backup(
                 environment_backup_id=created.id, max_wait=BACKUP_TIMEOUT
             )
         check_backup(backup, DEPLOYMENT_NAMES)
-        await asyncio.sleep(RESULT_HOLD_SECONDS)
+        await recorder.hold()
 
     async with recorder.step("Delete a device in Infrahub"):
+        await recorder.caption(f"Infrahub in {ENVIRONMENT_NAME}")
         await devices.goto(lab.infrahub_url)
         check_listed(
             await devices.list_device_names(),
@@ -162,18 +158,22 @@ async def record(context: DemoContext, lab: Lab) -> None:
             listed=True,
             where="Infrahub",
         )
-        await asyncio.sleep(LIST_HOLD_SECONDS)
+        await recorder.hold(LIST_HOLD_SECONDS)
         await devices.delete_device(DELETED_DEVICE)
-        await asyncio.sleep(RESULT_HOLD_SECONDS)
+        await recorder.hold()
 
+    # Semaphore shows a white page while it loads after a switch from another web application.
+    async with recorder.cut():
+        await recorder.caption(f"Semaphore in {ENVIRONMENT_NAME}")
+        await templates.goto_template_list(lab.semaphore_url, project_id)
     async with recorder.step("Delete the task template in Semaphore"):
         check_listed(
-            await templates.template_names(lab.semaphore_url, project_id),
+            await templates.listed_template_names(),
             template,
             listed=True,
             where="Semaphore",
         )
-        await asyncio.sleep(LIST_HOLD_SECONDS)
+        await recorder.hold(LIST_HOLD_SECONDS)
         await templates.open_template(template)
         await templates.delete_template()
         # Semaphore opens the template list after the deletion.
@@ -183,18 +183,19 @@ async def record(context: DemoContext, lab: Lab) -> None:
             listed=False,
             where="Semaphore",
         )
-        await asyncio.sleep(RESULT_HOLD_SECONDS)
+        await recorder.hold()
 
+    await recorder.caption(f"Styrmin: environment {ENVIRONMENT_NAME}")
     async with recorder.step("Restore the backup"):
         started = await driver.restore_environment_backup(
             environment_backup_id=backup.id
         )
-        async with recorder.wait("Restore in progress"):
+        async with recorder.wait("The restore runs"):
             restore = await driver.wait_for_environment_restore(
                 environment_restore_id=started.id, max_wait=RESTORE_TIMEOUT
             )
         check_restore(restore)
-        await asyncio.sleep(RESULT_HOLD_SECONDS)
+        await recorder.hold()
         async with recorder.wait("Infrahub restarts"):
             await infrahub_setup.wait_until_ready(
                 lab.infrahub_url, timeout=READY_TIMEOUT
@@ -205,6 +206,7 @@ async def record(context: DemoContext, lab: Lab) -> None:
             )
 
     async with recorder.step("The device and the template are back"):
+        await recorder.caption(f"Infrahub in {ENVIRONMENT_NAME}")
         await devices.goto(lab.infrahub_url)
         check_listed(
             await devices.list_device_names(),
@@ -212,11 +214,14 @@ async def record(context: DemoContext, lab: Lab) -> None:
             listed=True,
             where="Infrahub",
         )
-        await asyncio.sleep(FINAL_HOLD_SECONDS)
+        await recorder.hold()
+        async with recorder.cut():
+            await recorder.caption(f"Semaphore in {ENVIRONMENT_NAME}")
+            await templates.goto_template_list(lab.semaphore_url, project_id)
         check_listed(
-            await templates.template_names(lab.semaphore_url, project_id),
+            await templates.listed_template_names(),
             template,
             listed=True,
             where="Semaphore",
         )
-        await asyncio.sleep(FINAL_HOLD_SECONDS)
+        await recorder.hold()

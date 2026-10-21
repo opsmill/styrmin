@@ -14,6 +14,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError, expect
 
 from tests.e2e.demos.semaphore_setup import ADMIN_PASSWORD, ADMIN_USERNAME
 from tests.e2e.drivers.errors import ScenarioActionError, ScenarioTimeout
+from tests.e2e.helpers.infrahub import INFRAHUB_ADMIN_TOKEN
 from tests.e2e.pages._dom import enter_text
 
 if TYPE_CHECKING:
@@ -34,11 +35,17 @@ def strip_ansi(text: str) -> str:
     return _ANSI_PATTERN.sub("", text)
 
 
+def log_tail(log: str, lines: int = 10) -> str:
+    """Return the last ``lines`` lines of ``log`` that are not blank, with ``***`` in place of the Infrahub token."""
+    tail = "\n".join([line for line in log.splitlines() if line.strip()][-lines:])
+    return tail.replace(INFRAHUB_ADMIN_TOKEN, "***")
+
+
 def check_task_status(status: str, log: str) -> None:
     """Raise unless ``status`` is "Success"; the error ends with the last lines of ``log``."""
     if status.strip() == "Success":
         return
-    tail = "\n".join([line for line in log.splitlines() if line.strip()][-10:])
+    tail = log_tail(log)
     raise ScenarioActionError(
         f"The Semaphore task ended with status {status.strip()!r}. Last lines of its log:\n{tail}"
     )
@@ -107,16 +114,6 @@ class SemaphoreTemplatesPage:
         check_task_status(await status.inner_text(), log)
         return log
 
-    async def close_output(self) -> None:
-        """Close the task log dialog."""
-        dialog = self._log_dialog
-        await (
-            dialog.get_by_role("button")
-            .filter(has=self._page.locator(".mdi-close"))
-            .click()
-        )
-        await dialog.wait_for(state="hidden", timeout=TIMEOUT_MS)
-
     async def delete_template(self) -> None:
         """Delete the open template; ends when Semaphore reports it deleted."""
         await (
@@ -135,10 +132,10 @@ class SemaphoreTemplatesPage:
                 "Semaphore did not report the template deleted"
             ) from exc
 
-    async def template_names(self, base_url: str, project_id: int) -> list[str]:
-        """Open the project's template list and return the template names."""
+    async def goto_template_list(self, base_url: str, project_id: int) -> None:
+        """Open the project's template list; ends when the list shows."""
         await self._page.goto(f"{base_url}/project/{project_id}/templates")
-        return await self.listed_template_names()
+        await self._page.get_by_role("table").wait_for(timeout=TIMEOUT_MS)
 
     async def listed_template_names(self) -> list[str]:
         """Return the names in the template list on screen, such as the one Semaphore opens after a deletion."""

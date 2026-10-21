@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from tests.e2e.demos import infrahub_setup, semaphore_setup, stack
+from tests.e2e.demos import infrahub_setup, semaphore_image, semaphore_setup, stack
 from tests.e2e.demos.pages.infrahub import InfrahubDevicesPage
-from tests.e2e.demos.pages.semaphore import SemaphoreTemplatesPage
+from tests.e2e.demos.pages.semaphore import SemaphoreTemplatesPage, log_tail
+from tests.e2e.demos.recorder import LIST_HOLD_SECONDS
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.ui_driver import UiScenarioDriver
+from tests.e2e.helpers.infrahub import INFRAHUB_ADMIN_TOKEN
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -23,9 +24,6 @@ if TYPE_CHECKING:
 ENVIRONMENT_NAME = "network-lab"
 CLONE_NAME = "network-lab-clone"
 INFRAHUB_DRIVER = "infrahub-enterprise"
-# The `semaphore` driver's default version; the demo image's tag follows it (tasks/demo.py builds it).
-SEMAPHORE_VERSION = "2.16.47"
-SEMAPHORE_IMAGE_REPOSITORY = "styrmin-demo/semaphore"
 DEPLOYMENT_NAMES = ("infrahub", "semaphore")
 DEVICES = ("sw1", "sw2")
 NEW_DEVICE = "sw3"
@@ -33,10 +31,14 @@ KEYSTROKE_DELAY_MS = 45
 TASK_TIMEOUT = 120.0
 CLONE_TIMEOUT = 1200.0
 READY_TIMEOUT = 300.0
-# How long the video shows the device list before the new device, each finished operation, and each task output.
-LIST_HOLD_SECONDS = 1.5
-RESULT_HOLD_SECONDS = 2.0
-OUTPUT_HOLD_SECONDS = 3.0
+# How long the video shows each task output with its device count.
+OUTPUT_HOLD_SECONDS = 6.0
+# The image fix that the clone's Semaphore needs to reach the clone's Infrahub; a failed count names it.
+IMAGE_HINT = (
+    "When the clone's Semaphore cannot reach Infrahub, the Styrmin image may be older than the fix to #530 "
+    "(PR #531): run 'uv run invoke build' and 'uv run invoke reset' from a checkout of develop at bb56eac9 "
+    "or later, then record again"
+)
 # The line that demos/semaphore/ansible/list_hosts.yml prints.
 _DEVICE_COUNT_PATTERN = re.compile(r"Devices in the inventory: (\d+)")
 
@@ -61,13 +63,11 @@ def device_count(log: str) -> int:
     counts = {int(count) for count in _DEVICE_COUNT_PATTERN.findall(log)}
     if len(counts) == 1:
         return counts.pop()
-    tail = "\n".join([line for line in log.splitlines() if line.strip()][-10:])
-    tail = tail.replace(infrahub_setup.INFRAHUB_TOKEN, "***")
     problem = (
         "no device count" if not counts else f"several device counts {sorted(counts)}"
     )
     raise ScenarioActionError(
-        f"The Semaphore task output gives {problem}. Last lines of its log:\n{tail}"
+        f"The Semaphore task output gives {problem}. Last lines of its log:\n{log_tail(log)}"
     )
 
 
@@ -76,7 +76,7 @@ def check_device_count(log: str, expected: int, *, where: str) -> None:
     count = device_count(log)
     if count != expected:
         raise ScenarioActionError(
-            f"{where} lists {count} devices in its inventory, not {expected}"
+            f"{where} lists {count} devices in its inventory, not {expected}. {IMAGE_HINT}"
         )
 
 
@@ -125,16 +125,16 @@ async def setup(context: DemoContext) -> Lab:
         client,
         environment_id=environment_id,
         driver="semaphore",
-        version=SEMAPHORE_VERSION,
+        version=semaphore_image.SEMAPHORE_VERSION,
         name="semaphore",
-        parameters={"docker_image": SEMAPHORE_IMAGE_REPOSITORY},
+        parameters={"docker_image": semaphore_image.REPOSITORY},
     )
     infrahub_url = stack.service_url(infrahub, "infrahub")
     semaphore_url = stack.service_url(semaphore, "semaphore")
     await infrahub_setup.wait_until_ready(infrahub_url, timeout=READY_TIMEOUT)
     await infrahub_setup.load_devices(infrahub_url, DEVICES)
     project = await semaphore_setup.configure(
-        semaphore_url, infrahub_token=infrahub_setup.INFRAHUB_TOKEN
+        semaphore_url, infrahub_token=INFRAHUB_ADMIN_TOKEN
     )
     await InfrahubDevicesPage(context.page).log_in(infrahub_url)
     templates = SemaphoreTemplatesPage(context.page)
@@ -163,7 +163,7 @@ async def run_template(
     async with recorder.wait("Ansible reads the inventory"):
         log = await templates.wait_for_output(TASK_TIMEOUT)
     check_device_count(log, expected, where=where)
-    await asyncio.sleep(OUTPUT_HOLD_SECONDS)
+    await recorder.hold(OUTPUT_HOLD_SECONDS)
 
 
 async def record(context: DemoContext, lab: Lab) -> None:
@@ -178,22 +178,26 @@ async def record(context: DemoContext, lab: Lab) -> None:
         context.page, keystroke_delay_ms=KEYSTROKE_DELAY_MS
     )
     project = lab.semaphore
+    source = f"{ENVIRONMENT_NAME} (source)"
+    copy = f"{CLONE_NAME} (clone)"
 
+    await recorder.caption(f"Semaphore in {source}")
     async with recorder.step("Semaphore reads its inventory from Infrahub"):
         await run_template(
             recorder, templates, expected=len(DEVICES), where="The source Semaphore"
         )
 
     async with recorder.step("Clone the environment"):
+        await recorder.caption(f"Styrmin: environment {source}")
         created = await driver.clone_environment(
             environment_id=lab.environment_id, name=CLONE_NAME, deployment_ids=None
         )
-        async with recorder.wait("Clone in progress"):
+        async with recorder.wait("The clone is created"):
             clone = await driver.wait_for_environment_clone(
                 environment_clone_id=created.id, max_wait=CLONE_TIMEOUT
             )
         counterparts = check_clone(clone, DEPLOYMENT_NAMES)
-        await asyncio.sleep(RESULT_HOLD_SECONDS)
+        await recorder.hold()
         clone_infrahub_url = stack.service_url(
             await context.client.deployments.get(counterparts["infrahub"]), "infrahub"
         )
@@ -215,16 +219,20 @@ async def record(context: DemoContext, lab: Lab) -> None:
             await SemaphoreTemplatesPage(login_page).log_in(clone_semaphore_url)
 
     async with recorder.step("Add a device in the clone's Infrahub"):
+        await recorder.caption(f"Infrahub in {copy}")
         await devices.goto(clone_infrahub_url)
-        await asyncio.sleep(LIST_HOLD_SECONDS)
+        await recorder.hold(LIST_HOLD_SECONDS)
         await devices.add_device(NEW_DEVICE)
-        await asyncio.sleep(RESULT_HOLD_SECONDS)
+        await recorder.hold()
 
-    async with recorder.step("The clone's Semaphore lists the new device"):
+    # Semaphore shows a white page while it loads after a switch from another web application.
+    async with recorder.cut():
+        await recorder.caption(f"Semaphore in {copy}")
         # The clone's Semaphore holds a copy of the source's project and template, with the same ids.
         await templates.goto_template(
             clone_semaphore_url, project.project_id, project.template_id
         )
+    async with recorder.step("The clone's Semaphore lists the new device"):
         await run_template(
             recorder,
             templates,
@@ -232,10 +240,12 @@ async def record(context: DemoContext, lab: Lab) -> None:
             where="The clone's Semaphore",
         )
 
-    async with recorder.step("The source is unchanged"):
+    async with recorder.cut():
+        await recorder.caption(f"Semaphore in {source}")
         await templates.goto_template(
             lab.semaphore_url, project.project_id, project.template_id
         )
+    async with recorder.step("The source is unchanged"):
         await run_template(
             recorder, templates, expected=len(DEVICES), where="The source Semaphore"
         )
