@@ -75,6 +75,9 @@ class FakeApiClient:
             self.objects[(namespace, name)] = body
         # Secrets keyed by (namespace, name), as the API returns them.
         self.secrets: dict[tuple[str, str], SimpleNamespace] = {}
+        # The labels of each namespace, by namespace name. The namespace a restore
+        # lands in exists: Velero has created it by the time recovery runs.
+        self.namespaces: dict[str, dict[str, str]] = {COUNTERPART_NAMESPACE: {}}
         self.calls: list[tuple[str, str]] = []
 
 
@@ -153,10 +156,23 @@ class FakeCustomObjectsApi:
 
 
 class FakeCoreV1Api:
-    """The two Secret calls Helm-storage retargeting makes."""
+    """The two Secret calls Helm-storage retargeting makes, and the namespace patch."""
 
     def __init__(self, api_client: FakeApiClient) -> None:
         self._client = api_client
+
+    async def patch_namespace(
+        self,
+        *,
+        name: str,
+        body: dict[str, Any],
+        _content_type: str | None = None,
+    ) -> None:
+        self._client.calls.append(("patch_namespace", name))
+        assert _content_type == "application/merge-patch+json"
+        if name not in self._client.namespaces:
+            raise FakeApiException(404)
+        self._client.namespaces[name].update(body["metadata"]["labels"])
 
     async def list_namespaced_secret(
         self, *, namespace: str, label_selector: str
@@ -776,3 +792,120 @@ async def test_only_helm_release_secrets_are_rewritten(
 
     patched = [name for verb, name in api_client.calls if verb == "patch_secret"]
     assert patched == [HELM_SECRET_NAME]
+
+
+ENVIRONMENT_ID = "33333333-3333-3333-3333-333333333333"
+CLONE_ENVIRONMENT_ID = "44444444-4444-4444-4444-444444444444"
+NAMESPACE_BEFORE = {
+    "kubernetes.io/metadata.name": NAMESPACE,
+    "unrelated.io/keep": "yes",
+}
+
+
+async def _phase_succeeds(*, crd_spec: dict[str, Any], namespace: str) -> PhaseResult:
+    return PhaseResult(success=True)
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
+async def test_in_place_restore_puts_the_namespace_labels_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Velero creates the namespace bare: the labels must be back before the policies.
+
+    The cluster-wide policy that lets a shared ingress controller in selects the
+    namespace by ``styrmin/environment_id``, so a namespace without it is
+    unreachable.
+    """
+    crd = restored_crd()
+    crd["spec"]["context"] = {
+        "labels": {"environment_id": ENVIRONMENT_ID, "deployment_id": SOURCE_ID}
+    }
+    api_client = FakeApiClient({RESTORED_NAME: crd})
+    api_client.namespaces[NAMESPACE] = dict(NAMESPACE_BEFORE)
+    labels_when_policies_were_applied: dict[str, str] = {}
+
+    async def _prerequisites(
+        *, crd_spec: dict[str, Any], namespace: str
+    ) -> PhaseResult:
+        labels_when_policies_were_applied.update(api_client.namespaces[namespace])
+        return PhaseResult(success=True)
+
+    monkeypatch.setattr(restore_recovery, "execute_phase_prerequisites", _prerequisites)
+    monkeypatch.setattr(restore_recovery, "execute_phase_services", _phase_succeeds)
+
+    await restore_recovery.reapply_and_finalize(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+    )
+
+    expected = {
+        **NAMESPACE_BEFORE,
+        "styrmin/environment_id": ENVIRONMENT_ID,
+        "styrmin/deployment_id": SOURCE_ID,
+    }
+    assert api_client.namespaces[NAMESPACE] == expected
+    assert labels_when_policies_were_applied == expected
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s", "phase_spy")
+async def test_cross_target_restore_labels_the_namespace_with_the_counterparts_ids() -> (
+    None
+):
+    """A clone's namespace gets the clone's labels, not the source's."""
+    body = await counterpart_body()
+    body["spec"]["context"]["labels"]["environment_id"] = CLONE_ENVIRONMENT_ID
+    api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
+    api_client.namespaces[NAMESPACE] = dict(NAMESPACE_BEFORE)
+
+    await restore_recovery.reapply_with_counterpart_identity(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+        body,
+    )
+
+    assert api_client.namespaces[NAMESPACE] == {
+        **NAMESPACE_BEFORE,
+        "styrmin/environment_id": CLONE_ENVIRONMENT_ID,
+        "styrmin/deployment_id": COUNTERPART_ID,
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
+async def test_a_missing_namespace_fails_the_recovery_before_any_phase(
+    phase_order: list[str],
+) -> None:
+    crd = restored_crd()
+    crd["spec"]["context"] = {"labels": {"environment_id": ENVIRONMENT_ID}}
+    api_client = FakeApiClient({RESTORED_NAME: crd})
+    api_client.namespaces.clear()
+
+    with pytest.raises(FakeApiException):
+        await restore_recovery.reapply_and_finalize(
+            api_client,  # type: ignore[arg-type]
+            NAMESPACE,
+            RESTORED_NAME,
+        )
+
+    assert phase_order == []
+    assert "status" not in api_client.objects[(NAMESPACE, RESTORED_NAME)]
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s", "phase_spy")
+async def test_no_labels_in_the_context_leaves_the_namespace_alone() -> None:
+    api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
+    api_client.namespaces[NAMESPACE] = dict(NAMESPACE_BEFORE)
+
+    await restore_recovery.reapply_and_finalize(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+    )
+
+    assert api_client.namespaces[NAMESPACE] == NAMESPACE_BEFORE
+    assert ("patch_namespace", NAMESPACE) not in api_client.calls

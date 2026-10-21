@@ -238,6 +238,14 @@ backed up, and Cilium could then leave a restored pod unreachable from
 pods on other nodes. On a cluster that does not run Cilium, this has no
 effect.
 
+A backup holds the objects in the namespace, not the namespace itself, so
+Velero creates the restored namespace with its name as its only label. After
+the Velero restore, Styrmin puts the labels of the deployment back on the
+namespace (`styrmin/environment_id` and `styrmin/deployment_id`), before it
+re-applies the network policies. Network policies select namespaces by these
+labels. The restore that an environment clone runs writes the labels of the
+counterpart deployment, which carry the new environment's id.
+
 ### Following a backup or a restore
 
 On the deployment page, each backup and each restore row lists its steps

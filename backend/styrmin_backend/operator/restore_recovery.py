@@ -8,9 +8,12 @@ restore workflow therefore drives the post-restore lifecycle explicitly:
 
 1. Mark the CRD ``phase=Restoring`` so the operator's timer skips its
    readiness timeout while we reapply.
-2. Re-apply Phase 1 prerequisites (NetworkPolicies + Secrets).
-3. Re-apply Phase 3 utility resources (Middlewares + Services).
-4. Mark the CRD ``phase=Ready / displayState=Running``.
+2. Put the deployment's labels back on its namespace. Velero creates the
+   namespace without them: the backup leaves out cluster-scoped objects, and a
+   Namespace is one.
+3. Re-apply Phase 1 prerequisites (NetworkPolicies + Secrets).
+4. Re-apply Phase 3 utility resources (Middlewares + Services).
+5. Mark the CRD ``phase=Ready / displayState=Running``.
 
 The kopf state annotations are deliberately **kept** — see
 ``reapply_and_finalize`` for why stripping them makes the deployment
@@ -37,6 +40,7 @@ from kubernetes_asyncio import client as k8s_client
 from kubernetes_asyncio.client import ApiClient
 from loguru import logger
 
+from styrmin_backend.context.namespace_labels import build_namespace_labels
 from styrmin_backend.operator.config import (
     ANNOTATION_SKIP_TEARDOWN,
     CRD_GROUP,
@@ -107,6 +111,27 @@ async def _patch_crd_status(
     )
 
 
+async def _label_namespace(
+    api_client: ApiClient, namespace: str, crd_spec: dict[str, Any]
+) -> None:
+    """Put the deployment's labels back on the namespace Velero created.
+
+    The labels come from the context in ``crd_spec``, so a cross-target restore
+    (environment clone) gets the counterpart's labels, not the source's. Other
+    labels of the namespace stay as they are.
+    """
+    labels = build_namespace_labels(crd_spec.get("context", {}).get("labels", {}))
+    if not labels:
+        return
+    core_api = k8s_client.CoreV1Api(api_client)
+    await core_api.patch_namespace(
+        name=namespace,
+        body={"metadata": {"labels": labels}},
+        _content_type="application/merge-patch+json",  # type: ignore[call-arg]
+    )
+    logger.info("Put the labels back on namespace {}: {}", namespace, sorted(labels))
+
+
 async def mark_restoring(api_client: ApiClient, namespace: str, name: str) -> None:
     """Patch the CRD to indicate the styrmin restore flow is in control.
 
@@ -172,6 +197,8 @@ async def _reapply_phases_and_finalize(
     hosts), so without re-rendering it from the counterpart's spec the cloned
     namespace would keep serving the source's identity (010 research D2.4).
     """
+    await _label_namespace(api_client, namespace, crd_spec)
+
     prerequisites = await execute_phase_prerequisites(
         crd_spec=crd_spec, namespace=namespace
     )

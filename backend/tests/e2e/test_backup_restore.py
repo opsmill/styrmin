@@ -272,6 +272,19 @@ async def wait_for_pods_ready(
     raise TimeoutError(f"Pods in {namespace} did not become ready within {timeout}s")
 
 
+async def namespace_labels(kubeconfig_path: str, namespace: str) -> dict[str, str]:
+    """The labels of *namespace*, as the cluster holds them now."""
+    from kubernetes_asyncio import client as kubeclient, config as k8s_config
+
+    await k8s_config.load_config(config_file=kubeconfig_path)
+    api_client = kubeclient.ApiClient()
+    try:
+        read = await kubeclient.CoreV1Api(api_client).read_namespace(name=namespace)
+        return dict(read.metadata.labels or {})
+    finally:
+        await api_client.close()
+
+
 async def workload_object_names(kubeconfig_path: str, namespace: str) -> set[str]:
     """``kind/name`` of every Deployment, StatefulSet and Service in *namespace*."""
     from kubernetes_asyncio import client as kubeclient, config as k8s_config
@@ -1062,6 +1075,14 @@ async def test_backup_and_restore_lifecycle(
                 for _ in range(5):
                     await http_client.get(f"http://localhost:{port}/count", timeout=10)
 
+        # 3a. The namespace carries the labels that network policies select on.
+        labels_before_restore = await namespace_labels(kubeconfig_path, namespace)
+        assert {"styrmin/environment_id", "styrmin/deployment_id"} <= set(
+            labels_before_restore
+        ), (
+            f"the namespace should carry the Styrmin labels, got {labels_before_restore!r}"
+        )
+
         # 4. Restore from backup via scenario_driver (same namespace)
         created_restore = await scenario_driver.create_restore(
             backup_id=backup.id, target_namespace=namespace
@@ -1077,6 +1098,12 @@ async def test_backup_and_restore_lifecycle(
 
         # 5. Wait for pods to recover, verify data restored
         await wait_for_pods_ready(kubeconfig_path, namespace)
+
+        # 5-labels. Velero creates the namespace without its labels (the backup
+        #     leaves out cluster-scoped objects): the recovery puts them back.
+        assert await namespace_labels(kubeconfig_path, namespace) == (
+            labels_before_restore
+        ), "the restore must put the namespace labels back"
         async with portforward_simple_app(kubeconfig_path, namespace) as port:
             async with httpx.AsyncClient() as http_client:
                 resp = await http_client.get(
@@ -2899,6 +2926,22 @@ async def test_environment_clone_lifecycle(
             kubeconfig_path,
             counterpart_namespace,
             timeout=CLONE_PODS_READY_TIMEOUT_SECONDS,
+        )
+        # 9-labels. The counterpart's namespace carries the labels of the new
+        #     environment and of the counterpart, not the source's: network
+        #     policies select namespaces by them.
+        counterpart_labels = await namespace_labels(
+            kubeconfig_path, counterpart_namespace
+        )
+        assert counterpart_labels.get("styrmin/environment_id") == str(
+            created_environment_id
+        ), (
+            f"the clone's namespace must carry the new environment's id, got {counterpart_labels!r}"
+        )
+        assert counterpart_labels.get("styrmin/deployment_id") == str(
+            counterpart_deployment_id
+        ), (
+            f"the clone's namespace must carry the counterpart's id, got {counterpart_labels!r}"
         )
         async with portforward_simple_app(
             kubeconfig_path, counterpart_namespace
