@@ -238,7 +238,7 @@ def test_ffmpeg_arguments_for_a_normal_a_sped_up_and_a_cut_segment_then_the_clos
     assert graph == (
         "[0:v]setpts=PTS-STARTPTS,scale=1920:1080,setsar=1[v0];"
         "[1:v]setpts=(PTS-STARTPTS)/63,scale=1920:1080,setsar=1[s1];"
-        "[s1][2:v]overlay=(W-w)/2:H-h-64[v1];"
+        "[s1][2:v]overlay=(W-w)/2:H-h-112[v1];"
         "[3:v]setpts=PTS-STARTPTS,scale=1920:1080,setsar=1[v2];"
         "[v0][v1][v2]concat=n=3:v=1:a=0,fps=30,format=yuv420p[out]"
     )
