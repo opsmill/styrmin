@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -22,23 +21,6 @@ def test_demo_2_is_registered_with_its_environment() -> None:
     assert demo.environment_names == ("network-lab-overrides",)
     assert demo.setup is component_overrides.setup
     assert demo.record is component_overrides.record
-
-
-def test_the_override_image_is_the_one_the_record_task_builds() -> None:
-    task_source = (REPOSITORY_ROOT / "tasks" / "demo.py").read_text()
-
-    match = re.search(r'^SEMAPHORE_DEMO_IMAGE = "([^"]+)"$', task_source, re.MULTILINE)
-    assert match is not None
-    assert component_overrides.SEMAPHORE_IMAGE == match.group(1)
-
-
-def test_the_image_is_built_on_the_semaphore_version_the_setup_deploys() -> None:
-    dockerfile = (DEMOS_DIRECTORY / "semaphore" / "Dockerfile").read_text()
-
-    assert (
-        f"FROM semaphoreui/semaphore:v{component_overrides.SEMAPHORE_VERSION}\n"
-        in dockerfile
-    )
 
 
 def test_check_override_accepts_a_row_that_shows_the_value() -> None:

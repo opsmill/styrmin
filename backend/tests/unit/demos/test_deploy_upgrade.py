@@ -63,8 +63,12 @@ def test_check_upgrade_task_names_the_steps_of_a_task_without_the_action() -> No
 
     assert str(raised.value) == (
         "The upgrade task task-2 did not run the driver's upgrade action; "
-        "its steps: Plan the changes, Install or upgrade the HelmRelease"
+        "its steps: Plan the changes, Install or upgrade the HelmRelease. "
+        f"{deploy_upgrade.IMAGE_HINT}"
     )
+    # The error points to the image as the likely cause.
+    assert "#372 (PR #535" in deploy_upgrade.IMAGE_HINT
+    assert "uv run invoke build" in deploy_upgrade.IMAGE_HINT
 
 
 @pytest.mark.parametrize("status", ["FAILED", "PENDING", "RUNNING", "SUPERSEDED"])

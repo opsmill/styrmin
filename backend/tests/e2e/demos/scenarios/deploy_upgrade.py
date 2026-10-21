@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -24,9 +23,13 @@ UPGRADE_ACTION_STEP = "hook:upgrade:core"
 KEYSTROKE_DELAY_MS = 45
 DEPLOY_TIMEOUT = 900.0
 UPGRADE_TIMEOUT = 900.0
-# How long the video shows the running deployment's timeline, then the finished upgrade task and its steps.
-RESULT_HOLD_SECONDS = 1.5
-STEPS_HOLD_SECONDS = 3.0
+# How long the video shows the finished upgrade task and its steps, before the closing card.
+STEPS_HOLD_SECONDS = 7.0
+# The image fix that the upgrade action needs; the error of a failed check names it.
+IMAGE_HINT = (
+    "A Styrmin image built from a commit before the fix to #372 (PR #535, develop commit bb56eac9) does not run "
+    "the action: run 'uv run invoke build' and 'uv run invoke reset' from a newer checkout, then record again"
+)
 
 
 @dataclass(frozen=True)
@@ -57,7 +60,8 @@ def check_upgrade_task(entry: TimelineEntry, expected_version: str) -> None:
     if step is None:
         shown = ", ".join(step.name for step in entry.steps) or "none"
         raise ScenarioActionError(
-            f"The upgrade task {task_id} did not run the driver's upgrade action; its steps: {shown}"
+            f"The upgrade task {task_id} did not run the driver's upgrade action; its steps: {shown}. "
+            f"{IMAGE_HINT}"
         )
     if step.status != "SUCCEEDED":
         raise ScenarioActionError(
@@ -86,6 +90,7 @@ async def record(context: DemoContext, lab: Lab) -> None:
         keystroke_delay_ms=KEYSTROKE_DELAY_MS,
     )
     detail = DeploymentDetailPage(context.page, keystroke_delay_ms=KEYSTROKE_DELAY_MS)
+    await recorder.caption(f"Styrmin: environment {ENVIRONMENT_NAME}")
 
     async with recorder.step(f"Deploy Infrahub {versions.previous}"):
         deployment = await driver.create_deployment(
@@ -94,23 +99,24 @@ async def record(context: DemoContext, lab: Lab) -> None:
             environment_id=lab.environment_id,
             name=DEPLOYMENT_NAME,
         )
-        async with recorder.wait(f"Infrahub {versions.previous} is starting"):
+        async with recorder.wait(f"Infrahub {versions.previous} starts"):
             await driver.wait_for_deployment_running(
                 deployment_id=deployment.id, timeout=DEPLOY_TIMEOUT
             )
         check_version(await detail.read_application_version(), versions.previous)
-        # Read the task ids at the end of this chapter, so the next chapter does not open the
-        # Timeline tab and then reload the page to open the Upgrade dialog.
+        # Read the task ids at the end of this chapter, so the chapter ends on the Timeline tab
+        # with the succeeded "Create" task.
         known_task_ids = await detail.read_task_ids()
-        await asyncio.sleep(RESULT_HOLD_SECONDS)
+        await recorder.hold()
 
     async with recorder.step(f"Upgrade to Infrahub {versions.latest}"):
-        await driver.upgrade_deployment(
-            deployment_id=deployment.id, version=versions.latest
-        )
+        # The page object opens the Upgrade dialog from the tab on screen. The scenario driver's
+        # upgrade_deployment first opens the page by its address, which jumps to the Overview tab.
+        await detail.open_upgrade_dialog()
+        await detail.confirm_upgrade(version=versions.latest)
         # Open the timeline before the wait, so the click plays at normal speed.
         await detail.open_timeline()
-        async with recorder.wait("Upgrade in progress"):
+        async with recorder.wait("The upgrade runs"):
             task_id = await detail.wait_for_new_task(
                 "upgrade_instance",
                 known_task_ids=known_task_ids,
@@ -118,7 +124,6 @@ async def record(context: DemoContext, lab: Lab) -> None:
             )
 
     async with recorder.step("The upgrade task and its steps"):
-        await detail.open_timeline()
         # The tasks that the upgrade action started are listed above the upgrade task.
         check_upgrade_task(await detail.show_timeline_entry(task_id), versions.latest)
-        await asyncio.sleep(STEPS_HOLD_SECONDS)
+        await recorder.hold(STEPS_HOLD_SECONDS)

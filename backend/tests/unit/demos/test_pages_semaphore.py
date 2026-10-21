@@ -6,6 +6,7 @@ import pytest
 
 from tests.e2e.demos.pages import semaphore
 from tests.e2e.demos.pages.semaphore import check_task_status, strip_ansi
+from tests.e2e.helpers.infrahub import INFRAHUB_ADMIN_TOKEN
 from tests.e2e.drivers.errors import ScenarioActionError
 
 
@@ -43,6 +44,17 @@ def test_check_task_status_raises_with_the_last_lines_of_the_log(status: str) ->
     assert f"status {status!r}" in message
     assert message.endswith("\n".join(f"line {number}" for number in range(3, 13)))
     assert "line 2\n" not in message
+
+
+def test_check_task_status_hides_the_infrahub_token() -> None:
+    log = f"fatal: Infrahub refused the token {INFRAHUB_ADMIN_TOKEN}\nPLAY RECAP ****\n"
+
+    with pytest.raises(ScenarioActionError) as raised:
+        check_task_status("Failed", log)
+
+    message = str(raised.value)
+    assert INFRAHUB_ADMIN_TOKEN not in message
+    assert message.endswith("fatal: Infrahub refused the token ***\nPLAY RECAP ****")
 
 
 @pytest.mark.parametrize(

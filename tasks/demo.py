@@ -47,8 +47,6 @@ DEMO_PORT = 8080
 DEMO_VALUES = MAIN_DIRECTORY_PATH / "dev" / "local" / "demo-values.yaml"
 HELM_STYRMIN_DIR = MAIN_DIRECTORY_PATH / "helm" / "styrmin"
 PORT_FORWARD_PID_FILE = MAIN_DIRECTORY_PATH / ".vcluster" / "traefik.pid"
-SEMAPHORE_DEMO_IMAGE = "styrmin-demo/semaphore:v2.16.47"
-SEMAPHORE_DEMO_DIR = MAIN_DIRECTORY_PATH / "backend" / "tests" / "e2e" / "demos" / "semaphore"
 DEMO_VIDEOS_DIR = MAIN_DIRECTORY_PATH / "demo-videos"
 
 
@@ -205,32 +203,37 @@ def reset(context: Context) -> None:
     start(context)
 
 
-def build_semaphore_image(context: Context) -> None:
-    """Build the demo Semaphore image with the Infrahub Ansible collection; it is never pushed (FR-015)."""
-    print_header(f"Building {SEMAPHORE_DEMO_IMAGE}...")
-    context.run(f"docker build -t {SEMAPHORE_DEMO_IMAGE} {SEMAPHORE_DEMO_DIR}", pty=True)
-
-
 @task(
+    iterable=["demo"],
     help={
         "demo": "Record only this demo: deploy-upgrade, component-overrides, backup-restore or clone. "
-        "Default: all four demos.",
+        "Repeat the option to record several. Default: all four demos.",
         "output_dir": "Where to write the MP4 files. Default: demo-videos/ at the repository root.",
-        "build_image": f"Rebuild {SEMAPHORE_DEMO_IMAGE} even if it already exists.",
-    }
+        "build_image": "Build the demo Semaphore image without Docker's build cache. The command builds it "
+        "before each run anyway, from Docker's cache when nothing changed.",
+        "delete_environments": "Only delete the environments of the selected demos, then exit.",
+        "encode_again": "Only encode the raw recording that a failed encoding kept in this directory, then exit.",
+    },
 )
-def record(context: Context, demo: str = "", output_dir: str = "", build_image: bool = False) -> None:
+def record(  # noqa: PLR0917 - invoke passes the options as positional parameters
+    context: Context,
+    demo: list[str] | None = None,
+    output_dir: str = "",
+    build_image: bool = False,
+    delete_environments: bool = False,
+    encode_again: str = "",
+) -> None:
     """Record the feature demos as MP4 videos on the running demo stack."""
-    if build_image or not _image_exists(context, SEMAPHORE_DEMO_IMAGE):
-        build_semaphore_image(context)
-    else:
-        Console().print(
-            f"[green]✓[/green] Reusing existing image {SEMAPHORE_DEMO_IMAGE} (pass --build-image to rebuild)"
-        )
     target = Path(output_dir).resolve() if output_dir else DEMO_VIDEOS_DIR
-    arguments = ["--output-dir", shlex.quote(str(target))]
-    if demo:
-        arguments += ["--demo", shlex.quote(demo)]
+    arguments = ["--output-dir", str(target)]
+    for slug in demo or []:
+        arguments += ["--demo", slug]
+    if build_image:
+        arguments.append("--rebuild-image")
+    if delete_environments:
+        arguments.append("--delete-environments")
+    if encode_again:
+        arguments += ["--encode-again", str(Path(encode_again).resolve())]
     username, password = _admin_credentials()
     # The password goes through the environment so it never shows in a command line or a log.
     environment = {
@@ -238,8 +241,9 @@ def record(context: Context, demo: str = "", output_dir: str = "", build_image: 
         "STYRMIN_DEMO_USERNAME": username,
         "STYRMIN_DEMO_PASSWORD": password,
     }
+    command = shlex.join(["python", "-m", "tests.e2e.demos", *arguments])
     with context.cd(MAIN_DIRECTORY_PATH / "backend"):
-        result = context.run(f"python -m tests.e2e.demos {' '.join(arguments)}", env=environment, pty=True, warn=True)
+        result = context.run(command, env=environment, pty=True, warn=True)
     if result is not None and result.exited != 0:
         raise SystemExit(result.exited)
 

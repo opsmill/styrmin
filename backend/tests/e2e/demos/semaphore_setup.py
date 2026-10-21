@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from tests.e2e.demos.progress import report
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
@@ -149,6 +151,9 @@ async def configure(
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> SemaphoreProject:
     """Create the project, the inventory that reads Infrahub and the template in the Semaphore at ``url``."""
+    report(
+        f"Creating the project {PROJECT_NAME!r} and the template {TEMPLATE_NAME!r} in Semaphore at {url}"
+    )
     async with httpx.AsyncClient(
         base_url=url, timeout=30.0, transport=transport
     ) as http:

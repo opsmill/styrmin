@@ -29,6 +29,7 @@ def _demo(slug: str, number: int, *environment_names: str) -> Demo[None]:
     return Demo(
         slug=slug,
         number=number,
+        title=f"Title of {slug}",
         environment_names=environment_names,
         setup=_setup,
         record=_record,
@@ -116,3 +117,24 @@ def test_check_catalog_refuses_shared_environment_names_and_wrong_order() -> Non
 def test_the_registered_demos_follow_the_catalog_rules() -> None:
     check_catalog(DEMOS)
     assert tuple(demo.slug for demo in DEMOS) == SLUGS
+
+
+def test_each_demo_has_a_closing_card_with_the_versions_filled_in() -> None:
+    versions = InfrahubVersions(previous="1.10.11", latest="1.11.7")
+
+    cards = {demo.slug: demo.closing_card(versions) for demo in DEMOS}
+
+    assert cards["deploy-upgrade"].title == "Deploy and upgrade Infrahub"
+    assert cards["deploy-upgrade"].lines[0] == (
+        "Infrahub 1.10.11 deployed from the Styrmin UI, then upgraded to 1.11.7."
+    )
+    assert "styrmin-demo/semaphore:v2.16.47" in cards["component-overrides"].lines[0]
+    for card in cards.values():
+        assert card.title
+        assert card.lines
+        assert not any("{" in line for line in card.lines)
+
+
+def test_each_demo_gives_how_long_a_run_usually_takes() -> None:
+    assert [demo.expected_minutes for demo in DEMOS] == [9, 11, 21, 14]
+    assert [demo.uses_semaphore_image for demo in DEMOS] == [False, True, True, True]

@@ -13,11 +13,13 @@ from styrmin_sdk.graphql._generated.get_deployment import (
 
 from tests.e2e.demos import stack
 from tests.e2e.demos.stack import (
+    EnvironmentRecord,
     StackError,
+    check_kube_context,
     create_environment,
     delete_environments,
     deploy,
-    existing_environments,
+    find_environments,
     load_enterprise_driver,
     service_url,
 )
@@ -202,45 +204,76 @@ def waited(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
     return waits
 
 
-async def test_delete_environments_deletes_existing_ones_in_order_then_waits_for_every_namespace(
+async def test_delete_environments_deletes_them_by_id_in_order_then_waits_for_every_namespace(
     waited: list[tuple],
 ) -> None:
     calls: list[tuple] = []
     client = _client(
-        calls,
-        environments={"network-lab": "env-source", "network-lab-clone": "env-clone"},
-        deployments={"env-clone": ["c1", "c2"], "env-source": ["s1"]},
+        calls, deployments={"env-clone": ["c1", "c2"], "env-source": ["s1"]}
     )
 
     await delete_environments(
-        client, ["network-lab-clone", "network-lab", "never-created"]
+        client,
+        [
+            EnvironmentRecord("network-lab-clone", "env-clone"),
+            EnvironmentRecord("network-lab", "env-source"),
+        ],
     )
 
-    assert [call for call in calls if call[0] in {"list", "delete"}] == [
+    assert calls == [
         ("list", "env-clone", True, True),
         ("delete", "env-clone"),
         ("list", "env-source", True, True),
         ("delete", "env-source"),
     ]
-    assert ("get", "never-created", "local") in calls
     assert waited == [
         (["styrmin-c1", "styrmin-c2", "styrmin-s1"], 600.0, "vcluster-docker_styrmin")
     ]
 
 
-async def test_existing_environments_keeps_the_given_order_and_skips_missing_ones() -> (
-    None
-):
+async def test_find_environments_keeps_the_given_order_and_skips_missing_ones() -> None:
     calls: list[tuple] = []
     client = _client(
         calls,
         environments={"network-lab": "env-source", "network-lab-clone": "env-clone"},
     )
 
-    assert await existing_environments(
+    assert await find_environments(
         client, ["network-lab-clone", "never-created", "network-lab"]
-    ) == ["network-lab-clone", "network-lab"]
+    ) == [
+        EnvironmentRecord("network-lab-clone", "env-clone"),
+        EnvironmentRecord("network-lab", "env-source"),
+    ]
     assert ("get", "never-created", "local") in calls
+
+
+async def test_check_kube_context_names_the_error_of_an_unreachable_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def missing_context(*, context):
+        raise ValueError(f"No such context {context}")
+
+    monkeypatch.setattr(stack.kr8s.asyncio, "api", missing_context)
+
+    assert (
+        await check_kube_context("vcluster-docker_styrmin")
+        == "ValueError: No such context vcluster-docker_styrmin"
+    )
+
+
+async def test_check_kube_context_accepts_a_cluster_that_answers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Api:
+        async def version(self):
+            return {"gitVersion": "v1.36.0"}
+
+    async def api(*, context):
+        return Api()
+
+    monkeypatch.setattr(stack.kr8s.asyncio, "api", api)
+
+    assert await check_kube_context() is None
 
 
 async def test_wait_for_namespaces_gone_returns_once_each_namespace_is_gone(
