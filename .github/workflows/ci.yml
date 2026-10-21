@@ -317,6 +317,8 @@ jobs:
           cat "$cfg"
           sudo systemctl restart docker
           docker info -f '{{ .DriverStatus }}'
+          docker version -f '{{ .Server.Version }}'
+          docker compose version
       - name: "Set environment variables"
         run: |
           echo "STYRMIN_IMAGE_VER=local-${{ github.sha }}-${{ matrix.shard }}-${{ matrix.entrypoint }}" >> $GITHUB_ENV
@@ -334,8 +336,23 @@ jobs:
           exec tini -s -g -- uv run pytest -v \
             -m "ci and shard_${{ matrix.shard }}" \
             -k "${{ matrix.entrypoint }}-chromium" \
+            --e2e-keep-cluster \
             ${PYTEST_OTEL_ARGS:-} \
             backend/tests/e2e
+      - name: Show test cluster state
+        if: failure()
+        run: |
+          docker ps -a
+          for kc in /tmp/pytest-of-*/pytest-*/vcluster*/kubeconfig; do
+            [ -f "$kc" ] || continue
+            echo "=== $kc"
+            kubectl --kubeconfig "$kc" get nodes -o wide || true
+            kubectl --kubeconfig "$kc" get pods -A -o wide || true
+            kubectl --kubeconfig "$kc" get events -A --sort-by=.lastTimestamp | tail -100 || true
+            kubectl --kubeconfig "$kc" describe pods -A \
+              --field-selector=status.phase!=Running,status.phase!=Succeeded || true
+            kubectl --kubeconfig "$kc" describe pods -n default -l app=chart-server || true
+          done
       - name: Upload Playwright diagnostic artifacts
         if: failure() && matrix.entrypoint == 'ui'
         uses: actions/upload-artifact@v4

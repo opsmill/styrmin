@@ -735,9 +735,12 @@ async def styrmin_deployment(
     kubeconfig_path = vcluster["kubeconfig_path"]
     api: kubeclient.ApiClient = vcluster["api"]
 
-    # Build styrmin image via docker compose
+    # Build styrmin image via docker compose. task-worker, agent-operator and
+    # server share one image and one build, so build it once: with Docker's
+    # containerd image store, three parallel exports to the same tag fail with
+    # "image ... already exists".
     subprocess.run(
-        ["docker", "compose", "build"],
+        ["docker", "compose", "build", "server"],
         cwd=str(PROJECT_ROOT),
         check=True,
     )
