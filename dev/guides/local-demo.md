@@ -31,6 +31,14 @@ Cloudflare-hosted wildcard `*.local.styrmin.io` → `127.0.0.1`; no
 `start` auto-builds the image if it's missing. Pass `--build-image` to
 force a rebuild.
 
+`start` ends with a bootstrap that creates the `local` cluster, the `local`
+environment and the `local` backup storage location, and loads the
+`infrahub` and `semaphore` drivers. `uv run invoke start --no-bootstrap` and
+`uv run invoke reset --no-bootstrap` skip the bootstrap and leave Styrmin
+with no cluster, environment, backup storage location or driver. The setup
+demo of `uv run invoke record` needs a demo stack in that state (see
+[The setup demo](#the-setup-demo)).
+
 ## Access URLs
 
 After `start` completes, the summary panel prints the demo URL:
@@ -65,18 +73,19 @@ region `garage`, bucket `velero`. Point any S3 client at
   vCluster's embedded LB provider) on Linux for parity with macOS — one
   code path, one access URL, no host-network surprises.
 - **Single shared ingress**: The demo cluster is bootstrapped with
-  `ingress_class=traefik` only — `dedicated_ingress` is intentionally
-  omitted so every deployment's Ingress is served by the one front-door
-  Traefik. The per-environment dedicated-Traefik path exists for
+  `ingress_class=traefik` only, and the setup demo enters the same value —
+  `dedicated_ingress` is intentionally omitted so every deployment's
+  Ingress is served by the one front-door Traefik. The per-environment dedicated-Traefik path exists for
   multi-environment isolation in production and would not be reachable
   through the single port-forward.
 
 ## Recording the demos
 
-`uv run invoke record` records videos of four Styrmin features for the beta
-presentation ([#518](https://github.com/opsmill/styrmin/issues/518)) and
-writes one MP4 file for each demo. It runs on the demo stack that
-`uv run invoke start` creates. Fatih Acar owns the command.
+`uv run invoke record` records a video of the setup of Styrmin and videos of
+four Styrmin features for the beta presentation
+([#518](https://github.com/opsmill/styrmin/issues/518)), one MP4 file for each
+demo. It runs on the demo stack that `uv run invoke start` creates. Fatih Acar
+owns the command.
 
 ### Record the demos for the first time
 
@@ -96,9 +105,12 @@ writes one MP4 file for each demo. It runs on the demo stack that
    from an older commit, so build the image after each checkout. With an image
    built before the fixes, demo 1 fails after about 8 minutes, and its error
    names the fix to #372.
-4. Create the demo stack from that image: `uv run invoke reset`. It deletes the
-   vCluster `styrmin` and everything in it.
-5. Record the four demos: `uv run invoke record`. The run takes about 50 minutes.
+4. Create the demo stack from that image, without the bootstrap:
+   `uv run invoke reset --no-bootstrap`. It deletes the vCluster `styrmin` and
+   everything in it. The setup demo creates the cluster, the backup storage
+   location and the drivers in the Styrmin UI.
+5. Record the five demos: `uv run invoke record`. The run takes about
+   50 minutes.
 6. Watch each video in `demo-videos/`, with the
    [notes for the presenter](#notes-for-the-presenter).
 
@@ -117,16 +129,58 @@ added are also called by the `[ui-chromium]` variants of
 `test_pods_tab_copy_logs_command` in `backend/tests/e2e/test_ui_smoke.py`, so
 a UI change that breaks them fails an E2E test. No test uses the page objects
 for Infrahub and Semaphore in `backend/tests/e2e/demos/pages/`: a recording
-of demos 3 and 4 is their only test.
+of demos 1, 3 and 4 is their only test. No E2E test calls the page-object
+methods that the setup demo added either: a recording of the setup demo is
+their only test (see
+[Page objects shared with the recorded demos](../knowledge/backend/e2e-testing.md#page-objects-shared-with-the-recorded-demos)).
 
-### The four demos
+### The five demos
 
 | Slug | Video file | Environments the demo creates | What the video shows |
 |------|------------|-------------------------------|----------------------|
-| `deploy-upgrade` | `1-deploy-upgrade.mp4` | `network-lab-upgrade` | Infrahub deployed at the `previous` version and upgraded to `latest`, then the upgrade task with the step that runs the driver's upgrade action |
+| `setup` | `0-setup.mp4` | `network-lab-upgrade`, which it leaves to demo 1 | The `local` cluster added, the `local` backup storage location added, the `infrahub` driver loaded from `/styrmin/drivers/infrahub`, and the environment `network-lab-upgrade` created with the `local` backup storage location |
+| `deploy-upgrade` | `1-deploy-upgrade.mp4` | `network-lab-upgrade`, when the setup demo did not create it | Infrahub deployed at the `previous` version, the `previous` version in Infrahub's About dialog, the upgrade to `latest`, the upgrade task with the step that runs the driver's upgrade action, then the `latest` version in Infrahub's About dialog |
 | `component-overrides` | `2-component-overrides.mp4` | `network-lab-overrides` | An image override on the Semaphore `server` component, then the Pods tab with the server pod on the new image; a replica override of 2 on the Infrahub `server` component, then the Pods tab with two server pods |
 | `backup-restore` | `3-backup-restore.mp4` | `network-lab-backup` | An environment backup, a device deleted in Infrahub and a task template deleted in Semaphore, an environment restore, and the device and the template back |
 | `clone` | `4-clone.mp4` | `network-lab` and `network-lab-clone` | An environment clone whose Semaphore lists a device added in the clone's Infrahub, while the source's Semaphore does not |
+
+The setup demo and demo 1 type one key every 90 ms and keep each click
+highlighted for 1.6 seconds, twice as long as demos 2 to 4, so that a viewer
+can follow each form.
+
+#### The setup demo
+
+The setup demo needs a demo stack with no cluster and no backup storage
+location named `local`, which `uv run invoke reset --no-bootstrap` creates.
+The Clusters page offers "New Cluster" only when no cluster exists. Before its
+recording, the demo loads the `semaphore` driver through the SDK, for demos 2
+to 4; the video shows only the load of the `infrahub` driver. It enters the
+values of the bootstrap of `uv run invoke start`:
+
+- the cluster `local`, with the ingress class `traefik`, the FQDN suffix
+  `local.styrmin.io`, the runtime class `default`, the external URL scheme
+  `http`, the external URL port `8080`, and the storage class `local-path`
+  for standard and fast storage. The FQDN suffix, the scheme and the port
+  come from the Styrmin URL `http://styrmin.local.styrmin.io:8080`;
+- the backup storage location `local`: the Garage endpoint
+  `http://garage.styrmin.svc:3900`, the bucket `velero`, the region
+  `garage`, and the Garage keys in [Access URLs](#access-urls).
+
+It does not create the `local` environment of the bootstrap. It creates the
+environment `network-lab-upgrade` instead and leaves it to demo 1, which
+deploys Infrahub into it. Without the setup demo, demo 1 creates that
+environment through the SDK.
+
+The setup demo runs first. When the setup demo is selected and the demo stack
+has a cluster, the prerequisites check stops the command with exit code 2. To
+record the four other demos on a demo stack with the bootstrap, select them:
+`uv run invoke record --demo deploy-upgrade,component-overrides,backup-restore,clone`.
+When the setup demo fails before the end of its recording, the command records
+no later demo, because they need what it creates. The summary then says to
+create an empty demo stack with `uv run invoke reset --no-bootstrap` and to
+record again.
+
+#### Demos 1 to 4
 
 Demo 1 shows the `infrahub` driver's upgrade action, which stops the Infrahub
 server and task workers, runs `infrahub upgrade` in a job, and starts them
@@ -136,6 +190,15 @@ again. The Styrmin agent runs the action from the driver directory
 Since the fix to #372, an upgrade runs the action; before it, it did not. The
 demo fails unless the upgrade task lists the step "Run the upgrade hook" as
 succeeded and its entry on the Timeline tab shows the `latest` version.
+
+Demo 1 also opens Infrahub's web UI after the deployment and after the
+upgrade, at the address of the deployment's `infrahub` service, for example
+`http://infrahub-network-lab-upgrade.local.styrmin.io:8080`. It opens the About
+dialog from the account menu at the bottom of Infrahub's sidebar, which shows
+the version, for example `v1.10.11`. The login to Infrahub, as `admin`, is cut
+from the video. The browser stays logged in to Infrahub during the upgrade.
+The demo fails unless the dialog shows `v` and the `previous` version before
+the upgrade, and `v` and the `latest` version after it.
 
 Demos 3 and 4 deploy the `infrahub-enterprise` application driver instead of
 `infrahub`. The environment backup runs `neo4j-admin database backup` on
@@ -155,7 +218,9 @@ Semaphore lists 2 devices instead of 3, and the error names the fix.
    (see [Environments the command deletes](#environments-the-command-deletes)).
 2. It creates the demo's environment and deployments through the SDK, and,
    when the demo needs them, loads devices into Infrahub and a project into
-   Semaphore. This part is not recorded.
+   Semaphore. This part is not recorded. The setup demo only loads the
+   `semaphore` driver here, and demo 1 creates its environment only when the
+   setup demo did not create it earlier in the same run.
 3. It performs the feature in the Styrmin UI with the E2E page objects, and in
    Infrahub and Semaphore when the demo uses them, while Playwright records the
    browser page.
@@ -166,8 +231,11 @@ Semaphore lists 2 devices instead of 3, and the error names the fix.
 
 Before its setup, each demo deletes the environments on the cluster `local`
 that have the demo's names (see the table above), and after a successful
-recording it deletes them again. The command deletes only environments that it
-created itself. It records their ids in
+recording it deletes them again. The setup demo is the exception: it deletes
+no environment, and leaves `network-lab-upgrade` to demo 1. When demo 1 runs
+after the setup demo in the same run, it keeps that environment before its
+setup and deletes it after its recording. The command deletes only
+environments that it created itself. It records their ids in
 `$XDG_STATE_HOME/styrmin/demo-environments.json` (by default
 `~/.local/state/styrmin/demo-environments.json`), for each demo stack URL.
 
@@ -181,7 +249,8 @@ other names than `network-lab`, `network-lab-*`.
 ### Prerequisites for recording
 
 - The tools in [Prerequisites](#prerequisites) and a demo stack that
-  `uv run invoke start` created. The command waits for the deleted
+  `uv run invoke start` created, with `--no-bootstrap` when the setup demo is
+  selected. The command waits for the deleted
   deployments' namespaces through the kube context `vcluster-docker_styrmin`,
   which `vcluster connect` writes during `uv run invoke start`.
 - `ffmpeg` and `ffprobe` on the PATH, any build with libx264.
@@ -232,8 +301,10 @@ fails stops it with exit code 2 and a message that names what is missing:
 6. the demo stack accepts the admin login from `dev/local/demo-values.yaml`.
    The stack keeps the password it was created with, so run
    `uv run invoke reset` after a change to that file;
-7. the `infrahub` and `semaphore` drivers are loaded, and the `local`
-   cluster and the `local` backup storage location exist;
+7. when the setup demo is selected, the demo stack has no cluster and no
+   backup storage location named `local`. Otherwise, the `infrahub` and
+   `semaphore` drivers are loaded, and the `local` cluster and the `local`
+   backup storage location exist;
 8. the Infrahub versions file is valid.
 
 Then the command builds the demo Semaphore image when a selected demo deploys
@@ -242,7 +313,8 @@ it, and confirms the environments it may delete.
 ### Commands to record the demos
 
 ```bash
-uv run invoke record                                     # the four demos, in order
+uv run invoke record                                     # the five demos, in order
+uv run invoke record --demo deploy-upgrade,component-overrides,backup-restore,clone  # every demo except the setup demo
 uv run invoke record --demo backup-restore               # one demo
 uv run invoke record --demo clone --demo deploy-upgrade  # several demos, in order
 uv run invoke record --output-dir /tmp/videos            # write the videos to another directory
@@ -291,8 +363,8 @@ ran 1.11.7. The demo stack reads the drivers from the Styrmin image
 - The videos go to `demo-videos/` at the repository root, which git ignores,
   or to the directory that `--output-dir` names.
 - Each video is named `<number>-<slug>.mp4`, for example
-  `2-component-overrides.mp4`. It is H.264, `yuv420p`, 1920×1080, 30 frames
-  per second, with no audio track and with its index at the start of the file
+  `2-component-overrides.mp4`; the setup demo is number 0, `0-setup.mp4`.
+  It is H.264, `yuv420p`, 1920×1080, 30 frames per second, with no audio track and with its index at the start of the file
   (`faststart`). Whether the videos play in Keynote, PowerPoint and Google
   Slides without conversion is not checked yet.
 - Each video keeps a caption in its bottom left corner that names the
@@ -340,13 +412,14 @@ Demo, Result, Video and Length. The Result column holds one of these values:
 - `interrupted`: Ctrl-C stopped the demo; Video gives the step it was in and
   the environments it kept.
 - `skipped`: the demo did not run, because the prerequisites check, the image
-  build or the confirmation of a deletion failed, or because Ctrl-C stopped an
+  build or the confirmation of a deletion failed, because the setup demo
+  failed before the end of its recording, or because Ctrl-C stopped an
   earlier demo.
 
 The exit code is 0 when every requested demo was recorded, 1 when at least
 one demo failed, 2 when the prerequisites check, the image build or the
 confirmation of a deletion failed, or when `--demo` names a slug that is not
-one of the four, and 130 after Ctrl-C.
+one of the five, and 130 after Ctrl-C.
 
 ### Stop a run with Ctrl-C
 
@@ -389,11 +462,20 @@ cluster plays faster, with a label at the bottom that gives its real duration.
 The caption in the bottom left corner says which application and which
 environment are on screen.
 
+0. **Set up Styrmin.** The demo starts on an empty Styrmin. It adds the
+   Kubernetes cluster `local`, with the domain and the storage classes that
+   deployments get; adds the backup storage location `local`, an S3 bucket in
+   the demo stack's Garage; loads the Infrahub application driver from a
+   directory in the Styrmin image; creates the environment
+   `network-lab-upgrade` on the cluster; and selects `local` as the place
+   where the environment's backups go. Demo 1 starts in this environment.
 1. **Deploy and upgrade Infrahub.** The demo deploys Infrahub at the
-   `previous` version into the empty environment `network-lab-upgrade`, then
-   upgrades it to `latest` from the Upgrade dialog. The last chapter shows the
-   upgrade task on the Timeline tab. Point at the step "Run the upgrade hook":
-   the Infrahub driver's upgrade action stopped Infrahub, ran
+   `previous` version into the empty environment `network-lab-upgrade`, opens
+   Infrahub's web UI, and shows the version in its About dialog. Then it
+   upgrades Infrahub to `latest` from the Upgrade dialog in Styrmin. The fourth
+   chapter shows the upgrade task on the Timeline tab. Point at the step
+   "Run the upgrade hook": the Infrahub driver's upgrade action stopped
+   Infrahub, ran
    `infrahub upgrade` in a job, which applies the database migrations, and
    started Infrahub again. Above the upgrade task, the timeline lists the two
    tasks that the action started, "Stop Components" and "Start Components".
@@ -402,7 +484,11 @@ environment are on screen.
    that these steps describe. The upgrade task's result is Succeeded.
    "Stop Components" can itself show Superseded instead of Succeeded, when
    "Start Components" changes the deployment before the operator reports that
-   the stop finished; the upgrade succeeded in both cases.
+   the stop finished; the upgrade succeeded in both cases. The last chapter
+   opens Infrahub again: its About dialog shows the `latest` version and the
+   same Deployment ID as before the upgrade. In the recording of 2026-10-21,
+   Infrahub's home page then listed the tasks "Apply schema migrations" and
+   "Validate schema migrations" as completed.
 2. **Override the image and the replicas of a component.** The demo changes
    one component of each deployment, without a change to its application
    driver. First it sets the image of the Semaphore `server` component to
@@ -435,7 +521,18 @@ Measured on one Linux host:
 
 - `uv run invoke reset`: between 2 min 9 s and 2 min 52 s in four runs from
   2026-10-18 to 2026-10-21.
-- `uv run invoke record` with the four demos, on 2026-10-21: 50 min 13 s. The
+- `uv run invoke reset --no-bootstrap`, on 2026-10-21: 2 min 19 s.
+- `uv run invoke record` with the five demos, on 2026-10-21, on a demo stack
+  that `uv run invoke reset --no-bootstrap` had just created: 48 min 34 s.
+  Each demo took, including its setup, recording, encoding and cleanup:
+  - `setup`: 2 min 46 s, for a video of 2:40;
+  - `deploy-upgrade`: 10 min 44 s, for a video of 1:41;
+  - `component-overrides`: 10 min 1 s, for a video of 1:17;
+  - `backup-restore`: 15 min 1 s, for a video of 1:36. The restore took
+    4 min 18 s;
+  - `clone`: 10 min 1 s, for a video of 1:32.
+- `uv run invoke record` with the four demos, earlier on 2026-10-21, before
+  the setup demo and the slower pace of demo 1: 50 min 13 s. The
   demo stack was 23 minutes old; a first run on it had failed in demos 2 to 4
   because the disk was full. Each demo took, including its setup, recording,
   encoding and cleanup:
@@ -453,11 +550,11 @@ Measured on one Linux host:
 
 The setup, which deploys Infrahub and Semaphore and waits for them, and the
 waits for the cluster take most of the time. The environment restore of demo 3
-took between 1 min 9 s and 5 min 40 s over seven runs, 5 min 1 s on
-2026-10-21; the cause of the difference is not known. After each recording of
-2026-10-21, the deletion of the demo's environments, which waits until their
-namespaces are gone, took between 2 min 1 s and 4 min 1 s, while ffmpeg
-encoded the video.
+took between 1 min 9 s and 5 min 40 s over eight runs, 5 min 1 s and
+4 min 18 s on 2026-10-21; the cause of the difference is not known. After each
+recording of 2026-10-21, the deletion of the demo's environments, which waits
+until their namespaces are gone, took between 1 min 42 s and 4 min 1 s, while
+ffmpeg encoded the video.
 
 ### Problems seen when recording the demos
 
