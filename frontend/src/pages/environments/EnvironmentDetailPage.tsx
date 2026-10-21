@@ -96,6 +96,23 @@ export default function EnvironmentDetailPage() {
   const envHealth = deriveEnvHealth(deployments);
   const envColors = getStatusColor(envHealth);
 
+  // The options of the backup storage location select. Passed to its `items`,
+  // so that its trigger shows the location's name instead of its id. The
+  // assigned location comes from the environment too, so that its name shows
+  // before the list of locations has loaded.
+  const assignedBsl = environment.backupStorageLocation;
+  const bslOptions = [
+    { value: "__none__", label: "Cluster default" },
+    ...(bslData?.backupStorageLocations ?? []).map((bsl) => ({
+      value: bsl.id,
+      label: bsl.name,
+    })),
+  ];
+  const bslItems =
+    assignedBsl && !bslOptions.some((option) => option.value === assignedBsl.id)
+      ? [...bslOptions, { value: assignedBsl.id, label: assignedBsl.name }]
+      : bslOptions;
+
   return (
     <div
       className="flex flex-col gap-6 p-8 px-10"
@@ -292,6 +309,7 @@ export default function EnvironmentDetailPage() {
           </Label>
           {canWrite ? (
             <Select
+              items={bslItems}
               value={environment.backupStorageLocation?.id ?? "__none__"}
               onValueChange={handleBslChange}
             >
@@ -299,10 +317,9 @@ export default function EnvironmentDetailPage() {
                 <SelectValue placeholder="Cluster default" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__none__">Cluster default</SelectItem>
-                {bslData?.backupStorageLocations.map((bsl) => (
-                  <SelectItem key={bsl.id} value={bsl.id}>
-                    {bsl.name}
+                {bslOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
                   </SelectItem>
                 ))}
               </SelectContent>

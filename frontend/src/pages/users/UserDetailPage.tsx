@@ -14,7 +14,7 @@ import {
   type Role,
 } from "@/generated/graphql";
 import { GraphQLOperationError } from "@/lib/graphql-fetcher";
-import { roleLabel } from "@/auth/roleLabel";
+import { ROLE_OPTIONS, roleLabel } from "@/auth/roleLabel";
 import { PASSWORD_REQUIREMENTS_SUMMARY } from "@/auth/password-policy";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { PageLayout } from "@/components/PageLayout";
@@ -463,6 +463,7 @@ export default function UserDetailPage() {
           <div className="space-y-2">
             <Label htmlFor="user-role">Role</Label>
             <Select
+              items={ROLE_OPTIONS}
               value={role}
               onValueChange={(value) => setRole(value as Role)}
               disabled={submitting}
@@ -471,13 +472,11 @@ export default function UserDetailPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="READ_ONLY">
-                  {roleLabel("READ_ONLY")}
-                </SelectItem>
-                <SelectItem value="READ_WRITE">
-                  {roleLabel("READ_WRITE")}
-                </SelectItem>
-                <SelectItem value="ADMIN">{roleLabel("ADMIN")}</SelectItem>
+                {ROLE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             {roleFieldError && (

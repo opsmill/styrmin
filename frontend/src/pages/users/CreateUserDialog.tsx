@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Plus, AlertCircle } from "lucide-react";
 
 import { useCreateUserMutation, type Role } from "@/generated/graphql";
-import { roleLabel } from "@/auth/roleLabel";
+import { ROLE_OPTIONS } from "@/auth/roleLabel";
 import { PASSWORD_REQUIREMENTS_SUMMARY } from "@/auth/password-policy";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -148,6 +148,7 @@ export function CreateUserDialog({ onCreated }: CreateUserDialogProps) {
           <div className="space-y-2">
             <Label htmlFor="create-user-role">Role</Label>
             <Select
+              items={ROLE_OPTIONS}
               value={role}
               onValueChange={(value) => setRole(value as Role)}
             >
@@ -155,13 +156,11 @@ export function CreateUserDialog({ onCreated }: CreateUserDialogProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="READ_ONLY">
-                  {roleLabel("READ_ONLY")}
-                </SelectItem>
-                <SelectItem value="READ_WRITE">
-                  {roleLabel("READ_WRITE")}
-                </SelectItem>
-                <SelectItem value="ADMIN">{roleLabel("ADMIN")}</SelectItem>
+                {ROLE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

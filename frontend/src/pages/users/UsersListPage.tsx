@@ -16,7 +16,7 @@ import {
   type ListUsersQuery,
   type Role,
 } from "@/generated/graphql";
-import { roleLabel } from "@/auth/roleLabel";
+import { ROLE_OPTIONS, roleLabel } from "@/auth/roleLabel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { PageLayout } from "@/components/PageLayout";
 import { LoadingState } from "@/components/LoadingState";
@@ -42,6 +42,19 @@ type UserRow = ListUsersQuery["users"][number];
 
 type ActiveFilter = "any" | "true" | "false";
 type RoleFilter = "any" | Role;
+
+// The options of the two filters. Passed to each select's `items`, so that its
+// trigger shows the label instead of the raw value.
+const ACTIVE_FILTER_OPTIONS: ReadonlyArray<{
+  value: ActiveFilter;
+  label: string;
+}> = [
+  { value: "any", label: "Any" },
+  { value: "true", label: "Yes" },
+  { value: "false", label: "No" },
+];
+const ROLE_FILTER_OPTIONS: ReadonlyArray<{ value: RoleFilter; label: string }> =
+  [{ value: "any", label: "Any" }, ...ROLE_OPTIONS];
 
 const PAGE_SIZE = 25;
 
@@ -124,6 +137,7 @@ export default function UsersListPage() {
         <div className="space-y-1.5">
           <Label htmlFor="users-filter-active">Active</Label>
           <Select
+            items={ACTIVE_FILTER_OPTIONS}
             value={activeFilter}
             onValueChange={(value) =>
               resetPagination(setActiveFilter)(value as ActiveFilter)
@@ -136,9 +150,11 @@ export default function UsersListPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="any">Any</SelectItem>
-              <SelectItem value="true">Yes</SelectItem>
-              <SelectItem value="false">No</SelectItem>
+              {ACTIVE_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -146,6 +162,7 @@ export default function UsersListPage() {
         <div className="space-y-1.5">
           <Label htmlFor="users-filter-role">Role</Label>
           <Select
+            items={ROLE_FILTER_OPTIONS}
             value={roleFilter}
             onValueChange={(value) =>
               resetPagination(setRoleFilter)(value as RoleFilter)
@@ -158,14 +175,11 @@ export default function UsersListPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="any">Any</SelectItem>
-              <SelectItem value="READ_ONLY">
-                {roleLabel("READ_ONLY")}
-              </SelectItem>
-              <SelectItem value="READ_WRITE">
-                {roleLabel("READ_WRITE")}
-              </SelectItem>
-              <SelectItem value="ADMIN">{roleLabel("ADMIN")}</SelectItem>
+              {ROLE_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

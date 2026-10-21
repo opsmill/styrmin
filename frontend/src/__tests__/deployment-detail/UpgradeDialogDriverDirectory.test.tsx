@@ -3,7 +3,7 @@
  * warns when the driver's versions come from more than one (#517 review).
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, act, within } from "@testing-library/react";
+import { render, screen, act, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -204,6 +204,24 @@ describe("DeploymentDetailPage upgrade dialog: driver directory", () => {
     expect(
       within(dialog).getByTestId("driver-directory-change-notice"),
     ).toHaveTextContent("uses a driver version from the repository root.");
+  });
+
+  it("shows the label of the selected driver version, not its raw value", async () => {
+    driverVersionsMock.mockReturnValue([
+      driverVersion("adv-1", "drivers/a"),
+      driverVersion("adv-2", "drivers/b"),
+    ]);
+
+    const dialog = await openUpgradeDialog();
+
+    const trigger = within(dialog).getByTestId("upgrade-driver-version-select");
+    expect(trigger).toHaveTextContent("Latest (auto)");
+    await userEvent.click(trigger);
+    const option = await screen.findByRole("option", { name: /drivers\/b/ });
+    const label = option.textContent ?? "";
+    await userEvent.click(option);
+    await waitFor(() => expect(trigger).toHaveTextContent(label));
+    expect(trigger).not.toHaveTextContent("adv-2");
   });
 
   it("shows no warning when every version comes from one driver directory", async () => {

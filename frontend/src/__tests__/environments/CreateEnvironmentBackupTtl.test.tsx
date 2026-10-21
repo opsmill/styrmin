@@ -167,3 +167,17 @@ describe("CreateEnvironmentDialog: backup retention TTL", () => {
     expect(submittedConfig()).toMatchObject({ backup_ttl: "1h30m" });
   });
 });
+
+describe("CreateEnvironmentDialog: cluster select", () => {
+  it("shows the name of the selected cluster, not its id", async () => {
+    const user = await openAdvancedForm();
+
+    await user.click(screen.getByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: "kind" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox")).toHaveTextContent("kind");
+    });
+    expect(screen.getByRole("combobox")).not.toHaveTextContent("cluster-1");
+  });
+});
