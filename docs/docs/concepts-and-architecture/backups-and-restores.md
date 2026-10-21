@@ -37,7 +37,8 @@ kinds to strategies:
 | **`postgres`** | Run `pg_dump` into a sidecar volume, then snapshot it. | Postgres databases. |
 | **`mariadb`** | Run `mariadb-dump` into a sidecar volume, then snapshot it. | MariaDB / MySQL databases. |
 | **`mongodb`** | Run `mongodump` into a sidecar volume, then snapshot it. | MongoDB databases. |
-| **`neo4j`** | Run `neo4j-admin dump` into a sidecar volume, then snapshot it. | Neo4j graph databases. |
+| **`neo4j`** | Run `neo4j-admin database backup` into a sidecar volume, then snapshot it. | Neo4j Enterprise Edition. |
+| **`neo4j-community`** | Pause Neo4j while Velero copies its data volume, then resume it. | Neo4j Community Edition. |
 | **`action`** | Run a custom driver-defined Python action. | Anything that doesn't fit the patterns above. |
 
 The driver author picks the strategy per component. The operator runs
@@ -62,6 +63,51 @@ server:
     kind: disk
     volume: my-app-storage-data   # required: the pod-template volume name
 ```
+
+:::
+
+:::note Neo4j Community has no online backup
+
+The `neo4j` strategy runs commands that exist only in Neo4j Enterprise
+Edition (`neo4j-admin database backup` and `STOP DATABASE`). Against Neo4j
+Community Edition, the default image of the Neo4j and Infrahub charts, every
+backup ends `PartiallyFailed`. Use `neo4j-community` for those components:
+
+```yaml
+database:
+  identifier:
+    label:
+      infrahub/service: database
+  backup:
+    enabled: true
+    kind: neo4j-community
+    volume: data   # optional: the pod-template volume that holds /data
+```
+
+What to expect from a `neo4j-community` backup:
+
+- Neo4j does not answer queries while Velero uploads the volume. Clients of
+  the database, such as the Infrahub API, wait or time out until the backup
+  finishes. The pause grows with the size of the volume.
+- If the backup takes longer than one hour, Styrmin resumes Neo4j anyway and
+  the backup is marked failed, because the copy is no longer consistent.
+- The backup is also marked failed when Neo4j restarts during the backup,
+  or when another backup of the same pod resumes it first.
+- A restore lays the volume down before Neo4j starts. Neo4j replays its
+  transaction logs when it starts, so the restored database contains whole
+  transactions only.
+- The strategy expects the official Neo4j image, which writes the server's
+  process ID to `/var/lib/neo4j/run/neo4j.pid`.
+- Velero's file-system backup skips `hostPath` volumes, such as the ones the
+  `local-path` provisioner creates. The data volume must use a storage class
+  that provisions CSI volumes, or the backup completes without the database.
+
+The `volume` field defaults to `data`, the name the Neo4j Helm chart gives
+its data volume. The strategy reads no other field: a driver that sets
+`volumes`, `database_name` or `credentials_secret` on a `neo4j-community`
+component fails to load. See
+[ADR-070](https://github.com/opsmill/styrmin/blob/develop/dev/adr/0070-neo4j-community-backup-pauses-neo4j-during-volume-copy.md)
+for why Styrmin pauses Neo4j instead of dumping it.
 
 :::
 

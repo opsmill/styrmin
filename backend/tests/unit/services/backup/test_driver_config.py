@@ -549,6 +549,37 @@ class TestValidateDriverBackupConfigsForSpec:
         spec = _spec({"db": _component({"enabled": True, "kind": "neo4j"})})
         validate_driver_backup_configs_for_spec(spec)
 
+    def test_neo4j_community_with_volume_passes(self) -> None:
+        spec = _spec(
+            {
+                "db": _component(
+                    {"enabled": True, "kind": "neo4j-community", "volume": "graph"}
+                )
+            }
+        )
+        validate_driver_backup_configs_for_spec(spec)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("volumes", ["data"]),
+            ("database_name", "neo4j"),
+            ("credentials_secret", "neo4j-auth"),
+        ],
+    )
+    def test_neo4j_community_rejects_fields_it_ignores(
+        self, field: str, value: object
+    ) -> None:
+        spec = _spec(
+            {
+                "db": _component(
+                    {"enabled": True, "kind": "neo4j-community", field: value}
+                )
+            }
+        )
+        with pytest.raises(ValidationError, match=f"does not use \\['{field}'\\]"):
+            validate_driver_backup_configs_for_spec(spec)
+
     def test_disabled_backup_ignored(self) -> None:
         spec = _spec({"server": _component({"enabled": False})})
         validate_driver_backup_configs_for_spec(spec)
@@ -615,6 +646,38 @@ class TestInfrahubExampleDriverDiskBackup:
             assert (
                 patch.patch.annotations[VELERO_BACKUP_VOLUMES_ANNOTATION]  # type: ignore[attr-defined]
                 == self._SERVER_STORAGE_VOLUME
+            )
+
+
+class TestInfrahubExampleDriverDatabaseBackup:
+    """Guard the community infrahub driver's database backup (#263).
+
+    The infrahub chart deploys Neo4j Community, where ``kind: neo4j`` runs the
+    Enterprise-only ``neo4j-admin database backup`` and every backup ends
+    ``PartiallyFailed``. The driver must use ``kind: neo4j-community`` so Velero
+    copies the paused database's ``data`` volume (the chart's volumeClaimTemplate).
+    """
+
+    def test_database_backup_copies_neo4j_data_volume(self) -> None:
+        spec_path = (
+            _REPO_ROOT / "driver" / "examples" / "infrahub" / "driver.styrmin.yml"
+        )
+        spec = yaml.safe_load(spec_path.read_text())
+
+        backup_raw = spec["spec"]["components"]["database"]["backup"]
+        config = ComponentBackupConfig.model_validate(backup_raw)
+        assert config.enabled is True
+        assert config.kind == BackupKind.NEO4J_COMMUNITY
+
+        patches = build_backup_volume_annotation_patches(
+            {"database": config},
+            {"database": "infrahub/service=database"},
+        )
+        assert patches
+        for patch in patches:
+            assert (
+                patch.patch.annotations[VELERO_BACKUP_VOLUMES_ANNOTATION]  # type: ignore[attr-defined]
+                == "data"
             )
 
 

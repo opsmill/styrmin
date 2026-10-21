@@ -14,7 +14,7 @@ from styrmin_backend.services.backup.strategies.base import BackupStrategy
 
 
 class Neo4jBackupStrategy(BackupStrategy):
-    """Neo4j-aware backup: neo4j-admin dump to extra volume, Velero backs up extra volume."""
+    """Neo4j Enterprise online backup: neo4j-admin database backup to extra volume, Velero backs up extra volume."""
 
     def get_hooks(
         self,

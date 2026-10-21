@@ -11,10 +11,8 @@ This is a **read-only** assertion on an already-deployed Infrahub stack, so it
 piggybacks on the session-scoped ``deployed_infrahub_enterprise_app`` fixture —
 the same stack that ``test_infrahub_enterprise_backup_and_restore_lifecycle``
 already boots in the ``shard_infrahub`` shard. It deliberately does **not**
-consume ``deployed_infrahub_app`` (the community stack): that fixture's only
-other consumer (the community backup/restore test) is ``@pytest.mark.skip``,
-so depending on it would resurrect a second full Infrahub boot (~600s +
-Neo4j/Prefect/server) in the shard just for these read-only assertions. The
+also consume ``deployed_infrahub_app`` (the community stack): one stack is
+enough for these read-only assertions, because the
 community and enterprise drivers share the identical ``task-manager`` →
 ``prefect-server`` subchart, so the enterprise deployment exercises the same
 service-discovery + FQDN + ingress machinery this test asserts on. See

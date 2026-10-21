@@ -64,7 +64,9 @@ spec:
           infrahub/service: database
       backup:
         enabled: true
-        kind: neo4j
+        # The chart ships Neo4j Community, which has no online backup: Neo4j
+        # is paused while Velero copies its `data` volume.
+        kind: neo4j-community
 
     cache:
       container: redis
