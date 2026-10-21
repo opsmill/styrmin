@@ -4,7 +4,7 @@ description: "Task list for the recorded demos of four Styrmin features"
 
 # Tasks: Recorded Demos of Four Styrmin Features
 
-**Input**: Design documents from `specs/029-recorded-feature-demos/`: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/record-command.md](contracts/record-command.md), [quickstart.md](quickstart.md), [critique](critiques/critique-20261017.md)
+**Input**: Design documents from `specs/031-recorded-feature-demos/`: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/record-command.md](contracts/record-command.md), [quickstart.md](quickstart.md), [critique](critiques/critique-20261017.md)
 
 **Tests**: The PRD asks for unit tests of the post-processor only, plus the read-only FR-016 E2E check. The demo scripts have no E2E test (approved exception); one full run on a fresh demo stack is their proof. One extra unit test guards FR-004 (the E2E suite keeps `fill`).
 
@@ -21,7 +21,7 @@ description: "Task list for the recorded demos of four Styrmin features"
 - Build the server image once before the first session: `docker compose build server`.
 - One CI shard per pytest session, and `api-chromium` and `ui-chromium` in separate sessions.
 - Run with `--pdb`. From a non-interactive shell, prefix the command with `sleep infinity |` and stop the run by PID, not with `pkill -f`.
-- Record each passing run in `specs/029-recorded-feature-demos/e2e-evidence.md`: the pytest node ID, the exact command, ISO 8601 start and end times, the vcluster name and kubeconfig path, and the verbatim `PASSED` line (Constitution §V).
+- Record each passing run in `specs/031-recorded-feature-demos/e2e-evidence.md`: the pytest node ID, the exact command, ISO 8601 start and end times, the vcluster name and kubeconfig path, and the verbatim `PASSED` line (Constitution §V).
 
 ## Demo stack rules (apply to every task that records or runs a demo)
 
@@ -48,18 +48,18 @@ description: "Task list for the recorded demos of four Styrmin features"
 
 **Purpose**: find out early what research expects to fail. T008 decides whether US4 can go on.
 
-- [X] T005 Add the FR-016 alias check to `test_environment_clone_lifecycle` in `backend/tests/e2e/test_backup_restore.py` (research R-013): right after the first clone reaches its terminal status and `counterpart_deployment_id` is known (step 6), list with `kr8s` (as `portforward_simple_app` does, with `vcluster["kubeconfig_path"]`) the Services labelled `styrmin.io/service-alias=true` in namespace `styrmin-<counterpart_deployment_id>`. For each, take the namespace part of `spec.externalName` (`<name>.<namespace>.svc.<domain>`) and assert it is in the set of namespaces of the clone's deployments (`styrmin-<counterpart_deployment_id>` and `styrmin-<id>` of every deployment `client.deployments.list` returns for the created environment). The assertion message lists each offending alias name and its `externalName`. Add a comment of at most three lines: the check proves no alias points to the source; demo 4 proves the positive case (critique E5). Do not add a deployment or a new test node
-- [X] T006 Run `test_environment_clone_lifecycle[api-chromium]` with `-m "ci and shard_env_backup"` following the E2E run rules, and record the result in `specs/029-recorded-feature-demos/e2e-evidence.md` (PASSED evidence, or the failure output with the offending aliases)
-- [X] T007 Run `test_environment_clone_lifecycle[ui-chromium]` in its own session the same way, and record the result in `specs/029-recorded-feature-demos/e2e-evidence.md`
-- [X] T008 If T006 or T007 fails on the alias assertion: create a GitHub issue with the `create-issue` skill ("a clone keeps the source's service aliases"), citing research R-013, the failure output, and the docs statement in `docs/docs/concepts-and-architecture/ingress-and-networking.md` that the defect contradicts. Stop and ask the maintainer how the product fix will be made. Keep T005 on the branch uncommitted or in a separate commit that is not pushed until the check passes; do not mark it `xfail` (critique X1). Phases 3, 4, 5, 7 (for demos 1 to 3), 8 and 9 go on; Phase 6 waits for the fix. Record the decision in `specs/029-recorded-feature-demos/e2e-evidence.md`. If both runs pass, write "alias check passed; no issue needed" there and go on
+- [X] T005 *(Dropped on 2026-10-20: commit `472fe403`, which held this check, was removed from the branch, because PR #531 adds its own alias check to the same test. FR-016 is dropped.)* Add the FR-016 alias check to `test_environment_clone_lifecycle` in `backend/tests/e2e/test_backup_restore.py` (research R-013): right after the first clone reaches its terminal status and `counterpart_deployment_id` is known (step 6), list with `kr8s` (as `portforward_simple_app` does, with `vcluster["kubeconfig_path"]`) the Services labelled `styrmin.io/service-alias=true` in namespace `styrmin-<counterpart_deployment_id>`. For each, take the namespace part of `spec.externalName` (`<name>.<namespace>.svc.<domain>`) and assert it is in the set of namespaces of the clone's deployments (`styrmin-<counterpart_deployment_id>` and `styrmin-<id>` of every deployment `client.deployments.list` returns for the created environment). The assertion message lists each offending alias name and its `externalName`. Add a comment of at most three lines: the check proves no alias points to the source; demo 4 proves the positive case (critique E5). Do not add a deployment or a new test node
+- [X] T006 *(Dropped on 2026-10-20: commit `472fe403`, which held this check, was removed from the branch, because PR #531 adds its own alias check to the same test. FR-016 is dropped.)* Run `test_environment_clone_lifecycle[api-chromium]` with `-m "ci and shard_env_backup"` following the E2E run rules, and record the result in `specs/031-recorded-feature-demos/e2e-evidence.md` (PASSED evidence, or the failure output with the offending aliases)
+- [X] T007 *(Dropped on 2026-10-20: commit `472fe403`, which held this check, was removed from the branch, because PR #531 adds its own alias check to the same test. FR-016 is dropped.)* Run `test_environment_clone_lifecycle[ui-chromium]` in its own session the same way, and record the result in `specs/031-recorded-feature-demos/e2e-evidence.md`
+- [X] T008 If T006 or T007 fails on the alias assertion: create a GitHub issue with the `create-issue` skill ("a clone keeps the source's service aliases"), citing research R-013, the failure output, and the docs statement in `docs/docs/concepts-and-architecture/ingress-and-networking.md` that the defect contradicts. Stop and ask the maintainer how the product fix will be made. Keep T005 on the branch uncommitted or in a separate commit that is not pushed until the check passes; do not mark it `xfail` (critique X1). Phases 3, 4, 5, 7 (for demos 1 to 3), 8 and 9 go on; Phase 6 waits for the fix. Record the decision in `specs/031-recorded-feature-demos/e2e-evidence.md`. If both runs pass, write "alias check passed; no issue needed" there and go on
 - [X] T009 Verify the deployments the demos rely on, on a fresh demo stack (`uv run invoke reset`), with a throwaway script in the session scratchpad (not committed) that uses `StyrminClient` with the admin credentials from `dev/local/demo-values.yaml`:
   - create environment `spike-upgrade` on cluster `local`, deploy `infrahub` at `1.10.11`, wait for Running (up to 900 s), upgrade to `1.11.7` with `client.deployments.update_version`, wait for Running (research R-015);
   - `client.drivers.load_local_version("/styrmin/drivers/infrahub-enterprise")`, create environment `spike-backup`, assign the stack's backup storage location (`client.backup_storage_locations.list()` then `assign`), deploy `infrahub-enterprise` at `1.11.7`, wait for Running, take an environment backup and restore it with `client.environment_backups`, wait for both to complete (research R-007);
   - delete both environments.
 
-  Write the outcome to `specs/029-recorded-feature-demos/spike-notes.md`. If 1.10.11 does not start on chart 4.33.2, try the newest 1.11 release below 1.11.7 and note which version demo 1 will use. If `infrahub-enterprise` 1.11.7 does not start or its backup fails, stop and report it to the maintainer, because demos 3 and 4 depend on it
-- [X] T010 Verify the screencast (research R-001) with a throwaway script in the scratchpad: open a 1920×1080 page on the demo stack's Styrmin URL, `screencast.start(path=..., size=...)`, `show_actions(cursor="pointer")`, `show_chapter("Test", duration=1500)`, navigate to the `spike-upgrade` Infrahub URL (another origin) before T009 deletes it or to any other `*.local.styrmin.io` page, click once, `stop()`. Check with `ffprobe` that the file lasts the whole run and look at its last frames to confirm the second origin was recorded. Note the result in `specs/029-recorded-feature-demos/spike-notes.md`; if the recording stops at the navigation, note that the recorder must open one recorded page per web application and join the files (R-001 fallback), and apply that in T019
-- [X] T011 Run `test_ui_smoke.py` in the `ui-chromium` variant locally after the Playwright upgrade (E2E run rules, `-m "ci and shard_general"` filtered to that file) and record the result in `specs/029-recorded-feature-demos/e2e-evidence.md`
+  Write the outcome to `specs/031-recorded-feature-demos/spike-notes.md`. If 1.10.11 does not start on chart 4.33.2, try the newest 1.11 release below 1.11.7 and note which version demo 1 will use. If `infrahub-enterprise` 1.11.7 does not start or its backup fails, stop and report it to the maintainer, because demos 3 and 4 depend on it
+- [X] T010 Verify the screencast (research R-001) with a throwaway script in the scratchpad: open a 1920×1080 page on the demo stack's Styrmin URL, `screencast.start(path=..., size=...)`, `show_actions(cursor="pointer")`, `show_chapter("Test", duration=1500)`, navigate to the `spike-upgrade` Infrahub URL (another origin) before T009 deletes it or to any other `*.local.styrmin.io` page, click once, `stop()`. Check with `ffprobe` that the file lasts the whole run and look at its last frames to confirm the second origin was recorded. Note the result in `specs/031-recorded-feature-demos/spike-notes.md`; if the recording stops at the navigation, note that the recorder must open one recorded page per web application and join the files (R-001 fallback), and apply that in T019
+- [X] T011 Run `test_ui_smoke.py` in the `ui-chromium` variant locally after the Playwright upgrade (E2E run rules, `-m "ci and shard_general"` filtered to that file) and record the result in `specs/031-recorded-feature-demos/e2e-evidence.md`
 
 ### 2b. Typing one key at a time in the page objects (research R-006, FR-004)
 
@@ -118,7 +118,7 @@ description: "Task list for the recorded demos of four Styrmin features"
   Register the demo in `demos/catalog.py` with environment names `("network-lab-upgrade",)`
 
   Changed after the first recordings ([spike-notes.md](spike-notes.md#what-changed-after-watching-the-first-recording)): `read_task_ids()` moved to the end of chapter 1; `DeploymentDetailPage.show_timeline_entry(task_id)` was added to expand and show the upgrade task; the demo fails unless the step of the driver's upgrade action succeeded and the upgrade task's timeline entry shows the `latest` version.
-- [X] T034 [US1] Record demo 1 alone on a demo stack that `uv run invoke start` just created: `uv run invoke record --demo deploy-upgrade`. Watch the video and check each item of quickstart §4 for demo 1; check `ffprobe` gives `h264,1920,1080,yuv420p` and a length of 3:00 or less; check the environment is gone. Fix the scenario or the page objects until it passes, and note the length in `specs/029-recorded-feature-demos/spike-notes.md`
+- [X] T034 [US1] Record demo 1 alone on a demo stack that `uv run invoke start` just created: `uv run invoke record --demo deploy-upgrade`. Watch the video and check each item of quickstart §4 for demo 1; check `ffprobe` gives `h264,1920,1080,yuv420p` and a length of 3:00 or less; check the environment is gone. Fix the scenario or the page objects until it passes, and note the length in `specs/031-recorded-feature-demos/spike-notes.md`
 
 **Checkpoint**: one demo works end to end; the presenter can use video 1.
 
@@ -135,7 +135,7 @@ description: "Task list for the recorded demos of four Styrmin features"
   2. step "Run two Infrahub servers": `read_task_ids()` on the Infrahub deployment, `set_component_replicas(deployment_id=<infrahub>, component="server", replicas=2)`, then `wait("A second Infrahub server starts")` around `wait_for_new_task("update_instance", ...)`.
 
   Register it with environment names `("network-lab-overrides",)`
-- [X] T036 [US2] Record demo 2 alone on a fresh demo stack and check it as in T034, plus: the Semaphore pod runs `styrmin-demo/semaphore:v2.16.47` (`kubectl get pod -n styrmin-<id> -o jsonpath`) before the cleanup deletes it; note the length in `specs/029-recorded-feature-demos/spike-notes.md`
+- [X] T036 [US2] Record demo 2 alone on a fresh demo stack and check it as in T034, plus: the Semaphore pod runs `styrmin-demo/semaphore:v2.16.47` (`kubectl get pod -n styrmin-<id> -o jsonpath`) before the cleanup deletes it; note the length in `specs/031-recorded-feature-demos/spike-notes.md`
 
 ---
 
@@ -153,7 +153,7 @@ description: "Task list for the recorded demos of four Styrmin features"
   5. step "The device and the template are back": show the Infrahub device list and the Semaphore template list, and fail the demo unless `sw2` and "List network devices" are listed.
 
   Register it with environment names `("network-lab-backup",)`
-- [X] T038 [US3] Record demo 3 alone on a fresh demo stack and check it as in T034, plus the acceptance scenario of User Story 3 (both items back); note the length in `specs/029-recorded-feature-demos/spike-notes.md`
+- [X] T038 [US3] Record demo 3 alone on a fresh demo stack and check it as in T034, plus the acceptance scenario of User Story 3 (both items back); note the length in `specs/031-recorded-feature-demos/spike-notes.md`
 
 ---
 
@@ -173,7 +173,7 @@ description: "Task list for the recorded demos of four Styrmin features"
   5. step "The source is unchanged": run the template in the source Semaphore again, fail unless it says 2 devices.
 
   Register it with environment names `("network-lab-clone", "network-lab")`, the clone first so cleanup deletes it first
-- [X] T040 [US4] Record demo 4 alone on a fresh demo stack and check it as in T034, plus the acceptance scenario of User Story 4 (counts 2, 3, 2); note the length in `specs/029-recorded-feature-demos/spike-notes.md`
+- [X] T040 [US4] Record demo 4 alone on a fresh demo stack and check it as in T034, plus the acceptance scenario of User Story 4 (counts 2, 3, 2); note the length in `specs/031-recorded-feature-demos/spike-notes.md`
 
 ---
 
@@ -183,8 +183,8 @@ description: "Task list for the recorded demos of four Styrmin features"
 
 **Independent Test**: quickstart §3 and §6.
 
-- [X] T041 [US5] Check the prerequisites messages (quickstart §6): run `uv run invoke record` with ffmpeg removed from the PATH and with the demo stack paused (`uv run invoke stop`), and confirm exit code 2 and the contract's messages before any setup; paste both outputs into `specs/029-recorded-feature-demos/full-run.log`. Restart with `uv run invoke start`
-- [X] T042 [US5] Run all demos on a fresh demo stack: `uv run invoke reset`, then `uv run invoke record 2>&1 | tee specs/029-recorded-feature-demos/full-run.log`. Confirm exit code 0, four `recorded` lines, four videos of 3:00 or less, `ffprobe` values as in quickstart §3, and that only the `local` environment and no demo namespace remain (SC-001, SC-002, SC-005). If demo 4 waits for the product fix (T008), run the three other demos with `--demo` one after the other in the same session instead, and say so in the log. Done on 2026-10-20: the run of all four demos on a fresh demo stack passed, with exit code 0, four `recorded` lines, four videos of 3:00 or less and only the `local` environment left (see "T042, second run" in `full-run.log`). The first run, on 2026-10-18, recorded demos 2 and 3 only, because demos 1 and 4 were not registered then; `full-run.log` keeps it, marked as superseded
+- [X] T041 [US5] Check the prerequisites messages (quickstart §6): run `uv run invoke record` with ffmpeg removed from the PATH and with the demo stack paused (`uv run invoke stop`), and confirm exit code 2 and the contract's messages before any setup; paste both outputs into `specs/031-recorded-feature-demos/full-run.log`. Restart with `uv run invoke start`
+- [X] T042 [US5] Run all demos on a fresh demo stack: `uv run invoke reset`, then `uv run invoke record 2>&1 | tee specs/031-recorded-feature-demos/full-run.log`. Confirm exit code 0, four `recorded` lines, four videos of 3:00 or less, `ffprobe` values as in quickstart §3, and that only the `local` environment and no demo namespace remain (SC-001, SC-002, SC-005). If demo 4 waits for the product fix (T008), run the three other demos with `--demo` one after the other in the same session instead, and say so in the log. Done on 2026-10-20: the run of all four demos on a fresh demo stack passed, with exit code 0, four `recorded` lines, four videos of 3:00 or less and only the `local` environment left (see "T042, second run" in `full-run.log`). The first run, on 2026-10-18, recorded demos 2 and 3 only, because demos 1 and 4 were not registered then; `full-run.log` keeps it, marked as superseded
 
 ---
 
@@ -194,7 +194,7 @@ description: "Task list for the recorded demos of four Styrmin features"
 
 **Independent Test**: quickstart §5.
 
-- [X] T043 [US6] Follow quickstart §5: make demo 3 fail during its backup by scaling `deploy/velero` in namespace `styrmin` to 0, run `uv run invoke record --demo backup-restore`, and confirm exit code 1, the failing step and error in the summary, `network-lab-backup` kept, and no new video. Scale Velero back to 1, run it again, and confirm the leftover environment was deleted before the setup and only `3-backup-restore.mp4` was written. Append both outputs to `specs/029-recorded-feature-demos/full-run.log`
+- [X] T043 [US6] Follow quickstart §5: make demo 3 fail during its backup by scaling `deploy/velero` in namespace `styrmin` to 0, run `uv run invoke record --demo backup-restore`, and confirm exit code 1, the failing step and error in the summary, `network-lab-backup` kept, and no new video. Scale Velero back to 1, run it again, and confirm the leftover environment was deleted before the setup and only `3-backup-restore.mp4` was written. Append both outputs to `specs/031-recorded-feature-demos/full-run.log`
 
 ---
 
@@ -203,7 +203,7 @@ description: "Task list for the recorded demos of four Styrmin features"
 - [X] T044 [P] Add a "Recording the demos" section to `dev/guides/local-demo.md` (FR-017): prerequisites (ffmpeg, network access for the image build and Semaphore's start, memory for two environments during demo 4); the commands and the four slugs; the versions file and when to update it (including that a new Infrahub release may need a newer chart in the driver); the output directory; what the summary means; what to do after a failed demo (inspect the kept environments; they use memory until the next run of that demo deletes them); how long a full run takes (research R-017, marked as not measured until T042 measures it)
 - [X] T045 [P] Add a paragraph to `dev/knowledge/backend/e2e-testing.md` (Constitution §VII, plan): page objects take `keystroke_delay_ms` (default `None`, which the E2E suite keeps), `enter_text` in `pages/_dom.py`, `DeploymentDetailPage.wait_for_new_task`, and that `backend/tests/e2e/demos/` reuses the page objects, so a page-object fix repairs both (SC-004)
 - [X] T046 Run `uv run invoke format lint` and `uv run invoke test`; fix failures
-- [ ] T047 Open one video in Keynote, PowerPoint and Google Slides (uploaded to Google Drive) and play it without conversion (SC-003). If no Mac or Windows machine is available to the implementer, ask the maintainer to do it and record who did it and the result in `specs/029-recorded-feature-demos/full-run.log`
+- [ ] T047 Open one video in Keynote, PowerPoint and Google Slides (uploaded to Google Drive) and play it without conversion (SC-003). If no Mac or Windows machine is available to the implementer, ask the maintainer to do it and record who did it and the result in `specs/031-recorded-feature-demos/full-run.log`
 - [X] T048 Prepare the pull request notes: link `e2e-evidence.md`, `spike-notes.md` and `full-run.log`; state the approved E2E exception and the governance gates crossed (Playwright 1.64 upgrade that changes the UI E2E browser, ffmpeg, the local Semaphore image); state the two research findings for the maintainer: demos 3 and 4 use `infrahub-enterprise` (research R-007, critique P2 asks the maintainer to confirm showing it), and the alias check outcome with the issue link if T008 filed one; name the UI E2E shards in CI as the check of the page-object change
 
 ---
@@ -257,3 +257,25 @@ T026 Semaphore page object
 4. US2 and US3: demos 2 and 3.
 5. US4: demo 4, after the alias check passes.
 6. US5, US6 and Polish: the full run on a fresh demo stack, the failure and re-record check, the guide, and the PR notes.
+
+## Phase 10: Review of PR #540 (2026-10-21)
+
+**Purpose**: address the review of [PR #540](https://github.com/opsmill/styrmin/pull/540) (Clarifications, session 2026-10-21). The numbers in brackets are the review's item numbers.
+
+- [X] T049 [4] Keep a caption that names the application and its environment (`DemoRecorder.caption`), hold each result for at least 5 s (`DemoRecorder.hold`, which also rests the cursor at the right edge), end each video on a closing card (`encode.render_closing_card`, `Demo.summary`), and reword the sped-up labels (`video.label_text`) (FR-020)
+- [X] T050 [4] Find why demo 1 ends on steps marked "Superseded by Stop Components" and why "Stop Components" itself can end Superseded; write the cause in the spec and a note for the presenter of each video in the guide
+- [X] T051 [5] Check the Chromium build, ffprobe, docker and the kube context `vcluster-docker_styrmin` before any setup, and name a rejected admin login as such (FR-012)
+- [X] T052 [6] On Ctrl-C, print the summary so far with the kept environments and exit with code 130; unit test that the client and the browser are closed (FR-023)
+- [X] T053 [7] Delete only the environments that the command created, recorded in `$XDG_STATE_HOME/styrmin/demo-environments.json`, or that the developer confirms (FR-009)
+- [X] T054 [8] Call the `DeploymentDetailPage` methods of the demos from the `[ui-chromium]` variants of `test_override_then_clear` and `test_token_follows_upgrade_and_action_job`, and the new `PodsTabPage` methods from `test_pods_tab_copy_logs_command`; run them to a pass; give the command an owner and a schedule in the guide
+- [X] T055 [9] Keep the raw recording and the plan of the video after a failed encoding, and add `--encode-again` (FR-024)
+- [X] T056 [10] Test the encoding with a real ffmpeg on a short generated recording: duration, size, codec and pixel format (`test_encode.py`)
+- [X] T057 [11] Name the commit the beta videos are recorded from and add numbered first-time steps to the guide; make the errors of demos 1 and 4 name the fixes to #372 and #530
+- [X] T058 [13] Update the spec: status, FR-016, T005 to T007, assumptions; answer the three open questions of #518 on the issue
+- [X] T059 [14] Print a line when each wait starts and every minute while it lasts, each sub-step of the setup, and how long each demo usually takes (FR-025)
+- [X] T060 [16] Build the demo Semaphore image inside the command after the argument and prerequisites checks, with list arguments, every time from Docker's cache
+- [X] T061 [17] State the lasting facts in the guide without links into the spec, start its section with numbered steps, renumber the spec from 029 to 031, and delete `full-run.log` and `pr-notes.md`
+- [X] T062 [18] Mask the Infrahub token in the Semaphore task errors; write each output file under a temporary name, then `os.replace`; name the Semaphore version in the Dockerfile's `FROM` line only; remove `close_output` and `PodsTabPage._keystroke_delay_ms`; explain the Playwright pin; share one Infrahub admin token constant (`tests/e2e/helpers/infrahub.py`); pin the base image digest and `infrahub-sdk==1.23.2`; delete the environments while ffmpeg encodes
+- [X] T063 [19] Accept several `--demo` values and add `--delete-environments`; give each failed summary row a next step; end each chapter of demo 2 on the Pods tab; cut the white page of Semaphore's load, rest the cursor before each result, open the Upgrade dialog from the Timeline tab; write a chapter file next to each MP4 (FR-021, FR-022)
+- [ ] T064 Record the four demos on a fresh demo stack and watch each video
+

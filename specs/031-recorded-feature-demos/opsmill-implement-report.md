@@ -3,7 +3,7 @@
 Status: INCOMPLETE. All four demos record in one run, and every task but one is done. Task T047 (play a video in Keynote, PowerPoint and Google Slides) needs a person with those applications.
 
 - Feature: recorded demos of four Styrmin features for the beta presentation ([#518](https://github.com/opsmill/styrmin/issues/518))
-- Spec directory: `specs/029-recorded-feature-demos`
+- Spec directory: `specs/031-recorded-feature-demos`
 - This report covers two sessions of `speckit-opsmill-implement`:
   - 2026-10-18, from base commit `11a4b58b`: phases 7, 8 and 9 for demos 2 and 3, while demos 1 and 4 waited for [#372](https://github.com/opsmill/styrmin/issues/372) and [#530](https://github.com/opsmill/styrmin/issues/530).
   - 2026-10-20, after the maintainer said both issues are fixed: drop commit `472fe403`, rebase on `develop` at `bb56eac9`, then phases 3 and 6, the run of all four demos, and the documentation, from base commit `17468791`.
@@ -73,9 +73,9 @@ Unit tests added or modified on 2026-10-20 (the 2026-10-18 session added or modi
 | Full backend suite after the review fixes | unit, functional | `uv run invoke test` | 2026-10-20T15:33:56Z | `5631 passed, 3 skipped, 36 warnings in 231.91s (0:03:51)` |
 | `backend/tests/e2e/test_task_steps.py::test_helmrelease_failure_shows_fluxcd_reason[ui-chromium]` (not changed; run for the page-object changes) | e2e | `sleep infinity \| uv run pytest backend/tests/e2e/test_task_steps.py -m "ci and shard_task_steps" -k "ui-chromium" -v -s --pdb` | 2026-10-20T16:02:37Z | `PASSED`; `1 passed, 4 skipped, 5 deselected, 4 warnings in 434.65s (0:07:14)` (vCluster `pytest-b6282f18-4a55-4a2b-8107-0d5dd70e187c`, commit `28b1d20a`) |
 
-The demo scenarios have no E2E test (approved exception). Their proof is the run of all four demos on a demo stack that `uv run invoke reset` had just created, in [full-run.log](full-run.log) ("T042, second run").
+The demo scenarios have no E2E test (approved exception). Their proof is the run of all four demos on a demo stack that `uv run invoke reset` had just created, in full-run.log ("T042, second run").
 
-One UI E2E test ran locally after the page-object changes, at the maintainer's request: `test_task_steps.py` in the `ui-chromium` variant, which reads the timeline through `read_timeline` and enters text through `enter_text` with the default `None` ([e2e-evidence.md](e2e-evidence.md#the-timeline-test-passes-in-the-ui-variant-after-the-page-object-changes)). The UI cells of the `e2e-tests` job in CI check the other UI tests ([pr-notes.md](pr-notes.md)).
+One UI E2E test ran locally after the page-object changes, at the maintainer's request: `test_task_steps.py` in the `ui-chromium` variant, which reads the timeline through `read_timeline` and enters text through `enter_text` with the default `None` ([e2e-evidence.md](e2e-evidence.md#the-timeline-test-passes-in-the-ui-variant-after-the-page-object-changes)). The UI cells of the `e2e-tests` job in CI check the other UI tests (pr-notes.md).
 
 ## Review findings
 
@@ -87,7 +87,7 @@ Fixed in `25a35791` and `4358d79c`:
 |---|---|---|
 | Medium | `backend/tests/e2e/demos/scenarios/deploy_upgrade.py` | The version check after the upgrade read `deployment.applicationVersion`, which Styrmin sets when it accepts the request, so it could not fail. It now reads the upgrade task's timeline entry. |
 | Medium | `backend/tests/e2e/demos/__main__.py`, `tasks/demo.py` | The "not available yet" code path could no longer run, and the help text said "every available demo". |
-| Medium | `specs/029-recorded-feature-demos/spike-notes.md`, `e2e-evidence.md` | Wrong rebase base commit, an outdated critique citation, a tense contradiction, and no note that `472fe403` had been pushed. |
+| Medium | `specs/031-recorded-feature-demos/spike-notes.md`, `e2e-evidence.md` | Wrong rebase base commit, an outdated critique citation, a tense contradiction, and no note that `472fe403` had been pushed. |
 | Medium | `dev/knowledge/backend/e2e-testing.md` | Did not say that `show_timeline_entry` needs the Timeline tab already open. |
 | Medium | `spike-notes.md`, `deploy_upgrade.py` | "step" used for a recorded chapter next to the glossary term Step. |
 | Low | `backend/tests/e2e/pages/deployment_detail.py` | `show_timeline_entry` re-raised `from None`, and did not wrap the expand assertion. |
@@ -108,14 +108,14 @@ Not fixed:
 - On 2026-10-18, phases 3 and 6 were not dispatched because the maintainer had decided that demos 1 and 4 wait for #372 and #530. On 2026-10-20 the maintainer said both are fixed, and both phases were done.
 - `472fe403` was dropped rather than kept, as the maintainer asked; PR #531's alias check on `develop` covers the same assertion. On 2026-10-20 the orchestrator stated in [e2e-evidence.md](e2e-evidence.md) that PR #531's runs meet the dependency of Phase 6 on T006 and T007.
 - T042, T044, T045, T046 and T048 were done again after demos 1 and 4 landed, so the run of all four demos that the approved exception asks for exists and the documents describe the current state.
-- The version check of demo 1 was changed after the run of all four demos; demo 1 was recorded again alone to confirm it ([full-run.log](full-run.log)).
+- The version check of demo 1 was changed after the run of all four demos; demo 1 was recorded again alone to confirm it (full-run.log).
 - The shared setup helper for demos 3 and 4 was deferred.
 - T047 was not dispatched, because no agent can open Keynote, PowerPoint or Google Slides.
 - `full-run.log` is committed with `git add -f`, because it matches `*.log` in `.gitignore`.
 
 ## Suggested next steps
 
-1. Review the pull request. On 2026-10-20 the rebased branch replaced `11a4b58b` on GitHub with `git push --force-with-lease`, and the pull request was opened from [pr-notes.md](pr-notes.md), both at the maintainer's request.
+1. Review the pull request. On 2026-10-20 the rebased branch replaced `11a4b58b` on GitHub with `git push --force-with-lease`, and the pull request was opened from pr-notes.md, both at the maintainer's request.
 2. Play one video in Keynote, PowerPoint and Google Slides (T047) and record the result in `full-run.log`.
-3. Confirm that demos 3 and 4 may show the `infrahub-enterprise` driver (question in [pr-notes.md](pr-notes.md)).
+3. Confirm that demos 3 and 4 may show the `infrahub-enterprise` driver (question in pr-notes.md).
 4. Consider the deferred shared setup helper for demos 3 and 4, and look into the slower upgrade (5 min 56 s) seen in the last demo 1 run.
