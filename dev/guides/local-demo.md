@@ -98,7 +98,7 @@ writes one MP4 file for each demo. It runs on the demo stack that
    names the fix to #372.
 4. Create the demo stack from that image: `uv run invoke reset`. It deletes the
    vCluster `styrmin` and everything in it.
-5. Record the four demos: `uv run invoke record`. The run takes about one hour.
+5. Record the four demos: `uv run invoke record`. The run takes about 50 minutes.
 6. Watch each video in `demo-videos/`, with the
    [notes for the presenter](#notes-for-the-presenter).
 
@@ -205,7 +205,20 @@ other names than `network-lab`, `network-lab-*`.
     at most 26,993 MiB, and the available memory fell to 4,472 MiB.
 
   How much of that the two environments used is not measured. Since then, the
-  command deletes the environments while ffmpeg encodes.
+  command deletes the environments while ffmpeg encodes. In the run of the
+  four demos on 2026-10-21, the memory in use rose from 16,810 MiB before
+  demo 4 to at most 26,130 MiB during it, and the available memory fell to
+  5,335 MiB.
+- Disk: the vCluster's node evicts pods when the host's free disk falls below
+  15% of its size, 14.4 GiB on a 96 GB disk. The demos pull Infrahub, Infrahub
+  Enterprise, Neo4j and Semaphore images into the vCluster during the run. On
+  2026-10-21, a run that started with 18 GB free fell below that limit during
+  demo 1: Velero, Prefect and Garage were evicted, and demos 2 to 4 failed in
+  their setup with "An internal error occurred". The next run, started with
+  20 GB free, recorded the four demos; 6.6 GB of Docker build cache was
+  deleted during it, and the free disk never fell below 17 GB. Check
+  `df -h /` before a run;
+  `docker system df` shows which images and build cache take the space.
 
 Before any demo, the command checks in this order, and the first check that
 fails stops it with exit code 2 and a message that names what is missing:
@@ -395,8 +408,10 @@ environment are on screen.
    driver. First it sets the image of the Semaphore `server` component to
    `styrmin-demo/semaphore:v2.16.47`, an image that adds the Infrahub Ansible
    collection; the Settings tab shows the override, and the Pods tab shows
-   the server pod with the new image. Then it sets 2 replicas on the Infrahub
-   `server` component; the Pods tab shows two server pods.
+   the server pod with the new image. The Pods tab cuts the image name to
+   `docker.io/styrmin-demo/semaph…`, because its image column is narrow; the
+   Settings tab shows the full name just before. Then it sets 2 replicas on the
+   Infrahub `server` component; the Pods tab shows two server pods.
 3. **Back up and restore an environment.** One backup covers both
    applications of `network-lab-backup`, Infrahub and Semaphore. The demo then
    deletes the device `sw2` in Infrahub and the task template
@@ -416,27 +431,33 @@ environment are on screen.
 
 ### Time a run takes
 
-Measured on one Linux host, before the review of PR #540 added the Pods tab
-to demo 2, longer pauses on each result and the closing card, which make each
-video about 20 to 30 seconds longer:
+Measured on one Linux host:
 
-- `uv run invoke reset`: between 2 min 9 s and 2 min 52 s in three runs on
-  2026-10-18 and 2026-10-20.
-- `uv run invoke record` with the four demos, on 2026-10-20 on a fresh demo
-  stack: 48 min 28 s. Each demo took, including its setup, recording,
+- `uv run invoke reset`: between 2 min 9 s and 2 min 52 s in four runs from
+  2026-10-18 to 2026-10-21.
+- `uv run invoke record` with the four demos, on 2026-10-21: 50 min 13 s. The
+  demo stack was 23 minutes old; a first run on it had failed in demos 2 to 4
+  because the disk was full. Each demo took, including its setup, recording,
   encoding and cleanup:
-  - `deploy-upgrade`: 8 min 13 s, for a video of 0:35;
-  - `component-overrides`: 10 min 8 s, for a video of 0:45;
-  - `backup-restore`: 19 min 56 s, for a video of 1:08;
-  - `clone`: 10 min 10 s, for a video of 1:08.
+  - `deploy-upgrade`: 9 min 31 s, for a video of 0:51;
+  - `component-overrides`: 15 min 11 s, for a video of 1:18. 5 min 8 s of it
+    went to deleting the environment that an interrupted run had kept;
+  - `backup-restore`: 14 min 53 s, for a video of 1:34;
+  - `clone`: 10 min 14 s, for a video of 1:32.
+- The same run of 2026-10-20, before the review of PR #540 added the Pods tab
+  to demo 2, longer pauses on each result and the closing card: 48 min 28 s,
+  for videos of 0:35, 0:45, 1:08 and 1:08.
 - `uv run invoke record --demo backup-restore` after a failed run of demo 3,
   on 2026-10-18: 20 min 40 s, of which about 5 min 45 s went to deleting the
   environment the failed run kept.
 
 The setup, which deploys Infrahub and Semaphore and waits for them, and the
 waits for the cluster take most of the time. The environment restore of demo 3
-took between 1 min 9 s and 5 min 40 s over six runs; the cause of the
-difference is not known.
+took between 1 min 9 s and 5 min 40 s over seven runs, 5 min 1 s on
+2026-10-21; the cause of the difference is not known. After each recording of
+2026-10-21, the deletion of the demo's environments, which waits until their
+namespaces are gone, took between 2 min 1 s and 4 min 1 s, while ffmpeg
+encoded the video.
 
 ### Problems seen when recording the demos
 
@@ -444,9 +465,13 @@ difference is not known.
   the vCluster runs a Kubernetes version that kr8s 0.20.15 does not list. The
   warning did not affect the runs of 2026-10-18 and 2026-10-20.
 - When the host disk is nearly full, the vCluster's node evicts pods, and
-  Styrmin operations fail with "An internal error occurred". This happened in
-  an E2E run on 2026-10-21 with the host disk 85% full. Free disk space, then
-  record again.
+  Styrmin operations fail with "An internal error occurred". This happened on
+  2026-10-21 in an E2E run and in a recording, both with the host disk 85%
+  full (see the disk item in
+  [Prerequisites for recording](#prerequisites-for-recording)). Run
+  `kubectl get events -n styrmin | grep Evicted` to confirm it. Free disk
+  space, wait until `kubectl get pods -n styrmin` shows the evicted pods
+  running again, then record the failed demos again with `--demo`.
 - `uv run invoke start` or `uv run invoke reset` fails before the recording
   can start: see the Traefik and Helm items in
   [Troubleshooting](#troubleshooting).
