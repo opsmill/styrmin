@@ -1700,8 +1700,8 @@ def my_task(context: Context) -> None:  # noqa: ARG001
   `fill()`.** A page-object class that enters text takes a keyword-only
   `keystroke_delay_ms: int | None = None` and passes it to `enter_text()` and to every page object
   it creates. `UiScenarioDriver` passes it on too. With the default `None`, `enter_text()` calls
-  `fill()`, so the E2E suite fills fields in one step. The recorded demos pass 45 ms, and a field
-  that a page object fills with `fill()` appears in their videos all at once. Example:
+  `fill()`, so the E2E suite fills fields in one step. The recorded demos pass 45 ms or 90 ms, and a
+  field that a page object fills with `fill()` appears in their videos all at once. Example:
   `backend/tests/e2e/pages/deploy_form.py`. See
   [ADR-082](../../adr/0082-recorded-demos-reuse-e2e-page-objects.md).
 - **A recorded demo holds no selector for a Styrmin page.** When a demo needs a Styrmin action that

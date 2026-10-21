@@ -53,6 +53,10 @@ We chose option 2.
   fails with an error that names the environment.
 - `uv run invoke record --delete-environments` deletes the environments of the selected demos under
   the same rules (FR-022).
+- The setup demo, added after a review of the videos on 2026-10-21, creates the environment of demo 1
+  in the Styrmin UI and leaves it to demo 1. The command records its id in the file like the id of any
+  other environment it creates. When demo 1 runs after the setup demo in the same run, it does not
+  delete that environment before its setup; it deletes it after its recording, as before.
 
 An environment created again by `uv run invoke reset` has a new id, so ids left in the file never
 match it.

@@ -78,7 +78,9 @@ another page object passes its value on. Page objects enter text with
 - With `None`, it calls `locator.fill(text)`. The E2E fixtures do not pass the argument, so the E2E
   suite fills fields in one step, as before.
 - With a number, it clears the field with `fill("")` and types the text with
-  `press_sequentially(text, delay=keystroke_delay_ms)`. The demos pass 45 ms.
+  `press_sequentially(text, delay=keystroke_delay_ms)`. The demos passed 45 ms. After a review of
+  the videos on 2026-10-21, the setup demo and demo 1 pass 90 ms, because the text appeared too fast
+  for a viewer to follow; demos 2 to 4 still pass 45 ms.
 
 The demos have no E2E test. This exception to Constitution §V was approved in the grilling session
 of 2026-10-17. The proof of the feature was one run of the four demos on a demo stack that

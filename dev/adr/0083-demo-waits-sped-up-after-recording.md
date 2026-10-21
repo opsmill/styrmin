@@ -51,7 +51,8 @@ objects call `page.goto` before most actions. For each demo, the recorder:
 
 - logs in to Styrmin on the page it will record before it calls `page.screencast.start(path,
   size=1920×1080)`, in a browser context with a 1920×1080 viewport;
-- calls `show_actions(cursor="pointer", duration=800, style=...)`. Playwright 1.64 draws no highlight
+- calls `show_actions(cursor="pointer", duration=800, style=...)`, with a duration of 1600 ms for the
+  setup demo and demo 1 since a review of the videos on 2026-10-21. Playwright 1.64 draws no highlight
   unless it gets a `style.highlight`, so the recorder passes a blue outline and hides the action
   title, which shows the Playwright locator;
 - shows a chapter with `show_chapter(title, duration=2500)` at the start of each step;
@@ -113,7 +114,8 @@ its chapter file are written under a temporary name and then renamed.
 - Bad, because Playwright writes WebM with frame times that follow when the browser showed each
   frame, so cuts must use times, not frame numbers.
 - Bad, because each chapter adds about 2.8 s to the video: `show_chapter` returns after its duration
-  plus a 300 ms fade. Each action is held for 800 ms, which slows the script.
+  plus a 300 ms fade. Each action is held for 800 ms, or 1600 ms in the setup demo and demo 1, which
+  slows the script.
 - Not checked yet: whether the videos play in Keynote, PowerPoint and Google Slides without
   conversion (SC-003). The settings follow what Microsoft, Apple and Google document for H.264 MP4.
 
