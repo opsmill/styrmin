@@ -387,6 +387,16 @@ The task result (`RUNNING`, `FAILED`, `SUCCEEDED`, `SUPERSEDED`) is calculated f
 
 `Task.status` counts in addition to the steps, because a flow can fail, or still run, between two steps (for example, `apply_state` fails after "Plan the changes" succeeded and before the remediation flow records a step). A member whose flow succeeded (`success`) counts by its steps only, so the operator-phase steps keep a task `RUNNING` after its flow ended. A family member without steps counts by its `Task.status` only. See [ADR-060](../../adr/0060-steps-and-derived-task-result.md).
 
+<!-- Extracted from specs/031-recorded-feature-demos on 2026-10-21 -->
+
+Example: the results of an upgrade that runs a driver's core upgrade action. The `infrahub` driver's upgrade action stops the server and task workers, runs `infrahub upgrade` in a job, and starts them again. The upgrade task's step "Run the upgrade hook" (`hook:upgrade:core`) starts the tasks "Stop Components" and "Start Components". Each of them writes the StyrminDeployment resource, which supersedes the open operator-phase steps of the deployment's older tasks (`supersede_operator_steps` in `services/steps/recorder.py`). In the recordings of the deploy and upgrade demo on 2026-10-20 ([spike notes](../../../specs/archive/031-recorded-feature-demos/spike-notes.md#since-the-fix-2026-10-20)):
+
+- The upgrade task's steps "Install or upgrade the HelmRelease", "Create services and middlewares" and "Wait for the deployment to be ready" ended Superseded, each with "Superseded by Stop Components".
+- The upgrade task's result stayed Succeeded. "Stop Components" belongs to the upgrade task's family, and rule 3 counts only a task outside the family.
+- "Stop Components" ended Succeeded in one recording and Superseded in the other. "Stop Components" is a sibling of "Start Components", not its starter, so "Start Components" is outside its family. When "Start Components" writes the resource before the operator reports the end of the "Stop Components" rollout, the result of "Stop Components" is Superseded.
+
+This cause comes from reading the code and was not reproduced on purpose. Whether the product should show these steps differently is not decided ([spec 031, Clarifications](../../../specs/archive/031-recorded-feature-demos/spec.md#session-2026-10-21-review-of-pr-540)).
+
 #### Utility
 
 ```python

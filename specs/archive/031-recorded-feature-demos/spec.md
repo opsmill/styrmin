@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-17
 
-**Status**: Implemented. The review of [PR #540](https://github.com/opsmill/styrmin/pull/540) was addressed on 2026-10-21 (Clarifications, session 2026-10-21). The spec number was 029 until that review; it changed to 031 because `specs/archive/029-local-driver-actions` already uses 029.
+**Status**: Extracted on 2026-10-21 ([EXTRACTED.md](EXTRACTED.md)). The feature was implemented before that. The review of [PR #540](https://github.com/opsmill/styrmin/pull/540) was addressed on 2026-10-21 (Clarifications, session 2026-10-21). The spec number was 029 until that review; it changed to 031 because `specs/archive/029-local-driver-actions` already uses 029.
 
 **Input**: PRD "Recorded demos of four Styrmin features for the beta presentation" — [opsmill/styrmin#518 (comment)](https://github.com/opsmill/styrmin/issues/518#issuecomment-6240009049). Seed issue: [#518](https://github.com/opsmill/styrmin/issues/518). The PRD's links point to `develop` at [ce8cb7d8](https://github.com/opsmill/styrmin/tree/ce8cb7d8d3ef8aee655e31aca8e77e02cc539409).
 

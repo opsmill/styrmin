@@ -1693,3 +1693,34 @@ def my_task(context: Context) -> None:  # noqa: ARG001
   several variants share a name. Example: `backend/tests/e2e/test_local_driver_actions.py`, whose
   variants share the name `local-actions-check` and whose `_create_pinned_deployment` pins every
   create.
+
+<!-- Extracted from specs/031-recorded-feature-demos on 2026-10-21 -->
+
+- **Enter text in an E2E page object with `enter_text()` from `tests/e2e/pages/_dom.py`, not with
+  `fill()`.** A page-object class that enters text takes a keyword-only
+  `keystroke_delay_ms: int | None = None` and passes it to `enter_text()` and to every page object
+  it creates. `UiScenarioDriver` passes it on too. With the default `None`, `enter_text()` calls
+  `fill()`, so the E2E suite fills fields in one step. The recorded demos pass 45 ms, and a field
+  that a page object fills with `fill()` appears in their videos all at once. Example:
+  `backend/tests/e2e/pages/deploy_form.py`. See
+  [ADR-082](../../adr/0082-recorded-demos-reuse-e2e-page-objects.md).
+- **A recorded demo holds no selector for a Styrmin page.** When a demo needs a Styrmin action that
+  the page objects do not have, add it to the page objects in `backend/tests/e2e/pages/`, and call
+  the new method from the `[ui-chromium]` variant of an E2E test that already creates the deployment
+  the method needs, so that a UI change that breaks it fails in CI. Make the demo check the result
+  it shows, so that a wrong result fails the demo instead of producing a misleading video. Check the
+  result itself, not only a status: Semaphore marks a task "Success" when the inventory cannot reach
+  Infrahub, so demo 4 checks the device count in the task log (`check_device_count` in
+  `backend/tests/e2e/demos/scenarios/clone.py`). Examples of tests that call demo methods:
+  `test_override_then_clear` and `test_token_follows_upgrade_and_action_job` in
+  `backend/tests/e2e/test_deployment_image_override.py`.
+- **To prove that an upgrade ran, check what the upgrade task did, not the deployment's
+  version or status.** Styrmin sets `Deployment.application_version` when it accepts the upgrade
+  request, before the task runs (`update_deployment_version` in
+  `backend/styrmin_backend/services/deployment.py`), and the deployment page can still show
+  Running before the task starts. Wait for the new upgrade task with
+  `DeploymentDetailPage.wait_for_new_task("upgrade_instance", known_task_ids=...)`, then check its
+  Timeline entry: its result, its steps, and its application version, which is the version of the
+  newest instance created at or before the task (`_correlate_version` in
+  `services/deployment_timeline.py`). Example: `check_upgrade_task` in
+  `backend/tests/e2e/demos/scenarios/deploy_upgrade.py`.
