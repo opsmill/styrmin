@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-17
 
-**Status**: Draft
+**Status**: Implemented. The review of [PR #540](https://github.com/opsmill/styrmin/pull/540) was addressed on 2026-10-21 (Clarifications, session 2026-10-21). The spec number was 029 until that review; it changed to 031 because `specs/archive/029-local-driver-actions` already uses 029.
 
 **Input**: PRD "Recorded demos of four Styrmin features for the beta presentation" — [opsmill/styrmin#518 (comment)](https://github.com/opsmill/styrmin/issues/518#issuecomment-6240009049). Seed issue: [#518](https://github.com/opsmill/styrmin/issues/518). The PRD's links point to `develop` at [ce8cb7d8](https://github.com/opsmill/styrmin/tree/ce8cb7d8d3ef8aee655e31aca8e77e02cc539409).
 
@@ -28,7 +28,7 @@ The PRD's decisions were taken in a grilling session on 2026-10-17 that started 
 - Q: Which features count as the main features (#518's second open question)? → A: Four: deploy and upgrade, component overrides, environment backup and restore, and environment clone.
 - Q: What form does a demo take (#518's third open question)? → A: A video file for each demo, with no recorded voice and no captions over the page.
 - Q: Which applications do the demos deploy? → A: Infrahub and Semaphore in every demo. In the demo environment, Semaphore runs an Ansible playbook that reads its inventory from Infrahub.
-- Q: Is a new E2E test required for the demo scripts? → A: No. This exception to Constitution §V was approved in the grilling session. The proof is one run of all four demos on a demo stack that `uv run invoke start` just created, with the command output attached to the pull request. `test_environment_clone_lifecycle` gets one read-only check instead (FR-016).
+- Q: Is a new E2E test required for the demo scripts? → A: No. This exception to Constitution §V was approved in the grilling session. The proof is one run of all four demos on a demo stack that `uv run invoke start` just created, with the command output attached to the pull request. `test_environment_clone_lifecycle` was to get one read-only check instead (FR-016). That check was dropped on 2026-10-20, because [PR #531](https://github.com/opsmill/styrmin/pull/531) adds its own alias check to the same test ([E2E evidence](e2e-evidence.md#the-defect-is-fixed-by-531-which-carries-its-own-alias-check)).
 - Q: Which new dependencies are approved? → A: An upgrade of Playwright from 1.58.0 to 1.61 or later, which also changes the browser the UI E2E tests run in, locally and in CI; ffmpeg on the developer's PATH; and a Semaphore image built locally that contains the `opsmill.infrahub` Ansible collection and the `infrahub-sdk` Python package.
 - Q: Which documentation changes? → A: A "Recording the demos" section in the [local demo guide](../../dev/guides/local-demo.md). No `docs/` page, no towncrier fragment and no `CONTEXT.md` entry, because nothing changes for Styrmin users and a demo is not a Styrmin domain concept.
 
@@ -44,11 +44,25 @@ The PRD left two questions open. They are answered here with the most direct opt
 Two findings change what the PRD assumed. Both are flagged for the maintainer.
 
 - Q: Can the `infrahub` driver take the environment backup that demos 3 and 4 need? → A: No. Its Neo4j backup runs `neo4j-admin database backup`, an online backup that only Neo4j Enterprise has, and the `infrahub` driver deploys the community chart. Its backup E2E test is skipped with the reason "backup/restore not supported with community" (R-007). Demos 3 and 4 therefore deploy Infrahub with the existing `infrahub-enterprise` driver, which the Styrmin image already contains and whose backup test runs in CI. Demos 1 and 2 keep the `infrahub` driver.
-- Q: Does a clone's Semaphore reach the clone's Infrahub today? → A: Probably not. A clone restores each source namespace, including the `ExternalName` alias Services that point to the source's namespaces, and no step of the clone writes the clone's own aliases afterwards (R-013, from reading the code; not run). The FR-016 check is therefore the first implementation task. If it fails, the implementer reports the defect as a separate issue and stops for a maintainer decision, because a fix changes Styrmin's restore or clone flow, which the PRD keeps out of scope. Demo 4 cannot show three devices in the clone until the defect is fixed. The recorder and demos 1 to 3 do not depend on the aliases and go on; the FR-016 check and demo 4 land once the check passes (critique X1).
+- Q: Does a clone's Semaphore reach the clone's Infrahub today? → A: Probably not. *(Confirmed, then fixed: the defect is [#530](https://github.com/opsmill/styrmin/issues/530), fixed by [PR #531](https://github.com/opsmill/styrmin/pull/531) on `develop`.)* A clone restores each source namespace, including the `ExternalName` alias Services that point to the source's namespaces, and no step of the clone writes the clone's own aliases afterwards (R-013, from reading the code; not run). The FR-016 check is therefore the first implementation task. If it fails, the implementer reports the defect as a separate issue and stops for a maintainer decision, because a fix changes Styrmin's restore or clone flow, which the PRD keeps out of scope. Demo 4 cannot show three devices in the clone until the defect is fixed. The recorder and demos 1 to 3 do not depend on the aliases and go on; the FR-016 check and demo 4 land once the check passes (critique X1).
 - Q: Which Playwright version? → A: 1.64.0, the first version whose cursor stays visible after the page loads a new URL (R-001). The PRD asked for 1.61 or later.
 - Q: Which Infrahub versions does the versions file start with? → A: `1.10.11` and `1.11.7`. No document says chart 4.33.2 runs 1.10.x, so the first demo task checks it; if it does not, the developer sets the earlier version to the newest 1.11 release below 1.11.7 (R-015).
 - Q: How does the inventory read Infrahub? → A: With the admin token that both Infrahub charts preset, which Semaphore passes to Ansible as a secret of its environment. The inventory plugin requires a token even when Infrahub allows anonymous reads (R-008).
 - Q: Which version of the `opsmill.infrahub` collection? → A: 1.8.3. Version 1.9.0 requires ansible-core 2.19, and the Semaphore 2.16.47 image has 2.18.12 (R-009).
+
+### Session 2026-10-21 (review of PR #540)
+
+The review of [PR #540](https://github.com/opsmill/styrmin/pull/540) found that a viewer cannot follow the videos without someone who explains them, and that the command misses several problems. The maintainer answered the open questions of the review.
+
+- Q: Do the videos keep the decision "no captions over the page"? → A: No. Demo 4 shows two Semaphore pages that look the same, and both show "Task #2". Each video now keeps a caption in its bottom left corner that names the application on screen and its environment, for example "Semaphore in network-lab-clone (clone)" (FR-020). Other captions stay out of scope.
+- Q: How does a video end? → A: On a closing card that gives the demo's title and what the video showed (FR-020). Each result stays on screen for at least 5 s, because a video played inside a slide is smaller than the screen. The guide holds a short note for the presenter for each video.
+- Q: Why does the upgrade task of demo 1 end with steps marked "Superseded by Stop Components"? → A: The driver's upgrade action starts the tasks "Stop Components" and "Start Components". Each of them writes the StyrminDeployment resource, which supersedes the rollout steps of the older tasks of the deployment that are still open ([`supersede_operator_steps`](../../backend/styrmin_backend/services/steps/recorder.py)). A step superseded by a task of the same family counts as done, so the upgrade task's result stays Succeeded ([`results.py`](../../backend/styrmin_backend/services/steps/results.py)). "Stop Components" is a sibling of "Start Components", not its starter, so its own result is Superseded when "Start Components" writes the resource before the operator reports the end of the "Stop Components" rollout. This cause comes from reading the code and was not reproduced on purpose; it fits the two runs of 2026-10-20, in which "Stop Components" ended Succeeded once and Superseded once ([spike notes](spike-notes.md#since-the-fix-2026-10-20), [implement report](opsmill-implement-report.md)). Whether the product should show these steps differently is not decided; the presenter note of demo 1 explains them.
+- Q: Which Styrmin commit are the beta videos recorded from? → A: The `develop` commit that merges PR #540, or a later one. The first `develop` commit that holds both fixes the demos need, from #531 and [#535](https://github.com/opsmill/styrmin/pull/535), is `bb56eac9`.
+- Q: Who owns the record command, and when are the demos recorded again? → A: Fatih Acar owns it. The demos are recorded again before each presentation that uses the videos, after a change to a UI page that a demo uses, and after a change to `infrahub_versions.yml`. CI does not run the demos, so these recordings are the test of the Infrahub and Semaphore page objects. The `[ui-chromium]` variants of two tests in `test_deployment_image_override.py` and `test_pods_tab_copy_logs_command` in `test_ui_smoke.py` call the Styrmin page-object methods that the demos added (SC-004).
+- Q: Does PR #540 close #518? → A: Yes. The answers to the three open questions of #518 are posted on the issue.
+- Q: Which environments may the command delete? → A: Only the environments with a demo's names that the command created, which it records in a file outside the repository, and environments that the developer confirms on the terminal. Without a terminal, the command stops before any change (FR-009).
+- Q: What happens on Ctrl-C? → A: The command prints the summary of the demos so far, with the environments it keeps, and exits with code 130. The client and the browser are closed (FR-023).
+- Q: What happens when the encoding fails? → A: The command keeps the raw recording and the plan of the video, and can encode them again without recording again (FR-024).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -195,11 +209,14 @@ After a UI change, the developer runs the command for one demo and receives a ne
 - **A new Infrahub release needs a newer Helm chart**: the `infrahub` driver pins the Infrahub Helm chart 4.33.2 ([`driver.styrmin.yml`](../../driver/examples/infrahub/driver.styrmin.yml)). After someone updates the versions file, demo 1 fails until the driver is updated.
 - **Nobody updates the versions file**: demo 1 keeps recording the older versions.
 - **An earlier run failed and left its environments**: the next run of that demo deletes them before its setup (FR-009).
+- **An environment has a demo's name, and the command did not create it**: the command asks before it deletes it, and stops before any change without a yes (FR-009).
+- **The developer presses Ctrl-C**: the command prints the summary so far and the environments it keeps (FR-023).
+- **The encoding fails after a recording of up to 10 minutes**: the raw recording stays, and the command can encode it again (FR-024).
 - **ffmpeg is missing or the demo stack does not respond**: the command stops before any setup (FR-012).
 - **A step fails during a recording**: the demo keeps no partial video, so a video in the output directory is always complete (FR-010).
 - **Environment names are unique on a cluster** ([`models.py`](../../backend/styrmin_backend/db/models.py)): a demo cannot create its environment while an earlier run's environment with the same name exists, which is why FR-009 deletes leftovers first.
-- **Two environments at once**: during demo 4, the source and the clone both run Infrahub and Semaphore. It is not known whether a laptop that runs the demo stack has enough memory for this.
-- **A clone's aliases point to the source**: a clone restores the source's alias Services, which point to the source's namespaces, and no step of the clone writes the clone's own aliases (research R-013). The FR-016 check finds out whether this happens; if it does, demo 4 shows two devices in the clone instead of three until the defect is fixed.
+- **Two environments at once**: during demo 4, the source and the clone both run Infrahub and Semaphore. On a Linux host with 31,465 MiB of memory, the memory in use rose to at most 26,993 MiB during demo 4 ([spike notes](spike-notes.md#memory-during-the-run)). Since the review, the command deletes the environments while ffmpeg encodes, so that the two do not add up.
+- **A clone's aliases point to the source**: a clone restored the source's alias Services, which point to the source's namespaces (research R-013). This was the defect [#530](https://github.com/opsmill/styrmin/issues/530), fixed by [PR #531](https://github.com/opsmill/styrmin/pull/531). With a Styrmin image built before that fix, demo 4 shows two devices in the clone instead of three, and its error names the fix.
 - **A demo stack where the developer changed things by hand**: the demos create their own environments and deployments on top of what `uv run invoke start` creates, and touch nothing else. Environments with other names are left as they are.
 
 ## Requirements *(mandatory)*
@@ -216,18 +233,24 @@ After a UI change, the developer runs the command for one demo and receives a ne
 - **FR-006**: The two Infrahub versions of demo 1 MUST be set in one file that someone updates by hand.
 - **FR-007**: The command MUST write each video as an MP4 file with H.264 at 1920×1080, to a directory that git ignores.
 - **FR-008**: Each demo MUST use fixed, readable names for its environments and deployments, for example `network-lab`, `network-lab-clone`, `infrahub` and `semaphore`.
-- **FR-009**: After a successful recording, a demo MUST delete the environments it created. Before its setup, a demo MUST delete any environment with its names that an earlier run left behind.
+- **FR-009**: After a successful recording, a demo MUST delete the environments it created. Before its setup, a demo MUST delete any environment with its names that an earlier run left behind. The command MUST NOT delete an environment with a demo's name that it did not create, unless the developer confirms it on the terminal.
 - **FR-010**: When a step fails, the demo MUST stop, report the step and the error, keep no partial video and keep the environments it created.
 - **FR-011**: When the command records all demos, a failure in one demo MUST NOT stop the others. The command MUST list the result of each demo and exit with an error if any demo failed.
-- **FR-012**: Before any setup, the command MUST check that ffmpeg is on the PATH and that the demo stack responds, and stop with a message that names what is missing.
+- **FR-012**: Before any setup, the command MUST check that ffmpeg and ffprobe are on the PATH, that the Chromium build of the installed Playwright exists, that docker is on the PATH when a demo needs the demo Semaphore image, that the kube context `vcluster-docker_styrmin` reaches the demo stack, that the demo stack responds and accepts the admin login, and what FR-001 to FR-019 need from the stack, and stop with a message that names what is missing. A rejected login MUST be named as such.
 - **FR-013**: In demo 4, Semaphore MUST reach Infrahub by the short name of Infrahub's service, so that Semaphore's settings name no specific deployment.
   - Verification: the clone's Semaphore lists the device added in the clone's Infrahub.
 - **FR-014**: The steps in Infrahub's and Semaphore's own web pages MUST be performed through page objects for those pages, used by the demos only: in Infrahub, add, delete and list devices; in Semaphore, run a task template, read its output and delete a task template.
 - **FR-015**: The demo Semaphore image MUST contain the `opsmill.infrahub` Ansible collection and the `infrahub-sdk` Python package, and the playbook and inventory file that demo 4 runs. It MUST be built locally and loaded into the vCluster, and MUST NOT be published to a registry.
-- **FR-016**: `test_environment_clone_lifecycle` MUST check, read-only, that each `ExternalName` alias in the clone points to a namespace of the clone and not of the source. The check MUST reuse the stack the test already deploys ([`test_backup_restore.py`](../../backend/tests/e2e/test_backup_restore.py)).
+- **FR-016**: *Dropped on 2026-10-20.* It asked `test_environment_clone_lifecycle` to check that each `ExternalName` alias in the clone points to a namespace of the clone. [PR #531](https://github.com/opsmill/styrmin/pull/531) adds that check to the same test on `develop`, so this branch does not change the test ([E2E evidence](e2e-evidence.md#the-defect-is-fixed-by-531-which-carries-its-own-alias-check)).
 - **FR-017**: The [local demo guide](../../dev/guides/local-demo.md) MUST gain a "Recording the demos" section that covers the prerequisites, the commands, the versions file, the output directory and what to do after a failed demo.
 - **FR-018**: The GraphQL API, SDK, `styrminctl`, frontend, database schema, drivers and error types MUST NOT change.
 - **FR-019**: Demos 3 and 4 MUST deploy Infrahub with the `infrahub-enterprise` driver, which their setup loads from the drivers that the Styrmin image contains, because the `infrahub` driver cannot take an environment backup (Clarifications, planning session).
+- **FR-020**: Each video MUST keep a caption that names the application on screen and its environment, MUST show each result for at least 5 s, and MUST end on a closing card that gives the demo's title and what it showed. A sped-up label MUST read as the wait, its real duration and the speed-up factor, for example "The upgrade runs (2 min 55 s, shown 44× faster)".
+- **FR-021**: The command MUST write a file of chapter start times next to each MP4, for example `1-deploy-upgrade.chapters.txt`.
+- **FR-022**: The command MUST accept several demos, and MUST offer to only delete the demos' environments.
+- **FR-023**: On Ctrl-C, the command MUST print the summary of the demos so far with the environments it keeps, close the Styrmin client and the browser, and exit with code 130.
+- **FR-024**: When the encoding fails, the command MUST keep the raw recording and the plan of the video, and MUST be able to encode them again without recording again.
+- **FR-025**: The command MUST print a line when each wait starts, a line every minute while it lasts, the sub-steps of each setup, and how long each demo usually takes. Each failed line of the summary MUST give a next step.
 
 ### Key Entities
 
@@ -249,17 +272,17 @@ All the entities are existing ones. The demos add no Styrmin entity.
 - **SC-001**: Starting from a demo stack that `uv run invoke start` just created, one command produces all four videos, with no step performed in a browser by hand.
 - **SC-002**: Each video lasts 3 minutes or less, including the sped-up waits.
 - **SC-003**: Each video plays in Keynote, PowerPoint and Google Slides without conversion.
-- **SC-004**: A fix for a change to a Styrmin page is made in one place only, and it also repairs the E2E tests that use the same page.
+- **SC-004**: A fix for a change to a Styrmin page is made in one place only, and it also repairs the E2E tests that use the same page. Since the review, E2E tests call the Styrmin page-object methods that the demos added, so a UI change that breaks one of them fails an E2E test.
 - **SC-005**: After a successful run of all four demos, none of the environments the demos created remain on the cluster.
 
 ## Assumptions
 
 - The beta audience knows Infrahub.
-- A laptop that runs the demo stack has enough memory for two environments with Infrahub and Semaphore at the same time, which demo 4 needs during the clone. This has not been measured.
-- The Infrahub Helm chart 4.33.2 that the `infrahub` driver pins runs Infrahub 1.10.11 and 1.11.7. Its own default is 1.11.2. This has not been verified (research R-015).
-- The Infrahub Enterprise Helm chart 4.19.2 that the `infrahub-enterprise` driver pins runs Infrahub 1.11.7. Its own default is 1.11.2. This has not been verified (research R-007).
-- Semaphore can use the `opsmill.infrahub` inventory plugin once its image contains the collection and `infrahub-sdk`. This has not been verified.
-- The vCluster can run a locally built Semaphore image the same way it runs the locally built Styrmin image. This has not been verified.
+- A laptop that runs the demo stack has enough memory for two environments with Infrahub and Semaphore at the same time, which demo 4 needs during the clone. Measured on one Linux host with 31,465 MiB and no swap: the memory in use rose to at most 26,993 MiB, and the available memory fell to 4,472 MiB ([spike notes](spike-notes.md#memory-during-the-run)). How much a laptop with less memory can run is not known.
+- The Infrahub Helm chart 4.33.2 that the `infrahub` driver pins runs Infrahub 1.10.11 and 1.11.7. Its own default is 1.11.2. Verified on 2026-10-18 (research R-015, [spike notes](spike-notes.md)).
+- The Infrahub Enterprise Helm chart 4.19.2 that the `infrahub-enterprise` driver pins runs Infrahub 1.11.7. Its own default is 1.11.2. Verified on 2026-10-18 (research R-007, [spike notes](spike-notes.md#infrahub-enterprise-1117-backs-up-and-restores)).
+- Semaphore can use the `opsmill.infrahub` inventory plugin once its image contains the collection and `infrahub-sdk`. Verified: demo 4 reads 2, 3 and 2 devices from the inventory ([spike notes](spike-notes.md#demo-4-recorded-tasks-t039-and-t040)).
+- The vCluster can run a locally built Semaphore image the same way it runs the locally built Styrmin image. Verified: demos 2 to 4 run `styrmin-demo/semaphore:v2.16.47` ([spike notes](spike-notes.md)).
 
 ## Out of Scope
 
@@ -267,7 +290,7 @@ All the entities are existing ones. The demos add no Styrmin entity.
 - A CI job that records the demos for each release, because that would be a CI change.
 - Terminal demos, such as `styrminctl deployments apply`.
 - Demos of editing a cluster's config, of the `infrahub-mcp` driver, which needs a running Infrahub instance, and of user and group administration.
-- Recorded voice, and captions over the page.
+- Recorded voice, and captions over the page other than the one that names the application and its environment (FR-020).
 - Publishing the Semaphore image to a registry.
 - Finding the latest Infrahub version automatically.
 

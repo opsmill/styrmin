@@ -2,7 +2,7 @@
 
 **Branch**: `fac/demo-beta-presentation-bhshh` | **Date**: 2026-10-17 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `specs/029-recorded-feature-demos/spec.md` (PRD: [#518 comment](https://github.com/opsmill/styrmin/issues/518#issuecomment-6240009049))
+**Input**: Feature specification from `specs/031-recorded-feature-demos/spec.md` (PRD: [#518 comment](https://github.com/opsmill/styrmin/issues/518#issuecomment-6240009049))
 
 ## Summary
 
@@ -77,7 +77,7 @@ Post-design re-check (after Phase 1): unchanged. The design adds no product code
 ### Documentation (this feature)
 
 ```text
-specs/029-recorded-feature-demos/
+specs/031-recorded-feature-demos/
 ├── spec.md
 ├── plan.md              # This file
 ├── research.md          # Phase 0: R-001 to R-017
