@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, expect
 
 from tests.e2e.drivers.errors import ScenarioActionError
-from tests.e2e.pages._dom import enter_text
+from tests.e2e.pages._dom import enter_text, wait_for_dialog_open
 
 if TYPE_CHECKING:
     from playwright.async_api import Locator, Page
@@ -50,7 +50,7 @@ class ClusterDetailPage:
 
     async def open_edit_dialog(self) -> None:
         await self._page.get_by_role("button", name="Edit", exact=True).click()
-        await expect(self._edit_dialog()).to_be_visible()
+        await wait_for_dialog_open(self._edit_dialog())
 
     async def set_fqdn_suffix(self, value: str) -> None:
         await enter_text(
