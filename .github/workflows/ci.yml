@@ -276,8 +276,17 @@ jobs:
           # cannot express), which is not enough to empty the ui cell.
     steps:
       - uses: actions/checkout@v6
+      # The hosted runner starts with ~13 GB free on a 72 GB disk. The vCluster
+      # node's kubelet sets disk pressure below ~15% free, taints the node and
+      # leaves every pod Pending. Remove large preinstalled toolsets.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force
       - name: Show runner resources
-        run: nproc && free -h && df -h /
+        run: nproc && free -h && df -h
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
       - uses: azure/setup-helm@v4
       - uses: azure/setup-kubectl@v4
@@ -343,14 +352,18 @@ jobs:
         if: failure()
         run: |
           docker ps -a
-          for kc in /tmp/pytest-of-*/pytest-*/vcluster*/kubeconfig; do
+          for kc in /tmp/pytest-of-*/pytest-*/vcluster[0-9]*/kubeconfig; do
             [ -f "$kc" ] || continue
             echo "=== $kc"
             kubectl --kubeconfig "$kc" get nodes -o wide || true
             kubectl --kubeconfig "$kc" get pods -A -o wide || true
             kubectl --kubeconfig "$kc" get events -A --sort-by=.lastTimestamp | tail -100 || true
-            kubectl --kubeconfig "$kc" describe pods -A \
-              --field-selector=status.phase!=Running,status.phase!=Succeeded || true
+            kubectl --kubeconfig "$kc" get pods -A --no-headers \
+              --field-selector=status.phase!=Running,status.phase!=Succeeded \
+              -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name |
+              while read -r ns name; do
+                kubectl --kubeconfig "$kc" describe pod -n "$ns" "$name" || true
+              done
             kubectl --kubeconfig "$kc" describe pods -n default -l app=chart-server || true
           done
       - name: Upload Playwright diagnostic artifacts
