@@ -24,3 +24,13 @@ export function roleLabel(role: Role | null | undefined): string {
       return String(role ?? "Unknown");
   }
 }
+
+/**
+ * The roles a role select offers, in display order, each with its label.
+ *
+ * Pass it to the select's `items` so that its trigger shows the label, not the
+ * raw enum value, and render the select's options from it.
+ */
+export const ROLE_OPTIONS: ReadonlyArray<{ value: Role; label: string }> = (
+  ["READ_ONLY", "READ_WRITE", "ADMIN"] as const
+).map((role) => ({ value: role, label: roleLabel(role) }));

@@ -171,6 +171,12 @@ export function CreateEnvironmentDialog({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const { data: clustersData, isLoading: clustersFetching } =
     useListClustersQuery();
+  // The options of the cluster select. Passed to its `items`, so that its
+  // trigger shows the cluster's name instead of its id.
+  const clusterOptions = (clustersData?.clusters ?? []).map((cluster) => ({
+    value: cluster.id,
+    label: cluster.name,
+  }));
   const createEnvironmentMutation = useCreateEnvironmentMutation();
   const queryClient = useQueryClient();
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -312,6 +318,7 @@ export function CreateEnvironmentDialog({
               <div className="space-y-2">
                 <Label htmlFor="env-cluster">Cluster</Label>
                 <Select
+                  items={clusterOptions}
                   value={field.state.value}
                   onValueChange={field.handleChange}
                   disabled={clustersFetching}
@@ -326,9 +333,9 @@ export function CreateEnvironmentDialog({
                     />
                   </SelectTrigger>
                   <SelectContent>
-                    {clustersData?.clusters.map((cluster) => (
-                      <SelectItem key={cluster.id} value={cluster.id}>
-                        {cluster.name}
+                    {clusterOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -38,6 +38,7 @@ Base UI exposes state via boolean presence attributes. Tailwind selectors must u
 
 - Both `Menu` and `Select` require an explicit `Positioner` between `Portal` and `Popup`. Do not skip the Positioner — without it, popups do not anchor correctly.
 - Pass positioning props (`sideOffset`, alignment) on the `Positioner`, not on the `Popup`.
+- Pass `items`, a list of `{ value, label }`, to every `Select` whose options show a label that differs from their value, such as a name for an id or "Read/write" for `READ_WRITE`, and render the options from the same list. Without `items`, `<SelectValue>` shows the raw value of the selected option in the trigger. `src/__tests__/selectItems.test.ts` fails on a `Select` that shows `<SelectValue>` without `items`, unless each option shows its own value, as in `<SelectItem value={op}>{op}</SelectItem>`. Example: the role selects use `ROLE_OPTIONS` from `src/auth/roleLabel.ts`.
 
 ### Label
 

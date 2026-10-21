@@ -155,6 +155,12 @@ export default function DeployFormPage() {
   }, [driversData]);
 
   const selectedVersion = allVersions.find((v) => v.id === selectedVersionId);
+  // The options of the driver version select. Passed to its `items`, so that
+  // its trigger shows the version's label instead of its id.
+  const driverVersionOptions = allVersions.map((v) => ({
+    value: v.id,
+    label: `${v.driverName} v${withDriverDirectory(formatDriverVersionLabel(v), v)}`,
+  }));
 
   const hasDefaultVersion = Boolean(selectedVersion?.defaultVersion);
 
@@ -299,6 +305,7 @@ export default function DeployFormPage() {
             <div className="space-y-2">
               <Label htmlFor="driverVersion">Application Driver Version</Label>
               <Select
+                items={driverVersionOptions}
                 value={field.state.value}
                 onValueChange={(value) => {
                   field.handleChange(value);
@@ -307,23 +314,12 @@ export default function DeployFormPage() {
                 }}
               >
                 <SelectTrigger data-testid="driver-version-select">
-                  {selectedVersion ? (
-                    <span>
-                      {selectedVersion.driverName} v
-                      {withDriverDirectory(
-                        formatDriverVersionLabel(selectedVersion),
-                        selectedVersion,
-                      )}
-                    </span>
-                  ) : (
-                    <SelectValue placeholder="Select a driver version" />
-                  )}
+                  <SelectValue placeholder="Select a driver version" />
                 </SelectTrigger>
                 <SelectContent>
-                  {allVersions.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>
-                      {v.driverName} v
-                      {withDriverDirectory(formatDriverVersionLabel(v), v)}
+                  {driverVersionOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>

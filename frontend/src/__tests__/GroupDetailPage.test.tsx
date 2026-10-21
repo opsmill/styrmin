@@ -194,6 +194,14 @@ describe("GroupDetailPage — inactive member safety", () => {
       expect(screen.getByTestId("group-edit-form")).toBeInTheDocument();
     });
 
+    // The role select shows the label of the group's role, not the enum value.
+    expect(screen.getByTestId("group-role-trigger")).toHaveTextContent(
+      "Read/write",
+    );
+    expect(screen.getByTestId("group-role-trigger")).not.toHaveTextContent(
+      "READ_WRITE",
+    );
+
     // Active member picker contains alice and carol, with alice pre-checked.
     const picker = screen.getByTestId("group-members-multiselect");
     expect(picker.querySelector('[data-user-id="u-active"]')).not.toBeNull();

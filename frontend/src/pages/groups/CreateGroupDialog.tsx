@@ -8,7 +8,7 @@ import {
   type Role,
 } from "@/generated/graphql";
 import { GraphQLOperationError } from "@/lib/graphql-fetcher";
-import { roleLabel } from "@/auth/roleLabel";
+import { ROLE_OPTIONS } from "@/auth/roleLabel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -168,6 +168,7 @@ export function CreateGroupDialog({ onCreated }: CreateGroupDialogProps) {
           <div className="space-y-2">
             <Label htmlFor="create-group-role">Role</Label>
             <Select
+              items={ROLE_OPTIONS}
               value={role}
               onValueChange={(value) => setRole(value as Role)}
             >
@@ -175,13 +176,11 @@ export function CreateGroupDialog({ onCreated }: CreateGroupDialogProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="READ_ONLY">
-                  {roleLabel("READ_ONLY")}
-                </SelectItem>
-                <SelectItem value="READ_WRITE">
-                  {roleLabel("READ_WRITE")}
-                </SelectItem>
-                <SelectItem value="ADMIN">{roleLabel("ADMIN")}</SelectItem>
+                {ROLE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

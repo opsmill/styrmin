@@ -171,11 +171,24 @@ describe("UsersListPage", () => {
 
     const initialCallCount = calls.length;
 
+    // Both filters show the label of their value, not the raw value.
+    expect(screen.getByTestId("users-filter-active-trigger")).toHaveTextContent(
+      "Any",
+    );
+    expect(screen.getByTestId("users-filter-role-trigger")).toHaveTextContent(
+      "Any",
+    );
+
     const user = userEvent.setup();
     await user.click(screen.getByTestId("users-filter-role-trigger"));
     // Options are rendered with the humanised role label (see roleLabel).
     const adminOption = await screen.findByRole("option", { name: "Admin" });
     await user.click(adminOption);
+    await waitFor(() => {
+      expect(screen.getByTestId("users-filter-role-trigger")).toHaveTextContent(
+        "Admin",
+      );
+    });
 
     await waitFor(() => {
       expect(calls.length).toBeGreaterThan(initialCallCount);

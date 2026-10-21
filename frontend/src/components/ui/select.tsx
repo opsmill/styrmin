@@ -4,6 +4,11 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
+/**
+ * Pass `items`, a list of `{ value, label }`, whenever an item's label differs
+ * from its value: without it, `<SelectValue>` shows the raw value, for example
+ * an id, in the trigger.
+ */
 function Select({
   value,
   onValueChange,

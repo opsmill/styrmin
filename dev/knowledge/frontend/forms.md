@@ -56,8 +56,12 @@ A single `<form.Field>` render-prop component handles **both** uncontrolled inpu
 ```tsx
 <form.Field name="clusterId" validators={{ onChange: z.string().min(1) }}>
   {(field) => (
-    <Select value={field.state.value} onValueChange={field.handleChange}>
-      {/* options */}
+    <Select
+      items={clusterOptions}
+      value={field.state.value}
+      onValueChange={field.handleChange}
+    >
+      {/* options, rendered from clusterOptions */}
     </Select>
   )}
 </form.Field>

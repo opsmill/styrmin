@@ -141,6 +141,17 @@ export default function DeploymentDetailPage() {
     upgradeDriverVersions,
     deployment?.applicationDriverVersionId,
   );
+  // The options of the driver version select. Passed to its `items`, so that
+  // its trigger shows the version's label instead of "latest" or the id.
+  const upgradeDriverOptions = [
+    { value: "latest", label: "Latest (auto)" },
+    ...upgradeDriverVersions.map((v) => ({
+      value: v.id,
+      label:
+        withDriverDirectory(formatDriverVersionLabel(v), v) +
+        (v.id === deployment?.applicationDriverVersionId ? " (current)" : ""),
+    })),
+  ];
 
   // Deployment-deletion state (spec 008).
   const deleteDeploymentMutation = useDeleteDeploymentMutation();
@@ -903,6 +914,7 @@ export default function DeploymentDetailPage() {
           <div className="space-y-2">
             <Label htmlFor="upgrade-driver-version">Driver Version</Label>
             <Select
+              items={upgradeDriverOptions}
               value={selectedDriverVersionId}
               onValueChange={setSelectedDriverVersionId}
             >
@@ -913,13 +925,9 @@ export default function DeploymentDetailPage() {
                 <SelectValue placeholder="Latest (auto)" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="latest">Latest (auto)</SelectItem>
-                {upgradeDriverVersions.map((v) => (
-                  <SelectItem key={v.id} value={v.id}>
-                    {withDriverDirectory(formatDriverVersionLabel(v), v)}
-                    {v.id === deployment.applicationDriverVersionId
-                      ? " (current)"
-                      : ""}
+                {upgradeDriverOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
                   </SelectItem>
                 ))}
               </SelectContent>
