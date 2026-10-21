@@ -303,6 +303,20 @@ jobs:
           echo "NO_NETLINK_SO=$RUNNER_TEMP/no_netlink.so" >> "$GITHUB_ENV"
       - name: Install tini
         run: sudo apt-get update && sudo apt-get install -y tini
+      # vCluster's docker driver shares host-built images (chart-server,
+      # styrmin) with the cluster through the docker daemon registry proxy,
+      # which needs the containerd image store. Hosted runners use the classic
+      # store by default.
+      - name: Use the containerd image store in Docker
+        run: |
+          sudo modprobe -a overlay bridge br_netfilter
+          cfg=/etc/docker/daemon.json
+          [ -f "$cfg" ] || echo '{}' | sudo tee "$cfg" >/dev/null
+          sudo jq '.features["containerd-snapshotter"] = true' "$cfg" | sudo tee "$cfg.new" >/dev/null
+          sudo mv "$cfg.new" "$cfg"
+          cat "$cfg"
+          sudo systemctl restart docker
+          docker info -f '{{ .DriverStatus }}'
       - name: "Set environment variables"
         run: |
           echo "STYRMIN_IMAGE_VER=local-${{ github.sha }}-${{ matrix.shard }}-${{ matrix.entrypoint }}" >> $GITHUB_ENV
