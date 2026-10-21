@@ -160,10 +160,15 @@ async def create_environment(client: StyrminClient, name: str) -> str:
     return str(environment.id)
 
 
-async def load_enterprise_driver(client: StyrminClient) -> None:
+async def load_local_driver(client: StyrminClient, path: str) -> None:
+    """Load the driver at ``path`` in the Styrmin image."""
     # Loading a version that is already loaded returns that version without an error (spike-notes.md).
-    report(f"Loading the driver at {ENTERPRISE_DRIVER_PATH}")
-    await client.drivers.load_local_version(ENTERPRISE_DRIVER_PATH)
+    report(f"Loading the driver at {path}")
+    await client.drivers.load_local_version(path)
+
+
+async def load_enterprise_driver(client: StyrminClient) -> None:
+    await load_local_driver(client, ENTERPRISE_DRIVER_PATH)
 
 
 async def deploy(

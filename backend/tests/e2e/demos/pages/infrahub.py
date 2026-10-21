@@ -1,4 +1,5 @@
-"""Page object for the network device list of Infrahub 1.11 (``/objects/InfraDevice``), used by the demos only."""
+"""Page objects for Infrahub 1.10 and 1.11: the home page with the About dialog, and the network device list
+(``/objects/InfraDevice``). Only the demos use them."""
 
 from __future__ import annotations
 
@@ -19,6 +20,49 @@ ADMIN_PASSWORD = "infrahub"  # noqa: S105
 TIMEOUT_MS = 30_000
 # The list's footer, e.g. "2 counts", at the end of its rendered text.
 _COUNT_PATTERN = re.compile(r"(?<!\w)(\d+)\s*counts?\s*$")
+
+
+def about_version(text: str) -> str | None:
+    """Return the version, for example ``v1.11.7``, that the About dialog's rendered ``text`` shows on the line
+    after ``Version``, or ``None``."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if "Version" not in lines:
+        return None
+    index = lines.index("Version") + 1
+    return lines[index] if index < len(lines) else None
+
+
+class InfrahubHomePage:
+    """Open Infrahub's home page and show its version in the About dialog of the account menu."""
+
+    def __init__(self, page: Page) -> None:
+        self._page = page
+
+    async def goto(self, base_url: str) -> None:
+        """Open the home page; ends when the account menu of the logged-in user shows."""
+        await self._page.goto(base_url)
+        await expect(self._account_menu).to_be_visible(timeout=TIMEOUT_MS)
+
+    async def open_about(self) -> str | None:
+        """Open the About dialog from the account menu; return the version it shows, for example ``v1.11.7``."""
+        await self._account_menu.click()
+        await self._page.get_by_role(
+            "menuitem", name="About Infrahub", exact=True
+        ).click()
+        await expect(self._about).to_contain_text("Version", timeout=TIMEOUT_MS)
+        return about_version(await self._about.inner_text())
+
+    async def close_about(self) -> None:
+        await self._page.keyboard.press("Escape")
+        await expect(self._about).to_be_hidden(timeout=TIMEOUT_MS)
+
+    @property
+    def _account_menu(self) -> Locator:
+        return self._page.get_by_test_id("authenticated-menu-trigger")
+
+    @property
+    def _about(self) -> Locator:
+        return self._page.get_by_role("dialog", name="About Infrahub")
 
 
 def footer_count(text: str) -> int | None:

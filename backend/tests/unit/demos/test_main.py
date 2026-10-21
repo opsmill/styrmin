@@ -127,8 +127,10 @@ class Stack:
     def ledger(self) -> CreatedEnvironments:
         return CreatedEnvironments(self.ledger_path, SETTINGS.styrmin_url)
 
-    async def check(self, api_url, credentials, versions_path, *, needs_docker):
-        self.calls.append(("check", api_url, credentials[0], needs_docker))
+    async def check(
+        self, api_url, credentials, versions_path, *, needs_docker, empty_stack=False
+    ):
+        self.calls.append(("check", api_url, credentials[0], needs_docker, empty_stack))
         return self.problems
 
     async def check_tools(self) -> list[str]:
@@ -214,6 +216,42 @@ def _demo(slug: str, number: int, *, setup=None, record=None, image=False) -> De
         summary=("Infrahub {previous} to {latest}.",),
         uses_semaphore_image=image,
     )
+
+
+def _setup_demo(*, record=None) -> Demo:
+    """A setup demo that creates the environment of the fake deploy-upgrade demo during its recording."""
+
+    async def setup(context) -> None:
+        return None
+
+    async def default_record(context, state) -> None:
+        async with context.recorder.step("Add the Kubernetes cluster"):
+            STACK.create("network-lab-deploy-upgrade")
+            context.recorder._clock.now += 2
+
+    return Demo(
+        slug="setup",
+        number=0,
+        title="Set up Styrmin",
+        environment_names=(),
+        setup=setup,
+        record=record or default_record,
+        summary=("Set up.",),
+        hands_over=("network-lab-deploy-upgrade",),
+        sets_up_stack=True,
+    )
+
+
+def _upgrade_demo(seen: list[dict[str, str]]) -> Demo:
+    """A deploy-upgrade demo whose setup keeps the environment it finds, as the real one does."""
+
+    async def setup(context) -> str:
+        seen.append(dict(STACK.environments))
+        if "network-lab-deploy-upgrade" not in STACK.environments:
+            STACK.create("network-lab-deploy-upgrade")
+        return "state of deploy-upgrade"
+
+    return _demo("deploy-upgrade", 1, setup=setup)
 
 
 async def _failing_setup(context) -> None:
@@ -363,7 +401,7 @@ async def test_every_demo_recorded_exits_0_and_the_run_order_is_the_contracts(
 
     assert code == 0
     assert stack.calls == [
-        ("check", "http://styrmin.test:8080", "admin", False),
+        ("check", "http://styrmin.test:8080", "admin", False, False),
         ("browser", "http://styrmin.test:8080"),
         ("log in", "admin"),
         ("encode", "1-deploy-upgrade.mp4"),
@@ -593,7 +631,7 @@ async def test_the_semaphore_image_is_built_before_any_demo_that_deploys_it(
     )
 
     assert stack.calls[:2] == [
-        ("check", "http://styrmin.test:8080", "admin", True),
+        ("check", "http://styrmin.test:8080", "admin", True, False),
         ("build", True),
     ]
 
@@ -688,7 +726,7 @@ async def test_delete_environments_deletes_only_the_selected_demos_environments(
     assert "env-network-lab-clone" not in stack.ledger()
 
 
-def test_an_unknown_slug_lists_the_four_slugs_and_exits_2(capsys) -> None:
+def test_an_unknown_slug_lists_the_slugs_and_exits_2(capsys) -> None:
     with pytest.raises(SystemExit) as raised:
         main(
             ["--demo", "nope"], environ=ENVIRON, demos=[_demo("component-overrides", 2)]
@@ -697,7 +735,7 @@ def test_an_unknown_slug_lists_the_four_slugs_and_exits_2(capsys) -> None:
     assert raised.value.code == 2
     error = capsys.readouterr().err
     assert (
-        "'nope' is not a demo. The demos are: deploy-upgrade, "
+        "'nope' is not a demo. The demos are: setup, deploy-upgrade, "
         "component-overrides, backup-restore, clone"
     ) in error
 
@@ -832,3 +870,104 @@ def test_the_memory_note_follows_a_summary_with_kept_environments(capsys) -> Non
     output = " ".join(capsys.readouterr().out.split())
     assert "kept environments: network-lab" in output
     assert "'uv run invoke record --delete-environments' deletes" in output
+
+
+async def test_the_setup_demo_hands_its_environment_to_demo_1(
+    stack, versions_path, tmp_path
+) -> None:
+    seen: list[dict[str, str]] = []
+
+    code = await record_demos(
+        [_setup_demo(), _upgrade_demo(seen)],
+        SETTINGS,
+        tmp_path / "videos",
+        stack.runtime(versions_path),
+    )
+
+    assert code == 0
+    # The check asks for a stack without the cluster and the backup storage location.
+    assert stack.calls[0] == ("check", "http://styrmin.test:8080", "admin", False, True)
+    # Demo 1 finds the environment of the setup demo: no deletion before its setup.
+    assert seen == [{"network-lab-deploy-upgrade": "env-1"}]
+    assert stack.deleted == [("network-lab-deploy-upgrade",)]
+    assert (tmp_path / "videos" / "0-setup.mp4").exists()
+    assert "env-1" not in stack.ledger()
+
+
+async def test_without_the_setup_demo_a_kept_environment_of_demo_1_is_deleted_first(
+    stack, versions_path, tmp_path
+) -> None:
+    stack.environments["network-lab-deploy-upgrade"] = "env-kept"
+    stack.ledger().remember(
+        [EnvironmentRecord("network-lab-deploy-upgrade", "env-kept")]
+    )
+    seen: list[dict[str, str]] = []
+
+    code = await record_demos(
+        [_upgrade_demo(seen)],
+        SETTINGS,
+        tmp_path / "videos",
+        stack.runtime(versions_path),
+    )
+
+    assert code == 0
+    assert seen == [{}]
+    assert stack.deleted[0] == ("network-lab-deploy-upgrade",)
+
+
+async def test_a_failed_setup_demo_skips_the_later_demos(
+    stack, versions_path, tmp_path, summaries, capsys
+) -> None:
+    async def record(context, state) -> None:
+        async with context.recorder.step("Add a backup storage location"):
+            STACK.create("network-lab-deploy-upgrade")
+            raise AssertionError("the dialog stayed open")
+
+    code = await record_demos(
+        [_setup_demo(record=record), _upgrade_demo([]), _demo("clone", 4)],
+        SETTINGS,
+        tmp_path / "videos",
+        stack.runtime(versions_path),
+    )
+
+    assert code == 1
+    assert cli.SETUP_FAILED_NOTE in " ".join(capsys.readouterr().out.split())
+    [summary] = summaries
+    assert [(row.slug, row.status) for row in summary] == [
+        ("setup", "failed"),
+        ("deploy-upgrade", "skipped"),
+        ("clone", "skipped"),
+    ]
+    assert summary[0].reset_stack
+    assert summary[0].kept_environments == ("network-lab-deploy-upgrade",)
+    assert summary_row(summary[0])[2] == (
+        'step "Add a backup storage location": AssertionError: the dialog stayed open\n'
+        "kept environments: network-lab-deploy-upgrade\n"
+        "next: read the error above, then create an empty demo stack with "
+        "'uv run invoke reset --no-bootstrap', then record again with 'uv run invoke record'"
+    )
+    # The later demos never opened a browser.
+    assert stack.calls.count(("browser", "http://styrmin.test:8080")) == 1
+
+
+async def test_a_setup_demo_whose_encoding_failed_still_lets_the_later_demos_run(
+    stack, versions_path, tmp_path, summaries
+) -> None:
+    stack.failing_encodes.add("0-setup.mp4")
+    seen: list[dict[str, str]] = []
+
+    code = await record_demos(
+        [_setup_demo(), _upgrade_demo(seen)],
+        SETTINGS,
+        tmp_path / "videos",
+        stack.runtime(versions_path),
+    )
+
+    assert code == 1
+    [summary] = summaries
+    assert [(row.slug, row.status, row.failed_step) for row in summary] == [
+        ("setup", "failed", "post-processing"),
+        ("deploy-upgrade", "recorded", None),
+    ]
+    assert not summary[0].reset_stack
+    assert seen == [{"network-lab-deploy-upgrade": "env-1"}]

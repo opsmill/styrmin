@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 class DriversListPage:
-    """Drivers list + the Load Driver drawer (remote Git flow)."""
+    """Drivers list + the Load Driver drawer (Git repository and local directory)."""
 
     def __init__(self, page: Page, *, keystroke_delay_ms: int | None = None) -> None:
         self._page = page
@@ -118,6 +118,30 @@ class DriversListPage:
                 keystroke_delay_ms=self._keystroke_delay_ms,
             )
 
+        return await self._submit_and_read_loaded_version()
+
+    async def load_local_version(
+        self, *, path: str, open_page: bool = True
+    ) -> DriverVersionRef:
+        """Drive the Load Driver drawer (Local directory tab) and return the new version ref.
+
+        ``path`` is a directory inside the Styrmin server container. With
+        ``open_page=False`` the caller has already opened ``/drivers``.
+        """
+        if open_page:
+            await self._page.goto("/drivers")
+        await self._page.get_by_role("button", name="Load driver").first.click()
+        drawer = self._page.get_by_role("dialog", name="Load a driver")
+        await wait_for_dialog_open(drawer)
+        await drawer.get_by_role("button", name="Local directory", exact=True).click()
+        await enter_text(
+            drawer.locator("#path"),
+            path,
+            keystroke_delay_ms=self._keystroke_delay_ms,
+        )
+        return await self._submit_and_read_loaded_version()
+
+    async def _submit_and_read_loaded_version(self) -> DriverVersionRef:
         # The footer submit is the only button bound to the drawer form.
         await self._page.locator("button[form=load-driver-form]").click()
 

@@ -1,11 +1,16 @@
-"""Demo 1's registration and the checks that fail the demo on a wrong result."""
+"""Demo 1's registration, its setup, and the checks that fail the demo on a wrong result."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
+from tests.e2e.demos import stack
 from tests.e2e.demos.catalog import DEMOS
 from tests.e2e.demos.scenarios import deploy_upgrade
+from tests.e2e.demos.stack import EnvironmentRecord
+from tests.e2e.pages.environments import EnvironmentDetailPage
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.refs import StepRef, TimelineEntry
 
@@ -104,3 +109,61 @@ def test_check_version_names_the_version_shown() -> None:
         deploy_upgrade.check_version("1.10.11", "1.11.7")
 
     assert str(raised.value) == "The deployment shows Infrahub 1.10.11, not 1.11.7"
+
+
+def test_check_about_version_wants_the_version_with_a_v() -> None:
+    deploy_upgrade.check_about_version("v1.11.7", "1.11.7")
+    with pytest.raises(ScenarioActionError) as raised:
+        deploy_upgrade.check_about_version("v1.10.11", "1.11.7")
+    assert str(raised.value) == "Infrahub's About dialog shows v1.10.11, not v1.11.7"
+    with pytest.raises(ScenarioActionError, match="shows no version, not v1.11.7"):
+        deploy_upgrade.check_about_version(None, "1.11.7")
+
+
+@pytest.fixture
+def setup_calls(monkeypatch: pytest.MonkeyPatch) -> tuple[list[tuple], dict]:
+    """Replace the stack and the environment page; ``existing`` maps the environments on the stack to their ids."""
+    calls: list[tuple] = []
+    existing: dict[str, str] = {}
+
+    async def find_environments(client, names):
+        return [
+            EnvironmentRecord(name, existing[name])
+            for name in names
+            if name in existing
+        ]
+
+    async def create_environment(client, name):
+        calls.append(("create", name))
+        return "env-created"
+
+    async def goto(self, *, environment_id):
+        calls.append(("goto", environment_id))
+
+    monkeypatch.setattr(stack, "find_environments", find_environments)
+    monkeypatch.setattr(stack, "create_environment", create_environment)
+    monkeypatch.setattr(EnvironmentDetailPage, "goto", goto)
+    return calls, existing
+
+
+async def test_setup_opens_the_environment_that_the_setup_demo_created(
+    setup_calls,
+) -> None:
+    calls, existing = setup_calls
+    existing["network-lab-upgrade"] = "env-of-the-setup-demo"
+
+    lab = await deploy_upgrade.setup(SimpleNamespace(client=object(), page=object()))
+
+    assert lab.environment_id == "env-of-the-setup-demo"
+    assert calls == [("goto", "env-of-the-setup-demo")]
+
+
+async def test_setup_creates_the_environment_without_the_setup_demo(
+    setup_calls,
+) -> None:
+    calls, _existing = setup_calls
+
+    lab = await deploy_upgrade.setup(SimpleNamespace(client=object(), page=object()))
+
+    assert lab.environment_id == "env-created"
+    assert calls == [("create", "network-lab-upgrade"), ("goto", "env-created")]

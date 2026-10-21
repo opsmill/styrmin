@@ -64,9 +64,15 @@ def versions_file(tmp_path):
     return path
 
 
-async def check(api_url, credentials, versions_path, *, needs_docker=True):
+async def check(
+    api_url, credentials, versions_path, *, needs_docker=True, empty_stack=False
+):
     return await prerequisites.check(
-        api_url, credentials, versions_path, needs_docker=needs_docker
+        api_url,
+        credentials,
+        versions_path,
+        needs_docker=needs_docker,
+        empty_stack=empty_stack,
     )
 
 
@@ -241,7 +247,8 @@ async def test_the_missing_items_are_named_in_one_message_before_the_versions_fi
 
     assert await check(STACK_URL, CREDENTIALS, tmp_path / "missing.yml") == [
         "The demo stack is missing the 'semaphore' driver, the 'local' cluster and "
-        "the 'local' backup storage location. Run 'uv run invoke start' again."
+        "the 'local' backup storage location. Run 'uv run invoke start' again, "
+        "or record the setup demo before the others."
     ]
     assert client.closed
 
@@ -258,8 +265,44 @@ async def test_one_missing_item_is_named_alone(
     )
 
     assert await check(STACK_URL, CREDENTIALS, versions_file) == [
-        "The demo stack is missing the 'infrahub' driver. Run 'uv run invoke start' again."
+        "The demo stack is missing the 'infrahub' driver. Run 'uv run invoke start' again, "
+        "or record the setup demo before the others."
     ]
+
+
+async def test_the_setup_demo_accepts_an_empty_stack(
+    ffmpeg_on_path, stack_client, versions_file
+) -> None:
+    # A stack started with --no-bootstrap has no driver, cluster or backup storage location.
+    client = FakeClient(drivers=[], clusters=[], locations=_named("offsite"))
+    stack_client(client)
+
+    assert await check(STACK_URL, CREDENTIALS, versions_file, empty_stack=True) == []
+    assert client.closed
+
+
+async def test_the_setup_demo_names_what_the_stack_already_has(
+    ffmpeg_on_path, stack_client, versions_file
+) -> None:
+    stack_client(_complete_stack())
+
+    assert await check(STACK_URL, CREDENTIALS, versions_file, empty_stack=True) == [
+        "The setup demo creates the cluster and the backup storage location in the Styrmin UI, so it needs "
+        "a demo stack without them, and this demo stack has the cluster 'local' and the backup storage "
+        "location 'local'. Run 'uv run invoke reset --no-bootstrap', which creates the demo stack without "
+        "them, or record the other demos only with "
+        "'uv run invoke record --demo deploy-upgrade,component-overrides,backup-restore,clone'."
+    ]
+
+
+async def test_the_setup_demo_refuses_a_cluster_of_any_name(
+    ffmpeg_on_path, stack_client, versions_file
+) -> None:
+    stack_client(FakeClient(drivers=[], clusters=_named("other"), locations=[]))
+
+    [message] = await check(STACK_URL, CREDENTIALS, versions_file, empty_stack=True)
+
+    assert "this demo stack has the cluster 'other'. Run" in message
 
 
 async def test_the_versions_file_comes_last_with_its_path(

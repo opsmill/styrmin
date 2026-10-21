@@ -88,16 +88,23 @@ class EnvironmentsListPage:
         ).to_be_visible(timeout=15_000)
 
     async def create_environment(
-        self, *, name: str, cluster_id: str, config: dict[str, Any]
+        self,
+        *,
+        name: str,
+        cluster_id: str,
+        config: dict[str, Any],
+        open_page: bool = True,
     ) -> EnvironmentRef:
         """Drive the CreateEnvironmentDialog to create an environment.
 
         ``cluster_id`` selects the cluster in the dropdown. The dropdown
         renders option labels as cluster *names*, so the caller must have
         populated the data-cluster-id attribute via a preceding
-        ``SettingsPage.create_cluster`` or similar.
+        ``SettingsPage.create_cluster`` or similar. With ``open_page=False``
+        the caller has already opened the environments list.
         """
-        await self.goto()
+        if open_page:
+            await self.goto()
         await self._page.get_by_role("button", name="New Environment").click()
         dialog = self._page.get_by_role("dialog", name="Create Environment")
         await wait_for_dialog_open(dialog)
@@ -179,6 +186,15 @@ class EnvironmentsListPage:
             )
         return EnvironmentRef(id=env_id, name=name, cluster_id=cluster_id)
 
+    async def open_card(self, *, environment_id: str) -> None:
+        """Click the environment's card; ends when the environment's page shows."""
+        await self._page.locator(
+            f"[data-testid=environment-card][data-environment-id='{environment_id}']"
+        ).first.click()
+        await EnvironmentDetailPage(self._page).wait_until_shown(
+            environment_id=environment_id
+        )
+
     async def read_card_summary(self, *, environment_id: str) -> tuple[str, int]:
         """Return the status and application count an environment card shows."""
         card = self._page.locator(
@@ -198,6 +214,9 @@ class EnvironmentDetailPage:
 
     async def goto(self, *, environment_id: str) -> None:
         await self._page.goto(f"/environments/{environment_id}")
+        await self.wait_until_shown(environment_id=environment_id)
+
+    async def wait_until_shown(self, *, environment_id: str) -> None:
         root = self._page.locator(
             f"[data-testid=environment-detail][data-environment-id='{environment_id}']"
         ).first
@@ -438,9 +457,15 @@ class EnvironmentDetailPage:
                 ) from None
             raise
 
-    async def assign_bsl(self, *, environment_id: str, bsl_id: str) -> None:
-        """Open the Parameters tab and pick the BSL from the selector."""
-        await self.goto(environment_id=environment_id)
+    async def assign_bsl(
+        self, *, environment_id: str, bsl_id: str, open_page: bool = True
+    ) -> None:
+        """Open the Parameters tab and pick the BSL from the selector.
+
+        With ``open_page=False`` the caller has already opened the environment's page.
+        """
+        if open_page:
+            await self.goto(environment_id=environment_id)
         await self._page.get_by_role("button", name="Parameters", exact=True).click()
         selector = self._page.locator("[data-testid=bsl-selector]").first
         await selector.wait_for()

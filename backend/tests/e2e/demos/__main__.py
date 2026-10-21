@@ -66,6 +66,11 @@ MEMORY_NOTE = (
     "Kept environments still use the cluster's memory, which can make later demos fail. "
     "'uv run invoke record --delete-environments' deletes the environments of every demo."
 )
+EMPTY_STACK_COMMAND = "uv run invoke reset --no-bootstrap"
+SETUP_FAILED_NOTE = (
+    "The setup demo failed, so the command records no later demo: they need the cluster, the backup storage "
+    "location and the drivers that it creates."
+)
 
 type Phase = Literal["setup", "recording", "post-processing", "cleanup"]
 type Status = Literal["recorded", "failed", "interrupted", "skipped"]
@@ -99,6 +104,8 @@ class DemoResult:
     """One line of the summary (data-model "Demo result").
 
     ``kept_work_dir`` is the directory that holds the raw recording and its plan after a failed encoding.
+    ``reset_stack`` is true when the setup demo stopped before it set up the demo stack: recording it again
+    needs an empty demo stack.
     """
 
     slug: str
@@ -109,6 +116,7 @@ class DemoResult:
     error: str | None = None
     kept_environments: tuple[str, ...] = ()
     kept_work_dir: Path | None = None
+    reset_stack: bool = False
 
 
 @asynccontextmanager
@@ -185,7 +193,12 @@ class Runtime:
 
 
 class DemoRun:
-    """One run of one demo: leftovers, setup, recording, post-processing, cleanup (plan "Recorder flow")."""
+    """One run of one demo: leftovers, setup, recording, post-processing, cleanup (plan "Recorder flow").
+
+    ``received`` holds the ids of the environments that an earlier demo of the same run handed over to this
+    demo; the deletion of the leftovers keeps them. After the recording, ``handed_over`` holds the ids of the
+    environments that this demo hands over to a later demo.
+    """
 
     def __init__(
         self,
@@ -194,12 +207,16 @@ class DemoRun:
         versions: InfrahubVersions,
         runtime: Runtime,
         created: ledger.CreatedEnvironments,
+        *,
+        received: frozenset[str] = frozenset(),
     ) -> None:
         self._demo = demo
         self._settings = settings
         self._versions = versions
         self._runtime = runtime
         self._created = created
+        self._received = received
+        self.handed_over: frozenset[str] = frozenset()
         self._recorder = runtime.new_recorder()
         self._client: StyrminClient | None = None
         self._phase: Phase = "setup"
@@ -207,6 +224,11 @@ class DemoRun:
         self._keep_work_dir = False
         # The result of a run that Ctrl-C stopped; ``execute`` then raises instead of returning it.
         self.interrupted: DemoResult | None = None
+
+    @property
+    def stack_ready(self) -> bool:
+        """False when the demo sets up the demo stack and stopped before the end of its recording."""
+        return not (self._demo.sets_up_stack and self._phase in {"setup", "recording"})
 
     async def execute(self, output_path: Path) -> DemoResult:
         try:
@@ -231,7 +253,7 @@ class DemoRun:
             settings.styrmin_url, settings.username, settings.password
         )
         # A failed earlier run keeps its environments; delete them before the setup (FR-009).
-        await self._delete_environments()
+        await self._delete_environments(keep=self._received)
         async with runtime.open_browser(settings.styrmin_url) as (
             browser_context,
             page,
@@ -249,11 +271,17 @@ class DemoRun:
             state = await demo.setup(context)
             await self._remember_environments()
             self._phase = "recording"
-            await self._recorder.start(page, work_dir / RAW_NAME)
+            await self._recorder.start(
+                page, work_dir / RAW_NAME, action_ms=demo.action_ms
+            )
             await demo.record(context, state)
             self._phase = "post-processing"
             recording = await self._recorder.stop()
-            await self._remember_environments()
+            self.handed_over = frozenset(
+                environment.id
+                for environment in await self._remember_environments()
+                if environment.name in demo.hands_over
+            )
             plan = VideoPlan(
                 video_name=output_path.name,
                 segments=tuple(
@@ -284,12 +312,17 @@ class DemoRun:
         await cleanup
         return seconds
 
-    async def _delete_environments(self) -> None:
-        """Delete the demo's environments; refuse one that the command did not create."""
+    async def _delete_environments(self, *, keep: frozenset[str] = frozenset()) -> None:
+        """Delete the demo's environments, except those whose id is in ``keep``; refuse one that the command
+        did not create."""
         client = self._require_client()
-        found = await self._runtime.find_environments(
-            client, self._demo.environment_names
-        )
+        found = [
+            environment
+            for environment in await self._runtime.find_environments(
+                client, self._demo.environment_names
+            )
+            if environment.id not in keep
+        ]
         if not found:
             return
         foreign = [
@@ -305,14 +338,15 @@ class DemoRun:
         await self._runtime.delete_environments(client, found)
         self._created.forget(found)
 
-    async def _remember_environments(self) -> None:
-        # Before the setup, the run deleted every environment with the demo's names,
-        # so the ones that exist now are the run's own.
-        self._created.remember(
-            await self._runtime.find_environments(
-                self._require_client(), self._demo.environment_names
-            )
+    async def _remember_environments(self) -> list[EnvironmentRecord]:
+        """Remember the demo's environments as created by the command, and return them."""
+        # Before the setup, the run deleted every environment with the demo's names, except those that an
+        # earlier demo of the run handed over, so the ones that exist now are the run's own.
+        found = await self._runtime.find_environments(
+            self._require_client(), self._demo.all_environment_names
         )
+        self._created.remember(found)
+        return found
 
     def _require_client(self) -> StyrminClient:
         if self._client is None:
@@ -347,6 +381,7 @@ class DemoRun:
             error=describe(error) if error is not None else None,
             kept_environments=await self._kept_environments(),
             kept_work_dir=self._work_dir if self._keep_work_dir else None,
+            reset_stack=not self.stack_ready,
         )
 
     async def _kept_environments(self) -> tuple[str, ...]:
@@ -354,11 +389,11 @@ class DemoRun:
             return ()
         try:
             found = await self._runtime.find_environments(
-                self._client, self._demo.environment_names
+                self._client, self._demo.all_environment_names
             )
             self._created.remember(found)
         except Exception:  # noqa: BLE001 - the summary then names every environment the demo may have left
-            return self._demo.environment_names
+            return self._demo.all_environment_names
         return tuple(environment.name for environment in found)
 
     async def _close(self) -> None:
@@ -439,6 +474,16 @@ def is_too_long(seconds: float) -> bool:
 
 def next_steps(result: DemoResult) -> list[str]:
     """Return what to do after a failed or interrupted demo, one line per action."""
+    if result.reset_stack:
+        start = (
+            "read the error above, then create"
+            if result.status == "failed"
+            else "create"
+        )
+        return [
+            f"next: {start} an empty demo stack with '{EMPTY_STACK_COMMAND}', "
+            "then record again with 'uv run invoke record'"
+        ]
     record_again = f"uv run invoke record --demo {result.slug}"
     steps: list[str] = []
     if result.kept_work_dir is not None:
@@ -524,7 +569,7 @@ async def confirm_environments(
 
     An environment that the command did not create is deleted only after a yes on the terminal.
     """
-    names = [name for demo in demos for name in demo.environment_names]
+    names = [name for demo in demos for name in demo.all_environment_names]
     foreign = [
         environment
         for environment in await runtime.find_environments(client, names)
@@ -573,15 +618,22 @@ async def record_demos(
             return status
         versions = load_versions(runtime.versions_path)
         created = runtime.created_environments(settings)
-        for demo in demos:
+        received: frozenset[str] = frozenset()
+        for index, demo in enumerate(demos):
             console.rule(f"Demo {demo.number}: {demo.slug}")
             report(
                 f"Demo {demo.number} usually takes about {demo.expected_minutes} min, setup and cleanup included"
             )
-            run = DemoRun(demo, settings, versions, runtime, created)
+            run = DemoRun(demo, settings, versions, runtime, created, received=received)
             results.append(
                 await run.execute(output_dir / f"{demo.number}-{demo.slug}.mp4")
             )
+            received |= run.handed_over
+            later = demos[index + 1 :]
+            if not run.stack_ready and later:
+                console.print(Text(SETUP_FAILED_NOTE, style="bold red"))
+                results += skipped(later)
+                break
     except asyncio.CancelledError:
         if run is not None and run.interrupted is not None:
             results.append(run.interrupted)
@@ -609,6 +661,7 @@ async def _prepare(
         settings.credentials,
         runtime.versions_path,
         needs_docker=needs_image,
+        empty_stack=any(demo.sets_up_stack for demo in demos),
     )
     if problems:
         print_problems(problems)
@@ -657,7 +710,7 @@ async def delete_demo_environments(
     try:
         if not await confirm_environments(client, demos, runtime, created):
             return EXIT_PREREQUISITES
-        names = [name for demo in demos for name in demo.environment_names]
+        names = [name for demo in demos for name in demo.all_environment_names]
         found = await runtime.find_environments(client, names)
         if not found:
             console.print(f"No environment of these demos exists: {', '.join(names)}")
@@ -758,7 +811,7 @@ def parse_arguments(
         default=[],
         metavar="SLUG",
         help=f"A demo to record: {', '.join(SLUGS)}. Repeat the option, or separate the slugs "
-        "with commas, to record several. Default: all four demos.",
+        f"with commas, to record several. Default: all {len(SLUGS)} demos.",
     )
     parser.add_argument(
         "--output-dir",

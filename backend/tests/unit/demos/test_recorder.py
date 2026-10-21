@@ -15,6 +15,7 @@ from tests.e2e.demos.recorder import (
     ACTION_STYLE,
     CURSOR_REST,
     RESULT_HOLD_SECONDS,
+    SLOW_ACTION_MS,
     DemoRecorder,
     Recording,
     probe_duration,
@@ -129,6 +130,19 @@ async def test_start_records_at_1920x1080_with_the_pointer_and_a_highlight(
     # FR-004: a highlight on each element; no title naming the locator.
     assert "outline" in ACTION_STYLE["highlight"]
     assert ACTION_STYLE["title"] == "display: none"
+
+
+async def test_start_takes_how_long_each_action_stays_highlighted(
+    clock: FakeClock, calls: list[tuple]
+) -> None:
+    await DemoRecorder(clock=clock).start(
+        FakePage(calls), Path("raw.webm"), action_ms=SLOW_ACTION_MS
+    )
+
+    assert calls[1] == (
+        "show_actions",
+        {"cursor": "pointer", "duration": SLOW_ACTION_MS, "style": ACTION_STYLE},
+    )
 
 
 async def test_waits_are_recorded_in_seconds_since_start_and_printed(

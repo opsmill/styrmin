@@ -9,7 +9,8 @@ pieces into a single happy-path experience:
     invoke destroy   # tear down
     invoke reset     # destroy + start
 
-``invoke record`` then records the feature demos as MP4 videos on the running stack.
+``invoke record`` then records the feature demos as MP4 videos on the running stack. Its setup demo
+needs a stack without the bootstrap: ``invoke reset --no-bootstrap``.
 
 The Cloudflare wildcard zone *.local.styrmin.io resolves to 127.0.0.1,
 so no /etc/hosts manipulation is needed.
@@ -116,8 +117,20 @@ def build(context: Context) -> None:
         context.run("helm dependency update", pty=True)
 
 
-@task(help={"build_image": "Force a rebuild of the styrmin image even if it already exists."})
-def start(context: Context, build_image: bool = False) -> None:
+BOOTSTRAP_HELP = (
+    "Create the 'local' cluster, environment and backup storage location, and load the bundled drivers "
+    "(default). --no-bootstrap leaves Styrmin empty, for the setup demo of 'invoke record', which creates "
+    "the cluster, the backup storage location and the drivers in the Styrmin UI."
+)
+
+
+@task(
+    help={
+        "build_image": "Force a rebuild of the styrmin image even if it already exists.",
+        "bootstrap": BOOTSTRAP_HELP,
+    }
+)
+def start(context: Context, build_image: bool = False, bootstrap: bool = True) -> None:
     """Create the vCluster and deploy a working Styrmin demo end-to-end."""
     console = Console()
 
@@ -148,6 +161,15 @@ def start(context: Context, build_image: bool = False) -> None:
         f"kubectl rollout status deployment/{DEMO_RELEASE}-server -n {KUBERNETES_ROOT_NAMESPACE} --timeout=300s",
         pty=True,
     )
+
+    if not bootstrap:
+        console.print(
+            "[yellow]⚠[/yellow] Skipped the bootstrap: Styrmin has no cluster, environment, backup storage "
+            "location or driver. The setup demo of 'uv run invoke record' creates the cluster, the backup "
+            "storage location and the drivers that the demos need."
+        )
+        _print_summary(context)
+        return
 
     print_header("Bootstrapping cluster, environment, and local driver...")
     admin_username, admin_password = _admin_credentials()
@@ -196,18 +218,19 @@ def destroy(context: Context, yes: bool = False) -> None:
     cluster.delete(context)
 
 
-@task
-def reset(context: Context) -> None:
+@task(help={"bootstrap": BOOTSTRAP_HELP})
+def reset(context: Context, bootstrap: bool = True) -> None:
     """Destroy and re-create the demo environment from scratch."""
     destroy(context, yes=True)
-    start(context)
+    start(context, bootstrap=bootstrap)
 
 
 @task(
     iterable=["demo"],
     help={
-        "demo": "Record only this demo: deploy-upgrade, component-overrides, backup-restore or clone. "
-        "Repeat the option to record several. Default: all four demos.",
+        "demo": "Record only this demo: setup, deploy-upgrade, component-overrides, backup-restore or clone. "
+        "Repeat the option to record several. Default: all five demos. The setup demo needs a demo stack "
+        "started with --no-bootstrap.",
         "output_dir": "Where to write the MP4 files. Default: demo-videos/ at the repository root.",
         "build_image": "Build the demo Semaphore image without Docker's build cache. The command builds it "
         "before each run anyway, from Docker's cache when nothing changed.",
