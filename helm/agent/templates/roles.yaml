@@ -78,7 +78,8 @@ rules:
 ##
 ## Base operator rules
 ##
-# We need to get namespaces so the operator can read namespaces to ensure they exist
+# We need to get namespaces so the operator can read namespaces to ensure they exist, and
+# to patch the labels of a namespace that a restore created without them
 - apiGroups:
   - ""
   resources:
@@ -88,6 +89,7 @@ rules:
   - create
   - delete
   - list
+  - patch
 # We need to manage Helm release secrets
 - apiGroups:
   - ""

@@ -50,6 +50,10 @@ from styrmin_backend.agent.tasks.shared import (
     render_helm_chart_specifications,
     render_helm_repository_specifications,
 )
+from styrmin_backend.context.namespace_labels import (
+    NAMESPACE_LABEL_PREFIX,
+    build_namespace_labels,
+)
 from styrmin_backend.context.models.contexts import GlobalContext
 from styrmin_backend.db.models import ApplicationInstance as ApplicationInstanceModel
 from styrmin_backend.domain import steps
@@ -111,12 +115,10 @@ class KeptInstance:
 
 
 def _build_namespace_labels(
-    context: GlobalContext, label_prefix: str = "styrmin"
+    context: GlobalContext, label_prefix: str = NAMESPACE_LABEL_PREFIX
 ) -> dict[str, str]:
     """Build Kubernetes namespace labels from context labels."""
-    return {
-        f"{label_prefix}/{key}": str(value) for key, value in context.labels.items()
-    }
+    return build_namespace_labels(context.labels, label_prefix)
 
 
 async def _apply_styrmin_deployment_crd(
