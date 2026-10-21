@@ -26,6 +26,14 @@ replica override of 2, so the create path of the override is covered too.
 The override images are the simple-app builds re-tagged by the session fixture
 ``simple_app_override_images`` under ``registry.example/acme/simple-app-patched``;
 the vcluster nodes pull them from the host Docker daemon like the base images.
+
+In the ui variant, two tests also call the ``DeploymentDetailPage`` methods
+that the recorded demos use (``backend/tests/e2e/demos/``), so a frontend
+change that breaks them fails here: the override test reads the ``server``
+row of the Component Overrides card (``show_component_overrides``, demo 2),
+and the upgrade test reads the task ids, waits for the new upgrade task and
+expands its Timeline entry (``read_task_ids``, ``wait_for_new_task``,
+``show_timeline_entry``, demo 1). Each result is checked against the API.
 """
 
 from __future__ import annotations
@@ -78,6 +86,8 @@ GUARD_FAILURE_TIMEOUT_SECONDS = 120.0
 # The bitnami subchart's ``fullnameOverride`` in the simple-app values template.
 DATABASE_WORKLOAD = "styrmin-postgresql"
 CREATE_SERVER_REPLICAS = 2
+# The step of an upgrade task that runs the driver's ``upgrade`` action.
+UPGRADE_ACTION_STEP = "hook:upgrade:core"
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +266,16 @@ async def _read_image_overrides(
         row["component"]: row
         for row in raw["data"]["deployment"]["componentImageOverrides"]
     }
+
+
+async def _shown_server_overrides(
+    page: Any, environment_id: str, deployment_id: str
+) -> str:
+    """Open the deployment's page and return the text of the ``server`` row of
+    the Component Overrides card in the Settings tab."""
+    detail = DeploymentDetailPage(page)
+    await detail.goto(environment_id=environment_id, deployment_id=deployment_id)
+    return await detail.show_component_overrides(component="server")
 
 
 def _server_image(workload: Any) -> str | None:
@@ -516,13 +536,20 @@ async def test_override_then_clear(
     simple_app_override_images: dict[str, str],
     vcluster: dict,
     scenario_driver: ScenarioDriver,
+    driver_mode: str,
+    session_ui_page: Any,
     _io_driver_bound: None,
 ) -> None:
     """US1: an image override on ``server`` replaces only the component
     container's image; the pod keeps its containers, init container and env,
     and the read surface shows the override applied. US3: clearing it restores
-    the chart image on the next reconcile and the read surface lists nothing."""
+    the chart image on the next reconcile and the read surface lists nothing.
+
+    In the ui variant, the ``server`` row of the Component Overrides card shows
+    the image after the set and not after the clear (``show_component_overrides``,
+    which demo 2 uses)."""
     client: StyrminClient = image_override_environment["client"]
+    environment_id = image_override_environment["environment_id"]
     deployment_id = image_override_deployment["deployment_id"]
     namespace = image_override_deployment["namespace"]
     patched = simple_app_override_images["0.1.0"]
@@ -554,6 +581,11 @@ async def test_override_then_clear(
     assert rows["server"]["resolvedReference"] == patched
     assert rows["server"]["isApplicable"] is True
     assert rows["server"]["isOrphaned"] is False
+    if driver_mode == "ui":
+        row = await _shown_server_overrides(
+            session_ui_page, environment_id, deployment_id
+        )
+        assert patched in row, row
 
     # Clear half (US3): the next render drops the patch, so the chart image returns.
     await scenario_driver.set_component_image(
@@ -572,6 +604,11 @@ async def test_override_then_clear(
         image=CHART_IMAGE,
     )
     assert await _read_image_overrides(client, deployment_id) == {}
+    if driver_mode == "ui":
+        row = await _shown_server_overrides(
+            session_ui_page, environment_id, deployment_id
+        )
+        assert patched not in row, row
 
 
 @pytest.mark.ci
@@ -646,18 +683,25 @@ async def test_token_follows_upgrade_and_action_job(
     simple_app_override_images: dict[str, str],
     vcluster: dict,
     scenario_driver: ScenarioDriver,
+    driver_mode: str,
+    session_ui_page: Any,
 ) -> None:
     """US2: a literal-tag override is listed as pinned before an upgrade; a
     ``{{ app.version }}`` override is not, and after upgrading to 0.2.0 the
-    ``server`` container runs the 0.2.0 override image."""
+    ``server`` container runs the 0.2.0 override image.
+
+    In the ui variant, the test makes the calls of demo 1 around the upgrade:
+    it reads the task ids on the Timeline tab (``read_task_ids``), waits there
+    for the new upgrade task to succeed (``wait_for_new_task``) and expands its
+    entry (``show_timeline_entry``). The task ids, the new task and its steps
+    must equal what the API lists."""
     client: StyrminClient = image_override_environment["client"]
+    environment_id = image_override_environment["environment_id"]
     deployment_id = image_override_upgrade_deployment["deployment_id"]
     namespace = image_override_upgrade_deployment["namespace"]
     patched_v1 = simple_app_override_images["0.1.0"]
     patched_v2 = simple_app_override_images["0.2.0"]
-    scenario_driver.attach_to_deployment(
-        environment_id=image_override_environment["environment_id"]
-    )
+    scenario_driver.attach_to_deployment(environment_id=environment_id)
 
     # A literal tag stays pinned across the upgrade (FR-008).
     await scenario_driver.set_component_image(
@@ -688,9 +732,43 @@ async def test_token_follows_upgrade_and_action_job(
     assert rows["server"]["reference"] == TOKEN_IMAGE
     assert rows["server"]["resolvedReference"] == patched_v1
 
+    detail: DeploymentDetailPage | None = None
+    known: set[str] = set()
+    if driver_mode == "ui":
+        detail = DeploymentDetailPage(session_ui_page)
+        await detail.goto(environment_id=environment_id, deployment_id=deployment_id)
+        known = await detail.read_task_ids()
+        assert known == await _task_ids(client, deployment_id)
+
     await scenario_driver.upgrade_deployment(
         deployment_id=deployment_id, version="0.2.0"
     )
+    if detail is not None:
+        task_id = await detail.wait_for_new_task(
+            "upgrade_instance",
+            known_task_ids=known,
+            timeout=RECONCILE_TIMEOUT_SECONDS,
+        )
+        shown = await detail.show_timeline_entry(task_id)
+        listed = [
+            entry
+            for entry in await ApiScenarioDriver(client).get_deployment_timeline(
+                deployment_id=deployment_id
+            )
+            if entry.task_type == "upgrade_instance" and entry.task_id not in known
+        ]
+        assert [entry.task_id for entry in listed] == [task_id], listed
+        assert shown.task_id == task_id, shown
+        assert shown.task_type == "upgrade_instance", shown
+        assert shown.result == "SUCCEEDED", shown
+        assert shown.application_version == "0.2.0", shown
+        assert shown.steps == listed[0].steps
+        action_step = next(
+            (step for step in shown.steps if step.key == UPGRADE_ACTION_STEP), None
+        )
+        assert action_step is not None, shown.steps
+        assert action_step.status == "SUCCEEDED", action_step
+
     upgraded = await scenario_driver.wait_for_deployment_running(
         deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
     )
