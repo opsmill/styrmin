@@ -115,7 +115,8 @@ async def wait_for_namespaces_gone(
     api = await kr8s.asyncio.api(context=kube_context)
     deadline = time.monotonic() + timeout
     remaining = list(namespaces)
-    what = f"the {len(namespaces)} namespaces of the deleted deployments are gone"
+    count = len(namespaces)
+    what = f"the {count} namespace{'' if count == 1 else 's'} of the deleted deployments {'is' if count == 1 else 'are'} gone"
     async with waiting(what, limit=timeout):
         while True:
             remaining = [
