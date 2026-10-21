@@ -198,11 +198,12 @@ jobs:
     name: Integration Tests
     needs: ["files-changed", "pre-commit-hooks"]
     if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
-    runs-on:
-      group: huge-runners
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+      - name: Show runner resources
+        run: nproc && free -h && df -h /
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
       - uses: azure/setup-helm@v4
       - uses: azure/setup-kubectl@v4
@@ -213,10 +214,6 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - run: uv sync
-      - name: "Set environment variables"
-        run: |
-          RUNNER_NAME=$(echo "${{ runner.name }}" | grep -o 'ghrunner[0-9]\+' | sed 's/ghrunner\([0-9]\+\)/ghrunner_\1/')
-          echo "VCLUSTER_DIR=/var/lib/github/${RUNNER_NAME}/_temp/.vcluster/config.json" >> $GITHUB_ENV
       - name: Run integration tests
         run: uv run pytest -v backend/tests/integration
 
@@ -224,8 +221,7 @@ jobs:
     name: E2E Tests (${{ matrix.entrypoint }} / ${{ matrix.shard }})
     needs: ["files-changed", "pre-commit-hooks"]
     if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
-    runs-on:
-      group: huge-runners
+    runs-on: ubuntu-latest
     # Raised from 40 because a cell's *worst case* has to leave room for the
     # test's own diagnostic. A wait that overruns raises an AssertionError naming
     # the deployment, the observed state and the budget; a cell killed on
@@ -280,6 +276,8 @@ jobs:
           # cannot express), which is not enough to empty the ui cell.
     steps:
       - uses: actions/checkout@v6
+      - name: Show runner resources
+        run: nproc && free -h && df -h /
       - uses: loft-sh/setup-vcluster@68e17a8c3618e3c47d635842b803d4f560f694e8
       - uses: azure/setup-helm@v4
       - uses: azure/setup-kubectl@v4
@@ -298,18 +296,16 @@ jobs:
       - name: Build no-netlink shim
         if: matrix.entrypoint == 'ui'
         run: |
-          apt-get update && apt-get install -y gcc
+          sudo apt-get update && sudo apt-get install -y gcc
           gcc -shared -fPIC -Wall -Wextra \
             -o "$RUNNER_TEMP/no_netlink.so" \
             backend/tests/e2e/fixtures/no_netlink.c -ldl
           echo "NO_NETLINK_SO=$RUNNER_TEMP/no_netlink.so" >> "$GITHUB_ENV"
       - name: Install tini
-        run: apt-get update && apt-get install -y tini
+        run: sudo apt-get update && sudo apt-get install -y tini
       - name: "Set environment variables"
         run: |
-          RUNNER_NAME=$(echo "${{ runner.name }}" | grep -o 'ghrunner[0-9]\+' | sed 's/ghrunner\([0-9]\+\)/ghrunner_\1/')
-          echo "VCLUSTER_DIR=/var/lib/github/${RUNNER_NAME}/_temp/.vcluster/config.json" >> $GITHUB_ENV
-          echo "STYRMIN_IMAGE_VER=local-${{ runner.name }}-${{ github.sha }}-${{ matrix.shard }}-${{ matrix.entrypoint }}" >> $GITHUB_ENV
+          echo "STYRMIN_IMAGE_VER=local-${{ github.sha }}-${{ matrix.shard }}-${{ matrix.entrypoint }}" >> $GITHUB_ENV
       - name: Enable E2E tracing
         if: inputs.enable-e2e-tracing == true
         run: |
