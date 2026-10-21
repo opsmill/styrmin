@@ -41,7 +41,7 @@ Each component in a driver can define a backup kind. The strategy pattern maps k
 | `postgres` | `PostgresBackupStrategy` | `pg_dump` to extra volume, then Velero snapshot |
 | `mariadb` | `MariadbBackupStrategy` | `mariadb-dump` to extra volume, then Velero snapshot |
 | `mongodb` | `MongodbBackupStrategy` | `mongodump` to extra volume, then Velero snapshot |
-| `neo4j` | `Neo4jBackupStrategy` | `neo4j-admin dump` to extra volume, then Velero snapshot |
+| `neo4j` | `Neo4jBackupStrategy` | `neo4j-admin database backup` to extra volume, then Velero snapshot. Needs Neo4j Enterprise (see [The neo4j backup needs Neo4j Enterprise](#the-neo4j-backup-needs-neo4j-enterprise)) |
 | `action` | `ActionBackupStrategy` | Custom driver action via Prefect (no Velero hooks) |
 
 ### Strategy Interface
@@ -56,7 +56,7 @@ class BackupStrategy(ABC):
 ```
 
 - **Disk:** No hooks needed, extracts volume names from `volume`/`volumes` config fields
-- **Postgres / Mariadb / Mongodb / Neo4j:** Pre-backup hooks run a dump command (e.g. `pg_dump`, `mariadb-dump`, `mongodump`, `neo4j-admin dump`) into an extra volume mounted at `backup_mount_path` (default `/backup`); post-restore hooks run the corresponding restore command. Default backup volume is `"backup"`.
+- **Postgres / Mariadb / Mongodb / Neo4j:** Pre-backup hooks run a dump command (e.g. `pg_dump`, `mariadb-dump`, `mongodump`, `neo4j-admin database backup`) into an extra volume mounted at `backup_mount_path` (default `/backup`); post-restore hooks run the corresponding restore command. Default backup volume is `"backup"`.
 - **Action:** No hooks or volumes — backup is handled entirely by the driver's Prefect action
 
 ### Hook timeouts: `timeout` vs `execTimeout`
@@ -108,6 +108,19 @@ These hooks used to run `sleep 5` and then load the dump once, which failed as a
 `backend/tests/unit/services/backup/test_strategies.py::TestRetriedDatabaseLoad` runs the rendered scripts with fake clients. The race itself was reproduced against the bitnami images with the container limited to 0.08 CPU: the old hooks failed 3 of 3 runs (mariadb) and 1 of 3 runs (mongodb) with the errors from CI, and the new hooks restored the data in 5 of 5 runs each.
 
 The fence is covered at unit level only: `backend/tests/unit/services/backup/test_strategies.py` asserts the rendered script's fence, role filter, liveness bound, atomicity and retry. There is deliberately no E2E for the race — the one scenario with a live writer against a `kind: postgres` component is the enterprise backup/restore lifecycle, and probing Prefect's schema from it was judged too heavy for what it proved.
+
+<!-- Extracted from specs/031-recorded-feature-demos on 2026-10-21 -->
+
+### The neo4j backup needs Neo4j Enterprise
+
+`neo4j_backup_hooks()` runs `neo4j-admin database backup --to-path=<backup_mount_path> neo4j`. `neo4j_restore_hooks()` stops the `neo4j` database with `cypher-shell`, runs `neo4j-admin database restore --from-path=<the .backup file> neo4j --overwrite-destination=true`, and starts the database again (`agent/service/kubernetes/velero/hooks.py`). `neo4j-admin database backup` is an online backup, which only Neo4j Enterprise has ([research R-007](../../../specs/archive/031-recorded-feature-demos/research.md#r-007-environment-backups-need-the-infrahub-enterprise-driver)).
+
+Both Infrahub example drivers declare a component with `kind: neo4j`, but only one of them can be backed up:
+
+- The `infrahub` driver deploys the community chart, so it cannot take a backup or an environment backup. Its E2E test `test_infrahub_backup_and_restore_lifecycle` is skipped with the reason "backup/restore not supported with community" (`backend/tests/e2e/test_infrahub_backup_restore.py`).
+- The `infrahub-enterprise` driver's chart (4.19.2) sets `neo4j.edition: enterprise` and `acceptLicenseAgreement: "yes"`. Its E2E test `test_infrahub_enterprise_backup_and_restore_lifecycle` runs in CI. On 2026-10-18, an environment backup of `infrahub-enterprise` 1.11.7 and its restore both reached `COMPLETED` on the local demo stack ([spike notes](../../../specs/archive/031-recorded-feature-demos/spike-notes.md#infrahub-enterprise-1117-backs-up-and-restores)).
+
+For this reason, the recorded demos of environment backup and environment clone deploy `infrahub-enterprise` ([local demo guide](../../guides/local-demo.md#the-four-demos)).
 
 ## Data Models
 
@@ -469,6 +482,18 @@ A restore is a multi-stage operation: velero recreates the namespace and its res
    - `reapply_and_finalize` — first puts the deployment's labels back on the namespace (`_label_namespace`, from the context in the CR spec: Velero creates the namespace with its name as its only label, because the Velero Backup sets `includeClusterResources: false` and a Namespace is cluster-scoped; `apply_kubernetes_namespace` never changes an existing namespace, so no other step repairs them; the cross-target path uses the counterpart's own spec, so a clone gets its own ids). Then it re-applies prerequisites (`execute_phase_prerequisites`) and utility resources (`execute_phase_services`), then patches the CRD to `phase=Ready` / `displayState=Running`. It keeps kopf's state-tracking annotations on purpose. The restored `last-handled-configuration` annotation makes kopf treat the CR as already handled, which is correct because this function does the work `on.create` would do. Removing the annotation would make kopf run `on.create` after `displayState=Running` is set; `on.create` sets it back to `Deploying`, and the displayed state then switches back and forth (`operator/restore_recovery.py:130-151`).
    - `mark_failed` — used on any failure with a message that distinguishes velero failure from post-restore reapply failure.
 5. **Final DB transition (INTERNAL flow).** `deployment.status` is moved from `RESTORING` to `RUNNING` (or `FAILED`) inline so the UI reflects the transition immediately rather than waiting on the next agent status poll. A failed Velero restore or a failed recovery moves it to `FAILED`. A failed alias step of a cross-target restore moves it to `RUNNING` and fails only the restore, because the recovery succeeded (#530).
+
+<!-- Extracted from specs/031-recorded-feature-demos on 2026-10-21 -->
+
+### The application can still be unavailable when its restore completes
+
+Stage 4 sets the CRD's `displayState` to `Running` after it re-applies the resources, and stage 5 moves `deployment.status` to `RUNNING` when the restore completes. Neither waits until the application answers. Observed on 2026-10-18 with `infrahub-enterprise` 1.11.7 on the local demo stack ([spike notes](../../../specs/archive/031-recorded-feature-demos/spike-notes.md#infrahub-enterprise-1117-backs-up-and-restores)):
+
+- The deployment was Running as soon as the restore completed.
+- Infrahub answered `GET /api/schema/summary` with 503 for about 36 s after that, then with 200.
+- The Infrahub server and task-manager pods had each restarted twice.
+
+A test or a script that reads the application after a restore therefore waits until the application answers, not only until the restore completes or the deployment is Running. The recorded demo of backup and restore does this with `infrahub_setup.wait_until_ready` and `semaphore_setup.wait_until_ready` (`backend/tests/e2e/demos/`). Whether other applications behave the same way is not known.
 
 <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 

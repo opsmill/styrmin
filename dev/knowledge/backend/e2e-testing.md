@@ -559,6 +559,14 @@ kubectl get styrmindeployments -A
 kubectl get helmreleases -A
 ```
 
+<!-- Extracted from specs/031-recorded-feature-demos on 2026-10-21 -->
+
+### Operations fail with "An internal error occurred" when the host disk is nearly full
+
+The vCluster's node evicts pods when the host's free disk falls below 15% of its size, for example 14.4 GiB on a 96 GB disk. The evicted pods include Velero, Prefect and Garage, and Styrmin operations then fail with "An internal error occurred". On 2026-10-21 this happened in an E2E run and in a recording of the demos, both with the host disk 85% full ([local demo guide](../../guides/local-demo.md#problems-seen-when-recording-the-demos)).
+
+To confirm it, run `kubectl get events -n styrmin | grep Evicted`. Check `df -h /` before a run; `docker system df` shows which images and build cache take the space. Free disk space, wait until `kubectl get pods -n styrmin` shows the evicted pods running again, then run the failed tests again.
+
 ### UI-variant troubleshooting
 
 When diagnosing a `[ui-chromium]` failure, drive the investigation through the Playwright MCP server rather than adding screenshot/HTML-dump instrumentation to the page object — see `dev/CLAUDE.md` for the full loop.
