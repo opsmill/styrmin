@@ -25,7 +25,9 @@ END_TOLERANCE = 1.0
 # A shorter kept part holds no frame: ffmpeg 6.1 then aborts
 # or reads the input to its end.
 SHORTEST_PART = 0.1
-LABEL_BOTTOM_MARGIN = 64
+# The label stays above the caption that the recorder keeps in the bottom left corner, which ends
+# 72 px above the bottom (recorder._CAPTION_HTML).
+LABEL_BOTTOM_MARGIN = 112
 VIDEO_SIZE = (1920, 1080)
 # How long the closing card stays on screen at the end of each video.
 CLOSING_SECONDS = 6.0
