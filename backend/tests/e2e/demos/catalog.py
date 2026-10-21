@@ -10,11 +10,13 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from packaging.version import InvalidVersion, Version
 
+from tests.e2e.demos.recorder import ACTION_MS, SLOW_ACTION_MS
 from tests.e2e.demos.scenarios import (
     backup_restore,
     clone,
     component_overrides,
     deploy_upgrade,
+    setup_styrmin,
 )
 from tests.e2e.demos.semaphore_image import IMAGE as SEMAPHORE_IMAGE
 from tests.e2e.demos.video import ClosingCard
@@ -27,8 +29,9 @@ if TYPE_CHECKING:
 
     from tests.e2e.demos.recorder import DemoRecorder
 
-# Every demo of the PRD, in its order. DEMOS registers one demo for each slug, in the same order.
-SLUGS = ("deploy-upgrade", "component-overrides", "backup-restore", "clone")
+# Every demo, in the order the command runs them. The setup demo is number 0; the demos of the PRD keep their
+# numbers 1 to 4. DEMOS registers one demo for each slug, in the same order.
+SLUGS = ("setup", "deploy-upgrade", "component-overrides", "backup-restore", "clone")
 VERSIONS_PATH = Path(__file__).with_name("infrahub_versions.yml")
 VERSION_KEYS = ("previous", "latest")
 
@@ -95,6 +98,13 @@ class Demo[S]:
     ``summary`` holds the lines of the closing card; ``{previous}``, ``{latest}`` and ``{semaphore_image}``
     in them are replaced by the Infrahub versions and the demo Semaphore image. ``expected_minutes`` is how
     long a run of the demo usually takes, setup and cleanup included.
+
+    ``environment_names`` are the environments the demo deletes before its setup and after its recording.
+    ``hands_over`` are environments the demo creates and leaves to a later demo of the same run, which names
+    them in its ``environment_names``. ``sets_up_stack`` marks the demo that creates the cluster, the backup
+    storage location and the drivers in the Styrmin UI: it needs a demo stack without them, and when it fails,
+    the command records no later demo. ``action_ms`` is how long each action stays highlighted, and how long
+    Playwright waits after it.
     """
 
     slug: str
@@ -106,6 +116,14 @@ class Demo[S]:
     summary: tuple[str, ...] = ()
     expected_minutes: int = 10
     uses_semaphore_image: bool = False
+    hands_over: tuple[str, ...] = ()
+    sets_up_stack: bool = False
+    action_ms: int = ACTION_MS
+
+    @property
+    def all_environment_names(self) -> tuple[str, ...]:
+        """The environments of ``environment_names`` and ``hands_over``: every environment the demo creates."""
+        return self.environment_names + self.hands_over
 
     def closing_card(self, versions: InfrahubVersions) -> ClosingCard:
         values = {
@@ -122,19 +140,22 @@ class Demo[S]:
             raise ValueError(
                 f"Unknown demo slug {self.slug!r}; the slugs are {', '.join(SLUGS)}"
             )
-        if self.number != SLUGS.index(self.slug) + 1:
+        if self.number != SLUGS.index(self.slug):
             raise ValueError(
-                f"Demo {self.slug!r} has number {self.number}, not its PRD position"
+                f"Demo {self.slug!r} has number {self.number}, not its position in the run order"
             )
-        if not self.environment_names:
+        if not self.all_environment_names:
             raise ValueError(f"Demo {self.slug!r} names no environment")
 
 
 def check_catalog(demos: Sequence[Demo[Any]]) -> None:
-    """Raise ``ValueError`` unless the demos are in PRD order and share no slug or environment name."""
+    """Raise ``ValueError`` unless the demos are in the run order, share no slug or environment name, and
+    hand each handed-over environment to a later demo."""
     numbers = [demo.number for demo in demos]
     if numbers != sorted(set(numbers)):
-        raise ValueError(f"The demos must be in PRD order with no repeat: {numbers}")
+        raise ValueError(
+            f"The demos must be in the run order with no repeat: {numbers}"
+        )
     # A demo deletes its environments first, so a shared name would delete another demo's kept environment.
     names = Counter(name for demo in demos for name in demo.environment_names)
     shared = sorted(name for name, count in names.items() if count > 1)
@@ -142,10 +163,39 @@ def check_catalog(demos: Sequence[Demo[Any]]) -> None:
         raise ValueError(
             f"Two demos use the same environment names: {', '.join(shared)}"
         )
+    for index, demo in enumerate(demos):
+        later = {
+            name for other in demos[index + 1 :] for name in other.environment_names
+        }
+        orphans = [name for name in demo.hands_over if name not in later]
+        if orphans:
+            raise ValueError(
+                f"Demo {demo.slug!r} hands over environments that no later demo names: {', '.join(orphans)}"
+            )
 
 
 # The expected durations come from the measured runs in dev/guides/local-demo.md, rounded up.
 DEMOS: tuple[Demo[Any], ...] = (
+    Demo(
+        slug="setup",
+        number=0,
+        title="Set up Styrmin",
+        environment_names=(),
+        setup=setup_styrmin.setup,
+        record=setup_styrmin.record,
+        summary=(
+            f"The Kubernetes cluster {setup_styrmin.CLUSTER_NAME} and the backup storage location "
+            f"{setup_styrmin.BACKUP_STORAGE_LOCATION_NAME}, an S3 bucket, were added in the Styrmin UI.",
+            f"The Infrahub application driver was loaded from {setup_styrmin.INFRAHUB_DRIVER_PATH}.",
+            f"The environment {deploy_upgrade.ENVIRONMENT_NAME} runs on the cluster {setup_styrmin.CLUSTER_NAME} "
+            f"and keeps its backups in {setup_styrmin.BACKUP_STORAGE_LOCATION_NAME}.",
+        ),
+        expected_minutes=3,
+        # Demo 1 deploys Infrahub into the environment that this demo creates.
+        hands_over=(deploy_upgrade.ENVIRONMENT_NAME,),
+        sets_up_stack=True,
+        action_ms=SLOW_ACTION_MS,
+    ),
     Demo(
         slug="deploy-upgrade",
         number=1,
@@ -157,9 +207,10 @@ DEMOS: tuple[Demo[Any], ...] = (
             "Infrahub {previous} deployed from the Styrmin UI, then upgraded to {latest}.",
             "The upgrade ran the Infrahub driver's upgrade action: it stopped Infrahub, "
             "ran 'infrahub upgrade' and started Infrahub again.",
-            "The upgrade task lists each step that it ran.",
+            "The upgrade task lists each step that it ran, and Infrahub's About dialog shows {latest}.",
         ),
-        expected_minutes=9,
+        expected_minutes=11,
+        action_ms=SLOW_ACTION_MS,
     ),
     Demo(
         slug="component-overrides",

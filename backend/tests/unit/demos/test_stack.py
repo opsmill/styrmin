@@ -21,6 +21,7 @@ from tests.e2e.demos.stack import (
     deploy,
     find_environments,
     load_enterprise_driver,
+    load_local_driver,
     service_url,
 )
 
@@ -353,6 +354,14 @@ async def test_load_enterprise_driver_loads_the_bundled_local_driver() -> None:
     await load_enterprise_driver(_client(calls))
 
     assert calls == [("load_local_version", "/styrmin/drivers/infrahub-enterprise")]
+
+
+async def test_load_local_driver_loads_the_driver_at_the_path() -> None:
+    calls: list[tuple] = []
+
+    await load_local_driver(_client(calls), "/styrmin/drivers/semaphore")
+
+    assert calls == [("load_local_version", "/styrmin/drivers/semaphore")]
 
 
 @pytest.fixture

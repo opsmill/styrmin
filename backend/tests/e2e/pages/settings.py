@@ -45,14 +45,18 @@ class SettingsPage:
             )
             raise
 
-    async def create_cluster(self, *, name: str, config: dict[str, Any]) -> ClusterRef:
+    async def create_cluster(
+        self, *, name: str, config: dict[str, Any], open_page: bool = True
+    ) -> ClusterRef:
         """Create a cluster by driving the CreateClusterDialog form.
 
         The Clusters page only shows the "New Cluster" button when no
         cluster exists yet. Callers must ensure this is the first cluster
         on the instance (``styrmin_resources`` currently enforces this).
+        With ``open_page=False`` the caller has already opened the page.
         """
-        await self.goto()
+        if open_page:
+            await self.goto()
         trigger = self._page.get_by_role("button", name="New Cluster")
         await trigger.click()
         dialog = self._page.get_by_role("dialog", name="Create Cluster")
@@ -122,6 +126,15 @@ class SettingsPage:
                         ss["storage_class"],
                         keystroke_delay_ms=self._keystroke_delay_ms,
                     )
+            fs = config.get("fast_storage")
+            if fs:
+                await dialog.locator("label[for='cluster-fast-storage']").click()
+                if fs.get("storage_class"):
+                    await enter_text(
+                        dialog.locator("#cluster-fast-sc"),
+                        fs["storage_class"],
+                        keystroke_delay_ms=self._keystroke_delay_ms,
+                    )
 
         await submit_dialog(dialog, button="Create")
 
@@ -149,6 +162,7 @@ def _needs_advanced(config: dict[str, Any]) -> bool:
         "external_dns_endpoints_type",
         "dedicated_ingress",
         "standard_storage",
+        "fast_storage",
     )
     return any(config.get(k) is not None and config.get(k) != "" for k in keys)
 
@@ -172,9 +186,14 @@ class BackupStorageLocationsListPage:
         region: str,
         access_key_id: str,
         secret_access_key: str,
+        open_page: bool = True,
     ) -> str:
-        """Open the dialog, fill, submit, and return the new BSL's id."""
-        await self.goto()
+        """Open the dialog, fill, submit, and return the new BSL's id.
+
+        With ``open_page=False`` the caller has already opened the page.
+        """
+        if open_page:
+            await self.goto()
         await self._page.get_by_role("button", name="New Storage Location").click()
         dialog = self._page.get_by_role("dialog", name="Create Backup Storage Location")
         await wait_for_dialog_open(dialog)

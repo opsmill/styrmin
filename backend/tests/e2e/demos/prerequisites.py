@@ -10,7 +10,7 @@ from playwright.async_api import async_playwright
 from styrmin_sdk.exceptions import StyrminAuthenticationError, StyrminError
 
 from tests.e2e.demos import stack
-from tests.e2e.demos.catalog import load_versions
+from tests.e2e.demos.catalog import DEMOS, load_versions
 
 if TYPE_CHECKING:
     from styrmin_sdk import StyrminClient
@@ -53,9 +53,25 @@ def login_rejected(api_url: str, username: str) -> str:
     )
 
 
+def _listed(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
 def stack_missing(items: list[str]) -> str:
-    listed = items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
-    return f"The demo stack is missing {listed}. Run 'uv run invoke start' again."
+    return (
+        f"The demo stack is missing {_listed(items)}. Run 'uv run invoke start' again, "
+        "or record the setup demo before the others."
+    )
+
+
+def stack_not_empty(items: list[str]) -> str:
+    others = ",".join(demo.slug for demo in DEMOS if not demo.sets_up_stack)
+    return (
+        "The setup demo creates the cluster and the backup storage location in the Styrmin UI, so it needs a "
+        f"demo stack without them, and this demo stack has {_listed(items)}. Run "
+        "'uv run invoke reset --no-bootstrap', which creates the demo stack without them, or record the other "
+        f"demos only with 'uv run invoke record --demo {others}'."
+    )
 
 
 async def chromium_path() -> Path:
@@ -80,12 +96,15 @@ async def check(
     versions_path: Path,
     *,
     needs_docker: bool,
+    empty_stack: bool = False,
     kube_context: str = stack.KUBE_CONTEXT,
 ) -> list[str]:
     """Run the contract's checks in its order and return the message of the first that fails, or no message.
 
     ``api_url`` is the Styrmin URL without ``/graphql``; ``credentials`` are the admin username and password.
     ``needs_docker`` is true when a selected demo deploys the demo Semaphore image, which the command builds.
+    ``empty_stack`` is true when the setup demo is selected: the demo stack must then have no cluster and no
+    backup storage location of the setup demo's name, which the setup demo creates for the later demos.
     """
     problems = await check_tools()
     if problems:
@@ -106,18 +125,34 @@ async def check(
         # ValueError covers a body that is not JSON or not a GraphQL answer.
         return [stack_not_responding(api_url)]
     try:
-        missing = await missing_items(client)
+        items = await (present_items(client) if empty_stack else missing_items(client))
     except StyrminError, ValueError:
         return [stack_not_responding(api_url)]
     finally:
         await client.close()
-    if missing:
-        return [stack_missing(missing)]
+    if items:
+        return [stack_not_empty(items) if empty_stack else stack_missing(items)]
     try:
         load_versions(versions_path)
     except ValueError as error:
         return [str(error)]
     return []
+
+
+async def present_items(client: StyrminClient) -> list[str]:
+    """Return what the setup demo creates and the demo stack already has: any cluster, since the Clusters page
+    offers "New Cluster" only when no cluster exists, and the backup storage location of the setup demo's name."""
+    present = [
+        f"the cluster {cluster.name!r}" for cluster in await client.clusters.list()
+    ]
+    if any(
+        location.name == stack.BACKUP_STORAGE_LOCATION_NAME
+        for location in await client.backup_storage_locations.list()
+    ):
+        present.append(
+            f"the backup storage location {stack.BACKUP_STORAGE_LOCATION_NAME!r}"
+        )
+    return present
 
 
 async def missing_items(client: StyrminClient) -> list[str]:
