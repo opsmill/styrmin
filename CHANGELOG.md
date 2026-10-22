@@ -11,6 +11,12 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [Styrmin - v0.1.52](https://github.com/opsmill/styrmin/tree/v0.1.52) - 2026-10-22
+
+### Fixed
+
+- Fixed dropdowns that showed the raw value of the selected option instead of its label: the backup storage location on an environment's Parameters tab and the cluster in the New Environment dialog showed an id instead of a name, the driver version in the Upgrade dialog showed "latest" or an id, the role on the user and group pages showed the role's code, such as READ_WRITE, and the Active and Role filters of the users list showed "any", "true" or "false".
+
 ## [Styrmin - v0.1.51](https://github.com/opsmill/styrmin/tree/v0.1.51) - 2026-10-21
 
 ### Fixed
