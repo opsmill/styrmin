@@ -1,6 +1,6 @@
 ---
 title: Beta status
-description: What the Styrmin beta includes, what changed since the alpha, what to do before you upgrade from the alpha, and the known limitations and broken features.
+description: What the Styrmin beta includes, what changed since the alpha, what to do before you upgrade from the alpha, what is coming next, and the known limitations and broken features.
 ---
 
 <!--
@@ -17,13 +17,13 @@ description: What the Styrmin beta includes, what changed since the alpha, what 
 -->
 
 The features that the alpha listed as coming before the beta are in this
-release. Before you rely on Styrmin, read what the beta means:
+release. Before you use Styrmin, note the following:
 
 - The GraphQL API, `styrminctl` commands and flags, the Python SDK and the
   driver format can still change between releases.
 - The release notes of each release list its breaking changes with the steps
   to take, and the [Changelog](./changelog.md) describes the notable ones. A
-  change to the driver format also comes with a migration guide, such as
+  change to the driver format also has a migration guide, such as
   [Migrating Container Overrides](./drivers/migrating-container-overrides.md).
 - Styrmin is not yet recommended for production-critical workloads. Use it for
   lab, staging and internal-tooling deployments, and read the
@@ -31,7 +31,7 @@ release. Before you rely on Styrmin, read what the beta means:
 
 ## Workflows added since the alpha
 
-These workflows are new since the alpha (v0.1.26, 27 May 2026). Each item
+These workflows are new since the alpha (v0.1.26, May 27, 2026). Each item
 links to the page that explains it.
 
 ### Deploying and changing applications
@@ -39,7 +39,7 @@ links to the page that explains it.
 - Describe deployments in `styrmin/v1` manifest files and create or update
   them with `styrminctl deployments apply -f <path>`. An apply that changes
   nothing starts no task and reports the deployment as `unchanged`. See
-  [`deployments apply`](./reference/styrminctl.md#deployment-apply-is-idempotent).
+  [`deployments apply`](./reference/styrminctl.md#deployments-apply-is-idempotent).
 - Choose the driver version of a deployment, or let Styrmin use the newest
   loaded driver version that supports the application version. See
   [Selecting a driver version](./drivers/loading-drivers.md#selecting-a-driver-version-when-deploying-or-upgrading).
@@ -51,7 +51,7 @@ links to the page that explains it.
   - the container image, see [Image overrides](./concepts-and-architecture/image-overrides.md)
   - the replica count, also with `styrminctl deployments scale`, see
     [Replica overrides](./concepts-and-architecture/replica-overrides.md)
-- Follow a task step by step. The deployment page and `styrminctl tasks get`
+- View the steps of each task. The deployment page and `styrminctl tasks get`
   list the steps of each task with their status, duration, attempts and
   errors, and show the task result: `RUNNING`, `FAILED`, `SUCCEEDED` or
   `SUPERSEDED`. See [`tasks get`](./reference/styrminctl.md#tasks-get--a-tasks-steps)
@@ -72,7 +72,7 @@ links to the page that explains it.
   [Cloning an environment](./concepts-and-architecture/backups-and-restores.md#cloning-an-environment).
 - Set how long backups are kept with `backup_ttl` on the cluster, the
   environment or the deployment. See
-  [Retention](./concepts-and-architecture/backups-and-restores.md#retention-how-long-a-backup-lives).
+  [Retention: how long Velero keeps a backup](./concepts-and-architecture/backups-and-restores.md#retention-how-long-velero-keeps-a-backup).
 - View the backups of a deployment across upgrades and config changes, with
   the application version of each backup, and restore a backup of an earlier
   instance. See
@@ -101,15 +101,15 @@ links to the page that explains it.
   second `execute_commands` call deletes the Job that the earlier call left
   once that Job has ended. See
   [How actions call the Styrmin API](./concepts-and-architecture/hooks-and-actions.md#how-actions-call-the-styrmin-api).
-- Keep the actions of a deployment stable. The actions of a driver version run
-  at the commit that the driver version was loaded from, so a push to the
-  driver's branch does not change them.
+- Run the actions of a driver version at the commit that the driver version
+  was loaded from. A push to the driver's branch does not change the actions
+  of the deployments that use it.
 
 ### Running Styrmin
 
 - The agent installs the controllers of FluxCD v2.9 and runs helm-controller
   with the defaults of Helm v4. See
-  [The HelmRelease](./concepts-and-architecture/operator-and-crds.md#the-helmrelease--styrmins-other-crd).
+  [The HelmRelease](./concepts-and-architecture/operator-and-crds.md#the-helmrelease).
 - `styrminctl` and the server send anonymous telemetry, which you can turn
   off. See [Telemetry & privacy](./reference/telemetry.md).
 - When the Prefect worker that runs a flow stops, Styrmin marks the flow run
@@ -117,12 +117,12 @@ links to the page that explains it.
 
 ## Changes to make before you upgrade from the alpha
 
-Releases between the alpha and the beta changed or removed behaviour that
-installs, deployments, drivers and scripts rely on. Read the list for each
-role you have before you upgrade. The version in brackets is the first
-release with the change.
+Releases between the alpha and the beta changed or removed behavior that
+installs, deployments, drivers and scripts depend on. Before you upgrade,
+read the list for each role you have. The version in parentheses is the
+first release with the change.
 
-### Changes for the people who install and upgrade Styrmin
+### If you install or upgrade Styrmin
 
 <!--
   TODO(beta): the chart does not run `styrmin db migrate`, and the server only
@@ -148,14 +148,14 @@ release with the change.
   chart's version. The tag no longer defaults to `latest` (v0.1.42).
 - Turn off server telemetry with `styrmin.telemetry.enabled: false` if you do
   not want the daily anonymous report. It is on by default (v0.1.48). See
-  [Turning server telemetry off](./reference/telemetry.md#turning-server-telemetry-off).
+  [Turn server telemetry off](./reference/telemetry.md#turn-server-telemetry-off).
 - Upgrade the server and the agent before `styrminctl` and the Python SDK.
   `deployments apply` and the backup list of v0.1.48 need a v0.1.48 server,
   and replica overrides need the agent of v0.1.50.
 - Upgrade the server, `styrminctl` and the Python SDK together to the beta
   release, and reload the web pages that were open during the upgrade,
   because the restore request changes (the beta release). See
-  [A restore lands only in the deployment its backup was taken of](./changelog.md#a-restore-lands-only-in-the-deployment-its-backup-was-taken-of).
+  [Restores no longer delete a namespace that the caller names](./changelog.md#restores-no-longer-delete-a-namespace-that-the-caller-names).
 - Load your local drivers again after you upgrade, so that Styrmin registers
   their actions. Deployments created from local drivers before v0.1.51 never
   ran their setup actions, and Styrmin does not run them now (v0.1.51).
@@ -168,7 +168,7 @@ release with the change.
 - Read credentials from your own secrets, not from `styrmin config show`,
   which no longer prints passwords, the database URL or tokens (v0.1.48).
 
-### Changes for the people who run deployments
+### If you create and change deployments
 
 - Move the replica counts of Infrahub deployments to replica overrides. The
   `infrahub` driver version 5 and the `infrahub-enterprise` driver version 4
@@ -177,8 +177,9 @@ release with the change.
   version until you move the value (v0.1.50). See
   [Migrating Replica Parameters](./drivers/migrating-replica-parameters.md).
 - Before you upgrade to v0.1.48, list the stored container `command` and
-  `args` overrides and remove the ones you do not want. From v0.1.48 they
-  reach the pods, also for drivers whose templates never used them. See
+  `args` overrides and remove the ones you do not want. From v0.1.48,
+  Styrmin applies them to the pods, also for drivers whose templates never
+  used them. See
   [Before you upgrade Styrmin](./drivers/migrating-container-overrides.md#before-you-upgrade-styrmin).
 - Move each deployment to a driver version that declares component
   containers before you edit its env vars. On a driver version that still
@@ -209,11 +210,11 @@ release with the change.
   new environment has no deployments yet. After you delete a deployment that
   a term names, updates of the deployments that the term applies to fail
   until you write the term again (v0.1.50).
-- Expect deleting an environment to delete its deployments and its
-  environment backups. Before v0.1.46 the request failed when the environment
-  had deployments.
+- Check the scripts and procedures that delete environments. Deleting an
+  environment deletes its deployments and its environment backups (v0.1.46).
+  Before, the request failed when the environment had deployments.
 
-### Changes for the people who write application drivers
+### If you write application drivers
 
 - Declare `components.<name>.container` for each component that receives env
   vars, `command`, `args` or an image override, and remove the
@@ -223,7 +224,7 @@ release with the change.
   [If you write drivers](./drivers/migrating-container-overrides.md#if-you-write-drivers).
 - Set `backup.volume` or `backup.volumes` on each component with
   `backup.kind: disk`. Without one, the driver fails to load (v0.1.30).
-- Take `images[0]` in actions. `get_component_images` returns the image of
+- Use `images[0]` in actions. `get_component_images` returns the image of
   the component container first (v0.1.47). See
   [Reading a component's images](./concepts-and-architecture/hooks-and-actions.md#reading-a-components-images).
 - Load the new commit and upgrade deployments onto it to change their
@@ -249,16 +250,17 @@ release with the change.
   `spec.ingressClassName` from every Ingress after the chart renders
   (v0.1.50). See
   [Ingress and networking](./concepts-and-architecture/ingress-and-networking.md).
-- Expect a field that the chart sets to return to the chart's value at the
-  next upgrade, also when `kubectl` or an action changed it. New deployments
-  are installed with server-side apply (v0.1.50).
+- Change a field that the chart sets through the chart's values, not with
+  `kubectl` or an action. New deployments are installed with server-side
+  apply, and on those deployments the next upgrade sets the field back to the
+  chart's value (v0.1.50).
 - Do not combine `singleton: true` with `replicas` above 1 on a component. The
   driver fails to load (v0.1.50).
 - Read `backup.velero.storage_location` as the name of the Velero object,
   `styrmin-bsl-<location id>`. It held the backup storage location's name
   before (v0.1.50).
 
-### Changes for the people who write scripts against the API, the SDK or styrminctl
+### If you write scripts that use the API, the Python SDK or styrminctl
 
 - Send `deploy` a typed `config: DeploymentConfigInput` and
   `parameters: [ParameterValueInput!]` instead of JSON. The SDK's
@@ -274,7 +276,7 @@ release with the change.
   `styrminctl backups restore <backup-id>` refuses `--target-deployment`,
   `--target-deployment-id`, `--target-instance-id` and `--environment`, which
   work only with `--last` (the beta release). See
-  [A restore lands only in the deployment its backup was taken of](./changelog.md#a-restore-lands-only-in-the-deployment-its-backup-was-taken-of).
+  [Restores no longer delete a namespace that the caller names](./changelog.md#restores-no-longer-delete-a-namespace-that-the-caller-names).
 - Pass `--yes` to `styrminctl backups restore --last` in scripts. It asks for
   confirmation when the chosen backup is of an earlier instance (v0.1.48),
   also with `--target-instance-id` (the beta release).
@@ -292,7 +294,7 @@ release with the change.
 - Read `deployment_id` in the deployment references of affinity terms.
   Reading a config back gives the id of the named deployment without its
   name (v0.1.50).
-- Expect `IN_USE` from `deleteCluster` on a cluster that still has
+- Handle `IN_USE` from `deleteCluster` on a cluster that still has
   environments (v0.1.49).
 
 ## Features that are not in the beta
@@ -331,6 +333,66 @@ release with the change.
   tracked in [opsmill/styrmin#464](https://github.com/opsmill/styrmin/issues/464),
   [opsmill/styrmin#466](https://github.com/opsmill/styrmin/issues/466) and
   [opsmill/styrmin#463](https://github.com/opsmill/styrmin/issues/463).
+
+## Coming next
+
+These features have an open issue, and no release date is set for them.
+Some already have a written design or an open pull request, as noted.
+
+### Backing up and restoring
+
+- Restore a backup into a new deployment in the same environment, without
+  changing the deployment the backup was taken of. This also works for a
+  backup of a deleted deployment. The issue has a written design. Tracked in
+  [opsmill/styrmin#534](https://github.com/opsmill/styrmin/issues/534).
+- Rename a backup and add a description to it. Tracked in
+  [opsmill/styrmin#39](https://github.com/opsmill/styrmin/issues/39).
+
+### Deploying and changing applications
+
+- Choose the application version from a list of releases when you deploy or
+  upgrade, instead of typing it. Tracked in
+  [opsmill/styrmin#336](https://github.com/opsmill/styrmin/issues/336).
+- View the name of the deployment that a pod affinity term names when you
+  read a config, and get a warning before you delete a deployment that an
+  affinity term names. Tracked in
+  [opsmill/styrmin#521](https://github.com/opsmill/styrmin/issues/521) and
+  [opsmill/styrmin#523](https://github.com/opsmill/styrmin/issues/523).
+- Expose applications through the Kubernetes Gateway API. Tracked in
+  [opsmill/styrmin#465](https://github.com/opsmill/styrmin/issues/465).
+
+### Loading application drivers
+
+- Load a driver version from a Git tag or a commit, in addition to the tip
+  of a branch. Tracked in
+  [opsmill/styrmin#528](https://github.com/opsmill/styrmin/issues/528).
+
+### Viewing logs and change history
+
+- View the logs of a component from the frontend or the API. The issue
+  is open for a design discussion. Tracked in
+  [opsmill/styrmin#147](https://github.com/opsmill/styrmin/issues/147).
+- View who changed the config of a cluster, when, and what the previous
+  config was. Tracked in
+  [opsmill/styrmin#447](https://github.com/opsmill/styrmin/issues/447).
+
+### Using the Python SDK
+
+- Wait for a deployment change to finish with one SDK call. A pull request is
+  open. Tracked in
+  [opsmill/styrmin#545](https://github.com/opsmill/styrmin/issues/545).
+- Read the pod statuses and the services of a whole environment, or the pod
+  statuses of a whole cluster, in one call. A pull request is open. Tracked
+  in [opsmill/styrmin#547](https://github.com/opsmill/styrmin/issues/547).
+- Read the phase, message and conditions that the operator reported for a
+  deployment. A pull request is open. Tracked in
+  [opsmill/styrmin#548](https://github.com/opsmill/styrmin/issues/548).
+- Read the parameters, services and env vars that a driver version declares.
+  Tracked in
+  [opsmill/styrmin#546](https://github.com/opsmill/styrmin/issues/546).
+- Change one override of one component without sending every component
+  block again. Tracked in
+  [opsmill/styrmin#549](https://github.com/opsmill/styrmin/issues/549).
 
 ## Security limitations
 
