@@ -35,7 +35,7 @@ today require specialist knowledge to get right.
 Styrmin runs on Kubernetes as its underlying infrastructure layer, but
 that's an implementation detail — the goal is for teams to get a managed
 infrastructure experience without needing to think about Kubernetes at
-all. See [Why Styrmin?](https://styrmin.pages.dev/docs/getting-started/why-styrmin)
+all. See [Why Styrmin?](https://styrmin.pages.dev/docs/introduction/why-styrmin)
 for the full positioning, and how Styrmin compares to ArgoCD, Flux, and
 manual Helm.
 
@@ -59,7 +59,7 @@ with `admin` / `styrmin`.
 
 The full walkthrough — what each step does, the lifecycle commands, and
 troubleshooting — lives in the
-[Quickstart guide](https://styrmin.pages.dev/docs/getting-started/quickstart).
+[Quickstart guide](https://styrmin.pages.dev/docs/installation/quickstart).
 For a production install, see
 [Installation](https://styrmin.pages.dev/docs/installation).
 
@@ -67,11 +67,11 @@ For a production install, see
 
 | What you want | Where it lives |
 |---------------|----------------|
-| Why Styrmin, how it compares to ArgoCD/Flux | [Why Styrmin?](https://styrmin.pages.dev/docs/getting-started/why-styrmin) |
-| Conceptual model and core vocabulary | [Platform Overview](https://styrmin.pages.dev/docs/getting-started/overview) |
+| Why Styrmin, how it compares to ArgoCD/Flux | [Why Styrmin?](https://styrmin.pages.dev/docs/introduction/why-styrmin) |
+| Conceptual model and core vocabulary | [Platform overview](https://styrmin.pages.dev/docs/introduction/platform-overview) |
 | Install on your laptop or in a cloud | [Installation](https://styrmin.pages.dev/docs/installation) |
-| Write a driver | [Creating a Driver](https://styrmin.pages.dev/docs/drivers/creating-a-driver) |
-| Architecture, ingress, backups, hooks | [How It Works](https://styrmin.pages.dev/docs/how-it-works) |
+| Write a driver | [Create a driver](https://styrmin.pages.dev/docs/drivers/creating-a-driver) |
+| Architecture, ingress, backups, hooks | [Concepts and architecture](https://styrmin.pages.dev/docs/concepts-and-architecture) |
 | The canonical project glossary | [`CONTEXT.md`](CONTEXT.md) |
 | Decisions behind the architecture | [`dev/adr/`](dev/adr/) |
 | Contributor / agent guide | [`AGENTS.md`](AGENTS.md) |
