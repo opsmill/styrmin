@@ -40,6 +40,8 @@ const config: Config = {
         // `/docs/concepts-and-architecture/*`. Generated as client-side
         // redirects so deep links from blog posts, slack, etc. keep working.
         redirects: [
+          // The alpha status page was replaced by the beta status page.
+          {from: '/docs/alpha-status', to: '/docs/beta-status'},
           {from: '/docs/how-it-works', to: '/docs/concepts-and-architecture'},
           // `/docs/getting-started/*` was dissolved per audit: Why Styrmin?
           // and Platform Overview moved under Introduction, Quickstart moved
@@ -114,10 +116,10 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     announcementBar: {
-      id: 'alpha-status-v1',
+      id: 'beta-status-v1',
       content:
-        '🚧 Styrmin is in <strong>alpha</strong> — APIs and features may change. ' +
-        '<a href="/docs/alpha-status">Read the alpha status →</a>',
+        'Styrmin is in <strong>beta</strong>. Read what changed since the alpha and ' +
+        'what to do before you upgrade: <a href="/docs/beta-status">Beta status</a>',
       backgroundColor: '#fef3c7',
       textColor: '#78350f',
       isCloseable: true,

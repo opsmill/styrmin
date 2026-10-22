@@ -14,7 +14,7 @@ import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 const sidebars: SidebarsConfig = {
   docs: [
     'index',
-    'alpha-status',
+    'beta-status',
     {
       type: 'category',
       label: 'Introduction',
