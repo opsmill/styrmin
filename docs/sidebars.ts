@@ -7,7 +7,7 @@ import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
  * by editing this file alone.
  *
  * Layout follows the docs audit (May 2026):
- *   Introduction → Installation → Drivers → Concepts and Architecture
+ *   Introduction → Installation → Drivers → Concepts and architecture
  *   → Changelog. Operations / Reference / Troubleshooting land in
  *   subsequent commits.
  */
@@ -63,7 +63,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Concepts and Architecture',
+      label: 'Concepts and architecture',
       link: {type: 'doc', id: 'concepts-and-architecture/index'},
       items: [
         'concepts-and-architecture/core-concepts',
@@ -76,6 +76,7 @@ const sidebars: SidebarsConfig = {
         'concepts-and-architecture/backups-and-restores',
         'concepts-and-architecture/image-overrides',
         'concepts-and-architecture/replica-overrides',
+        'concepts-and-architecture/node-affinity',
         'concepts-and-architecture/hooks-and-actions',
         'concepts-and-architecture/status-reporting',
       ],

@@ -1,32 +1,31 @@
 ---
-title: Loading a Driver
+title: Load a driver
 sidebar_position: 2
-description: Load an Application Driver into Styrmin from a local directory or a git repository (public or private).
+description: Load an application driver into Styrmin from a local directory or from a public or private git repository.
 ---
 
-## Loading a Driver
+## Load a driver
 
-Before you can deploy an application, Styrmin needs to register an
-**Application Driver Version** for it. A driver on disk is inert — loading
-it parses the spec, validates the chart reference, and inserts a row in
-the database that deployments can pin to.
+Before you deploy an application, load its driver: Styrmin registers an
+**application driver version** for it. Styrmin does not use a driver on
+disk until you load it. Loading parses the specification, validates the
+chart reference, and adds a database row that deployments can pin.
 
 There are two ways to load a driver:
 
 | Source | Use it when… |
 |--------|--------------|
-| **Local directory** | The driver is at a path in the Styrmin server container, and in the agent pod when it declares actions (the bundled examples, drivers you're iterating on locally, or anything you ship in your own image). |
-| **Git repository** | The driver lives in a git repo — public or private — at its root or in a driver directory, and you want Styrmin to fetch it directly. Each load creates a new version pinned to the requested branch's tip. |
+| **Local directory** | The driver is at a path in the Styrmin server container, and in the agent pod when it declares actions (the bundled examples, drivers you are developing locally, or drivers you add to your own image). |
+| **Git repository** | The driver is in a public or private git repository, at its root or in a driver directory, and Styrmin fetches it from there. Styrmin pins the version to the commit at the tip of the requested branch. |
 
-Both paths produce the same end result: a new Application Driver Version
-in the database that a Deployment can reference.
+Both create an application driver version in the database that a
+deployment can reference.
 
 ### From a local directory
 
 The Styrmin server reads the driver from a path **inside its own
-container**, not from your laptop. The bundled examples are baked into the
-official image at `/styrmin/drivers/<name>`, so the most common command is
-just:
+container**, not from your machine. The official image includes the
+bundled examples at `/styrmin/drivers/<name>`. Load them with:
 
 ```shell
 uv run styrminctl drivers load-local-version /styrmin/drivers/infrahub
@@ -41,14 +40,14 @@ declares actions, the Styrmin agent must hold the driver at the same path
 The Styrmin Helm charts have no value that mounts a volume of drivers
 into the server or the agent. In a Helm install, build an image `FROM`
 the Styrmin image with your drivers copied into `/styrmin/drivers/`, and
-run the server and the agent with it. The local demo
-builds the Styrmin image from the working tree, so it holds everything
-under `driver/examples/` at `/styrmin/drivers/`. The `docker compose`
+run the server and the agent with it. The local demo builds the Styrmin
+image from the working tree, so the image includes everything under
+`driver/examples/` at `/styrmin/drivers/`. The `docker compose`
 dev stack mounts `driver/examples/` at `/styrmin/drivers/` into the
 server container and the agent container.
 
-Under the hood this calls the `loadLocalApplicationDriverVersion` GraphQL
-mutation with the in-container path.
+The command calls the `loadLocalApplicationDriverVersion` GraphQL
+mutation with the path in the container.
 
 #### Actions of a driver loaded from a local directory
 
@@ -105,7 +104,7 @@ A driver without actions loads from any path.
   Driver path 'drivers/my-app' is refused: it is a relative path, and the driver declares actions. The Styrmin agent runs each action from a temporary working folder, where a relative path does not lead to the driver. Load the driver from an absolute path, such as /styrmin/drivers/my-app.
   ```
 
-- An action's `location` is in another file than `actions.py`, such as
+- An action's `location` is in a file other than `actions.py`, such as
   `helpers.py::upgrade`. The check covers only `actions.py` of the
   driver's code:
 
@@ -125,8 +124,8 @@ checks the files at the path in the agent pod:
 
 When the check fails, the action does not import or run `actions.py`, and
 the hook step and the task fail with one of the errors below. A change to
-any of the three files, also to the values template only, makes the check
-fail for every driver version loaded from the path before the change.
+any of the three files, even to the values template alone, makes the
+check fail for every driver version loaded from the path before the change.
 
 #### Errors when an action of a driver version cannot run
 
@@ -172,14 +171,14 @@ version was loaded with. This happens when:
   at the path;
 - a Styrmin upgrade installed an image with a newer bundled driver at the
   same path;
-- the agent pod holds other files at the path than the server, for
+- the agent pod holds different files at the path from the server, for
   example because the image that the agent runs was built before an edit
   of the files that the server loaded.
 
 To fix it:
 
-1. When the agent pod and the server hold other files at the path, give
-   both the same files: build the image that the agent runs with the
+1. When the agent pod and the server hold different files at the path,
+   give both the same files: build the image that the agent runs with the
    server's files, or mount the same volume into both pods.
 2. Load the driver again from the path with the command in the message.
    When the files changed, the load creates a new driver version. Create
@@ -187,7 +186,7 @@ To fix it:
    (see
    [Selecting a driver version](#selecting-a-driver-version-when-deploying-or-upgrading)).
 
-After a Styrmin upgrade that ships a newer bundled driver, load the
+After a Styrmin upgrade that includes a newer bundled driver, load the
 bundled drivers again. A create or an upgrade that uses a driver version
 loaded before the Styrmin upgrade fails with this error when one of that
 version's actions runs.
@@ -237,10 +236,10 @@ To fix it:
 
 Each load of a driver that declares actions, from git or from a local
 directory, registers the actions whose hook and mode have no registered
-flow, also when the load returns an existing driver version. Styrmin
-decides that a flow is missing with the same lookup that hooks use, so it
-leaves the flows that hooks already find as they are. A load with nothing
-to register makes no change in Prefect.
+flow, even when the load returns an existing driver version. Styrmin
+finds missing flows with the same lookup that hooks use, and does not
+change a flow that hooks already find. A load with nothing to register
+makes no change in Prefect.
 
 #### When an action's check fails during an upgrade
 
@@ -266,7 +265,7 @@ an upgrade, so its files at the path are the files the check expects.
 
 When the flow run of an action crashes, for example because the check of
 the driver files failed, the error of its hook step holds the first log
-line of level `ERROR` of that flow run, cut to 4,000 characters. Only the
+line of level `ERROR` of that flow run, truncated to 4,000 characters. Only the
 flow runs of driver actions add their logs to an error; the other flows
 that Styrmin runs do not.
 
@@ -280,8 +279,8 @@ it with `<redacted>`:
   `passwd`, `secret`, `token`, `api_key`, `private_key` or `credential`.
 
 A secret written in any other form stays in the error. Every signed-in
-user who can read the task can read this error, so actions must not write
-secrets to their logs.
+user who can read the task can read this error, so do not write secrets
+to the logs of an action.
 
 ### From a git repository
 
@@ -363,7 +362,7 @@ In the UI, open the Drivers page, select "Load driver", and on the
 "Git repository" tab fill in "Repository URL", "Branch" and
 "Driver directory (optional)". Leave the driver directory empty to load
 from the repository root. While the server clones the repository, the
-button reads "Cloning repository…". When the server refuses the load, the
+button shows "Cloning repository…". When the server refuses the load, the
 drawer keeps the values you entered and shows the server's message: under
 the "Driver directory" field when the message is about the driver
 directory, and at the top of the drawer otherwise. The drawer refuses the
@@ -418,7 +417,7 @@ when:
   outside the repository. The message names the part of the path that is
   the symlink;
 - the driver directory's `driver.styrmin.yml`, `values.j2.yml` or
-  `actions.py` is a symlink to a path outside the driver directory, also
+  `actions.py` is a symlink to a path outside the driver directory, even
   when that path is another folder of the repository. For a load from the
   repository root, the driver directory is the whole repository;
 - the driver directory or one of these files cannot be followed, such as
@@ -460,8 +459,8 @@ several drivers share into each driver directory, or install it in the
 image that the agent runs.
 
 The load does not import `actions.py`, so an import that fails, such as
-`import shared` for a module outside the driver directory, shows only when
-an action runs: the step of the hook that runs the action fails with the
+`import shared` for a module outside the driver directory, appears only
+when an action runs: the step of the hook that runs the action fails with the
 action's error, on the deployment page and in `styrminctl tasks get` (see
 [Steps of a hook](../concepts-and-architecture/hooks-and-actions.md#steps-of-a-hook)),
 and the logs of the action's flow run in Prefect show the import error.
@@ -482,7 +481,7 @@ driver version (see
 [Selecting a driver version](#selecting-a-driver-version-when-deploying-or-upgrading)).
 
 Two driver directories of one repository, loaded at the same commit, give
-two driver versions, also when their drivers have the same name. Each
+two driver versions, even when their drivers have the same name. Each
 driver version runs the actions of its own driver directory. The deploy
 form, the Upgrade dialog and the version picker of the driver page label
 each one `<version>@<short commit> · <driver directory>`, and the search
@@ -490,7 +489,7 @@ of the version picker matches the driver directory.
 
 Drivers with the same name are one application driver, whatever their
 driver directory. The latest-wins rule that binds a deployment does not
-look at the driver directory, so an upgrade with "Latest (auto)" can move
+consider the driver directory, so an upgrade with "Latest (auto)" can move
 a deployment from `drivers/a` to `drivers/b` when `drivers/b` holds the
 newest matching version. The Upgrade dialog warns about this while
 "Latest (auto)" is selected and the driver's versions come from more than
@@ -501,9 +500,9 @@ driver version with `--driver-version-id` (see
 
 #### Private repositories
 
-For private GitHub repositories, the Styrmin server needs a token with
-read access. Configure it once when installing Styrmin, alongside the
-agent-source repository it pulls from to bootstrap the agent:
+For a private GitHub repository, the Styrmin server needs a token with
+read access. Set it when you install Styrmin, together with the settings
+of the repository that Styrmin fetches the agent source code from:
 
 ```shell
 # Token used to clone driver repositories
@@ -515,47 +514,46 @@ STYRMIN_AGENT_SOURCE_BRANCH=develop
 STYRMIN_AGENT_SOURCE_REPOSITORY=https://github.com/your-org/styrmin.git
 ```
 
-In the bundled Helm chart, `STYRMIN_DRIVER_TOKEN` and
-`STYRMIN_AGENT_SOURCE_TOKEN` are read from Kubernetes Secrets that the
-deployment templates already mount; the easiest path is to create the
-Secret in the `styrmin` namespace before `helm upgrade --install`. The
-`STYRMIN_AGENT_SOURCE_*` settings live in a ConfigMap and are typically
-set through Helm values (`styrmin.agentSource.repository` /
+In the Styrmin Helm chart, the server reads `STYRMIN_DRIVER_TOKEN` and
+`STYRMIN_AGENT_SOURCE_TOKEN` from Kubernetes Secrets that the deployment
+templates mount. Create the Secret in the `styrmin` namespace before you
+run `helm upgrade --install`. `STYRMIN_AGENT_SOURCE_BRANCH` and
+`STYRMIN_AGENT_SOURCE_REPOSITORY` are stored in a ConfigMap and are
+usually set with Helm values (`styrmin.agentSource.repository` and
 `styrmin.agentSource.branch`).
 
-Once those are in place, `uv run styrminctl drivers load-version` works
-against the private repo with no extra flags on the client side — the
-token is held by the server.
+Then `uv run styrminctl drivers load-version` works with the private
+repository without extra options, because the server holds the token.
 
 ### After loading
 
 Browse the loaded drivers from the **Drivers** view in the UI, or query
-the `applicationDrivers` field through the GraphQL API. Versions are
-immutable once loaded — to "update" a driver, load a new version and
-upgrade the deployments that pin the old one.
+the `applicationDrivers` field through the GraphQL API. A loaded version
+does not change. To update a driver, load a new version and upgrade the
+deployments that pin the old one.
 
-The **Drivers** view offers two layouts, switched from the toolbar:
+The **Drivers** view has two layouts. Switch between them from the
+toolbar:
 
-- **Group by application** — one card per application driver, showing its
-  three newest **application driver versions**. Drivers with a longer
-  history close with a row reading `N older versions`, which opens the
-  driver's detail page where the full history lives. A driver with three
-  or fewer loaded versions shows all of them and no such row. Filtering
-  suspends the cap: while a filter is active every matching version is
-  listed, so a search can never hide its own matches.
-- **Flat list** — one row per loaded version across all drivers, newest
-  first and uncapped.
+- **Group by application**: one card per application driver, with its
+  three newest **application driver versions**. When a driver has more
+  versions, its card ends with a row `N older versions`, which opens the
+  driver's detail page with every version. A driver with three or fewer
+  loaded versions shows all of them and no such row. While a filter is
+  active, the card lists every matching version, so a search shows all
+  its matches.
+- **Flat list**: one row per loaded version of every driver, newest
+  first, with no limit.
 
-On a driver's detail page, the version selector carries a search field,
-so a driver with a long history stays reachable without scrolling. The
-count beside it states how many versions are loaded in total.
+On a driver's detail page, the version selector has a search field, so
+you can find a version without scrolling. The count next to it is the
+number of loaded versions.
 
-Every driver-version label in the UI, CLI, and SDK is rendered as
-`<version>@<short>`, where `<short>` is the first 7 hex chars of the
-**provenance fingerprint** — the content hash for local drivers, the
-resolved git commit SHA for git drivers. Detail surfaces show the full
-64-char content hash (or 40-char SHA) next to a copy-to-clipboard
-control. The corresponding GraphQL fields on `ApplicationDriverVersion`
+The UI, the CLI, and the SDK show every driver version label as
+`<version>@<short>`, where `<short>` is the first 7 hex characters of the
+**provenance fingerprint**: the content hash for a local driver, the git
+commit SHA for a git driver. Detail pages show the full 64-character
+content hash (or 40-character SHA) with a copy button. The corresponding GraphQL fields on `ApplicationDriverVersion`
 are `contentHash` (populated for `sourceType == "local"`) and
 `sourceCommitSha` (populated for `sourceType == "git"`); exactly one is
 non-null per row. The UI pickers add the driver directory to the
@@ -578,7 +576,7 @@ notification that stays until you close it, and the GraphQL load
 mutations return them in `loadWarnings`. Styrmin does not store the
 warnings: loading the same file again returns them again. To stop a
 warning, fix or remove the value in `driver.styrmin.yml` and load the
-driver again. See [Creating a driver](./creating-a-driver.md) for the
+driver again. See [Create a driver](./creating-a-driver.md) for the
 accepted values.
 
 A load that fails for another reason lists one line per invalid field,
@@ -586,79 +584,80 @@ for example `- spec.version: Field required`.
 
 ### Reloading a local driver while you iterate
 
-You do **not** need to bump `spec.version` in `driver.styrmin.yml` to
-record a change. Re-running `drivers load-local-version` against the
+You do **not** need to increase `spec.version` in `driver.styrmin.yml`
+to record a change. Running `drivers load-local-version` again with the
 same path:
 
-- creates a new Application Driver Version row when the bytes of
-  `driver.styrmin.yml`, the values template, or `actions.py` have
-  changed (the three files that feed the content hash);
-- is a no-op when those three files are byte-identical to the existing
-  row — any number of repeated loads produces a single row;
-- registers the declared actions that have no registered flow, also when
-  it returns the existing row (see
+- creates a new application driver version when the content of
+  `driver.styrmin.yml`, the values template, or `actions.py` changed
+  (the three files of the content hash);
+- changes nothing when those three files are identical to the existing
+  version: repeated loads create one row only;
+- registers the declared actions that have no registered flow, even when
+  it returns the existing version (see
   [Loading a driver again registers its missing actions](#loading-a-driver-again-registers-its-missing-actions)).
 
 Edits to other files in the driver directory (`README.md`, examples,
-screenshots) are invisible to the fingerprint and never produce a new
-row.
+screenshots) do not change the fingerprint and never create a new
+version.
 
 After you edit `driver.styrmin.yml`, the values template or `actions.py`,
 the driver versions loaded from the path before the edit no longer pass
 the [check of the driver files](#check-of-the-driver-files-before-an-action-runs):
 their actions fail with the fingerprint error. Load the driver again and
 create or upgrade your deployments with the new driver version. The
-agent reads the files from the same path as the server: on the
+agent reads the files from the same path as the server. On the
 `docker compose` dev stack, both containers mount `driver/examples/`, so
-the agent reads your edit without an image build; in a Helm install, the
-server and the agent read the driver from their image, so rebuild the
+the agent reads your edit without an image build. In a Helm install, the
+server and the agent read the driver from their image: rebuild the
 image and roll out the server and the agent before you load the driver
 again.
 
-For git-sourced drivers, the fingerprint is the resolved commit SHA on
-the requested branch — loading the same repository, branch, commit and
-driver directory twice is a no-op; loading after a new commit lands
-creates a new row.
+For a driver loaded from git, the fingerprint is the commit SHA at the
+tip of the requested branch. Loading the same repository, branch,
+commit, and driver directory twice changes nothing. Loading after a new
+commit is pushed to the branch creates a new version.
 
-The recorded commit is also the code a deployment's actions run. Pushing
-new commits to the driver's branch does not change what a deployment
-executes: its actions keep running the commit shown in `sourceCommitSha`
+The recorded commit is also the code that a deployment's actions run.
+New commits on the driver's branch do not change what a deployment
+runs: its actions keep running the commit shown in `sourceCommitSha`
 until you load the new commit and upgrade the deployment onto it. Driver
 versions loaded by an earlier Styrmin release keep following the branch tip
 until a new commit is loaded.
 
 See [`dev/guides/driver-iteration.md`](https://github.com/opsmill/styrmin/blob/develop/dev/guides/driver-iteration.md)
-for the full iteration-loop reference.
+for the full workflow to develop and reload a driver.
 
 ### Selecting a driver version when deploying or upgrading
 
 Several loaded driver versions can support the same application version
-(their `supported_versions` specifiers overlap) — for example after
-loading a bugfixed build of a driver whose range did not change. Styrmin
-resolves which one a deployment binds to with a deterministic
-**latest-wins** rule:
+(their `supported_versions` specifiers overlap), for example after you
+load a fixed build of a driver whose range did not change. Styrmin
+selects the driver version that a deployment binds to with a
+deterministic **latest-wins** rule:
 
-1. the driver version with the highest *parseable* `spec.version` wins
-   (compared as versions, so `"10"` beats `"9"`); unparseable version
-   strings rank below all parseable ones;
-2. ties — including same-`version` rebuilds with different fingerprints —
-   are broken by load time, most recent first;
-3. any remaining tie falls back to the row id, so the order is total.
+1. The driver version with the highest *parseable* `spec.version` wins.
+   Styrmin compares the strings as versions, so `"10"` is higher than
+   `"9"`. A version string that cannot be parsed ranks below all others.
+2. Between equal versions, including rebuilds of the same `version` with
+   different fingerprints, the most recently loaded version wins.
+3. If two versions are still equal, Styrmin compares their row IDs, so
+   the order is always defined.
 
-The rule applies on **initial deploy** and on **every upgrade**. An
-upgrade always re-resolves the binding, so re-running an upgrade at the
-deployment's *current* application version is the canonical way to move
-it onto a newly loaded driver build:
+The rule applies when you first deploy and on **every upgrade**: an
+upgrade always selects the driver version again. To move a deployment to
+a newly loaded driver build, upgrade it to its *current* application
+version:
 
 ```shell
-# load the fresh build, then re-apply the same application version
+# load the new build, then apply the same application version again
 uv run styrminctl drivers load-version https://github.com/your-org/styrmin-drivers.git main
 uv run styrminctl deployments update-version <deployment-id> 1.6.0
 ```
 
-To bypass latest-wins and pin a specific build, pass its driver-version
-UUID (shown as `Driver version ID` in `deployments get`, or via the
-`applicationDriver.versions` GraphQL field):
+To skip the latest-wins rule and pin a build, pass its driver version
+UUID. `deployments get` shows it as `Driver version ID`, and the
+`applicationDriver.versions` GraphQL field returns it:
 
 ```shell
 uv run styrminctl deployments update-version <deployment-id> 1.6.0 \
@@ -668,80 +667,83 @@ uv run styrminctl deployments create infrahub 1.6.0 my-env \
   --driver-version-id <uuid>
 ```
 
-The pinned version must belong to the deployment's driver and its
-`supported_versions` must cover the requested application version —
-cross-driver moves are rejected. The UI's **Upgrade** dialog exposes the
-same choice through a driver-version picker that defaults to
-**Latest (auto)**. The pin applies to that call only: a later upgrade
-without an explicit pin re-resolves to the latest matching build again.
-Latest-wins does not look at the driver directory: see
+The pinned version must belong to the deployment's driver, and its
+`supported_versions` must include the requested application version:
+Styrmin rejects a move to another driver. The **Upgrade** dialog in the
+UI offers the same choice with a driver version picker, set to
+**Latest (auto)** by default. The pin applies to that call only: a later
+upgrade without a pin selects the latest matching build again. The
+latest-wins rule does not consider the driver directory: see
 [A new commit to the repository creates a new driver version](#a-new-commit-to-the-repository-creates-a-new-driver-version)
 for drivers with the same name in several driver directories.
 
 ### Where to put your own drivers
 
-The reference repository ships several example drivers under
+The Styrmin repository includes example drivers under
 [`driver/examples/`](https://github.com/opsmill/styrmin/tree/develop/driver/examples)
-(`generic-app`, `infrahub`, `infrahub-mcp`, `semaphore`, `slurpit`). They're a good
-starting point for writing your own.
+(`generic-app`, `infrahub`, `infrahub-mcp`, `semaphore`, `slurpit`). Copy
+one to start a new driver.
 
 The `infrahub` example declares two services: `infrahub` (the Infrahub
 API and web UI on port 8000) and `task-manager` (the Prefect UI on port
 4200, with the Prefect API under `/api`). Both get a service-discovery
 Service in the deployment's namespace, so other applications in the
 environment reach them by short DNS name (`infrahub`, `task-manager`).
-Both are also exposed through the per-environment ingress: the driver's
-`values.j2.yml` enables each chart's own Ingress and sets its host to
-the computed FQDNs from the template context — the Infrahub server on
-`{{ services.infrahub.primary_fqdn }}`, with
-`{{ services.infrahub.human_readable_fqdn }}` as an extra host (the
-chart's `extraHosts` entries take a `hostname` key), and the Prefect UI on
-`{{ services['task-manager'].human_readable_fqdn }}` (the
-service-scoped name, since `primary_fqdn` is app-scoped and identical
-for every service of a deployment). The `infrahub-enterprise` example
-declares the same `task-manager` service and Prefect UI ingress, since it
-runs the identical `prefect-server` subchart.
+Both are also exposed through the environment's ingress. The driver's
+`values.j2.yml` enables each chart's own Ingress and sets its hosts to
+the FQDNs from the context:
 
-Because the Prefect UI is a single-page app whose browser-side code
-calls the Prefect API directly (at `PREFECT_UI_API_URL`, defaulting to
-`http://localhost:4200/api`), the driver also sets the subchart's
-`server.uiConfig.prefectUiApiUrl` to the externally reachable API URL —
-built in the template from the same `human_readable_fqdn` plus
-`instance.config.external_url_scheme` / `external_url_port`, mirroring
-how Styrmin computes user-facing service URLs. Without it, the UI loads
-but reports "Can't connect to Server API at `http://localhost:4200/api`".
+- the Infrahub server on `{{ services.infrahub.primary_fqdn }}`, with
+  `{{ services.infrahub.human_readable_fqdn }}` as an extra host (the
+  chart's `extraHosts` entries take a `hostname` key);
+- the Prefect UI on `{{ services['task-manager'].human_readable_fqdn }}`,
+  the name of this one service, because `primary_fqdn` is the same for
+  every service of a deployment.
 
-The `infrahub-mcp` example exposes an existing Infrahub instance to AI
-agents over the Model Context Protocol in token-passthrough auth mode.
-Its `infrahub_address` parameter is accepted as a free-form string and
-is **not** URL-validated — connection failures surface at agent-query
-time, not at deploy time.
+The `infrahub-enterprise` example declares the same `task-manager`
+service and Prefect UI ingress, because it runs the same
+`prefect-server` subchart.
 
-For your own drivers, the typical layouts are:
+The Prefect UI is a single-page app: the browser calls the Prefect API
+directly, at `PREFECT_UI_API_URL` (`http://localhost:4200/api` by
+default). The driver therefore sets the subchart's
+`server.uiConfig.prefectUiApiUrl` to the external API URL. The template
+builds it from the same `human_readable_fqdn` and from
+`instance.config.external_url_scheme` and `external_url_port`, the way
+Styrmin builds the service URLs that users open. Without it, the UI
+loads but reports "Can't connect to Server API at
+`http://localhost:4200/api`".
 
-- **Inside the Styrmin repo** — drop them under `driver/examples/<name>/`
-  and they'll be picked up by the demo image automatically. Best for
-  prototyping against the local demo.
-- **In a dedicated git repository** — recommended for production use.
-  Versioned, reviewable, and Styrmin can pin deployments to a specific
-  commit per branch load. One repository can hold several drivers, each
-  in its own driver directory (see
+The `infrahub-mcp` example gives AI agents access to an existing
+Infrahub instance over the Model Context Protocol (MCP), in
+token-passthrough authentication mode. Styrmin accepts any string as its
+`infrahub_address` parameter and does **not** check that it is a URL, so
+a wrong address causes an error only when an AI agent sends a query, not
+when you deploy.
+
+You can keep your own drivers in one of these places:
+
+- **In the Styrmin repository**: put them under
+  `driver/examples/<name>/`. The demo image includes every driver in that
+  folder. Use this to try a driver on the local demo.
+- **In a git repository of their own**: recommended for production. Each
+  change is versioned and can be reviewed, and Styrmin pins each loaded
+  version to a commit. One repository can hold several drivers, each in
+  its own driver directory (see
   [Loading a driver from a driver directory](#loading-a-driver-from-a-driver-directory)).
-- **In your own container image** — fork or extend the Styrmin server
-  image, copy your driver directories into `/styrmin/drivers/`, and use
-  `load-local-version` against the baked-in paths. Run the server and the
-  agent with that image, because the agent runs the driver's actions from
-  the same paths.
+- **In your own container image**: build an image `FROM` the Styrmin
+  server image, copy your driver directories into `/styrmin/drivers/`,
+  and run `load-local-version` with those paths. Run the server and the
+  agent with that image, because the agent runs the driver's actions
+  from the same paths.
 
-See [Creating a Driver](./creating-a-driver.md) for the authoring
-walkthrough, and the
-[Driver overview in the main repository](https://github.com/opsmill/styrmin/blob/develop/driver/DRIVERS.md)
-for the authoritative, version-controlled description of the driver
-format.
+See [Create a driver](./creating-a-driver.md) for how to write a
+driver, and the
+[driver overview in the main repository](https://github.com/opsmill/styrmin/blob/develop/driver/DRIVERS.md)
+for the version-controlled description of the driver format.
 
 ### Next steps
 
-- [**The Context**](./context.md) — what your driver templates and
-  actions receive at runtime.
-- [**Creating a Driver**](./creating-a-driver.md) — write your own
-  driver from scratch.
+- [**The context**](./context.md): the values that your driver
+  templates and actions receive at runtime.
+- [**Create a driver**](./creating-a-driver.md): write a new driver.

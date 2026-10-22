@@ -1,7 +1,7 @@
 ---
 title: The generic-app driver
 sidebar_position: 6
-description: Deploy any single-container HTTP application, such as a Streamlit app or Semaphore, without writing a driver.
+description: Deploy a single-container HTTP application, such as a Streamlit app or Semaphore, with the bundled generic-app driver.
 ---
 
 ## The generic-app driver
@@ -17,7 +17,7 @@ The driver is bundled in the Styrmin image. Load it like any bundled driver:
 uv run styrminctl drivers load-local-version /styrmin/drivers/generic-app
 ```
 
-It builds on the public
+It uses the public
 [bjw-s `app-template`](https://github.com/bjw-s-labs/helm-charts/tree/main/charts/library/common)
 Helm chart. The driver declares one component, `app`.
 
@@ -30,7 +30,7 @@ Helm chart. The driver declares one component, `app`.
 - **Serve HTTP.** The driver publishes the application at its public address
   through the environment's ingress.
 - **Run in one container.** Several containers, or a database next to the
-  application, need a driver of their own: see [Creating a Driver](./creating-a-driver.md).
+  application, need a driver of their own: see [Create a driver](./creating-a-driver.md).
 
 ### Parameters
 
@@ -41,7 +41,7 @@ Parameters are set once per deployment.
 | `image_repository` | none, required | The image to run, without the tag. |
 | `image_tag` | empty | The image tag. When empty, the deployment's application version is the tag. The application version must be a valid version number such as `2.17.12`, so for a tag like `latest` or `v2.17.12`, set `image_tag` and give the deployment any valid version. |
 | `image_pull_policy` | `IfNotPresent` | `IfNotPresent`, `Always` or `Never`. |
-| `health_path` | empty | An HTTP path that answers 200 when the application is ready. When empty, the driver checks that port 8080 accepts connections. |
+| `health_path` | empty | An HTTP path that returns 200 when the application is ready. When empty, the driver checks that port 8080 accepts connections. |
 | `storage_size` | `0` | The size in Gi of a persistent volume. `0` means no volume. |
 | `storage_path` | `/data` | Where the volume is mounted in the container. |
 | `fs_group` | `0` | A group ID that owns the volume. `0` leaves the volume as it is. |
@@ -54,7 +54,8 @@ deployment and not on the driver:
 
 - **Environment variables**, which is how most applications are configured.
 - **Command and arguments**, to replace the image's entrypoint or arguments.
-  Clearing them returns to the image's own.
+  When you clear them, the container runs the image's own entrypoint and
+  arguments.
 - **An image override**, to run another image of the same application. See
   [image overrides](../concepts-and-architecture/image-overrides.md).
 
@@ -119,9 +120,9 @@ mounts it at `storage_path`. A volume is created owned by root, so an image that
 runs as another user needs `fs_group` set to that user's group, or it cannot
 write to the volume. A volume can be mounted by one pod at a time, so
 with a volume the deployment replaces its pod instead of starting the new one
-next to the old one, and the application is down for the few seconds that
-takes. Without a volume, the deployment starts the new pod before it stops the
-old one.
+next to the old one, and the application is unavailable for the few seconds
+that this takes. Without a volume, the deployment starts the new pod before it
+stops the old one.
 
 The driver declares a `disk` [backup](../concepts-and-architecture/backups-and-restores.md)
 of the volume named `data`. That volume exists only when `storage_size` is above
@@ -148,8 +149,8 @@ pod does not have.
   private address ranges, except the other applications of its environment.
 
 The driver declares these network policies itself, because Styrmin's
-default policies for an environment only let the environment's ingress
-controller and Styrmin's own components talk to a deployment
+default policies for an environment allow connections to a deployment only
+from the environment's ingress controller and Styrmin's own components
 ([opsmill/styrmin#284](https://github.com/opsmill/styrmin/issues/284)).
 
 ### Several deployments in one environment

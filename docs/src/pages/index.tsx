@@ -10,17 +10,17 @@ const features = [
   {
     title: 'Clone an entire environment',
     description:
-      'Duplicate production — applications, configuration, and live data — into a test environment. Validate upgrades and changes against real data before touching production.',
+      'Copy a production environment, with its applications, configuration, and data, to a test environment. Test upgrades and changes on that data before you apply them to production.',
   },
   {
     title: 'Back up the whole stack',
     description:
-      'Trigger backups across every application in an environment in a single operation. Each driver knows how to back up its application correctly, so Neo4j and Postgres are both handled the right way.',
+      "Back up every application in an environment with one operation. Each application's driver defines its backup procedure, for example for Neo4j or PostgreSQL.",
   },
   {
-    title: 'Upgrade reliably',
+    title: 'Upgrade with driver-defined steps',
     description:
-      'Upgrade applications through driver-defined sequences — stop components, run migrations, restart, verify. Complex upgrade processes are encoded once and run the same way every time.',
+      'The driver lists the upgrade steps in order: stop components, run migrations, restart, and verify. You write a multi-step upgrade once, and Styrmin runs the same steps on every upgrade.',
   },
 ];
 
@@ -34,9 +34,9 @@ function HomepageHeader() {
         </Heading>
         <p className="hero__subtitle">{siteConfig.tagline}</p>
         <p className={styles.heroLede}>
-          Styrmin manages the full lifecycle of your infrastructure automation
-          stack — Infrahub, Ansible, Grafana, Prometheus — as a single system,
-          not application by application.
+          Styrmin deploys, configures, backs up, and upgrades a group of
+          applications, such as Infrahub, Ansible, Grafana, and Prometheus, as
+          one stack on Kubernetes.
         </p>
         <div className={styles.buttons}>
           <Link
@@ -75,7 +75,7 @@ export default function Home(): ReactNode {
         <section className={styles.featuresSection}>
           <div className="container">
             <Heading as="h2" className={styles.sectionHeading}>
-              What nothing else gives you
+              Operations on a whole environment
             </Heading>
             <div className="row">
               {features.map((feature) => (

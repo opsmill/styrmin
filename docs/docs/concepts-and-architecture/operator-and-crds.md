@@ -1,98 +1,93 @@
 ---
 title: The operator and StyrminDeployment
 sidebar_position: 4
-description: What the agent's operator does inside the cluster — explained without Kubernetes background.
+description: What the agent's operator does inside the cluster, for readers without Kubernetes experience.
 ---
 
 ## The operator and `StyrminDeployment`
 
-This page explains two pieces of Kubernetes vocabulary you don't have to
-know to use Styrmin, but that show up everywhere once you start poking
-around: **custom resources** and **operators**.
+Styrmin uses two Kubernetes mechanisms that you see when you inspect a
+cluster: **custom resources** and **operators**. You do not need to know
+them to use Styrmin.
 
-### A 60-second primer
+### Custom resources and operators
 
-**Kubernetes**, deep down, is a database of "things that should exist"
-plus a bunch of programs that make those things exist. You write a YAML
-file that says "I want a Deployment with three pods", you hand it to the
-cluster, and a built-in program (the Deployment controller) makes it
-happen.
+**Kubernetes** stores the objects that should exist, and controllers
+create them. You apply a YAML file that declares a Deployment with three
+pods, and the built-in Deployment controller creates the pods.
 
-A **custom resource** is just a new kind of "thing that should exist",
-defined by you instead of by Kubernetes. It's a way of teaching the
-cluster a new vocabulary word.
+A **custom resource** is an object of a type that you define, not a
+built-in Kubernetes type.
 
-An **operator** is the matching program — the one that watches for
-changes to that custom resource and reacts.
+An **operator** is the controller for a custom resource type. It watches
+the objects of that type and changes the cluster to match them.
 
-You write the custom resource. The operator does whatever you wrote
-needs doing. That's it.
+### The `StyrminDeployment` resource
 
-### What Styrmin adds
+Styrmin defines one custom resource type, **`StyrminDeployment`**. The
+cluster has one `StyrminDeployment` object for each deployment that you
+create in Styrmin.
 
-Styrmin defines one custom resource type, called **`StyrminDeployment`**.
-There is one `StyrminDeployment` object in the cluster for every
-deployment you create in Styrmin.
+A `StyrminDeployment` contains:
 
-Inside the `StyrminDeployment` you'll find:
-
-- which driver and version this deployment uses;
-- which application version it's running;
-- the fully resolved **configuration context** — every value the driver
-  needs to render its Helm chart (see
-  [The Context](../drivers/context.md) for the full structure);
+- the driver and the driver version that the deployment uses;
+- the application version it runs;
+- the fully resolved **context**: every value that the driver needs to
+  render its Helm chart (see [The context](../drivers/context.md) for the
+  full structure);
 - the lifecycle phase it should be in (running, stopped, deleting).
 
-Think of it as "the deployment, in a form Kubernetes can read".
+It describes the deployment in a form that Kubernetes can read.
 
 ### What the operator does with it
 
-The operator (which lives inside the agent — see
-[Architecture](./architecture.md)) watches every `StyrminDeployment` in
-the cluster and works through a small set of phases:
+The operator runs inside the agent (see [Architecture](./architecture.md)).
+It watches every `StyrminDeployment` in the cluster and runs these
+phases:
 
-1. **Render** — turn the configuration context into actual Kubernetes
-   resources: a HelmRelease (for the application's chart), services,
-   network policies, secrets.
-2. **Apply** — write those resources into the cluster. Kubernetes's
-   built-in controllers (and FluxCD, for the HelmRelease) take it from
-   there.
-3. **Wait** — let everything come up. Mark the `StyrminDeployment` as
-   ready when FluxCD reports the new release ready, or as failed when
-   FluxCD gives up (see
+1. **Render**: turn the context into Kubernetes resources: a
+   `HelmRelease` for the application's chart, services, network policies,
+   and secrets.
+2. **Apply**: write those resources into the cluster. The built-in
+   Kubernetes controllers, and FluxCD for the `HelmRelease`, then create
+   the objects they describe.
+3. **Wait**: wait until the resources are ready. Mark the
+   `StyrminDeployment` as ready when FluxCD reports the new release ready,
+   or as failed when FluxCD stops retrying (see
    [When a rollout is ready or failed](#when-a-rollout-is-ready-or-failed)).
-4. **Re-check periodically** — every so often, look at the cluster
-   again. If something drifted from what was declared (a pod was
-   deleted, a ConfigMap was edited), put it back.
+4. **Check periodically**: compare the cluster with the declared state
+   again. When something differs (a pod was deleted, a ConfigMap was
+   edited), restore it.
 
-If you update the `StyrminDeployment` (because the server detected a
-change in the deployment — see [Reconciliation](./reconciliation.md)),
-the operator notices and re-runs the phases.
+When the `StyrminDeployment` changes, because the server recorded a
+change to the deployment (see [Reconciliation](./reconciliation.md)), the
+operator runs the phases again.
 
-### Why this design?
+### Why Styrmin uses a custom resource
 
-Going through a custom resource may look indirect — why not have the
-server just talk to Kubernetes? Two reasons:
+The server does not call the Kubernetes API to deploy an application. It
+goes through a custom resource, for two reasons:
 
-- **The desired state lives in the cluster.** If the agent restarts, or
-  even the server goes down, the `StyrminDeployment` is still there. The
-  operator picks up where it left off.
-- **It composes with Kubernetes.** Tools that already understand
-  custom resources (kubectl, GitOps engines, monitoring) can see Styrmin
-  deployments without any special integration.
+- **The cluster stores the desired state.** When the agent restarts, or
+  the server stops, the `StyrminDeployment` stays in the cluster. The
+  operator continues from it.
+- **Kubernetes tools can read it.** `kubectl`, GitOps tools, and
+  monitoring tools that read custom resources show Styrmin deployments
+  without a Styrmin integration.
 
-### The HelmRelease — Styrmin's other CRD
+<!-- Keeps the anchor that earlier releases of CHANGELOG.md link to. -->
+<a id="the-helmrelease--styrmins-other-crd"></a>
 
-You'll also see a second custom resource per deployment, called
-**`HelmRelease`**. That one is not Styrmin's — it comes from
-[FluxCD](https://fluxcd.io/), an open-source toolkit that ships with
-Styrmin.
+### The HelmRelease
 
-A `HelmRelease` is FluxCD's way of saying "install this Helm chart, at
-this version, with these values, and keep it that way." FluxCD's own
-operator (the **helm-controller**) watches `HelmRelease` objects and
-does the actual `helm install` / `helm upgrade` work. Styrmin doesn't
-run Helm itself — it asks Flux to do it.
+Each deployment also has a second custom resource, a **`HelmRelease`**.
+Its type comes from [FluxCD](https://fluxcd.io/), an open-source toolkit
+that the agent chart installs, not from Styrmin.
+
+A `HelmRelease` declares a Helm chart, its version, and its values.
+FluxCD's operator, the **helm-controller**, watches `HelmRelease` objects
+and runs `helm install` and `helm upgrade` for them. Styrmin does not run
+Helm itself.
 
 The agent chart installs FluxCD's helm-controller v1.6.5 and
 source-controller v1.9.6, the controllers of Flux v2.9.6. They support
@@ -102,29 +97,29 @@ Helm v4:
 - A deployment created since the agent runs helm-controller with these
   defaults is installed with server-side apply. helm-controller is the
   field manager and forces field ownership conflicts, so at each upgrade
-  a field that the chart sets returns to the chart's value, also when
+  a field that the chart sets returns to the chart's value, even when
   `kubectl` or a driver action changed it. The upgrade does not fail.
 - A deployment created before, when helm-controller ran with the
   `UseHelm3Defaults` feature gate, keeps client-side apply: an upgrade uses
   the apply method recorded in the release's newest revision, and a
-  rollback uses the method of the revision it returns to. From its next upgrade, the two items below apply to it
-  too.
+  rollback uses the method of the revision it returns to. From its next
+  upgrade, the two items below apply to it too.
 - Installs and upgrades wait for the chart's resources with kstatus,
   FluxCD's library that computes the status of each Kubernetes resource.
   The wait ends before the HelmRelease timeout when kstatus reports a
   resource as failed, for example a `Job` that failed or a `Deployment`
   past its `progressDeadlineSeconds`. A `Deployment` whose pods cannot
-  pull their image, or whose container exits at once, is not failed for
+  pull their image, or whose container exits immediately, is not failed for
   kstatus, so FluxCD waits the full timeout.
 - Helm hooks of the driver's chart, the resources annotated
   `helm.sh/hook`, receive Styrmin's post-render patches, as the chart's
   other resources do: Styrmin's labels, the deployment's scheduling
   settings and, on a `Deployment` or `StatefulSet` that matches a
   component, the component overrides. See
-  [Step 1 of Creating a driver](../drivers/creating-a-driver.md#step-1-analyse-the-helm-chart)
+  [Step 1 of Create a driver](../drivers/creating-a-driver.md#step-1-analyze-the-helm-chart)
   for which patches reach which hooks.
 
-To go back to Helm v3's behaviour, downgrade the agent chart to a
+To go back to Helm v3's behavior, downgrade the agent chart to a
 release that runs helm-controller with the `UseHelm3Defaults` gate.
 Deployments created while the gate was off keep server-side apply on
 their later upgrades and rollbacks, because they keep the apply method
@@ -140,32 +135,32 @@ upgrade if it has some. To apply the CRDs yourself, set
 `styrmin-agent.crdUpgrade.enabled` to `false` and apply the files of
 `helm/agent/crds/` before each upgrade.
 
-So the chain inside the cluster is:
+Inside the cluster, the work passes through these components:
 
 ```text
 StyrminDeployment  ──►  Styrmin operator  ──►  HelmRelease  ──►  FluxCD helm-controller  ──►  Helm install / upgrade
    (Styrmin CRD)        (in the agent)         (FluxCD CRD)      (separate pod)
 ```
 
-Why split it? Two operators, two clear jobs:
+Each operator handles different work:
 
-- **Styrmin's operator** owns the application-shaped concerns: which
-  driver, which version, what the resolved context says, what the
-  per-environment ingress looks like, when to run lifecycle actions.
-- **FluxCD's helm-controller** owns the Helm-shaped concerns: chart
-  rendering, install/upgrade ordering, value templating, rollback on
-  failure.
+- **Styrmin's operator** handles the driver, the version, the resolved
+  context, the ingress of the environment, and when to run lifecycle
+  actions.
+- **FluxCD's helm-controller** handles Helm: it renders the chart,
+  templates the values, orders the install and upgrade steps, and rolls
+  back a failed release.
 
-Both halves are visible if you go looking:
+To list both:
 
 ```shell
 kubectl get styrmindeployments -A
 kubectl get helmreleases -A
 ```
 
-For day-to-day use you only need to know that the `HelmRelease` is what
-actually puts the application's resources into the cluster, and that
-it's created and updated by Styrmin in response to your deployment.
+In short, FluxCD creates the application's resources from the
+`HelmRelease`, and Styrmin creates and updates the `HelmRelease` from your
+deployment.
 
 ### When a rollout is ready or failed
 
@@ -178,7 +173,7 @@ a changed spec, it:
 - removes the `HelmReleaseRemediated` condition of the previous rollout;
 - records the start of the rollout in `status.rolloutStartedAt`;
 - writes the application instance it is rolling out to
-  `status.instanceId`, also when the handler fails. The status reporter
+  `status.instanceId`, even when the handler fails. The status reporter
   sends this value to the server (see
   [Status reporting](./status-reporting.md#which-instance-a-report-is-about)).
 
@@ -192,7 +187,7 @@ release therefore does not make the new release ready.
 
 - When FluxCD reports the current generation `Ready=True`, the operator
   sets `HelmReleaseReady` to `True` with the reason `FluxReady`, creates
-  the services and moves the CR to `Ready`.
+  the services and moves the `StyrminDeployment` to `Ready`.
 - Until then, `HelmReleaseReady` copies the status and transition time of
   FluxCD's `Ready` condition. When `Ready` is `False`, the reason and
   message come from FluxCD's `Released=False` condition when there is one,
@@ -204,7 +199,7 @@ release therefore does not make the new release ready.
   an install or an upgrade, and a later attempt can succeed.
 - When FluxCD's `Stalled` condition is `True` for the current generation,
   FluxCD has used all its retries. The operator sets the phase `Failed`
-  and the display state `Error`. The CR's message is the message of
+  and the display state `Error`. The message of the `StyrminDeployment` is the message of
   FluxCD's `Stalled` condition followed by the failure message, in the
   form `<Stalled message>: <failure message>`. The `Ready` condition
   becomes `False` with the reason of FluxCD's `Stalled` condition, for
@@ -220,8 +215,7 @@ Styrmin's HelmReleases give FluxCD
 by default) for each install or upgrade. At that timeout FluxCD fails the
 attempt and rolls the release back, which removes its pods.
 
-The readiness timeout is the safety net when FluxCD never reports
-`Stalled`. When a rollout has not reached `Ready` or `Failed` within
+The readiness timeout applies when FluxCD never reports `Stalled`. When a rollout has not reached `Ready` or `Failed` within
 `STYRMIN_OPERATOR_DEPLOYMENT_READY_TIMEOUT` seconds (270 by default), the
 operator sets the display state `Error` with the message "Deployment did
 not reach Ready within" followed by the timeout and the phase. The phase
@@ -231,9 +225,9 @@ failed rollout then reports the pods that are not ready and why before
 FluxCD's rollback removes them. This holds while FluxCD waits the full
 HelmRelease timeout, which it does for pods that cannot pull their image
 (see the kstatus item in
-[The HelmRelease](#the-helmrelease--styrmins-other-crd)). The
-timeout counts from `status.rolloutStartedAt`, or from the CR's creation
-time when that field is missing. When the operator restarts and resumes a
+[The HelmRelease](#the-helmrelease)). The
+timeout counts from `status.rolloutStartedAt`, or from the creation time of the
+`StyrminDeployment` when that field is missing. When the operator restarts and resumes a
 rollout, it keeps the recorded start, so a restart does not extend the
 timeout. When a step of the rollout fails with a temporary error, for
 example when the operator cannot create a network policy, kopf runs the
@@ -246,7 +240,7 @@ post-render overrides, such as an [image override](./image-overrides.md)
 or environment variables: after the rollback, FluxCD compares only the
 chart and the values with the HelmRelease, finds the rolled-back release
 in sync, and reports it as a successful upgrade, although the override
-was never applied. The operator recognises this state from FluxCD's
+was never applied. The operator recognizes this state from FluxCD's
 release history: FluxCD counted a failed install or upgrade for the
 current generation of the HelmRelease, and the newest release is
 `deployed` right after a `failed` one, so it is the rollback. The
@@ -264,7 +258,7 @@ When an install or upgrade fails before Helm stores a release, for
 example because a post-render patch fails, helm-controller v1.6.5 still
 records the new post-renderers as applied. On its next run it compares
 only the chart and the values, reports the previous release `Ready`, and
-does not try again. The operator recognises this state: FluxCD counted a
+does not try again. The operator recognizes this state: FluxCD counted a
 failure for the current generation of the HelmRelease
 (`status.failures`), and FluxCD's newest `InstallFailed` or
 `UpgradeFailed` event of the HelmRelease is newer than its newest
@@ -304,7 +298,7 @@ kubectl get pods -A -l app.kubernetes.io/name=styrmin-agent \
   -o jsonpath='{range .items[*]}{.spec.containers[0].image}{"\n"}{end}'
 ```
 
-#### Tell the finalizer apart from pods that take long to stop
+#### Check whether the finalizer or slow pods block the namespace
 
 A namespace also stays `Terminating` while its pods stop, and a pod can
 need longer than 600 seconds. The
@@ -322,11 +316,11 @@ kubectl get styrmindeployments -n <namespace> \
   `styrmin.io/kopf-finalizer`: the operator kept the finalizer. Follow
   the recovery steps below.
 - Pods are still `Terminating`: Kubernetes deletes the namespace once
-  they have stopped.
+  they stop.
 
 In both cases, a restore that failed with `Namespace <namespace> was not
-deleted within 600s` does not continue. Start it again once the
-namespace is gone.
+deleted within 600s` does not continue. Start it again after the
+namespace is deleted.
 
 #### Remove the finalizer
 
@@ -363,19 +357,18 @@ log.
 
 ### What this means in practice
 
-- A `StyrminDeployment` is what Styrmin's operator acts on. If you're
-  debugging Styrmin, that's the object to look at.
-- A `HelmRelease` is what FluxCD acts on. If a chart fails to install,
+- Styrmin's operator reconciles `StyrminDeployment` objects. To debug a
+  deployment, start with its `StyrminDeployment`.
+- FluxCD reconciles `HelmRelease` objects. If a chart fails to install,
   FluxCD's reason is copied into the `StyrminDeployment`'s
   `HelmReleaseReady` condition, and the deployment page shows it on the
   step "Install or upgrade the HelmRelease".
-- "Drift correction" — the operator periodically re-checking the
-  cluster — is the reason you can't just delete a pod to make Styrmin
-  forget about it. It'll come back.
+- Because the operator checks the cluster periodically, a pod that you
+  delete is created again.
 
-### Next
+### Next steps
 
-- [**Reconciliation**](./reconciliation.md) — how the server decides
-  when to update the `StyrminDeployment`.
-- [**Status reporting**](./status-reporting.md) — how the agent tells
-  the server what the operator is seeing.
+- [**Reconciliation**](./reconciliation.md): when the server updates the
+  `StyrminDeployment`.
+- [**Status reporting**](./status-reporting.md): how the agent reports
+  the cluster state to the server.

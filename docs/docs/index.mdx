@@ -1,51 +1,44 @@
 ---
 title: Welcome
 slug: /
-description: One-page map of the Styrmin documentation — where to start depending on what you're trying to do.
+description: Where to start in the Styrmin documentation, depending on what you want to do.
 hide_table_of_contents: true
 ---
 
 ## Welcome to the Styrmin docs
 
-Styrmin is an **application platform that manages the full lifecycle of
-your infrastructure automation stack** — Infrahub, Ansible, Grafana,
-Prometheus, and the tooling around them — as one system, not one
-application at a time.
-
-The docs are organised by what you're trying to do. Pick the entry
-point that matches your goal; the sidebar on the left has everything in
-order.
+Styrmin deploys, configures, backs up, and upgrades your infrastructure
+automation stack on Kubernetes: Infrahub, Ansible, Grafana, Prometheus,
+and the tools around them. You manage these applications as one stack,
+with one lifecycle.
 
 ### Where to start
 
 | You want to… | Start here |
 |---|---|
-| Understand what Styrmin is and whether it fits your use case | [Why Styrmin?](./introduction/why-styrmin.md) |
-| Get the mental model — driver, cluster, environment, deployment | [Platform overview](./introduction/platform-overview.md) |
-| Try Styrmin end-to-end on your laptop in two commands | [Quickstart](./installation/quickstart.md) |
-| Install Styrmin on a real Kubernetes cluster | [Installation](./installation/index.mdx) |
-| Understand or write an Application Driver | [What is an Application Driver?](./concepts-and-architecture/what-is-a-driver.md) |
-| Read about how Styrmin works under the hood | [Concepts and Architecture](./concepts-and-architecture/index.md) |
+| Find out what Styrmin does and whether it fits your use case | [Why Styrmin?](./introduction/why-styrmin.md) |
+| Learn the core terms: driver, cluster, environment, deployment | [Platform overview](./introduction/platform-overview.md) |
+| Run Styrmin on your laptop with two commands | [Quickstart](./installation/quickstart.md) |
+| Install Styrmin on a Kubernetes cluster | [Installation](./installation/index.mdx) |
+| Learn what an application driver is, or write one | [What is an application driver?](./concepts-and-architecture/what-is-a-driver.md) |
+| Learn how Styrmin works internally | [Concepts and architecture](./concepts-and-architecture/index.md) |
 
-### The sections, at a glance
+### Sections
 
-- **[Introduction](./introduction/why-styrmin.md)** — what Styrmin is,
-  who it's for, how it compares to ArgoCD/Flux/Helm, and the platform
-  model behind it.
-- **[Installation](./installation/index.mdx)** — Quickstart and
-  per-platform install guides (DigitalOcean, GKE, local vCluster).
-- **[Drivers](./drivers/loading-drivers.md)** — how to load a driver,
-  what the Context looks like at runtime, and how to write your own.
-  For the conceptual "what is a driver?" page, see
-  [Concepts and Architecture](./concepts-and-architecture/what-is-a-driver.md).
-- **[Reference](./reference/index.md)** — lookup pages for the
-  `StyrminDeployment` CRD, the `styrminctl` CLI, the Driver API, and
-  Styrmin configuration.
-- **[Concepts and Architecture](./concepts-and-architecture/index.md)**
-  — the mental model up front, optional under-the-hood deep dives
-  after.
-- **[Changelog](./changelog.md)** — what's changed, release by release.
+- **[Introduction](./introduction/why-styrmin.md)**: what Styrmin does,
+  who it is for, how it compares to Argo CD, Flux, and Helm, and the
+  terms it uses.
+- **[Installation](./installation/index.mdx)**: the Quickstart and the
+  install guides for each platform (DigitalOcean, GKE, local vCluster).
+- **[Drivers](./drivers/loading-drivers.md)**: how to load a driver,
+  what the context contains, and how to write your own driver. For what
+  a driver is, see
+  [What is an application driver?](./concepts-and-architecture/what-is-a-driver.md).
+- **[Reference](./reference/index.md)**: the `StyrminDeployment` CRD,
+  the `styrminctl` CLI, the driver API, and Styrmin configuration.
+- **[Concepts and architecture](./concepts-and-architecture/index.md)**:
+  the core terms first, then one page for each internal mechanism.
+- **[Changelog](./changelog.md)**: notable changes, newest first.
 
-If you're not sure which page to read first, [**Why
-Styrmin?**](./introduction/why-styrmin.md) is the most common entry
-point.
+If you are new to Styrmin, start with
+[Why Styrmin?](./introduction/why-styrmin.md).
