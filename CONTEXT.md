@@ -147,7 +147,7 @@ A **component** that the **driver version** marks `singleton: true`. Its replica
 _Avoid_: "single-replica component", "stateful component".
 
 **Service** (deployed service):
-A network-addressable endpoint declared by the **application driver** under `spec.services` (kind, scope, port, owning component) and materialised as a `DeployedService` row plus a Kubernetes Service object.
+A network-addressable endpoint declared by the **application driver** under `spec.services` (kind, scope, port, owning component) and materialised as a `DeployedService` row plus a Kubernetes Service object. The other **deployments** of the **environment** can connect to it on its port: Styrmin writes one NetworkPolicy per owning component, `allow-environment-to-<component>` ([#557](https://github.com/opsmill/styrmin/issues/557)). A component that owns no service is reachable from its own deployment's namespace only.
 _Avoid_: "endpoint" (HTTP-specific), "port" (one attribute of a service), conflating with Kubernetes-`Service` when ambiguity matters — qualify as "K8s Service" if needed.
 
 **Service alias**:

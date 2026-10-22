@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from styrmin_backend.agent.service.kubernetes.resources.utilities.service_discovery import (
     ServiceDiscoveryUtility,
+    environment_policy_name,
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.context.models.components import (
@@ -52,6 +53,7 @@ def _make_context(
     deployed_services: list[dict],
     components: ComponentsContext | None = None,
     deployment_id=None,
+    labels: dict | None = None,
 ) -> GlobalContext:
     """Build a minimal GlobalContext for testing."""
     deployment_id = deployment_id or uuid4()
@@ -84,6 +86,7 @@ def _make_context(
         ),
         deployed_services=deployed_services,
         components=components,
+        labels=labels or {},
     )
 
 
@@ -317,3 +320,165 @@ class TestServiceDiscoveryUtility:
             "app.kubernetes.io/name": "redis"
         }
         assert by_name["redis"]["spec"]["ports"][0]["port"] == 6379
+
+
+def _service(
+    name: str, port: int, component: str, deployment_id, kind: str = "http"
+) -> dict:
+    return {
+        "resolved_name": name,
+        "port": port,
+        "kind": kind,
+        "deployment_id": str(deployment_id),
+        "component": component,
+    }
+
+
+def _policies(resources: list[dict]) -> dict[str, dict]:
+    return {r["metadata"]["name"]: r for r in resources if r["kind"] == "NetworkPolicy"}
+
+
+class TestEnvironmentPolicies:
+    """#557: the other deployments of the environment reach the declared services only."""
+
+    def setup_method(self) -> None:
+        self.utility = ServiceDiscoveryUtility()
+
+    def test_one_policy_per_component_with_a_service(self) -> None:
+        dep_a = uuid4()
+        ns_a = get_kubernetes_reference(dep_a)
+        components = _make_components(
+            ("server", {"service": "infrahub-server"}),
+            ("task-manager", {"app.kubernetes.io/name": "prefect-server"}),
+            ("database", {"infrahub/service": "database"}),
+        )
+        context = _make_context(
+            deployment_id=dep_a,
+            deployed_services=[
+                _service("infrahub", 8000, "server", dep_a),
+                _service("task-manager", 4200, "task-manager", dep_a),
+            ],
+            components=components,
+            labels={"environment_id": "env-1"},
+        )
+
+        resources = self.utility.build_resources(context, ns_a, ns_a)
+
+        policies = _policies(resources)
+        assert set(policies) == {
+            "allow-environment-to-server",
+            "allow-environment-to-task-manager",
+        }
+        server = policies["allow-environment-to-server"]
+        assert server["apiVersion"] == "networking.k8s.io/v1"
+        assert server["metadata"]["namespace"] == ns_a
+        assert server["spec"] == {
+            "podSelector": {"matchLabels": {"service": "infrahub-server"}},
+            "policyTypes": ["Ingress"],
+            "ingress": [
+                {
+                    "from": [
+                        {
+                            "namespaceSelector": {
+                                "matchLabels": {"styrmin/environment_id": "env-1"}
+                            }
+                        }
+                    ],
+                    "ports": [{"port": 8000, "protocol": "TCP"}],
+                }
+            ],
+        }
+
+    def test_component_without_a_service_gets_no_policy(self) -> None:
+        dep_a = uuid4()
+        ns_a = get_kubernetes_reference(dep_a)
+        components = _make_components(
+            ("server", {"service": "infrahub-server"}),
+            ("database", {"infrahub/service": "database"}),
+        )
+        context = _make_context(
+            deployment_id=dep_a,
+            deployed_services=[_service("infrahub", 8000, "server", dep_a)],
+            components=components,
+            labels={"environment_id": "env-1"},
+        )
+
+        policies = _policies(self.utility.build_resources(context, ns_a, ns_a))
+
+        assert "allow-environment-to-database" not in policies
+
+    def test_services_of_one_component_share_a_policy(self) -> None:
+        dep_a = uuid4()
+        ns_a = get_kubernetes_reference(dep_a)
+        components = _make_components(("server", {"app": "web"}))
+        context = _make_context(
+            deployment_id=dep_a,
+            deployed_services=[
+                _service("web", 8000, "server", dep_a),
+                _service("metrics", 9090, "server", dep_a),
+                _service("web-again", 8000, "server", dep_a),
+                _service("dns", 53, "server", dep_a, kind="udp"),
+            ],
+            components=components,
+            labels={"environment_id": "env-1"},
+        )
+
+        policies = _policies(self.utility.build_resources(context, ns_a, ns_a))
+
+        assert list(policies) == ["allow-environment-to-server"]
+        assert policies["allow-environment-to-server"]["spec"]["ingress"][0][
+            "ports"
+        ] == [
+            {"port": 8000, "protocol": "TCP"},
+            {"port": 9090, "protocol": "TCP"},
+            {"port": 53, "protocol": "UDP"},
+        ]
+
+    def test_other_deployments_services_get_no_policy(self) -> None:
+        dep_a = uuid4()
+        dep_b = uuid4()
+        ns_a = get_kubernetes_reference(dep_a)
+        components = _make_components(("server", {"app": "web"}))
+        context = _make_context(
+            deployment_id=dep_a,
+            deployed_services=[_service("peer", 8000, "server", dep_b)],
+            components=components,
+            labels={"environment_id": "env-1"},
+        )
+
+        assert self.utility.build_resources(context, ns_a, ns_a) == []
+
+    def test_no_policy_without_environment_id(self) -> None:
+        dep_a = uuid4()
+        ns_a = get_kubernetes_reference(dep_a)
+        components = _make_components(("server", {"app": "web"}))
+        context = _make_context(
+            deployment_id=dep_a,
+            deployed_services=[_service("web", 8000, "server", dep_a)],
+            components=components,
+        )
+
+        resources = self.utility.build_resources(context, ns_a, ns_a)
+
+        assert [r["kind"] for r in resources] == ["Service"]
+
+    def test_policy_named_after_component_not_service_name(self) -> None:
+        """A service-name override changes the Service name, not the policy name (ADR-073)."""
+        dep_a = uuid4()
+        ns_a = get_kubernetes_reference(dep_a)
+        components = _make_components(("app", {"styrmin/component": "app"}))
+        context = _make_context(
+            deployment_id=dep_a,
+            deployed_services=[_service("portal", 8080, "app", dep_a)],
+            components=components,
+            labels={"environment_id": "env-1"},
+        )
+
+        policies = _policies(self.utility.build_resources(context, ns_a, ns_a))
+
+        assert list(policies) == ["allow-environment-to-app"]
+
+    def test_policy_name_is_a_valid_kubernetes_name(self) -> None:
+        assert environment_policy_name("Task_Worker") == (
+            "allow-environment-to-task-worker"
+        )

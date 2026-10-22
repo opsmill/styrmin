@@ -94,7 +94,9 @@ class IngressUtility(Utility):
         # Render the Jinja2 template using the shared environment (cached loader)
         env = get_jinja_environment()
         template = env.get_template(self.values_template_file)
-        rendered = template.render(context=context, release_reference=release_reference)
+        rendered = template.render(
+            context=context, release_reference=release_reference, namespace=namespace
+        )
         values = yaml.safe_load(rendered)
 
         resources: list[dict[str, Any]] = []

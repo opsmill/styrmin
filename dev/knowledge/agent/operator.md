@@ -251,8 +251,10 @@ All resources created from a StyrminDeployment carry:
 
 ### Resource Naming
 
-- NetworkPolicies: `{release_reference}-{policy_name}` (e.g., `abc123def-default-deny-egress`)
-- NetworkPolicies per deployment: default-deny-egress, default-deny-ingress, allow-traefik-ingress, traefik-netpolicy-egress, prefect-netpolicy-egress, plus app-specific
+- NetworkPolicies: the bare policy name (e.g., `default-deny-egress`); each deployment has its own namespace, so names cannot collide
+- NetworkPolicies per deployment, from the ingress utility: default-deny-egress, default-deny-ingress, allow-traefik-ingress, allow-egress-to-environment (when the context has an environment id), traefik-netpolicy-egress, prefect-netpolicy-egress, infrahub-netpolicy-egress
+- NetworkPolicies per deployment, from the service-discovery utility: `allow-environment-to-<component>`, one for each component that serves a declared service; it admits the namespaces of the environment on the services' ports (#557)
+- Plus the policies that the application's chart creates
 
 ### Apply semantics
 

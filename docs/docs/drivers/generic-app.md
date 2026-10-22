@@ -148,9 +148,14 @@ pod does not have.
   `allow_internet` is `true`, and cannot when it is `false`. It never reaches
   private address ranges, except the other applications of its environment.
 
-The driver declares these network policies itself, because Styrmin's
-default policies for an environment allow connections to a deployment only
-from the environment's ingress controller and Styrmin's own components
+The driver declares these network policies itself. Styrmin's own policies
+also let the other applications of the environment call the application on
+its service port, and let the application call the services that other
+drivers declare. See
+[Which connections the network policies allow](../concepts-and-architecture/ingress-and-networking.md#which-connections-the-network-policies-allow).
+Styrmin's policies allow outbound connections only for Traefik, Prefect and
+Infrahub pods and to the environment, so without its own policies the
+application could not reach DNS or the internet
 ([opsmill/styrmin#284](https://github.com/opsmill/styrmin/issues/284)).
 
 ### Several deployments in one environment

@@ -323,6 +323,35 @@ connects to the PostgreSQL in the clone, not to production.
 The driver declares which services are internal and which are external.
 External services get an external hostname; internal services do not.
 
+#### Which connections the network policies allow
+
+Styrmin writes network policies into the namespace of each deployment. On a
+cluster whose network plugin enforces network policies, such as Cilium,
+they allow these connections:
+
+- **Inside a deployment.** A pod accepts connections from the other pods of
+  its namespace. Which pods may open them depends on the outbound rules:
+  Styrmin writes outbound rules for Traefik, Prefect and Infrahub pods only
+  ([opsmill/styrmin#284](https://github.com/opsmill/styrmin/issues/284)).
+- **To a declared service, from the environment.** The other deployments of
+  the environment connect to each service that the driver declares, on the
+  service's port only. Styrmin writes one policy for each component that
+  serves a declared service, named `allow-environment-to-<component>`. It
+  admits the namespaces labelled with the environment's
+  `styrmin/environment_id`.
+- **From a deployment to the rest of its environment.** The pods of a
+  deployment connect to the other namespaces of the environment
+  (`allow-egress-to-environment`). The policies of those namespaces then
+  decide which ports answer.
+
+A component that serves no declared service, such as a database that only
+its own application uses, is reachable from its own namespace only. The
+applications of another environment cannot connect to the applications of
+this one.
+
+A chart can add network policies of its own. Styrmin does not change them,
+and they can admit more than the rules above.
+
 #### Service aliases
 
 Each deployment runs in its own namespace, `styrmin-<deployment id>`. So
