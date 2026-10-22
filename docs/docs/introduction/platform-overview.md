@@ -119,6 +119,7 @@ upgrade.
 - [**What is an application driver?**](../concepts-and-architecture/what-is-a-driver.md):
   the application driver in detail.
 - [**Install Styrmin on a local vCluster**](../installation/vcluster-local.md):
-  the same install as the Quickstart, one step at a time.
+  install a released version on your laptop from the published Helm chart
+  and container image, one step at a time.
 - [**Install Styrmin on DigitalOcean**](../installation/digitalocean.md):
   an install on DOKS with backups stored in DigitalOcean Spaces.
