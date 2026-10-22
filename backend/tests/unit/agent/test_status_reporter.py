@@ -660,6 +660,70 @@ class TestPollOnce:
             await _poll_once(GRAPHQL_URL)
             mock_crd_report.assert_called_once()
 
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("namespace_read", "expected_phases"),
+        [
+            # Kubernetes deletes the CR with the namespace's contents, before
+            # it removes the namespace itself.
+            pytest.param(
+                SimpleNamespace(metadata=SimpleNamespace(deletion_timestamp="now")),
+                [],
+                id="namespace-terminating",
+            ),
+            pytest.param(None, ["Deleted"], id="namespace-gone"),
+            pytest.param(RuntimeError("API down"), [], id="namespace-read-fails"),
+            # A create that failed before its CR write leaves a namespace that
+            # nothing deletes.
+            pytest.param(
+                SimpleNamespace(metadata=SimpleNamespace(deletion_timestamp=None)),
+                ["Deleted"],
+                id="namespace-not-being-deleted",
+            ),
+        ],
+    )
+    async def test_deleting_deployment_without_cr_is_deleted_once_namespace_is_gone(
+        self, namespace_read: object, expected_phases: list[str]
+    ) -> None:
+        """FR-003 of spec 008: the deployment is not deleted while its namespace terminates."""
+        namespace_mock = (
+            AsyncMock(side_effect=namespace_read)
+            if isinstance(namespace_read, Exception)
+            else AsyncMock(return_value=namespace_read)
+        )
+        with (
+            patch(
+                "styrmin_backend.agent.status.reporter._get_active_deployments",
+                new_callable=AsyncMock,
+                return_value=[(uuid4(), "deleting")],
+            ),
+            patch(
+                "styrmin_backend.agent.status.reporter._collect_pod_statuses",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "styrmin_backend.agent.status.reporter._collect_crd_status",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "styrmin_backend.agent.status.reporter.get_namespace",
+                namespace_mock,
+            ),
+            patch(
+                "styrmin_backend.agent.status.reporter._report_pod_statuses_to_backend",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "styrmin_backend.agent.status.reporter._report_deployment_statuses_to_backend",
+                new_callable=AsyncMock,
+            ) as mock_crd_report,
+        ):
+            await _poll_once(GRAPHQL_URL)
+        reports = mock_crd_report.call_args[0][1]
+        assert [report.phase for report in reports] == expected_phases
+
 
 class TestRunStatusReporter:
     @pytest.mark.anyio

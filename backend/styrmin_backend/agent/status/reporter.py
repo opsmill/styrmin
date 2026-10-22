@@ -15,6 +15,7 @@ import httpx
 from styrmin_backend.agent.service.kubernetes.exceptions import CustomResourceNotFound
 from styrmin_backend.agent.service.kubernetes.primitives import (
     get_custom_resource,
+    get_namespace,
     list_pods,
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
@@ -166,6 +167,19 @@ async def _collect_crd_status(namespace: str, crd_name: str) -> dict | None:
             "Failed to read StyrminDeployment CRD in namespace %s", namespace
         )
         return None
+
+
+async def _namespace_is_terminating(namespace: str) -> bool:
+    """True while Kubernetes removes the namespace, and when the namespace cannot be read.
+
+    A namespace that is gone, or that has no deletion timestamp, is not terminating.
+    """
+    try:
+        found = await get_namespace(name=namespace)
+    except Exception:
+        logger.exception("Failed to read namespace %s", namespace)
+        return True
+    return found is not None and found.metadata.deletion_timestamp is not None
 
 
 async def _get_active_deployments(graphql_url: str) -> list[tuple[UUID, str]]:
@@ -330,8 +344,14 @@ async def _poll_once(graphql_url: str) -> None:
             # thinks the deployment is DELETING but the CR is gone, we
             # synthesise a final ``displayState: Deleted`` report so the
             # backend's status reporter flips the row to DELETED and
-            # atomically stamps deleted_at. This is the race-free terminal
-            # transition for the platform-driven path.
+            # atomically stamps deleted_at. Kubernetes deletes the CR with
+            # the rest of the namespace's contents, before it removes the
+            # namespace itself, so the report waits while the namespace is
+            # terminating (FR-003). A namespace that nothing deletes, such as
+            # the one of a create that failed before its CR write, does not
+            # hold the report back.
+            if await _namespace_is_terminating(namespace):
+                continue
             logger.info(
                 "Deployment %s is DELETING and its CR is gone — emitting "
                 "synthetic Deleted status report",
