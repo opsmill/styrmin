@@ -4,7 +4,7 @@ Helm chart for deploying Styrmin - a deployment orchestration platform for Kuber
 
 ## Prerequisites
 
-- Kubernetes 1.34.1+ (the FluxCD v2.9 controllers that the agent installs support 1.34.1 and later)
+- Kubernetes 1.25+ (earlier versions do not check the validation rules of the agent's CRDs; the FluxCD project supports the v2.9 controllers that the agent installs only on 1.34.1 and later)
 - Helm 3.8+
 - PV provisioner support in the underlying infrastructure (for PostgreSQL persistence)
 
