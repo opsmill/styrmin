@@ -13,41 +13,74 @@ on:
         type: boolean
         default: false
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
   pull-requests: read
 
-jobs:
-  files-changed:
-    name: Detect which file has changed
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      non_runtime_only: ${{ steps.non-runtime-only.outputs.non_runtime_only }}
-    steps:
-      - uses: actions/checkout@v6
-      # Returns 'true' only when *every* changed file matches a non-runtime pattern.
-      # Used by the E2E jobs to skip on tooling-only PRs (docs, agent config, etc.).
-      - name: Check if only non-runtime files changed
-        uses: dorny/paths-filter@v3
-        id: non-runtime-only
-        with:
-          predicate-quantifier: every
-          filters: |
-            non_runtime_only:
-              - 'docs/**'
-              - '**/*.md'
-              - '**/*.mdx'
-              - '.specify/**'
-              - '.agents/**'
-              - '.github/prompts/**'
-              - 'LICENSE*'
-              - 'CODEOWNERS'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
+jobs:
+  # --- Shared catalog callers (opsmill/opsmill-cicd-workflows) -----------
+  files-changed:
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/files-changed.yml@a51bb79fc402a61f88fda054054c21a57e4a05ef
+    with:
+      filters: |
+        python:
+          - 'backend/**'
+          - 'cli/**'
+          - 'driver/**'
+          - 'python_sdk/**'
+          - 'tests/**'
+          - 'pyproject.toml'
+          - 'uv.lock'
+        # "runtime" = any changed file that is NOT tooling/docs-only. Negation of
+        # the old non-runtime-gate set, which makes it equivalent to that gate's
+        # `predicate-quantifier: every` non_runtime_only: this filter matches iff
+        # SOME changed file is outside the non-runtime set (i.e. exactly when the
+        # old non_runtime_only was false). The e2e/integration jobs gate on it.
+        runtime:
+          - '**'
+          - '!docs/**'
+          - '!**/*.md'
+          - '!**/*.mdx'
+          - '!.specify/**'
+          - '!.agents/**'
+          - '!.github/prompts/**'
+          - '!LICENSE*'
+          - '!CODEOWNERS'
+    secrets:
+      # Read token for the (private) shared repo's side-checkout. Org secret.
+      SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
+
+  lint:
+    needs: files-changed
+    if: contains(fromJSON(needs.files-changed.outputs.changes), 'python')
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/lint.yml@a51bb79fc402a61f88fda054054c21a57e4a05ef
+    with:
+      ruff: true
+      ty: true
+      python-version: '3.14'
+    secrets:
+      SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
+
+  python-test:
+    needs: [files-changed, pre-commit-hooks]
+    if: contains(fromJSON(needs.files-changed.outputs.changes), 'python')
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/python-uv.yml@a51bb79fc402a61f88fda054054c21a57e4a05ef
+    with:
+      python-versions: '["3.14"]'
+      # Match the old `unit-tests` job's scope (unit + functional; e2e and
+      # integration need service containers and stay bespoke). Scoping to
+      # backend/tests/unit alone would silently drop backend/tests/functional.
+      pytest-args: 'backend/tests --ignore=backend/tests/e2e --ignore=backend/tests/integration'
+      uv-sync-args: '--all-extras --frozen'
+      coverage: false
+    secrets:
+      SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
+
+  # --- Bespoke jobs (kept verbatim from the previous ci.yml) -------------
   pre-commit-hooks:
     name: Pre-Commit Hooks
     # Runs both stages of .pre-commit-config.yaml on every PR. This is the
@@ -138,28 +171,6 @@ jobs:
       - name: Build frontend (includes tsc)
         run: pnpm build
 
-  unit-tests:
-    name: Unit Tests
-    needs: ["pre-commit-hooks"]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      - run: uv sync
-      - name: Run unit tests
-        # E2E and integration tests need vcluster — they run in dedicated jobs.
-        run: >-
-          uv run pytest -v
-          --ignore=backend/tests/e2e
-          --ignore=backend/tests/integration
-          backend/tests
-
   cli-tests:
     name: CLI Unit Tests
     needs: ["pre-commit-hooks"]
@@ -197,7 +208,7 @@ jobs:
   integration-tests:
     name: Integration Tests
     needs: ["files-changed", "pre-commit-hooks"]
-    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
+    if: github.event_name == 'workflow_dispatch' || contains(fromJSON(needs.files-changed.outputs.changes), 'runtime')
     runs-on:
       group: huge-runners
     timeout-minutes: 20
@@ -223,7 +234,7 @@ jobs:
   e2e-tests:
     name: E2E Tests (${{ matrix.entrypoint }} / ${{ matrix.shard }})
     needs: ["files-changed", "pre-commit-hooks"]
-    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
+    if: github.event_name == 'workflow_dispatch' || contains(fromJSON(needs.files-changed.outputs.changes), 'runtime')
     runs-on:
       group: huge-runners
     # Raised from 40 because a cell's *worst case* has to leave room for the

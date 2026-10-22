@@ -1,0 +1,74 @@
+---
+# Composed by .github/dependabot/compose.py (fragments: base uv docker) from
+# opsmill/opsmill-cicd-workflows `.github/dependabot/{base,overlay-*}.yml`,
+# with two styrmin-specific adjustments:
+#   - docker `directory: /docker` — styrmin's Dockerfile lives at docker/.
+#   - `time` values quoted — the shared composer currently emits them unquoted,
+#     which Dependabot rejects (`03:00` parses as a sexagesimal integer, but the
+#     schema wants a string). Tracked for a fix in the shared composer; re-apply
+#     these two tweaks if you re-compose before that lands.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 10
+    groups:
+      github-actions-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: chore(deps)
+      prefix-development: chore(deps-dev)
+      include: scope
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 10
+    groups:
+      uv-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+      - python
+    commit-message:
+      prefix: chore(deps)
+      prefix-development: chore(deps-dev)
+      include: scope
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 10
+    groups:
+      docker-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: chore(deps)
+      prefix-development: chore(deps-dev)
+      include: scope

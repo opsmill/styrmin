@@ -1,0 +1,97 @@
+---
+name: Publish
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+        required: true
+        description: Existing release tag to (re)publish (e.g. v0.3.2)
+
+permissions: {}
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-22.04
+    permissions: {}
+    outputs:
+      tag: ${{ steps.strip.outputs.tag }}
+      version: ${{ steps.strip.outputs.version }}
+    steps:
+      - name: derive version from tag
+        id: strip
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+  publish-docker:
+    needs: version
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-docker.yml@a51bb79fc402a61f88fda054054c21a57e4a05ef
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+      attestations: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+      release-branch: ${{ needs.version.outputs.tag }}
+      image-name: styrmin
+      dockerfile-path: docker/Dockerfile
+      registries: '["${{ vars.HARBOR_HOST }}"]'
+      extra-tags: latest
+      cosign-sign: true
+    secrets:
+      SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
+      REGISTRY_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+
+  publish-helm-agent:
+    needs: version
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-helm.yml@a51bb79fc402a61f88fda054054c21a57e4a05ef
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+      attestations: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+      release-branch: ${{ needs.version.outputs.tag }}
+      chart-path: helm/agent
+      oci-registry: ${{ vars.HARBOR_HOST }}
+      dependency-update: true
+    secrets:
+      SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
+      REGISTRY_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+
+  # The styrmin chart depends on styrmin-agent — publish the agent chart
+  # first, exactly as release.yml orders it today.
+  publish-helm-styrmin:
+    needs:
+      - version
+      - publish-helm-agent
+    uses: opsmill/opsmill-cicd-workflows/.github/workflows/publish-helm.yml@a51bb79fc402a61f88fda054054c21a57e4a05ef
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+      attestations: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+      release-branch: ${{ needs.version.outputs.tag }}
+      chart-path: helm/styrmin
+      oci-registry: ${{ vars.HARBOR_HOST }}
+      dependency-update: true
+    secrets:
+      SHARED_CHECKOUT_TOKEN: ${{ secrets.OPSMILL_SHARED_CICD_READ_TOKEN }}
+      REGISTRY_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
