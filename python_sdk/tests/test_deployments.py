@@ -202,6 +202,78 @@ async def test_get_deployment_not_found(client: StyrminClient, mock_transport: A
         await client.deployments.get("11111111-2222-3333-4444-555555555555")
 
 
+async def test_get_status_returns_the_operator_status(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.return_value = {
+        "data": {
+            "deployment": {
+                "name": "my-app",
+                "status": "failed",
+                "crdStatus": {
+                    "phase": "Failed",
+                    "message": "Component 'server': component container 'wrong-name' was not found",
+                    "conditions": [
+                        {
+                            "type": "HelmReleaseReady",
+                            "status": "False",
+                            "reason": "ComponentContainerNotFound",
+                            "message": "component container 'wrong-name' was not found",
+                            "lastTransitionTime": "2026-10-22T10:00:00Z",
+                        }
+                    ],
+                    "managedResourceCounts": {
+                        "networkPolicies": 2,
+                        "secrets": 1,
+                        "helmReleases": 1,
+                        "services": 0,
+                        "middlewares": 0,
+                    },
+                    "lastPolledAt": "2026-10-22T10:00:05Z",
+                },
+            }
+        }
+    }
+
+    deployment = await client.deployments.get_status("11111111-2222-3333-4444-555555555555")
+
+    query, variables = mock_transport.execute.call_args.args
+    assert "query GetDeploymentStatus(" in query
+    assert variables == {"deploymentId": "11111111-2222-3333-4444-555555555555"}
+    assert deployment.status == "failed"
+    assert deployment.crd_status is not None
+    assert deployment.crd_status.phase == "Failed"
+    assert deployment.crd_status.message == "Component 'server': component container 'wrong-name' was not found"
+    [condition] = deployment.crd_status.conditions
+    assert (condition.type_, condition.status, condition.reason) == (
+        "HelmReleaseReady",
+        "False",
+        "ComponentContainerNotFound",
+    )
+    assert deployment.crd_status.managed_resource_counts is not None
+    assert deployment.crd_status.managed_resource_counts.helm_releases == 1
+    assert deployment.crd_status.last_polled_at is not None
+
+
+async def test_get_status_before_the_first_report(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.return_value = {
+        "data": {"deployment": {"name": "my-app", "status": "pending", "crdStatus": None}}
+    }
+
+    deployment = await client.deployments.get_status("11111111-2222-3333-4444-555555555555")
+
+    assert deployment.status == "pending"
+    assert deployment.crd_status is None
+
+
+async def test_get_status_not_found(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.return_value = {
+        "data": {"deployment": None},
+        "errors": [{"message": "Deployment not found", "extensions": {"code": "NOT_FOUND"}}],
+    }
+
+    with pytest.raises(ResourceNotFoundError, match="Deployment not found"):
+        await client.deployments.get_status("11111111-2222-3333-4444-555555555555")
+
+
 async def test_get_by_name_success(client: StyrminClient, mock_transport: AsyncMock) -> None:
     mock_transport.execute.return_value = {
         "data": {

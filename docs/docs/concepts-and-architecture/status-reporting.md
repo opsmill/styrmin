@@ -252,10 +252,12 @@ within about 15 seconds.
   the last known state, and a running operator-phase step shows "No
   report from the agent since" and the time of the last report after 60
   seconds without one.
-- The GraphQL API returns the same data in the `podStatuses` and
-  `deploymentStatuses` fields, so external dashboards can read it too.
-  The Python SDK reads the pod statuses as described in
-  [Reading pod statuses from a script](#reading-pod-statuses-from-a-script).
+- The GraphQL API returns the same data in the `Deployment.podStatuses`
+  and `Deployment.crdStatus` fields, so external dashboards can read it
+  too. The Python SDK reads them as described in
+  [Reading pod statuses from a script](#reading-pod-statuses-from-a-script)
+  and
+  [Reading the operator's status from a script](#reading-the-operators-status-from-a-script).
 
 ### Reading pod statuses from a script
 
@@ -339,6 +341,37 @@ Each item is a `PodStatus` from `styrmin_sdk.models`. Its `deployment_id`
 names the deployment of the pod, and its `phase` is a `PodPhase`.
 `deployments.get_pod_statuses()` returns the same fields, except
 `deployment_id`.
+
+### Reading the operator's status from a script
+
+`client.deployments.get_status()` in the Python SDK returns the
+deployment state and, as `crd_status`, what the agent last reported for
+the deployment's `StyrminDeployment`:
+
+- `phase` and `message`: the operator's phase, such as `Failed`, and
+  its message.
+- `conditions`: each condition of the CR, with its `type_`, `status`,
+  `reason`, `message` and `last_transition_time`.
+- `managed_resource_counts`: the number of network policies, secrets,
+  HelmReleases, services and middlewares the operator manages for the
+  deployment.
+- `last_polled_at`: when the server received the report.
+
+`crd_status` is `None` until the agent first reports the deployment. In
+the GraphQL API, the same data is `Deployment.crdStatus`.
+
+```python
+from styrmin_sdk import StyrminClient
+
+# The client reads its token from STYRMIN_TOKEN, or takes token=... explicitly.
+async with StyrminClient(server_address="https://styrmin.example") as client:
+    deployment = await client.deployments.get_status(deployment_id)
+    print(deployment.status)
+    if deployment.crd_status is not None:
+        print(deployment.crd_status.phase, deployment.crd_status.message)
+        for condition in deployment.crd_status.conditions:
+            print(condition.type_, condition.status, condition.reason, condition.message)
+```
 
 ### Next steps
 

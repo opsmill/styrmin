@@ -54,6 +54,10 @@ from styrmin_sdk.graphql._generated.get_deployment_pod_statuses import (
     GetDeploymentPodStatuses,
     GetDeploymentPodStatusesDeploymentPodStatuses,
 )
+from styrmin_sdk.graphql._generated.get_deployment_status import (
+    GetDeploymentStatus,
+    GetDeploymentStatusDeployment,
+)
 from styrmin_sdk.graphql._generated.get_deployment_timeline import (
     GetDeploymentTimeline,
     GetDeploymentTimelineDeploymentTimeline,
@@ -782,6 +786,22 @@ class DeploymentResource(BaseResource):
         self._check_graphql_errors(result)
         validated = GetDeploymentPodStatuses.model_validate(result["data"])
         return validated.deployment.pod_statuses if validated.deployment else []
+
+    async def get_status(self, deployment_id: str | UUID) -> GetDeploymentStatusDeployment:
+        """Read the deployment state and the operator's last reported status of a deployment.
+
+        ``crd_status`` holds what the status reporter last sent for the
+        deployment's ``StyrminDeployment``: the phase, the message, the
+        conditions, the count of each kind of managed resource, and the time
+        the server received that report. It is ``None`` until the agent first
+        reports the deployment.
+        """
+        result = await self._transport.execute(
+            load_query("get_deployment_status"),
+            {"deploymentId": str(deployment_id)},
+        )
+        self._check_graphql_errors(result)
+        return self._parse(GetDeploymentStatus, result["data"], "deployment", GetDeploymentStatusDeployment)
 
     async def _resolve_environment_id(self, environment_name: str, cluster_name: str | None) -> UUID:
         """Resolve ``(environment_name, cluster_name)`` to a single ``environment_id``.

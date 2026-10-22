@@ -1775,14 +1775,11 @@ async def _wait_for_deployment_status(
 
 async def _read_status_and_last_poll(
     client: StyrminClient, deployment_id
-) -> tuple[str, str | None]:
+) -> tuple[str, datetime | None]:
     """Read ``deployment.status`` and the last agent status report time together."""
-    raw = await client._transport.execute(
-        load_query("get_deployment_status"), {"deploymentId": str(deployment_id)}
-    )
-    assert "errors" not in raw, raw
-    deployment = raw["data"]["deployment"]
-    return deployment["status"], (deployment.get("crdStatus") or {}).get("lastPolledAt")
+    deployment = await client.deployments.get_status(deployment_id)
+    crd_status = deployment.crd_status
+    return deployment.status, crd_status.last_polled_at if crd_status else None
 
 
 async def _status_after_next_report(

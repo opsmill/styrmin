@@ -49,6 +49,9 @@ from kubernetes_asyncio import client as kubeclient
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
 from styrmin_sdk.exceptions import OperationFailedError
+from styrmin_sdk.graphql._generated.get_deployment_status import (
+    GetDeploymentStatusDeployment,
+)
 from styrmin_sdk.models import (
     ComponentConfigInput,
     EnvVarInput,
@@ -300,21 +303,17 @@ def _pod_shape(workload: Any) -> dict[str, Any]:
 async def _wait_for_deployment_status(
     client: StyrminClient,
     deployment_id: str,
-    predicate: Callable[[dict], bool],
+    predicate: Callable[[GetDeploymentStatusDeployment], bool],
     *,
     description: str,
     timeout: float = RECONCILE_TIMEOUT_SECONDS,
-) -> dict:
+) -> GetDeploymentStatusDeployment:
     """Poll ``Deployment.status`` and ``crdStatus`` until ``predicate`` holds."""
     deadline = time.monotonic() + timeout
-    deployment: dict = {}
+    deployment: GetDeploymentStatusDeployment | None = None
     while time.monotonic() < deadline:
-        raw = await client._transport.execute(
-            load_query("get_deployment_status"), {"deploymentId": deployment_id}
-        )
-        assert "errors" not in raw, raw
-        deployment = raw["data"]["deployment"] or {}
-        if deployment and predicate(deployment):
+        deployment = await client.deployments.get_status(deployment_id)
+        if predicate(deployment):
             return deployment
         await asyncio.sleep(2)
     raise TimeoutError(
@@ -665,7 +664,7 @@ async def test_override_with_version_change_reaches_upgrade_job(
     await _wait_for_deployment_status(
         client,
         deployment_id,
-        lambda d: d["status"] == "running",
+        lambda d: d.status == "running",
         description="status == running",
     )
     await _wait_for_server_image(vcluster, namespace, patched_v2)
@@ -837,7 +836,7 @@ async def test_misnamed_container_never_added(
     await _wait_for_deployment_status(
         client,
         deployment_id,
-        lambda d: d["status"] == "running",
+        lambda d: d.status == "running",
         description="status == running",
     )
     baseline = await _wait_for_server_image(vcluster, namespace, CHART_IMAGE)
@@ -854,23 +853,24 @@ async def test_misnamed_container_never_added(
     failed = await _wait_for_deployment_status(
         client,
         deployment_id,
-        lambda d: d["status"] == "failed",
+        lambda d: d.status == "failed",
         description="status == failed",
         timeout=GUARD_FAILURE_TIMEOUT_SECONDS,
     )
 
-    crd_status = failed["crdStatus"]
-    assert crd_status["phase"] == "Failed", crd_status
-    message = crd_status["message"]
+    crd_status = failed.crd_status
+    assert crd_status is not None, failed
+    assert crd_status.phase == "Failed", crd_status
+    message = crd_status.message or ""
     assert "Component 'server'" in message, message
     assert f"component container '{MISNAMED_CONTAINER}' was not found" in message, (
         message
     )
     helm_condition = next(
-        c for c in crd_status["conditions"] if c["type"] == "HelmReleaseReady"
+        c for c in crd_status.conditions if c.type_ == "HelmReleaseReady"
     )
-    assert helm_condition["status"] == "False", helm_condition
-    assert helm_condition["reason"] == "ComponentContainerNotFound", helm_condition
+    assert helm_condition.status == "False", helm_condition
+    assert helm_condition.reason == "ComponentContainerNotFound", helm_condition
 
     # Nothing was applied: no container added, the chart image still runs.
     apps = kubeclient.AppsV1Api(vcluster["api"])
