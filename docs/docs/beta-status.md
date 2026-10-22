@@ -299,11 +299,13 @@ first release with the change.
 
 ## Features that are not in the beta
 
-- Network isolation of a cloned environment, tracked in
-  [opsmill/styrmin#36](https://github.com/opsmill/styrmin/issues/36). Values
-  stored in the restored data, such as credentials or webhook URLs, are copied
-  as they are, so a clone can reach the same external systems as its source.
-  See [What a clone is not isolated from](./concepts-and-architecture/backups-and-restores.md#what-a-clone-is-not-isolated-from).
+- Network isolation of a cloned environment. A clone runs in its own
+  namespaces, but values stored in the restored data, such as credentials
+  or webhook URLs, are copied as they are, so a clone can reach the same
+  external systems as its source. See
+  [What a clone is not isolated from](./concepts-and-architecture/backups-and-restores.md#what-a-clone-is-not-isolated-from).
+  [Coming next](#coming-next) lists outbound traffic control for
+  environments.
 - More than one cluster per Styrmin install, and cloning an environment into
   another cluster.
 - Restoring a backup into another deployment. Styrmin restores a backup only
@@ -314,30 +316,36 @@ first release with the change.
 - Long-lived API tokens. Scripts log in with `STYRMIN_USERNAME` and
   `STYRMIN_PASSWORD`, or reuse the session token of `styrminctl login` in
   `STYRMIN_TOKEN`. A session ends after 30 days, or after 7 days without use.
-- Pagination, filtering and ordering of GraphQL lists, tracked in
-  [opsmill/styrmin#26](https://github.com/opsmill/styrmin/issues/26) and
-  [opsmill/styrmin#27](https://github.com/opsmill/styrmin/issues/27).
-- CPU and memory requests and limits for each component, tracked in
-  [opsmill/styrmin#382](https://github.com/opsmill/styrmin/issues/382).
-- Stopping, starting and restarting a whole deployment, tracked in
-  [opsmill/styrmin#99](https://github.com/opsmill/styrmin/issues/99). You can
-  stop and start components.
 - Deleting an environment from the environment page, tracked in
   [opsmill/styrmin#254](https://github.com/opsmill/styrmin/issues/254). Use
   `styrminctl environments delete`.
-- Changing the config of an environment with `styrminctl`, tracked in
-  [opsmill/styrmin#425](https://github.com/opsmill/styrmin/issues/425). Use
-  the environment page or the API.
-- Ingress controllers other than Traefik, backup systems other than Velero,
-  and the planned environment network features on CNIs other than Cilium,
-  tracked in [opsmill/styrmin#464](https://github.com/opsmill/styrmin/issues/464),
-  [opsmill/styrmin#466](https://github.com/opsmill/styrmin/issues/466) and
-  [opsmill/styrmin#463](https://github.com/opsmill/styrmin/issues/463).
 
 ## Coming next
 
 These features have an open issue, and no release date is set for them.
 Some already have a written design or an open pull request, as noted.
+
+### Isolating environments and routing traffic
+
+- Control the outbound traffic of an environment: allow only traffic inside
+  the cluster, only traffic to a list of addresses, or all traffic. A cloned
+  environment starts with traffic inside the cluster only. Tracked in
+  [opsmill/styrmin#36](https://github.com/opsmill/styrmin/issues/36).
+- Give the outbound traffic of an environment a fixed source IP address or
+  range, so that firewalls can match it. Tracked in
+  [opsmill/styrmin#32](https://github.com/opsmill/styrmin/issues/32).
+- Put the traffic of an environment in its own VLAN. Tracked in
+  [opsmill/styrmin#33](https://github.com/opsmill/styrmin/issues/33).
+- Declare in an application driver which components can connect to each
+  other and which can reach the internet, and block all other traffic.
+  Tracked in [opsmill/styrmin#131](https://github.com/opsmill/styrmin/issues/131).
+- Use the planned environment network features on clusters whose CNI is not
+  Cilium. Tracked in
+  [opsmill/styrmin#463](https://github.com/opsmill/styrmin/issues/463).
+- Serve applications through an ingress controller other than Traefik, or
+  through the Kubernetes Gateway API. Tracked in
+  [opsmill/styrmin#464](https://github.com/opsmill/styrmin/issues/464) and
+  [opsmill/styrmin#465](https://github.com/opsmill/styrmin/issues/465).
 
 ### Backing up and restoring
 
@@ -347,51 +355,101 @@ Some already have a written design or an open pull request, as noted.
   [opsmill/styrmin#534](https://github.com/opsmill/styrmin/issues/534).
 - Rename a backup and add a description to it. Tracked in
   [opsmill/styrmin#39](https://github.com/opsmill/styrmin/issues/39).
+- Back up the Neo4j Community database of Infrahub with an offline dump that
+  a backup action makes. Tracked in
+  [opsmill/styrmin#438](https://github.com/opsmill/styrmin/issues/438).
+- Run backups and restores with a backup system other than Velero. Tracked
+  in [opsmill/styrmin#466](https://github.com/opsmill/styrmin/issues/466).
 
 ### Deploying and changing applications
 
+- Stop, start and restart a whole deployment in one action. Tracked in
+  [opsmill/styrmin#99](https://github.com/opsmill/styrmin/issues/99).
+- Set CPU and memory requests and limits for each component of a
+  deployment. Tracked in
+  [opsmill/styrmin#382](https://github.com/opsmill/styrmin/issues/382).
 - Choose the application version from a list of releases when you deploy or
   upgrade, instead of typing it. Tracked in
   [opsmill/styrmin#336](https://github.com/opsmill/styrmin/issues/336).
+- Get an error before the deployment starts when its application driver
+  needs a storage class that the cluster does not set. Tracked in
+  [opsmill/styrmin#303](https://github.com/opsmill/styrmin/issues/303).
 - View the name of the deployment that a pod affinity term names when you
   read a config, and get a warning before you delete a deployment that an
   affinity term names. Tracked in
   [opsmill/styrmin#521](https://github.com/opsmill/styrmin/issues/521) and
   [opsmill/styrmin#523](https://github.com/opsmill/styrmin/issues/523).
-- Expose applications through the Kubernetes Gateway API. Tracked in
-  [opsmill/styrmin#465](https://github.com/opsmill/styrmin/issues/465).
+- Record an owner and contact details on a deployment. Tracked in
+  [opsmill/styrmin#35](https://github.com/opsmill/styrmin/issues/35).
 
-### Loading application drivers
+### Writing and loading application drivers
 
+- Check the files of a driver and render its templates on your machine,
+  without a Styrmin server or a cluster. Tracked in
+  [opsmill/styrmin#23](https://github.com/opsmill/styrmin/issues/23).
 - Load a driver version from a Git tag or a commit, in addition to the tip
   of a branch. Tracked in
   [opsmill/styrmin#528](https://github.com/opsmill/styrmin/issues/528).
+- Deploy Peering Manager, Netpicker, Akvorado, Gitea and Workflow
+  Orchestrator with new bundled application drivers. Tracked in
+  [opsmill/styrmin#200](https://github.com/opsmill/styrmin/issues/200),
+  [opsmill/styrmin#144](https://github.com/opsmill/styrmin/issues/144),
+  [opsmill/styrmin#139](https://github.com/opsmill/styrmin/issues/139),
+  [opsmill/styrmin#63](https://github.com/opsmill/styrmin/issues/63) and
+  [opsmill/styrmin#34](https://github.com/opsmill/styrmin/issues/34).
 
-### Viewing logs and change history
+### Viewing the state and the history of Styrmin
 
-- View the logs of a component from the frontend or the API. The issue
-  is open for a design discussion. Tracked in
-  [opsmill/styrmin#147](https://github.com/opsmill/styrmin/issues/147).
+- View which clusters have a running agent, when each agent last reported,
+  and the health of its components. Tracked in
+  [opsmill/styrmin#97](https://github.com/opsmill/styrmin/issues/97).
+- View a log of the actions on deployments, environments, clusters and
+  backups: what changed, who made the change and when. Tracked in
+  [opsmill/styrmin#201](https://github.com/opsmill/styrmin/issues/201).
 - View who changed the config of a cluster, when, and what the previous
   config was. Tracked in
   [opsmill/styrmin#447](https://github.com/opsmill/styrmin/issues/447).
+- View the logs of a component from the frontend or the API. The issue is
+  open for a design discussion. Tracked in
+  [opsmill/styrmin#147](https://github.com/opsmill/styrmin/issues/147).
+- Collect the metrics and logs of the deployed applications with an
+  observability stack that Styrmin runs. The tools and the scope are not
+  decided yet. Tracked in
+  [opsmill/styrmin#462](https://github.com/opsmill/styrmin/issues/462).
 
-### Using the Python SDK
+### Integrating Styrmin with other tools
 
+- Declare Styrmin resources as Kubernetes resources and apply them with
+  `kubectl`. Which resources this covers is not decided yet. Tracked in
+  [opsmill/styrmin#544](https://github.com/opsmill/styrmin/issues/544).
+- Read credentials from an external secrets manager, such as Vault, AWS
+  Secrets Manager or Sealed Secrets. Tracked in
+  [opsmill/styrmin#22](https://github.com/opsmill/styrmin/issues/22).
+- Give AI agents access to the clusters, environments, deployments, drivers
+  and tasks of Styrmin through an MCP server in the Styrmin server. Tracked
+  in [opsmill/styrmin#60](https://github.com/opsmill/styrmin/issues/60).
+
+### Using the API, the Python SDK and styrminctl
+
+- Page, filter and order the results of GraphQL list queries. Tracked in
+  [opsmill/styrmin#26](https://github.com/opsmill/styrmin/issues/26) and
+  [opsmill/styrmin#27](https://github.com/opsmill/styrmin/issues/27).
+- Change the config of an environment with `styrminctl`. Tracked in
+  [opsmill/styrmin#425](https://github.com/opsmill/styrmin/issues/425).
 - Wait for a deployment change to finish with one SDK call. A pull request is
   open. Tracked in
   [opsmill/styrmin#545](https://github.com/opsmill/styrmin/issues/545).
 - Read the pod statuses and the services of a whole environment, or the pod
-  statuses of a whole cluster, in one call. A pull request is open. Tracked
-  in [opsmill/styrmin#547](https://github.com/opsmill/styrmin/issues/547).
+  statuses of a whole cluster, in one SDK call. A pull request is open.
+  Tracked in [opsmill/styrmin#547](https://github.com/opsmill/styrmin/issues/547).
 - Read the phase, message and conditions that the operator reported for a
-  deployment. A pull request is open. Tracked in
+  deployment with the SDK. A pull request is open. Tracked in
   [opsmill/styrmin#548](https://github.com/opsmill/styrmin/issues/548).
-- Read the parameters, services and env vars that a driver version declares.
-  Tracked in
+- Read the parameters, services and env vars that a driver version declares
+  with the SDK. Tracked in
   [opsmill/styrmin#546](https://github.com/opsmill/styrmin/issues/546).
-- Change one override of one component without sending every component
-  block again. Tracked in
+- Change one override of one component with the SDK without sending every
+  component block again. Tracked in
   [opsmill/styrmin#549](https://github.com/opsmill/styrmin/issues/549).
 
 ## Security limitations
