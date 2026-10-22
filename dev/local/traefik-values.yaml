@@ -1,7 +1,7 @@
 ---
 # Traefik ingress controller values for the local vCluster demo.
 #
-# service.type is set to ClusterIP via `--set` in the invoke task
+# service.spec.type is set to ClusterIP via `--set` in the invoke task
 # `cluster.traefik`; the demo flow port-forwards svc/traefik on every
 # platform rather than relying on a LoadBalancer.
 #

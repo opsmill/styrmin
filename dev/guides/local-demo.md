@@ -67,9 +67,9 @@ region `garage`, bucket `velero`. Point any S3 client at
 
 ## Platform notes
 
-- **Traefik exposure**: Installed with `service.type=ClusterIP` on every
+- **Traefik exposure**: Installed with `service.spec.type=ClusterIP` on every
   platform and reached via a backgrounded `kubectl port-forward
-  svc/traefik 8080:80`. We avoid `service.type=LoadBalancer` (and
+  svc/traefik 8080:80`. We avoid a `LoadBalancer` Service (and
   vCluster's embedded LB provider) on Linux for parity with macOS — one
   code path, one access URL, no host-network surprises.
 - **Single shared ingress**: The demo cluster is bootstrapped with
