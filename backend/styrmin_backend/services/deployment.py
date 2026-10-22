@@ -94,7 +94,8 @@ from styrmin_backend.services.context import check_deployment_scheduling
 from styrmin_backend.services.scheduling.references import bind_deployment_references
 from deepdiff import DeepDiff
 
-from styrmin_backend.domain.models import Instance
+from styrmin_backend.context.models.contexts import GlobalContext
+from styrmin_backend.domain.models import Instance, InstanceStatus
 from styrmin_backend.services.driver.models.resources.services import (
     ServiceDefinition,
 )
@@ -1351,6 +1352,130 @@ async def _reconcile_services_for_version(
         )
     else:
         await delete_services_for_deployment(deployment_id=deployment.id, uow=uow)
+
+
+async def adopt_restored_instance(
+    deployment_id: UUID,
+    instance_id: UUID,
+    uow: UnitOfWork,
+) -> bool:
+    """Record the instance a restore put back as the deployment's active instance.
+
+    An in-place restore of the backup of an earlier instance puts that
+    instance's ``StyrminDeployment`` and ``HelmRelease`` back, so the cluster
+    runs that instance's application version and config. This writes the same
+    state to the database, so that the deployment's version, config and
+    parameters, its driver binding and its active instance match what runs.
+    Without it, the next update builds its instance from the later state and
+    applies it over the restored one.
+
+    Nothing is applied to the cluster: it already runs the instance. When the
+    instance is bound to another driver version than the deployment, the
+    deployment's components and deployed services are set to that driver
+    version's, with the service names the deployment has.
+
+    Args:
+        deployment_id: The deployment the restore went into.
+        instance_id: The instance the restored backup was taken of.
+        uow: The unit of work to use.
+
+    Returns:
+        bool: ``True`` when the active instance changed, ``False`` when the
+            instance already was the active one, the deployment has no active
+            instance, or the instance does not belong to the deployment.
+    """
+    async with uow:
+        deployment = await uow.deployments.find(id=deployment_id)
+        if deployment is None:
+            raise DeploymentNotFoundError(
+                f"Deployment with ID {deployment_id} not found"
+            )
+        instance_model = await uow.application_instances.get(instance_id)
+        if instance_model is None or instance_model.deployment_id != deployment.id:
+            logger.warning(
+                "Restored instance {} does not belong to deployment {}; "
+                "the active instance is left as it is",
+                instance_id,
+                deployment.id,
+            )
+            return False
+        instance = Instance(
+            id=instance_model.id,
+            name=instance_model.name,
+            application_version=instance_model.application_version,
+            status=InstanceStatus(instance_model.status.value),
+            context=GlobalContext.model_validate(instance_model.context),
+            application_driver_version_id=instance_model.application_driver_version_id,
+            deployment_id=instance_model.deployment_id,
+            sequence=instance_model.sequence,
+        )
+        active_instance = deployment.active_instance
+        if active_instance is None or active_instance.id == instance.id:
+            # A deployment without an active instance is not given one by a restore.
+            return False
+
+        if (
+            instance.application_driver_version_id
+            != deployment.application_driver_version_id
+        ):
+            driver_version = await uow.application_driver_versions.get(
+                id=instance.application_driver_version_id
+            )
+            assert driver_version is not None, "Driver version not found"
+            deployment.set_components(
+                [
+                    Component.create(
+                        name=name,
+                        config=component.config.model_dump(
+                            mode="json", exclude_none=True
+                        ),
+                        enabled=component.enabled,
+                    )
+                    for name, component in (
+                        instance.context.components.items()
+                        if instance.context.components is not None
+                        else []
+                    )
+                ]
+            )
+            service_definitions = parse_service_definitions(driver_version.services)
+            service_overrides, _ = await _resolve_service_overrides(
+                deployment=deployment,
+                service_definitions=service_definitions,
+                service_name_overrides=None,
+                uow=uow,
+            )
+            await _reconcile_services_for_version(
+                deployment=deployment,
+                service_definitions=service_definitions,
+                service_name_overrides=service_overrides,
+                uow=uow,
+            )
+            deployment.application_driver_version_id = (
+                instance.application_driver_version_id
+            )
+
+        deployment.application_version = instance.application_version
+        deployment.config = (
+            instance.context.deployment.config.model_dump(
+                mode="json", exclude_none=True
+            )
+            or None
+        )
+        deployment.parameters = dict(instance.context.parameters)
+        deployment.set_active_instance(instance=instance)
+
+        await uow.deployments.save(deployment=deployment)
+        await uow.commit()
+        logger.info(
+            "Restored instance {} (version {}) is now the active instance of "
+            "deployment {}; it was {}",
+            instance.id,
+            instance.application_version,
+            deployment.id,
+            active_instance.id,
+        )
+        return True
 
 
 async def redeploy_for_environment_update(

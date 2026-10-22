@@ -62,7 +62,8 @@ The `backups` commands take a deployment: `create` and `list` by name or by
   confirmation. Pass `--yes` to skip the
   question; without a terminal, the command refuses unless you pass `--yes`.
   The restore puts the earlier instance's `StyrminDeployment` and `HelmRelease`
-  back in the namespace, and the deployment keeps its active instance.
+  back in the namespace, and Styrmin makes that instance the deployment's
+  active instance.
 
 A raw `--instance-id` (`--target-instance-id` on `restore`) targets one
 instance instead: `create` backs up that instance, `list` lists only its
