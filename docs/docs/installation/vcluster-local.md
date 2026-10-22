@@ -2,84 +2,67 @@
 title: Install Styrmin on a local vCluster
 sidebar_label: Local laptop (vCluster)
 sidebar_position: 4
-description: Install Styrmin on a vCluster on your laptop, one step at a time — the manual version of `uv run invoke start`.
+description: Install a released version of Styrmin on a vCluster on your laptop, from the Helm chart and the container image on registry.opsmill.io.
 ---
 
 ## Install Styrmin on a local vCluster
 
-This guide installs Styrmin on a [vCluster](https://www.vcluster.com/) on
-your laptop, with the same steps as the `uv run invoke start` command,
-run one at a time. Use it to see what each step does, to replace a
-component, or to find the step that fails.
+Install a released version of Styrmin on a [vCluster](https://www.vcluster.com/)
+that runs in Docker on your laptop. Every step uses the Helm chart and the
+container image that OpsMill publishes on `registry.opsmill.io`, so you need
+no copy of the Styrmin repository.
 
 By the end, you have:
 
 - a vCluster named `styrmin` that runs in Docker on your machine,
-- [Traefik](https://traefik.io/) as the cluster's ingress controller,
-- a [Garage](https://garagehq.deuxfleurs.fr/) object store in the
-  cluster, for S3-compatible Velero backups,
-- Styrmin (server, agent, Prefect, PostgreSQL) installed from the Helm
-  chart in the repository,
-- one **cluster**, one **environment**, one **backup storage location**,
-  and the bundled **application driver versions** loaded,
-- the UI at `http://styrmin.local.styrmin.io:8080`.
+- [Traefik](https://traefik.io/) as the ingress controller of the vCluster,
+- a [Garage](https://garagehq.deuxfleurs.fr/) object store in the vCluster,
+  which Velero uses to store backups,
+- Styrmin (server, agent, Prefect, PostgreSQL) installed from the published
+  Helm chart,
+- one cluster, one environment, one backup storage location, and the
+  bundled `infrahub` and `semaphore` application drivers loaded,
+- the frontend at `http://styrmin.local.styrmin.io:8080`.
 
-> To run every step with one command, see the
+> To run Styrmin from a clone of the repository with one command, for
+> example to test a change to Styrmin, see the
 > [Quickstart](../installation/quickstart.md).
-
-### How this compares to `uv run invoke start`
-
-Each section below is one step of `tasks/demo.py::start`. If a manual
-step fails, run the matching invoke task instead. Each task is
-independent and idempotent.
-
-| Step | Manual command | Invoke equivalent |
-|------|----------------|-------------------|
-| 2. Create vCluster | `vcluster create styrmin …` | `uv run invoke cluster.create` |
-| 3. Connect kubeconfig | `vcluster connect styrmin …` | `uv run invoke cluster.connect` |
-| 4. Install Traefik | `helm upgrade --install traefik …` | `uv run invoke cluster.traefik` |
-| 5. Install Garage | `kubectl apply -f dev/local/garage.yaml …` | `uv run invoke cluster.garage` |
-| 6. Build the image | `docker build …` | `uv run invoke build` |
-| 7. Install Styrmin chart | `helm upgrade --install styrmin …` | (part of `start`) |
-| 8. Port-forward Traefik | `kubectl port-forward …` | (part of `start`) |
-| 9. Create the first records | `styrminctl …` | `uv run invoke dev.bootstrap` |
 
 ### Prerequisites
 
 You need the following on your `PATH`:
 
-- **Docker**: this guide runs vCluster with its `docker` driver
-- **`kubectl`**
-- **`helm`** ≥ 3.x
-- **`vcluster`** CLI ([install instructions](https://www.vcluster.com/docs/getting-started/setup))
-- **`uv`** ([install instructions](https://docs.astral.sh/uv/getting-started/installation/))
+- Docker: the vCluster runs in Docker with the vCluster `docker` driver
+- `kubectl`
+- `helm` 3.8 or later, which can install charts from an OCI registry
+- the `vcluster` CLI ([install instructions](https://www.vcluster.com/docs/getting-started/setup))
 
-TCP port **`8080`** must be free on your host: the Traefik port-forward
-listens on it. The guide does not use port `80`, because it is a
+TCP port `8080` must be free on your machine, because the port-forward to
+Traefik listens on it. The guide does not use port `80`, which is a
 privileged port.
 
-> The wildcard zone `*.local.styrmin.io` resolves to `127.0.0.1`, so
-> `http://styrmin.local.styrmin.io:8080` opens the UI without changes
-> to `/etc/hosts`.
+> The DNS zone `*.local.styrmin.io` resolves to `127.0.0.1`, so
+> `http://styrmin.local.styrmin.io:8080` opens the frontend without a
+> change to `/etc/hosts`.
 
-### 1. Clone and install the toolchain
+### 1. Choose the Styrmin version
+
+The commands below install the Styrmin version in `STYRMIN_VERSION`.
+The examples use 0.1.52, the latest release when this guide was written.
+The [Changelog](../changelog.md) lists the releases.
 
 ```shell
-git clone https://github.com/opsmill/styrmin.git
-cd styrmin
-uv sync
+export STYRMIN_VERSION=0.1.52
 ```
 
-`uv sync` installs the root project, the backend, SDK, and CLI workspace
-packages, and the `dev` dependency group, which includes `invoke` and
-`styrminctl`.
+The Helm chart and the container image have the same version number, and
+the chart installs the image of its own version.
 
 ### 2. Create the vCluster
 
-[vCluster](https://www.vcluster.com/) runs a virtual Kubernetes control
-plane in a pod on a host cluster. With the `docker` driver, Docker is
-the host, so you do not need an existing Kubernetes cluster.
-`uv run invoke cluster.create` runs the same command.
+vCluster runs a virtual Kubernetes control plane. With the `docker` driver,
+the control plane runs in a Docker container, so you need no Kubernetes
+cluster on your machine.
 
 ```shell
 vcluster create styrmin \
@@ -88,138 +71,218 @@ vcluster create styrmin \
   --connect=false
 ```
 
-- `--driver=docker` runs the vCluster control-plane container in Docker,
-  without a host Kubernetes cluster.
-- `--upgrade` makes the command idempotent: on an existing vCluster, it
-  upgrades the vCluster instead of failing.
-- `--connect=false` leaves your kubeconfig unchanged. The next step
-  switches it.
+- `--driver=docker` runs the vCluster in Docker.
+- `--upgrade` upgrades the vCluster if it exists, so you can run the
+  command again without an error.
+- `--connect=false` leaves your kubeconfig unchanged. The next step changes
+  it.
 
-`vcluster list` now shows `styrmin` as `Running`.
+`vcluster list --driver=docker` now shows `styrmin` as `running`.
 
-### 3. Connect your kubeconfig
+### 3. Connect `kubectl` to the vCluster
 
 ```shell
 vcluster connect styrmin --driver=docker
 ```
 
-This writes a kubeconfig entry for the vCluster and switches your
-current context to it. Check the result:
+The command adds a kubeconfig context for the vCluster and makes it the
+current context. Check the result:
 
 ```shell
-kubectl get nodes
 kubectl config current-context
+kubectl get nodes
 ```
 
-The output lists one node, the vCluster's synthetic node.
+The output lists one node.
 
-> **Tip:** every later `kubectl` and `helm` command in this guide runs
-> against the vCluster, not your usual cluster. If you have other
-> clusters configured, check `kubectl config current-context` before
-> each step.
+> Every later `kubectl` and `helm` command in this guide runs against the
+> vCluster. If your kubeconfig has other clusters, check
+> `kubectl config current-context` before each step.
 
-### 4. Install Traefik (ingress controller)
+### 4. Install Traefik
 
-The Styrmin frontend is served over HTTP through a Kubernetes `Ingress`,
-so the cluster needs an ingress controller. The demo uses Traefik.
-Another ingress controller also works, but the Helm values and hostnames
-in this guide are for Traefik.
+Styrmin serves its frontend through a Kubernetes `Ingress`, so the
+vCluster needs an ingress controller. This guide uses Traefik. Another
+ingress controller also works, but the values and the host names below are
+for Traefik.
+
+Write the values file:
 
 ```shell
-helm repo add traefik https://helm.traefik.io/traefik
+cat > traefik-values.yaml <<'EOF'
+service:
+  spec:
+    type: ClusterIP
+ports:
+  web:
+    port: 80
+    expose:
+      default: true
+providers:
+  kubernetesIngress:
+    publishedService:
+      enabled: true
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+EOF
+```
+
+Install the chart:
+
+```shell
+helm repo add traefik https://helm.traefik.io/traefik --force-update
 helm repo update traefik
 helm upgrade --install traefik traefik/traefik \
+  --version 42.1.2 \
   -n styrmin --create-namespace \
-  -f dev/local/traefik-values.yaml \
-  --set service.type=ClusterIP \
-  --take-ownership \
+  -f traefik-values.yaml \
   --wait --timeout 5m
 ```
 
-Note:
+- `service.spec.type: ClusterIP` gives Traefik a Service without an external
+  IP. Step 7 forwards a port of your machine to it, so the steps are the
+  same on Linux and macOS.
+- `publishedService` makes Traefik write the address of its Service in the
+  status of each `Ingress`.
+- `--force-update` updates the `traefik` repository entry if it exists.
+- `--version 42.1.2` installs the chart version that this guide was tested
+  with.
 
-- **`service.type=ClusterIP`**, not `LoadBalancer`. The vCluster has no
-  cloud provider for `LoadBalancer` Services, so step 8 exposes Traefik
-  with a port-forward instead of an external IP. With `ClusterIP`, the
-  steps are the same on Linux and macOS.
-- **`dev/local/traefik-values.yaml`** sets a small resource request and
-  enables `publishedService`, so Traefik writes the address of its
-  Service in the status of each `Ingress`.
-
-### 5. Install Garage (backup storage)
-
-Styrmin runs backups with Velero, which needs an S3-compatible object
-store. For a local install, run Garage in the same namespace:
+Check that the Service type is `ClusterIP`:
 
 ```shell
-kubectl apply -f dev/local/garage.yaml -n styrmin
+kubectl get service traefik -n styrmin
+```
+
+### 5. Install Garage
+
+Styrmin runs backups with Velero, which stores them in an S3-compatible
+object store. On your laptop, run Garage in the same namespace. The
+manifest below creates a `ConfigMap` with the Garage configuration, a
+volume claim for the data, a `Deployment` with one replica, and a `Service`
+for the S3 API on port `3900`:
+
+```shell
+cat > garage.yaml <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: garage
+data:
+  garage.toml: |
+    metadata_dir = "/var/lib/garage/meta"
+    data_dir = "/var/lib/garage/data"
+    db_engine = "sqlite"
+    replication_factor = 1
+    rpc_bind_addr = "[::]:3901"
+    rpc_public_addr = "127.0.0.1:3901"
+    rpc_secret = "a0b1c2d3e4f5061728394a5b6c7d8e9fa0b1c2d3e4f5061728394a5b6c7d8e9f"
+
+    [s3_api]
+    s3_region = "garage"
+    api_bind_addr = "[::]:3900"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: garage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: garage
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: garage
+  template:
+    metadata:
+      labels:
+        app: garage
+    spec:
+      containers:
+        - name: garage
+          image: dxflrs/garage:v2.4.1
+          ports:
+            - containerPort: 3900
+          readinessProbe:
+            tcpSocket:
+              port: 3901
+            periodSeconds: 2
+          volumeMounts:
+            - name: config
+              mountPath: /etc/garage.toml
+              subPath: garage.toml
+            - name: data
+              mountPath: /var/lib/garage
+      volumes:
+        - name: config
+          configMap:
+            name: garage
+        - name: data
+          persistentVolumeClaim:
+            claimName: garage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: garage
+spec:
+  selector:
+    app: garage
+  ports:
+    - name: s3
+      port: 3900
+EOF
+kubectl apply -n styrmin -f garage.yaml
 kubectl rollout status deployment/garage -n styrmin --timeout=120s
 ```
 
-The manifest creates a `ConfigMap` (Garage's configuration and a setup
-script), a `Deployment` with one replica, and a `Service` that exposes
-the S3 API on port `3900` and the admin API on port `3903`.
-
-A new Garage node stores no data until it has a cluster layout. The pod
-runs a second container that waits for the admin API, assigns the
-layout, and creates the `velero` bucket and its access key. The pod
-reports ready only after that, so when `kubectl rollout status`
-returns, the bucket exists.
-
-The access key is `GKdeadbeefdeadbeefdeadbeef` with secret
-`deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef`.
-Velero uses it, and so does the backup storage location you create in
-step 9. These are fixed demo values: use your own keys for an
-installation that you keep.
-
-### 6. Build the Styrmin container image
-
-The demo values file
-([dev/local/demo-values.yaml](https://github.com/opsmill/styrmin/blob/develop/dev/local/demo-values.yaml))
-sets the image to `styrmin:latest`. Build it locally:
+The pod is ready when Garage listens on its RPC port, `3901`. A new Garage
+node stores no data until it has a cluster layout. Assign the layout, then
+create the access key and the `velero` bucket with the `garage` CLI in the
+pod:
 
 ```shell
-uv run invoke build
+NODE_ID=$(kubectl exec -n styrmin deploy/garage -- /garage node id -q)
+kubectl exec -n styrmin deploy/garage -- \
+  /garage layout assign -z styrmin -c 10G "${NODE_ID%%@*}"
+kubectl exec -n styrmin deploy/garage -- /garage layout apply --version 1
+kubectl exec -n styrmin deploy/garage -- \
+  /garage key import --yes -n velero \
+  GKdeadbeefdeadbeefdeadbeef \
+  deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+kubectl exec -n styrmin deploy/garage -- /garage bucket create velero
+kubectl exec -n styrmin deploy/garage -- \
+  /garage bucket allow --read --write --owner velero --key velero
 ```
 
-The task runs:
+- `garage node id -q` prints the node ID followed by `@` and its address.
+  `${NODE_ID%%@*}` keeps the part before the `@`.
+- `key import` creates the access key `GKdeadbeefdeadbeefdeadbeef` with the
+  secret key that follows it. Step 9 gives the same keys to Styrmin. These
+  are demo values: use your own keys for an installation that you keep.
 
-1. `docker build` of the image that the server and the agent both run,
-2. `helm dependency update helm/agent`,
-3. `helm dependency update helm/styrmin`.
+The volume claim keeps the data, the layout, the key and the bucket when
+the pod restarts, so you run these commands once.
 
-The vCluster pulls images through the host's Docker daemon, so it can
-use `styrmin:latest` right away, without a push to a registry.
+### 6. Install Styrmin
 
-> Skip this step if you built the image before and your code has not
-> changed. The `start` task builds the image only when it is missing or
-> when you pass `--build-image`.
-
-### 7. Install Styrmin with Helm
+Write the values file:
 
 ```shell
-helm upgrade --install styrmin helm/styrmin \
-  -n styrmin --create-namespace \
-  -f dev/local/demo-values.yaml \
-  --wait --timeout 10m
-```
-
-`dev/local/demo-values.yaml` contains the values for the demo. The
-relevant settings:
-
-```yaml
-image:
-  repository: styrmin
-  tag: latest
-  pullPolicy: IfNotPresent
-
-# The agent subchart defaults its tag to the released appVersion, so the
-# locally-built tag has to be pinned there too.
-styrmin-agent:
-  image:
-    tag: latest
-    pullPolicy: IfNotPresent
-
+cat > styrmin-values.yaml <<'EOF'
 ingress:
   enabled: true
   className: traefik
@@ -230,15 +293,51 @@ ingress:
           pathType: Prefix
 
 styrmin:
+  url:
+    apiK8s: http://styrmin-server.styrmin.svc.cluster.local:8000
   adminUsername: admin
   adminPassword: styrmin
-  sessionCookieSecure: false   # demo is plain HTTP; cookies would be dropped otherwise
+  sessionCookieSecure: false
   telemetry:
-    enabled: false             # the local demo sends no telemetry reports
+    enabled: false
 
 velero:
-  backupsEnabled: false        # the BSL of step 9 points Velero to Garage instead
+  backupsEnabled: false
+  credentials:
+    useSecret: false
+EOF
 ```
+
+- `ingress` serves the frontend and the API at
+  `styrmin.local.styrmin.io` through Traefik.
+- `styrmin.url.apiK8s` is the address of the Styrmin API that pods in the
+  vCluster use.
+- `adminUsername` and `adminPassword` set the first admin user. Styrmin
+  creates this user at the first install only: a later change to these values
+  does not change the password.
+- `sessionCookieSecure: false` lets your browser keep the session cookie over
+  plain HTTP. Leave it at `true` on an installation that uses HTTPS.
+- `telemetry.enabled: false` turns off the daily anonymous report of the
+  server. See [Telemetry & privacy](../reference/telemetry.md).
+- `velero.backupsEnabled: false` and `velero.credentials.useSecret: false`
+  install Velero without a backup storage location of its own. Step 9
+  creates one in Styrmin, for the Garage bucket.
+
+Install the chart from the OpsMill registry:
+
+```shell
+helm upgrade --install styrmin \
+  oci://registry.opsmill.io/opsmill/chart/styrmin \
+  --version "$STYRMIN_VERSION" \
+  -n styrmin --create-namespace \
+  -f styrmin-values.yaml \
+  --wait --timeout 10m
+```
+
+The chart installs the Styrmin server and its task worker, the Styrmin
+agent with the FluxCD controllers, Prefect, PostgreSQL and Velero. The
+server and the agent run the image
+`registry.opsmill.io/opsmill/styrmin:$STYRMIN_VERSION`.
 
 Check that the server is running:
 
@@ -246,73 +345,93 @@ Check that the server is running:
 kubectl rollout status deployment/styrmin-server -n styrmin --timeout=300s
 ```
 
-### 8. Port-forward Traefik
+### 7. Forward a port to Traefik
 
-Traefik has a `ClusterIP` Service, so you forward a host port to reach
-it. The demo uses `8080`:
+Traefik has a `ClusterIP` Service, so forward a port of your machine to it.
+This guide uses `8080`:
 
 ```shell
 kubectl port-forward svc/traefik 8080:80 -n styrmin
 ```
 
-Keep it running in its own terminal, or run it in the background with
-`&` and record its PID. `invoke start` writes the PID to a file under
-`.vcluster/`.
-
-The UI is now available at:
+Leave the command running in its own terminal. The frontend is now
+available at:
 
 ```text
 http://styrmin.local.styrmin.io:8080
 ```
 
-### 9. Create the first records
+Log in with the user `admin` and the password `styrmin`.
 
-Styrmin runs, but its database has no records yet. This step uses
-`styrminctl` to create the cluster, the environment, and the backup
-storage location, and to load the bundled application driver versions.
+### 8. Run `styrminctl` in the server pod
 
-#### 9a. Log in
+The Styrmin image includes `styrminctl`, the Styrmin CLI. Run it in the
+server pod with `kubectl exec`, which needs no installation on your
+machine. Define a shell function for it:
 
 ```shell
-export STYRMIN_SERVER_ADDRESS=http://styrmin.local.styrmin.io:8080
-uv run styrminctl login --username admin
+styrminctl() {
+  kubectl exec -n styrmin deploy/styrmin-server -- \
+    env STYRMIN_USERNAME=admin STYRMIN_PASSWORD=styrmin styrminctl "$@"
+}
 ```
 
-The admin credentials come from `styrmin.adminUsername` and
-`styrmin.adminPassword` in `dev/local/demo-values.yaml`. If you changed
-them there, use the new values here.
+- `styrminctl` connects to the server at `http://localhost:8000`, its
+  default address, which is the server in the same pod.
+- `STYRMIN_USERNAME` and `STYRMIN_PASSWORD` log `styrminctl` in on each
+  call, with the admin user of step 6.
+- The command runs in the container, so a file that you pass to it, such as
+  `--config @file.json`, must be in the container. Pass the JSON inline
+  instead.
 
-#### 9b. Create the cluster record
-
-The `external_url_*` fields set how users reach the cluster's services.
-Styrmin builds the URLs of the services from them and from
-`fqdn_suffix`.
+Check that the function works:
 
 ```shell
-uv run styrminctl clusters create local \
+styrminctl whoami
+```
+
+The output shows `Username: admin` and `Role: ADMIN`.
+
+### 9. Create the first records
+
+The Styrmin database has no records yet. Create the cluster, the
+environment and the backup storage location, then load the bundled
+application drivers.
+
+#### 9a. Create the cluster
+
+```shell
+styrminctl clusters create local \
   --config '{
         "fqdn_suffix": "local.styrmin.io",
         "external_url_scheme": "http",
-        "external_url_port": 8080
+        "external_url_port": 8080,
+        "ingress_class": "traefik",
+        "standard_storage": {"storage_class": "local-path"},
+        "fast_storage": {"storage_class": "local-path"}
       }'
 ```
 
-Record the returned `id`, referred to as `<CLUSTER_ID>` below.
+- `fqdn_suffix`, `external_url_scheme` and `external_url_port` set the URLs
+  of the applications that you deploy, for example
+  `http://infrahub-<deployment-id>.local.styrmin.io:8080`.
+- `ingress_class` is the ingress class of Traefik.
+- `standard_storage` and `fast_storage` name the storage class of the
+  vCluster, `local-path`. The `infrahub` driver uses `fast_storage` for its
+  databases.
 
-#### 9c. Create the environment
+#### 9b. Create the environment
 
 ```shell
-uv run styrminctl environments create local --cluster local -c '{}'
+styrminctl environments create local --cluster local -c '{}'
 ```
 
-Record the returned `id`, referred to as `<ENVIRONMENT_ID>` below.
+#### 9c. Create the backup storage location
 
-#### 9d. Create the backup storage location
-
-Create a backup storage location (BSL) for the Garage store from step 5:
+Create a backup storage location for the Garage bucket of step 5:
 
 ```shell
-uv run styrminctl backup-locations create local \
+styrminctl backup-locations create local \
   --endpoint http://garage.styrmin.svc:3900 \
   --bucket velero \
   --region garage \
@@ -320,43 +439,59 @@ uv run styrminctl backup-locations create local \
   --secret-access-key deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
 ```
 
-Record the returned `id`, referred to as `<BSL_ID>` below.
+Note the `id` in the output. The next step uses it as `<BSL_ID>`.
 
-#### 9e. Assign the BSL to the environment
-
-```shell
-uv run styrminctl backup-locations assign <ENVIRONMENT_ID> <BSL_ID>
-```
-
-#### 9f. Load the bundled drivers
-
-The Styrmin image includes the example drivers at `/styrmin/drivers/`.
-Load `infrahub` and `semaphore`, the two drivers that the `dev.bootstrap`
-task loads by default:
+#### 9d. Assign the backup storage location to the environment
 
 ```shell
-uv run styrminctl drivers load-local-version /styrmin/drivers/infrahub
-uv run styrminctl drivers load-local-version /styrmin/drivers/semaphore
+styrminctl backup-locations assign local <BSL_ID> --cluster local
 ```
 
-Log in to the UI. It shows one cluster (`local`), one environment
-(`local`), and two drivers.
+Styrmin creates a Velero `BackupStorageLocation` for it. After a few
+seconds, its phase is `Available`:
+
+```shell
+kubectl get backupstoragelocations -n styrmin
+```
+
+#### 9e. Load the bundled application drivers
+
+The Styrmin image includes the example drivers in `/styrmin/drivers/`.
+Load `infrahub` and `semaphore`:
+
+```shell
+styrminctl drivers load-local-version /styrmin/drivers/infrahub
+styrminctl drivers load-local-version /styrmin/drivers/semaphore
+```
+
+The server and the agent read these paths in their own containers, which
+run the same image, so the actions of these drivers run. See
+[Actions of a driver loaded from a local directory](../drivers/loading-drivers.md#actions-of-a-driver-loaded-from-a-local-directory).
+
+Reload the frontend. It shows one cluster (`local`), one environment
+(`local`), and the two drivers.
 
 ### 10. Deploy an application
 
-From the UI or with `styrminctl`, create a deployment:
+Deploy Infrahub 1.6.0 in the `local` environment:
 
 ```shell
-uv run styrminctl deployments create infrahub 1.6.0 <ENVIRONMENT_ID>
+styrminctl deployments create infrahub 1.6.0 local --cluster local
 ```
 
-Follow the deployment with `styrminctl`:
+The output shows the id of the deployment. Follow the deployment:
 
 ```shell
-uv run styrminctl deployments get <DEPLOYMENT_ID>
+styrminctl deployments get <DEPLOYMENT_ID>
 ```
 
-Or port-forward the Prefect UI in another shell:
+The status changes from `pending` to `deploying`, then to `running`, after
+a few minutes. Infrahub is then available at
+`http://infrahub-local.local.styrmin.io:8080`. The deployment page of the
+frontend shows the same status and the steps of each task.
+
+To view the flow runs in Prefect, forward a port to the Prefect server in
+another terminal:
 
 ```shell
 kubectl port-forward svc/prefect-server 4200:4200 -n styrmin
@@ -364,54 +499,51 @@ kubectl port-forward svc/prefect-server 4200:4200 -n styrmin
 
 Then open [http://localhost:4200](http://localhost:4200).
 
-### Lifecycle
+### Pause, resume and delete the installation
 
-| What you want | Command |
-|---------------|---------|
-| Pause everything and keep the state | `vcluster pause styrmin --driver=docker` (or `uv run invoke stop`) |
-| Resume after a pause | `vcluster resume styrmin --driver=docker`, then run the port-forward again |
-| Delete everything | `vcluster delete styrmin --driver=docker` (or `uv run invoke destroy`) |
-| Start again with no data | `uv run invoke reset` |
+| Task | Command |
+|------|---------|
+| Pause the vCluster and keep its data | `vcluster pause styrmin --driver=docker` |
+| Resume the vCluster | `vcluster resume styrmin --driver=docker`, then run the port-forward of step 7 again |
+| Delete the vCluster and all its data | `vcluster delete styrmin --driver=docker` |
 
-The vCluster stores its state on a Docker volume, so `pause` and
-`resume` keep the cluster, environment, drivers, and deployments.
+The vCluster stores its data on a Docker volume, so a pause and a resume
+keep the cluster, the environment, the drivers, the deployments and the
+backups. To start again with no data, delete the vCluster and start again
+from step 2.
 
 ### Troubleshooting
 
-**`kubectl` connects to the wrong cluster.** `vcluster connect` switches
-your current context. If you ran `kubectl config use-context …` after
-it, `kubectl` uses your host cluster again. Run
-`vcluster connect styrmin --driver=docker` or
-`kubectl config use-context vcluster_…` again.
+`kubectl` connects to another cluster. `vcluster connect` changes your
+current context, and a later `kubectl config use-context` changes it back.
+Run `vcluster connect styrmin --driver=docker` again.
 
-**Port 8080 is already in use.** The port-forward command fails
-immediately. Stop the process that listens on the port, or change both
-the `kubectl port-forward` port and the `external_url_port` that you set
-on the cluster in step 9b.
+Port 8080 is in use. The port-forward command fails immediately. Stop the
+process that listens on the port, or use another port in both the
+`kubectl port-forward` command and the `external_url_port` of the cluster
+in step 9a.
 
-**The `styrmin:latest` pod is in `ImagePullBackOff`.** Run
-`uv run invoke build` again to build the image. The vCluster reads the
-images of the host's Docker daemon, so a local build is enough, without
-a push to a registry.
+A pod is in `ImagePullBackOff`. Check that `STYRMIN_VERSION` is a published
+release:
 
-**The bootstrap step says "Cluster already exists".** A previous
-bootstrap run created the cluster record. Run `uv run invoke reset` to
-start over with a new vCluster. `styrminctl clusters delete` removes the
-existing record only while the cluster has no environments: after the
-bootstrap has created one, Styrmin refuses the delete with an error
-that lists them.
+```shell
+helm show chart oci://registry.opsmill.io/opsmill/chart/styrmin --version "$STYRMIN_VERSION"
+```
 
-**Login fails with "invalid credentials".** Check that
-`styrmin.adminPassword` in `dev/local/demo-values.yaml` matches the
-password you enter. The Helm install sets the password on the first
-install. After you change it in the values file, run `helm upgrade` to
-apply it.
+`styrminctl` fails with "invalid credentials". Styrmin sets the admin
+password at the first install only. If you changed `adminPassword` in
+`styrmin-values.yaml` after the first install, use the first password in
+the `styrminctl` function, or delete the vCluster and install again.
+
+`styrminctl clusters create` fails because the cluster exists. A previous
+run created it. List the existing records with `styrminctl clusters list`
+and `styrminctl environments list`, and continue with the next step.
 
 ### Next steps
 
-- [**Platform overview**](../introduction/platform-overview.md): the
+- [Platform overview](../introduction/platform-overview.md): the
   components and terms of Styrmin.
-- [**What is an application driver?**](../concepts-and-architecture/what-is-a-driver.md):
+- [What is an application driver?](../concepts-and-architecture/what-is-a-driver.md):
   the specification that Styrmin uses to deploy each application.
-- [**Install Styrmin on DigitalOcean**](./digitalocean.md): install
-  Styrmin on a managed Kubernetes cluster.
+- [Install Styrmin on DigitalOcean](./digitalocean.md): install Styrmin on
+  a managed Kubernetes cluster.

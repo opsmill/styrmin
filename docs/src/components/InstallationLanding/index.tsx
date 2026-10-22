@@ -29,7 +29,7 @@ const platforms: Platform[] = [
     name: 'Local laptop (vCluster)',
     subtitle: 'Docker on your machine',
     description:
-      'Run Styrmin in a vCluster on Docker. The guide runs the steps of `uv run invoke start` one at a time.',
+      'Run a released version of Styrmin in a vCluster on Docker, from the published Helm chart and container image.',
     Logo: VclusterLogo,
     href: '/docs/installation/vcluster-local',
   },
