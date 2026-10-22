@@ -7,7 +7,7 @@ import os
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import yaml
@@ -15,6 +15,9 @@ from pydantic import ValidationError
 
 from styrmin_sdk._queries import load_query
 from styrmin_sdk._wait import (
+    DELETED_STATUS,
+    TERMINAL_FAILURE_STATUSES,
+    TERMINAL_SUCCESS_STATUSES,
     WAIT_POLL_INTERVAL_SECONDS,
     WAIT_TIMEOUT_SECONDS,
     is_terminal_failure,
@@ -37,6 +40,7 @@ from styrmin_sdk.graphql._generated.delete_deployment import (
     DeleteDeploymentDeleteDeployment,
 )
 from styrmin_sdk.graphql._generated.deploy import Deploy, DeployDeploy
+from styrmin_sdk.graphql._generated.enums import TaskResult
 from styrmin_sdk.graphql._generated.get_deployment import GetDeployment, GetDeploymentDeployment
 from styrmin_sdk.graphql._generated.get_deployment_by_name import (
     GetDeploymentByName,
@@ -85,8 +89,12 @@ from styrmin_sdk.models.deployment_manifest import (
     resolve_overrides,
 )
 from styrmin_sdk.models.image_reference import pinned_image_components
+from styrmin_sdk.models.task import FailedStep, TaskWait
 from styrmin_sdk.resources._base import BaseResource, JsonValue
 from styrmin_sdk.resources.tasks import TaskResource
+
+if TYPE_CHECKING:
+    from styrmin_sdk.graphql._generated.get_task import GetTaskTask
 
 
 def _expand_paths(paths: Sequence[Path | str]) -> list[Path]:
@@ -286,6 +294,27 @@ FAILED_TASK_STATUS = "failed"
 def failed_task_reason(task_id: UUID, message: str | None) -> str:
     """Describe a failed task by its id and, when it has one, its message."""
     return f"task {task_id} failed: {message}" if message else f"task {task_id} failed"
+
+
+def _failed_step_reason(step: FailedStep) -> str:
+    """Describe a failed step by its name and, when it has one, its newest error."""
+    return f'step "{step.name}" failed: {step.error}' if step.error else f'step "{step.name}" failed'
+
+
+#: ``Task.type`` of the task that :meth:`DeploymentResource.delete` returns.
+DELETE_DEPLOYMENT_TASK_TYPE = "delete_deployment"
+
+#: ``Deployment.status`` values that end :meth:`DeploymentResource.wait_for_task` once the task result is final.
+_SETTLED_STATUSES = TERMINAL_SUCCESS_STATUSES | TERMINAL_FAILURE_STATUSES | {DELETED_STATUS}
+
+
+async def _sleep_before_next_poll(deadline: float) -> bool:
+    """Sleep one poll interval, never past ``deadline``. Returns ``False``, without sleeping, once it has passed."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return False
+    await asyncio.sleep(min(WAIT_POLL_INTERVAL_SECONDS, remaining))
+    return True
 
 
 def _effective_image_overrides(update_input: UpdateDeploymentInput, stored_config: object) -> dict[str, str | None]:
@@ -644,6 +673,94 @@ class DeploymentResource(BaseResource):
         self._check_graphql_errors(result)
         return self._parse(RunJob, result["data"], "run_job", RunJobRunJob)
 
+    async def wait_for_task(self, task_id: str | UUID, *, max_wait: float | None = None) -> TaskWait:
+        """Wait until the change that a task of a deployment makes has finished.
+
+        ``task_id`` is the id of the task that :meth:`create`, :meth:`update`, :meth:`scale`,
+        :meth:`update_version`, :meth:`delete`, :meth:`start_components`,
+        :meth:`stop_components` or :meth:`run_job` returns.
+
+        1. Waits until the task result is no longer ``RUNNING``. The task result covers the
+           task, the tasks that its hook steps started, and the operator's rollout steps.
+        2. When the task result is ``SUCCEEDED``, waits until ``Deployment.status`` is
+           ``running``, ``failed`` or ``deleted``. The change succeeded when it is ``deleted``
+           after a ``delete_deployment`` task, and ``running`` after any other task.
+
+        ``Deployment.status`` alone does not tell when a change has finished:
+        :meth:`start_components` and :meth:`stop_components` leave it ``running`` until their
+        flow starts, and a task's ``SUCCESS`` status does not set it to ``running``.
+
+        Polls every ``WAIT_POLL_INTERVAL_SECONDS`` for at most ``max_wait`` seconds
+        (``WAIT_TIMEOUT_SECONDS`` when ``None``). A failed change or a timeout does not raise:
+        the returned :class:`~styrmin_sdk.models.TaskWait` gives the reason in
+        ``failure_reason``, and ``timed_out`` is true after a timeout. A failed task result names
+        the failed step of the task, or of a task it started.
+
+        Raises:
+            ValueError: ``max_wait`` is not positive.
+            ResourceNotFoundError: no task has this id.
+        """
+        _check_max_wait(max_wait)
+        deadline = time.monotonic() + (WAIT_TIMEOUT_SECONDS if max_wait is None else max_wait)
+        tasks = TaskResource(self._transport)
+        task = await tasks.get(task_id)
+        while task.result is TaskResult.RUNNING:
+            if not await _sleep_before_next_poll(deadline):
+                return await self._task_wait(task, failure_reason="wait timeout", timed_out=True)
+            task = await tasks.get(task_id)
+
+        if task.result is TaskResult.FAILED:
+            return await self._task_wait(task, failure_reason=await self._task_failure_reason(task))
+        if task.result is TaskResult.SUPERSEDED:
+            return await self._task_wait(
+                task, failure_reason=f"task {task.id} was superseded by a later task of the deployment"
+            )
+        if task.deployment_id is None:
+            return TaskWait(task_id=task.id, deployment_id=None, task_result=task.result)
+
+        expected = DELETED_STATUS if task.type_ == DELETE_DEPLOYMENT_TASK_TYPE else "running"
+        status = (await self.get(task.deployment_id)).status
+        while status.lower() not in _SETTLED_STATUSES:
+            if not await _sleep_before_next_poll(deadline):
+                return TaskWait(
+                    task_id=task.id,
+                    deployment_id=task.deployment_id,
+                    task_result=task.result,
+                    deployment_status=status,
+                    failure_reason="wait timeout",
+                    timed_out=True,
+                )
+            status = (await self.get(task.deployment_id)).status
+        return TaskWait(
+            task_id=task.id,
+            deployment_id=task.deployment_id,
+            task_result=task.result,
+            deployment_status=status,
+            failure_reason=None
+            if status.lower() == expected
+            else f"deployment status is {status}, expected {expected}",
+        )
+
+    async def _task_wait(self, task: GetTaskTask, *, failure_reason: str, timed_out: bool = False) -> TaskWait:
+        """A :class:`TaskWait` for a wait that ends on the task, with the deployment status read now."""
+        status = None if task.deployment_id is None else (await self.get(task.deployment_id)).status
+        return TaskWait(
+            task_id=task.id,
+            deployment_id=task.deployment_id,
+            task_result=task.result,
+            deployment_status=status,
+            failure_reason=failure_reason,
+            timed_out=timed_out,
+        )
+
+    async def _task_failure_reason(self, task: GetTaskTask) -> str:
+        """Name the failed step of ``task`` or of a task it started, else the task's own message."""
+        try:
+            step = await TaskResource(self._transport).failed_step(task.id)
+        except StyrminError:
+            step = None
+        return failed_task_reason(task.id, task.message) if step is None else _failed_step_reason(step)
+
     async def get_timeline(self, deployment_id: str | UUID) -> list[GetDeploymentTimelineDeploymentTimeline]:
         result = await self._transport.execute(
             load_query("get_deployment_timeline"),
@@ -951,7 +1068,7 @@ class DeploymentResource(BaseResource):
             return fallback
         if step is None:
             return fallback
-        return f'step "{step.name}" failed: {step.error}' if step.error else f'step "{step.name}" failed'
+        return _failed_step_reason(step)
 
     async def apply_files(
         self,

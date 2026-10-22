@@ -13,6 +13,17 @@ All notable changes to the Styrmin Python SDK will be documented in this file.
   stored enum values that `clusters.get()` returns. An unknown key at any depth raises
   `ValueError` before any request. With `dry_run=True`, nothing is saved. The call waits
   up to 600 seconds.
+- **`client.deployments.wait_for_task(task_id, *, max_wait=None)`** waits until the
+  change that a task of a deployment makes has finished, and returns a `TaskWait`. It
+  takes the task that `create()`, `update()`, `scale()`, `update_version()`, `delete()`,
+  `start_components()`, `stop_components()` or `run_job()` returns. It waits until the
+  task result is no longer `RUNNING`, then, when the result is `SUCCEEDED`, until the
+  deployment status is `running`, `failed` or `deleted`. `TaskWait.succeeded` is true
+  when the status is `running`, or `deleted` after `delete()`. Otherwise
+  `failure_reason` names the failed step, the superseded task, the deployment status or
+  the timeout, and the call does not raise. Before, a program polled by hand, and a
+  `running` status read right after `start_components()` or `stop_components()` was
+  the status from before the change. ([#545](https://github.com/opsmill/styrmin/issues/545))
 
 ### Fixed
 
