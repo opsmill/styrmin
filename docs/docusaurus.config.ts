@@ -167,7 +167,7 @@ const config: Config = {
               to: '/docs/installation',
             },
             {
-              label: 'Application Drivers',
+              label: 'Application drivers',
               to: '/docs/drivers/loading-drivers',
             },
           ],

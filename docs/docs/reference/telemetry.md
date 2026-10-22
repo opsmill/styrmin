@@ -1,10 +1,10 @@
 ---
-title: Telemetry & privacy
+title: Telemetry and privacy
 sidebar_position: 5
 description: What anonymous data the styrminctl CLI and the Styrmin server send to OpsMill, why, and how to turn each one off.
 ---
 
-## Telemetry & privacy
+## Telemetry and privacy
 
 Styrmin sends anonymous telemetry from two places. Each one has its own
 settings, read by a different process, and its own endpoint:
@@ -21,7 +21,7 @@ To turn telemetry off:
 - On your workstation, run `styrminctl telemetry disable`, or set
   `DO_NOT_TRACK=1` or `STYRMIN_TELEMETRY=0`.
 - In your cluster, set the Helm value `styrmin.telemetry.enabled: false`. See
-  [Turning server telemetry off](#turning-server-telemetry-off) for the other
+  [Turn server telemetry off](#turn-server-telemetry-off) for the other
   settings.
 
 Turning one off does not turn the other off. `DO_NOT_TRACK=1` and
@@ -34,77 +34,77 @@ the hosts named in the driver files. See
 
 ### CLI telemetry
 
-`styrminctl` collects **anonymous, opt-out** usage telemetry so the Styrmin
-maintainers can see which commands and options are actually used, on which
-platforms, and where they fail — and prioritise the CLI accordingly.
+`styrminctl` sends anonymous usage telemetry, which you can turn off. The
+Styrmin maintainers use it to count which commands and options are used, on
+which platforms, and where they fail.
 
 - **On by default** on interactive workstations.
-- **Silent in CI / non-interactive contexts** — no configuration needed.
-- **No first-run prompt and no banner.** This page is the disclosure.
+- **Off in CI and in non-interactive shells**, with no configuration.
+- **No prompt at first run and no banner.** This page is the disclosure.
 
-Dispatch is **best-effort and failure-isolated**: after each eligible command
-finishes, the CLI fire-and-forgets a single anonymous event over HTTPS and then
-exits. It never changes a command's output, exit code, or perceptible speed, and
-it silently drops the event if the endpoint is slow or unreachable. The added
-latency is hard-capped at **≤ 200 ms** for any endpoint state, including a hung
-connection. There is no on-disk spool, no retry, and no batching.
+After each eligible command finishes, the CLI sends one anonymous event over
+HTTPS, then exits. Sending never changes a command's output, exit code, or
+perceptible speed. The CLI waits at most **200 ms** for the request, whatever
+the state of the endpoint, including a connection that does not respond. When
+the endpoint is slow or cannot be reached, the CLI drops the event without an
+error. The CLI does not store events on disk, retry, or batch them.
 
-#### What is collected
+#### Fields of each event
 
-One JSON event per eligible invocation, with **only** these fields:
+Each eligible command sends one JSON event with **only** these fields:
 
 | Field | Example | Notes |
 |-------|---------|-------|
-| `event_id` | `a1b2c3d4-deployments_update` | `install_id[:8]` + `-` + command (spaces → `_`) |
-| `install_id` | `a1b2c3d4e5f6…` | a random anonymous id, generated once and persisted |
-| `command` | `deployments update` | the resolved command route, from a **closed set** |
-| `options` | `["--config", "--wait"]` | canonical **long option names** only, deduplicated and sorted |
+| `event_id` | `a1b2c3d4-deployments_update` | `install_id[:8]` + `-` + the command, with spaces replaced by `_` |
+| `install_id` | `a1b2c3d4e5f6…` | A random anonymous ID, created once and stored |
+| `command` | `deployments update` | The command name, from the fixed list of `styrminctl` commands |
+| `options` | `["--config", "--wait"]` | The **long names** of the options you passed (`--config` for `-c`), without duplicates and sorted |
 | `outcome` | `success` / `failure` | — |
-| `error_category` | `network` | `null` on success, else one of `auth`, `network`, `validation`, `not_found`, `server`, `usage`, `unknown` — bucketed by the error **type**, never a message |
+| `error_category` | `network` | `null` on success, otherwise one of `auth`, `network`, `validation`, `not_found`, `server`, `usage`, `unknown`, chosen from the error **type**, never from its message |
 | `styrminctl_version` | `0.1.0` | — |
 | `python_version` | `3.14.0` | — |
-| `os_family` | `Linux` | OS family only (`Linux` / `Darwin` / `Windows`) — never kernel/version detail |
+| `os_family` | `Linux` | The operating system family only (`Linux`, `Darwin` or `Windows`), never the kernel or its version |
 
-The event is wrapped in the envelope
+The CLI sends the event in the envelope
 `{"data": {…}, "checksum": "<sha256 hex of data>", "kind": "styrminctl", "payload_format": "1.0"}`.
-The `checksum` is the SHA-256 of the serialised `data`, so the server can
-recompute and verify the canonical serialisation of the data (HTTPS already
-covers transport integrity). The client never sends a timestamp or any network
-identifier — the server adds those.
+The `checksum` is the SHA-256 of the serialized `data`, so the server can
+compute it again and check the serialized data. HTTPS already protects the
+integrity of the transfer. The CLI sends no timestamp and no network
+identifier; the server adds them.
 
-#### What is **never** collected
+#### Data the CLI never sends
 
-Scrubbed by construction — these never appear anywhere in the payload:
+The event contains only the fields above. It never contains:
 
-- Server addresses, hostnames, usernames, IPs.
-- Tokens or any credentials.
+- Server addresses, host names, user names, or IP addresses.
+- Tokens or other credentials.
 - Deployment, cluster, or environment names.
-- **Argument and option values** — only option *names* are recorded.
-- File paths. Deriving option names never reads or converts a value, so a
-  `@file` option value is never opened and file contents can never leak.
+- **Argument and option values**. The event records only option *names*.
+- File paths. The CLI reads option names without reading or converting their
+  values, so it never opens the file of an `@file` value and never sends file
+  contents.
 
-#### Why
+#### Why the CLI sends telemetry
 
-`styrminctl` previously collected nothing, leaving roadmap and
-developer-experience decisions blind. Anonymous reach signal — *which* commands
-installs use and *where* they fail — lets the maintainers invest where it
-matters. The trade-off for zero added latency is that events may be lost and
-repeat-counts are dropped; the signal measures per-install reach, not raw call
-frequency.
+Before the CLI sent these events, the maintainers had no data for roadmap and
+usability decisions. The events show which commands each install uses and
+where they fail. Because the CLI waits at most 200 ms and does not retry, some
+events are lost, and repeated runs of a command are not counted. The data
+therefore shows how many installs use a command, not how often they run it.
 
-#### How to opt out
+#### Turn CLI telemetry off
 
-Any **one** of these stops all emission:
+Any **one** of these settings turns CLI telemetry off:
 
-| Lever | Effect |
+| Setting | Effect |
 |-------|--------|
-| `styrminctl telemetry disable` | Persists an opt-out (survives `logout`); `styrminctl telemetry enable` reverts it. |
-| `STYRMIN_TELEMETRY=0` | Disables emission for the process (overrides the persisted flag). |
-| `DO_NOT_TRACK=1` | Honours the [community standard](https://consoledonottrack.com/). |
-| Running in CI (`CI` set/truthy) | Auto-excluded. |
-| `stderr` is not a TTY (piped / non-interactive) | Auto-excluded. |
+| `styrminctl telemetry disable` | Stores an opt-out that stays after `logout`. `styrminctl telemetry enable` removes it. |
+| `STYRMIN_TELEMETRY=0` | Turns telemetry off for the process, whatever the stored setting. |
+| `DO_NOT_TRACK=1` | Follows the [community standard](https://consoledonottrack.com/). |
+| Running in CI (`CI` set to a true value) | Telemetry is off. |
+| `stderr` is not a terminal (piped or non-interactive) | Telemetry is off. |
 
-Inspect the effective state and the reason at any time:
+To check whether telemetry is on, and why:
 
 ```bash
 styrminctl telemetry status
@@ -113,19 +113,22 @@ styrminctl telemetry status
 # Telemetry: disabled (persisted opt-out via 'telemetry disable').
 ```
 
-The `telemetry` command group, `--version` / `version`, `--help` / `-h`, and the
-shell-completion command never emit anything themselves.
+The `telemetry` command group, `--version` / `version`, `--help` / `-h`, and
+the shell-completion command never send an event.
 
 #### Endpoint and state
 
-Telemetry POSTs to
-`https://telemetry-endpoints.cloudflare-096.workers.dev/styrminctl` by default;
-set `STYRMIN_TELEMETRY_ENDPOINT=<url>` to redirect it (used by the test suite and a
-local sink). State is `{install_id, enabled}` stored as JSON at
-`${XDG_DATA_HOME:-$HOME/.local/share}/styrminctl/telemetry.json`, written
-atomically with strict permissions (`0600` file, `0700` directory). The
-`install_id` persists even when telemetry is disabled; an unwritable directory
-falls back to an ephemeral in-memory id and never errors.
+The CLI sends each event as a `POST` request to
+`https://telemetry-endpoints.cloudflare-096.workers.dev/styrminctl`. To send
+events to another address, set `STYRMIN_TELEMETRY_ENDPOINT=<url>`; the test
+suite uses it to send events to a local receiver.
+
+The CLI stores its state, `{install_id, enabled}`, as JSON in
+`${XDG_DATA_HOME:-$HOME/.local/share}/styrminctl/telemetry.json`. It writes
+the file atomically, with the permissions `0600` for the file and `0700` for
+the directory. The CLI keeps the `install_id` when telemetry is turned off.
+If the CLI cannot write to the directory, it uses a temporary ID in memory and
+reports no error.
 
 ### Server telemetry
 
@@ -188,18 +191,18 @@ The report data is sent inside the same envelope as the CLI events, with
       {"name": "styrmin-ingress-controller", "version": "1.0.0", "source_type": "internal", "deployment_count": 3}
     ]
   },
-  "checksum": "<SHA-256 hex digest of the serialised data>",
+  "checksum": "<SHA-256 hex digest of the serialized data>",
   "kind": "styrmin",
   "payload_format": "1.0"
 }
 ```
 
-#### Driver names can identify your organisation
+#### Driver names can identify your organization
 
 Driver names are sent exactly as they are written, because the reports must
 show which drivers installs use. If you write your own drivers and their names
-contain the name of your organisation, for example `acme-billing`, the report
-can identify your organisation to OpsMill. If that is not acceptable, turn
+contain the name of your organization, for example `acme-billing`, the report
+can identify your organization to OpsMill. If that is not acceptable, turn
 telemetry off.
 
 #### Data the server never sends
@@ -239,7 +242,7 @@ timestamp; the endpoint records when it received the report.
   `Could not build the telemetry report: <error>`, and the flow run ends
   `Completed`.
 
-#### Checking whether telemetry is on
+#### Check whether telemetry is on
 
 On every start, the server logs one line at INFO level. With telemetry on and
 the default endpoint, the line is:
@@ -263,7 +266,7 @@ the Prefect UI:
 | The endpoint was not reached or returned an error | `Telemetry report not sent to https://telemetry.opsmill.cloud/styrmin: ConnectError` |
 | The run started more than one hour late | `No telemetry report sent: the run scheduled at <time> started more than 1:00:00 late` |
 
-#### Turning server telemetry off
+#### Turn server telemetry off
 
 Any one of these settings turns server telemetry off:
 
@@ -296,12 +299,12 @@ error. An upgrade with `--reuse-values` from a chart version that has no
 `styrmin.telemetry` values keeps telemetry on.
 
 The setting must reach two processes: the server, which logs whether telemetry
-is on, and the task worker, which runs the daily flow and decides whether to
-send the report. The Helm value does this: it sets `STYRMIN_TELEMETRY_ENABLED`
-in the ConfigMap that the server and the task worker both load, and a
-`helm upgrade` that changes the value restarts both. If you set
-`STYRMIN_TELEMETRY_ENABLED`, `DO_NOT_TRACK` or `STYRMIN_TELEMETRY` by other
-means, set it on both containers. Otherwise the server can log that telemetry is
+is on, and the task worker, which runs the daily flow and checks the setting
+before it sends the report. The Helm value does this: it sets
+`STYRMIN_TELEMETRY_ENABLED` in the ConfigMap that the server and the task worker
+both load, and a `helm upgrade` that changes the value restarts both. If you set
+`STYRMIN_TELEMETRY_ENABLED`, `DO_NOT_TRACK` or `STYRMIN_TELEMETRY` in another
+way, set it on both containers. Otherwise the server can log that telemetry is
 off while the task worker still sends reports. To check that a report is no
 longer sent, read the INFO line of the next `send_telemetry_report` flow run.
 
@@ -312,7 +315,7 @@ The development installs in the Styrmin repository send no reports:
 `docker-compose.yml` and the local demo values (`dev/local/demo-values.yaml`)
 turn telemetry off.
 
-#### Viewing the report with `styrmin telemetry show`
+#### View the report with `styrmin telemetry show`
 
 Run `styrmin telemetry show` in the server container to print the data of the
 next report. Outside the server container, the command does not find the
@@ -327,9 +330,9 @@ notes print the command for your release.
 
 The command:
 
-- prints the `data` object as JSON, without the envelope, to standard output,
-  so it is the same as the data the endpoint receives when nothing in the
-  install changes in between
+- prints the `data` object as JSON, without the envelope, to standard output.
+  It is the same as the data the endpoint receives, if nothing in the install
+  changes in between.
 - prints one line to standard error that says whether telemetry is on in the
   settings of the server container, and to which endpoint the task worker sends
   the report, for example
@@ -358,14 +361,14 @@ the CLI on your workstation and the task worker in your cluster.
 
 The task worker uses the standard proxy environment variables: when
 `HTTPS_PROXY` is set, the request to an `https://` endpoint goes through that
-proxy, and `NO_PROXY` lists the hosts that bypass it. The Helm chart has no
-value for these variables, so add them to the task worker container by other
-means.
+proxy, and `NO_PROXY` lists the hosts that do not use the proxy. The Helm chart
+has no value for these variables, so add them to the task worker container in
+another way.
 
 #### Install ID
 
-The install ID lets OpsMill count distinct installs without knowing who they
-are. One install is one Styrmin database:
+The install ID lets OpsMill count distinct installs without identifying them.
+One install is one Styrmin database:
 
 - The server creates a random UUID the first time it starts with a database, and
   stores it in that database. It creates the ID whether telemetry is on or off,
@@ -374,8 +377,8 @@ are. One install is one Styrmin database:
   they use the same database.
 - When you restore a dump of the database into a second install, both installs
   report the same install ID.
-- When you rebuild the database from scratch, the install reports a new install
-  ID, and OpsMill counts it as a new install.
+- When you create a new, empty database, the install reports a new install ID,
+  and OpsMill counts it as a new install.
 
 The server install ID is not linked to the install ID of `styrminctl`, which is
 stored on your workstation.

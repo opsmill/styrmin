@@ -6,14 +6,13 @@ description: Server and agent configuration — environment variables, Helm valu
 
 ## Configuration
 
-:::info Stub page — to be auto-generated
+:::info Stub page — to be generated
 
-This page will be generated from the Pydantic-settings models (server
-and agent) and the Helm chart's `values.schema.json`. The information
-below is a placeholder describing scope, not the final content.
+This page will be generated from the Pydantic-settings models of the
+server and the agent, and from the Helm chart's `values.schema.json`.
+The text below describes the scope of the page, not its final content.
 
-Until the auto-generation pipeline is wired up, the authoritative
-sources are:
+Until the generation step exists, these files define the settings:
 
 - Server, agent and operator settings:
   [`backend/styrmin_backend/config.py`](https://github.com/opsmill/styrmin/blob/develop/backend/styrmin_backend/config.py)
@@ -26,33 +25,34 @@ sources are:
 
 ### Scope
 
-This page will document every knob you can turn:
+The page will document every setting:
 
-- **Server settings** — database URL, GraphQL options, Prefect
-  connection, auth, logging, feature flags. Sourced from Pydantic-
-  settings models, set via environment variables or the Helm chart.
-- **Agent settings** — server URL, poll intervals, status reporter
-  cadence, kopf operator options.
-- **Helm chart values** — every value the `styrmin` and `agent`
+- **Server settings**: database URL, GraphQL options, Prefect
+  connection, authentication, logging, feature flags. Defined in
+  Pydantic-settings models, and set with environment variables or the
+  Helm chart.
+- **Agent settings**: server URL, poll intervals, status reporter
+  interval, kopf operator options.
+- **Helm chart values**: every value that the `styrmin` and `agent`
   charts accept, with defaults and validation rules.
-- **Per-environment configuration** — fields on `Environment.config`
-  and `Cluster.config` that override defaults for a specific
-  environment or cluster.
+- **Per-environment configuration**: the fields of `Environment.config`
+  and `Cluster.config` that override defaults for one environment or
+  cluster.
 
-For each, the page will give: the key name, the type, the default,
-where it can be set (env var / Helm value / GraphQL field), and
-when you'd want to change it.
+For each setting, the page will give the key name, the type, the
+default, where you can set it (environment variable, Helm value, or
+GraphQL field), and when to change it.
 
-### Auto-generation source
+### Generation source
 
-- **Schema**: Pydantic-settings models (server + agent) and the Helm
-  charts' `values.schema.json`
-- **Build step**: TBD — emit Markdown from the JSON schemas
+- **Schema**: the Pydantic-settings models of the server and the agent,
+  and the Helm charts' `values.schema.json`
+- **Build step**: not defined yet; it will write Markdown from the JSON
+  schemas
 
-### Related
+### Related pages
 
-- [Installation](../installation/index.mdx) — the install guides that
+- [Installation](../installation/index.mdx): the install guides that
   set these values for the first time.
-- [Concepts and Architecture → Architecture](../concepts-and-architecture/architecture.md)
-  — what the server and the agent actually do, so the knobs make
-  sense in context.
+- [Concepts and architecture → Architecture](../concepts-and-architecture/architecture.md):
+  what the server and the agent do, which explains each setting.

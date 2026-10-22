@@ -1,56 +1,56 @@
 ---
 title: Backups and restores
 sidebar_position: 6
-description: How Styrmin backs up an application stack, what happens when you restore, and how cloning an environment works.
+description: How Styrmin backs up the applications of a deployment or an environment, what happens when you restore, and how cloning an environment works.
 ---
 
 ## Backups and restores
 
-Backing up an application correctly is application-specific work. A
-relational database needs a `pg_dump`. A graph database needs its own
-dump tool. A stateless API server doesn't need any application-level
-backup at all — just its persistent volumes.
+Each application needs its own backup procedure. A relational database
+needs a `pg_dump`. A graph database needs its own dump tool. A stateless
+API server needs only a copy of its persistent volumes.
 
-Styrmin's job is to make backups across a whole stack feel like a single
-operation, while still doing the right thing per component. This page
-explains how.
+Back up one deployment, or every deployment of an environment, with one
+operation. The driver of each application defines how Styrmin backs up
+each of its components.
 
-### The pieces
+### What a backup uses
 
-- **[Velero](https://velero.io/)** — an open-source Kubernetes backup
-  tool that snapshots volumes and ships them to S3-compatible object
-  storage. Styrmin uses Velero under the hood.
-- **A Backup Storage Location (BSL)** — an S3-compatible bucket (DO
-  Spaces, Garage, AWS S3, …) that Velero writes backups to. You
-  configure one per environment.
-- **A backup strategy per component** — declared by the driver. Tells
-  Styrmin *how* to back up that specific component.
+- **[Velero](https://velero.io/)**: an open-source Kubernetes backup
+  tool that takes volume snapshots and stores them in S3-compatible
+  object storage. Styrmin runs every backup and restore with Velero.
+- **A backup storage location (BSL)**: an S3-compatible bucket
+  (DigitalOcean Spaces, Garage, AWS S3, …) that Velero writes backups
+  to. You configure one per environment.
+- **A backup strategy per component**: declared by the driver. It
+  defines how Styrmin backs up that component.
 
 ### Backup strategies
 
-Each component in a driver can declare a backup `kind`. Styrmin maps
-kinds to strategies:
+Each component in a driver can declare a backup `kind`. Styrmin maps each
+kind to a strategy:
 
 | Strategy | What it does | Used for |
 |----------|--------------|----------|
-| **`disk`** | Snapshot the component's volumes directly. | Stateless workloads, or stores that are safe to snapshot live. |
-| **`postgres`** | Run `pg_dump` into a sidecar volume, then snapshot it. | Postgres databases. |
-| **`mariadb`** | Run `mariadb-dump` into a sidecar volume, then snapshot it. | MariaDB / MySQL databases. |
+| **`disk`** | Snapshot the component's volumes directly. | Stateless workloads, or data stores that are safe to snapshot while they run. |
+| **`postgres`** | Run `pg_dump` into a sidecar volume, then snapshot it. | PostgreSQL databases. |
+| **`mariadb`** | Run `mariadb-dump` into a sidecar volume, then snapshot it. | MariaDB and MySQL databases. |
 | **`mongodb`** | Run `mongodump` into a sidecar volume, then snapshot it. | MongoDB databases. |
 | **`neo4j`** | Run `neo4j-admin dump` into a sidecar volume, then snapshot it. | Neo4j graph databases. |
-| **`action`** | Run a custom driver-defined Python action. | Anything that doesn't fit the patterns above. |
+| **`action`** | Run a custom Python action that the driver defines. | Any data that the strategies above do not cover. |
 
-The driver author picks the strategy per component. The operator runs
-the right one when a backup is triggered — you don't think about it.
+The driver author chooses the strategy of each component. Styrmin runs it
+when a backup starts.
 
 :::caution Disk backups must name the volume
 
-The `disk` strategy backs up **only the volumes you name** via the
-component's `backup.volume` (single) or `backup.volumes` (list) field. The
-name is the **pod-template volume name** (the entry under `volumes:` in the
-rendered pod spec), not the PVC name. If you set `kind: disk` but omit
-`volume`/`volumes`, Velero's opt-in file-system backup captures nothing and
-the backup is a silent no-op — the component's data is not protected.
+The `disk` strategy backs up **only the volumes you name** in the
+component's `backup.volume` (one volume) or `backup.volumes` (a list)
+field. The name is the **pod-template volume name** (the entry under
+`volumes:` in the rendered pod spec), not the PVC name. If you set
+`kind: disk` and omit `volume` and `volumes`, Velero's opt-in file-system
+backup copies nothing: the backup contains no data of the component, and
+no error reports it.
 
 ```yaml
 server:
@@ -65,18 +65,19 @@ server:
 
 :::
 
-### What happens when you click "backup"
+### What happens when you start a backup
 
-1. You trigger a backup for a deployment (UI, CLI, or GraphQL).
-2. Styrmin schedules a Prefect flow on the agent.
-3. For each component, Styrmin asks the strategy "what do I need to do
-   before and after Velero takes its snapshot?" — for a Postgres
-   component, that means running `pg_dump` first.
-4. The agent creates a Velero `Backup` object describing what to snapshot
+1. You start a backup of a deployment from the UI, the CLI, or the
+   GraphQL API.
+2. Styrmin starts a Prefect flow for the backup.
+3. For each component, Styrmin adds the steps of its strategy before and
+   after the Velero snapshot. For a PostgreSQL component, the step before
+   the snapshot runs `pg_dump`.
+4. The agent creates a Velero `Backup` object that lists what to back up
    and which hooks to run.
-5. Velero does the snapshotting and ships the result to the BSL.
-6. Styrmin records the backup, including the underlying Velero backup
-   name, so it can be referenced later.
+5. Velero takes the snapshot and stores it in the BSL.
+6. Styrmin records the backup with the name of its Velero backup, so that
+   a restore can find it.
 
 #### Backup size
 
@@ -89,7 +90,7 @@ that each of Velero's `PodVolumeBackup` objects reports for the backup.
   so the space the backup uses in the BSL is usually smaller.
 - The Kubernetes resource definitions that Velero also stores are not
   counted.
-- The size is empty when the backup captured no volume data (for example,
+- The size is empty when the backup contains no volume data (for example,
   no component declares a backup strategy, or a `disk` component names no
   volume), when the backup did not complete, or when Styrmin could not read
   the `PodVolumeBackup` objects.
@@ -135,12 +136,12 @@ also skips expired backups.
 #### Restoring a backup of an earlier instance
 
 You can restore a backup of an earlier instance into the deployment,
-for example a backup taken before an upgrade. The restore puts the
-earlier instance's `StyrminDeployment` and `HelmRelease` back in the
-deployment's namespace, with that instance's application version and
-config. Styrmin does not change the deployment's active instance, so the
-deployment page and `styrminctl` keep showing the application version of
-the active instance.
+for example a backup taken before an upgrade. The restore writes the
+earlier instance's `StyrminDeployment` and `HelmRelease` to the
+deployment's namespace again, with that instance's application version
+and config. Styrmin does not change the deployment's active instance, so
+the deployment page and `styrminctl` keep showing the application version
+of the active instance.
 
 Before such a restore:
 
@@ -175,61 +176,59 @@ A deleted deployment keeps its backup history:
   is the last part of the page's URL,
   `/environments/<environment-id>/deployments/<deployment-id>`.
 
-A deleted deployment's backups cannot be restored. A restore puts a
-backup back into the deployment it was taken of, and Styrmin refuses a
-restore into a deleted deployment with the error code
-`OPERATION_DENIED`. Only an environment clone restores a backup into
-another deployment, and an environment restore and an environment clone
-both skip a deleted deployment.
+A deleted deployment's backups cannot be restored. A restore writes a
+backup to the deployment it was taken of, and Styrmin refuses a restore
+into a deleted deployment with the error code `OPERATION_DENIED`. Only an
+environment clone restores a backup into another deployment, and an
+environment restore and an environment clone both skip a deleted
+deployment.
 
 A new deployment that reuses the name of a deleted deployment starts
 with an empty backup history, because the history is listed by
 deployment id, not by name. The deleted deployment keeps its own
-history, which you reach by its id.
+history, which you can list by its id.
 
 ### What happens when you restore
 
-A restore is the same machinery, run in reverse:
+A restore runs the same steps in reverse order:
 
-1. You pick a backup. Styrmin restores it into the deployment it was
+1. You choose a backup. Styrmin restores it into the deployment it was
    taken of, in that deployment's namespace `styrmin-<deployment id>`.
    Before it changes anything in the cluster, the restore fails when the
    namespace it received is not that one, for example for a restore
    that an earlier version of Styrmin queued with another namespace.
-2. Styrmin asks each strategy "what do I need to do to bring this
-   backup back?" — for a Postgres component, that means restoring the
-   dump and replaying it.
-3. The agent creates a Velero `Restore` object with the right hooks.
-4. Velero pulls the data back from the BSL and lays it down.
-5. The restore hooks run and the deployment is now serving the restored
-   data.
+2. Styrmin adds the restore steps of each component's strategy. For a
+   PostgreSQL component, these steps load the dump into the database.
+3. The agent creates a Velero `Restore` object with these restore hooks.
+4. Velero reads the data from the BSL and writes it to the restored
+   volumes.
+5. The restore hooks run, and the deployment serves the restored data.
 
-A restore recreates the namespace from scratch, so your application pods
-come back up **while** the restore hooks are still replaying data — Velero
-starts everything at once and does not hold the application back. For a
-Postgres component that matters: the database the application first
-connects to is empty, and an application that migrates its own schema on
-startup will try to do so on top of the restore. Styrmin's Postgres
-restore hook handles this by locking other clients out of the database
-until the dump has been replayed, and by replaying it in a single
-transaction so a restore either lands whole or not at all. Your
-application may log a few connection errors during that window; it should
-reconnect on its own once the restore finishes.
+A restore creates the namespace again, so the application pods start
+**while** the restore hooks still load the data: Velero starts all pods
+at once and does not wait for the hooks. This matters for a PostgreSQL
+component. The database that the application first connects to is empty,
+and an application that migrates its own schema at startup tries to do so
+before the restore has loaded the data. Styrmin's PostgreSQL restore hook
+prevents this: it blocks other clients from the database until the dump
+is loaded, and it loads the dump in one transaction, so the restore loads
+all of the data or none of it. The application can log connection errors
+during the restore. An application that reconnects by itself recovers
+when the restore finishes.
 
 The restore of a deployment, and each restore that the
 [restore of an environment](#restoring-an-environment) runs, keeps the
 [service aliases](./ingress-and-networking.md#service-aliases) of the
 restored deployment in the other namespaces of its environment, and Velero
 restores the aliases in the restored deployment's namespace from the
-backup. A deployment of the
-environment that is created, updated or upgraded while the restore runs
-skips the aliases between itself and the restored deployment, because the
-restored deployment's namespace is being deleted or does not exist yet.
-Nothing writes them after the restore, so the two applications cannot
-reach each other by short name. Once the restore has finished, make a
-change to either deployment, such as a change to its configuration or its
-parameters, to write the aliases. Saving the same values does not change
-the deployment, so it writes no alias.
+backup. A deployment of the environment that is created, updated or
+upgraded while the restore runs skips the aliases between itself and the
+restored deployment, because the restored deployment's namespace is being
+deleted or does not exist yet. Nothing writes them after the restore, so
+the two applications cannot reach each other by short name. After the
+restore has finished, make a change to either deployment, such as a change
+to its configuration or its parameters, to write the aliases. Saving the
+same values does not change the deployment, so it writes no alias.
 
 The restore that an [environment clone](#cloning-an-environment) runs
 into each counterpart deployment does not restore the source's service
@@ -245,18 +244,19 @@ failed attempts before the one that loaded the dump.
 
 Backups and restores leave out the `CiliumEndpoint` objects that Cilium
 writes for each pod. Cilium writes new ones when the restored pods start.
-A restored copy would still hold the addresses of the pods that were
-backed up, and Cilium could then leave a restored pod unreachable from
+A restored copy would still contain the addresses of the pods that were
+backed up, and Cilium could then make a restored pod unreachable from
 pods on other nodes. On a cluster that does not run Cilium, this has no
 effect.
 
-A backup holds the objects in the namespace, not the namespace itself, so
-Velero creates the restored namespace with its name as its only label. After
-the Velero restore, Styrmin puts the labels of the deployment back on the
-namespace (`styrmin/environment_id` and `styrmin/deployment_id`), before it
-re-applies the network policies. Network policies select namespaces by these
-labels. The restore that an environment clone runs writes the labels of the
-counterpart deployment, which carry the new environment's id.
+A backup contains the objects in the namespace, not the namespace itself,
+so Velero creates the restored namespace with its name as its only label.
+After the Velero restore, Styrmin sets the labels of the deployment on the
+namespace again (`styrmin/environment_id` and `styrmin/deployment_id`),
+before it applies the network policies again. Network policies select
+namespaces by these labels. The restore that an environment clone runs
+writes the labels of the counterpart deployment, which contain the new
+environment's id.
 
 ### Following a backup or a restore
 
@@ -268,11 +268,11 @@ order:
 
 1. "Delete the namespace": Styrmin deletes the namespace of the
    deployment that receives the restore and waits until it is gone, so
-   the restore starts from a clean namespace.
+   the restore starts from an empty namespace.
 2. "Run the Velero restore": Styrmin creates the Velero `Restore` object
    and waits for Velero to finish.
 3. "Run the recovery": Styrmin prepares the restored `StyrminDeployment`
-   so that the operator takes it over again. This step runs only after
+   so that the operator manages it again. This step runs only after
    Velero completed the restore.
 
 The restore that an environment clone runs into a counterpart deployment
@@ -321,18 +321,18 @@ steps.
 
 ### Why one BSL per environment?
 
-A Backup Storage Location is attached to an **environment**, not to a
-deployment. That gives you a few useful properties:
+A backup storage location is assigned to an **environment**, not to a
+deployment, for these reasons:
 
-- **All backups for an environment live in one place.** Easy to
-  retention-manage, easy to point at a different region per environment.
-- **One place to point at a region, or to swap out.** Repointing an
-  environment's backups is one assignment, not one per deployment.
-  Note that a **cloned** environment does not inherit the source's BSL:
+- **All backups of an environment are in one bucket.** You manage them,
+  and choose their region, for the whole environment.
+- **One assignment sets where an environment's backups go.** To use
+  another bucket or region, you change one assignment, not one per
+  deployment. A **cloned** environment does not get the source's BSL:
   assign one before the clone can take backups of its own (see
   [Cloning an environment](#cloning-an-environment)).
 - **A BSL is shared infrastructure.** Setting it up once per environment
-  is cheaper than setting it up per deployment.
+  costs less than setting it up per deployment.
 
 ### What a BSL creates in the cluster
 
@@ -340,10 +340,10 @@ When you assign a BSL to the first environment of a cluster, Styrmin
 creates two objects in the `styrmin` namespace:
 
 - a Velero `BackupStorageLocation` named `styrmin-bsl-<BSL id>`;
-- a Secret named `styrmin-bsl-<BSL id>-credentials`, which holds the
+- a `Secret` named `styrmin-bsl-<BSL id>-credentials`, which contains the
   S3 access key and secret key.
 
-Both carry the label `styrmin.io/bsl-id=<BSL id>`. Styrmin creates them
+Both have the label `styrmin.io/bsl-id=<BSL id>`. Styrmin creates them
 only when no Velero `BackupStorageLocation` with that label exists, so
 assigning the same BSL again does not add a second one. To list them:
 
@@ -354,72 +354,72 @@ kubectl get backupstoragelocations.velero.io,secrets -n styrmin \
 
 The names come from the BSL's id, not its name, so you can rename a BSL
 at any time: backups, credential updates and the removal of the objects
-when you unassign the BSL keep working. Styrmin versions before this
-change named the objects after the BSL's name (`styrmin-bsl-<name>`).
-Styrmin finds those objects by the same label and keeps using them; it
-does not rename them.
+when you unassign the BSL keep working. Styrmin v0.1.49 and earlier
+named the objects after the BSL's name (`styrmin-bsl-<name>`). Styrmin
+finds those objects by the same label and keeps using them; it does not
+rename them.
 
-To create or update the Secret, the agent reads the S3 keys from a
+To create or update the `Secret`, the agent reads the S3 keys from a
 Prefect Secret block named `styrmin-bsl-<BSL id>-credentials`, which
 Styrmin saves on the Prefect server. The Prefect UI shows the block's
 value as `********`, and the Prefect API returns it only to a call that
 asks for secret values. Deleting the BSL deletes the block. Styrmin
-versions before this change passed the keys to these flows as flow-run
+v0.1.49 and earlier passed the keys to these flows as flow-run
 parameters, so the Prefect UI and API show the keys in the flow runs
 that those versions started, until Prefect deletes the runs. To make
-those keys useless, rotate them in your object storage and update the
+those keys unusable, rotate them in your object storage and update the
 BSL with the new keys.
 
-### Retention: how long a backup lives
+### Retention: how long Velero keeps a backup
 
-Every Velero backup Styrmin creates carries a **TTL** — the duration
-Velero keeps it before garbage-collecting the backup and the data behind
-it. Left alone, that's **`720h`** (30 days).
+Every Velero backup that Styrmin creates has a **TTL** (time to live):
+the time Velero keeps the backup before it deletes the backup and its
+data. The default is **`720h`** (30 days).
 
-Expiry and bucket space are two separate steps: garbage collection drops
-the expired backup, and a periodic **repository maintenance** pass then
-reclaims the storage behind it. Maintenance runs hourly per backup
-repository, and it deliberately leaves recently written data alone for
-safety, so expect bucket usage to trail your retention policy rather
-than fall the moment a backup expires.
+Expiry and the space used in the bucket are two separate steps. Velero's
+garbage collection deletes the expired backup, and a periodic
+**repository maintenance** run then frees the storage of its data.
+Maintenance runs once an hour for each backup repository, and it keeps
+recently written data, so the space used in the bucket decreases some
+time after a backup expires, not at the moment it expires.
 
-Set `backup_ttl` in config to choose your own. It takes a Go duration
+Set `backup_ttl` in the config to change the TTL. It takes a Go duration
 string in `h`, `m`, or `s` units: `2160h` (90 days), `8760h` (a year),
-`1h30m`, `1.5h`. There is deliberately **no day unit** — `30d` is not a
-Go duration and is rejected, as are `0h`, `-24h`, and a bare `720`. A
-malformed value is refused the moment you submit it, with an error that
-names `backup_ttl` and hints the `720h` syntax; nothing is stored and no
-backup is affected.
+`1h30m`, `1.5h`. There is **no day unit**: `30d` is not a Go duration and
+is rejected, as are `0h`, `-24h`, and `720` without a unit. Styrmin
+refuses a malformed value when you submit it, with an error that names
+`backup_ttl` and shows the `720h` format. Nothing is stored and no backup
+changes.
 
-#### Three scopes, deepest wins
+#### Three scopes; the most specific wins
 
-`backup_ttl` sits on the same shared config as knobs like `db_size`, so
-you can set it at three scopes. When a backup is created, the deepest
-scope that sets it wins:
+You can set `backup_ttl` at three scopes, as you can other config values
+such as `db_size`. When Styrmin creates a backup, it uses the value of the
+most specific scope that sets it:
 
 | Scope | Where you set it | Use it for |
-|-------|----------------|------------|
-| **Deployment** | `deploy`'s `config`, or `updateDeployment`'s `input` | One application that needs to keep its backups longer (or shorter) than its neighbours. |
-| **Environment** | The environment's **Configuration** tab in the web UI, `createEnvironment`'s `config`, or `updateEnvironment`'s `input` | The usual place — one policy for everything in the environment. |
-| **Cluster** | `createCluster`'s `config` | An org-wide baseline. |
+|-------|------------------|------------|
+| **Deployment** | `deploy`'s `config`, or `updateDeployment`'s `input` | An application that keeps its backups longer or shorter than the other applications of its environment. |
+| **Environment** | The environment's **Configuration** tab in the web UI, `createEnvironment`'s `config`, or `updateEnvironment`'s `input` | One policy for every application in the environment (the usual scope). |
+| **Cluster** | `createCluster`'s `config`, `updateCluster`'s `input`, or `styrminctl clusters update --config` | A default for every environment of the cluster. |
 
-A scope that leaves `backup_ttl` unset is transparent: resolution falls
-through to the next-shallower scope, and down to the built-in `720h`
-when no scope sets a policy. A cluster that never sets it behaves
-exactly as before.
+When a scope does not set `backup_ttl`, Styrmin uses the next broader
+scope, and `720h` when no scope sets it.
 
-Every backup records the TTL that was applied, and the resulting expiry
-date is in the backup list in the web UI and in `styrminctl backups
-list` — no cluster access needed. The scope the value came from is
-recorded internally alongside it and reported in the backup workflow's
-log; it is not part of the backup's API surface, so answering "why this
-retention?" means reading the workflow log or the scopes' config.
+Every backup records the TTL that Styrmin applied, and the web UI and
+`styrminctl backups list` show the resulting expiry date, so you do not
+need access to the cluster. Styrmin also records which scope the value
+came from and writes it to the log of the backup flow. The API does not
+return the scope: to find where a backup's retention comes from, read the
+flow log or the config of each scope.
 
-:::note Cluster scope is set at registration
+:::note Changing the cluster scope
 
-There is no cluster-update mutation, so the cluster-scope value is
-whatever you passed to `createCluster`'s `config`. To change a broad
-default afterwards, set it at environment scope instead.
+`updateCluster` and `styrminctl clusters update` replace the whole
+cluster config, and Styrmin redeploys the deployments that take a changed
+value. The **Edit** dialog on the cluster detail page does not show
+`backup_ttl` and keeps its stored value. See
+[`clusters update`](../reference/styrminctl.md#clusters-update--change-a-clusters-config).
 
 :::
 
@@ -427,36 +427,36 @@ default afterwards, set it at environment scope instead.
 
 The environment scope has a form field. Open the environment, go to the
 **Configuration** tab, and edit **Retention (`backup_ttl`)** in the
-**Backup Retention** section. It takes the same Go duration string,
-refuses a malformed one before it is submitted, and carries the rest of
-the environment's configuration back unchanged. Saving is an
-`updateEnvironment` like any other, so it fans out a redeploy to the
-environment's deployments — the confirmation dialog names them before
-anything happens. Leave the field empty and save to **clear** the
-environment policy: retention then falls through to the cluster scope, or
-to the built-in `720h`. An environment that carries `dedicated_ingress` or
-`scheduling` overrides is the exception — the form cannot map those yet, so
-it disables Save rather than clear them, and you set retention for that
-environment through the API instead.
+**Backup Retention** section. The field takes the same Go duration string
+and refuses a malformed value before it submits it. Saving keeps the rest
+of the environment's config unchanged. Saving is an `updateEnvironment`,
+so Styrmin redeploys the environment's deployments; the confirmation
+dialog lists them before anything changes. To **clear** the environment
+policy, empty the field and save: Styrmin then uses the cluster scope, or
+the default `720h`.
 
-The other two scopes have no dedicated control, and `styrminctl` has no
-retention flag at any scope. You set those through the generic config
-surfaces: the GraphQL API (or the Python SDK, which wraps the same
-mutations), or `styrminctl`'s `--config` payloads and deployment
-manifests.
+The form cannot save an environment that sets `dedicated_ingress` or
+`scheduling`: it disables Save instead of clearing them. Set the retention
+of such an environment through the API.
 
-Watch the key casing — it follows the surface, not the feature:
+The deployment and cluster scopes have no form field, and `styrminctl`
+has no retention option at any scope. Set those scopes with the GraphQL
+API or the Python SDK, which calls the same mutations, or with
+`styrminctl` `--config` payloads and deployment manifests.
 
-| Surface | Key |
-|---------|-----|
-| `updateEnvironment` / `updateDeployment` `input`, `deploy`'s `config` | `backupTtl` (GraphQL input types are camelCase) |
-| `createEnvironment`'s / `createCluster`'s `config` | `backup_ttl` (raw JSON, persisted as-is) |
+The key name depends on where you set it:
+
+| Where | Key |
+|-------|-----|
+| `input` of `updateEnvironment`, `updateDeployment` and `updateCluster`; `deploy`'s `config` | `backupTtl` (GraphQL input types use camelCase) |
+| `createEnvironment`'s and `createCluster`'s `config` | `backup_ttl` (raw JSON, stored as sent) |
 | `styrminctl deployments update --config` | `backupTtl` or `backup_ttl` (both accepted) |
+| `styrminctl clusters update --config` | `backup_ttl` or `backupTtl` (both accepted) |
 | `spec.config` in a `styrminctl deployments apply` manifest | `backupTtl` |
 | `styrminctl environments create --config`, `styrminctl clusters create --config` | `backup_ttl` |
 
-`updateEnvironment` takes the **complete desired configuration**, so
-read the environment's current config first:
+`updateEnvironment` takes the **complete config**, so read the
+environment's current config first:
 
 ```graphql
 query ReadEnvironmentConfig {
@@ -467,10 +467,10 @@ query ReadEnvironmentConfig {
 }
 ```
 
-(Looking an environment up by name needs cluster context — pass
-`clusterName` or `clusterId` alongside it, or just use `environmentId`.)
+To look up an environment by name, also pass `clusterName` or
+`clusterId`, or use `environmentId` instead.
 
-Then submit it back with `backupTtl` added:
+Then send the config back with `backupTtl` added:
 
 ```graphql
 mutation SetEnvironmentRetention {
@@ -490,89 +490,84 @@ mutation SetEnvironmentRetention {
 
 :::caution `updateEnvironment` replaces the whole config
 
-`UpdateEnvironmentInput` is a **full-replacement** input: every field you
-omit is persisted as its unset state. Carry the fields you want to keep
-in the same call, or you'll clear them. This cuts both ways — the web UI
-does the round-trip for you, so editing an environment variable in the
-UI will not wipe a retention policy you set here, and saving the
-retention field will not wipe the settings you set through the API.
+`UpdateEnvironmentInput` replaces the whole config: Styrmin clears every
+field you omit. Send every field you want to keep in the same call. The
+web UI reads the stored config and sends it back with your change, so
+editing an environment variable in the UI keeps a retention policy that
+you set through the API, and saving the retention field keeps the
+settings that you set through the API.
 
 :::
 
-For a single application, set it in the deployment's config instead —
-`backupTtl` on `deploy`'s `config` or `updateDeployment`'s `input`, or
+For one application, set it in the deployment's config instead:
+`backupTtl` in `deploy`'s `config` or `updateDeployment`'s `input`, or
 `backupTtl` under `spec.config` in a `styrminctl` deployment manifest.
-`updateDeployment` is full-replacement in the same way.
+`updateDeployment` also replaces the whole config.
 
 #### A change applies to future backups only
 
-Velero fixes a backup's expiration at creation time, so changing
-`backup_ttl` **does not** move the expiry of backups that already exist,
-and Styrmin deliberately does not try to rewrite them. The new value
-takes effect on the next backup you create. Shorten retention and the
-existing backups still disappear on their original schedule; lengthen it
-and the ones already taken are not rescued.
+Velero sets a backup's expiry when it creates the backup, so a change to
+`backup_ttl` **does not** change the expiry of existing backups, and
+Styrmin does not update them. The new value applies from the next backup.
+Whether you shorten or lengthen the retention, existing backups expire on
+their original date.
 
 :::caution Restoring from an expired backup fails
 
-When a backup's TTL elapses, Velero garbage-collects its data but
-Styrmin's record of the backup stays in the list. A restore from an
-expired backup fails at the Velero step. A short `backup_ttl` surfaces
-this sooner, so check the expiry column before picking a backup to
-restore from.
+When a backup's TTL ends, Velero deletes its data, but the backup stays in
+Styrmin's list. A restore from an expired backup fails at the Velero
+step. With a short `backup_ttl`, backups expire sooner, so check the
+expiry column before you choose a backup to restore.
 
 :::
 
 ### Backing up a whole environment
 
-Everything above is per-deployment: one application, one backup. An
-**environment backup** does the same thing for every application in an
-environment in one action, and keeps the result together as a single
-record — so you never again have to remember by hand which five backups
-formed last Tuesday's snapshot.
+The sections above describe the backup of one deployment. An
+**environment backup** backs up every application of an environment in
+one action and records the result as one environment backup.
 
-One action — the **Backups** tab on the environment page, one
-`styrminctl env-backups create`, or one `createEnvironmentBackup` call —
-captures three things:
+One action, from the **Backups** tab on the environment page,
+`styrminctl env-backups create`, or `createEnvironmentBackup`, captures
+three things:
 
-- the **environment's config** as it stands at that moment;
-- the **declared state of every eligible deployment**: its Application
-  Driver, driver version and provenance fingerprint, application
+- the **environment's config** at the time of the backup;
+- the **declared state of every eligible deployment**: its application
+  driver, driver version and provenance fingerprint, application
   version, config, and parameters;
-- one **constituent backup** per eligible deployment — an ordinary
-  per-deployment backup, taken by exactly the machinery described above,
-  writing to the same BSL, expiring under the same retention rules.
+- one **constituent backup** per eligible deployment: a deployment
+  backup, taken as described above, written to the same BSL, and kept
+  for the same retention.
 
-A deployment is **eligible** when it isn't tombstoned, isn't one of
-Styrmin's own internal deployments (the environment's ingress
-controller, for instance), and has a running instance to back up. Its
-current state doesn't matter — a `FAILED` deployment with an active
-instance still contributes a constituent.
+A deployment is **eligible** when it is not deleted (tombstoned), is not
+one of Styrmin's internal deployments (such as the environment's ingress
+controller), and has a running instance to back up. Its state does not
+matter: a `FAILED` deployment with an active instance still gets a
+constituent backup.
 
-An environment with no eligible deployments is not an error: you get a
-config-only snapshot that reports `COMPLETED` immediately. That is the
-useful shape for capturing an environment's settings before you populate
-it.
+For an environment without eligible deployments, the environment backup
+contains only the config and reports `COMPLETED` at once. Use it to save
+an environment's settings before you deploy applications to it.
 
-#### Near-consistent, not stop-the-world
+#### Deployment backups run in parallel
 
-Constituent backups are all started together and run in parallel.
-Nothing is quiesced — no component is stopped, no writes are frozen, and
-the constituents do not finish at the same instant. The snapshot is
-**near-consistent**: the right tool for getting an environment back to a
-known-good state, not a distributed transaction. If one application
-needs a genuinely quiesced backup, stop its components and back that one
-up on its own.
+Styrmin starts every constituent backup at the same time, and they run in
+parallel. Styrmin does not stop components or block writes during the
+backup, so the constituent backups do not finish at the same moment. Use
+an environment backup to return an environment to a known working state;
+it is not a transaction across applications. To back up one application
+with no writes during the backup, stop its components and back it up
+separately.
 
-A per-deployment conflict never derails the rest. If one deployment
-already has a backup running, that constituent is recorded as failed
-with the reason attached and its neighbours carry on — the environment
-backup never waits for it and never aborts because of it.
+A conflict on one deployment does not stop the others. If a deployment
+already has a backup running, Styrmin records its constituent backup as
+failed, with the reason, and the other backups continue. The environment
+backup does not wait for that deployment and does not stop because of it.
 
 #### Status is derived, never stored
 
-An environment backup has no status column of its own. Every time you
-read one, Styrmin computes its status from its constituents:
+An environment backup stores no status. Each time you read one, Styrmin
+computes its status from its constituent backups:
 
 | Status | What it means |
 |--------|---------------|
@@ -582,93 +577,90 @@ read one, Styrmin computes its status from its constituents:
 | `PARTIAL` | At least one constituent completed and at least one did not. |
 | `FAILED` | Nothing completed. |
 
-Because the status is recomputed on every read, it can never drift out
-of step with the constituents it summarises. It also means `PARTIAL` is
-a first-class, normal outcome rather than a bug: the snapshot is real and
-restorable, and the constituents it is missing are named on it. Expand a
-snapshot in the UI — or run `styrminctl env-backups get <id>` — to see
-each deployment's constituent, its status, or the error that stopped it
-being created.
+Because Styrmin computes the status on every read, the status always
+matches the constituent backups. `PARTIAL` is an expected result: you can
+restore the environment backup, and it names the deployments it is
+missing. Expand an environment backup in the UI, or run
+`styrminctl env-backups get <id>`, to view each deployment's constituent
+backup, its status, or the error that prevented its creation.
 
-:::caution A terminal status is not proof the snapshot still covers the environment
+:::caution A final status does not show what the backup still covers
 
-The record and *all* of its constituents are written together, in one
-transaction, before Styrmin dispatches any backup work. So there is no
-moment at which you can read a snapshot that is missing constituents it
-was about to create: a snapshot with work to do reports `PENDING` or
-`IN_PROGRESS`, one whose every constituent was blocked at creation
-reports `FAILED`, and an immediate `COMPLETED` means one specific thing
-— there was nothing eligible to back up, so it's a config-only snapshot.
+Styrmin writes the environment backup and *all* its constituent backups
+in one transaction, before it starts any backup. You therefore never read
+an environment backup that is missing a constituent it was about to
+create. An environment backup with work to do reports `PENDING` or
+`IN_PROGRESS`. One whose constituent backups were all blocked at creation
+reports `FAILED`. A `COMPLETED` status right after creation means that no
+deployment was eligible, so the environment backup contains only the
+config.
 
-What a terminal status still doesn't tell you is whether the snapshot
-*covers* the environment today. Constituent backups can be deleted
-individually afterwards, and the snapshot keeps reporting `COMPLETED`
-with a gap where that deployment used to be — that visibility is the
-point, not a bug. Read the per-constituent list rather than the status
-alone: a constituent shown with neither a backup nor a failure reason
-(`deleted` in the CLI's output) is a gap.
+A final status does not show whether the environment backup still
+*covers* the environment. You can delete constituent backups one by one
+afterwards, and the environment backup still reports `COMPLETED`, with an
+empty entry for each deleted one. Read the list of constituent backups,
+not only the status: a constituent shown with neither a backup nor a
+failure reason (`deleted` in the CLI's output) has no backup.
 
 :::
 
 #### Restoring an environment
 
 Restoring a `COMPLETED` or `PARTIAL` environment backup is also one
-action. Styrmin reverts the environment's config to the captured value
-and restores every usable constituent **in place**, back into the
-deployment it came from.
+action. Styrmin sets the environment's config back to the captured value
+and restores every usable constituent **in place**, into the deployment
+it was taken of.
 
-Two things it deliberately does **not** do:
+A restore does not do the following:
 
-- **It never creates or deletes your deployments.** Restoring is a config-and-
-  data operation, not a topology one. A deployment you deleted since the
-  backup is not recreated; a deployment you added since is not removed.
-  Only the environment's dedicated ingress controller is created, redeployed
-  or removed to match the restored `dedicated_ingress`, as on an environment
-  update (see
+- **It does not create or delete deployments.** A restore changes config
+  and data, not the list of deployments. A deployment you deleted after
+  the backup is not created again, and a deployment you added after it is
+  not removed. Only the environment's dedicated ingress controller is
+  created, redeployed or removed to match the restored
+  `dedicated_ingress`, as on an environment update (see
   [Changing the dedicated ingress of an environment](./ingress-and-networking.md#changing-the-dedicated-ingress-of-an-environment)).
-- **It never touches data it has no backup for.** A deployment created
-  after the snapshot keeps its data untouched. It does still pick up the
-  reverted environment config, through the same config propagation any
-  environment edit triggers — that is the intended outcome, not a leak.
-  A deployment that is already at the reverted config is not redeployed.
+- **It does not change data that it has no backup of.** A deployment
+  created after the backup keeps its data. Styrmin still redeploys it
+  with the restored environment config, as after any environment update.
+  A deployment that is already at the restored config is not redeployed.
 
-Every constituent that is **not** restored is reported with its
-deployment name and a reason. There are no silent skips — if a
-deployment isn't in the restore's list of restored constituents, it is in
-the skipped list with a reason. These six cover the expected cases:
+Styrmin reports every constituent that it does not restore, with the
+deployment name and a reason: a deployment that is not in the restore's
+list of restored constituents is in its list of skipped ones. These six
+reasons cover the expected cases:
 
 | Reason | What happened |
 |--------|---------------|
-| `backup failed at creation` | The constituent backup never got started — usually a conflicting backup already running at snapshot time. |
-| `backup not completed` | The constituent backup exists but didn't finish successfully. |
-| `backup deleted` | Someone deleted that constituent backup individually. |
-| `backup expired` | The constituent's retention TTL elapsed and Velero garbage-collected the data. |
-| `deployment no longer exists` | The deployment was deleted (or tombstoned) after the snapshot was taken. |
-| `deployment busy with another restore` | A separately started restore is already running on that deployment. |
+| `backup failed at creation` | The constituent backup never started, usually because another backup of the deployment was running when the environment backup started. |
+| `backup not completed` | The constituent backup exists but did not complete. |
+| `backup deleted` | Someone deleted that constituent backup. |
+| `backup expired` | The constituent backup's TTL ended and Velero deleted its data. |
+| `deployment no longer exists` | The deployment was deleted after the environment backup was taken. |
+| `deployment busy with another restore` | Another restore is already running on that deployment. |
 
-They are not the only possible values. Anything else that stops a
-constituent restore from being created is reported verbatim as
-`restore could not be created: <error>`, and the set is expected to grow.
-The reason is free text, so treat it as a message to read rather than a
-fixed set of codes to switch on.
+Other reasons are possible. When anything else prevents Styrmin from
+creating a constituent restore, it reports the error as
+`restore could not be created: <error>`, and more reasons may be added.
+The reason is free text: read it as a message, not as a code to match in
+a script.
 
 :::note Restoring an environment requires the administrator role
 
-Creating and deleting environment backups needs the same role as an
-ordinary per-deployment backup. **Restoring** one needs the
-administrator role, because it rewrites the environment's config — the
-same privilege you need to edit that config directly. The UI hides the
-restore action from anyone without it.
+Creating and deleting environment backups requires the same role as a
+deployment backup. **Restoring** one requires the administrator role,
+because it changes the environment's config, which also requires that
+role. The UI hides the restore action from users without it.
 
 :::
 
-A restore's status is derived from its constituent restores exactly the
-way a backup's is, with the same `PARTIAL` semantics. And the same
-caveat applies at the far end: when the restore reports a terminal
-status, its constituent data restores are done, but the reverted config
-may still be propagating to the deployments that *didn't* receive a
-restore. That propagation is tracked by those deployments' own
-reconciliations — watch their status, not the restore's.
+Styrmin computes a restore's status from its constituent restores in the
+same way as a backup's, with the same meaning of `PARTIAL`. The same
+limit applies: when the restore reports a final status, its constituent
+data restores are done, but the deployments that did not receive a
+restore can still be redeploying with the restored config. Each of these
+redeploys is a reconciliation of its own deployment: check the status of
+those deployments, not of the restore.
 
 When the redeploy of one of those deployments cannot start, the other
 redeploys still run and the restore returns normally, with a status that
@@ -679,114 +671,111 @@ not list it ([#520](https://github.com/opsmill/styrmin/issues/520)): an
 `environment_restore_id`, the `deployment_id` and, when the error has
 them, the `error_code` and the term's `path`. The
 `env_restore_fanout_dispatched` line counts the failure in
-`config_redeploy_failed`. One case: the captured config has an affinity term
-that names a deployment you deleted after the backup. The restore puts
-the config back as captured, and the next update of each deployment that
-the term applies to fails with the deleted deployment's last name and
-`deleted: true` until you write the term again.
+`config_redeploy_failed`. For example, the captured config has an
+affinity term that names a deployment you deleted after the backup. The
+restore sets the config back as captured, and the next update of each
+deployment that the term applies to fails with the deleted deployment's
+last name and `deleted: true` until you write the term again.
 
 #### One environment operation at a time
 
-An environment runs at most one environment-level operation — backup or
-restore — at a time. A second request while one is in flight is
-rejected with a machine-readable error rather than queued. Different
-environments never block each other, and per-deployment backups and
-restores keep their own separate guards.
+An environment runs at most one environment-level operation, a backup or
+a restore, at a time. Styrmin rejects a second request while one runs,
+with an error that a program can read, and does not queue it. Operations
+on different environments do not block each other, and deployment backups
+and restores have their own checks.
 
-"In flight" is derived from the constituents too, which has one sharp
-edge: if a constituent backup never gets picked up, it stays
-non-terminal, its snapshot stays non-terminal, and the environment stays
-blocked. Deleting the snapshot is the way out — see below.
+Styrmin also computes whether an operation runs from the constituents. If
+a constituent backup never starts, it never reaches a final status, its
+environment backup does not either, and the environment stays blocked.
+Delete the environment backup to unblock the environment (see below).
 
-#### Deleting snapshots
+#### Deleting environment backups
 
-Deleting an environment backup deletes its constituent backups and any
-restores of them, in one action. Retention still works per constituent:
-each one expires on its own TTL, so an old snapshot decays piecewise and
-its record survives even after every constituent has expired. The gaps
-stay visible, which is the point — a snapshot that can only restore
-three of its five applications should say so.
+Deleting an environment backup deletes its constituent backups and their
+restores, in one action. Each constituent backup still expires on its own
+TTL. The environment backup record stays after every constituent backup
+has expired, and lists the ones that are gone, so an environment backup
+that can restore only three of its five applications shows it.
 
-Deleting works **regardless of status**, including while constituents
-are still running. That is deliberate: it's the escape hatch for a
-snapshot pinned in progress by a constituent that never ran, and it's
-what releases the environment for new operations.
+You can delete an environment backup **in any status**, even while its
+constituent backups still run. Use this to unblock an environment whose
+environment backup never finishes because a constituent backup never
+started.
 
-There is one exception. While an environment clone is still capturing
-into the snapshot, deleting it is refused with `IN_USE`, for at most two
-hours. See [Discarding a clone](#discarding-a-clone).
+There is one exception. While an environment clone still captures into
+the environment backup, Styrmin refuses to delete it with `IN_USE`, for
+at most two hours. See [Discarding a clone](#discarding-a-clone).
 
-Deleting an environment takes its environment backups with it. In this
-release a snapshot does not outlive its environment.
+Deleting an environment also deletes its environment backups.
 
 ### Cloning an environment
 
-An environment backup captures an environment so you can put it *back*. A
-**clone** uses the same capture to stand up a **second, brand-new
-environment** next to the source — running, with the source's data as of
-clone time — in one action.
+An environment backup lets you restore an environment. A **clone** uses
+the same kind of capture to create a **second, new environment** next to
+the source, running, with the source's data at the time of the clone, in
+one action.
 
-The typical reason is a rehearsal: you want to practise a migration, an
-upgrade, or an incident against production-shaped data without touching
-production. Clone it, work in the copy, delete the copy.
+Use a clone to test a migration, an upgrade, or an incident procedure on
+a copy of production data before you do it in production. Create the
+clone, work in it, then delete it.
 
-One action — the **Clones** tab on the environment page, one
-`styrminctl env-clones create`, or one `cloneEnvironment` call — does all
-of this:
+One action, from the **Clones** tab on the environment page,
+`styrminctl env-clones create`, or `cloneEnvironment`, runs these steps:
 
-1. Captures a **fresh environment backup** of the source, limited to the
+1. Captures a **new environment backup** of the source, limited to the
    deployments you selected.
-2. Waits for that capture to finish. If it fails outright, **nothing is
-   created** — no environment, no deployments.
+2. Waits for that capture to finish. If the capture fails, Styrmin
+   **creates nothing**: no environment, no deployments.
 3. Creates the new environment from the **captured** config, with your
-   override merged over it.
-4. Creates one **counterpart deployment** per included source
-   deployment, pinned to the driver version the capture recorded.
+   override merged into it.
+4. Creates one **counterpart deployment** for each included source
+   deployment, with the driver version that the capture recorded.
 5. Restores each source deployment's data **into its counterpart**.
 
-Everything after step 1 is built from the capture. The live source is
-never read again, so data written to the source *after* the capture
-completes is not in the clone — that's the point of a defined clone
-point, not a gap.
+Every step after step 1 uses the capture. Styrmin does not read the
+source again, so data written to the source *after* the capture is not
+in the clone: the clone contains the source as it was at one point in
+time.
 
-**Cloning needs the administrator role**, for the same reason restoring
-does: it writes environment configuration. Reading clone records does
-not.
+**Cloning requires the administrator role**, as restoring does, because
+it writes environment config. Reading clone records does not.
 
 :::note The source is not modified
 
-A clone leaves the source environment's config and declared state exactly
-as they were. The only source-side artefact is the environment backup it
-captured — an ordinary snapshot, in the source's list, expiring under the
-source's retention rules.
+A clone does not change the source environment's config or declared
+state. The only thing it adds to the source is the environment backup it
+captured: an ordinary environment backup, in the source's list, that
+expires under the source's retention rules.
 
 :::
 
 #### Choosing which deployments come along
 
-Leave the selection empty and every **eligible** deployment comes along —
-the same eligibility rule as an environment backup: not tombstoned, not
-one of Styrmin's own internal deployments, and with a running instance.
+When the selection is empty, the clone includes every **eligible**
+deployment, with the same eligibility rule as an environment backup: not
+deleted, not one of Styrmin's internal deployments, and with a running
+instance.
 
-Name specific deployments and only those are captured and cloned, which
-is how you leave a heavyweight analytics stack out of a rehearsal. The
-selection filters the capture too, so excluded deployments are not backed
-up at all.
+When you name deployments, Styrmin captures and clones only those, for
+example to leave a large analytics application out of the clone. The
+selection also limits the capture, so Styrmin does not back up the
+deployments you leave out.
 
-What happens depends on what you name, and the difference matters:
+The result depends on what you name:
 
 | What you named | What happens |
 |----------------|--------------|
-| A deployment that doesn't exist, or belongs to a different environment | The whole request is **rejected up front**. Nothing is created and no backup is taken. |
-| A deployment that exists but isn't eligible | It's **skipped**, by name, with a reason. Not an error. |
-| An eligible deployment | It's included. |
-| A selection that leaves out a deployment, or includes one that isn't eligible, when an affinity term that the clone copies names that deployment | The whole request is **rejected up front** with `VALIDATION_ERROR`. The error message lists each such deployment, the reason the clone does not copy it, and the path of every term that names it. Nothing is created and no backup is taken. Add the deployment to the selection, leave out the deployment whose term names it, or, for a term in the environment's config, clear or override `scheduling`. |
+| A deployment that does not exist, or belongs to another environment | Styrmin **rejects the whole request**. It creates nothing and takes no backup. |
+| A deployment that exists but is not eligible | Styrmin **skips** it, by name, with a reason. The request does not fail. |
+| An eligible deployment | Styrmin includes it. |
+| A selection that leaves out a deployment, or includes one that is not eligible, when an affinity term that the clone copies names that deployment | Styrmin **rejects the whole request** with `VALIDATION_ERROR`. The error message lists each such deployment, the reason the clone does not copy it, and the path of every term that names it. Styrmin creates nothing and takes no backup. Add the deployment to the selection, leave out the deployment whose term names it, or, for a term in the environment's config, clear or override `scheduling`. |
 
 For a program, the GraphQL error of the last row gives the same details in
 `extensions.deployments`: one entry per deployment, with its
 `deployment_id`, `deployment_name`, `reason` and the `paths` of the terms
 that name it. The Python SDK raises `OperationFailedError`, and its
-`extensions` attribute holds these extensions:
+`extensions` attribute contains these extensions:
 
 ```python
 from styrmin_sdk.exceptions import OperationFailedError
@@ -816,100 +805,97 @@ reached by short service name from the clone: the clone has no alias for
 that deployment's services, so a call to it by short name fails instead
 of reaching the source environment.
 
-Every source deployment you could have selected is accounted for on the
-clone record — cloned, skipped with a reason, or failed with a reason.
-Styrmin's **internal** deployments are the exception: they are left off
-the record entirely unless you named one explicitly, because the clone
-gets its own fresh ingress controller as part of ordinary environment
-setup.
+The clone record lists every source deployment that you could have
+selected: cloned, skipped with a reason, or failed with a reason.
+Styrmin's **internal** deployments are the exception: the record does not
+list them unless you named one, because Styrmin creates a new ingress
+controller for the clone when it creates the environment.
 
-An **empty** selection is legal and means something useful: clone the
-environment only — its configuration, none of its applications. That
-clone reports `COMPLETED`, unless the environment's config has an
-affinity term that names a deployment. The clone copies no deployment, so
-that request is rejected up front, as the last row of the table above
-describes. Clear `scheduling` (`clearConfigFields: ["scheduling"]`,
+An **empty** selection clones only the environment's config, none of its
+applications. That clone reports `COMPLETED`, unless the environment's
+config has an affinity term that names a deployment. Because the clone
+copies no deployment, Styrmin rejects that request before it creates
+anything, as the last row of the table above describes. Clear
+`scheduling` (`clearConfigFields: ["scheduling"]`,
 `--clear-config-field scheduling`), or replace it in the override
 (`configOverride`, `--config-override`) with a `scheduling` that names no
 deployment.
 
-#### Changing the config on the way in
+#### Changing the config of the clone
 
-A clone of production that keeps production's configuration will behave
-like production: send real email, call real webhooks, register real DNS.
-So the clone takes an environment-config override, applied **before** the
-new environment is created — the counterparts' very first startup already
-sees the changed values. There is no window in which cloned workloads run
-under the source's settings.
+A clone that keeps the production config acts like production: it sends
+real email, calls real webhooks, and registers real DNS records. A clone
+therefore takes an override of the environment config, which Styrmin
+applies **before** it creates the new environment, so the counterparts
+start with the changed values. Cloned workloads never run with the
+source's settings.
 
-The override works one field at a time. A field you supply replaces the
-captured field **wholesale**; a field you leave out keeps its captured
-value. So overriding one environment variable list replaces that list,
-and leaves `fqdn_suffix`, retention, and everything else untouched.
+The override replaces fields one by one. A field you set replaces the
+whole captured field; a field you leave out keeps its captured value. An
+override of one environment variable list therefore replaces that list,
+and keeps `fqdn_suffix`, retention, and every other field.
 
-To **remove** a setting rather than change it — a production-only DNS
-integration, say — name it in the clear-fields list instead. A cleared
-field is *absent* from the clone's configuration: not empty, not
-defaulted. Naming a field that the capture never set is a harmless no-op;
-only an unknown field *name* is an error. Name a field in both places and
-the override wins.
+To **remove** a setting instead of changing it, for example a DNS
+integration used only in production, name it in the clear-fields list. A
+cleared field is *absent* from the clone's config: not empty and not set
+to its default. Naming a field that the capture did not set has no
+effect; only an unknown field *name* is an error. When you name a field
+in both lists, the override wins.
 
-Watch the casing here, because it follows the surface rather than the
-feature:
+The key casing depends on where you set it:
 
 | Where | Casing |
 |-------|--------|
-| The override input (`configOverride`, `--config-override`) | **camelCase** on GraphQL — the same `UpdateEnvironmentInput` shape as `updateEnvironment`, including `envVars` as a list of `{name, value}` entries rather than a map. The CLI and Python SDK also accept the snake_case field names, since their generated input model populates by either. |
+| The override input (`configOverride`, `--config-override`) | **camelCase** in GraphQL: the same `UpdateEnvironmentInput` format as `updateEnvironment`, with `envVars` as a list of `{name, value}` entries, not a map. The CLI and the Python SDK also accept the snake_case field names, because their generated input model accepts both. |
 | The clear-fields list (`clearConfigFields`, `--clear-config-field`) | **snake_case** config field names: `fqdn_suffix`, `external_dns_endpoints_type`, `backup_ttl`, … |
-| What the clone record reports back | **snake_case** canonical JSON, whatever casing you sent. |
+| What the clone record returns | **snake_case** JSON, whatever casing you sent. |
 
-:::caution A misspelled override field is dropped silently
+:::caution Styrmin ignores a misspelled override field
 
-The override input tolerates keys it doesn't recognise, so a typo'd field
-name is ignored rather than rejected — and the captured value stays in
-place. Read the `configOverride` echoed back on the clone record (or the
-new environment's configuration) to confirm an override actually landed.
-A misspelled *clear-field* name **is** rejected, because that list is
-validated against the config's field names.
+The override input accepts keys it does not recognize, so Styrmin ignores
+a misspelled field name instead of rejecting it, and the captured value
+stays. Read the `configOverride` that the clone record returns, or the
+new environment's config, to check that Styrmin applied your override. A
+misspelled name in the clear-fields list **is** rejected, because Styrmin
+checks that list against the config's field names.
 
 :::
 
 #### Watching a clone, and what its status means
 
-A clone runs asynchronously and is tracked by its own record: which
-capture it was built from, which environment it created, one outcome per
-source deployment, and a list of operation-level events. Its status is
-**derived on every read** from those parts, exactly like an environment
-backup's:
+A clone runs asynchronously, and Styrmin tracks it in its own record: the
+capture it uses, the environment it created, one outcome per source
+deployment, and a list of operation-level events. Styrmin **computes its
+status on every read** from those parts, as for an environment backup:
 
 | Status | What it means |
 |--------|---------------|
 | `PENDING` | Registered, capture not started. |
-| `IN_PROGRESS` | The capture, the environment, or a data restore is still moving. |
+| `IN_PROGRESS` | The capture, the environment creation, or a data restore is still running. |
 | `COMPLETED` | Every included deployment was cloned. |
 | `PARTIAL` | Some included deployments were cloned and some failed. |
-| `FAILED` | Nothing was cloned — or the clone was discarded (see below). |
+| `FAILED` | Nothing was cloned, or the clone was discarded (see below). |
 
-Two things surprise people:
+Note:
 
-- **A clone can read `IN_PROGRESS` the instant you create it.** Anything
-  skipped up front is recorded together with the clone, and recorded
-  progress counts. Don't wait for `PENDING`.
-- **An all-skipped clone is `COMPLETED`, not a failure.** So is a clone
-  of an empty selection. The environment was created; there was simply
-  nothing eligible to bring across.
+- **A clone can report `IN_PROGRESS` as soon as you create it.** Styrmin
+  records the deployments it skips together with the clone, and a
+  recorded outcome counts as progress. Do not wait for `PENDING`.
+- **A clone in which every deployment was skipped is `COMPLETED`, not
+  `FAILED`.** So is a clone of an empty selection. Styrmin created the
+  environment, and no deployment was eligible.
 
-`PARTIAL` is a normal outcome, not a bug. One way to get there: the
-driver version the capture recorded no longer exists by the time the
-counterpart is created. That deployment is attributed as failed, its
-neighbours are cloned, and the clone reports the mix.
+`PARTIAL` is an expected result. For example, the driver version that the
+capture recorded no longer exists when Styrmin creates the counterpart.
+Styrmin records that deployment as failed, clones the other deployments,
+and reports `PARTIAL`.
 
-A deployment whose restore failed is also attributed as failed, with the
-reason `the restore failed`, followed by the restore's error when it has
-one. The clone records a deployment as cloned when it starts the restore,
-and reports it as failed once the restore has failed. One cause is the step
-"Create and delete service aliases": when Styrmin cannot write the
-counterpart's service aliases, the restore fails with this error:
+Styrmin also records a deployment whose restore failed as failed, with
+the reason `the restore failed`, followed by the restore's error when it
+has one. The clone records a deployment as cloned when it starts the
+restore, and reports it as failed once the restore has failed. One cause
+is the step "Create and delete service aliases": when Styrmin cannot write
+the counterpart's service aliases, the restore fails with this error:
 
 ```text
 Create and delete service aliases: <cause>. To write the aliases, change the configuration or the parameters of the deployment, or upgrade it.
@@ -918,8 +904,8 @@ Create and delete service aliases: <cause>. To write the aliases, change the con
 When the Kubernetes API refused a request, the cause is
 `the Kubernetes API answered <HTTP status>: <message>`, for example
 `the Kubernetes API answered 403: services is forbidden: …`. The step
-"Create and delete service aliases" in the restore's list of steps holds
-the full error.
+"Create and delete service aliases" in the restore's list of steps
+contains the full error.
 
 When only the alias step failed, the restore sets the counterpart to
 `RUNNING`, because Styrmin recovered its workloads and they run. Only the
@@ -932,30 +918,30 @@ configuration or parameters, or upgrade it. The update or upgrade writes
 the counterpart's aliases and the aliases of its services in the
 namespaces of the other deployments. Saving the same values does not
 always run an update, so it might write no alias. After the repair, the
-failed restore and the clone's entry for that deployment still read
+failed restore and the clone's entry for that deployment still show
 failed, because they record the restore, not the aliases that the
 deployment has now.
 
-A restore that fails after it has started changes only the attribution of
-the deployment it restores. A deployment that fails before its restore
+A restore that fails after it has started changes only the outcome of the
+deployment it restores. A deployment that fails before its restore
 starts also fails the deployments whose affinity terms name it. A
 deployment fails this way when its captured data cannot be used (its
 capture failed, or its backup was deleted, did not complete or expired),
 or when its counterpart cannot be created or its restore cannot be
 started:
 
-- A deployment whose own config has such a term is attributed as failed,
+- A deployment whose own config has such a term is recorded as failed,
   and no counterpart is created for it. The reason is
   `an affinity term names deployment <name>, which was not cloned`.
 - When two deployments' terms name each other, one counterpart is
   created first. If the other counterpart then fails, the first one is
-  attributed as failed with the same reason. Its counterpart exists in
+  recorded as failed with the same reason. Its counterpart exists in
   the new environment, and its next update is refused until you change
   the term.
 - A term that comes from the component definitions of the deployment's
   driver version gives a name, which Styrmin looks up when it creates the
   counterpart. When no counterpart has that name, the counterpart is not
-  created and the deployment is attributed as failed with the reason
+  created and the deployment is recorded as failed with the reason
   `Affinity term at <path> names deployment '<name>', which is not a
   deployment of environment '<new environment>'.`
 - When the new environment's config names the failed deployment, the
@@ -965,111 +951,111 @@ started:
 
 #### Discarding a clone
 
-**Delete the environment the clone created.** That is the supported
-discard path, it works in any state including `PARTIAL` and `FAILED`, and
-it takes the counterpart deployments with it. The clone record keeps a
+**Delete the environment that the clone created.** This discards the
+clone in any status, including `PARTIAL` and `FAILED`, and also deletes
+the counterpart deployments. The clone record keeps a
 `created_environment_deleted` event, and the UI labels the clone
-*Discarded*. A clone that was still running then reads `FAILED`. A clone
-that had already finished keeps its outcome (`COMPLETED`, `PARTIAL` or
-`FAILED`); the event only records that its environment is gone.
+*Discarded*. A clone that was still running then reports `FAILED`. A
+clone that had already finished keeps its outcome (`COMPLETED`, `PARTIAL`
+or `FAILED`); the event only records that its environment is deleted.
 
-Because a clone's name is deliberately not unique, and deleting the
-environment frees the environment name, you can immediately re-clone the
-same source under the same name.
+A clone's name does not have to be unique, and deleting the environment
+frees the environment name, so you can clone the same source again under
+the same name right away.
 
-Two more handles, for the cases where there is no environment to delete
-yet:
+When the clone has not created its environment yet, two other actions
+end it:
 
-- **Deleting the backing environment backup** is refused (`IN_USE`) only
-  while that clone's *capture* is still running, and only for as long as
-  the clone could still be waiting for it (two hours, the clone's own
-  wait budget). Once the capture has landed — or that budget has run out,
-  which is what a capture whose constituent work was never picked up
-  eventually does — deleting it is allowed, and it is the escape hatch for
-  a clone that stalled before its environment appeared. On a still-running
-  clone the deletion is recorded and the clone ends `FAILED`; on a clone
-  that already finished, the recorded outcome stands.
-- **Deleting the source environment** keeps the clone record whenever it
-  has an environment to be the provenance of: the source link is cleared
-  and the source's *name* stays on the record. A clone that was still
-  building that environment also picks up a fatal
-  `source_environment_deleted` event and ends `FAILED` — its capture goes
-  with the source, so it can make no further progress. Only a clone that
-  never created anything is removed outright. Because the source's
-  snapshots cascade with it, a finished clone also picks up a non-fatal
-  note that its backing capture is gone.
+- **Delete the clone's environment backup.** Styrmin refuses this
+  (`IN_USE`) only while the clone's *capture* still runs, and only for as
+  long as the clone can still wait for it: two hours, the clone's wait
+  limit. After the capture finishes, or after the two hours, you can
+  delete it. When the constituent backups of a capture never start, the
+  two hours run out. Delete the environment backup to end a clone that
+  stopped before it created its environment. A clone that is still
+  running records the deletion and ends `FAILED`; a clone that already
+  finished keeps its outcome.
+- **Delete the source environment.** Styrmin keeps the clone record when
+  the clone created an environment: it clears the link to the source and
+  keeps the source's *name* on the record. A clone that was still
+  building its environment also records a fatal
+  `source_environment_deleted` event and ends `FAILED`, because Styrmin
+  deleted its capture with the source. Styrmin removes the record of a
+  clone that created nothing. Because deleting the source also deletes
+  its environment backups, a finished clone also records a non-fatal note
+  that its capture is deleted.
 
-:::note Deleting an environment now removes its deployments
+:::note Deleting an environment deletes its deployments
 
-Environment deletion tears down and removes the deployments inside the
-environment, rather than refusing. This is what makes the discard path
-above work — a cloned environment owns at least its counterparts, and its
-own ingress controller when it uses a dedicated one — and it applies to
-every environment, not just clones.
+Deleting an environment deletes the deployments in it, instead of
+refusing. This is why deleting a clone's environment discards the clone:
+a cloned environment contains at least its counterpart deployments, and
+its own ingress controller when it uses a dedicated one. This applies to
+every environment, not only to clones.
 
 :::
 
 #### What a clone is *not* isolated from
 
-This is the part to read before you point a clone at anything live.
+A clone is isolated at the Kubernetes level: it has its own namespaces,
+workloads, and ingress controller. The config override changes
+environment-level settings. **Neither changes values stored in the
+restored application data.**
 
-A clone is isolated at the Kubernetes level: its own namespaces, its own
-workloads, its own ingress controller. The config override is a genuine
-lever over environment-level settings. **Neither of those touches values
-stored inside the restored application data.**
+The restore copies database rows, config tables, and secrets
+**unchanged**. If your application stores an outbound webhook URL, a
+payment-provider API key, an SMTP credential, a license key, or a partner
+endpoint in its own data, the clone has the same value and can connect to
+the same system as the source. Cloned workloads run like the source:
+scheduled jobs run, queues are processed, and integrations send requests.
 
-Database rows, config tables, and secrets that came across in the restore
-are copied **verbatim**. If your application stores an outbound webhook
-URL, a payment-provider API key, an SMTP credential, a licence key, or a
-partner endpoint in its own data, the clone holds the same value and can
-reach the same system as the source. Cloned workloads are real workloads:
-schedulers fire, queues drain, integrations call out.
+Before the clone connects to other systems, change the external
+addresses and credentials stored in its application data yourself. The
+override changes only config, not database tables.
 
-Treat "neutralise the data-borne references" as a step you own, before
-the clone is allowed to talk to anything that matters. The override
-handles configuration; it cannot reach into a table.
+One more limit applies to some drivers. Styrmin renders a counterpart's
+Helm values again while it restores the counterpart's data from the
+source. A driver whose chart **generates** credentials at install time,
+such as a random password for each release, can therefore generate a new
+credential that the restored data does not accept, and the restored
+component becomes unreachable. To support clones, take credentials from
+configuration in your driver instead of generating them at deploy time.
 
-One more, narrower caveat. A counterpart's Helm values are re-rendered
-while its data is restored from the source. A driver whose chart
-**generates** credentials at install time — a random password minted per
-release — can therefore mint a fresh credential over restored data that
-expects the old one, leaving the restored component unreachable. Drivers
-meant to be cloneable should take credentials from configuration rather
-than generating them at deploy time.
+#### Other clone behavior
 
-#### Details worth knowing
-
-- **A counterpart's Helm release is named after the source deployment.**
-  `helm list -n styrmin-<counterpart-id>` shows a release named for the
-  *source*. That is intentional: the restored objects carry the source's
-  Helm ownership metadata, and matching the release name is what keeps
-  Helm's view consistent. It is not drift.
+- **A counterpart's Helm release has the source deployment's name.**
+  `helm list -n styrmin-<counterpart-id>` shows a release named after the
+  *source*. This is intended: the restored objects contain the source's
+  Helm ownership metadata, and the same release name keeps Helm's
+  records consistent with them. It is not drift.
 - **A cloned environment has no backup storage location.** Locations are
-  assigned per environment, and a clone does not inherit the source's, so
+  assigned per environment, and a clone does not get the source's, so
   the new environment cannot take its own backups until you assign one.
-  Restoring the capture *into* the clone is unaffected.
-- **A clone occupies its new environment until it finishes.** While a
-  clone is running, environment-level operations and config edits on the
-  environment it is building are refused. Deleting it is always allowed —
-  that's the discard path.
-- **You can clone a clone**, and you can run several clones of one source
-  at once. Only the capture window is serialised: a second clone started
-  while the first is still *capturing* is refused with a busy error.
+  This does not affect the restore of the capture *into* the clone.
+- **A running clone blocks its new environment.** While a clone runs,
+  Styrmin refuses environment-level operations and config changes on the
+  environment it builds. You can always delete that environment to
+  discard the clone.
+- **You can clone a clone**, and run several clones of one source at the
+  same time. Only one clone of a source can capture at a time: Styrmin
+  refuses a second clone that starts while the first one still
+  *captures*, with a busy error.
 
 For the commands and their exit codes, see
 [the `env-clones` CLI reference](../reference/styrminctl.md#env-clones--clone-an-environment).
 
-### What you set up vs what Styrmin handles
+### What you configure and what Styrmin does
 
-| Step | What it covers |
-|------|----------------|
-| Once per environment | The bucket, credentials, and Velero BSL configuration. |
-| Once per driver | The backup `kind` per component, in the driver spec. |
-| Per backup | Nothing — Styrmin orchestrates the rest. |
+| When | What you configure |
+|------|--------------------|
+| Once per environment | The bucket, the credentials, and the BSL. |
+| Once per driver | The backup `kind` of each component, in the driver specification. |
+| For each backup | Nothing. Styrmin runs every step. |
 
-### Next
+### Next steps
 
-- [**Lifecycle hooks and actions**](./hooks-and-actions.md) — backup is
-  one of the hooks the driver can attach actions to.
-- [**Ingress and networking**](./ingress-and-networking.md) — the other
-  big per-environment subsystem.
+- [**Lifecycle hooks and actions**](./hooks-and-actions.md): how drivers
+  run Python actions, which a backup strategy of `kind: action` also
+  uses.
+- [**Ingress and networking**](./ingress-and-networking.md): how traffic
+  reaches the applications of each environment.

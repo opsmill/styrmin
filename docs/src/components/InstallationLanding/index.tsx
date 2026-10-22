@@ -26,10 +26,10 @@ type Platform = {
 const platforms: Platform[] = [
   {
     id: 'vcluster',
-    name: 'Local laptop (vcluster)',
-    subtitle: 'Try Styrmin in minutes',
+    name: 'Local laptop (vCluster)',
+    subtitle: 'Docker on your machine',
     description:
-      'Run the full Styrmin stack on Docker via vCluster — same path as `uv run invoke start`, broken into explicit steps.',
+      'Run Styrmin in a vCluster on Docker. The guide runs the steps of `uv run invoke start` one at a time.',
     Logo: VclusterLogo,
     href: '/docs/installation/vcluster-local',
   },
@@ -38,7 +38,7 @@ const platforms: Platform[] = [
     name: 'DigitalOcean',
     subtitle: 'Managed Kubernetes',
     description:
-      'DOKS with two Load Balancers, Spaces-backed Velero backups, and hostname-based ingress — production-ready in one guide.',
+      'DOKS with two load balancers, Velero backups in Spaces, and hostname-based ingress.',
     Logo: DigitalOceanLogo,
     href: '/docs/installation/digitalocean',
   },
@@ -47,7 +47,7 @@ const platforms: Platform[] = [
     name: 'Google GKE',
     subtitle: 'Google Cloud',
     description:
-      'Run Styrmin on Google Kubernetes Engine. Guide is being written — content lands soon.',
+      'Google Kubernetes Engine. The guide is not written yet.',
     Logo: GkeLogo,
     href: '/docs/installation/gke',
     badge: 'Coming soon',
@@ -57,7 +57,7 @@ const platforms: Platform[] = [
     name: 'Amazon EKS',
     subtitle: 'AWS',
     description:
-      'Elastic Kubernetes Service on AWS. Walkthrough planned — track progress in the roadmap.',
+      'Elastic Kubernetes Service on AWS. The guide is not written yet.',
     Logo: EksLogo,
     badge: 'Planned',
   },
@@ -66,7 +66,7 @@ const platforms: Platform[] = [
     name: 'k3s',
     subtitle: 'Lightweight Kubernetes',
     description:
-      'Single- or multi-node k3s clusters on bare metal or VMs. Guide planned for the self-hosted track.',
+      'Single-node or multi-node k3s clusters on bare metal or VMs. The guide is not written yet.',
     Logo: K3sLogo,
     badge: 'Planned',
   },
@@ -75,7 +75,7 @@ const platforms: Platform[] = [
     name: 'kubeadm',
     subtitle: 'Self-hosted Kubernetes',
     description:
-      'Bring-your-own kubeadm cluster. Walkthrough coming.',
+      'A kubeadm cluster that you run. The guide is not written yet.',
     Logo: KubeadmLogo,
     badge: 'Planned',
   },
@@ -159,15 +159,15 @@ export default function InstallationLanding(): ReactNode {
         <header className={styles.hero}>
           <h1 className={styles.heroTitle}>Deploy Styrmin anywhere</h1>
           <p className={styles.heroLede}>
-            Styrmin runs on any conformant Kubernetes cluster. Pick the platform
-            you want to deploy on — each guide walks through prerequisites,
-            ingress, backups, and the first Styrmin install end to end.
+            Styrmin runs on any conformant Kubernetes cluster. Choose the
+            platform to install on. Each guide covers prerequisites, ingress,
+            backups, and the first Styrmin install.
           </p>
         </header>
 
         <LogoStrip />
 
-        <h2 className={styles.cardsHeading}>Pick your platform</h2>
+        <h2 className={styles.cardsHeading}>Choose a platform</h2>
         <div className={styles.cardGrid}>
           {platforms.map((p) => (
             <PlatformCard key={p.id} platform={p} />

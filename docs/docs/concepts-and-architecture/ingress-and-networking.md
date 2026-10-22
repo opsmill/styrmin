@@ -6,32 +6,31 @@ description: How a deployment becomes reachable on a URL, and how environments a
 
 ## Ingress and networking
 
-When you deploy an application through Styrmin, it ends up on a URL that
-you can hit from a browser or another service. This page explains how
-that happens.
+Each application that you deploy through Styrmin gets a URL that a
+browser or another service can reach.
 
 ### Two layers of ingress
 
-There are two different "front doors" in a Styrmin cluster:
+A Styrmin cluster has two layers of ingress:
 
-1. **The front door for Styrmin itself.** The UI and GraphQL API at
-   something like `styrmin.example.com`. You install this once when you
+1. **The ingress for Styrmin.** It serves the UI and the GraphQL API at
+   an address such as `styrmin.example.com`. You install it once when you
    set up the cluster (see the
-   [DigitalOcean guide](../installation/digitalocean.md) for a worked
-   example) and it never changes per deployment.
-2. **A front door per environment.** A Styrmin environment can get its
-   own ingress controller, which handles traffic to the applications
+   [DigitalOcean guide](../installation/digitalocean.md) for an example),
+   and it does not change per deployment.
+2. **An ingress controller per environment.** A Styrmin environment can
+   have its own ingress controller, which serves the applications
    deployed in that environment (see
    [Dedicated ingress controller or shared ingress class](#dedicated-ingress-controller-or-shared-ingress-class)).
 
-The reason for the split: the Styrmin server is a single thing with a
-fixed URL. The applications are many, change often, and need to be
-isolated from each other.
+The two layers are separate because Styrmin has one server with a fixed
+URL, while there are many applications, they change often, and they must
+be isolated from each other.
 
 ### Why an environment can have its own ingress controller
 
 An **ingress controller** is the program that accepts incoming HTTP
-traffic and routes it to the right service inside the cluster. Styrmin
+traffic and routes it to the service that the request is for. Styrmin
 uses [Traefik](https://traefik.io/) as the dedicated ingress controller
 of an environment.
 
@@ -45,22 +44,24 @@ A dedicated ingress controller gives the environment:
   them. With a dedicated Traefik instance, you configure each
   environment's ingress on its own.
 - **Self-contained cloned environments.** When you clone an environment
-  (see [why this matters](../introduction/why-styrmin.md)) and
+  (see [Why Styrmin?](../introduction/why-styrmin.md)) and
   `dedicated_ingress` is set for the new environment, the new
   environment gets its own Traefik instance too. Applications in the
-  clone reach each other through the clone's network, not back to
+  clone connect to each other through the clone's network, not to
   production.
 - **Separate failures.** A misconfiguration in one environment's ingress
   does not stop the ingress of another environment.
 
 The dedicated ingress controller is itself a deployment that Styrmin
-manages: Styrmin installs it with its own driver model, and you do not
-install or manage it. In an environment that has `dedicated_ingress`
-set and no controller yet, Styrmin installs it when you deploy, update
-or upgrade an application in the environment, or when you update the
-cluster or environment config, or restore an environment backup, and the
-environment has applications. Styrmin removes it when no application uses
-it any more:
+manages: Styrmin installs it with a built-in driver, and you do not
+install or manage it. When `dedicated_ingress` is set for an environment
+that has no controller yet, Styrmin installs the controller when:
+
+- you deploy, update, or upgrade an application in the environment;
+- you update the cluster or environment config, or restore an
+  environment backup, and the environment has applications.
+
+Styrmin removes the controller when no application uses it any more:
 
 - after you delete the last application in the environment
 - after `dedicated_ingress` is turned off for the environment and every
@@ -69,13 +70,13 @@ it any more:
 
 While the removal runs and `dedicated_ingress` is still set for the
 environment, Styrmin rejects deploying, updating and upgrading
-applications in the environment. Try again once the removal completes,
+applications in the environment. Try again after the removal completes,
 and Styrmin installs a new ingress controller.
 
 ### Dedicated ingress controller or shared ingress class
 
-The `dedicated_ingress` setting decides whether an environment gets its
-own ingress controller:
+The `dedicated_ingress` setting determines whether an environment gets
+its own ingress controller:
 
 - When the environment sets `dedicated_ingress`, or the environment does
   not set it and the cluster does, the environment gets a dedicated
@@ -112,7 +113,7 @@ such as a Traefik IngressRoute or a Gateway API HTTPRoute.
   `ingress_class`, Styrmin does not change the class that the chart
   sets. The resolved value is empty only when the cluster was created
   with `ingress_class: null` and neither the environment nor the
-  deployment sets a class, or when the deepest level that sets
+  deployment sets a class, or when the most specific level that sets
   `ingress_class` (the deployment, else the environment, else the
   cluster) sets an empty string.
 
@@ -128,7 +129,7 @@ set `ingress_class` on the cluster, the environment or the deployment.
 Styrmin sets that class on the Ingress the next time it deploys the
 application.
 
-The next two sections describe how Styrmin changes the ingress of an
+The two sections below describe how Styrmin changes the ingress of an
 environment when `dedicated_ingress` changes on the cluster or on the
 environment.
 
@@ -158,18 +159,18 @@ When the update turns `dedicated_ingress` on or changes its values:
 When the update turns `dedicated_ingress` off:
 
 1. Styrmin redeploys the applications to their resolved `ingress_class`
-   at once.
-2. Styrmin removes the controller once every application has been
+   immediately.
+2. Styrmin removes the controller after every application has been
    redeployed without the dedicated ingress, no application is
    `PENDING`, `DEPLOYING`, `FAILED` or `RESTORING`, and the controller is
    not `PENDING` or `DEPLOYING`. A controller that is still being
-   created when you turn the setting off is removed once its creation
+   created when you turn the setting off is removed after its creation
    has finished, so no controller is left running without a record in
    Styrmin.
 
 A `FAILED` application keeps the controller because FluxCD rolls a
 failed upgrade back to the previous release, whose Ingress can still use
-the controller. Styrmin removes the controller once the application is
+the controller. Styrmin removes the controller after the application is
 `RUNNING` again or deleted.
 
 When the controller has failed or is being removed:
@@ -181,10 +182,10 @@ When the controller has failed or is being removed:
   wait to move onto it stay on their current config, because Styrmin
   never moves an application onto a controller that is not `RUNNING`.
   Submit the config again: Styrmin redeploys the controller again, and
-  moves the applications once it is `RUNNING`.
+  moves the applications when it is `RUNNING`.
 - The controller is being removed (`DELETING`): Styrmin does not create
   a second controller, and the applications that would move onto one
-  stay on their current config. Submit the config again once the
+  stay on their current config. Submit the config again after the
   removal has finished; Styrmin then creates a new controller and moves
   them. If the controller stays `DELETING`, see
   [A controller that stays `DELETING`](#a-controller-that-stays-deleting).
@@ -199,7 +200,7 @@ resolve to.
 
 ### A controller that stays `DELETING`
 
-With an agent of Styrmin v0.1.48 or earlier, a race in the operator can
+With an agent of Styrmin v0.1.48 or earlier, a race condition in the operator can
 stop the removal of a dedicated ingress controller
 ([#446](https://github.com/opsmill/styrmin/issues/446)). Changes to
 `dedicated_ingress` remove controllers more often, so you are more
@@ -246,7 +247,7 @@ update. See
   differ, in the same order.
 - When the update turns `dedicated_ingress` off and the cluster does not
   set it, Styrmin redeploys the applications to the shared ingress class
-  at once, and removes the controller once they have moved.
+  immediately, and removes the controller after they have moved.
 
 A failed controller, and a controller that is being removed, are handled
 as in a cluster update. When you submit the environment config again,
@@ -259,8 +260,8 @@ When you restore an environment backup whose `dedicated_ingress`
 differs from the environment's current value, Styrmin changes the
 controller in the same way, with the backed-up value, and attributes a
 controller that it creates to you. A deployment that receives a restore
-of its own backup is not redeployed: its namespace comes back with the
-Ingress of the backup. When the backup turns `dedicated_ingress` off,
+of its own backup is not redeployed: the restore creates its namespace
+again with the Ingress of the backup. When the backup turns `dedicated_ingress` off,
 such a deployment keeps the controller until Styrmin redeploys it for
 another reason, for example when you update the deployment. See
 [Restoring an environment](./backups-and-restores.md#restoring-an-environment).
@@ -281,47 +282,46 @@ environment's values; the deployment's own value does not change it.
 
 When a cluster or environment update changes another value of such a
 deployment's resolved config, for example its environment variables or
-the FQDN suffix, Styrmin redeploys the deployment at once, whatever the
+the FQDN suffix, Styrmin redeploys the deployment immediately, whatever the
 state of the controller. The deployment does not wait for the
 controller, so Styrmin does not redeploy a `FAILED` controller for it.
 
-### How an application URL gets assigned
+### How Styrmin assigns an application URL
 
-Each application driver declares the **services** it exposes — name,
-port, scope (internal vs external). When Styrmin deploys an application,
-it generates a hostname for every external service based on a
-**fully-qualified domain name (FQDN) suffix** you configured at the
-cluster level.
+Each application driver declares the **services** it exposes: name,
+port, and scope (internal or external). When Styrmin deploys an
+application, it generates a hostname for every external service from the
+**fully qualified domain name (FQDN) suffix** that you configured on the
+cluster.
 
-The convention is roughly:
+The hostname has this form:
 
 ```text
 <service-name>-<deployment-id>.<fqdn-suffix>
 ```
 
-So a deployment of `infrahub` with a `web` service on a cluster with
-suffix `styrmin.io` ends up reachable at something like:
+For example, a deployment of `infrahub` on a cluster with the suffix
+`styrmin.io` is reachable at:
 
 ```text
 http://infrahub-<deployment-id>.styrmin.io
 ```
 
-You don't have to invent or register that hostname per deployment — it
-falls out of the configuration. The only DNS setup you need is a
-**wildcard record** (`*.styrmin.io`) pointing at the environment's
-ingress, and every deployment gets a working URL automatically.
+Styrmin generates the hostname from the configuration, so you do not
+register a hostname for each deployment. Add one **wildcard DNS record**
+(`*.styrmin.io`) that points to the environment's ingress, and each
+deployment gets a URL.
 
 ### Networking between applications
 
-When two applications in the same environment need to talk to each
-other — say, Infrahub talking to a Postgres deployed alongside it — they
-use Kubernetes service names, not external hostnames. That keeps the
-traffic inside the cluster and means cloned environments are naturally
-self-contained: the Infrahub in the clone talks to the Postgres in the
-clone, not back to production.
+Applications in the same environment, such as Infrahub and a PostgreSQL
+database deployed next to it, connect to each other by Kubernetes
+service name, not by external hostname. The traffic stays inside the
+cluster, so a cloned environment is self-contained: Infrahub in the clone
+connects to the PostgreSQL in the clone, not to production.
 
-The driver decides which services are internal and which are external.
-Internal services don't get an external hostname; external ones do.
+The driver declares which services are internal and which are external.
+External services get an external hostname; internal services do not.
 
 #### Service aliases
 
@@ -330,7 +330,7 @@ that an application can reach a service of another deployment of its
 environment by the service's short name, Styrmin writes a **service
 alias** into the namespace of every other deployment of the environment.
 An alias is an `ExternalName` Service named after the service, which
-points to the service in its owner's namespace. It carries the labels
+points to the service in its owner's namespace. It has the labels
 `styrmin.io/service-alias=true` and `styrmin.io/deployment-id=<owner id>`.
 
 Styrmin writes the aliases each time it creates, updates or upgrades a
@@ -394,21 +394,21 @@ must stay in the meantime. Then delete the alias:
 kubectl delete service --namespace <namespace> <alias>
 ```
 
-### What you actually have to configure
+### What you configure
 
-- **Once per cluster:** an FQDN suffix and an ingress in front of
-  the Styrmin server itself. Both are part of the install — see the
-  [DigitalOcean guide](../installation/digitalocean.md) for what this
-  looks like in practice on a real cloud.
-- **Once per environment:** any environment-specific ingress settings
-  (load balancer IDs, IP allow lists, etc.). These live on the
-  Environment record and get passed through to the environment's
-  dedicated Traefik instance.
-- **Per deployment:** nothing. The hostname is generated automatically.
+- **Once per cluster:** an FQDN suffix and an ingress for the Styrmin
+  server. Both are part of the install; see the
+  [DigitalOcean guide](../installation/digitalocean.md) for an example on
+  a cloud provider.
+- **Once per environment:** the ingress settings of the environment, such
+  as load balancer IDs and IP allow lists. Styrmin stores them on the
+  environment and passes them to the environment's dedicated Traefik
+  instance.
+- **Per deployment:** nothing. Styrmin generates the hostname.
 
-### Next
+### Next steps
 
-- [**Backups and restores**](./backups-and-restores.md) — the other big
-  per-environment subsystem.
-- [**The operator and `StyrminDeployment`**](./operator-and-crds.md) —
-  what actually creates the ingress objects inside the cluster.
+- [**Backups and restores**](./backups-and-restores.md): backups and
+  restores of an environment.
+- [**The operator and `StyrminDeployment`**](./operator-and-crds.md): the
+  component that creates the ingress objects in the cluster.

@@ -19,7 +19,7 @@ environment. Styrmin adds it to the pods after the chart renders.
   - With the `updateDeployment` GraphQL mutation,
     `styrminctl deployments update`, or `spec.config.scheduling` in a
     `deployments apply` manifest (see
-    [Manifest `spec.config` shape](../reference/styrminctl.md#manifest-specconfig-shape)).
+    [Manifest `spec.config` format](../reference/styrminctl.md#manifest-specconfig-format)).
 - **On an environment**, for every deployment in it, with the
   `updateEnvironment` GraphQL mutation. The environment page shows the
   value but cannot change it.
@@ -172,7 +172,7 @@ To fix it, do one of the following:
 Styrmin no longer accepts `node_selector` on a cluster or a deployment,
 because it stored the value but never applied it to a pod
 ([#472](https://github.com/opsmill/styrmin/issues/472)). To place a
-deployment's pods on nodes labelled `pool=apps`, replace the old value
+deployment's pods on nodes labeled `pool=apps`, replace the old value
 with a required node affinity term.
 
 Before, in the deployment config (no pod received it):

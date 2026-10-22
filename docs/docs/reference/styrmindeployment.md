@@ -6,14 +6,13 @@ description: Field-by-field reference for the StyrminDeployment Kubernetes Custo
 
 ## `StyrminDeployment` CRD
 
-:::info Stub page — to be auto-generated
+:::info Stub page — to be generated
 
 This page will be generated from the OpenAPI schema embedded in the
-operator. The information below is a placeholder describing scope, not
-the final content.
+operator. The text below describes the scope of the page, not its final
+content.
 
-Until the auto-generation pipeline is wired up, the authoritative
-source is
+Until the generation step exists, these files define the CRD:
 [`backend/styrmin_backend/operator/crds/`](https://github.com/opsmill/styrmin/tree/develop/backend/styrmin_backend/operator/crds)
 and the kopf handlers under
 [`backend/styrmin_backend/operator/`](https://github.com/opsmill/styrmin/tree/develop/backend/styrmin_backend/operator).
@@ -22,57 +21,57 @@ and the kopf handlers under
 
 ### Scope
 
-`StyrminDeployment` is Styrmin's primary Custom Resource Definition.
-It carries the embedded `GlobalContext` in `spec` and is the
-operator's single source of truth about what should be running in the
-cluster.
+`StyrminDeployment` is the custom resource that the operator
+reconciles. Its `spec` contains the embedded `GlobalContext`, which
+describes what must run in the cluster for one deployment.
 
-This page will document, field by field:
+The page will document each field:
 
-- `metadata` — name, namespace, labels, annotations
-- `spec` — the embedded `GlobalContext` and every sub-context
+- `metadata`: name, namespace, labels, annotations
+- `spec`: the embedded `GlobalContext` and each sub-context
   (`cluster`, `environment`, `deployment`, `instance`, `application`,
   `components`, `utilities`)
-- `status` — `phase`, `conditions`, `observedGeneration`,
-  per-component readiness
+- `status`: `phase`, `conditions`, `observedGeneration`, and the
+  readiness of each component
 
 ### Annotations
 
 Annotations are not part of the OpenAPI schema, so this section stays
 when the page is generated.
 
-- `styrmin.io/instance-sequence` — the number of the application
-  instance in `spec.instanceId` among the instances of the deployment:
-  1 for the first, then one more for each new instance. Styrmin manages
+- `styrmin.io/instance-sequence`: the number of the instance in
+  `spec.instanceId` among the instances of the deployment: 1 for the
+  first instance, then one more for each new instance. Styrmin manages
   it; do not edit it. A workflow does not replace a `StyrminDeployment`
   that holds a higher number than its own instance. See
   [Several changes in quick succession](../concepts-and-architecture/reconciliation.md#several-changes-in-quick-succession)
-  for what users view and how to recover after an edit.
+  for what you see and how to recover after an edit.
 
 ### Rollout fields in `status`
 
 These fields are documented here until the generated reference exists.
-They describe the rollout the operator is working on:
+They describe the rollout that the operator is running:
 
-- `status.instanceId` — the ID of the application instance whose spec the
-  operator last handled. The create, update and resume handlers write it,
-  also when the handler fails. The status reporter sends it to the server,
-  and sends `spec.instanceId` for a CR that has no `status.instanceId`.
-- `status.rolloutStartedAt` — when the create or update handler started
-  the current rollout. The readiness timeout counts from it, or from
-  `metadata.creationTimestamp` when it is missing. The resume handler
-  sets it only when it is missing.
-- The `HelmReleaseReady` condition — set to `Unknown` with the reason
+- `status.instanceId`: the ID of the instance whose spec the operator
+  last handled. The create, update and resume handlers write it, even
+  when the handler fails. The status reporter sends it to the server,
+  and sends `spec.instanceId` for a `StyrminDeployment` that has no
+  `status.instanceId`.
+- `status.rolloutStartedAt`: the time when the create or update handler
+  started the current rollout. The readiness timeout counts from it, or
+  from `metadata.creationTimestamp` when it is missing. The resume
+  handler sets it only when it is missing.
+- The `HelmReleaseReady` condition: set to `Unknown` with the reason
   `Progressing` at the start of each rollout. While FluxCD has not
-  reported the HelmRelease's current generation ready, it copies the
-  status and transition time of FluxCD's `Ready` condition, with the
-  reason and message of the failed install or upgrade when there is one.
-  It becomes `True` with the reason `FluxReady` when FluxCD reports the
-  current generation ready.
-- The `HelmReleaseRemediated` condition — a copy of FluxCD's
-  `Remediated=True` condition for the current generation: FluxCD rolled
-  back or uninstalled a failed release. The operator removes it at the
-  start of each rollout.
+  reported the current generation of the `HelmRelease` as ready, the
+  condition copies the status and transition time of FluxCD's `Ready`
+  condition, with the reason and message of the failed install or
+  upgrade when there is one. It becomes `True` with the reason
+  `FluxReady` when FluxCD reports the current generation as ready.
+- The `HelmReleaseRemediated` condition: a copy of FluxCD's
+  `Remediated=True` condition for the current generation, which means
+  that FluxCD rolled back or uninstalled a failed release. The operator
+  removes it at the start of each rollout.
 
 The condition types are `NetworkPoliciesReady`, `SecretsReady`,
 `HelmReleaseReady`, `HelmReleaseRemediated`, `ServicesReady`,
@@ -80,16 +79,17 @@ The condition types are `NetworkPoliciesReady`, `SecretsReady`,
 them, see
 [When a rollout is ready or failed](../concepts-and-architecture/operator-and-crds.md#when-a-rollout-is-ready-or-failed).
 
-### Auto-generation source
+### Generation source
 
-- **Schema**: the CRD's OpenAPI schema (the same one the kopf operator
-  validates against)
-- **Build step**: TBD — emit Markdown from the schema and write it
-  into this file
+- **Schema**: the OpenAPI schema of the CRD, which the kopf operator
+  also validates against
+- **Build step**: not defined yet; it will write Markdown from the
+  schema into this file
 
-### Related
+### Related pages
 
-- [Concepts and Architecture → The operator and `StyrminDeployment`](../concepts-and-architecture/operator-and-crds.md)
-  — what the CRD does at runtime.
-- [Concepts and Architecture → Reconciliation](../concepts-and-architecture/reconciliation.md)
-  — how the CRD's `spec` gets reconciled into Kubernetes resources.
+- [Concepts and architecture → The operator and `StyrminDeployment`](../concepts-and-architecture/operator-and-crds.md):
+  what the operator does with each `StyrminDeployment`.
+- [Concepts and architecture → Reconciliation](../concepts-and-architecture/reconciliation.md):
+  how Styrmin turns the `spec` of a `StyrminDeployment` into Kubernetes
+  resources.

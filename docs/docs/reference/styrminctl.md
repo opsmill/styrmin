@@ -6,54 +6,54 @@ description: Reference for every command, flag, and exit code in the styrminctl 
 
 ## `styrminctl` CLI
 
-:::info Partial reference — the full command tree is still to be auto-generated
+:::info Partial reference — the full command tree is not generated yet
 
-The sections below are hand-written and **authoritative for the commands
-they cover**: they document the behaviour `--help` cannot carry, such as
-identifier precedence and exit codes. They are not a complete
-command-by-command reference yet — that will be generated from the
-Cyclopts command tree at build time.
+The sections below are written manually and are correct for the commands
+they cover. They document what `--help` does not show, such as
+identifier precedence and exit codes. They do not cover every command
+yet; the full reference will be generated from the Cyclopts command tree
+at build time.
 
-For anything not covered here, the CLI itself is the source:
+For the commands not covered here, read the CLI help:
 
 ```bash
 styrminctl --help
 styrminctl <command> --help
 ```
 
-Plus the source tree under
+The source code is under
 [`cli/`](https://github.com/opsmill/styrmin/tree/develop/cli).
 
 :::
 
 ### Scope
 
-`styrminctl` is the Cyclopts-based command-line client for Styrmin.
-It's a thin wrapper over the GraphQL API — it never talks to the
-database or the agent directly.
+`styrminctl` is the command-line client for Styrmin, built with Cyclopts.
+It calls the GraphQL API and does not connect to the database or the
+agent.
 
 Its top-level command groups are `clusters`, `environments`,
 `deployments`, `drivers`, `backups`, `env-backups`, `env-clones`,
-`backup-locations`, `tasks`, `auth`, and `telemetry`. `login`, `logout`, and `whoami` are
-also registered at the top level as shorthands for their `auth`
-sub-commands. Everything else — restoring a backup, upgrading a
-deployment's version — is a sub-command inside one of those groups, not a
-group of its own.
+`backup-locations`, `tasks`, `auth`, and `telemetry`. `login`, `logout`,
+and `whoami` are also top-level commands, as short forms of their `auth`
+subcommands. Every other command, such as restoring a backup or upgrading
+a deployment's version, is a subcommand of one of these groups.
 
-Once auto-generation lands, this page will document, command by command:
+When the reference is generated, this page will document, for each
+command:
 
-- Every group, sub-command, and flag
+- Every group, subcommand, and flag
 - Output formats (`--output text|json|yaml`)
 - Exit codes
-- Authentication and configuration (where the CLI looks for a
-  server URL and a token)
+- Authentication and configuration (where the CLI reads the server URL
+  and the token)
 
-### Auto-generation source
+### Generation source
 
 - **Schema**: the Cyclopts command tree in
   [`cli/src/`](https://github.com/opsmill/styrmin/tree/develop/cli/src)
-- **Build step**: TBD — walk the Cyclopts tree, emit one Markdown
-  section per command, write it into this file
+- **Build step**: not defined yet; it will read the Cyclopts command
+  tree and write one Markdown section per command into this file
 
 ### `clusters update` — change a cluster's config
 
@@ -147,13 +147,13 @@ To start from the stored config, run
 `styrminctl clusters get <name> --json`. It prints only the config, as
 JSON, and `clusters update` accepts that JSON as it is, including
 values such as `"external_url_scheme": "http"`. Without `--json`, the
-command prints a table whose `config` column cuts long values, so do not
-copy the config from the table.
+command prints a table whose `config` column truncates long values, so do
+not copy the config from the table.
 
-Two updates are not merged: the update saved last wins. A file that you
-saved before another administrator's update reverts that update, so read
-the stored config with `clusters get --json` immediately before you edit
-it. The edit dialog warns you when the config changed after you opened
+Two updates are not merged: the update saved last replaces the other. A
+file that you saved before another administrator's update reverts that
+update, so read the stored config with `clusters get --json` immediately
+before you edit it. The edit dialog warns you when the config changed after you opened
 it.
 
 The update is refused, and nothing is saved, in these cases:
@@ -170,7 +170,7 @@ The update is refused, and nothing is saved, in these cases:
 
 For each deployment, Styrmin computes the config that the deployment
 resolves to now: the cluster config, then its environment's config, then
-its own config, where the deepest value wins. When this config differs
+its own config, where the most specific value wins. When this config differs
 from the one that the deployment's active instance was deployed with,
 Styrmin redeploys the deployment at its current application version and
 driver version. As a result:
@@ -206,7 +206,7 @@ driver version. As a result:
 After the update, the command lists, by environment:
 
 - the deployments that are being redeployed, each with the ID of its
-  `update_instance` task. Follow one with
+  `update_instance` task. To follow one, run
   `styrminctl tasks get <task-id>`.
 - the deployments that wait for their environment's dedicated ingress
   controller. They are redeployed when the controller runs with the new
@@ -225,8 +225,8 @@ command lists deployments or environments that could not start, run the
 same command again: it retries only the deployments that are not at
 their config.
 
-Styrmin starts the redeploys before it answers, environment by
-environment. The command waits up to 10 minutes. If it times out, the
+Styrmin starts the redeploys, environment by environment, before it
+returns a response. The command waits up to 10 minutes. If it times out, the
 server can still be saving the config and starting the redeploys: check
 the config with `clusters get --json` before you run the command again.
 
@@ -247,12 +247,12 @@ before you edit it, or save the output of
 `styrminctl clusters get <name> --json` first. Styrmin does not keep a
 history of cluster configs
 ([#447](https://github.com/opsmill/styrmin/issues/447)); the
-`cluster_config_updated` server log line holds the previous values.
+`cluster_config_updated` server log line contains the previous values.
 
-#### Storage class change on a StatefulSet
+#### Storage class change on a `StatefulSet`
 
 Kubernetes refuses any change to the volume claim templates of an
-existing StatefulSet, and an application driver can write the storage
+existing `StatefulSet`, and an application driver can write the storage
 class there (the Infrahub example drivers do). When you change
 `standard_storage` or `fast_storage`, the redeploy of such a deployment
 fails and the deployment becomes `FAILED`. Its existing volumes keep
@@ -268,16 +268,23 @@ redeploy. To recover, do one of the following:
 
 ### `env-backups` — environment-level backup and restore
 
-The `env-backups` group covers whole-environment snapshots: one command
-backs up every eligible deployment in an environment, and one restores
-them. Per-deployment backups stay in the `backups` group. The two groups
-are separate because the `backups` commands target one deployment or one
-instance, and the `env-backups` commands target an environment:
+The `env-backups` group backs up and restores a whole environment. One
+command backs up every eligible deployment of an environment, and one
+command restores them. An environment backup (also called a snapshot)
+contains one **constituent backup** per eligible deployment: an ordinary
+backup of that deployment, which belongs to the environment backup. An
+environment restore runs one constituent restore per constituent backup.
+See [Backing up a whole
+environment](../concepts-and-architecture/backups-and-restores.md#backing-up-a-whole-environment).
+
+Backups of one deployment stay in the `backups` group, because the
+`backups` commands act on one deployment or one instance, and the
+`env-backups` commands act on an environment:
 
 - `backups restore <BACKUP_ID>` takes the backup id alone and restores
   the backup into the deployment it was taken of, in that deployment's
   namespace. You do not choose the deployment or the namespace.
-- `backups list` and `backups restore --last` work on a deployment's
+- `backups list` and `backups restore --last` act on a deployment's
   backup history: the backups of every instance the deployment has had.
   `backups list` takes the deployment by name or by `--id`, and
   `backups restore --last` takes it with `--target-deployment` or
@@ -285,50 +292,46 @@ instance, and the `env-backups` commands target an environment:
   deployment](../concepts-and-architecture/backups-and-restores.md#backup-history-of-a-deployment).
 - `--target-deployment`, `--target-deployment-id`,
   `--target-instance-id` and `--environment` work only with
-  `backups restore --last`: they choose which backups the newest
-  completed backup is picked from, and the backup is restored into the
-  deployment it was taken of. `backups restore` refuses a backup id
-  combined with one of these options, before it contacts the server,
+  `backups restore --last`. They select the backups from which the
+  command picks the newest completed backup, and the backup is restored
+  into the deployment it was taken of. `backups restore` refuses a backup
+  id combined with one of these options before it contacts the server,
   and exits with status 1.
 - `backups restore --last` skips backups whose expiry date has passed.
-  When the backup it chooses was taken of an earlier instance, or at
+  When the backup it selects was taken of an earlier instance, or at
   another application version, it shows the backup's application
   version and the deployment's current one, and asks for confirmation.
-  `--yes` skips the question, and without a terminal the command refuses
-  unless you pass `--yes`.
-- `backups restore --last` also restores into a deployment without an
-  active instance, as the server does.
+  `--yes` skips the question. Without a terminal, the command refuses
+  the restore unless you pass `--yes`.
+- `backups restore --last` can restore into a deployment that has no
+  active instance, as the server can.
 - `--instance-id` on `backups list` and `--target-instance-id` on
-  `backups restore --last` work on one instance only.
+  `backups restore --last` act on one instance only.
 
-For the semantics behind the `env-backups` commands, read [Backups and
-restores](../concepts-and-architecture/backups-and-restores.md#backing-up-a-whole-environment).
-
-Seven commands:
+The group has seven commands:
 
 | Command | What it does |
 |---------|--------------|
-| `env-backups create [ENVIRONMENT]` | Create a coordinated backup of an environment. |
-| `env-backups get <ENVIRONMENT_BACKUP_ID>` | Show one snapshot, including per-constituent outcomes. |
-| `env-backups list [ENVIRONMENT]` | List an environment's snapshots, newest first. |
-| `env-backups restore <ENVIRONMENT_BACKUP_ID>` | Restore a snapshot in place. Requires the administrator role. |
-| `env-backups restore-get <ENVIRONMENT_RESTORE_ID>` | Show one restore, including skipped constituents and their reasons. A redeploy that the restore could not start is not listed ([#520](https://github.com/opsmill/styrmin/issues/520)). |
-| `env-backups restore-list <ENVIRONMENT_BACKUP_ID>` | List the restores performed from a snapshot, newest first. |
-| `env-backups delete <ENVIRONMENT_BACKUP_ID>` | Delete a snapshot, its constituent backups, and their restores. |
+| `env-backups create [ENVIRONMENT]` | Back up every eligible deployment of an environment in one operation. |
+| `env-backups get <ENVIRONMENT_BACKUP_ID>` | Show one environment backup, with the result of each constituent backup. |
+| `env-backups list [ENVIRONMENT]` | List the environment backups of an environment, newest first. |
+| `env-backups restore <ENVIRONMENT_BACKUP_ID>` | Restore an environment backup into the deployments it was taken of. Requires the administrator role. |
+| `env-backups restore-get <ENVIRONMENT_RESTORE_ID>` | Show one environment restore, with the skipped deployments and their reasons. A redeploy that the restore could not start is not listed ([#520](https://github.com/opsmill/styrmin/issues/520)). |
+| `env-backups restore-list <ENVIRONMENT_BACKUP_ID>` | List the restores of an environment backup, newest first. |
+| `env-backups delete <ENVIRONMENT_BACKUP_ID>` | Delete an environment backup, its constituent backups, and their restores. |
 
 #### Targeting an environment
 
 `create` and `list` take the environment as a positional name, or as a
-UUID with `--id`. Passing both — or neither — is an error. A name is
-resolved within a cluster, so pass `--cluster <name>` (defaults to
-`default`) or `--cluster-id <uuid>` when you have more than one cluster
-registered.
+UUID with `--id`. Passing both, or neither, is an error. Styrmin looks up
+a name within a cluster, so pass `--cluster <name>` (default `default`)
+or `--cluster-id <uuid>` when you have more than one cluster registered.
 
-`--cluster-id` combined with an explicitly named, non-default `--cluster`
-is an error. `--cluster-id` alongside the default `--cluster default` is
-accepted — the CLI cannot tell a defaulted value from a typed one — and
-`--cluster-id` wins: the name lookup is sent with the cluster id and no
-cluster name.
+`--cluster-id` combined with a named `--cluster` other than `default` is
+an error. `--cluster-id` with the default `--cluster default` is
+accepted, because the CLI cannot tell a default value from a value you
+typed. `--cluster-id` then takes precedence: the CLI sends the name
+lookup with the cluster id and no cluster name.
 
 ```bash
 styrminctl env-backups create production --name before-upgrade
@@ -336,100 +339,101 @@ styrminctl env-backups list production
 styrminctl env-backups list --id <environment-uuid>
 ```
 
-Every other command takes a snapshot or restore UUID directly.
+The other commands take the UUID of an environment backup or of an
+environment restore.
 
 #### `create` options
 
 | Option | Default | Purpose |
 |--------|---------|---------|
-| `--name` | generated | Snapshot name. Defaults to `styrmin-envbackup-<uuid>`. |
-| `--wait` | off | Block until every constituent backup reaches a terminal state. |
+| `--name` | generated | Name of the environment backup. Defaults to `styrmin-envbackup-<uuid>`. |
+| `--wait` | off | Wait until every constituent backup reaches a final state. |
 | `--max-wait` | `600` | Seconds to wait, with `--wait`. |
 | `--interval` | `5` | Poll interval in seconds, with `--wait`. |
 
-`create` prints the snapshot's derived status and a constituent count in
-`ok/failed/total` form, then one line per constituent with its own
-failure reason when it has one. `ok` counts constituents whose backup
-**completed**, `failed` counts constituents that never got a backup at
-all, and anything still running or since deleted shows up only in
-`total`. Compare `total` against the number of eligible deployments —
-that count, not the status, is what tells you the fan-out covered
-everything.
+`create` prints the status of the environment backup and a count of its
+constituent backups in `ok/failed/total` form, then one line per
+constituent backup, with its failure reason when it has one. `ok` counts
+the constituent backups that **completed**, and `failed` counts the
+deployments that got no backup. A constituent backup that is still
+running, or that was deleted since, appears only in `total`. To check
+that every eligible deployment has a backup, compare `total` with the
+number of eligible deployments; the status does not show it.
 
 #### `restore` options
 
 | Option | Default | Purpose |
 |--------|---------|---------|
-| `--wait` | off | Block until every constituent restore reaches a terminal state. |
+| `--wait` | off | Wait until every constituent restore reaches a final state. |
 | `--max-wait` | `900` | Seconds to wait, with `--wait`. |
 | `--interval` | `5` | Poll interval in seconds, with `--wait`. |
 
-`restore` prints the restored constituents and every skipped one with its
-deployment name and reason, before any waiting. The skip list is complete
-the moment the command returns — classification happens up front.
+`restore` prints the restored constituent backups and each skipped one,
+with its deployment name and reason, before it waits. The list of skipped
+deployments is complete when the command returns: the server selects the
+deployments to skip when it receives the request.
 
 #### Exit codes
 
-`create` and `restore` exit **non-zero on `PARTIAL` as well as on
-`FAILED`**, with or without `--wait`. A `PARTIAL` snapshot is real and
-restorable, but you asked to back up (or restore) a whole environment
-and did not get every deployment — the exit code is the only
-machine-readable place to say so, and a CI job that treats it as success
-will not notice the gap.
+`create` and `restore` exit with a **non-zero code on `PARTIAL` and on
+`FAILED`**, with or without `--wait`. You can restore a `PARTIAL`
+environment backup, but it does not include every deployment that you
+asked to back up or restore. The exit code is the only machine-readable
+sign of this, so a CI job that treats the command as successful does not
+detect the missing deployments.
 
-The status is derived from the constituents on every read, so it can
-already be `PARTIAL` or `FAILED` when the command returns: a fan-out
-where every constituent was busy, or a restore where every constituent
-was skipped, is finished before there is anything to wait for. In that
-case the command reports the outcome and exits non-zero immediately
-rather than polling. Without `--wait`, a command whose constituents are
-still running exits successfully once the operation is accepted.
+Styrmin computes the status from the constituent backups on every read,
+so the status can already be `PARTIAL` or `FAILED` when the command
+returns. For example, a backup in which every deployment already had a
+backup running, or a restore in which every deployment was skipped, has
+nothing to wait for. In that case the command prints the result and exits
+with a non-zero code without polling. Without `--wait`, a command whose
+constituent backups or restores are still running exits with code 0 when
+the server accepts the operation.
 
-**A `--wait` that times out also exits 1.** `--max-wait` elapsing is not
-an error the CLI distinguishes: the poll returns the last record it read,
-so the command prints the non-terminal status it saw (`PENDING` or
-`IN_PROGRESS`) and exits non-zero. Raise `--max-wait` rather than reading
-that exit code as a failed backup — nothing has been abandoned, and the
-constituents keep running.
+**A `--wait` that times out also exits with code 1.** The CLI does not
+report the timeout as a separate error: it prints the last status it read
+(`PENDING` or `IN_PROGRESS`) and exits with a non-zero code. The
+constituent backups or restores keep running. Increase `--max-wait`
+instead of treating that exit code as a failed backup.
 
-:::note `delete` has no status guard
+:::note `delete` works in any status
 
-`env-backups delete` works regardless of the snapshot's status,
-including while its constituents are still running. That is the escape
-hatch for an environment blocked by a constituent backup that never got
-picked up — deleting the snapshot releases the environment for new
-environment-level operations.
+`env-backups delete` works whatever the status of the environment backup,
+including while its constituent backups are still running. Use it when a
+constituent backup never started and the environment stays blocked:
+deleting the environment backup lets you start new environment-level
+operations.
 
 :::
 
 ### `env-clones` — clone an environment
 
-The `env-clones` group copies a live environment into a **new**
-environment on the same cluster, built from a fresh environment backup of
-the source, and tracks the operation afterwards. For the semantics behind
-these commands — selection, the config override, what a clone is and
-isn't isolated from — read [Cloning an
+The `env-clones` group copies a running environment into a **new**
+environment on the same cluster, from a new environment backup of the
+source, and tracks the operation. For how the selection and the config
+override work, and what a clone is not isolated from, see [Cloning an
 environment](../concepts-and-architecture/backups-and-restores.md#cloning-an-environment).
 
-Three commands:
+The group has three commands:
 
 | Command | What it does |
 |---------|--------------|
 | `env-clones create [ENVIRONMENT] --name <new-name>` | Clone an environment into a new one. Requires the administrator role. |
-| `env-clones get <ENVIRONMENT_CLONE_ID>` | Show one clone: derived status, per-deployment outcomes, operation-level events. |
+| `env-clones get <ENVIRONMENT_CLONE_ID>` | Show one clone: its status, the result for each deployment, and the events of the operation. |
 | `env-clones list [ENVIRONMENT]` | List the clones taken **of** an environment, newest first. |
 
-`create` and `list` target the source environment exactly the way
-`env-backups` does: a positional name, or a UUID with `--id`, resolved
-within `--cluster` (default `default`) or `--cluster-id`. Passing both a
-name and `--id` — or neither — is an error.
+`create` and `list` take the source environment in the same way as
+`env-backups`: a positional name, or a UUID with `--id`, looked up within
+`--cluster` (default `default`) or `--cluster-id`. Passing both a name
+and `--id`, or neither, is an error.
 
-`list` is scoped by **source**. A clone-born environment's own provenance
-is an entry in its *source's* list, not in its own: run `env-clones list`
-against the **source** environment, or `env-clones get <id>` on the clone
-record itself. (The reverse lookup — from the created environment back to
-the clone that made it — is the `Environment.clonedFrom` field, which the
-UI and the GraphQL API expose; no `styrminctl` command reads it.)
+`list` lists the clones of a **source** environment. An environment
+created by a clone is listed under its source environment, not under
+itself: run `env-clones list` on the **source** environment, or
+`env-clones get <id>` on the clone record. To find the clone that created
+an environment, read the `Environment.clonedFrom` field in the UI or the
+GraphQL API; no `styrminctl` command reads it.
 
 #### `create` options
 
@@ -439,20 +443,20 @@ UI and the GraphQL API expose; no `styrminctl` command reads it.)
 | `--deployment` | all eligible | A source deployment to include, by **name or UUID**. Repeat for several. Omit to include every eligible deployment. |
 | `--config-override` | none | JSON `UpdateEnvironmentInput` merged over the captured config, inline or `@path/to/file.json`. camelCase or snake_case keys. |
 | `--clear-config-field` | none | A captured config field to remove before the merge, by **snake_case** field name. Repeat for several. |
-| `--wait` | off | Block until the clone reaches a terminal state. |
-| `--max-wait` | `1800` | Seconds to wait, with `--wait`. Clones capture, create and restore, so the default is longer than `env-backups`'. |
+| `--wait` | off | Wait until the clone reaches a final state. |
+| `--max-wait` | `1800` | Seconds to wait, with `--wait`. A clone takes a backup, creates the environment and restores the data, so the default is longer than for `env-backups`. |
 | `--interval` | `5` | Poll interval in seconds, with `--wait`. |
 
-`--deployment` accepts deployment **names**, resolved within the source
-environment, as well as UUIDs. A name with no match in the source is
-rejected by the CLI before the mutation is sent.
+`--deployment` accepts deployment **names**, looked up in the source
+environment, and UUIDs. The CLI rejects a name that matches no deployment
+of the source before it sends the mutation.
 
 Omitting `--deployment` and passing an **empty** selection are different
-requests. Omit it for "every eligible deployment"; pass Cyclopts'
-generated `--empty-deployment` for "no applications at all", which clones
-the environment's configuration only and settles on `COMPLETED` once that
-environment exists. `env-clones get` tells the two apart: `all eligible`
-versus `none (configuration only)`.
+requests. Omit it to clone every eligible deployment. Pass
+`--empty-deployment`, which Cyclopts generates, to clone no application:
+the clone copies only the environment's configuration and ends in
+`COMPLETED` once the new environment exists. `env-clones get` shows which
+one you asked for: `all eligible` or `none (configuration only)`.
 
 When the environment's config has an affinity term that names a
 deployment, an empty selection is rejected with `VALIDATION_ERROR`,
@@ -462,16 +466,16 @@ such deployment and the path of every term that names it. Add
 deployment in `--config-override`.
 
 `--config-override` is an `UpdateEnvironmentInput` payload, so `envVars`
-is a list of `{name, value}` entries rather than a map. camelCase keys
+is a list of `{name, value}` entries, not a map. camelCase keys
 (`backupTtl`, `fqdnSuffix`) are the GraphQL spelling and always work;
-the CLI also accepts their snake_case equivalents. `--clear-config-field`
-names, by contrast, are **only** snake_case — that list is validated
-against the config's own field names, not against the input type.
+the CLI also accepts the snake_case forms. `--clear-config-field` takes
+**only** snake_case names, because the CLI checks them against the field
+names of the config, not against the input type.
 
-`create` prints the clone's id, its derived status, the source name, and
-a `cloned/skipped/failed/total` deployment count, then one line per
-source deployment with its outcome and reason, then any operation-level
-events.
+`create` prints the clone's id, its status, the source name, and a
+`cloned/skipped/failed/total` deployment count, then one line per source
+deployment with its result and reason, then the events of the
+operation.
 
 ```bash
 # Everything eligible, wait for it
@@ -495,7 +499,7 @@ styrminctl env-clones create --id <environment-uuid> \
 styrminctl env-clones create production --name prod-config-only --empty-deployment
 ```
 
-Track and inspect afterwards:
+To follow the clone afterwards:
 
 ```bash
 styrminctl env-clones list production
@@ -504,51 +508,52 @@ styrminctl env-clones get <environment-clone-id>
 
 #### Exit codes
 
-`create` exits **0 on `COMPLETED`**, and **1 on both `PARTIAL` and
-`FAILED`** — `PARTIAL` with an explicit warning, because you asked for a
-copy of an environment and did not get every deployment you selected.
+`create` exits with **0 on `COMPLETED`**, and with **1 on `PARTIAL` and
+on `FAILED`**. On `PARTIAL`, it also prints a warning, because the clone
+does not include every deployment you selected.
 
-The status is derived on every read, and the first reading — the one the
-mutation returns — is always non-terminal: `PENDING`, or `IN_PROGRESS`
-once anything has been recorded (an up-front skip counts). Even an
-all-skipped, configuration-only clone reads `IN_PROGRESS` until its
-environment exists. So a terminal status only ever comes from polling:
-`create` reaches it with `--wait`, and `get` shows it afterwards.
+Styrmin computes the status on every read. The first status, which the
+mutation returns, is never final: it is `PENDING`, or `IN_PROGRESS` once
+anything has been recorded, including a deployment skipped at the start.
+A configuration-only clone, or a clone whose deployments were all
+skipped, also shows `IN_PROGRESS` until its environment exists. A final
+status therefore comes only from polling: `create` reads it with
+`--wait`, and `get` shows it afterwards.
 
-Without `--wait`, a clone that is still working exits 0 once it has been
-accepted. As with `env-backups`, a `--wait` that runs out of `--max-wait`
-also exits 1: the CLI prints the non-terminal status it last saw and
-stops waiting. Nothing has been abandoned — raise `--max-wait` rather
-than reading that as a failed clone.
+Without `--wait`, `create` exits with 0 when the server accepts the
+clone, even if the clone is still running. As with `env-backups`, a
+`--wait` that reaches `--max-wait` also exits with 1: the CLI prints the
+last status it read and stops waiting. The clone keeps running. Increase
+`--max-wait` instead of treating that exit code as a failed clone.
 
 :::note There is no `env-clones delete`
 
-A clone is discarded by deleting the **environment it created**
-(`styrminctl environments delete <name>`), which works in any state and
-frees the name for an immediate re-clone. If the clone stalled before its
-environment appeared, delete its backing snapshot with `env-backups
-delete <id>` instead. See [Discarding a
+To discard a clone, delete the **environment it created**
+(`styrminctl environments delete <name>`). This works in any state, and
+you can then clone again under the same name. If the clone stopped
+before its environment was created, delete its environment backup with
+`env-backups delete <id>` instead. See [Discarding a
 clone](../concepts-and-architecture/backups-and-restores.md#discarding-a-clone).
 
 :::
 
-### `deployment apply` is idempotent
+### `deployments apply` is idempotent
 
-`styrminctl deployment apply -f <manifest>` is declarative: the CLI
-sends the full desired state on every run and the **backend** decides
-whether anything actually changed. Re-applying an unchanged manifest is
-a clean no-op — no new application instance is created, no reconcile
-task is dispatched, and the deployment's active instance and status are
-left untouched. The command still exits successfully.
+`styrminctl deployments apply -f <manifest>` is declarative: the CLI
+sends the full desired state on every run, and the server compares it
+with the stored state. Applying an unchanged manifest again changes
+nothing: Styrmin creates no new instance and starts no reconciliation
+task, and the deployment keeps its active instance and status. The
+command still exits with code 0.
 
-Each deployment in a run is reported with its outcome:
+The command reports the result for each deployment in a run:
 
-- `created <name>` — a new deployment was provisioned.
-- `updated <name>` — the desired state differed and a reconcile was
-  dispatched.
-- `unchanged <name>` — the resolved desired state already matched the
-  live state; nothing was done.
-- `failed <name>: <reason>` — the apply errored for that deployment. When
+- `created <name>`: Styrmin created a new deployment.
+- `updated <name>`: the desired state was different, and Styrmin started
+  a reconciliation.
+- `unchanged <name>`: the resolved desired state already matched the
+  stored state; Styrmin did nothing.
+- `failed <name>: <reason>`: the apply failed for that deployment. When
   the server rejected the manifest, the line ends with the server's error
   code, for example `[COMPONENT_CONTAINER_NOT_DECLARED]`, and nothing on
   the deployment changed. When the server refused the update and returned
@@ -563,9 +568,9 @@ A run ends with a summary line counting each outcome, for example:
 2 created, 1 updated, 3 unchanged, 0 failed
 ```
 
-A run consisting solely of no-ops still exits with a success code, so
-`apply` is safe to run repeatedly in a declarative loop. A run with at
-least one `failed` outcome exits with code 1.
+A run in which every deployment is `unchanged` exits with code 0, so you
+can run `apply` repeatedly, for example from a CI job. A run with at least
+one `failed` result exits with code 1.
 
 For an existing deployment, `apply` sends the manifest's config,
 parameters and version in one request. This needs a Styrmin server with
@@ -576,20 +581,20 @@ SDK.
 
 :::note Re-applying a failed deployment
 
-A no-op apply against a deployment in a terminal-failure state stays a
-no-op — `apply` compares desired intent against current intent, not
-health, so it will not retry a broken-but-unchanged deployment.
+An apply that changes nothing does not retry a `FAILED` deployment.
+`apply` compares the desired state with the stored state, not with the
+health of the deployment, so a failed deployment whose manifest did not
+change stays failed.
 
 :::
 
 :::note Rebuilt image under an unchanged version
 
-`apply` compares the *resolved desired state*, which is keyed on the
-application version (and driver version), not on image content. An
-application image rebuilt and re-pushed under the **same** version, with
-unchanged config, resolves to an identical instance and is therefore a
-no-op — `apply` will not redeploy it. Bump the version to force a
-redeploy.
+`apply` compares the *resolved desired state*, which depends on the
+application version and the driver version, not on the content of the
+image. An application image that you rebuild and push again under the
+**same** version, with an unchanged config, gives the same instance, so
+`apply` does not redeploy it. Change the version to redeploy.
 
 :::
 
@@ -600,17 +605,18 @@ change, then `running <name>` or `failed <name>: <reason>` when the
 deployment reaches a final state. When the server refuses the change
 and returns a failed task, `apply` prints only the line
 `failed <name>: task <task-id> failed: <message>` and does not wait,
-because the deployment did not change. For an upgrade, `running` comes only
-after the upgrade task and the tasks its driver hook started have
-finished (see
+because the deployment did not change. For an upgrade, `apply` prints
+`running` only after the upgrade task and the tasks that its driver hook
+started have finished (see
 [Status reporting](../concepts-and-architecture/status-reporting.md)).
-When the deployment state becomes `FAILED`, the reason names the failed step, in the form
+When the deployment state becomes `FAILED`, the reason names the failed
+step, in the form
 `step "<step name>" failed: <error>`. `apply` looks for it in the steps of
 the task that the apply started, then in the tasks that the task's hook
 steps started, nearest first. When it finds no failed step, the reason
 is `deployment reconciliation failed (status: <status>)`.
 
-`--wait` gives up after `--max-wait` seconds (600 by default) with the
+`--wait` stops after `--max-wait` seconds (600 by default) with the
 reason `wait timeout`. The operator fails a HelmRelease that is not ready
 after its readiness timeout (270 seconds by default), which counts from the
 start of the rollout, after the flow and its hooks. When the hooks of a
@@ -641,8 +647,8 @@ A replica override on a component that the deployment's driver version
 no longer declares gets its own row, with `-` in the `id` and `enabled`
 columns and the cell `3 (override, not applied: no longer declared)`.
 
-`chart` carries no number, because Styrmin does not read the count that
-the chart renders.
+The `chart` cell has no number, because Styrmin does not read the count
+that the chart renders.
 
 ### `deployments update-version`
 
@@ -672,8 +678,9 @@ Styrmin drops the value if it equals the parameter's default in the
 current driver version. Any other value fails the command with
 `RETIRED_PARAMETER_VALUE` before any task starts. `deployments apply`
 follows the same rule. See
-[Changing Driver Versions](../drivers/changing-driver-versions.md) and
-[Migrating Replica Parameters](../drivers/migrating-replica-parameters.md).
+[Change a deployment's driver version](../drivers/changing-driver-versions.md)
+and
+[Migrate the infrahub replica parameters](../drivers/migrating-replica-parameters.md).
 
 ### `deployments scale` — set the replica count of one component
 
@@ -705,13 +712,13 @@ and prints the error. When the count does not change, it prints
 `styrminctl tasks get <task-id>` prints three parts:
 
 1. A "Task" table with the columns `id`, `type`, `status`, `result`,
-   `message` and `deploymentId`. `status` follows only the Prefect flow
-   run; `result` is the task result, calculated from the steps and the
+   `message` and `deploymentId`. `status` shows only the state of the
+   Prefect flow run; `result` is the task result, calculated from the steps and the
    `status` of the task and of the tasks its hook steps started
    (`RUNNING`, `FAILED`, `SUCCEEDED` or `SUPERSEDED`).
 2. A "Steps" table with one row per step, in start order with pending
    steps last: `step` (the step's name), `status`, `duration` (`running`
-   while the step runs), `attempts` and `error`. The `error` column holds
+   while the step runs), `attempts` and `error`. The `error` column contains
    the error of each failed attempt as `attempt <n>: <message>`, oldest
    first, then FluxCD's current reason for the HelmRelease step, then the
    last line of a failed command's output as `output: <line>`, one per
@@ -723,11 +730,11 @@ and prints the error. When the count does not change, it prints
 
 The full output of a failed command is on the deployment page.
 
-### Manifest `spec.config` shape
+### Manifest `spec.config` format
 
 `spec.config` accepts the same typed configuration whether `apply` creates
-or updates a deployment. Environment variables — both deployment-scoped and
-per-component — are written as a **list of `{name, value}` entries**, not as
+or updates a deployment. Environment variables, for the deployment and for
+each component, are written as a **list of `{name, value}` entries**, not as
 a key/value map:
 
 ```yaml
@@ -763,8 +770,9 @@ token becomes the deployment's application version. Quote it, since YAML
 reads an unquoted `{` as a map. Removing the key clears the override on the
 next apply, unless that leaves `spec.config` empty: an omitted or empty
 `spec.config` keeps the stored configuration, so write `components: []` to
-clear the last override. A reference that fails the image grammar, has no tag or digest,
-carries another template expression, or becomes invalid once
+clear the last override. A reference that is not a valid image reference,
+has no tag or digest, contains another template expression, or becomes
+invalid once
 `{{ app.version }}` is replaced by the application version fails with
 `INVALID_IMAGE_REFERENCE`;
 a component the driver version does not declare fails with
@@ -797,10 +805,10 @@ version and application version it checked. A rejected apply changes nothing on
 the deployment.
 
 Component config on a component that this driver version does not declare is
-rejected even when it is unchanged, with one exception: a block that holds
+rejected even when it is unchanged, with one exception: a block that contains
 only `replicas`, sent with the stored value unchanged, is accepted, stored and
 not applied. When a driver version removes or renames a component, remove its
-block from the manifest in the same change that moves `spec.version`. Unchanged
+block from the manifest in the same change that changes `spec.version`. Unchanged
 `env_vars`, `image`, `command` or `args` on a component that the driver version
 declares without a component container are accepted, stored and not applied.
 `apply` prints a warning on stderr for each such component. The warning names
@@ -828,8 +836,9 @@ When that read fails, for example against a server of an earlier release,
 `apply` still succeeds and prints a warning with the error instead, because it
 cannot list the overrides that are not applied. The SDK sets
 `ApplyOutcome.applicability_check_error`.
-See [Migrating env var wiring](../drivers/migrating-env-vars.md) and
-[Migrating container overrides](../drivers/migrating-container-overrides.md).
+See [Migrate env vars to component containers](../drivers/migrating-env-vars.md)
+and
+[Migrate command and args overrides to component containers](../drivers/migrating-container-overrides.md).
 
 When a manifest changes an existing deployment's application version,
 `styrminctl deployments apply` prints a warning on stderr for each
@@ -844,7 +853,7 @@ warning: my-app: pinned image override on server will not follow version 1.3.0 (
 
 The warning does not change the exit code, and `apply` never prompts. With
 `--wait`, it is printed once, when the change is submitted. `apply` reads only
-the config, so it lists every token-free override, including one on a
+the config, so it lists every override without the token, including one on a
 component whose override does not currently apply. The SDK returns the same
 components as `ApplyOutcome.pinned_image_components`, with
 `ApplyOutcome.target_version` set on an `updated` outcome that changes the
@@ -853,8 +862,8 @@ version.
 :::note Overrides in the apply that changes the version
 
 Every component override (`env_vars`, `command`, `args`, `image`, `replicas`)
-is checked against the target driver version, so all of them can go in the
-apply that changes `spec.version`. The driver's upgrade action can start before the new
+is checked against the target driver version, so you can set all of them in
+the apply that changes `spec.version`. The driver's upgrade action can start before the new
 values reach the component's workload, so the action primitives take the
 `image` override and the `env_vars` from the new configuration: a Job that the
 action builds from the component's image and env runs with them. One
@@ -875,7 +884,7 @@ driver from the driver directory. The command needs the `ADMIN` role.
 |--------------------|---------|---------|
 | `REPOSITORY-URL` | required | Git repository URL of the driver. |
 | `BRANCH` | required | Git branch to load from. |
-| `--driver-directory PATH` | the repository root | Folder of the repository that holds driver.styrmin.yml, relative to the repository root. |
+| `--driver-directory PATH` | the repository root | The directory of the repository that contains `driver.styrmin.yml`, relative to the repository root. |
 
 ```shell
 uv run styrminctl drivers load-version \
@@ -923,7 +932,7 @@ message that asks you to upgrade the server. Without
 
 When the server refuses the load or the load fails, the command prints
 `Error:` and the server's message, and exits with code 1. When the driver
-directory does not exist, is not a folder, or holds no
+directory does not exist, is not a directory, or contains no
 `driver.styrmin.yml`, the message names the driver directory, the
 repository, the branch and the commit:
 
@@ -931,11 +940,12 @@ repository, the branch and the commit:
 Error: Driver directory 'drivers/missing' does not exist in repository 'https://github.com/your-org/styrmin-drivers.git' (branch 'main', commit 0123456789abcdef0123456789abcdef01234567).
 ```
 
-See [Loading a Driver](../drivers/loading-drivers.md#from-a-git-repository)
+See [Load a driver](../drivers/loading-drivers.md#from-a-git-repository)
 for the SDK, GraphQL and UI equivalents, and for how the actions of a
 driver version loaded from a driver directory run.
 
-### Related
+### Related pages
 
-- [Installation → Quickstart](../installation/quickstart.md) — the
-  CLI's first appearance, plus authentication.
+- [Install Styrmin on a local vCluster](../installation/vcluster-local.md):
+  an install that logs in with `styrminctl login` and creates the first
+  records with the CLI.

@@ -1,200 +1,171 @@
 ---
 title: Why Styrmin?
 sidebar_position: 1
-description: What Styrmin does, who it's for, and how it differs from Helm, ArgoCD, and Flux.
+description: What Styrmin does, who it is for, and how it differs from Helm, Argo CD, and Flux.
 ---
 
 ## Why Styrmin?
 
-Styrmin is an **application platform that manages the full lifecycle of your
-infrastructure automation stack** — Infrahub, Ansible, Grafana, Prometheus,
-and the tooling around them — **as a single system**, not application by
-application.
+Styrmin deploys, configures, backs up, and upgrades your infrastructure
+automation stack on Kubernetes: Infrahub, Ansible, Grafana, Prometheus,
+and the tools around them. You manage these applications as one stack,
+with one lifecycle.
 
-These tools don't actually run in isolation: they need to be deployed
-together, backed up together, upgraded together, and tested together. Doing
-that by hand means a Helm chart per application, a backup script per
-application, a brittle upgrade runbook per application, and no realistic
-way to rehearse a change before it hits production.
+These applications depend on each other: you deploy, back up, upgrade,
+and test them together. Without Styrmin, you need a Helm chart, a backup
+script, and an upgrade runbook for each application, and you have no way
+to test a change before you apply it to production.
 
-Styrmin gives you one system for all of it.
+Use Styrmin to run these operations for the whole stack.
 
-### The capabilities that nothing else provides
+### Environment cloning, stack backups, and driver-defined upgrades
 
-These three operations are what set Styrmin apart from every other tool in
-the space. They're either impossible or extremely painful today — Styrmin
-is designed to make them routine.
+Styrmin runs these three operations across every application in an
+environment:
 
-1. **Clone an entire environment.** Duplicate production — applications,
-   configuration, and live data — to a test environment so upgrades and
-   changes can be validated against real data before touching production.
-   Cross-application connectivity is environment-aware: cloned environments
-   talk to each other, not back to production.
-2. **Back up the whole stack in a single operation.** Trigger backups
-   across every application in an environment with one action. Each
-   application's driver knows how to back it up correctly — Neo4j and
-   Postgres need different procedures and the driver handles that.
-3. **Upgrade reliably.** Run upgrades through driver-defined sequences
-   that stop components in the right order, run migrations, restart, and
-   verify. Complex upgrade processes are encoded **once** in the driver
-   and run the same way every time, not improvised in production at 2am.
+1. **Clone an environment.** Copy production (the applications, their
+   configuration, and their data) to a test environment, and test an
+   upgrade or a change on real data before you apply it to production.
+   Applications in a cloned environment connect to each other, not to
+   the production applications.
+2. **Back up the whole stack in one operation.** Start a backup of every
+   application in an environment with one action. Each application's
+   driver defines its backup procedure, because Neo4j and PostgreSQL need
+   different procedures.
+3. **Upgrade with driver-defined steps.** The driver lists the upgrade
+   steps in order: stop components, run migrations, restart, verify. You
+   write a multi-step upgrade once in the driver, and Styrmin runs the
+   same steps on every upgrade.
 
-The unit that makes this work is the **driver**: a versioned, per-application
-specification that captures everything Styrmin needs to deploy, configure,
-back up, and upgrade that application correctly. See
-[What is an Application Driver?](../concepts-and-architecture/what-is-a-driver.md).
+Each application has a **driver**: a versioned specification of how
+Styrmin deploys, configures, backs up, and upgrades that application. See
+[What is an application driver?](../concepts-and-architecture/what-is-a-driver.md).
 
 ### Who Styrmin is for
 
-#### Primary persona: the engineer running their own stack
+Styrmin is for you if you are an infrastructure or network engineer who
+runs Infrahub, Ansible, and related tools in production, without a
+dedicated platform team and without Kubernetes expertise. For example:
 
-The person Styrmin is designed for first is **the infrastructure or network
-engineer running their own application stack** — not a dedicated platform
-team, not a Kubernetes expert, but responsible for keeping Infrahub,
-Ansible, and surrounding tooling running in production. This is the person
-who:
+- You look up Helm values each time you change a chart.
+- You have upgraded in production without a tested rollback.
+- You have no staging environment, because it is hard to create one.
 
-- Googles Helm values every time they touch a chart.
-- Has upgraded in production without a tested rollback path.
-- Doesn't have a staging environment because creating one is too hard.
+Drivers contain the Kubernetes and Helm settings and the backup and
+upgrade procedures, so you do not write them for each application.
 
-Styrmin removes the parts of that job that require Kubernetes specialism
-and replaces ad-hoc operational glue with driver-defined procedures.
+Styrmin is first aimed at mid-size Infrahub operators who run Infrahub
+in production without a large platform team.
 
-#### Where Styrmin fits
+Styrmin is also for:
 
-Styrmin is initially aimed at **Infrahub operators without a large
-platform team** — mid-size operators who need production-grade
-infrastructure management but can't afford the operational overhead it
-demands today.
-
-From there it extends to anyone who wants to manage a group of
-applications as one stack:
-
-- **Platform teams** managing multiple application stacks across
+- **Platform teams** that run several application stacks across
   environments.
-- **Managed Service Providers** building customer portals on top of a
-  consistent stack.
-- **Implementation and consulting partners** building a repeatable
-  delivery practice — owning an internal library of drivers for the
-  applications they deploy for clients, instead of rebuilding the
-  deployment from scratch on every engagement.
-- **Any operator currently stitching together multiple Helm charts
-  manually.**
+- **Managed service providers** that build customer portals on one
+  stack.
+- **Implementation and consulting partners** that keep a library of
+  drivers for the applications they deploy for their clients, so they
+  do not build each deployment again for each client.
+- **Anyone who deploys several Helm charts manually.**
 
-The longer-term goal is for teams running on Docker Compose to get the
-benefits of a managed Kubernetes platform without having to learn
-Kubernetes — Styrmin will eventually bundle a Kubernetes distribution so
-users don't even need to install it themselves.
+A later version of Styrmin will include a Kubernetes distribution. Teams
+that run their applications with Docker Compose will then be able to use
+Styrmin without installing or learning Kubernetes.
 
-### How teams do this today, and why it hurts
+### Problems with managing each application separately
 
 #### Manual Helm chart deployment
 
-The standard approach is to deploy each application individually using
-its own Helm chart. The pain:
+You deploy each application with its own Helm chart. Problems:
 
-- Every chart uses a different configuration schema; teams have to learn
-  each one.
-- Cluster-specific details (storage classes, ingress class) must be known
-  and set correctly for every application.
-- There's no standardised way to know which Helm chart version maps to
-  which application version.
-- Each application is managed independently; there is no abstraction
-  across them.
+- Each chart has its own configuration schema, and you learn each one.
+- You must know the cluster-specific settings (storage classes, ingress
+  class) and set them for every application.
+- No standard maps a Helm chart version to an application version.
+- You manage each application separately; nothing applies to all of
+  them.
 
 #### Manual backup and restore
 
-Teams build their own backup scripts or use per-application tools. The
-pain:
+You write a backup script for each application, or use a tool for each
+application. Problems:
 
-- Backup procedures differ per application (Neo4j ≠ Postgres) and have
-  to be maintained per application.
-- There's no unified backup across the stack — each application is
-  backed up separately.
+- Backup procedures differ for each application (Neo4j and PostgreSQL
+  are different), and you maintain each one.
+- No backup covers the whole stack: you back up each application
+  separately.
 - Restoring is manual, error-prone, and rarely tested.
-- Recreating a production environment for testing is extremely hard.
+- Creating a copy of production for testing is very hard.
 
 #### Manual upgrades
 
-Teams run `helm upgrade` directly, often without process. The pain:
+You run `helm upgrade` directly, with no defined sequence. Problems:
 
-- Upgrading in production without a tested rollback path — what the
-  field calls "YOLO upgrades".
-- Multi-step upgrade processes (stop workers, migrate DB, restart) have
-  to be executed manually in the right order.
-- There is no safe way to test an upgrade against production data first.
-- Breaking changes in a Helm chart require manual intervention with no
-  structured guidance.
+- You upgrade production without a tested rollback.
+- You run multi-step upgrades (stop workers, migrate the database,
+  restart) manually, in order.
+- You cannot test an upgrade on production data first.
+- A breaking change in a Helm chart needs manual steps, with no
+  guidance.
 
-### How Styrmin compares to ArgoCD and Flux
+### How Styrmin compares to Argo CD and Flux
 
-ArgoCD and Flux are the tools most people reach for when they first see
-Styrmin. The difference is **not feature-by-feature, it's conceptual**:
+Argo CD and Flux also deploy applications to Kubernetes. They manage
+each application separately. Styrmin manages a group of applications
+with one lifecycle.
 
-> **ArgoCD manages individual applications. Styrmin manages a group of
-> applications as a single system with a shared lifecycle.**
+If you manage Infrahub, Ansible, Grafana, and Prometheus with Argo CD,
+you still write the backup procedures, the upgrade sequences, and the
+environment cloning yourself. Styrmin runs them from each application's
+driver.
 
-A team using ArgoCD to manage Infrahub, Ansible, Grafana, and Prometheus
-still has to build all the operational glue themselves — backup
-procedures, upgrade sequences, environment cloning. Styrmin **is** that
-glue.
-
-The specifics:
-
-| | ArgoCD / Flux | Styrmin |
+| | Argo CD / Flux | Styrmin |
 |--|---------------|---------|
-| **Scope of management** | Individual applications | A group of applications as one stack |
-| **Driver / app-specific knowledge** | None — chart-agnostic | Encoded per app in a driver |
-| **Backup / upgrade / restore actions** | Not provided | First-class user actions |
-| **Environment cloning with data** | Not provided | Built-in |
-| **Opinions on how apps should be operated** | Unopinionated by design | Opinionated; drivers encode best practice |
-| **Best at** | GitOps delivery of K8s manifests | Lifecycle management of the application stack |
+| **Scope** | One application at a time | A group of applications as one stack |
+| **Application-specific knowledge** | None (chart-agnostic) | Defined in each application's driver |
+| **Backup, upgrade, and restore** | Not provided | Run from the UI, the CLI, and the API |
+| **Environment cloning with data** | Not provided | Included |
+| **How each application is operated** | Not defined | Defined in each application's driver |
+| **Main use** | GitOps delivery of Kubernetes manifests | Lifecycle of the application stack |
 
-**These tools are complementary, not competing.** Use ArgoCD or Flux for
-GitOps delivery of infrastructure changes; use Styrmin for the
-application lifecycle on top of it.
+Use Argo CD or Flux for GitOps delivery of infrastructure changes, and
+Styrmin for the lifecycle of the applications that run on it.
 
-### How Styrmin compares to Internal Developer Platforms
+### How Styrmin compares to internal developer platforms
 
-Internal Developer Platforms (Backstage-style portals, commercial IDPs)
-exist but solve a different problem: helping **developers deploy their
-own apps**. They aren't designed for:
+Internal developer platforms (IDPs), such as Backstage-based portals and
+commercial IDPs, help developers deploy their own applications. Styrmin
+manages a group of infrastructure applications as one stack, and runs
+the backup and upgrade procedures that each application's driver
+defines.
 
-- Managing a group of applications as one operational entity.
-- Encoding application-specific operational knowledge (backups, upgrade
-  sequences).
-- Providing a production-grade management layer for infrastructure
-  tooling specifically.
+### Styrmin and Kubernetes
 
-### What about Kubernetes itself?
+Styrmin runs on Kubernetes. A later version will include a Kubernetes
+distribution, so you will not need to install or operate Kubernetes
+separately.
 
-Styrmin **runs on top of Kubernetes** — that's an implementation detail,
-not the product. The goal is for teams to get the benefits of a managed
-infrastructure experience without needing to think about Kubernetes at
-all. In a future version, Styrmin will bundle a Kubernetes distribution
-so users don't even know it's there.
+You keep `kubectl`, Helm, and Argo CD. Drivers deploy applications with
+Helm charts. Styrmin replaces the manual steps between your
+applications: the backup scripts, the upgrade runbooks, and the copies
+of production for testing.
 
-You won't replace `kubectl`, Helm, or Argo by adopting Styrmin — Styrmin
-uses Helm under the hood and you can keep your existing tooling. What
-Styrmin replaces is the **manual operational glue** between your
-applications.
-
-### What Styrmin is and isn't
+### Common questions
 
 | Question | Answer |
 |----------|--------|
-| Is Styrmin a replacement for Kubernetes? | No. It runs on Kubernetes and uses it as the underlying infrastructure. |
-| Is it a replacement for Helm? | No. Drivers use Helm under the hood; Styrmin abstracts the chart-configuration complexity. |
-| Will my existing tools (Jenkins, monitoring, direct API access) keep working? | Yes. Styrmin manages deployment and lifecycle; it does not intercept or proxy application traffic. |
-| Can I use it for applications other than Infrahub? | Yes. Anything with a driver. The driver system is the extensibility mechanism, and Styrmin itself is application-agnostic. |
-| Can it manage applications not running on Kubernetes (VMs, SaaS)? | The first version is Kubernetes-only. SaaS (e.g. Kentik) and multi-cluster are on the roadmap; VM support comes later. |
-| Is there a commercial offering? | Not in the short term. Styrmin is an independent open-source project so other vendors and application teams can build drivers and adopt it broadly. |
+| Does Styrmin replace Kubernetes? | No. It runs on Kubernetes. |
+| Does it replace Helm? | No. Drivers deploy applications with Helm charts. You set driver parameters instead of each chart's values. |
+| Do my existing tools (Jenkins, monitoring, direct API access) keep working? | Yes. Styrmin manages deployment and lifecycle. It does not intercept or proxy application traffic. |
+| Can I use it for applications other than Infrahub? | Yes, for any application that has a driver. Styrmin does not depend on a specific application, and you add an application by writing its driver. |
+| Can it manage applications that do not run on Kubernetes (VMs, SaaS)? | The first version supports Kubernetes only. SaaS applications (for example, Kentik) and several clusters are on the roadmap. VM support comes later. |
+| Is there a commercial offering? | Not in the short term. Styrmin is an independent open-source project, so that other vendors and application teams can build drivers and use it. |
 
 ### Next steps
 
-- [**Platform Overview**](./platform-overview.md) — the conceptual model behind
-  driver, cluster, environment, deployment.
-- [**Quickstart**](../installation/quickstart.md) — try the bundled demo end-to-end.
-- [**What is an Application Driver?**](../concepts-and-architecture/what-is-a-driver.md) —
-  understand the unit that makes the rest of Styrmin work.
+- [**Platform overview**](./platform-overview.md): the components of
+  Styrmin and the terms driver, cluster, environment, and deployment.
+- [**Quickstart**](../installation/quickstart.md): run the bundled demo
+  on your laptop.
+- [**What is an application driver?**](../concepts-and-architecture/what-is-a-driver.md):
+  the specification Styrmin uses to deploy and operate each application.

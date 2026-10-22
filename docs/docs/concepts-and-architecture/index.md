@@ -1,52 +1,44 @@
 ---
-title: Concepts and Architecture
+title: Concepts and architecture
 sidebar_position: 1
-description: The mental model and the under-the-hood architecture — pick the depth you need.
+description: The terms Styrmin uses and how its components work.
 ---
 
-## Concepts and Architecture
+## Concepts and architecture
 
-This section serves two purposes:
+Read [Core concepts](./core-concepts.md) and
+[What is an application driver?](./what-is-a-driver.md) first: they define
+the terms that the other pages use. The [Glossary](./glossary.md) gives a
+one-sentence definition of each term.
 
-- **The first few pages give you the mental model** you need to use
-  Styrmin — driver, cluster, environment, deployment, reconciliation,
-  context. Read these.
-- **The remaining pages are optional under-the-hood detail.** Read them
-  when you want to understand what's happening internally — usually
-  because something surprised you, because you're integrating Styrmin
-  into a larger system, or because you're about to write a driver and
-  want to know which lifecycle hook runs when.
+Each other page explains one internal mechanism. Read it when you need
+it: for example, when Styrmin does something you did not expect, when
+you connect Styrmin to another system, or when you write a driver and
+need to know which lifecycle hook runs when.
 
-Each page is **short, educational, and assumes you are not a Kubernetes
-expert.** We explain the moving parts in plain English and link out to
-the deeper internal docs when you want more.
+### Pages in this section
 
-### What's in here
+| Page | Read it when you want to |
+|------|--------------------------|
+| [Architecture](./architecture.md) | Know the components (server, agent, database) and how they connect. |
+| [Reconciliation](./reconciliation.md) | Know what happens between a change to a deployment and the cluster matching it. |
+| [The operator and `StyrminDeployment`](./operator-and-crds.md) | Know what the operator and the `StyrminDeployment` custom resource do in the cluster. |
+| [Ingress and networking](./ingress-and-networking.md) | Know how an application gets a URL after you deploy it. |
+| [Backups and restores](./backups-and-restores.md) | Know what Styrmin does when you start a backup, and where it stores the data. |
+| [Image overrides](./image-overrides.md) | Run a custom or patched build on one component of a deployment, without forking its driver. |
+| [Replica overrides](./replica-overrides.md) | Change the number of pods of one component, or find where a component's pod count comes from. |
+| [Node affinity](./node-affinity.md) | Run a deployment's pods only on nodes with a given label, or replace a removed `node_selector` value. |
+| [Lifecycle hooks and actions](./hooks-and-actions.md) | Write a driver, or know which hook runs which driver code, and when. |
+| [Status reporting](./status-reporting.md) | Know how the UI shows the state of the cluster. |
 
-| Page | Read it when… |
-|------|---------------|
-| [Architecture](./architecture.md) | You want the big picture: server, agent, database, and how they talk to each other. |
-| [Reconciliation](./reconciliation.md) | You're wondering what actually happens between "I changed this deployment" and "the cluster matches". |
-| [The operator and `StyrminDeployment`](./operator-and-crds.md) | You've heard the word "CRD" or "operator" and want to know what Styrmin is doing with them. |
-| [Ingress and networking](./ingress-and-networking.md) | You want to understand how an application becomes reachable on a URL after you deploy it. |
-| [Backups and restores](./backups-and-restores.md) | You want to know what Styrmin actually does when you click "backup", and where the data ends up. |
-| [Image overrides](./image-overrides.md) | You want one component of a deployment to run a custom or patched build without forking its driver. |
-| [Replica overrides](./replica-overrides.md) | You want one component of a deployment to run more or fewer pods, or you want to know where a component's pod count comes from. |
-| [Node affinity](./node-affinity.md) | You want a deployment's pods to run only on nodes with a given label, or you are replacing a removed `node_selector` value. |
-| [Lifecycle hooks and actions](./hooks-and-actions.md) | You're about to write a driver, or you want to know how Styrmin runs the right code at the right moment. |
-| [Status reporting](./status-reporting.md) | You're wondering how the UI stays up-to-date with what's actually running in the cluster. |
+### Reading order
 
-### Suggested reading order
+The pages below build on each other:
 
-If you read top-to-bottom, the pages build on each other:
+1. **Architecture**: the other pages refer to its components.
+2. **Reconciliation**: the loop that Styrmin runs for each change.
+3. **The operator and `StyrminDeployment`**: reconciliation inside the
+   cluster, in the agent.
 
-1. **Architecture** first — everything else slots into the picture it
-   draws.
-2. **Reconciliation** — the core loop Styrmin runs over and over.
-3. **The operator and `StyrminDeployment`** — what reconciliation looks
-   like once the agent is involved.
-4. The remaining pages are independent — read whichever solves your
-   current problem.
-
-If you just want one specific answer, jump straight to that page from
-the table above.
+The other pages are independent. Read the one that answers your
+question.

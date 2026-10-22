@@ -1,30 +1,29 @@
 ---
 title: Status reporting
 sidebar_position: 8
-description: How the Styrmin UI stays up-to-date with what's actually running in the cluster.
+description: How the Styrmin UI shows the state of the cluster.
 ---
 
 ## Status reporting
 
-When you open the Styrmin UI and see a deployment marked `RUNNING` with
-three healthy pods, the server didn't guess that. The agent saw it,
-wrote it down, and sent it back. This page explains how.
+When the UI shows a deployment as `RUNNING` with three healthy pods, the
+agent read that state from the cluster and sent it to the server.
 
-### Why a separate reporter
+### Why the agent has a separate reporter
 
-The server never talks to the cluster directly (see
-[Architecture](./architecture.md)). So how does it know whether a pod is
-healthy?
+The server does not connect to the cluster (see
+[Architecture](./architecture.md)). The agent reports the cluster state
+to it.
 
-The agent runs a third coroutine called the **status reporter**, side by
-side with the Prefect worker and the operator. Its only job is:
+The agent runs a third coroutine, the **status reporter**, next to the
+Prefect worker and the operator. The reporter does only this:
 
-1. Every ~5 seconds, look at the cluster.
+1. Every 5 seconds or so, read the cluster.
 2. Collect the state of every pod and `StyrminDeployment`.
-3. Post the snapshot back to the server via GraphQL.
+3. Send the snapshot to the server through GraphQL.
 
-The server writes it into its `PodStatus` and `DeploymentStatus` tables.
-That's what the UI reads.
+The server writes it into its `PodStatus` and `DeploymentStatus` tables,
+and the UI reads those tables.
 
 ```text
                  every ~5 seconds
@@ -44,50 +43,49 @@ That's what the UI reads.
 
 ### Why polling, not watching
 
-Kubernetes can _push_ events as things change ("watches"). The reporter
-uses polling instead, for two reasons:
+Kubernetes can _push_ events when objects change ("watches"). The
+reporter polls instead, for two reasons:
 
-- **Simpler.** No long-lived connections, no resync logic, no missed
-  events.
-- **Same outcome at this cadence.** Five seconds is faster than any
-  user can react to. There's no operational benefit to event-driven
-  reporting here.
+- **Fewer failure modes.** Polling needs no long-lived connections and no
+  resync logic, and it cannot miss an event.
+- **The same result at this interval.** Five seconds is shorter than the
+  time a user needs to react, so event-driven reporting adds no
+  operational benefit here.
 
-### "Observed" vs "declared"
+### Observed state and declared state
 
-This is the one piece of vocabulary worth knowing.
+- **Declared state** is what _should_ run. Styrmin stores it in the
+  deployment row and in the `StyrminDeployment` resource.
+- **Observed state** is what _does_ run. The status reporter sends it,
+  and the UI shows it.
 
-- **Declared state** is what _should_ be running. That lives in the
-  `Deployment` row and the `StyrminDeployment` CRD.
-- **Observed state** is what _is_ running. That's what the status
-  reporter posts back, and what the UI shows.
+The two can differ for a short time in normal operation: after you roll
+out an update, while the pods start. The UI shows `DEPLOYING` until the
+observed state matches the declared state.
 
-The two can disagree, briefly, in normal operation: you just rolled out
-an update, the pods are still starting. The UI will show "DEPLOYING"
-until the observed state catches up with the declared state.
+The two can also differ because something is wrong: a pod is in
+`CrashLoopBackOff`, an image pull failed, or a node went down. The UI
+shows that difference.
 
-The two can also disagree because something is wrong — a pod is
-`CrashLoopBackOff`, an image pull failed, a node went down. That
-disagreement is what the UI is showing you.
+### Removing stale state
 
-### Pruning stale state
-
-Pods and deployments come and go. The reporter doesn't just append — it
-sends the full current state every cycle, and the server prunes rows
-that no longer exist in the cluster. So if you delete a deployment, the
-pods stop reporting and disappear from the UI within a few seconds.
+Pods and deployments are created and deleted. The reporter does not only
+add rows: it sends the full current state in every cycle, and the server
+deletes the rows of objects that no longer exist in the cluster. When you
+delete a deployment, its pods stop reporting and disappear from the UI
+within a few seconds.
 
 ### Which instance a report is about
 
-Each `StyrminDeployment` report carries an `instanceId`: the application
+Each `StyrminDeployment` report contains an `instanceId`: the application
 instance whose spec the operator last handled. The reporter reads it from
-the CR's `status.instanceId`, which the operator writes when it starts
-working on a new spec. A CR that no operator handler has touched since
-Styrmin was upgraded has no `status.instanceId`, so the reporter sends
-`spec.instanceId` instead.
+the `status.instanceId` of the `StyrminDeployment`, which the operator
+writes when it starts working on a new spec. A `StyrminDeployment` that
+no operator handler has processed since Styrmin was upgraded has no
+`status.instanceId`, so the reporter sends `spec.instanceId` instead.
 
-Right after a flow writes a new spec, the CR still shows the phase of the
-previous rollout. Because `status.instanceId` changes only when the
+Right after a flow writes a new spec, the `StyrminDeployment` still shows
+the phase of the previous rollout. Because `status.instanceId` changes only when the
 operator acts on the new spec, the server never reads the previous
 rollout's `Ready` phase as the result of the new instance.
 
@@ -120,8 +118,9 @@ forward:
   ready".
 
 A report can skip phases between two polls; the steps in between then
-succeed. A step ends at the time its CR condition became `True` when the
-report carries that condition, and at the time of the report otherwise.
+succeed. A step ends at the time its condition on the `StyrminDeployment` became
+`True` when the report contains that condition, and at the time of the
+report otherwise.
 
 Reports in the `Deleting` and `Deleted` phases go to the newest delete
 task of the deployment instead: its step "Remove the deployment's
@@ -135,7 +134,7 @@ task's steps, so a step that failed keeps its failure. Until then,
 reports for the earlier instance still move the earlier task's steps.
 
 When a report shows the phase `Failed` or the display state `Error`, the
-first unfinished step fails with the CR's message. For the HelmRelease
+first unfinished step fails with the message of the `StyrminDeployment`. For the HelmRelease
 step and the ready step, the error also names up to five pods from the
 stored pod statuses, with each container that waits or ended with one of
 these reasons: `ImagePullBackOff`, `ErrImagePull`, `InvalidImageName`,
@@ -162,8 +161,8 @@ While an operator-phase step is running, the server checks when the
 agent last reported the deployment. When that was more than 60
 seconds ago (or, without any report, when the step started more than 60
 seconds ago), the step shows "No report from the agent since" followed
-by that time. The notice goes away with the next report. It tells a
-stopped agent apart from a phase that is slow.
+by that time. The notice disappears with the next report. It shows
+whether the agent stopped or the phase is slow.
 
 The deployment page reloads its data every 10 seconds. With the 5-second
 report interval, a change of an operator-phase step appears on the page
@@ -171,19 +170,18 @@ within about 15 seconds.
 
 ### What this means in practice
 
-- The UI is _eventually consistent_ on a ~5-second cadence. A pod that
-  crashed half a second ago will show as healthy until the next poll.
+- The UI is _eventually consistent_, with a delay of about 5 seconds. A
+  pod that crashed half a second ago shows as healthy until the next poll.
 - If the agent is unhealthy, status updates stop. The UI keeps showing
   the last known state, and a running operator-phase step shows "No
   report from the agent since" and the time of the last report after 60
   seconds without one.
-- The same data is available through the GraphQL API — `podStatuses`
-  and `deploymentStatuses` fields — so external dashboards can consume
-  it too.
+- The GraphQL API returns the same data in the `podStatuses` and
+  `deploymentStatuses` fields, so external dashboards can read it too.
 
-### Next
+### Next steps
 
-- [**The operator and `StyrminDeployment`**](./operator-and-crds.md) —
-  what the reporter is observing.
-- [**Architecture**](./architecture.md) — where the reporter sits in
-  the bigger picture.
+- [**The operator and `StyrminDeployment`**](./operator-and-crds.md):
+  what the reporter observes.
+- [**Architecture**](./architecture.md): how the reporter connects to the
+  other components.

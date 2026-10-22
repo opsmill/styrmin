@@ -1,47 +1,46 @@
 ---
-title: The Context
+title: The context (GlobalContext)
+sidebar_label: The context
 sidebar_position: 3
 description: The hierarchical structure that drivers receive at runtime — what's in it, where each value comes from, and how to use it in templates and actions.
 ---
 
-## The Context
+## The context (GlobalContext)
 
-When Styrmin deploys an application, the driver needs to know things
-that aren't in the driver itself: which cluster is this running on,
-which environment, what namespace did Styrmin pick, what storage class
-should I use, what version of the application did the user ask for.
+A driver's templates and actions use values that are not in the driver:
+the cluster, the environment, the namespace that Styrmin chose, the
+storage class, and the application version that the user requested.
 
-All of that is bundled into a single object called the **Context** (more
-formally, `GlobalContext`). Every Helm-values template, every
-lifecycle action, and every `StyrminDeployment` CRD carries this
-context. If you're writing a driver, the Context is the single most
-important data structure to understand.
+Styrmin puts these values in one object, the **context**
+(`GlobalContext` in code). Every Helm values template and every
+lifecycle action receives it, and every `StyrminDeployment` resource
+contains it. Driver templates and actions read most of their values
+from the context.
 
-### Where context comes from
+### Where the context comes from
 
-The Context is built — once — at the moment Styrmin decides to act on
-a deployment. The server walks the database, gathers configuration from
-five sources, and merges them into one object:
+Styrmin builds the context once, when it creates an instance of a
+deployment. The server reads configuration from five sources and merges
+them into one object:
 
 ```text
 Cluster config        ──┐
 Environment config    ──┤
 Deployment config     ──┼──►  GlobalContext  ──►  driver templates + actions
 Driver / chart        ──┤                            +
-Resolved values       ──┘                          embedded in StyrminDeployment CRD
+Resolved values       ──┘                          embedded in StyrminDeployment
 ```
 
-Once built, the Context is **frozen** for the lifetime of that
-deployment's Instance — a re-resolution only happens when something
-changes and a new Instance is created. This means the driver always
-sees a stable, complete picture; it never has to call back to the
-server for "the latest value of X". See
-[Reconciliation](../concepts-and-architecture/reconciliation.md) for why this
-matters.
+The context does not change during the lifetime of the instance. When
+something changes, Styrmin creates a new instance with a new context.
+Templates and actions therefore read one consistent set of values, and
+do not query the server for the latest value. See
+[Reconciliation](../concepts-and-architecture/reconciliation.md) for why
+this matters.
 
 ### Structure
 
-The Context is a hierarchical Pydantic model. Top level:
+The context is a hierarchical Pydantic model. Top level:
 
 ```text
 GlobalContext
@@ -58,7 +57,7 @@ GlobalContext
 └── labels         ── Kubernetes labels Styrmin will apply
 ```
 
-Each entry is documented below.
+The sections below describe each entry.
 
 #### `cluster`
 
@@ -68,9 +67,10 @@ cluster:
   capabilities:    # dict — what this cluster can do (ingress, backups, …)
 ```
 
-This is the cluster-wide configuration set once when the cluster was
-registered. It includes things like `fqdn_suffix` and `standard_storage`
-that nearly every driver template ends up consuming.
+The cluster configuration, set when the cluster is created and changed
+with [`styrminctl clusters update`](../reference/styrminctl.md#clusters-update--change-a-clusters-config).
+It includes values such as `fqdn_suffix` and `standard_storage` that most
+driver templates use.
 
 #### `environment`
 
@@ -81,8 +81,9 @@ environment:
   capabilities:    # dict — what this environment can do
 ```
 
-Environment-level overlay on top of the cluster. The same fields can
-appear at both levels; the environment's value wins where they overlap.
+The environment configuration, which overrides the cluster
+configuration. A field can be set at both levels; where it is, the
+environment's value applies.
 
 When the environment has a backup storage location,
 `capabilities.backup.velero.storage_location` is the name of the
@@ -96,29 +97,28 @@ deployment:
   config:          # DeploymentConfig — the user's deployment-level config
 ```
 
-The user-supplied deployment configuration. This is the most specific
-of the three "config-bearing" layers.
+The deployment configuration that the user set. It is the most specific
+of the three configuration layers.
 
 #### `instance`
 
 ```text
 instance:
-  id:                  # the Instance ID (None for a freshly generated context)
-  deployment_id:       # the parent Deployment ID
+  id:                  # the instance ID (None for a freshly generated context)
+  deployment_id:       # the ID of the parent deployment
   namespace:           # the Kubernetes namespace Styrmin chose for this deployment
   release_reference:   # the Helm release name (and version reference)
   config:              # ResolvedConfig — the merged view of cluster + env + deployment
 ```
 
-This is the layer most templates actually read from.
-**`instance.config` is the fully-merged configuration** — cluster +
-environment + deployment, with each layer overriding the one above.
-**Always prefer `{{ instance.config.X }}` over reading from individual
-layers** unless you specifically need to see a single layer.
+Most templates read from this layer. **`instance.config` is the merged
+configuration** of the cluster, the environment, and the deployment,
+where each layer overrides the one above it. **Read
+`{{ instance.config.X }}` instead of the individual layers**, unless you
+need the value of one layer.
 
-`namespace` and `release_reference` are also commonly used — they tell
-your template the Kubernetes namespace and Helm release identity
-Styrmin picked.
+Templates also often read `namespace` and `release_reference`: the
+Kubernetes namespace and the Helm release name that Styrmin chose.
 
 #### `app`
 
@@ -129,8 +129,8 @@ app:
   helm:            # info about the Helm chart this driver version uses
 ```
 
-Use this to template the image tag, version-specific paths, or any
-chart value that depends on which application version you're deploying.
+Use it for the image tag, for version-specific paths, or for any chart
+value that depends on the application version you deploy.
 
 #### `components`
 
@@ -138,69 +138,72 @@ chart value that depends on which application version you're deploying.
 components:        # ComponentsContext, keyed by component name
 ```
 
-Per-component configuration. A driver declares its components in
-`driver.styrmin.yml`; this is where the resolved per-component values
-end up at runtime: the component's definition under
-`components.<name>.config` (including its declared `container`), its
-resolved env vars under `components.<name>.env_vars.config`, its
-image override under `components.<name>.image_override`, its
-container `command` and `args` override under
-`components.<name>.container_override`, and its replica override under
-`components.<name>.replica_override`.
+The configuration of each component. A driver declares its components
+in `driver.styrmin.yml`, and Styrmin puts the resolved values of each
+component here:
 
-May be `None` if the driver has no per-component configuration.
+- `components.<name>.config`: the component's definition, including its
+  declared `container`
+- `components.<name>.env_vars.config`: its resolved env vars
+- `components.<name>.image_override`: its image override
+- `components.<name>.container_override`: its container `command` and
+  `args` override
+- `components.<name>.replica_override`: its replica override
+
+`components` is `None` when the driver has no per-component
+configuration.
 
 #### Env vars are read-only data
 
-Styrmin injects the env vars users set into each component's declared
-component container after the chart renders; templates do not wire
-them (see
-[Creating a Driver](./creating-a-driver.md#the-component-container)).
+After the chart renders, Styrmin adds the env vars that users set to
+each component's declared component container, so templates do not pass
+them to the chart (see
+[Create a driver](./creating-a-driver.md#the-component-container)).
 The resolved values stay readable for other uses, such as building a
-ConfigMap or switching a chart feature on:
+ConfigMap or enabling a chart feature:
 
-- `instance.config.env_vars` — environment and deployment scopes merged,
-  deepest wins.
-- `components.<name>.env_vars.config` — environment, deployment, and
-  component scopes merged, deepest wins.
+- `instance.config.env_vars`: the environment and deployment scopes
+  merged, where the most specific scope wins.
+- `components.<name>.env_vars.config`: the environment, deployment, and
+  component scopes merged, where the most specific scope wins.
 
-Both are absent when nothing is set, so guard with
-`(instance.config.env_vars or {})`. Don't write them into a chart env
-key: Styrmin already injects them, and Helm's list replacement would
-drop the chart's own env defaults.
+Both are absent when no env var is set, so write
+`(instance.config.env_vars or {})`. Do not write them into a chart env
+key: Styrmin already adds them, and because Helm replaces lists, the
+chart's own env defaults would be removed.
 
 #### Image overrides are read-only data
 
-Styrmin also applies a user's
+After the chart renders, Styrmin also applies a user's
 [image override](../concepts-and-architecture/image-overrides.md) to the
-component container after the chart renders, so templates do not wire
-it either. `components.<name>.image_override` is present only when the
-user set one, and it is applied only when the component declares a
+component container, so templates do not pass it to the chart either.
+`components.<name>.image_override` is present only when the user set
+one, and Styrmin applies it only when the component declares a
 component container. Its `reference` is the stored string, with any
-`{{ app.version }}` token not yet substituted. Don't write it into a
-chart image key; Styrmin already sets the image.
+`{{ app.version }}` token not yet replaced. Do not write it into a
+chart image key: Styrmin already sets the image.
 
 #### Container overrides are read-only data
 
-Styrmin applies a user's container `command` and `args` override to the
-component container after the chart renders, so templates do not pass
-it to the chart. `components.<name>.container_override` is present only when the user
-set `command` or `args`, and it is applied only when the component
-declares a component container. Its `command` and `args` are lists, and
-a field the user did not set is absent. Don't write them into a chart
-`command` or `args` key: Styrmin already applies them, and when no
-override is set the chart key would no longer hold the chart's own
-value.
+After the chart renders, Styrmin applies a user's container `command`
+and `args` override to the component container, so templates do not
+pass it to the chart. `components.<name>.container_override` is present
+only when the user set `command` or `args`, and Styrmin applies it only
+when the component declares a component container. Its `command` and
+`args` are lists, and a field that the user did not set is absent. Do
+not write them into a chart `command` or `args` key: Styrmin already
+applies them, and when no override is set, the chart key would no
+longer hold the chart's own value.
 
 #### Replica overrides are read-only data
 
-Styrmin sets each component's replica count on its `Deployment` and
-`StatefulSet` workloads after the chart renders (see
+After the chart renders, Styrmin sets each component's replica count on
+its `Deployment` and `StatefulSet` workloads (see
 [Replica overrides](../concepts-and-architecture/replica-overrides.md)),
 so templates do not pass a count to the chart.
 `components.<name>.replica_override` is present only when the user set
 one. The driver's own `replicas` and `singleton` are under
-`components.<name>.config`, each only when the driver sets it. Don't
+`components.<name>.config`, each only when the driver sets it. Do not
 write either into a chart replica key: Styrmin sets `spec.replicas`
 after the chart renders, which replaces any count the chart renders.
 
@@ -210,8 +213,8 @@ after the chart renders, which replaces any count the chart renders.
 parameters:        # dict[str, Any] — values the user filled in for the driver's parameters
 ```
 
-If the driver declares `spec.parameters` in `driver.styrmin.yml`, the
-user-supplied values show up here. Use them directly:
+When the driver declares `spec.parameters` in `driver.styrmin.yml`,
+`parameters` contains the values that the user set. Use them directly:
 `{{ parameters.storage_size }}`.
 
 #### `services`
@@ -221,9 +224,10 @@ services:          # dict — declared services from the driver spec
 deployed_services: # list of dicts — services as they exist in the cluster
 ```
 
-`services` reflects what the driver declared under `spec.services`.
-`deployed_services` is what Styrmin actually materialised. Templates
-usually need `services`; actions sometimes need `deployed_services`.
+`services` contains the services that the driver declares under
+`spec.services`. `deployed_services` contains the services that Styrmin
+created in the cluster. Templates usually read `services`; actions
+sometimes read `deployed_services`.
 
 #### `utilities` and `labels`
 
@@ -232,12 +236,12 @@ utilities: [UtilityContext]   # ingress controller, etc.
 labels:    {key: value}       # Kubernetes labels Styrmin applies to managed resources
 ```
 
-Most drivers don't touch these directly.
+Most drivers do not read these.
 
-### Using context in a Helm values template
+### Using the context in a Helm values template
 
-The Context is exposed to your `values.j2.yml` as a Jinja namespace.
-Every top-level field is reachable by name.
+Your `values.j2.yml` receives the context as Jinja variables: each
+top-level field is available by name.
 
 A minimal example:
 
@@ -258,27 +262,26 @@ storage:
   storageClassName: "{{ instance.config.standard_storage.storage_class }}"
 ```
 
-Notice the typical patterns:
+The example shows these patterns:
 
-- **`{{ app.X }}`** for application-level identity.
-- **`{{ instance.config.X }}`** for merged configuration — this is the
-  default-correct place to read from.
-- **`{{ cluster.config.X }}`** only when you specifically need the
-  cluster's own value, not the one the environment or the deployment
-  sets. When an administrator changes the cluster config, Styrmin
-  redeploys only the deployments whose `instance.config` changes, so a
-  deployment that is not redeployed keeps the `cluster.config` of its
-  last render.
-- **No env var wiring.** User env vars reach each component's
-  declared container without template code; the `component_env_vars`
-  filter is removed (see
-  [Migrating env var wiring](./migrating-env-vars.md)).
-- **No `command` or `args` wiring.** A user's container `command` and
-  `args` overrides reach each component's declared container without
-  template code. The `component_command` and `component_args` filters are
-  retired: a template that calls either one fails to load with
-  `RETIRED_TEMPLATE_FILTER` (see
-  [Migrating container overrides](./migrating-container-overrides.md)).
+- **`{{ app.X }}`** for the application name and version.
+- **`{{ instance.config.X }}`** for the merged configuration. Read from
+  it by default.
+- **`{{ cluster.config.X }}`** only when you need the cluster's own
+  value, not the value that the environment or the deployment sets. When
+  an administrator changes the cluster config, Styrmin redeploys only the
+  deployments whose `instance.config` changes, so a deployment that is
+  not redeployed keeps the `cluster.config` of its last render.
+- **Do not pass env vars to the chart.** User env vars reach each
+  component's declared container without template code. The
+  `component_env_vars` filter is removed (see
+  [Migrate env vars to component containers](./migrating-env-vars.md)).
+- **Do not pass `command` or `args` to the chart.** A user's container
+  `command` and `args` overrides reach each component's declared
+  container without template code. The `component_command` and
+  `component_args` filters are retired: a template that calls either one
+  fails to load with `RETIRED_TEMPLATE_FILTER` (see
+  [Migrate command and args overrides to component containers](./migrating-container-overrides.md)).
 - **You do not need to set the Ingress class.** Styrmin sets the class
   of every Ingress after the chart renders, or removes it when the
   environment has a dedicated ingress controller. A template that still
@@ -288,10 +291,10 @@ Notice the typical patterns:
   `ingress_class` is resolved. See
   [Dedicated ingress controller or shared ingress class](../concepts-and-architecture/ingress-and-networking.md#dedicated-ingress-controller-or-shared-ingress-class).
 
-### Using context in an action
+### Using the context in an action
 
-Lifecycle actions get the Context too — as a Python object. The fields
-match the structure above; access them by attribute:
+Lifecycle actions receive the context as a Python object. Its fields
+match the structure above; read them as attributes:
 
 ```python
 from prefect import flow
@@ -305,28 +308,31 @@ async def post_setup(context: GlobalContext) -> None:
     # … use them to compose subsequent calls
 ```
 
-Built-in primitives like `stop_components`, `start_components`, and
-`execute_commands` know how to consume the Context themselves — you
-usually just pass them the deployment ID and let them resolve what they
-need.
+Built-in primitives such as `stop_components`, `start_components`, and
+`execute_commands` take the context as an argument and read the values
+they need from it, such as the deployment ID:
 
-### Three rules of thumb
+```python
+await stop_components(components=["server"], context=context)
+```
 
-1. **Read from `instance.config` by default.** It's the merged view
-   every template should want; individual layers exist for the cases
-   where you explicitly need to see a single source.
-2. **Treat the Context as immutable.** It's frozen for the Instance's
-   lifetime. If you find yourself wanting to mutate it, you probably
-   want a new parameter or a new deployment instead.
-3. **If a value isn't in the Context, it doesn't belong in the
-   driver.** Drivers that reach for cluster state, environment
-   variables, or live API calls break the declarative model. Add the
-   value to the Context (via cluster/environment config or a driver
-   parameter) instead.
+### Rules for reading the context
 
-### Next
+1. **Read from `instance.config` by default.** It holds the merged
+   configuration, which most templates need. Read an individual layer
+   only when you need the value of that layer.
+2. **Do not change the context.** It stays the same for the lifetime of
+   the instance. To change a value, add a parameter or create a new
+   deployment.
+3. **Read values only from the context.** A driver that reads cluster
+   state, environment variables, or live APIs can render differently for
+   the same instance, which breaks the declarative model. Add the value
+   to the context through the cluster or environment configuration, or
+   through a driver parameter.
 
-- [**Creating a Driver**](./creating-a-driver.md) — write your first
-  driver using the Context.
-- [**Reconciliation**](../concepts-and-architecture/reconciliation.md) — why the
-  Context is frozen per Instance.
+### Next steps
+
+- [**Create a driver**](./creating-a-driver.md): write your first driver
+  with the context.
+- [**Reconciliation**](../concepts-and-architecture/reconciliation.md):
+  why the context does not change during the lifetime of an instance.

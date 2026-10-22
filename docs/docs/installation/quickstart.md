@@ -1,40 +1,32 @@
 ---
 title: Quickstart
 sidebar_position: 3
-description: Bring up the built-in Styrmin demo cluster end-to-end in two commands.
+description: Start the Styrmin demo on a local vCluster with two commands.
 ---
 
 ## Quickstart
 
-The Styrmin repository ships with a one-command demo that spins up a local
-[vCluster](https://www.vcluster.com/), installs Styrmin into it, wires up
-Traefik, Garage, and the bundled drivers, and prints the URL to log in. It is
-the fastest way to see Styrmin running end-to-end on your own machine.
-
-This guide walks you through:
-
-1. Cloning the repository and installing the toolchain
-2. Building the demo image with `uv run invoke build`
-3. Starting the demo cluster with `uv run invoke start`
-4. Logging in and trying it out
-5. Tearing it down again
+The Styrmin repository includes a demo that runs on your machine. One
+command creates a local [vCluster](https://www.vcluster.com/), installs
+Styrmin, Traefik, Garage, and the bundled drivers, and prints the URL to
+log in.
 
 ### Prerequisites
 
 You need the following on your `PATH`:
 
-- **Docker** (the vCluster driver used by the demo is `docker`)
+- **Docker** (the demo runs vCluster with its `docker` driver)
 - **`kubectl`**
 - **`helm`** ≥ 3.x
 - **`vcluster`** CLI ([install instructions](https://www.vcluster.com/docs/getting-started/setup))
 - **`uv`** ([install instructions](https://docs.astral.sh/uv/getting-started/installation/))
 
-You also need a free TCP port `8080` on your host — the demo port-forwards
-Traefik there.
+TCP port `8080` must be free on your host: the demo port-forwards
+Traefik to it.
 
-> **No `/etc/hosts` edits required.** The demo uses the
-> `*.local.styrmin.io` wildcard zone, which resolves to `127.0.0.1`. The
-> URL `http://styrmin.local.styrmin.io:8080` Just Works.
+> The demo uses the `*.local.styrmin.io` wildcard zone, which resolves
+> to `127.0.0.1`, so `http://styrmin.local.styrmin.io:8080` opens the
+> demo without changes to `/etc/hosts`.
 
 ### 1. Clone the repository
 
@@ -45,15 +37,15 @@ cd styrmin
 
 ### 2. Install Python dependencies
 
-The demo workflow is implemented as [Invoke](https://www.pyinvoke.org/)
-tasks shipped with the repo. Install the toolchain with `uv`:
+The demo runs as [Invoke](https://www.pyinvoke.org/) tasks in the
+repository. Install them with `uv`:
 
 ```bash
 uv sync
 ```
 
-This installs the root project plus all workspace members (backend, SDK,
-CLI) and the `dev` dependency group, which is what provides `invoke`.
+This installs the root project, the workspace members (backend, SDK,
+CLI), and the `dev` dependency group, which includes `invoke`.
 
 ### 3. Build the demo image
 
@@ -61,15 +53,15 @@ CLI) and the `dev` dependency group, which is what provides `invoke`.
 uv run invoke build
 ```
 
-This task does three things:
+This task:
 
-1. Builds the `styrmin:latest` container image used by both the server and
-   the agent.
+1. Builds the `styrmin:latest` container image, which the server and
+   the agent both run.
 2. Resolves the Helm dependencies under `helm/agent/`.
 3. Resolves the Helm dependencies under `helm/styrmin/`.
 
-You only need to re-run `build` when you change the server/agent code,
-their `Dockerfile`s, or their Helm chart dependencies.
+Run `build` again only when you change the server or agent code, their
+`Dockerfile`s, or their Helm chart dependencies.
 
 ### 4. Start the demo cluster
 
@@ -77,36 +69,36 @@ their `Dockerfile`s, or their Helm chart dependencies.
 uv run invoke start
 ```
 
-`start` is the end-to-end happy path. In order, it:
+`start` runs these steps in order:
 
-1. Creates a vCluster named `styrmin-demo` running in Docker.
+1. Creates a vCluster named `styrmin-demo` in Docker.
 2. Connects to it and exports a kubeconfig under `.vcluster/`.
 3. Installs the [Traefik](https://traefik.io/) ingress controller and
-   [Garage](https://garagehq.deuxfleurs.fr/) (the in-cluster S3-compatible
-   store used for Velero backups).
-4. Installs Styrmin into the cluster via `helm upgrade --install`, using
+   [Garage](https://garagehq.deuxfleurs.fr/), the S3-compatible object
+   store in the cluster that Velero writes backups to.
+4. Installs Styrmin into the cluster with `helm upgrade --install`, using
    the values file at
    [`dev/local/demo-values.yaml`](https://github.com/opsmill/styrmin/blob/develop/dev/local/demo-values.yaml).
 5. Port-forwards Traefik to `localhost:8080`.
-6. Bootstraps the platform by calling the GraphQL API:
-   - creates a **Cluster** named `local`
-   - creates an **Environment** named `local` bound to that cluster
-   - creates a **Backup Storage Location** pointing at the in-cluster
-     Garage and assigns it to the environment
-   - loads the bundled **Application Driver Versions**
+6. Calls the GraphQL API to create the first records:
+   - a **cluster** named `local`
+   - an **environment** named `local` in that cluster
+   - a **backup storage location** for the Garage store, assigned to
+     the environment
+   - the bundled **application driver versions**
      ([`driver/examples/infrahub`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/infrahub)
      and
      [`driver/examples/semaphore`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/semaphore))
-7. Prints a green summary panel with the URLs and admin credentials.
+7. Prints a green summary panel with the URLs and the admin credentials.
 
-> If `styrmin:latest` is already present, `start` reuses it. Pass
-> `--build-image` to force a rebuild:
+> If the `styrmin:latest` image exists, `start` uses it. To build it
+> again, pass `--build-image`:
 >
 > ```bash
 > uv run invoke start --build-image
 > ```
 
-When the command finishes, you should see something like:
+When the command finishes, it prints a summary like this:
 
 ```text
 ╭─ Styrmin demo is ready ───────────────────────────────────────────╮
@@ -122,57 +114,55 @@ When the command finishes, you should see something like:
 ╰───────────────────────────────────────────────────────────────────╯
 ```
 
-### 5. Log in and look around
+### 5. Log in
 
 Open [http://styrmin.local.styrmin.io:8080](http://styrmin.local.styrmin.io:8080) and log in with `admin` /
-`styrmin` (these come from `dev/local/demo-values.yaml`; change them there
-if you want different credentials).
+`styrmin`. These credentials come from `dev/local/demo-values.yaml`;
+change them there to use other credentials.
 
-You should see:
+The UI shows:
 
-- one **Cluster** (`local`), with the agent running and reporting status
-- one **Environment** (`local`) bound to that cluster
-- two **Application Drivers** (`infrahub` and `semaphore`), each with at
-  least one driver version loaded
-- no deployments yet — try creating one from the UI to see reconciliation
-  in action
+- one **cluster** (`local`), with the agent running and reporting status
+- one **environment** (`local`) in that cluster
+- two **application drivers** (`infrahub` and `semaphore`), each with
+  at least one driver version loaded
+- no deployments. Create one from the UI, and the agent creates its
+  Kubernetes resources.
 
-To explore the GraphQL API directly, head to
+To use the GraphQL API directly, open
 [http://styrmin.local.styrmin.io:8080/graphql](http://styrmin.local.styrmin.io:8080/graphql).
 
-### 6. Pause, resume, or tear down
-
-The demo lifecycle has four convenience commands:
+### 6. Pause, resume, or delete the demo
 
 | Command | What it does |
 |---------|--------------|
-| `uv run invoke start`   | Create + provision everything (idempotent). |
-| `uv run invoke stop`    | Pause the vCluster, preserving state. |
-| `uv run invoke start`   | (After `stop`) resume by re-running start. |
-| `uv run invoke destroy` | Delete the vCluster and all associated data. |
-| `uv run invoke reset`   | `destroy` then `start` from scratch. |
+| `uv run invoke start`   | Creates and configures everything. Running it again is safe. |
+| `uv run invoke stop`    | Pauses the vCluster and keeps its state. |
+| `uv run invoke start`   | After `stop`, resumes the vCluster. |
+| `uv run invoke destroy` | Deletes the vCluster and all its data. |
+| `uv run invoke reset`   | Runs `destroy`, then `start`. |
 
-`stop` is useful when you want to free up resources without losing your
-deployments; `destroy` is the right answer when something is wedged and
-you'd rather start clean.
+Use `stop` to free resources on your machine and keep your deployments.
+Use `destroy` when the demo does not respond and you want to start again
+with no data.
 
 ### Troubleshooting
 
-**Port 8080 already in use.** Stop whatever else is listening on it; the
-demo always uses `8080` because `80` is privileged.
+**Port 8080 is already in use.** Stop the process that listens on it.
+The demo always uses `8080`, because port `80` is a privileged port.
 
 **`docker image inspect styrmin:latest` returns nothing.** Run
 `uv run invoke build` first, or pass `--build-image` to `start`.
 
-**Bootstrap step says "Cluster already exists".** That means a previous
-demo run left state behind. `uv run invoke reset` is the simplest way to
-start over; alternatively `uv run invoke destroy` and then `start`.
+**The bootstrap step says "Cluster already exists".** A previous demo
+run created the cluster record. Run `uv run invoke reset` to start over,
+or run `uv run invoke destroy` and then `uv run invoke start`.
 
 ### Next steps
 
-- [**Platform Overview**](../introduction/platform-overview.md) — get the conceptual picture if
-  you skipped it.
-- [**What is an Application Driver?**](../concepts-and-architecture/what-is-a-driver.md) —
-  understand the unit of deployment in Styrmin.
-- [**Creating a Driver**](../drivers/creating-a-driver.md) — write your
-  own driver and load it into the demo.
+- [**Platform overview**](../introduction/platform-overview.md): the
+  components and terms of Styrmin.
+- [**What is an application driver?**](../concepts-and-architecture/what-is-a-driver.md):
+  the specification that Styrmin uses to deploy each application.
+- [**Create a driver**](../drivers/creating-a-driver.md): write your own
+  driver and load it into the demo.

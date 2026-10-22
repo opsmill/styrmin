@@ -1,15 +1,16 @@
 ---
-title: Changing Driver Versions
+title: Change a deployment's driver version
 sidebar_position: 5
 description: What Styrmin checks when a deployment moves to another driver version, and how to fix a rejected change.
 ---
 
-## Changing Driver Versions
+## Change a deployment's driver version
 
-A deployment moves to another driver version when you upgrade it, with the **Upgrade** button on
-the deployment page, `styrminctl deployments update-version` or the `updateDeploymentVersion`
-mutation, and when `styrminctl deployments apply` binds it to a newer loaded driver version.
-[Loading a Driver](./loading-drivers.md#selecting-a-driver-version-when-deploying-or-upgrading)
+A deployment moves to another driver version when you upgrade it, or when
+`styrminctl deployments apply` binds it to a newer loaded driver version. You upgrade a deployment
+with the **Upgrade** button on the deployment page, `styrminctl deployments update-version`, or
+the `updateDeploymentVersion` mutation.
+[Load a driver](./loading-drivers.md#selecting-a-driver-version-when-deploying-or-upgrading)
 explains which driver version Styrmin binds to.
 
 Before any task starts, Styrmin checks the deployment's parameters and overrides against the
@@ -28,14 +29,14 @@ stored values together with the parameters sent in the same request:
   that you changed is never lost without a message.
 
 A value must have the same type as the default to be equal: the string `"2"` does not equal the
-integer default `2`. The error carries the parameter name (`parameter_name`), its value (`value`),
+integer default `2`. The error contains the parameter name (`parameter_name`), its value (`value`),
 its default in the current driver version (`default`) and the target driver version
 (`checked_against`). When several retired parameters hold a changed value, the error names the
 first one by name.
 
 The rule applies to every driver. The `infrahub` and `infrahub-enterprise` example drivers retire
-their replica parameters; [Migrating Replica Parameters](./migrating-replica-parameters.md)
-describes that case.
+their replica parameters;
+[Migrate the infrahub replica parameters](./migrating-replica-parameters.md) describes that case.
 
 ### Fix a rejected driver version change
 
@@ -43,7 +44,7 @@ Find out what the retired parameter did in the current driver version, from the 
 documentation or its `values.j2.yml`. Then, in the same request as the driver version change or
 before it:
 
-1. Carry the setting over to what replaces it in the target driver version, if anything does. For
+1. Move the setting to what replaces it in the target driver version, if anything does. For
    example, a parameter that set a replica count becomes a
    [replica override](../concepts-and-architecture/replica-overrides.md) on the component.
 2. Reset the parameter to its default.
@@ -67,8 +68,8 @@ argument.
 
 After the deployment moves to the target driver version, the parameter is no longer declared. A
 request or a manifest that still sets it fails with `OPERATION_FAILED` and the message
-`Unknown parameter: '<name>'`, which links this page. Remove the parameter from the request or the
-manifest.
+`Unknown parameter: '<name>'`, which links to this page. Remove the parameter from the request or
+the manifest.
 
 ### Overrides on components the target driver version changes
 
@@ -77,13 +78,13 @@ manifest.
   orphaned.
 - A replica override above 1 on a component that the target driver version marks as singleton
   rejects the change with `SINGLETON_REPLICA_OVERRIDE`, until the same request lowers the override
-  to 1 or clears it. See [Replica Overrides](../concepts-and-architecture/replica-overrides.md).
+  to 1 or clears it. See [Replica overrides](../concepts-and-architecture/replica-overrides.md).
 
-### Related pages
+### Next steps
 
-- [Loading a Driver](./loading-drivers.md): load a driver version and choose the one a deployment
+- [Load a driver](./loading-drivers.md): load a driver version and choose the one a deployment
   binds to.
-- [Migrating Replica Parameters](./migrating-replica-parameters.md): the infrahub replica
-  parameters.
+- [Migrate the infrahub replica parameters](./migrating-replica-parameters.md): move the infrahub
+  replica parameters to replica overrides.
 - [`styrminctl` reference](../reference/styrminctl.md): `deployments update-version` and
   `deployments apply`.

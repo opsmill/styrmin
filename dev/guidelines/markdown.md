@@ -6,6 +6,13 @@
 - **Excluded directories:** `.venv`, `node_modules`, `dev`, `.claude`, `specs`, `.github/agents`, `.agents`
 - Disabled rules: MD013 (line length), MD033 (inline HTML), MD041 (first line heading), MD057 (relative links), MD060 (code block language)
 
+## Language
+
+- Write docs, guides, comments, and UI text in American English: "behavior", "organization", "analyze", "license" (noun), "artifact", "labeled".
+- Leave quoted product output (error messages, log lines, CLI output) as the product prints it. Fix the spelling in the source string instead.
+- Write domain terms in lowercase in running text, as [`CONTEXT.md`](../../CONTEXT.md) does: cluster, environment, deployment, instance, application driver, application driver version.
+- Call a `StyrminDeployment` or `HelmRelease` object a resource or a custom resource. "CRD" means the type definition only.
+
 ## File Naming
 
 - Use `kebab-case` for filenames: `hooks-and-actions.md`, `data-models.md`

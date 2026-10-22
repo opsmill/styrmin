@@ -1,18 +1,15 @@
 ---
 title: Core concepts
 sidebar_position: 2
-description: The vocabulary you need to use Styrmin — driver, cluster, environment, deployment, instance, context, hooks, and how they fit together.
+description: The terms you need to use Styrmin (driver, cluster, environment, deployment, instance, context, hooks) and how they relate.
 ---
 
 ## Core concepts
 
-Styrmin's docs, GraphQL API, SDK, CLI, and UI all use the same set of
-nouns. The list below is canonical: if you know these terms, the rest
-of the documentation reads cleanly. If you've already skimmed the
-[Platform Overview](../introduction/platform-overview.md), this page
-formalises the same vocabulary in one place.
+The docs, the GraphQL API, the SDK, the CLI, and the UI use the terms
+below.
 
-> Looking for a quick lookup of every term Styrmin uses? See the
+> For a one-sentence definition of every term, see the
 > [Glossary](./glossary.md).
 
 ### The platform
@@ -20,83 +17,78 @@ formalises the same vocabulary in one place.
 #### Server
 
 The Styrmin **server** is the central backend process. It owns the
-database, exposes the public GraphQL API, and is the source of truth
-for _what should be running_. The CLI, the SDK, and the frontend are
-all clients of this same API. The server never talks to a target
-cluster directly — direction flows through **recorded intent** (see
-below).
+database, exposes the public GraphQL API, and records _what should run_.
+The CLI, the SDK, and the frontend are clients of this API. The server
+does not connect to a target cluster: it records the intended state, and
+the agent reads it (see [Recorded intent](#recorded-intent)).
 
 #### Agent
 
-An **agent** is the single container Styrmin runs _inside_ a target
-Kubernetes cluster. It picks up recorded intent, reconciles the
-cluster to match, and continuously reports observed state back to the
-server. There is **one agent per cluster**.
+The **agent** is the single container that Styrmin runs _inside_ a
+target Kubernetes cluster. It reads the recorded intent, changes the
+cluster to match, and reports the observed state to the server. There is
+**one agent per cluster**.
 
 #### CLI and SDK
 
-`styrminctl` is the command-line client; `styrmin-sdk` is the async
-Python SDK. Both are thin wrappers over the GraphQL API — they don't
-talk to the database or the agent directly.
+`styrminctl` is the command-line client, and `styrmin-sdk` is the async
+Python SDK. Both call the GraphQL API and do not connect to the database
+or the agent.
 
 ### What you deploy
 
-#### Application Driver
+#### Application driver
 
-An **Application Driver** is a versioned, self-contained deployment
-specification that tells Styrmin _everything it needs to know_ to
-deploy a given application: which Helm chart, which components, which
-user-facing parameters, which services to expose, and which lifecycle
-**actions** to run.
+An **application driver** is a versioned, self-contained specification
+of how Styrmin deploys an application: which Helm chart, which
+components, which user-facing parameters, which services to expose, and
+which lifecycle **actions** to run.
 
-Drivers are the unit of deployment in Styrmin. No application can be
-deployed without one, and all deployment behaviour flows from the
-driver — there is no ad-hoc deployment logic outside it.
+Styrmin deploys an application only through its driver. Every
+deployment step comes from the driver.
 
-See [What is an Application Driver?](./what-is-a-driver.md) for the
-full anatomy.
+See [What is an application driver?](./what-is-a-driver.md) for the
+parts of a driver.
 
-#### Application Driver Version
+#### Application driver version
 
-Drivers are versioned. An **Application Driver Version** is one
-revision of a driver — sourced from a directory or a git tag — with
-its own Helm chart pin, components, parameters, services, and actions.
-"Upgrading a deployment" almost always means pointing it at a newer
-Application Driver Version.
+Drivers are versioned. An **application driver version** is one
+revision of a driver, loaded from a directory or a git repository, with
+its own Helm chart version, components, parameters, services, and
+actions. It is one revision of one driver, not a version number. An
+upgrade usually moves a deployment to a newer application driver
+version.
 
-The capitalised form is a proper noun: when you see it in the docs,
-think "specific revision of a specific driver", not "any old version
-number".
+#### Application version
 
-#### Application Version
-
-The user-facing version of the deployed _application itself_ (e.g.
-Infrahub `1.6.0`). Distinct from the Application Driver Version, which
-is the spec that knows how to deploy it. One Application Driver
-Version typically supports a range of Application Versions, declared
-as a semver specifier.
+The **application version** is the version of the deployed application
+itself (for example, Infrahub `1.6.0`). It is different from the
+application driver version, which is the specification that deploys the
+application. One application driver version usually supports a range of
+application versions, declared as a semver specifier.
 
 ### Where you deploy
 
 #### Cluster
 
-A **Cluster** is a Kubernetes cluster registered with Styrmin.
-Cluster-level settings (storage classes, ingress, ...) are inherited by
-every application deployed on it. You set them when you create the
-cluster and can change them later with
+A **cluster** is a Kubernetes cluster registered with Styrmin. Every
+application deployed on the cluster uses the cluster-level settings
+(storage classes, ingress, …). You set them when you create the cluster,
+and you can change them later with
 [`styrminctl clusters update`](../reference/styrminctl.md#clusters-update--change-a-clusters-config),
-which redeploys the applications that take a changed value. Styrmin
-currently supports one cluster at a time; multi-cluster is on the
+which redeploys the applications that use a changed value. Styrmin
+supports one cluster at a time. Support for several clusters is on the
 roadmap.
 
 #### Environment
 
-An **Environment** is a named slice of a cluster — `dev`, `staging`,
-`prod`, `team-a`. Environments group applications that share a
-lifecycle and a backup storage location. Backup, upgrade, and clone
-operations can target an entire environment at once. Cross-application
-connectivity (e.g. Infrahub talking to Semaphore) is environment-aware:
-a cloned environment is self-contained.
+An **environment** is a logical deployment target in one cluster, such as
+`dev`, `staging`, `prod`, or `team-a`. An environment groups
+applications that share a lifecycle and a backup storage location.
+Backup, upgrade, and clone operations can apply to a whole environment.
+Applications connect to the other applications of their environment (for
+example, Infrahub connecting to Semaphore), so the applications in a
+cloned environment connect only to each other.
 
 ```text
 Cluster ─┬─ Environment "dev"      ─── Deployment "infrahub-dev"
@@ -106,92 +98,92 @@ Cluster ─┬─ Environment "dev"      ─── Deployment "infrahub-dev"
 
 #### Deployment
 
-A **Deployment** is the long-lived record that pins _one_ Application
-Driver Version, _one_ Application Version, and the user's config into
-_one_ Environment. Editing a deployment expresses a new intent and
-triggers reconciliation.
+A **deployment** is the long-lived record of _one_ application in _one_
+environment: _one_ application driver version, _one_ application version,
+and the user's configuration. Editing a deployment records a new intent
+and starts a reconciliation.
 
-A Deployment is the desired-state record. It does not include
-information about what is _currently_ running — that's the
-**Instance**.
+A deployment is the record of the desired state. It does not include
+what _currently_ runs: that is the **instance**.
 
 #### Instance
 
-An **Instance** is a frozen snapshot of what was actually deployed at
-a point in time. It's generated from the Deployment at reconciliation
-time and carries the resolved **Context** (see below).
+An **instance** is a fixed record of what was deployed at one point in
+time. Styrmin generates it from the deployment at reconciliation time,
+and it contains the resolved **context** (see below).
 
-A Deployment owns at most one **active instance** at any moment; older
-instances stay around for timeline and audit. When you upgrade or
-edit, a new instance is generated and compared against the active
-one — that's the reconciliation diff.
+A deployment has at most one **active instance** at a time. Styrmin
+keeps older instances for the timeline and for auditing. When you
+upgrade or edit a deployment, Styrmin generates a new instance and
+compares it with the active one: the difference is the reconciliation
+diff.
 
 ### How it runs
 
 #### Reconciliation
 
-**Reconciliation** is the loop Styrmin runs over and over: compare a
-newly generated Instance (desired) against the active Instance
-(current), plan the convergence work, and execute it. A converged
-deployment produces no diff, no plan, and no work — by construction.
+**Reconciliation** is the loop that Styrmin runs for each change: it
+compares a newly generated instance (desired) with the active instance
+(current), lists the changes, and applies them. When the two instances
+are the same, there are no changes and Styrmin does nothing.
 
-[Reconciliation](./reconciliation.md) covers the loop in detail.
+[Reconciliation](./reconciliation.md) explains the loop.
 
 #### Recorded intent
 
-The server never calls the agent directly. Instead it writes intent
-into the database and into a **StyrminDeployment** CRD, which the
-agent's operator picks up and reconciles. This indirection — direction
-flowing through recorded artefacts rather than RPC calls — is what
-makes the system resilient to restarts and partial failures.
+The server does not call the agent. It writes the intent into the
+database and into a `StyrminDeployment` resource, which the agent's
+operator reconciles. Because Styrmin stores the intent instead of
+sending direct calls, the agent can restart or fail partway and continue
+from the stored intent.
 
-[The operator and `StyrminDeployment`](./operator-and-crds.md) covers
-the CRD side.
+[The operator and `StyrminDeployment`](./operator-and-crds.md) explains
+the `StyrminDeployment` resource.
 
 #### Context (GlobalContext)
 
-The **Context** is the resolved configuration snapshot the agent
-actually acts on: cluster defaults, environment overrides, the
-Deployment's config and parameters, the driver's defaults — all
-merged into one hierarchical object and embedded in both the Instance
-and the StyrminDeployment CRD.
+The **context** is the resolved configuration that the agent uses:
+the cluster defaults, the environment overrides, the deployment's
+configuration and parameters, and the driver's defaults, merged into one
+hierarchical object. It is embedded in both the instance and the
+`StyrminDeployment` resource.
 
-Drivers render Helm values and run Python actions against the Context.
-It's the bridge between "the user filled in a form" and "the cluster
-has these Kubernetes objects".
+Drivers render Helm values and run Python actions with the context.
+Styrmin builds it from the values the user sets, and the driver turns it
+into Kubernetes objects.
 
-See [the Context page](../drivers/context.md) for the full structure.
+See [The context (GlobalContext)](../drivers/context.md) for its
+structure.
 
-### How drivers extend lifecycle
+### How drivers extend the lifecycle
 
 #### Hooks and modes
 
-Driver Python code runs at **hooks** — lifecycle slots like `setup`
-(during create) and `upgrade` (during upgrade). Each hook has three
-**modes**: `pre`, `core`, and `post`. Ordering across modes is strict;
-ordering inside a mode is unspecified.
+A driver's Python code runs at **hooks**: `setup` (when a deployment is
+created) and `upgrade` (when it is upgraded). Each hook has three
+**modes**: `pre`, `core`, and `post`. The modes run in this order. The
+order of the actions inside one mode is not defined.
 
 #### Action
 
-An **action** is the Python function the driver registers at a given
-hook/mode. Actions run inside a Prefect flow on the agent and have
-access to a set of built-in primitives (`stop_component`,
-`start_component`, `execute_commands`,
-`upgrade_deployment_version`, ...). This is how Styrmin encodes a
-real-world upgrade procedure — stop workers, run migrations, restart,
-verify — as a repeatable, driver-defined sequence rather than a
-human-executed runbook.
+An **action** is the Python function that a driver registers at a hook
+and mode. Actions run in a Prefect flow on the agent and can call
+built-in primitives (`stop_components`, `start_components`,
+`execute_commands`, `upgrade_deployment_version`, …). With actions, a
+driver defines an upgrade procedure (stop workers, run migrations,
+restart, verify) as a sequence that Styrmin runs the same way on every
+upgrade.
 
-[Lifecycle hooks and actions](./hooks-and-actions.md) covers the
-hook/mode model and the action primitives.
+[Lifecycle hooks and actions](./hooks-and-actions.md) explains hooks,
+modes, and the action primitives.
 
-### How it all fits together
+### How the concepts relate
 
 ```text
-                       Application Driver
+                       Application driver
                               │ versioned as
                               ▼
-                   Application Driver Version
+                   Application driver version
                               │ pinned by
                               ▼
 Cluster ─── Environment ─── Deployment ──generates──► Instance
@@ -201,7 +193,7 @@ Cluster ─── Environment ─── Deployment ──generates──► Inst
                            Context (resolved configuration)
                                 │
                                 ▼
-                       StyrminDeployment CRD
+                       StyrminDeployment resource
                                 │ watched by
                                 ▼
                             Agent operator
@@ -214,16 +206,16 @@ Cluster ─── Environment ─── Deployment ──generates──► Inst
                     (PodStatus / DeploymentStatus)
                                 │
                                 ▼
-                        reported back to server
+                        reported to the server
 ```
 
-### Where to go next
+### Next steps
 
-- [**Glossary**](./glossary.md) — every term Styrmin uses, in one
-  alphabetical list.
-- [**What is an Application Driver?**](./what-is-a-driver.md) — the
-  unit of deployment, in depth.
-- [**Architecture**](./architecture.md) — the big picture of server,
-  agent, and how they talk to each other.
-- [**Reconciliation**](./reconciliation.md) — the desired-vs-current
-  loop in detail.
+- [**Glossary**](./glossary.md): every Styrmin term, in alphabetical
+  order.
+- [**What is an application driver?**](./what-is-a-driver.md): the
+  application driver in detail.
+- [**Architecture**](./architecture.md): the server, the agent, and how
+  they connect.
+- [**Reconciliation**](./reconciliation.md): the loop that compares the
+  desired and the current state.
