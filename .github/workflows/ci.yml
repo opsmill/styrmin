@@ -27,26 +27,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      non_runtime_only: ${{ steps.non-runtime-only.outputs.non_runtime_only }}
+      runtime: ${{ steps.runtime.outputs.runtime }}
     steps:
       - uses: actions/checkout@v6
-      # Returns 'true' only when *every* changed file matches a non-runtime pattern.
-      # Used by the E2E jobs to skip on tooling-only PRs (docs, agent config, etc.).
-      - name: Check if only non-runtime files changed
+      # 'true' when at least one changed file is outside the docs and agent-config
+      # paths. With `every`, a file matches only if it matches all patterns, so the
+      # negations exclude those paths. The E2E and integration jobs skip otherwise.
+      - name: Check if any runtime file changed
         uses: dorny/paths-filter@v3
-        id: non-runtime-only
+        id: runtime
         with:
           predicate-quantifier: every
           filters: |
-            non_runtime_only:
-              - 'docs/**'
-              - '**/*.md'
-              - '**/*.mdx'
-              - '.specify/**'
-              - '.agents/**'
-              - '.github/prompts/**'
-              - 'LICENSE*'
-              - 'CODEOWNERS'
+            runtime:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+              - '!**/*.mdx'
+              - '!specs/**'
+              - '!changelog/**'
+              - '!.specify/**'
+              - '!.agents/**'
+              - '!.claude/**'
+              - '!.github/prompts/**'
+              - '!LICENSE*'
+              - '!CODEOWNERS'
 
   pre-commit-hooks:
     name: Pre-Commit Hooks
@@ -197,7 +202,7 @@ jobs:
   integration-tests:
     name: Integration Tests
     needs: ["files-changed", "pre-commit-hooks"]
-    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
+    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.runtime == 'true'
     runs-on:
       group: huge-runners
     timeout-minutes: 20
@@ -223,7 +228,7 @@ jobs:
   e2e-tests:
     name: E2E Tests (${{ matrix.entrypoint }} / ${{ matrix.shard }})
     needs: ["files-changed", "pre-commit-hooks"]
-    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.non_runtime_only != 'true'
+    if: github.event_name == 'workflow_dispatch' || needs.files-changed.outputs.runtime == 'true'
     runs-on:
       group: huge-runners
     # Raised from 40 because a cell's *worst case* has to leave room for the
