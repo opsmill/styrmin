@@ -1,0 +1,1 @@
+Fixed `uv run invoke cluster.traefik`, which `uv run invoke start` runs: with version 42 of the Traefik chart, the `service.type=ClusterIP` value had no effect, so the Traefik of the local demo got a `LoadBalancer` Service. The task now sets `service.spec.type=ClusterIP`.

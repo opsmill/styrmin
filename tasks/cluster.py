@@ -50,7 +50,7 @@ def traefik(context: Context) -> None:
     host. We use ClusterIP uniformly across platforms so the demo flow
     is identical on Linux and macOS.
     """
-    print_header("Installing Traefik ingress controller (service.type=ClusterIP)...")
+    print_header("Installing Traefik ingress controller (service.spec.type=ClusterIP)...")
     context.run(
         "helm repo add traefik https://helm.traefik.io/traefik 2>/dev/null || true",
         pty=True,
@@ -60,7 +60,7 @@ def traefik(context: Context) -> None:
         f"helm upgrade --install traefik traefik/traefik"
         f" -n {KUBERNETES_ROOT_NAMESPACE} --create-namespace"
         f" -f {DEV_LOCAL_DIR / 'traefik-values.yaml'}"
-        f" --set service.type=ClusterIP"
+        f" --set service.spec.type=ClusterIP"
         f" --take-ownership"
         f" --wait --timeout 5m",
         pty=True,
