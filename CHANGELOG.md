@@ -11,6 +11,31 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [Styrmin - v0.1.53](https://github.com/opsmill/styrmin/tree/v0.1.53) - 2026-10-23
+
+### Security
+
+- Stopped `createRestore` from deleting a namespace that the user names. Before, a user with the `READ_WRITE` role could pass any namespace as `targetNamespace`, for example `kube-system`, and the restore deleted that namespace and restored the backup into it: with the agent chart's default values, the restore Job runs as `styrmin-service-account`, whose ClusterRole may delete any namespace. Versions v0.1.19 to v0.1.50 are affected unless an operator changed that service account or its ClusterRole; v0.1.0 to v0.1.18 took `targetNamespace` too and checked no role on `createRestore`. A restore now lands only in the namespace `styrmin-<deployment id>` of the deployment the backup was taken of. The restore flow also fails a restore whose namespace is not that one before it changes anything in the cluster, which covers a restore that an earlier version queued before the upgrade and a flow run started directly through the Prefect API. ([#532](https://github.com/opsmill/styrmin/issues/532))
+
+### Removed
+
+- Removed the `targetNamespace` and `targetInstanceId` arguments from the `createRestore` mutation, the `target_namespace` and `target_instance_id` parameters from `create_restore()` in the Python SDK, and the `--target-namespace` option from `styrminctl backups restore`: Styrmin restores a backup into the deployment it was taken of, in that deployment's namespace, and records that deployment's active instance on the restore. Apart from an environment clone, Styrmin offers no way to restore a backup into another deployment until deployment clone, a separate feature, ships. Before you upgrade, read the upgrade steps under "Migration" in [A restore lands only in the deployment its backup was taken of](https://styrmin.pages.dev/docs/changelog#restores-no-longer-delete-a-namespace-that-the-caller-names): upgrade the server, `styrminctl` and the Python SDK together, reload the web pages that were open during the upgrade, remove the arguments and the option above from your scripts and requests, and run `styrminctl backups restore <backup-id>` with the backup id alone, because the command now refuses a backup id combined with `--target-deployment`, `--target-deployment-id`, `--target-instance-id` or `--environment`, which work only with `--last`. ([#532](https://github.com/opsmill/styrmin/issues/532))
+
+### Added
+
+- Added a link to the home page on the Styrmin logo and name at the top of the sidebar. ([#198](https://github.com/opsmill/styrmin/issues/198))
+- Added a GraphQL Sandbox link at the bottom of the sidebar. It opens the interactive GraphQL editor that the server provides at /graphql in a new tab. ([#199](https://github.com/opsmill/styrmin/issues/199))
+- Added `deployment_id` to the instance of each backup that `list_backups()` returns in the Python SDK. ([#532](https://github.com/opsmill/styrmin/issues/532))
+
+### Changed
+
+- Changed `styrminctl backups restore --last` to treat a deployment the way the server does: `--target-deployment` and `--target-deployment-id` no longer refuse a deployment without an active instance, and `--target-instance-id` now asks for confirmation, as the deployment options already did, when the chosen backup was taken of an earlier instance of its deployment or at another application version; `--yes` skips the question, and without a terminal the command refuses unless you pass `--yes`. The Restore dialog of the web app now shows the deployment and the namespace the backup is restored into as text instead of a read-only field, and the restore warning for a deployment without an active instance no longer says that Styrmin keeps its current instance. The "Restore already in progress" error now says to wait until that restore completes or fails and where to view its status. ([#532](https://github.com/opsmill/styrmin/issues/532))
+
+### Fixed
+
+- Fixed an in-place restore that deleted the namespace the caller named and restored the backup into it, which could be the namespace of another deployment, instead of the namespace of the deployment the backup was taken of. ([#532](https://github.com/opsmill/styrmin/issues/532))
+- Fixed applications of one environment being unable to connect to each other's declared services on clusters that enforce network policies: Styrmin now lets the other deployments of the environment connect to each service that a driver declares, on the service's port only, and lets each deployment connect to the rest of its environment. Styrmin's policies keep components that serve no declared service, and other environments, closed. ([#557](https://github.com/opsmill/styrmin/issues/557))
+
 ## [Styrmin - v0.1.52](https://github.com/opsmill/styrmin/tree/v0.1.52) - 2026-10-22
 
 ### Fixed

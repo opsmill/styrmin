@@ -13,8 +13,8 @@ type: application
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
 # Versions are expected to follow Semantic Versioning (https://semver.org/)
-version: 0.1.52
+version: 0.1.53
 # Application version being deployed. Doubles as the default `image.tag`
 # (see `templates/_helpers.tpl`), so it MUST stay in lockstep with the
 # parent `styrmin` chart's appVersion -- the release workflow bumps both.
-appVersion: "0.1.52"
+appVersion: "0.1.53"
