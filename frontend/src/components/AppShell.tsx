@@ -132,32 +132,39 @@ export function AppShell() {
         )}
       >
         {/* Logo */}
-        <div className="flex items-center gap-2.5 px-4 py-5">
-          {!collapsed && (
-            <>
+        <div className="px-3 py-4">
+          <Link
+            to="/"
+            aria-label="Styrmin home"
+            title={collapsed ? "Styrmin home" : undefined}
+            className="flex items-center gap-2.5 rounded-lg p-1"
+          >
+            {!collapsed && (
+              <>
+                <div
+                  className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-bold text-white",
+                    theme === "dark" ? "bg-primary" : "bg-foreground",
+                  )}
+                >
+                  S
+                </div>
+                <span className="text-[15px] font-semibold tracking-tight text-sidebar-foreground">
+                  Styrmin
+                </span>
+              </>
+            )}
+            {collapsed && (
               <div
                 className={cn(
-                  "flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-bold text-white",
+                  "mx-auto flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-bold text-white",
                   theme === "dark" ? "bg-primary" : "bg-foreground",
                 )}
               >
                 S
               </div>
-              <span className="text-[15px] font-semibold tracking-tight text-sidebar-foreground">
-                Styrmin
-              </span>
-            </>
-          )}
-          {collapsed && (
-            <div
-              className={cn(
-                "mx-auto flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-bold text-white",
-                theme === "dark" ? "bg-primary" : "bg-foreground",
-              )}
-            >
-              S
-            </div>
-          )}
+            )}
+          </Link>
         </div>
 
         {/* Navigation */}
