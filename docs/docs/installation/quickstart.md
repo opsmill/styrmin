@@ -129,8 +129,10 @@ The UI shows:
 - no deployments. Create one from the UI, and the agent creates its
   Kubernetes resources.
 
-To use the GraphQL API directly, open
-[http://styrmin.local.styrmin.io:8080/graphql](http://styrmin.local.styrmin.io:8080/graphql).
+To use the GraphQL API directly, select **GraphQL Sandbox** at the
+bottom of the sidebar. It opens
+[http://styrmin.local.styrmin.io:8080/graphql](http://styrmin.local.styrmin.io:8080/graphql)
+in a new tab.
 
 ### 6. Pause, resume, or delete the demo
 

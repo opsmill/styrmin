@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import {
+  Braces,
+  ExternalLink,
   LayoutGrid,
   Layers,
   HardDrive,
@@ -168,6 +170,34 @@ export function AppShell() {
         {/* Bottom */}
         <div className="space-y-1 border-t border-border px-3 py-2">
           {bottomNavItems.map(renderBottomNavLink)}
+          {/* The backend serves the GraphQL sandbox on the same origin. */}
+          <a
+            href="/graphql"
+            target="_blank"
+            rel="noopener noreferrer"
+            title={collapsed ? "GraphQL Sandbox" : undefined}
+            className={cn(
+              "flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+              collapsed && "justify-center px-2",
+            )}
+          >
+            <Braces className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+            {collapsed ? (
+              <span className="sr-only">
+                GraphQL Sandbox (opens in a new tab)
+              </span>
+            ) : (
+              <>
+                <span>GraphQL Sandbox</span>
+                <ExternalLink
+                  className="ml-auto h-3.5 w-3.5 shrink-0"
+                  aria-hidden="true"
+                />
+                {/* A flex container drops this space from the layout, not from the name. */}{" "}
+                <span className="sr-only">(opens in a new tab)</span>
+              </>
+            )}
+          </a>
           <button
             onClick={() => setCollapsed((prev) => !prev)}
             className={cn(

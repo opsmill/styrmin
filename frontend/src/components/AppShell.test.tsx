@@ -131,4 +131,26 @@ describe("AppShell", () => {
     expect(screen.queryByText("Drivers")).toBeNull();
     expect(screen.queryByText("Styrmin")).toBeNull();
   });
+
+  it("links to the GraphQL sandbox in a new tab, for every role", async () => {
+    await render(<Shell role="READ_ONLY" />);
+    const link = screen.getByRole("link", { name: /GraphQL Sandbox/ });
+    expect(link).toHaveAttribute("href", "/graphql");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(link).toHaveAccessibleName("GraphQL Sandbox (opens in a new tab)");
+  });
+
+  it("keeps the GraphQL sandbox link when the sidebar is collapsed", async () => {
+    const user = userEvent.setup();
+    await render(<Shell />);
+
+    await user.click(screen.getByText("Collapse"));
+
+    const link = screen.getByRole("link", {
+      name: "GraphQL Sandbox (opens in a new tab)",
+    });
+    expect(link).toHaveAttribute("href", "/graphql");
+    expect(link).toHaveAttribute("title", "GraphQL Sandbox");
+  });
 });
