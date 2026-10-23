@@ -2,7 +2,9 @@
 
 Deploy simple-app twice with service name overrides 'intent' and 'executor'.
 Call executor's /probe?target=intent endpoint and verify DNS resolution and
-HTTP connectivity between the two instances. Renaming 'executor' must create
+HTTP connectivity between the two instances. Each namespace must hold the
+NetworkPolicies that admit the environment to the declared service (#557).
+Renaming 'executor' must create
 its new Service and replace its alias in the 'intent' namespace (#237, #491).
 Deleting 'intent' must delete its alias in the 'executor' namespace (#503).
 That test runs last, because the other tests use 'intent'.
@@ -14,6 +16,7 @@ import time
 import httpx
 import kr8s.asyncio
 import pytest
+from kr8s.asyncio.objects import NetworkPolicy as AsyncNetworkPolicy
 from kr8s.asyncio.objects import Pod as AsyncPod
 from kr8s.asyncio.objects import Service as AsyncService
 
@@ -118,6 +121,80 @@ async def test_service_discovery_between_apps(
                         f"Expected HTTP 200, got {data['status']}: {data['body']}"
                     )
                 await asyncio.sleep(3)
+
+
+@pytest.mark.api_only(
+    reason="Reads NetworkPolicies with kr8s only; the [ui-chromium] variant "
+    "would read the same objects.",
+)
+@pytest.mark.ci
+async def test_environment_admits_declared_services(
+    discovery_deployments: dict[str, str],
+    scenario_environment_id: str,
+    vcluster: dict,
+) -> None:
+    """#557: the environment reaches each declared service, and nothing else.
+
+    The vCluster's network plugin does not enforce NetworkPolicies, so the probe
+    above passes without them. This test checks the policies themselves: the
+    component that serves ``simple-app`` admits the namespaces of the environment
+    on port 8000, the database component gets no such policy, and each namespace
+    may connect to the other namespaces of the environment.
+    """
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
+    environment_label = {"styrmin/environment_id": scenario_environment_id}
+
+    for deployment_id in discovery_deployments.values():
+        namespace = f"styrmin-{deployment_id}"
+        policies: dict[str, dict] = {}
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            policies = {
+                policy.name: policy.raw["spec"]
+                async for policy in AsyncNetworkPolicy.list(
+                    namespace=namespace, api=kr8s_api
+                )
+            }
+            if {
+                "allow-environment-to-server",
+                "allow-egress-to-environment",
+            } <= policies.keys():
+                break
+            await asyncio.sleep(3)
+
+        assert policies.get("allow-environment-to-server") == {
+            "podSelector": {"matchLabels": {"app.kubernetes.io/name": "simple-app"}},
+            "policyTypes": ["Ingress"],
+            "ingress": [
+                {
+                    "from": [{"namespaceSelector": {"matchLabels": environment_label}}],
+                    "ports": [{"port": 8000, "protocol": "TCP"}],
+                }
+            ],
+        }, f"{namespace}: {sorted(policies)}"
+        assert "allow-environment-to-database" not in policies
+        assert policies.get("allow-egress-to-environment") == {
+            "podSelector": {},
+            "policyTypes": ["Egress"],
+            "egress": [
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {
+                                "matchLabels": environment_label,
+                                "matchExpressions": [
+                                    {
+                                        "key": "kubernetes.io/metadata.name",
+                                        "operator": "NotIn",
+                                        "values": [namespace],
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                }
+            ],
+        }, f"{namespace}: {sorted(policies)}"
 
 
 @pytest.mark.api_only(

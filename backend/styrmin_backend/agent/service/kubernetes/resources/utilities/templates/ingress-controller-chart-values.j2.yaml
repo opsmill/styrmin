@@ -46,6 +46,26 @@ networkpolicies:
             podSelector:
               matchLabels:
                 styrmin/role: ingress-controller
+{% if context.labels.environment_id %}
+  # Allow connections to the other deployments of the environment. Each of them admits
+  # only the ports of the services its driver declares (service-discovery utility, #557).
+  # The deployment's own namespace is left out, so the rules inside it stay as they are.
+  - name: allow-egress-to-environment
+    spec:
+      podSelector: {}
+      policyTypes:
+        - Egress
+      egress:
+        - to:
+          - namespaceSelector:
+              matchLabels:
+                styrmin/environment_id: "{{ context.labels.environment_id }}"
+              matchExpressions:
+                - key: kubernetes.io/metadata.name
+                  operator: NotIn
+                  values:
+                    - "{{ namespace }}"
+{% endif %}
   - name: traefik-netpolicy-egress
     spec:
       policyTypes:

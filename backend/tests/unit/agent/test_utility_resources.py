@@ -179,6 +179,53 @@ class TestIngressUtilityBuildResources:
         netpols = [r for r in resources if r["kind"] == "NetworkPolicy"]
         assert len(netpols) == 6
 
+    def test_generates_egress_to_environment_policy(
+        self, ingress_utility: IngressUtility, global_context: GlobalContext
+    ) -> None:
+        """#557: the deployment may connect to the other namespaces of its environment."""
+        global_context.labels = {"environment_id": "env-1"}
+        resources = ingress_utility.build_resources(
+            global_context, RELEASE_REF, NAMESPACE
+        )
+        netpol = _find_resource(
+            resources, "NetworkPolicy", "allow-egress-to-environment"
+        )
+        assert netpol is not None
+        assert netpol["spec"] == {
+            "podSelector": {},
+            "policyTypes": ["Egress"],
+            "egress": [
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {
+                                "matchLabels": {"styrmin/environment_id": "env-1"},
+                                "matchExpressions": [
+                                    {
+                                        "key": "kubernetes.io/metadata.name",
+                                        "operator": "NotIn",
+                                        "values": [NAMESPACE],
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                }
+            ],
+        }
+
+    def test_omits_egress_to_environment_policy_without_environment_id(
+        self, ingress_utility: IngressUtility, global_context: GlobalContext
+    ) -> None:
+        """#557: without an environment id, an empty label would select no namespace."""
+        resources = ingress_utility.build_resources(
+            global_context, RELEASE_REF, NAMESPACE
+        )
+        assert (
+            _find_resource(resources, "NetworkPolicy", "allow-egress-to-environment")
+            is None
+        )
+
     def test_generates_default_deny_egress(
         self, ingress_utility: IngressUtility, global_context: GlobalContext
     ) -> None:

@@ -522,6 +522,10 @@ Notes:
 - **The hostname** of an external service has the form
   `<service-name>-<deployment-id>.<fqdn-suffix>`, and the template reads
   it from `{{ services['<service-name>'].primary_fqdn }}`.
+- **The other applications of the environment** can connect to each
+  declared service, internal or external, on its port. A component that
+  serves no declared service is reachable from its own deployment only, so
+  declare every port that other applications need.
 - See [Ingress and networking](../concepts-and-architecture/ingress-and-networking.md)
   for how Styrmin uses these declarations.
 
