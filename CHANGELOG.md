@@ -11,6 +11,12 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [Styrmin - v0.1.54](https://github.com/opsmill/styrmin/tree/v0.1.54) - 2026-10-25
+
+### Housekeeping
+
+- Fixed `uv run invoke cluster.traefik`, which `uv run invoke start` runs: with version 42 of the Traefik chart, the `service.type=ClusterIP` value had no effect, so the Traefik of the local demo got a `LoadBalancer` Service. The task now sets `service.spec.type=ClusterIP`.
+
 ## [Styrmin - v0.1.53](https://github.com/opsmill/styrmin/tree/v0.1.53) - 2026-10-23
 
 ### Security
