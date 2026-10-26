@@ -116,10 +116,13 @@ Only this signature fails the deployment at once, because it is deterministic fo
 Other HelmRelease failures keep the old path (Flux remediation, then the readiness timeout). A later
 config or driver change re-applies the HelmRelease and leaves `Failed` the usual way.
 
-> **Note (#432, #433):** the agent chart now installs helm-controller v1.6.5. After the guard
-> failure, it records the new post-renderers as applied and reports the previous release `Ready`
-> without retrying, so the operator also reads the guard key from FluxCD's `UpgradeFailed` Event.
-> See [A failed change reported in sync](../knowledge/agent/operator.md#a-failed-change-reported-in-sync).
+> **Note (#432, #433):** helm-controller v1.6.5, which the agent chart installed from v0.1.48,
+> recorded the new post-renderers as applied after the guard failure and reported the previous
+> release `Ready` without retrying, so the operator also read the guard key from FluxCD's
+> `UpgradeFailed` Event ([#434](https://github.com/opsmill/styrmin/pull/434)). The agent chart now
+> installs helm-controller v1.7.1, which keeps the guard failure in its conditions and tries
+> again, so the operator reads the guard key only from the conditions, as above. See the
+> post-renderers digest item of [FluxCD controllers](../knowledge/agent/operator.md#fluxcd-controllers).
 
 ### 5. Writes and upgrades are validated before any task starts
 

@@ -76,6 +76,52 @@ See
 - Apart from an environment clone, Styrmin offers no way to restore a
   backup into another deployment.
 
+### FluxCD tries a failed change again
+
+The agent now installs the FluxCD controllers of Flux v2.10.0:
+helm-controller v1.7.1 and source-controller v1.10.1, in place of
+helm-controller v1.6.5 and source-controller v1.9.6. When a change of env
+vars or image overrides failed before Helm stored a release,
+helm-controller v1.6.5 reported the previous release ready and did not try
+again
+([fluxcd/helm-controller#1607](https://github.com/fluxcd/helm-controller/issues/1607)).
+Since v0.1.48, the agent detected this state from FluxCD's Kubernetes
+Events. helm-controller v1.7.1 fixes it, so the agent no longer reads
+Events.
+
+#### What's new
+
+- When a change fails before Helm stores a release, for example because
+  the driver names a component container that the chart does not render,
+  FluxCD keeps the HelmRelease not ready and tries again. The deployment
+  fails with the same `COMPONENT_CONTAINER_NOT_FOUND` message as before.
+- After FluxCD rolls back a failed upgrade, it tries the upgrade again
+  until it has used its 3 retries, instead of reporting the rolled-back
+  release ready. A rollout whose pods cannot start shows the display state
+  `Error` from the readiness timeout on, as before. Its phase becomes
+  `Failed` when FluxCD has used its retries, about 20 minutes after the
+  change with the default timeouts, instead of right after the first
+  rollback. The message is then `Failed to upgrade after 4 attempt(s):`
+  followed by FluxCD's failure message, instead of
+  `FluxCD rolled the release back after release v<N> failed`. See
+  [Operator and CRDs](./concepts-and-architecture/operator-and-crds.md).
+
+#### Migration
+
+- The FluxCD project supports the Flux v2.10 controllers on Kubernetes
+  1.35.2 and later. In Styrmin's checks with kind, they worked on
+  Kubernetes 1.25 to 1.37.
+- `helm upgrade` runs the CRD Job of the agent chart first. It updates the
+  FluxCD CRDs in place: no CRD drops a version, so the Job deletes no CRD.
+- The agent's ClusterRole no longer allows `list` on `events`.
+- Upgrading the agent does not upgrade a deployment whose release is in
+  sync with its HelmRelease.
+- A change that helm-controller v1.6.5 already reported in sync after it
+  failed is not tried again after the upgrade: helm-controller v1.6.5
+  recorded it as applied. The deployment keeps the previous release until
+  a later change of its env vars, image overrides, settings or driver
+  version reaches FluxCD.
+
 ## v0.1.50 (2026-10-19)
 
 ### FluxCD uses the defaults of Helm v4
