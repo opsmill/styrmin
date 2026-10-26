@@ -707,12 +707,14 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
     assert cr_status.get("phase") != "Ready", cr_status
     deployment = await admin.deployments.get(deployment_id)
     assert deployment.status == "failed", deployment.status
-    final = next(
-        e
-        for e in await scenario_driver.get_deployment_timeline(
-            deployment_id=deployment_id
-        )
-        if e.task_id == entry.task_id
+    # A reloaded page shows the empty timeline until its query returns, so read again.
+    final, final_step = await _wait_for_step(
+        lambda: scenario_driver.get_deployment_timeline(deployment_id=deployment_id),
+        lambda e: e.task_id == entry.task_id,
+        HELMRELEASE,
+        lambda e, s: True,
+        timeout=READ_ONLY_MATCH_TIMEOUT,
+        interval=POLL_INTERVAL,
     )
     assert final.result == "FAILED", final
-    assert {s.key: s.status for s in final.steps}[HELMRELEASE] == "FAILED", final
+    assert final_step.status == "FAILED", final
