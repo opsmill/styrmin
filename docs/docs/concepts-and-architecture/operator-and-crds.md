@@ -89,10 +89,10 @@ FluxCD's operator, the **helm-controller**, watches `HelmRelease` objects
 and runs `helm install` and `helm upgrade` for them. Styrmin does not run
 Helm itself.
 
-The agent chart installs FluxCD's helm-controller v1.6.5 and
-source-controller v1.9.6, the controllers of Flux v2.9.6. They support
-Kubernetes 1.34.1 and later. helm-controller runs with the defaults of
-Helm v4:
+The agent chart installs FluxCD's helm-controller v1.7.1 and
+source-controller v1.10.1, the controllers of Flux v2.10.0. The FluxCD
+project supports them on Kubernetes 1.35.2 and later. helm-controller runs
+with the defaults of Helm v4:
 
 - A deployment created since the agent runs helm-controller with these
   defaults is installed with server-side apply. helm-controller is the
@@ -234,41 +234,26 @@ example when the operator cannot create a network policy, kopf runs the
 create or update handler again `STYRMIN_OPERATOR_RETRY_DELAY` seconds
 (30 by default) later, and the handler records a new start.
 
-FluxCD can also report the release `Ready` after it rolled back the
-failed upgrade. This happens when a change only adds or changes
-post-render overrides, such as an [image override](./image-overrides.md)
-or environment variables: after the rollback, FluxCD compares only the
-chart and the values with the HelmRelease, finds the rolled-back release
-in sync, and reports it as a successful upgrade, although the override
-was never applied. The operator recognizes this state from FluxCD's
-release history: FluxCD counted a failed install or upgrade for the
-current generation of the HelmRelease, and the newest release is
-`deployed` right after a `failed` one, so it is the rollback. The
-operator then sets the phase `Failed` and the display state `Error`,
-with the message
-`FluxCD rolled the release back after release v<N> failed` followed by
-the failure message when it recorded one, and the
-`Ready` condition becomes `False` with the reason `RolledBack`. The
-HelmRelease step and the task stay failed. A retry by FluxCD that
-succeeds creates a newer release after the rollback, so the deployment
-still reaches `Ready`.
+After FluxCD rolls back a failed upgrade, it tries the upgrade again
+until it has used its 3 retries, and rolls back each attempt that fails.
+This includes a change that only adds or changes post-render overrides,
+such as an [image override](./image-overrides.md) or environment
+variables. A rollout whose pods cannot start therefore shows the display
+state `Error` from the readiness timeout on, and reaches the phase
+`Failed` only when FluxCD reports `Stalled`: with the default 5-minute
+HelmRelease timeout, about 20 minutes after the change. In the meantime the
+HelmRelease step and the task stay failed.
 
-FluxCD can also report a change in sync after it failed to apply it.
-When an install or upgrade fails before Helm stores a release, for
-example because a post-render patch fails, helm-controller v1.6.5 still
-records the new post-renderers as applied. On its next run it compares
-only the chart and the values, reports the previous release `Ready`, and
-does not try again. The operator recognizes this state: FluxCD counted a
-failure for the current generation of the HelmRelease
-(`status.failures`), and FluxCD's newest `InstallFailed` or
-`UpgradeFailed` event of the HelmRelease is newer than its newest
-release. The operator then sets the phase `Failed` and the display state
-`Error`. When the event names a component container that the chart does
-not render, the message is the `COMPONENT_CONTAINER_NOT_FOUND` message
-(see [Image overrides](./image-overrides.md)). Otherwise it is
-`FluxCD reported the release in sync after the change failed:` followed
-by FluxCD's message, and the `Ready` condition becomes `False` with the
-reason of the event.
+helm-controller v1.6.5, which the agent chart installed before, reported
+the rolled-back release `Ready` instead of trying again. The operator
+still recognizes this state from FluxCD's release history: FluxCD counted
+a failed install or upgrade for the current generation of the
+HelmRelease, and the newest release is `deployed` right after a `failed`
+one, so it is the rollback. The operator then sets the phase `Failed` and
+the display state `Error`, with the message
+`FluxCD rolled the release back after release v<N> failed` followed by
+the failure message when it recorded one, and the `Ready` condition
+becomes `False` with the reason `RolledBack`.
 
 ### A `StyrminDeployment` that keeps its finalizer
 

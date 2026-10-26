@@ -246,11 +246,9 @@ The operator turns that failure into a typed status. On every timer tick in
 `read_helmrelease_guard_failure()` (`operator/reconciler.py`) reads the HelmRelease and
 matches when `Ready` is not `True` and a condition observed for the current
 `metadata.generation` carries the guard key in its message (`parse_guard_failure()` in
-`services/component_container/exceptions.py`). helm-controller v1.1.0 reported it under
-`Ready=False` and `Released=False`, reason `UpgradeFailed`. helm-controller v1.6.5, which the
-agent chart installs, reports it in an `UpgradeFailed` Event and then reports the previous
-release `Ready`; the operator then reads the guard key from that Event (see
-[A failed change reported in sync](../agent/operator.md#a-failed-change-reported-in-sync)). The CR then goes
+`services/component_container/exceptions.py`). helm-controller v1.7.1, which the agent chart
+installs, reports it under `Ready=False` and `Released=False`, reason `UpgradeFailed`, as v1.1.0
+did, and tries again (see [FluxCD controllers](../agent/operator.md#fluxcd-controllers)). The CR then goes
 `Failed` / `Error` with `HelmReleaseReady=False` and `Ready=False`, reason
 `ComponentContainerNotFound`, and
 the `ComponentContainerNotFoundError` (`COMPONENT_CONTAINER_NOT_FOUND`) message, which the

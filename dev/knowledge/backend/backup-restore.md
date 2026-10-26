@@ -1550,7 +1550,7 @@ storage driver).
 
 <!-- Extracted from specs/025-helm-v4-defaults on 2026-10-16 -->
 
-**Release records written by Helm v4.** helm-controller v1.6.5 uses Helm v4, which stores
+**Release records written by Helm v4.** helm-controller uses Helm v4 from v1.5.0, which stores
 releases in Secrets of the same type (`helm.sh/release.v1`), with the same labels (`name`,
 `owner=helm`, `status`, `version`) and the same encoding (JSON, gzip, base64) as Helm v3. The
 record has one new field, `apply_method` (`ssa` or `csa`; empty means client-side apply).

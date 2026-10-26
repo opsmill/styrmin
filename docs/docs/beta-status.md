@@ -132,9 +132,9 @@ first release with the change.
 -->
 
 - Run Kubernetes 1.25 or later. Earlier versions do not check the validation
-  rules of the agent's CRDs. The agent installs the FluxCD v2.9 controllers,
+  rules of the agent's CRDs. The agent installs the FluxCD v2.10 controllers,
   which work on Kubernetes 1.25 to 1.37. The FluxCD project supports them only
-  on Kubernetes 1.34.1 and later (v0.1.48).
+  on Kubernetes 1.35.2 and later (v0.1.48).
 - Keep the CRD upgrade Job of the agent chart turned on
   (`styrmin-agent.crdUpgrade.enabled`, on by default). It applies the agent's
   CRDs before each install and upgrade. If you turn it off, apply the files of
