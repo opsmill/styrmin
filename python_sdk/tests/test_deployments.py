@@ -2390,3 +2390,250 @@ async def test_scale_clear_drops_a_block_that_held_only_the_count(
     await client.deployments.scale("dep-1", "server", None)
 
     assert update.call_args.kwargs["input"].components == []
+
+
+def _task_read(
+    result: str,
+    *,
+    task_type: str = "stop_components",
+    status: str = "running",
+    message: str | None = None,
+    steps: tuple[dict[str, Any], ...] = (),
+) -> dict[str, Any]:
+    """A ``task(taskId)`` payload with the given task result."""
+    return {
+        "data": {
+            "task": {
+                "id": TASK_ID,
+                "type": task_type,
+                "status": status,
+                "message": message,
+                "deploymentId": DEPLOYMENT_ID,
+                "createdOn": "2026-10-22T10:00:00+00:00",
+                "result": result,
+                "startedByStepId": None,
+                "startedBy": None,
+                "startedTasks": [],
+                "steps": list(steps),
+            }
+        }
+    }
+
+
+@pytest.fixture
+def fake_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Replace the poll loop's clock and sleep; returns the list of sleeps, in seconds."""
+    from styrmin_sdk.resources import deployments as deployments_module
+
+    clock = {"now": 0.0}
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:  # noqa: RUF029 — must mirror asyncio.sleep signature
+        sleeps.append(seconds)
+        clock["now"] += seconds
+
+    monkeypatch.setattr(deployments_module.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(deployments_module.asyncio, "sleep", fake_sleep)
+    return sleeps
+
+
+async def test_wait_for_task_reads_the_deployment_only_once_the_task_result_is_final(
+    client: StyrminClient, mock_transport: AsyncMock, fake_clock: list[float]
+) -> None:
+    """A ``running`` deployment read while the task runs is the state from before the change."""
+    mock_transport.execute.side_effect = [
+        _task_read("RUNNING", status="pending"),
+        _task_read("RUNNING"),
+        _task_read("SUCCEEDED", status="success"),
+        _get_deployment_response(deployment_status="pending"),
+        _get_deployment_response(deployment_status="running"),
+    ]
+
+    waited = await client.deployments.wait_for_task(TASK_ID)
+
+    assert waited.succeeded
+    assert waited.failure_reason is None
+    assert waited.timed_out is False
+    assert waited.task_result == "SUCCEEDED"
+    assert waited.deployment_status == "running"
+    assert str(waited.deployment_id) == DEPLOYMENT_ID
+    assert [op.split("(")[0] for op in _operation_names(mock_transport)] == [
+        "query GetTask",
+        "query GetTask",
+        "query GetTask",
+        "query GetDeployment",
+        "query GetDeployment",
+    ]
+    assert fake_clock == [10.0, 10.0, 10.0]
+
+
+async def test_wait_for_task_of_a_deletion_succeeds_when_the_deployment_is_deleted(
+    client: StyrminClient, mock_transport: AsyncMock, fake_clock: list[float]
+) -> None:
+    mock_transport.execute.side_effect = [
+        _task_read("SUCCEEDED", task_type="delete_deployment", status="success"),
+        _get_deployment_response(deployment_status="deleting"),
+        _get_deployment_response(deployment_status="deleted"),
+    ]
+
+    waited = await client.deployments.wait_for_task(TASK_ID)
+
+    assert waited.succeeded
+    assert waited.deployment_status == "deleted"
+    assert fake_clock == [10.0]
+
+
+@pytest.mark.parametrize(
+    ("task_type", "deployment_status", "expected"),
+    [
+        ("update_instance", "failed", "running"),
+        ("update_instance", "deleted", "running"),
+        ("delete_deployment", "running", "deleted"),
+    ],
+    ids=["failed-after-a-change", "deleted-during-a-change", "running-after-a-deletion"],
+)
+@pytest.mark.usefixtures("fake_clock")
+async def test_wait_for_task_fails_when_the_deployment_settles_in_another_status(
+    client: StyrminClient,
+    mock_transport: AsyncMock,
+    task_type: str,
+    deployment_status: str,
+    expected: str,
+) -> None:
+    mock_transport.execute.side_effect = [
+        _task_read("SUCCEEDED", task_type=task_type, status="success"),
+        _get_deployment_response(deployment_status=deployment_status),
+    ]
+
+    waited = await client.deployments.wait_for_task(TASK_ID)
+
+    assert not waited.succeeded
+    assert waited.failure_reason == f"deployment status is {deployment_status}, expected {expected}"
+    assert waited.deployment_status == deployment_status
+
+
+async def test_wait_for_task_names_the_failed_step(
+    client: StyrminClient, mock_transport: AsyncMock, fake_clock: list[float]
+) -> None:
+    failed = _task_read(
+        "FAILED",
+        status="success",
+        steps=(
+            _task_step("Create network policies and secrets", "SUCCEEDED"),
+            _task_step(HELMRELEASE_STEP, "FAILED", HELMRELEASE_ERROR),
+        ),
+    )
+    mock_transport.execute.side_effect = [
+        failed,
+        failed,
+        _get_deployment_response(deployment_status="failed"),
+    ]
+
+    waited = await client.deployments.wait_for_task(TASK_ID)
+
+    assert not waited.succeeded
+    assert waited.task_result == "FAILED"
+    assert waited.failure_reason == f'step "{HELMRELEASE_STEP}" failed: {HELMRELEASE_ERROR}'
+    assert waited.deployment_status == "failed"
+    assert fake_clock == []
+
+
+async def test_wait_for_task_without_a_failed_step_gives_the_task_message(
+    client: StyrminClient, mock_transport: AsyncMock, fake_clock: list[float]
+) -> None:
+    """A flow can fail between two steps: no step failed, and the task's message says why."""
+    failed = _task_read(
+        "FAILED",
+        task_type="run_job",
+        status="failed",
+        message="Flow run crashed",
+        steps=(_task_step("Run the job", "SUCCEEDED"),),
+    )
+    mock_transport.execute.side_effect = [
+        failed,
+        failed,
+        _get_deployment_response(deployment_status="failed"),
+    ]
+
+    waited = await client.deployments.wait_for_task(TASK_ID)
+
+    assert waited.failure_reason == f"task {TASK_ID} failed: Flow run crashed"
+    assert fake_clock == []
+
+
+async def test_wait_for_task_reports_a_superseded_task(
+    client: StyrminClient, mock_transport: AsyncMock, fake_clock: list[float]
+) -> None:
+    mock_transport.execute.side_effect = [
+        _task_read("SUPERSEDED", status="success"),
+        _get_deployment_response(deployment_status="deploying"),
+    ]
+
+    waited = await client.deployments.wait_for_task(TASK_ID)
+
+    assert not waited.succeeded
+    assert waited.task_result == "SUPERSEDED"
+    assert waited.failure_reason == f"task {TASK_ID} was superseded by a later task of the deployment"
+    assert waited.deployment_status == "deploying"
+    assert fake_clock == []
+
+
+async def test_wait_for_task_times_out_while_the_task_runs(
+    client: StyrminClient, mock_transport: AsyncMock, fake_clock: list[float]
+) -> None:
+    """The last sleep ends at ``max_wait``; one read follows it, then the wait gives up."""
+    mock_transport.execute.side_effect = [
+        _task_read("RUNNING"),
+        _task_read("RUNNING"),
+        _task_read("RUNNING"),
+        _task_read("RUNNING"),
+        _get_deployment_response(deployment_status="pending"),
+    ]
+
+    waited = await client.deployments.wait_for_task(TASK_ID, max_wait=25)
+
+    assert waited.timed_out is True
+    assert waited.failure_reason == "wait timeout"
+    assert waited.task_result == "RUNNING"
+    assert waited.deployment_status == "pending"
+    assert fake_clock == [10.0, 10.0, 5.0]
+
+
+async def test_wait_for_task_times_out_while_the_deployment_settles(
+    client: StyrminClient, mock_transport: AsyncMock, fake_clock: list[float]
+) -> None:
+    mock_transport.execute.side_effect = [
+        _task_read("SUCCEEDED", status="success"),
+        _get_deployment_response(deployment_status="pending"),
+        _get_deployment_response(deployment_status="pending"),
+    ]
+
+    waited = await client.deployments.wait_for_task(TASK_ID, max_wait=3)
+
+    assert waited.timed_out is True
+    assert waited.failure_reason == "wait timeout"
+    assert waited.task_result == "SUCCEEDED"
+    assert waited.deployment_status == "pending"
+    assert fake_clock == [3.0]
+
+
+@pytest.mark.parametrize("max_wait", [0, -1])
+async def test_wait_for_task_rejects_a_max_wait_that_is_not_positive(
+    client: StyrminClient, mock_transport: AsyncMock, max_wait: float
+) -> None:
+    with pytest.raises(ValueError, match="max_wait must be positive"):
+        await client.deployments.wait_for_task(TASK_ID, max_wait=max_wait)
+
+    mock_transport.execute.assert_not_awaited()
+
+
+async def test_wait_for_task_raises_not_found_for_an_unknown_task(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    mock_transport.execute.return_value = {
+        "data": None,
+        "errors": [{"message": "Task not found", "extensions": {"code": "NOT_FOUND"}}],
+    }
+
+    with pytest.raises(ResourceNotFoundError):
+        await client.deployments.wait_for_task(TASK_ID)

@@ -11,6 +11,8 @@ What it covers:
 
 * ``client.deployments.delete(id)`` returns immediately with a born-
   complete ``DELETE_DEPLOYMENT`` task (US20, US21, FR-019).
+* ``client.deployments.wait_for_task(id)`` returns once the change of a
+  create, a stop, a start or a deletion has finished (#545).
 * ``Deployment.status`` projects through ``DELETING -> DELETED`` via the
   status-reporter (US24, FR-004, FR-005).
 * The terminal transition is gated on the namespace being actually gone
@@ -76,24 +78,26 @@ async def _namespace_exists(kubeconfig_path: str, namespace: str) -> bool:
         await api_client.close()
 
 
-async def _wait_for_namespace_gone(
-    kubeconfig_path: str, namespace: str, timeout: float = 300.0
-) -> None:
-    """Block until the namespace returns 404 or the timeout elapses.
-
-    Namespace finalisers can take minutes; we deliberately do not assert
-    a tight upper bound here. The 5-minute default matches the project's
-    other deletion E2E budgets.
-    """
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if not await _namespace_exists(kubeconfig_path, namespace):
-            return
-        await asyncio.sleep(5)
-    raise AssertionError(
-        f"Namespace {namespace!r} still present after {timeout}s — "
-        "the operator did not advance the StyrminDeployment to phase: Deleted."
-    )
+async def _ready_server_pods(kubeconfig_path: str, namespace: str) -> list[str]:
+    """Names of the simple-app server pods that are ready and not being deleted."""
+    await k8s_config.load_config(config_file=kubeconfig_path)
+    api_client = kubeclient.ApiClient()
+    core_api = kubeclient.CoreV1Api(api_client)
+    try:
+        pods = await core_api.list_namespaced_pod(
+            namespace=namespace, label_selector="app.kubernetes.io/name=simple-app"
+        )
+    finally:
+        await api_client.close()
+    return [
+        pod.metadata.name
+        for pod in pods.items
+        if pod.metadata.deletion_timestamp is None
+        and any(
+            condition.type == "Ready" and condition.status == "True"
+            for condition in pod.status.conditions or []
+        )
+    ]
 
 
 async def _wait_for_status(
@@ -132,7 +136,7 @@ async def test_delete_deployment_api(
     simple_app_image: str,  # noqa: ARG001 — ensures image is built
     vcluster: dict,
 ) -> None:
-    """End-to-end deletion: deploy → backup → delete → tombstone → redeploy → cluster refusal."""
+    """End-to-end deletion: deploy → backup → stop → start → delete → tombstone → redeploy → cluster refusal."""
     client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
 
@@ -141,7 +145,7 @@ async def test_delete_deployment_api(
     # uniqueness check (the `deployed_simple_app` session deployment is
     # already using the default name).
     override = f"delete-{uuid.uuid4().hex[:6]}"
-    deployment = await scenario_driver.create_deployment(
+    create_task = await client.deployments.create(
         driver="simple-app",
         version="0.1.0",
         environment_id=scenario_environment_id,
@@ -149,11 +153,12 @@ async def test_delete_deployment_api(
             {"driverServiceName": "simple-app", "overrideName": override}
         ],
     )
-    deployment = await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment.id, timeout=300.0
-    )
-    deployment_id = deployment.id
-    instance_id = deployment.instance_id
+    created = await client.deployments.wait_for_task(create_task.id, max_wait=300.0)
+    assert created.succeeded, f"Create did not finish: {created}"
+    assert created.deployment_status == "running", created
+    deployment_id = str(create_task.deployment_id)
+    instance = (await client.deployments.get(deployment_id)).application_instance
+    instance_id = str(instance.id) if instance else None
     namespace = f"styrmin-{deployment_id}"
     assert instance_id is not None, "Running deployment must have an instance_id"
 
@@ -170,7 +175,25 @@ async def test_delete_deployment_api(
     )
     backup_id = backup.id
 
-    # 3. Trigger deletion through the SDK. The mutation must return
+    # 3. Stop, then start, the server component. Until a stop's flow starts,
+    # the deployment stays RUNNING, so the wait reads the task result first.
+    stop_task = await client.deployments.stop_components(deployment_id, ["server"])
+    stopped = await client.deployments.wait_for_task(stop_task.id, max_wait=300.0)
+    assert stopped.succeeded, f"Stop did not finish: {stopped}"
+    assert stopped.deployment_status == "running", stopped
+    assert await _ready_server_pods(kubeconfig_path, namespace) == [], (
+        "No server pod may be ready once the stop has finished"
+    )
+
+    start_task = await client.deployments.start_components(deployment_id, ["server"])
+    started = await client.deployments.wait_for_task(start_task.id, max_wait=300.0)
+    assert started.succeeded, f"Start did not finish: {started}"
+    assert started.deployment_status == "running", started
+    assert await _ready_server_pods(kubeconfig_path, namespace), (
+        "A server pod must be ready once the start has finished"
+    )
+
+    # 4. Trigger deletion through the SDK. The mutation must return
     # immediately with a born-complete DELETE_DEPLOYMENT task — it MUST
     # NOT block on the namespace finaliser (US21, FR-019).
     delete_started_at = time.monotonic()
@@ -192,19 +215,21 @@ async def test_delete_deployment_api(
         f"DELETE_DEPLOYMENT task must be born complete; got status={task.status!r}"
     )
 
-    # 4. Status flips to DELETING via the status reporter once the
+    # 5. Status flips to DELETING via the status reporter once the
     # operator picks up the spec.deletionRequested flip.
     await _wait_for_status(client, deployment_id, "deleting", timeout=120.0)
 
-    # 5. Wait for the namespace to be fully torn down. The terminal
-    # DELETED transition is gated on this (US14).
-    await _wait_for_namespace_gone(kubeconfig_path, namespace, timeout=300.0)
-
     # 6. Once the namespace is gone, the operator advances the CR to
     # phase: Deleted, the status reporter projects displayState=Deleted
-    # to the DB, and atomically stamps deleted_at. Allow up to two
-    # reconciliation ticks for the propagation.
-    await _wait_for_status(client, deployment_id, "deleted", timeout=180.0)
+    # to the DB, and atomically stamps deleted_at. The terminal DELETED
+    # transition is gated on the namespace being gone (US14), so it is
+    # gone when the wait returns. Namespace finalisers can take minutes.
+    deleted = await client.deployments.wait_for_task(task.id, max_wait=480.0)
+    assert deleted.succeeded, f"Deletion did not finish: {deleted}"
+    assert deleted.deployment_status == "deleted", deleted
+    assert not await _namespace_exists(kubeconfig_path, namespace), (
+        f"Namespace {namespace!r} still present after the deletion finished"
+    )
 
     tombstoned = await client.deployments.get(deployment_id)
     assert tombstoned.status == "deleted", tombstoned.status

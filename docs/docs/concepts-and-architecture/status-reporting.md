@@ -104,6 +104,54 @@ middle of the upgrade, and `styrminctl deployments apply --wait` would
 return at that point. The first report after the upgrade task finishes sets
 `RUNNING`, within one reporting cycle.
 
+### Waiting for a change from a script
+
+Each SDK call that changes a deployment returns a task: `create()`,
+`update()`, `scale()`, `update_version()`, `delete()`,
+`start_components()`, `stop_components()` and `run_job()`. The task
+status `success` means that the flow has ended, not that the deployment
+is running. `start_components()` and `stop_components()` do not change
+the deployment status until their flow starts, so a `RUNNING` status read
+right after the call is the status from before the change.
+
+`client.deployments.wait_for_task()` waits until the change has finished:
+
+1. It waits until the task result is no longer `RUNNING`. The task result
+   covers the task, the tasks that its hook steps started, and the
+   operator-phase steps of the rollout.
+2. When the task result is `SUCCEEDED`, it waits until the deployment
+   status is `running`, `failed` or `deleted`.
+
+```python
+from styrmin_sdk import StyrminClient
+
+async with StyrminClient(server_address="https://styrmin.example") as client:
+    task = await client.deployments.stop_components(deployment_id, ["server"])
+    waited = await client.deployments.wait_for_task(task.id, max_wait=300)
+    if not waited.succeeded:
+        raise SystemExit(waited.failure_reason)
+```
+
+`waited.succeeded` is true when the deployment status is `running`, or
+`deleted` after `delete()`. Otherwise `failure_reason` gives the reason,
+and the call does not raise:
+
+- `step "<name>" failed: <error>` names the failed step of the task or of
+  a task that one of its hook steps started.
+- `task <id> failed: <message>` gives the task's message when the flow
+  failed between two steps.
+- `task <id> was superseded by a later task of the deployment` means that
+  a later task of the deployment interrupted the rollout.
+- `deployment status is <status>, expected <status>` means that the task
+  succeeded and the deployment ended in another status.
+- `wait timeout` means that `max_wait` elapsed first, and `timed_out` is
+  true. The change can still finish after that.
+
+`wait_for_task()` reads the task and the deployment every 10 seconds, for
+at most `max_wait` seconds (600 by default). `update()`, `scale()` and
+`update_version()` return `None` when nothing changes, and there is no
+task to wait for.
+
 ### Steps from status reports
 
 The operator's work appears on the deployment page as the steps of the

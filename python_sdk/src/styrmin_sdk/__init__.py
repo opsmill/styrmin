@@ -60,6 +60,7 @@ from styrmin_sdk.models import (
     Restore,
     SkippedConstituent,
     Task,
+    TaskWait,
     UpdateEnvironmentInput,
     resolve_overrides,
 )
@@ -119,6 +120,7 @@ __all__ = [
     "StyrminGraphQLError",
     "StyrminTransportError",
     "Task",
+    "TaskWait",
     "Transport",
     "UpdateEnvironmentInput",
     "resolve_overrides",

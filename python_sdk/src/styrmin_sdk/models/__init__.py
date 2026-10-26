@@ -98,7 +98,7 @@ from styrmin_sdk.models.deployment_manifest import (
 )
 from styrmin_sdk.models.driver import ApplicationDriver, ApplicationDriverVersionSummary
 from styrmin_sdk.models.image_reference import has_app_version_token, pinned_image_components
-from styrmin_sdk.models.task import FailedStep
+from styrmin_sdk.models.task import FailedStep, TaskWait
 
 __all__ = [
     "Action",
@@ -153,6 +153,7 @@ __all__ = [
     "Task",
     "TaskResult",
     "TaskStep",
+    "TaskWait",
     "UpdateDeploymentInput",
     "UpdateEnvironmentInput",
     "has_app_version_token",
