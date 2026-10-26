@@ -135,6 +135,7 @@ function makeDeployment(
     componentImageOverrides: [],
     componentContainerOverrides: [],
     componentReplicas: [],
+    podStatuses: [],
     deployedServices: [],
   } as DeploymentShape;
 

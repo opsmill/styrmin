@@ -383,6 +383,7 @@ describe("DeploymentDetailPage Overview", () => {
       componentImageOverrides: [],
       componentContainerOverrides: [],
       componentReplicas: [],
+      podStatuses: [],
       deployedServices: [],
     } as NonNullable<GetDeploymentQuery["deployment"]>;
   }

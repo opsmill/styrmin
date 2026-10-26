@@ -49,6 +49,22 @@ describe("PodRow", () => {
     expect(screen.queryByText("Commands")).not.toBeInTheDocument();
   });
 
+  it("shows a RUNNING pod that is not ready as NOT READY, not green (#567)", async () => {
+    const { container } = await render(
+      <PodRow pod={makePod({ ready: false, restartCount: 3 })} now={NOW} />,
+    );
+    const badge = container.querySelector('[data-pod-phase="RUNNING"]');
+    expect(badge?.textContent).toBe("NOT READY");
+    expect(badge?.className).not.toMatch(/emerald/);
+  });
+
+  it("shows a RUNNING pod that is ready as RUNNING, in green", async () => {
+    const { container } = await render(<PodRow pod={makePod()} now={NOW} />);
+    const badge = container.querySelector('[data-pod-phase="RUNNING"]');
+    expect(badge?.textContent).toBe("RUNNING");
+    expect(badge?.className).toMatch(/emerald/);
+  });
+
   it("renders the stale indicator when lastPolledAt is older than 30s", async () => {
     await render(
       <PodRow pod={makePod({ lastPolledAt: ONE_MINUTE_AGO })} now={NOW} />,

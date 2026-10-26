@@ -485,13 +485,14 @@ async def test_deployed_service_external_url_includes_port(
 
 def _expected_environment_status(statuses: list[str]) -> str:
     """The status rule of ``frontend/src/lib/environment-health.ts``."""
-    if not statuses:
+    live = [status.lower() for status in statuses if status.lower() != "deleted"]
+    if not live:
         return "pending"
-    if any(status in {"FAILED", "failed"} for status in statuses):
+    if "failed" in live:
         return "failed"
-    if any(status in {"PENDING", "pending", "in_progress"} for status in statuses):
-        return "pending"
-    return "active"
+    if all(status == "running" for status in live):
+        return "active"
+    return "pending"
 
 
 @pytest.mark.ci
