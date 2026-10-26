@@ -40,7 +40,7 @@ spec:
         fsGroup: 1337
       containers:
       - name: manager
-        image: fluxcd/source-controller:v1.9.6
+        image: fluxcd/source-controller:v1.10.1
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
@@ -80,8 +80,8 @@ spec:
             path: /healthz
         readinessProbe:
           httpGet:
-            port: http
-            path: /
+            path: /readyz
+            port: healthz
         resources:
           requests:
             cpu: 50m

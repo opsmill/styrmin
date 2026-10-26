@@ -89,11 +89,9 @@ READ_ONLY_MATCH_TIMEOUT = 60.0
 # FluxCD rolls the upgrade back at its timeout, about 30 s after the operator's
 # readiness timeout, and then reconciles the rolled-back release again.
 ROLLBACK_TIMEOUT = 240.0
-# About 10 s after the rollback FluxCD reports the rolled-back release Ready, and the
-# operator answers on its next 5-second tick with Ready=False RolledBack.
-ROLLED_BACK_TIMEOUT = 120.0
-# Three more operator ticks in which the failure must stay.
-AFTER_ROLLED_BACK_WATCH = 15.0
+# helm-controller v1.6.5 reported the rolled-back release Ready about 10 s after the
+# rollback; v1.7.1 starts the next upgrade attempt about 10 s after it instead.
+RETRY_WATCH = 60.0
 # Below uvicorn's 5-second keep-alive timeout, so a read never reuses a connection
 # that the server closes at that moment.
 POLL_INTERVAL = 3.0
@@ -101,6 +99,9 @@ POLL_INTERVAL = 3.0
 CR_GROUP = "styrmin.io"
 CR_VERSION = "v1alpha1"
 CR_PLURAL = "styrmindeployments"
+HR_GROUP = "helm.toolkit.fluxcd.io"
+HR_VERSION = "v2"
+HR_PLURAL = "helmreleases"
 
 
 # ---------------------------------------------------------------------------
@@ -325,49 +326,63 @@ async def _wait_for_rollback(api: Any, namespace: str) -> dict[str, Any]:
         await asyncio.sleep(3.0)
 
 
-def _ready_reason(status: dict[str, Any]) -> str | None:
-    return next(
-        (
-            condition.get("reason")
-            for condition in status.get("conditions") or ()
-            if condition.get("type") == "Ready"
-        ),
-        None,
+async def _helmrelease(api: Any, namespace: str) -> dict[str, Any]:
+    """The deployment's HelmRelease, which is named after its namespace."""
+    return await kubeclient.CustomObjectsApi(api).get_namespaced_custom_object(
+        group=HR_GROUP,
+        version=HR_VERSION,
+        namespace=namespace,
+        plural=HR_PLURAL,
+        name=namespace,
     )
 
 
-async def _assert_failure_stays(
+def _condition(status: dict[str, Any], condition_type: str) -> dict[str, Any]:
+    return next(
+        (
+            condition
+            for condition in status.get("conditions") or ()
+            if condition.get("type") == condition_type
+        ),
+        {},
+    )
+
+
+async def _assert_failure_stays_while_fluxcd_retries(
     read_timeline: Callable[[], Awaitable[list[TimelineEntry]]],
     task_id: str,
     api: Any,
     namespace: str,
 ) -> dict[str, Any]:
-    """Read the task until the operator answers FluxCD's Ready with RolledBack, then for a few ticks.
+    """Read the task, the StyrminDeployment and FluxCD for ``RETRY_WATCH`` seconds after the rollback.
 
-    Its result and HelmRelease step stay FAILED on every read. Returns the last
-    StyrminDeployment status.
+    FluxCD never reports the current generation Ready and starts another upgrade attempt.
+    The task result and HelmRelease step stay FAILED and the display state stays Error on
+    every read. Returns the last StyrminDeployment status.
     """
-    deadline = time.monotonic() + ROLLED_BACK_TIMEOUT
-    rolled_back_at: float | None = None
+    deadline = time.monotonic() + RETRY_WATCH
+    retried = False
     while True:
         entry = next(e for e in await read_timeline() if e.task_id == task_id)
         step = next(s for s in entry.steps if s.key == HELMRELEASE)
         assert step.status == "FAILED", step
         assert entry.result == "FAILED", entry
         status = await _styrmin_deployment_status(api, namespace)
-        now = time.monotonic()
-        if rolled_back_at is None and _ready_reason(status) == "RolledBack":
-            rolled_back_at = now
-        if (
-            rolled_back_at is not None
-            and now - rolled_back_at >= AFTER_ROLLED_BACK_WATCH
-        ):
-            return status
-        if rolled_back_at is None and now >= deadline:
-            raise AssertionError(
-                f"The operator did not answer FluxCD's Ready with RolledBack within"
-                f" {ROLLED_BACK_TIMEOUT}s: {status}"
+        assert status.get("displayState") == "Error", status
+        assert not _is_true(status, "HelmReleaseReady"), status
+        helmrelease = await _helmrelease(api, namespace)
+        flux_status = helmrelease.get("status") or {}
+        ready = _condition(flux_status, "Ready")
+        assert not (
+            ready.get("status") == "True"
+            and ready.get("observedGeneration") == helmrelease["metadata"]["generation"]
+        ), flux_status
+        retried = retried or ready.get("reason") == "Progressing"
+        if time.monotonic() >= deadline:
+            assert retried, (
+                f"FluxCD did not try the upgrade again within {RETRY_WATCH}s: {flux_status}"
             )
+            return status
         await asyncio.sleep(POLL_INTERVAL)
 
 
@@ -599,8 +614,9 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
     timeout with FluxCD's reason as its detail and the pods' ``ImagePullBackOff`` or
     ``ErrImagePull`` in its error, and the apply's ``failure_reason`` names that
     step. A ``READ_ONLY`` user then reads the same steps, errors and command output
-    as the admin. After FluxCD's rollback, the operator fails the rollout, so the
-    step, the task result and the deployment stay failed.
+    as the admin. After FluxCD's rollback, FluxCD tries the upgrade again instead of
+    reporting the rolled-back release Ready, and the step, the task result and the
+    deployment stay failed.
     """
     admin: StyrminClient = failing_actions_deployment["client"]
     deployment_id = failing_actions_deployment["deployment_id"]
@@ -680,19 +696,15 @@ async def test_helmrelease_failure_shows_fluxcd_reason(
                 read_only_client, with_output.id
             ) == await _step_output(admin, with_output.id)
 
-    # FluxCD rolls the upgrade back and then reports the rolled-back release Ready,
-    # because the post-render override is not part of the chart or values it compares.
-    # The rollout stays failed.
+    # FluxCD rolls the upgrade back and then tries it again, because the post-render
+    # override is still not applied. The rollout stays failed.
     namespace = failing_actions_deployment["namespace"]
     api = failing_actions_deployment["api"]
     await _wait_for_rollback(api, namespace)
-    cr_status = await _assert_failure_stays(
+    cr_status = await _assert_failure_stays_while_fluxcd_retries(
         admin_timeline, entry.task_id, api, namespace
     )
-    assert cr_status.get("phase") == "Failed", cr_status
-    assert cr_status.get("displayState") == "Error", cr_status
-    assert "rolled the release back" in (cr_status.get("message") or ""), cr_status
-    assert not _is_true(cr_status, "Ready"), cr_status
+    assert cr_status.get("phase") != "Ready", cr_status
     deployment = await admin.deployments.get(deployment_id)
     assert deployment.status == "failed", deployment.status
     final = next(
