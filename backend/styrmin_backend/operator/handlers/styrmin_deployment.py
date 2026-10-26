@@ -28,7 +28,6 @@ from styrmin_backend.operator.crd.schema import (
     DisplayState,
 )
 from styrmin_backend.operator.crd.status import (
-    get_condition,
     is_condition_true,
     remove_condition,
     replace_condition,
@@ -639,7 +638,7 @@ async def _wait_for_helm_release(
 
     An internal deployment is also ready when one of its pods is. Until then, copy FluxCD's
     readiness and remediation into the CR conditions, writing them only when they change, and
-    fail the CR when FluxCD stalled, or reports Ready for its rollback of this generation.
+    fail the CR when FluxCD stalled.
     """
     from styrmin_backend.operator.reconciler import (
         _check_any_pod_ready,
@@ -661,23 +660,12 @@ async def _wait_for_helm_release(
         return False
 
     changed = observation is not None and _copy_remediation(conditions, observation)
-    rolled_back = observation is not None and observation.is_ready_after_rollback
-    ready = observation is not None and observation.is_ready and not rolled_back
+    ready = observation is not None and observation.is_ready
     # For internal deployments (e.g., ingress controller), also accept running pods as "ready" — the
     # HelmRelease may stay in Unknown/Progressing if a LoadBalancer can't get an external IP.
     if not ready and _is_internal(crd_spec):
         ready = await _check_any_pod_ready(namespace=namespace)
 
-    if not ready and rolled_back and observation is not None:
-        _fail_on_rollback(
-            observation,
-            conditions=conditions,
-            namespace=namespace,
-            name=name,
-            patch=patch,
-            logger=logger,
-        )
-        return False
     if ready:
         if not is_condition_true(conditions, ConditionType.HELM_RELEASE_READY):
             set_condition(
@@ -772,49 +760,6 @@ def _fail_on_stalled(
         ConditionStatus.FALSE,
         stalled.reason or "Stalled",
         message,
-    )
-    patch.status["conditions"] = conditions
-    set_phase(patch.status, DeploymentPhase.FAILED, message)
-    patch.status["displayState"] = DisplayState.ERROR.value
-    logger.warning("Deployment %s/%s failed: %s", namespace, name, message)
-
-
-def _fail_on_rollback(
-    observation: HelmReleaseObservation,
-    *,
-    conditions: list[dict[str, str]],
-    namespace: str,
-    name: str,
-    patch: Any,
-    logger: Any,
-) -> None:
-    """FluxCD rolled back this generation's failed release and stopped, so the rollout failed.
-
-    ``HelmReleaseReady`` keeps FluxCD's failure when the timer copied one; it names the cause.
-    """
-    message = (
-        f"FluxCD rolled the release back after release"
-        f" v{observation.rolled_back_version} failed"
-    )
-    hr_ready = get_condition(conditions, ConditionType.HELM_RELEASE_READY.value)
-    if (
-        hr_ready is not None
-        and hr_ready.get("status") == ConditionStatus.FALSE.value
-        and str(hr_ready.get("reason") or "").endswith("Failed")
-        and hr_ready.get("message")
-    ):
-        message = f"{message}: {hr_ready['message']}"
-    else:
-        set_condition(
-            conditions,
-            ConditionType.HELM_RELEASE_READY,
-            ConditionStatus.FALSE,
-            "RolledBack",
-            message,
-        )
-    # Phase Failed must not sit next to Ready=True of the previous rollout.
-    set_condition(
-        conditions, ConditionType.READY, ConditionStatus.FALSE, "RolledBack", message
     )
     patch.status["conditions"] = conditions
     set_phase(patch.status, DeploymentPhase.FAILED, message)

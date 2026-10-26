@@ -844,23 +844,21 @@ async def test_stalled_release_fails_the_attempt_fluxcd_failed(
     assert helmrelease.rolled_back_at == _at(325)
 
 
-async def test_rollback_failure_keeps_the_helmrelease_step_failed(
+async def test_stalled_after_rollbacks_keeps_the_helmrelease_step_failed(
     uow: SqlModelUnitOfWork, parents: Parents, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """H1: the operator fails the rollout when FluxCD reports its rollback Ready."""
+    """helm-controller v1.7.1 rolls back each failed attempt, tries again, then stalls."""
     await _running_helmrelease(uow, parents)
     await apply_operator_report(_timed_out(parents), _at(300), uow)
     copied = [_upgrade_failed(_at(305)), _remediated(_at(305))]
     await apply_operator_report(_timed_out(parents, *copied), _at(310), uow)
-    rolled_back = (
-        f"FluxCD rolled the release back after release v3 failed: {UPGRADE_FAILED}"
-    )
+    stalled = f"Failed to upgrade after 4 attempt(s): {UPGRADE_FAILED}"
     report = _failed(
         parents,
-        rolled_back,
+        stalled,
         *copied,
         _condition(
-            "Ready", _at(316), status="False", reason="RolledBack", message=rolled_back
+            "Ready", _at(316), status="False", reason="RetriesExceeded", message=stalled
         ),
     )
 
@@ -875,7 +873,7 @@ async def test_rollback_failure_keeps_the_helmrelease_step_failed(
     assert _errors(helmrelease) == [
         (1, TIMEOUT, _at(300)),
         (1, f"UpgradeFailed: {UPGRADE_FAILED}", _at(305)),
-        (1, rolled_back, _at(316)),
+        (1, stalled, _at(316)),
     ]
     assert (helmrelease.rolled_back_at, helmrelease.rollback_message) == (
         _at(305),

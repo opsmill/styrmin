@@ -314,5 +314,5 @@ one backup for the whole namespace and creates one `PodVolumeBackup` per backed-
   > [FluxCD controllers](../knowledge/agent/operator.md#fluxcd-controllers). helm-controller
   > v1.7.1, which the agent chart now installs, tries the upgrade again after a rollback
   > instead of reporting the rolled-back release `Ready`, so the rollback rule of decision 13
-  > does not apply to it; see
-  > [Rollback reported Ready](../knowledge/agent/operator.md#rollback-reported-ready).
+  > was removed; see
+  > [FluxCD's retries after a rollback](../knowledge/agent/operator.md#fluxcds-retries-after-a-rollback).

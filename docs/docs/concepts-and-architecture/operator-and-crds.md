@@ -244,17 +244,6 @@ state `Error` from the readiness timeout on, and reaches the phase
 HelmRelease timeout, about 20 minutes after the change. In the meantime the
 HelmRelease step and the task stay failed.
 
-helm-controller v1.6.5, which the agent chart installed before, reported
-the rolled-back release `Ready` instead of trying again. The operator
-still recognizes this state from FluxCD's release history: FluxCD counted
-a failed install or upgrade for the current generation of the
-HelmRelease, and the newest release is `deployed` right after a `failed`
-one, so it is the rollback. The operator then sets the phase `Failed` and
-the display state `Error`, with the message
-`FluxCD rolled the release back after release v<N> failed` followed by
-the failure message when it recorded one, and the `Ready` condition
-becomes `False` with the reason `RolledBack`.
-
 ### A `StyrminDeployment` that keeps its finalizer
 
 The agents of Styrmin v0.1.48 and earlier can keep the
