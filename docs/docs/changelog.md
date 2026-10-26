@@ -103,8 +103,9 @@ Events.
   change with the default timeouts, instead of right after the first
   rollback. The message is then `Failed to upgrade after 4 attempt(s):`
   followed by FluxCD's failure message, instead of
-  `FluxCD rolled the release back after release v<N> failed`. See
-  [Operator and CRDs](./concepts-and-architecture/operator-and-crds.md).
+  `FluxCD rolled the release back after release v<N> failed`, and the
+  `Ready` condition's reason is `RetriesExceeded` instead of `RolledBack`.
+  See [Operator and CRDs](./concepts-and-architecture/operator-and-crds.md).
 
 #### Migration
 

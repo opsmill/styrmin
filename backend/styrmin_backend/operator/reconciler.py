@@ -414,7 +414,6 @@ class HelmReleaseObservation:
     """FluxCD's conditions for the HelmRelease's current generation (spec 019, research D5).
 
     A field is ``None`` when FluxCD has no such condition for ``metadata.generation``.
-    ``rolled_back_version`` is the failed release that the newest release rolled back.
     """
 
     ready: FluxCondition | None = None
@@ -422,21 +421,10 @@ class HelmReleaseObservation:
     remediated: FluxCondition | None = None
     stalled: FluxCondition | None = None
     guard_failure: tuple[str, str] | None = None
-    rolled_back_version: int | None = None
 
     @property
     def is_ready(self) -> bool:
         return self.ready is not None and self.ready.is_true
-
-    @property
-    def is_ready_after_rollback(self) -> bool:
-        """FluxCD reports Ready, but the release that runs is its rollback of this generation's failure.
-
-        After a rollback, FluxCD compares only the chart and the values with the current
-        generation, so it reports a change of post-renderers alone Ready although it was never
-        applied.
-        """
-        return self.is_ready and self.rolled_back_version is not None
 
     @property
     def failure(self) -> FluxCondition | None:
@@ -490,43 +478,10 @@ def _helmrelease_guard_failure(helmrelease: dict[str, Any]) -> tuple[str, str] |
     return None
 
 
-def _snapshot_version(snapshot: dict[str, Any]) -> int:
-    version = snapshot.get("version")
-    return version if isinstance(version, int) else -1
-
-
-def _rolled_back_version(helmrelease: dict[str, Any]) -> int | None:
-    """The version of the failed release that FluxCD's newest release rolled back, if it is one.
-
-    With failures counted for the current generation, FluxCD remediates a failed release before
-    it tries again, so a ``deployed`` release that directly follows a ``failed`` one is the
-    rollback. FluxCD resets the failure counters for each new generation.
-    """
-    status = helmrelease.get("status") or {}
-    if not (status.get("installFailures") or status.get("upgradeFailures")):
-        return None
-    history = sorted(status.get("history") or [], key=_snapshot_version, reverse=True)
-    if len(history) < 2:
-        return None
-    newest, previous = history[0], history[1]
-    failed = _snapshot_version(previous)
-    if (
-        newest.get("status") != "deployed"
-        or previous.get("status") != "failed"
-        or failed < 0
-        or _snapshot_version(newest) != failed + 1
-    ):
-        return None
-    return failed
-
-
 def observe_helmrelease_conditions(
     helmrelease: dict[str, Any],
 ) -> HelmReleaseObservation:
-    """Read FluxCD's ``Ready``, ``Released``, ``Remediated=True`` and ``Stalled=True`` of the current generation.
-
-    Also reads whether FluxCD's newest release is the rollback of a failed release.
-    """
+    """Read FluxCD's ``Ready``, ``Released``, ``Remediated=True`` and ``Stalled=True`` of the current generation."""
     current = {
         str(condition.get("type")): FluxCondition.from_dict(condition)
         for condition in _current_generation_conditions(helmrelease)
@@ -541,7 +496,6 @@ def observe_helmrelease_conditions(
         else None,
         stalled=stalled if stalled is not None and stalled.is_true else None,
         guard_failure=_helmrelease_guard_failure(helmrelease),
-        rolled_back_version=_rolled_back_version(helmrelease),
     )
 
 
