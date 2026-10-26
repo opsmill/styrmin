@@ -8,13 +8,13 @@
 
 | Filter | Metadata `filter` | Metadata `migration_guide` |
 |--------|-------------------|----------------------------|
-| `component_env_vars` (unchanged) | `component_env_vars` | `https://styrmin.pages.dev/docs/drivers/migrating-env-vars` |
-| `component_command` (new) | `component_command` | `https://styrmin.pages.dev/docs/drivers/migrating-container-overrides` |
-| `component_args` (new) | `component_args` | `https://styrmin.pages.dev/docs/drivers/migrating-container-overrides` |
+| `component_env_vars` (unchanged) | `component_env_vars` | `https://docs.styrmin.app/docs/drivers/migrating-env-vars` |
+| `component_command` (new) | `component_command` | `https://docs.styrmin.app/docs/drivers/migrating-container-overrides` |
+| `component_args` (new) | `component_args` | `https://docs.styrmin.app/docs/drivers/migrating-container-overrides` |
 
 Message for the two new filters (one per filter name; `<filter>` is the name):
 
-> The '`<filter>`' template filter was removed: Styrmin now applies container command and args overrides to each component's declared component container. Deployment users: move this deployment to a driver version that no longer calls the filter. Driver authors: remove the filter from values.j2.yml and declare components.&lt;name&gt;.container in driver.styrmin.yml. Migration guide: https://styrmin.pages.dev/docs/drivers/migrating-container-overrides
+> The '`<filter>`' template filter was removed: Styrmin now applies container command and args overrides to each component's declared component container. Deployment users: move this deployment to a driver version that no longer calls the filter. Driver authors: remove the filter from values.j2.yml and declare components.&lt;name&gt;.container in driver.styrmin.yml. Migration guide: https://docs.styrmin.app/docs/drivers/migrating-container-overrides
 
 On the live path only the message survives the StyrminDeployment CR hop: the operator records `Failed to create HelmRelease: <message>` on the deployment (ADR-057 §4). The message therefore names the filter and the guide.
 

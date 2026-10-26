@@ -28,10 +28,10 @@ from .conftest import gql
 from .seeds import seed_deployment
 
 RETIRED_PARAMETERS_GUIDE_URL = (
-    "https://styrmin.pages.dev/docs/drivers/changing-driver-versions"
+    "https://docs.styrmin.app/docs/drivers/changing-driver-versions"
 )
 MIGRATION_GUIDE_URL = (
-    "https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters"
+    "https://docs.styrmin.app/docs/drivers/migrating-replica-parameters"
 )
 P_DEFINITION = {"name": "p", "label": "P", "kind": "integer", "default": 5}
 Q_DEFINITION = {"name": "q", "label": "Q", "kind": "integer", "default": 1}

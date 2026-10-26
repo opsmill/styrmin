@@ -17,9 +17,9 @@ If you arrived here from an error like this one when you changed a deployment's 
 Parameter 'replicas_task_worker' is not declared by driver infrahub version 5 (application
 version 1.7.3), and this deployment sets it to 4 (default 2). Remove the parameter or reset it
 to its default, then change the driver version again. See
-https://styrmin.pages.dev/docs/drivers/changing-driver-versions. If it set a replica count,
+https://docs.styrmin.app/docs/drivers/changing-driver-versions. If it set a replica count,
 carry the value over as a replica override on the component first:
-https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters
+https://docs.styrmin.app/docs/drivers/migrating-replica-parameters
 ```
 
 the deployment sets a replica parameter to a value other than its default. Follow

@@ -5,9 +5,9 @@ import userEvent from "@testing-library/user-event";
 import { GraphQLOperationError } from "@/lib/graphql-fetcher";
 import { UpgradeErrorAlert } from "./UpgradeErrorAlert";
 
-const GUIDE = "https://styrmin.pages.dev/docs/drivers/changing-driver-versions";
+const GUIDE = "https://docs.styrmin.app/docs/drivers/changing-driver-versions";
 const REPLICA_GUIDE =
-  "https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters";
+  "https://docs.styrmin.app/docs/drivers/migrating-replica-parameters";
 
 function retiredParameterError(): GraphQLOperationError {
   return new GraphQLOperationError(

@@ -42,10 +42,10 @@ from tests.unit.services.fakes import (
 
 CHECKED_AGAINST = "driver generic version 2 (application version 1.0.0)"
 MIGRATION_GUIDE_URL = (
-    "https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters"
+    "https://docs.styrmin.app/docs/drivers/migrating-replica-parameters"
 )
 RETIRED_PARAMETERS_GUIDE_URL = (
-    "https://styrmin.pages.dev/docs/drivers/changing-driver-versions"
+    "https://docs.styrmin.app/docs/drivers/changing-driver-versions"
 )
 
 

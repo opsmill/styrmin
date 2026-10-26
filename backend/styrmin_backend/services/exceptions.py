@@ -969,10 +969,10 @@ class SchedulingPatchRenderingError(PostRenderPatchRenderingError):
 
 
 ENV_VARS_MIGRATION_GUIDE_URL = (
-    "https://styrmin.pages.dev/docs/drivers/migrating-env-vars"
+    "https://docs.styrmin.app/docs/drivers/migrating-env-vars"
 )
 CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL = (
-    "https://styrmin.pages.dev/docs/drivers/migrating-container-overrides"
+    "https://docs.styrmin.app/docs/drivers/migrating-container-overrides"
 )
 
 RetiredTemplateFilter = Literal[

@@ -582,7 +582,7 @@ version declares and the target does not is dropped from the merged parameter ma
 equals the current default with the same type. Any other value raises `RETIRED_PARAMETER_VALUE`
 (metadata `parameter_name`, `value`, `default`, `checked_against`; the first parameter by name when
 several differ) before any task starts. The message prints the value and the default as JSON and
-links `https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters`. A key that neither
+links `https://docs.styrmin.app/docs/drivers/migrating-replica-parameters`. A key that neither
 version declares still fails with `OPERATION_FAILED` "Unknown parameter". See
 [services.md](services.md#retired-parameters-servicesparametersretiredpy).
 

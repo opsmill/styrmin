@@ -200,7 +200,7 @@ parameter that the current driver version declares and the target does not:
   differ, the first parameter by name is reported. The message prints the value and the default as
   JSON, says to remove the parameter or reset it to its default, says to carry a replica count over
   as a replica override first, and links the migration guide
-  (`https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters`).
+  (`https://docs.styrmin.app/docs/drivers/migrating-replica-parameters`).
 
 A key that neither driver version declares is left to `validate_parameter_values`, which still
 rejects it with `OPERATION_FAILED` "Unknown parameter". `updateDeployment` and `deploy` do not

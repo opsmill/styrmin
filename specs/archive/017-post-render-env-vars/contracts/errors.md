@@ -27,7 +27,7 @@
   env vars into each component's declared component container. Deployment users: upgrade this
   deployment to a driver version that declares component containers. Driver authors: remove the
   filter from values.j2.yml and declare components.<name>.container in driver.styrmin.yml.
-  Migration guide: https://styrmin.pages.dev/docs/drivers/migrating-env-vars`.
+  Migration guide: https://docs.styrmin.app/docs/drivers/migrating-env-vars`.
 - **Metadata**: `filter: "component_env_vars"`, `migration_guide: <url>`.
 
 ## Env var patch serialisation failure
