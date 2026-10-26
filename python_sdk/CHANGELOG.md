@@ -24,6 +24,21 @@ All notable changes to the Styrmin Python SDK will be documented in this file.
   the timeout, and the call does not raise. Before, a program polled by hand, and a
   `running` status read right after `start_components()` or `stop_components()` was
   the status from before the change. ([#545](https://github.com/opsmill/styrmin/issues/545))
+- **`client.environments.get_pod_statuses()`** and **`client.clusters.get_pod_statuses()`**
+  return the pod statuses of every deployment of an environment or of a cluster, and
+  **`client.environments.get_services()`** returns the services of every deployment of an
+  environment. Before, a program called `deployments.get_pod_statuses()` once per
+  deployment. ([#547](https://github.com/opsmill/styrmin/issues/547))
+  - They take the same arguments as `environments.get()` and `clusters.get()`: an ID or
+    a name. They read the environment or the cluster first, so an unknown ID or name
+    raises `ResourceNotFoundError`.
+  - The lists include internal deployments, such as the ingress controller of a dedicated
+    ingress, and leave out deleted deployments. Their order is not fixed.
+  - A pod that started since the agent's last report, about 5 seconds earlier, is not
+    listed yet, so a new environment can return an empty list.
+  - The services have no URL or FQDN; `deployments.get()` returns them.
+  - `styrmin_sdk.models` exports the item types as `PodStatus`, with `PodPhase`, and
+    `DeployedService`.
 
 ### Fixed
 
