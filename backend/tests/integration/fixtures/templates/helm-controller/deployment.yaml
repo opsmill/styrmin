@@ -38,7 +38,7 @@ spec:
         fsGroup: 1337
       containers:
       - name: manager
-        image: fluxcd/helm-controller:v1.6.5
+        image: fluxcd/helm-controller:v1.7.1
         imagePullPolicy: IfNotPresent
         securityContext:
           allowPrivilegeEscalation: false
