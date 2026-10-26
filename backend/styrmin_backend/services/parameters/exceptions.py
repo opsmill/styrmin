@@ -44,10 +44,10 @@ class DuplicateParameterNameError(ServiceError):
 
 
 MIGRATION_GUIDE_URL = (
-    "https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters"
+    "https://docs.styrmin.app/docs/drivers/migrating-replica-parameters"
 )
 RETIRED_PARAMETERS_GUIDE_URL = (
-    "https://styrmin.pages.dev/docs/drivers/changing-driver-versions"
+    "https://docs.styrmin.app/docs/drivers/changing-driver-versions"
 )
 
 

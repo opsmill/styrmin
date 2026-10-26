@@ -112,7 +112,7 @@ The filter stays registered as a stub that raises `RetiredTemplateFilterError`
 before the HelmRelease is built, so the HelmRelease is not applied (the HelmRepository and
 HelmChart upserted before it are). The message tells deployment
 users to upgrade the deployment and driver authors to declare containers, and names
-`https://styrmin.pages.dev/docs/drivers/migrating-env-vars`. On the live path the typed code
+`https://docs.styrmin.app/docs/drivers/migrating-env-vars`. On the live path the typed code
 and metadata do not survive the StyrminDeployment CR → operator hop: the operator records
 `Failed to create HelmRelease: <message>` on the deployment, and the full message and URL
 survive.

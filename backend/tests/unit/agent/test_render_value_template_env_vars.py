@@ -51,7 +51,7 @@ from styrmin_backend.context.models.helm import (
 from styrmin_backend.operator.pipeline import execute_phase_helmrelease
 from styrmin_backend.services.exceptions import RetiredTemplateFilterError
 
-MIGRATION_GUIDE = "https://styrmin.pages.dev/docs/drivers/migrating-env-vars"
+MIGRATION_GUIDE = "https://docs.styrmin.app/docs/drivers/migrating-env-vars"
 RETIRED_FILTER_MESSAGE = (
     "The 'component_env_vars' template filter was removed: Styrmin now injects "
     "env vars into each component's declared component container. Deployment "

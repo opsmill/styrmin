@@ -2,7 +2,7 @@
 
 > Lifecycle management for your infrastructure automation stack.
 
-📖 Documentation: <https://styrmin.pages.dev>
+📖 Documentation: <https://docs.styrmin.app>
 
 Styrmin is an application platform that manages the **full lifecycle** of
 your infrastructure automation stack — Infrahub, Ansible, Grafana,
@@ -35,7 +35,7 @@ today require specialist knowledge to get right.
 Styrmin runs on Kubernetes as its underlying infrastructure layer, but
 that's an implementation detail — the goal is for teams to get a managed
 infrastructure experience without needing to think about Kubernetes at
-all. See [Why Styrmin?](https://styrmin.pages.dev/docs/introduction/why-styrmin)
+all. See [Why Styrmin?](https://docs.styrmin.app/docs/introduction/why-styrmin)
 for the full positioning, and how Styrmin compares to ArgoCD, Flux, and
 manual Helm.
 
@@ -59,19 +59,19 @@ with `admin` / `styrmin`.
 
 The full walkthrough — what each step does, the lifecycle commands, and
 troubleshooting — lives in the
-[Quickstart guide](https://styrmin.pages.dev/docs/installation/quickstart).
+[Quickstart guide](https://docs.styrmin.app/docs/installation/quickstart).
 For a production install, see
-[Installation](https://styrmin.pages.dev/docs/installation).
+[Installation](https://docs.styrmin.app/docs/installation).
 
 ## Documentation
 
 | What you want | Where it lives |
 |---------------|----------------|
-| Why Styrmin, how it compares to ArgoCD/Flux | [Why Styrmin?](https://styrmin.pages.dev/docs/introduction/why-styrmin) |
-| Conceptual model and core vocabulary | [Platform overview](https://styrmin.pages.dev/docs/introduction/platform-overview) |
-| Install on your laptop or in a cloud | [Installation](https://styrmin.pages.dev/docs/installation) |
-| Write a driver | [Create a driver](https://styrmin.pages.dev/docs/drivers/creating-a-driver) |
-| Architecture, ingress, backups, hooks | [Concepts and architecture](https://styrmin.pages.dev/docs/concepts-and-architecture) |
+| Why Styrmin, how it compares to ArgoCD/Flux | [Why Styrmin?](https://docs.styrmin.app/docs/introduction/why-styrmin) |
+| Conceptual model and core vocabulary | [Platform overview](https://docs.styrmin.app/docs/introduction/platform-overview) |
+| Install on your laptop or in a cloud | [Installation](https://docs.styrmin.app/docs/installation) |
+| Write a driver | [Create a driver](https://docs.styrmin.app/docs/drivers/creating-a-driver) |
+| Architecture, ingress, backups, hooks | [Concepts and architecture](https://docs.styrmin.app/docs/concepts-and-architecture) |
 | The canonical project glossary | [`CONTEXT.md`](CONTEXT.md) |
 | Decisions behind the architecture | [`dev/adr/`](dev/adr/) |
 | Contributor / agent guide | [`AGENTS.md`](AGENTS.md) |
@@ -118,7 +118,7 @@ uv run invoke dev.stop dev.clean     # stop and wipe
 - [`driver/`](driver/) — bundled application drivers and the driver
   format reference.
 - [`docs/`](docs/) — public Docusaurus site published to
-  <https://styrmin.pages.dev>.
+  <https://docs.styrmin.app>.
 - [`dev/`](dev/) — internal developer documentation
   ([`constitution.md`](dev/constitution.md),
   [`knowledge/`](dev/knowledge/),

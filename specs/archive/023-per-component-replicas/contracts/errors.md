@@ -58,7 +58,7 @@ Message: "Component '`<name>`' is a singleton component in `<checked against>` a
 
 Trigger: on a driver version change, a parameter that the current version declares and the target version does not, with a value that is not equal (same type and value) to the current version's default. A value equal to the default is dropped with no error.
 
-Message (FR-010a): "Parameter '`<name>`' is not declared by `<target>`, and this deployment sets it to `<value>` (default `<default>`). Remove the parameter or reset it to its default, then change the driver version again. If it set a replica count, carry the value over as a replica override on the component first. See https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters".
+Message (FR-010a): "Parameter '`<name>`' is not declared by `<target>`, and this deployment sets it to `<value>` (default `<default>`). Remove the parameter or reset it to its default, then change the driver version again. If it set a replica count, carry the value over as a replica override on the component first. See https://docs.styrmin.app/docs/drivers/migrating-replica-parameters".
 
 ## Driver load error (existing code, new trigger)
 

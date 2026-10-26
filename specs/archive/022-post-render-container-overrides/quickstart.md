@@ -89,7 +89,7 @@ kubectl get deploy -A -l app.kubernetes.io/name=simple-app -o jsonpath='{.items[
 
 ## 7. Manual check of the retired filters
 
-Load a copy of the pre-migration `simple-app` driver (version 2, which calls `component_command`) and create a deployment on it. Expected: the deployment message reads `Failed to create HelmRelease: The 'component_command' template filter was removed ... Migration guide: https://styrmin.pages.dev/docs/drivers/migrating-container-overrides`, and no HelmRelease is applied.
+Load a copy of the pre-migration `simple-app` driver (version 2, which calls `component_command`) and create a deployment on it. Expected: the deployment message reads `Failed to create HelmRelease: The 'component_command' template filter was removed ... Migration guide: https://docs.styrmin.app/docs/drivers/migrating-container-overrides`, and no HelmRelease is applied.
 
 ## 8. Lint, types and generated files
 

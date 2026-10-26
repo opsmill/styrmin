@@ -254,7 +254,7 @@ values are still rejected 100% of the time (SC-005). (Critique E1, E2.)
 **Decision**: Keep `component_env_vars` registered in `get_jinja_environment()` as a stub that
 raises `RetiredTemplateFilterError(ServiceError)` (`error_code = "RETIRED_TEMPLATE_FILTER"`,
 metadata `{filter, migration_guide}`), with a message naming
-`https://styrmin.pages.dev/docs/drivers/migrating-env-vars`. Raising from inside the filter
+`https://docs.styrmin.app/docs/drivers/migrating-env-vars`. Raising from inside the filter
 aborts rendering before a HelmRelease is built, so nothing partial is applied. The operator
 pipeline's existing `except Exception` path records the message on the instance.
 

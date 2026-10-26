@@ -116,7 +116,7 @@ as `component_env_vars` does (ADR-057 §4). The helper `_resolved_container_over
 override filters the message tells deployment users to move the deployment to a driver version
 that no longer calls the filter, tells driver authors to remove the filter call and declare
 `components.<name>.container`, and links `CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL`
-(`https://styrmin.pages.dev/docs/drivers/migrating-container-overrides`, in
+(`https://docs.styrmin.app/docs/drivers/migrating-container-overrides`, in
 `services/exceptions.py`). The `component_env_vars` message and URL do not change.
 
 The stubs raise whatever the context holds, so a driver version that calls them fails its next

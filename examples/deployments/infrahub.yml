@@ -18,7 +18,7 @@ spec:
   # so a deployment created from that example is rejected with
   # RETIRED_PARAMETER_VALUE when it moves to version 5. Before you apply this
   # manifest to such a deployment, follow
-  # https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters#deployments-created-from-the-earlier-example-manifest
+  # https://docs.styrmin.app/docs/drivers/migrating-replica-parameters#deployments-created-from-the-earlier-example-manifest
   # parameters:
   #   database_storage_size: 200
 

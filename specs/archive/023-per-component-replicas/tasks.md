@@ -122,7 +122,7 @@ description: "Tasks for 023: per-component replica counts"
 
 ### Implementation for User Story 4
 
-- [X] T043 [US4] Add `RetiredParameterValueError` (`RETIRED_PARAMETER_VALUE`, metadata and message per contracts/errors.md, including the migration guide URL `https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters`) to `backend/styrmin_backend/services/parameters/exceptions.py`
+- [X] T043 [US4] Add `RetiredParameterValueError` (`RETIRED_PARAMETER_VALUE`, metadata and message per contracts/errors.md, including the migration guide URL `https://docs.styrmin.app/docs/drivers/migrating-replica-parameters`) to `backend/styrmin_backend/services/parameters/exceptions.py`
 - [X] T044 [US4] Create `backend/styrmin_backend/services/parameters/retired.py` with `drop_retired_parameters(values: dict, *, current_definitions: list[DriverParameterDefinition], target_definitions: list[DriverParameterDefinition], checked_against: str) -> dict` (research D-007; strict equality `type(v) is type(d) and v == d`)
 - [X] T045 [US4] In `update_deployment_version` in `backend/styrmin_backend/services/deployment.py`, call `drop_retired_parameters` on the merged parameter map before `validate_parameter_values` runs against the target version, only when the target driver version differs from the bound one; before any task or ingress dispatch
 - [X] T046 [US4] In `driver/examples/infrahub/driver.styrmin.yml` set `spec.version` to `"5"`, remove the `replicas_server` and `replicas_task_worker` parameters, add `replicas: 1` to `server`, `replicas: 2` to `task-worker`, and `singleton: true` to `database`, `task-manager-db` and `cache`; in `driver/examples/infrahub/values.j2.yml` remove the two `replicas:` lines

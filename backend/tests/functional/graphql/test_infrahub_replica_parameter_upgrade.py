@@ -44,7 +44,7 @@ _LEGACY_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "legacy_drivers
 _EXAMPLES_DIR = Path(__file__).resolve().parents[4] / "driver" / "examples"
 APP_VERSION = "1.5.0"
 MIGRATION_GUIDE_URL = (
-    "https://styrmin.pages.dev/docs/drivers/migrating-replica-parameters"
+    "https://docs.styrmin.app/docs/drivers/migrating-replica-parameters"
 )
 DEFAULT_PARAMETERS = {
     "replicas_server": 1,
