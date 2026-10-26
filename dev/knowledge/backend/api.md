@@ -79,10 +79,10 @@ The full list, in the order they appear on `type Query` in `schema.graphql`:
 | `backupSchedules` | `deploymentId` | `[BackupSchedule!]!` |
 | `applicationDrivers` | — | `[ApplicationDriver!]!` |
 | `applicationDriver` | `applicationDriverId` | `ApplicationDriver` |
-| `environmentServices` | `environmentId` | `[DeployedService!]!` |
+| `environmentServices` | `environmentId` | `[DeployedService!]!` (an unknown id returns an empty list; the URL and FQDN fields are null) |
 | `deploymentServices` | `deploymentId` | `[DeployedService!]!` |
 | `deploymentTimeline` | `deploymentId` | `[DeploymentTimelineEntry!]!` |
-| `podStatuses` | `deploymentId?, environmentId?, clusterId?` | `[PodStatus!]!` |
+| `podStatuses` | `deploymentId?, environmentId?, clusterId?` | `[PodStatus!]!` (an unknown id returns an empty list; with `environmentId` or `clusterId`, leaves out deleted deployments) |
 | `ok` | — | `Boolean!` (health probe) |
 
 The environment backup, environment restore and environment clone queries require no role: any signed-in user can read them, as for `environmentBackup`, which already returns the captured environment config ([ADR-056](../../adr/0056-environment-clone-record-and-cross-target-restore.md) §6).
