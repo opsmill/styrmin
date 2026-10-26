@@ -11,7 +11,7 @@ const config: Config = {
     v4: true,
   },
 
-  url: 'https://styrmin.pages.dev',
+  url: 'https://docs.styrmin.app',
   baseUrl: '/',
 
   onBrokenLinks: 'throw',
@@ -111,7 +111,7 @@ const config: Config = {
   ],
 
   themeConfig: {
-    image: 'img/docusaurus-social-card.jpg',
+    image: 'img/styrmin-social-card.png',
     colorMode: {
       respectPrefersColorScheme: true,
     },
