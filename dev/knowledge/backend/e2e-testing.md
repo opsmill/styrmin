@@ -306,6 +306,9 @@ retry delay and both timeouts are settings that the E2E values lower
 (`STYRMIN_OPERATOR_RETRY_DELAY` 5 s, readiness 210 s, HelmRelease 240 s),
 and the check ends 15 s after the operator answers FluxCD's rolled-back
 `Ready=True` with `Ready=False RolledBack` (about 16 s after the rollback).
+Since the upgrade to helm-controller v1.7.1, FluxCD tries the upgrade again
+after the rollback instead, and the check ends when it sees FluxCD start the
+next attempt (11 to 15 s after the rollback in local runs, 90 s at most).
 Measured locally (four cells at a time), `general` / `api` went from
 **1175s to 520s** and `general` / `ui` from **863s to 391s**; the HelmRelease
 scenario takes 312s instead of 463s, and the new `task_steps` cells take

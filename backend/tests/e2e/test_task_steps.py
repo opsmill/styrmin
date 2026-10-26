@@ -89,9 +89,9 @@ READ_ONLY_MATCH_TIMEOUT = 60.0
 # FluxCD rolls the upgrade back at its timeout, about 30 s after the operator's
 # readiness timeout, and then reconciles the rolled-back release again.
 ROLLBACK_TIMEOUT = 240.0
-# helm-controller v1.6.5 reported the rolled-back release Ready about 10 s after the
-# rollback; v1.7.1 starts the next upgrade attempt about 10 s after it instead.
-RETRY_WATCH = 60.0
+# helm-controller v1.7.1 started the next upgrade attempt 11 to 15 s after each rollback
+# (v1.6.5 reported the rolled-back release Ready about 10 s after it instead).
+RETRY_TIMEOUT = 90.0
 # Below uvicorn's 5-second keep-alive timeout, so a read never reuses a connection
 # that the server closes at that moment.
 POLL_INTERVAL = 3.0
@@ -354,14 +354,14 @@ async def _assert_failure_stays_while_fluxcd_retries(
     api: Any,
     namespace: str,
 ) -> dict[str, Any]:
-    """Read the task, the StyrminDeployment and FluxCD for ``RETRY_WATCH`` seconds after the rollback.
+    """Read the task, the StyrminDeployment and FluxCD until FluxCD tries the upgrade again.
 
-    FluxCD never reports the current generation Ready and starts another upgrade attempt.
-    The task result and HelmRelease step stay FAILED and the display state stays Error on
-    every read. Returns the last StyrminDeployment status.
+    Until then FluxCD never reports the current generation Ready, and the task result and
+    HelmRelease step stay FAILED and the display state stays Error on every read. Once the
+    next attempt runs, FluxCD reports nothing new before its timeout. Returns the last
+    StyrminDeployment status.
     """
-    deadline = time.monotonic() + RETRY_WATCH
-    retried = False
+    deadline = time.monotonic() + RETRY_TIMEOUT
     while True:
         entry = next(e for e in await read_timeline() if e.task_id == task_id)
         step = next(s for s in entry.steps if s.key == HELMRELEASE)
@@ -377,12 +377,18 @@ async def _assert_failure_stays_while_fluxcd_retries(
             ready.get("status") == "True"
             and ready.get("observedGeneration") == helmrelease["metadata"]["generation"]
         ), flux_status
-        retried = retried or ready.get("reason") == "Progressing"
-        if time.monotonic() >= deadline:
-            assert retried, (
-                f"FluxCD did not try the upgrade again within {RETRY_WATCH}s: {flux_status}"
-            )
+        remediated = _condition(flux_status, "Remediated")
+        if (
+            ready.get("reason") == "Progressing"
+            and remediated.get("status") == "True"
+            and ready.get("lastTransitionTime", "")
+            >= remediated.get("lastTransitionTime", "")
+        ):
             return status
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"FluxCD did not try the upgrade again within {RETRY_TIMEOUT}s: {flux_status}"
+            )
         await asyncio.sleep(POLL_INTERVAL)
 
 
