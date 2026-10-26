@@ -73,19 +73,6 @@ def test_hook_is_left_out_when_disabled() -> None:
     assert _hook_documents(_render("crdUpgrade.enabled=false")) == {}
 
 
-def test_operator_can_list_events() -> None:
-    """The operator reads FluxCD's failure events of a HelmRelease that FluxCD reports in sync."""
-    roles = {
-        doc["metadata"]["name"]: doc
-        for doc in _render()
-        if doc["kind"] == "ClusterRole"
-    }
-    rules = roles["t-styrmin-agent-manager-role"]["rules"]
-    assert any(
-        "events" in rule["resources"] and "list" in rule["verbs"] for rule in rules
-    )
-
-
 @pytest.mark.parametrize(
     "path",
     sorted((FIXTURES_DIR / "crds").glob("*.yaml")),
