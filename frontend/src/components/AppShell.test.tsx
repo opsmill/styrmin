@@ -118,6 +118,7 @@ describe("AppShell", () => {
     const home = screen.getByRole("link", { name: "Styrmin home" });
     expect(home).toHaveAttribute("href", "/");
     expect(within(home).getByText("Styrmin")).toBeInTheDocument();
+    expect(within(home).getByTestId("styrmin-logo")).toBeInTheDocument();
   });
 
   it("keeps the logo linked to the home page when the sidebar is collapsed", async () => {
@@ -129,6 +130,7 @@ describe("AppShell", () => {
     const home = screen.getByRole("link", { name: "Styrmin home" });
     expect(home).toHaveAttribute("href", "/");
     expect(home).toHaveAttribute("title", "Styrmin home");
+    expect(within(home).getByTestId("styrmin-logo")).toBeInTheDocument();
   });
 
   it("renders the theme toggle in the shared header, on every route", async () => {

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { StyrminLogo } from "@/components/StyrminLogo";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const GENERIC_ERROR = "Invalid username or password.";
@@ -55,7 +56,8 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
-        <CardHeader>
+        <CardHeader className="space-y-4">
+          <StyrminLogo className="h-10 w-10" />
           <CardTitle>
             <h1>Sign in to Styrmin</h1>
           </CardTitle>

@@ -12,9 +12,9 @@ import {
   PanelLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/hooks/use-theme";
 import { useAuth } from "@/auth/AuthProvider";
 import { HeaderUserMenu } from "@/components/HeaderUserMenu";
+import { StyrminLogo } from "@/components/StyrminLogo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { IfRole } from "@/auth/IfRole";
 import type { Role } from "@/generated/graphql";
@@ -60,7 +60,6 @@ export function AppShell() {
     return localStorage.getItem(STORAGE_KEY) === "true";
   });
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { theme } = useTheme();
   const { currentUser, logout } = useAuth();
   const isLoginRoute = pathname === "/login";
 
@@ -143,29 +142,13 @@ export function AppShell() {
           >
             {!collapsed && (
               <>
-                <div
-                  className={cn(
-                    "flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-bold text-white",
-                    theme === "dark" ? "bg-primary" : "bg-foreground",
-                  )}
-                >
-                  S
-                </div>
+                <StyrminLogo className="h-7 w-7" />
                 <span className="text-[15px] font-semibold tracking-tight text-sidebar-foreground">
                   Styrmin
                 </span>
               </>
             )}
-            {collapsed && (
-              <div
-                className={cn(
-                  "mx-auto flex h-7 w-7 items-center justify-center rounded-lg text-[13px] font-bold text-white",
-                  theme === "dark" ? "bg-primary" : "bg-foreground",
-                )}
-              >
-                S
-              </div>
-            )}
+            {collapsed && <StyrminLogo className="mx-auto h-7 w-7" />}
           </Link>
         </div>
 
