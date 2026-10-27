@@ -150,7 +150,10 @@ end and request the change again.
 When the flow run of an action crashes, the hook step's error contains
 the first log line of level `ERROR` of that flow run. Styrmin replaces
 the action's API token and common forms of secrets in that line with
-`<redacted>`. Do not write secrets to the logs of an action either.
+`<redacted>`, and the same forms in every line of its logs. Do not write
+secrets to the logs of an action either: log ids and names, not the values
+of the context (see
+[Logging in an action](../drivers/creating-a-driver.md#logging-in-an-action)).
 
 When an action calls `stop_components`, `start_components` or
 `upgrade_deployment_version`, Styrmin links the task that the call

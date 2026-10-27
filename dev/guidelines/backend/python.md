@@ -62,12 +62,34 @@ Use brace-style placeholders `{}` (not f-strings or `%`-formatting) in log messa
 Log whether a user-supplied override is set, not its value. Container `args` often carry flags
 such as `--password=...`, so the patch builder logs `command_set` and `args_set` as booleans.
 
+### Log ids, names and the paths of changes, never an object that holds values
+
+A context, a deployment config, a diff report, a values template, the parameters and the env vars
+can hold passwords that a user or a driver provided. Do not log such an object whole, in an
+f-string or as a placeholder argument. Log the ids, the names and what changed:
+
+```python
+# Wrong — prints every env var value, old and new
+get_run_logger().info(f"Flow-side diff report: {diff_report}")
+
+# Right — the kind of change, the ids and the paths of the changed keys
+get_run_logger().info("Flow-side diff report: %s", diff_report.describe())
+```
+
+Each process also redacts every log record (`install_log_redaction` in `redaction.py`, run when
+`styrmin_backend` is imported), but that redaction finds a secret by its form, such as the value
+after `password:`; it keeps the value of an env var named `FOO`. It also hides a value that is not a
+secret when the word before the `:` or `=` contains `secret` or `token`, so write
+`"Created BSL credential Secret {}"`, not `"Created BSL credential Secret: {}"`. Reference:
+`DiffReport.describe` in `services/reconciliation/diffs/diffs.py`, `GlobalContext.__repr_args__`
+in `context/models/contexts.py` (#573).
+
 <!-- Extracted from specs/028-git-driver-directory on 2026-10-18 -->
 
 ### Remove the user info from repository URLs in messages and logs
 
 A repository URL can carry credentials, such as `https://user:token@host/x.git`. Pass every
-repository URL through `redact_user_info` (`services/driver/driver_directory.py`) before it goes
+repository URL through `redact_user_info` (`redaction.py`) before it goes
 into an error message or a log line. Pass the text of an exception that a clone raised through it
 too, because some clone errors repeat the URL with its user info.
 
@@ -91,7 +113,7 @@ Every signed-in user who can read a task can read the errors of its steps and it
 Read-only users included: on the deployment page, with `styrminctl tasks get` and through the
 GraphQL API. A flow run's logs can hold secrets, such as the action token or a password that an
 action printed. Before text from a flow run's logs goes into a step error or a task message, pass
-it through `redact_secrets` (`agent/tasks/utils.py`) with the secrets that the code knows, such as
+it through `redact_secrets` (`redaction.py`) with the secrets that the code knows, such as
 the action token:
 
 ```python
@@ -102,7 +124,8 @@ if first_error:
 
 `redact_secrets` replaces the given values, the user info of every `scheme://` URL, the credential
 after `Bearer` or `Basic`, and the value after `=` or `:` of a key whose name contains `password`,
-`passwd`, `secret`, `token`, `api_key`, `private_key` or `credential`. It keeps a secret written in
+`passwd`, `passphrase`, `secret`, `token`, `api_key`, `private_key`, `credential` or `cookie`. It
+keeps a secret written in
 any other form, so copy only the text that users need, such as the first `ERROR` log, cut to a
 fixed length. Reference: `_run_deployment_or_fail` and `run_driver_action_or_fail` in
 `agent/tasks/utils.py`
@@ -770,7 +793,7 @@ Rules for any mutation that touches user/group state, admin-conferring rows, or 
   ```
 
   Field **names only** — never values. Emit from the service function so it only fires on commit, never from the resolver.
-- Password-bearing GraphQL variables MUST be added to the `MASKED_VARIABLE_NAMES` frozenset in `api/logging/mask.py`. Per-mutation ad-hoc masking is forbidden — every password field on the schema goes through that one allow-list. Adding a new password field is a one-line PR change that triggers code review on the import site.
+- The GraphQL request log masks every variable value except ids, names, booleans and nulls (`mask_variables` in `api/logging/mask.py`), so a new password field needs no change there. Per-mutation ad-hoc masking is forbidden. Keep a new value in the log only by changing that one rule, and only for a value that cannot be a secret.
 
 <!-- Extracted from specs/019-task-steps on 2026-10-08 -->
 

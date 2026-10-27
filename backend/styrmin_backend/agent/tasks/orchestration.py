@@ -437,7 +437,7 @@ async def _plan_remediation(
             new_instance=new_instance,
         )
         diff_report = comparator.compare()
-        get_run_logger().info(f"Flow-side diff report: {diff_report}")
+        get_run_logger().info("Flow-side diff report: %s", diff_report.describe())
 
         remediator = Remediator(uow=uow)
         remediation = await remediator.generate_remediation(diff_report=diff_report)

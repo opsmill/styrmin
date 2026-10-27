@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self
 from uuid import UUID
 
-from styrmin_backend.services.driver.driver_directory import redact_user_info
+from styrmin_backend.redaction import redact_user_info
 from styrmin_backend.services.driver.exceptions import ActionNotRegisteredError
 from styrmin_backend.services.driver.labels import (
     action_directory_of,

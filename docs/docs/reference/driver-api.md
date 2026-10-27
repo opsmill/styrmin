@@ -61,6 +61,11 @@ author:
   forms of secrets in that line with `<redacted>`, but not every form, so
   do not write secrets to the logs of an action (see
   [Logs of a crashed action are shown on its hook step](../drivers/loading-drivers.md#logs-of-a-crashed-action-are-shown-on-its-hook-step)).
+- `str(context)` and `repr(context)` show only the deployment id, the
+  instance id, the namespace, the application name and version, and the
+  environment name. The values template, the parameters and the env vars
+  stay out of a log line that prints the context (see
+  [Logging in an action](../drivers/creating-a-driver.md#logging-in-an-action)).
 - `execute_commands` names its Job `<release reference>-job`, in the
   deployment's namespace, with the label `styrmin.io/action-job=true`.
   The Job ends at its first failed pod and stays in the cluster after it

@@ -276,8 +276,11 @@ it with `<redacted>`:
 - the user name and password in a URL, such as `https://user:password@host`;
 - the credential after `Bearer` or `Basic`;
 - the value after `=` or `:` of a key whose name contains `password`,
-  `passwd`, `secret`, `token`, `api_key`, `private_key` or `credential`.
+  `passwd`, `passphrase`, `secret`, `token`, `api_key`, `private_key`,
+  `credential` or `cookie`.
 
+Styrmin replaces the same parts in every line that it writes to its logs
+(see [Logging in an action](./creating-a-driver.md#logging-in-an-action)).
 A secret written in any other form stays in the error. Every signed-in
 user who can read the task can read this error, so do not write secrets
 to the logs of an action.
