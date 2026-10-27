@@ -121,7 +121,7 @@ def test_a_loguru_traceback_shows_no_variable_value(tmp_path: Path) -> None:
         "import styrmin_backend\n"
         "from loguru import logger\n"
         "logger.remove()\n"
-        "logger.add(sys.stdout)\n"
+        "logger.add(sys.stdout, colorize=False)\n"
         "def delete_session(token):\n"
         "    raise RuntimeError('database down')\n"
         "def revoke(token):\n"
