@@ -152,7 +152,9 @@ def test_an_access_log_record_with_a_secret_keeps_its_arguments() -> None:
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
     handler.setFormatter(
-        AccessFormatter('%(client_addr)s - "%(request_line)s" %(status_code)s')
+        AccessFormatter(
+            '%(client_addr)s - "%(request_line)s" %(status_code)s', use_colors=False
+        )
     )
     access_logger = logging.getLogger("test.uvicorn.access")
     access_logger.addHandler(handler)
@@ -173,6 +175,57 @@ def test_an_access_log_record_with_a_secret_keeps_its_arguments() -> None:
     assert stream.getvalue() == (
         '10.0.0.1:5000 - "GET /graphql?token=<redacted> HTTP/1.1" 200 OK\n'
     )
+
+
+@pytest.mark.parametrize("path", ["/api/basic", "/v1/auth/bearer", "/login?password="])
+def test_an_access_log_line_that_looks_like_a_secret_with_the_format_is_kept(
+    path: str,
+) -> None:
+    # A match that runs from the request path into the ``HTTP/1.1`` of the
+    # format string, such as ``basic HTTP/1.1``, is not a secret. Dropping the
+    # arguments made uvicorn's formatter fail, and the request line was lost.
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(
+        AccessFormatter(
+            '%(client_addr)s - "%(request_line)s" %(status_code)s', use_colors=False
+        )
+    )
+    access_logger = logging.getLogger("uvicorn.access")
+    level, propagate = access_logger.level, access_logger.propagate
+    access_logger.addHandler(handler)
+    access_logger.setLevel(logging.INFO)
+    access_logger.propagate = False
+    try:
+        access_logger.info(
+            '%s - "%s %s HTTP/%s" %d', "10.0.0.1:5000", "GET", path, "1.1", 200
+        )
+    finally:
+        access_logger.removeHandler(handler)
+        access_logger.setLevel(level)
+        access_logger.propagate = propagate
+
+    assert stream.getvalue() == f'10.0.0.1:5000 - "GET {path} HTTP/1.1" 200 OK\n'
+
+
+def test_a_secret_split_on_the_access_logger_with_another_format_is_redacted() -> None:
+    # Only uvicorn's own format string keeps its arguments; any other record on
+    # the same logger falls back to the redacted message.
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    access_logger = logging.getLogger("uvicorn.access")
+    level, propagate = access_logger.level, access_logger.propagate
+    access_logger.addHandler(handler)
+    access_logger.setLevel(logging.INFO)
+    access_logger.propagate = False
+    try:
+        access_logger.info("token=%s", TOKEN)
+    finally:
+        access_logger.removeHandler(handler)
+        access_logger.setLevel(level)
+        access_logger.propagate = propagate
+
+    assert stream.getvalue() == "token=<redacted>\n"
 
 
 def test_a_secret_split_between_format_and_argument_is_redacted(

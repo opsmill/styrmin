@@ -54,11 +54,13 @@ _USER_INFO = re.compile(r"(?<=[A-Za-z0-9+.-])(://)[^/\s]*@")
 _AUTHORIZATION = re.compile(r"(?i)\b(bearer|basic)(\s+)[^\s\"',;]+")
 # A key whose name says it holds a secret, then ``=`` or ``:``, then its value:
 # a quoted string whole, with its spaces and commas, or else the text up to the
-# first space, quote, comma, semicolon or ``}``. The key starts where a run of
-# ``[\w.-]`` characters starts, so each run is scanned once.
+# first space, quote, comma, semicolon or ``}``. The key is a whole run of
+# ``[\w.-]`` characters: a lookahead finds the word in the run, and the run is
+# then matched possessively, so a run that holds the word many times, such as
+# ``tokentoken...``, is still scanned a fixed number of times.
 _SECRET_FIELD = re.compile(
-    r"(?i)(?<![\w.-])([\w.-]*(?:password|passwd|passphrase|secret|token|api[_-]?key"
-    r"|private[_-]?key|credential|cookie)[\w.-]*)([\"']?\s*[:=]\s*)"
+    r"(?i)(?<![\w.-])(?=[\w.-]*?(?:password|passwd|passphrase|secret|token|api[_-]?key"
+    r"|private[_-]?key|credential|cookie))([\w.-]++)([\"']?\s*[:=]\s*)"
     r"(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|[\"']?[^\s\"',;}]+)"
 )
 
@@ -69,6 +71,11 @@ def _redact_field_value(match: re.Match[str]) -> str:
     closing = quote if quote and len(value) > 1 and value.endswith(quote) else ""
     return f"{match.group(1)}{match.group(2)}{quote}{REDACTED}{closing}"
 
+
+#: The logger and the format string of uvicorn's access log records. The format
+#: string holds no secret, and each argument is redacted on its own.
+_ACCESS_LOGGER = "uvicorn.access"
+_ACCESS_FORMAT = '%s - "%s %s HTTP/%s" %d'
 
 _installed = False
 
@@ -192,6 +199,13 @@ def _replace_message(record: logging.LogRecord, redacted: str) -> None:
     and kept when the message that they make holds nothing left to redact.
     Otherwise, such as when a secret is split between the format string and an
     argument, the record gets the redacted message and no arguments.
+
+    The arguments of uvicorn's access log records are always kept. A match
+    that is left there crosses from one argument into the format string or
+    the next argument, and holds no secret: ``basic HTTP/1.1`` and
+    ``?password= HTTP/1.1`` end in the HTTP version, and a method such as
+    ``BEARER``, which only the h11 parser accepts, is followed by the request
+    path, which every access log line shows.
     """
     args = record.args
     if isinstance(record.msg, str) and args and isinstance(args, (tuple, dict)):
@@ -204,7 +218,10 @@ def _replace_message(record: logging.LogRecord, redacted: str) -> None:
             message = record.msg % new_args
         except Exception:  # noqa: BLE001 - fall back to the flat message below
             message = None
-        if message is not None and redact_secrets(message) == message:
+        if message is not None and (
+            (record.name == _ACCESS_LOGGER and record.msg == _ACCESS_FORMAT)
+            or redact_secrets(message) == message
+        ):
             record.args = new_args
             return
     record.msg = redacted

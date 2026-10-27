@@ -57,8 +57,9 @@ def test_redact_secrets_keeps_the_name_of_a_kubernetes_secret() -> None:
         "GET /" + "-".join(["a"] * 8000),
         ".".join(["x"] * 8000),
         "a-a-" * 4000 + "://user:pw@host/",
+        "GET /" + "token" * 6400,
     ],
-    ids=["hyphens", "dots", "url-scheme"],
+    ids=["hyphens", "dots", "url-scheme", "repeated-keyword"],
 )
 def test_redact_secrets_takes_linear_time_on_a_long_word(text: str) -> None:
     # Every log line goes through the redaction, including the server's access
