@@ -30,6 +30,7 @@ from styrmin_backend.agent.status.reporter import (
     _report_pod_statuses_to_backend,
     run_status_reporter,
 )
+from tests.helpers.pods import load_pod
 
 GRAPHQL_URL = "http://test:8000/graphql"
 SCHEMA_PATH = Path(__file__).resolve().parents[4] / "schema.graphql"
@@ -47,6 +48,7 @@ def _make_container_status(
     state: str = "running",
     reason: str | None = None,
     started_at: str | None = "2026-01-01T00:00:00",
+    message: str | None = None,
 ) -> SimpleNamespace:
     running = None
     waiting = None
@@ -59,9 +61,9 @@ def _make_container_status(
             else None
         )
     elif state == "waiting":
-        waiting = SimpleNamespace(reason=reason)
+        waiting = SimpleNamespace(reason=reason, message=message)
     elif state == "terminated":
-        terminated = SimpleNamespace(reason=reason)
+        terminated = SimpleNamespace(reason=reason, message=message)
 
     return SimpleNamespace(
         name=name,
@@ -72,6 +74,12 @@ def _make_container_status(
     )
 
 
+def _make_condition(
+    type_: str, status: str, reason: str | None = None, message: str | None = None
+) -> SimpleNamespace:
+    return SimpleNamespace(type=type_, status=status, reason=reason, message=message)
+
+
 def _make_pod(
     name: str = "test-pod",
     namespace: str = "styrmin-test",
@@ -80,17 +88,30 @@ def _make_pod(
     node_name: str | None = "node-1",
     start_time: str | None = "2026-01-01T00:00:00",
     labels: dict[str, str] | None = None,
+    init_container_statuses: list | None = None,
+    conditions: list | None = None,
+    sidecars: tuple[str, ...] = (),
 ) -> SimpleNamespace:
+    init_containers = [
+        SimpleNamespace(
+            name=cs.name, restart_policy="Always" if cs.name in sidecars else None
+        )
+        for cs in init_container_statuses or ()
+    ]
     return SimpleNamespace(
         metadata=SimpleNamespace(name=name, namespace=namespace, labels=labels),
         status=SimpleNamespace(
             phase=phase,
             container_statuses=container_statuses,
+            init_container_statuses=init_container_statuses,
+            conditions=conditions,
             start_time=SimpleNamespace(isoformat=lambda: start_time)
             if start_time
             else None,
         ),
-        spec=SimpleNamespace(node_name=node_name) if node_name else None,
+        spec=SimpleNamespace(node_name=node_name, init_containers=init_containers)
+        if node_name
+        else None,
     )
 
 
@@ -279,6 +300,286 @@ class TestExtractPodData:
         pod = _make_pod(labels={"styrmin/component": "ghost"})
         result = _extract_pod_data(pod)
         assert result.component_name == "ghost"
+
+
+class TestExtractPodDataFailureCauses:
+    """#574: the stored pod status keeps what explains why a pod is not ready."""
+
+    def test_unscheduled_pod_has_a_pod_entry_with_the_scheduler_message(self) -> None:
+        message = "0/2 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found"
+        pod = _make_pod(
+            phase="Pending",
+            container_statuses=None,
+            node_name=None,
+            start_time=None,
+            conditions=[
+                _make_condition("PodScheduled", "False", "Unschedulable", message)
+            ],
+        )
+
+        result = _extract_pod_data(pod)
+
+        assert result.ready is False
+        assert result.restart_count == 0
+        assert result.container_statuses == [
+            {
+                "name": "PodScheduled",
+                "kind": "pod",
+                "ready": False,
+                "state": "waiting:Unschedulable",
+                "message": message,
+                "restart_count": 0,
+                "image": "",
+                "started_at": None,
+            }
+        ]
+
+    def test_scheduled_pod_has_no_pod_entry(self) -> None:
+        pod = _make_pod(
+            container_statuses=[_make_container_status()],
+            conditions=[_make_condition("PodScheduled", "True")],
+        )
+
+        result = _extract_pod_data(pod)
+
+        assert [entry["kind"] for entry in result.container_statuses or ()] == [
+            "container"
+        ]
+
+    def test_failing_init_container_is_reported_with_its_restarts(self) -> None:
+        # The Semaphore pod of the issue: its init container `admin` fails and restarts,
+        # while the container waits with PodInitializing.
+        pod = _make_pod(
+            phase="Pending",
+            init_container_statuses=[
+                _make_container_status(
+                    name="admin",
+                    ready=False,
+                    restart_count=5,
+                    state="waiting",
+                    reason="CrashLoopBackOff",
+                    message="back-off 2m40s restarting failed container=admin",
+                )
+            ],
+            container_statuses=[
+                _make_container_status(
+                    name="semaphore",
+                    ready=False,
+                    state="waiting",
+                    reason="PodInitializing",
+                )
+            ],
+            conditions=[
+                _make_condition("PodScheduled", "True"),
+                _make_condition("Initialized", "False", "ContainersNotInitialized"),
+            ],
+        )
+
+        result = _extract_pod_data(pod)
+
+        entries = result.container_statuses or []
+        assert [(e["name"], e["kind"], e["state"]) for e in entries] == [
+            ("admin", "init", "waiting:CrashLoopBackOff"),
+            ("semaphore", "container", "waiting:PodInitializing"),
+        ]
+        assert entries[0]["restart_count"] == 5
+        assert entries[0]["message"] == (
+            "back-off 2m40s restarting failed container=admin"
+        )
+        # kubectl counts the init container restarts while the pod initializes.
+        assert result.restart_count == 5
+        assert result.ready is False
+
+    def test_initialized_pod_counts_container_and_sidecar_restarts(self) -> None:
+        pod = _make_pod(
+            init_container_statuses=[
+                _make_container_status(
+                    name="migrate",
+                    ready=False,
+                    restart_count=2,
+                    state="terminated",
+                    reason="Completed",
+                ),
+                _make_container_status(name="proxy", restart_count=3),
+            ],
+            container_statuses=[_make_container_status(name="app", restart_count=1)],
+            conditions=[_make_condition("Initialized", "True")],
+            sidecars=("proxy",),
+        )
+
+        result = _extract_pod_data(pod)
+
+        assert result.restart_count == 4
+        assert result.ready is True
+        assert [(e["name"], e["kind"]) for e in result.container_statuses or ()] == [
+            ("migrate", "init"),
+            ("proxy", "sidecar"),
+            ("app", "container"),
+        ]
+
+    def test_initializing_pod_counts_init_container_and_sidecar_restarts(
+        self,
+    ) -> None:
+        # kubectl counts every init container's restarts, sidecars included, until the
+        # pod is initialized.
+        pod = _make_pod(
+            phase="Pending",
+            init_container_statuses=[
+                _make_container_status(name="proxy", ready=False, restart_count=2),
+                _make_container_status(
+                    name="migrate",
+                    ready=False,
+                    restart_count=3,
+                    state="waiting",
+                    reason="CrashLoopBackOff",
+                ),
+            ],
+            container_statuses=[
+                _make_container_status(
+                    name="app", ready=False, state="waiting", reason="PodInitializing"
+                )
+            ],
+            conditions=[_make_condition("Initialized", "False")],
+            sidecars=("proxy",),
+        )
+
+        result = _extract_pod_data(pod)
+
+        assert result.restart_count == 5
+        assert [(e["name"], e["kind"]) for e in result.container_statuses or ()] == [
+            ("proxy", "sidecar"),
+            ("migrate", "init"),
+            ("app", "container"),
+        ]
+
+    def test_waiting_message_is_kept(self) -> None:
+        message = 'failed to pull image "traefik/whoami:v1.99.99": not found'
+        pod = _make_pod(
+            phase="Pending",
+            container_statuses=[
+                _make_container_status(
+                    name="app",
+                    ready=False,
+                    state="waiting",
+                    reason="ErrImagePull",
+                    message=message,
+                )
+            ],
+        )
+
+        entry = (_extract_pod_data(pod).container_statuses or [])[0]
+
+        assert entry["state"] == "waiting:ErrImagePull"
+        assert entry["message"] == message
+
+    def test_post_start_hook_message_is_not_kept(self) -> None:
+        # The kubelet quotes the output of the hook command in this message.
+        pod = _make_pod(
+            container_statuses=[
+                _make_container_status(
+                    ready=False,
+                    state="waiting",
+                    reason="PostStartHookError",
+                    message=(
+                        "Exec lifecycle hook ([sh -c ./register.sh]) for Container "
+                        '"app" in Pod "app-0" failed - error: command exited with 1, '
+                        'message: "token=s3cr3t rejected"'
+                    ),
+                )
+            ],
+        )
+
+        entry = (_extract_pod_data(pod).container_statuses or [])[0]
+
+        assert entry["state"] == "waiting:PostStartHookError"
+        assert entry["message"] is None
+
+    def test_terminated_message_is_not_kept(self) -> None:
+        # The container writes this message, so it can hold anything it printed.
+        pod = _make_pod(
+            container_statuses=[
+                _make_container_status(
+                    ready=False,
+                    state="terminated",
+                    reason="Error",
+                    message="password=hunter2",
+                )
+            ],
+        )
+
+        entry = (_extract_pod_data(pod).container_statuses or [])[0]
+
+        assert entry["state"] == "terminated:Error"
+        assert entry["message"] is None
+
+
+class TestExtractPodDataFromKind:
+    """The reporter on pods that a kind cluster returned for failed deployments (#574)."""
+
+    @pytest.mark.anyio
+    async def test_pod_not_scheduled(self) -> None:
+        result = _extract_pod_data(await load_pod("pod_not_scheduled"))
+
+        assert (result.phase, result.ready, result.restart_count) == (
+            PodPhase.PENDING,
+            False,
+            0,
+        )
+        assert result.node_name is None
+        assert [
+            (e["name"], e["kind"], e["state"], e["message"])
+            for e in result.container_statuses or ()
+        ] == [
+            (
+                "PodScheduled",
+                "pod",
+                "waiting:Unschedulable",
+                "0/2 nodes are available: pod has unbound immediate "
+                "PersistentVolumeClaims. not found",
+            )
+        ]
+
+    @pytest.mark.anyio
+    async def test_pod_with_failing_init_container(self) -> None:
+        result = _extract_pod_data(await load_pod("pod_init_container_failing"))
+
+        assert (result.phase, result.ready, result.restart_count) == (
+            PodPhase.PENDING,
+            False,
+            7,
+        )
+        assert [
+            (e["name"], e["kind"], e["state"], e["restart_count"])
+            for e in result.container_statuses or ()
+        ] == [
+            ("admin", "init", "running", 7),
+            ("semaphore", "container", "waiting:PodInitializing", 0),
+        ]
+
+    @pytest.mark.anyio
+    async def test_pod_with_image_that_cannot_be_pulled(self) -> None:
+        result = _extract_pod_data(await load_pod("pod_image_pull_failing"))
+
+        [entry] = result.container_statuses or []
+        assert (entry["kind"], entry["state"]) == (
+            "container",
+            "waiting:ImagePullBackOff",
+        )
+        assert entry["message"].endswith("docker.io/traefik/whoami:v1.99.99: not found")
+
+    @pytest.mark.anyio
+    async def test_pod_with_sidecar_that_is_not_ready(self) -> None:
+        # The sidecar `proxy` fails its readiness probe; the container `app` started and is ready.
+        result = _extract_pod_data(await load_pod("pod_sidecar_not_ready"))
+
+        assert (result.phase, result.restart_count) == (PodPhase.RUNNING, 0)
+        assert [
+            (e["name"], e["kind"], e["state"], e["ready"])
+            for e in result.container_statuses or ()
+        ] == [
+            ("proxy", "sidecar", "running", False),
+            ("app", "container", "running", True),
+        ]
 
 
 # ---------------------------------------------------------------------------

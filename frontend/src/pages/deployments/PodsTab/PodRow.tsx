@@ -8,14 +8,18 @@ import { PodPhaseBadge } from "./PodPhaseBadge";
 
 type Pod = GetDeploymentPodsQuery["podStatuses"][number];
 
-// Wire format from the agent reporter — see backend/agent/status/reporter.py.
-// snake_case because it is serialized straight from a Python dict via the
-// GraphQL JSON scalar; no codegen mapping happens.
+// Wire format from the agent reporter — see backend/agent/status/reporter.py
+// and ADR-088. snake_case because it is serialized straight from a Python dict
+// via the GraphQL JSON scalar; no codegen mapping happens. `kind` is missing
+// from entries that an agent older than #574 reported: they are containers.
+// A `sidecar` is an init container with `restartPolicy: Always`.
 type AgentContainerStatus = {
   name: string;
+  kind?: "container" | "init" | "sidecar" | "pod";
   image?: string;
   ready?: boolean;
   state?: string;
+  message?: string | null;
   restart_count?: number;
   started_at?: string | null;
 };
@@ -112,8 +116,10 @@ function ExpandedPanel({
   ageSource: ReturnType<typeof pickAgeSource>;
   staleness: ReturnType<typeof classifyStaleness>;
 }) {
-  const containers = (pod.containerStatuses ??
+  const entries = (pod.containerStatuses ??
     []) as unknown as AgentContainerStatus[];
+  const podEntries = entries.filter((entry) => entry.kind === "pod");
+  const containers = entries.filter((entry) => entry.kind !== "pod");
   const polledAgo = pod.lastPolledAt
     ? formatAgo(pod.lastPolledAt, now)
     : "never";
@@ -142,6 +148,10 @@ function ExpandedPanel({
         </span>
       </div>
 
+      {podEntries.map((entry) => (
+        <PodConditionNotice key={entry.name} entry={entry} />
+      ))}
+
       <div className="overflow-hidden rounded-lg border border-border bg-background">
         <div className="grid grid-cols-[1fr_220px_64px_120px] items-center gap-3 border-b border-border/60 px-3.5 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           <span>Container</span>
@@ -158,7 +168,8 @@ function ExpandedPanel({
           const parsed = parseContainerState(c.state);
           return (
             <div
-              key={c.name}
+              key={`${c.kind ?? "container"}:${c.name}`}
+              data-testid="container-row"
               className="grid grid-cols-[1fr_220px_64px_120px] items-center gap-3 border-b border-border/60 px-3.5 py-2.5 text-[13px] last:border-b-0"
             >
               <span className="flex items-center gap-2 min-w-0">
@@ -168,6 +179,11 @@ function ExpandedPanel({
                   }`}
                 />
                 <span className="truncate font-mono">{c.name}</span>
+                {(c.kind === "init" || c.kind === "sidecar") && (
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                    {c.kind}
+                  </span>
+                )}
               </span>
               <span className="truncate font-mono text-[12px] text-muted-foreground">
                 {c.image ?? "—"}
@@ -178,12 +194,39 @@ function ExpandedPanel({
               <span className="text-[12px]">
                 <ContainerStateLabel parsed={parsed} />
               </span>
+              {c.message && (
+                <span
+                  data-testid="container-message"
+                  className="col-span-4 break-words text-[12px] text-muted-foreground"
+                >
+                  {c.message}
+                </span>
+              )}
             </div>
           );
         })}
       </div>
 
       <KubectlCommands namespace={pod.namespace} podName={pod.podName} />
+    </div>
+  );
+}
+
+// The agent reports a pod that is not scheduled with one `pod` entry: the
+// PodScheduled condition, its reason and the scheduler's message.
+function PodConditionNotice({ entry }: { entry: AgentContainerStatus }) {
+  const { reason } = parseContainerState(entry.state);
+  const label = entry.name === "PodScheduled" ? "Not scheduled" : entry.name;
+  return (
+    <div
+      data-testid="pod-condition"
+      className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+    >
+      <span className="font-medium">
+        {label}
+        {reason ? `: ${reason}` : ""}
+      </span>
+      {entry.message && <p className="mt-0.5 break-words">{entry.message}</p>}
     </div>
   );
 }

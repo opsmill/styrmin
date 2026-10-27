@@ -19,6 +19,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from styrmin_backend.agent.status.models import (
+    INIT_CONTAINER_KIND,
+    POD_KIND,
+    SIDECAR_KIND,
+)
 from styrmin_backend.db.models import PodPhase
 from styrmin_backend.domain import steps
 from styrmin_backend.domain.models import Step, StepKind, StepStatus, Task, TaskType
@@ -65,19 +70,13 @@ _HELMRELEASE_READY = "HelmReleaseReady"
 _HELMRELEASE_REMEDIATED = "HelmReleaseRemediated"
 _DEFAULT_FAILURE = "The operator reported a failure"
 
-#: Container reasons that explain why a pod is not ready (contracts "Pod reasons on failure").
-_POD_FAILURE_REASONS = frozenset(
-    {
-        "ImagePullBackOff",
-        "ErrImagePull",
-        "InvalidImageName",
-        "CrashLoopBackOff",
-        "CreateContainerConfigError",
-        "CreateContainerError",
-        "Error",
-        "OOMKilled",
-    }
-)
+#: Container reasons of a container that starts or has done its work: they explain nothing.
+_STARTING_REASONS = frozenset({"ContainerCreating", "PodInitializing", "Completed"})
+#: Reasons whose kubelet message only gives the back-off delay.
+_REASONS_WITHOUT_MESSAGE = frozenset({"CrashLoopBackOff"})
+#: The word before the name of an init container or a sidecar in a pod cause.
+_KIND_LABELS = {INIT_CONTAINER_KIND: "init container", SIDECAR_KIND: "sidecar"}
+_MAX_MESSAGE = 300
 _MAX_PODS = 5
 #: Finished pods, such as those of a failed Job, are not part of the rollout.
 _FINISHED_POD_PHASES = frozenset({PodPhase.SUCCEEDED, PodPhase.FAILED})
@@ -383,23 +382,70 @@ async def _with_pod_reasons(
 
 
 async def _pod_reasons(deployment_id: Any, uow: UnitOfWork) -> str | None:
-    """``Pods not ready: <pod> (<container>: <reason>), …`` from the stored pod statuses."""
+    """``Pods not ready: <pod> (<cause>; …), …`` from the stored pod statuses."""
     entries: list[str] = []
     pods = await uow.pod_statuses.find_by_deployment(deployment_id)
     for pod in sorted(pods, key=lambda pod: pod.pod_name):
         if pod.phase in _FINISHED_POD_PHASES:
             continue
-        containers = [
-            f"{container.get('name')}: {reason}"
-            for container in pod.container_statuses or ()
-            if (reason := _container_reason(container.get("state")))
-            in _POD_FAILURE_REASONS
+        causes = [
+            cause
+            for entry in pod.container_statuses or ()
+            if isinstance(entry, dict) and (cause := _entry_cause(entry))
         ]
-        if containers:
-            entries.append(f"{pod.pod_name} ({'; '.join(containers)})")
+        if causes:
+            entries.append(f"{pod.pod_name} ({'; '.join(causes)})")
         if len(entries) == _MAX_PODS:
             break
     return f"Pods not ready: {', '.join(entries)}" if entries else None
+
+
+def _entry_cause(entry: Mapping[str, Any]) -> str | None:
+    """Why one ``containerStatuses`` entry keeps its pod from being ready, or None.
+
+    - The ``pod`` entry of a pod that is not scheduled: ``<reason>: <message>``.
+    - A container, init container or sidecar that waits or ended with a reason
+      other than a starting one: ``<name>: <reason>: <message>``.
+    - A container, init container or sidecar that runs again after restarts and is
+      not ready: ``<name>: running after <n> restarts``.
+    - An init container that runs, is not ready and has not restarted, such as one
+      that waits for a service: ``init container <name>: still running``. The pod
+      cannot start its containers until it ends.
+    - A sidecar that runs, is not ready and has not restarted, such as one whose
+      readiness probe fails: ``sidecar <name>: not ready``. A sidecar runs for the
+      pod's whole life, so it does not end.
+    """
+    kind = entry.get("kind")
+    state = entry.get("state")
+    reason = _container_reason(state)
+    if kind == POD_KIND:
+        return _with_message(reason, entry) if reason else None
+    name = entry.get("name")
+    word = _KIND_LABELS.get(kind) if isinstance(kind, str) else None
+    label = f"{word} {name}" if word else str(name)
+    if reason is not None and reason not in _STARTING_REASONS:
+        if reason in _REASONS_WITHOUT_MESSAGE:
+            return f"{label}: {reason}"
+        return f"{label}: {_with_message(reason, entry)}"
+    if state != "running" or entry.get("ready"):
+        return None
+    restarts = entry.get("restart_count")
+    if isinstance(restarts, int) and restarts > 0:
+        return f"{label}: running after {restarts} restart{'s' if restarts > 1 else ''}"
+    if kind == INIT_CONTAINER_KIND:
+        return f"{label}: still running"
+    return f"{label}: not ready" if kind == SIDECAR_KIND else None
+
+
+def _with_message(reason: str, entry: Mapping[str, Any]) -> str:
+    """``<reason>: <message>``, the message on one line and cut to ``_MAX_MESSAGE`` characters."""
+    message = entry.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return reason
+    text = " ".join(message.split())
+    if len(text) > _MAX_MESSAGE:
+        text = f"{text[: _MAX_MESSAGE - 1]}…"
+    return f"{reason}: {text}"
 
 
 def _container_reason(state: object) -> str | None:

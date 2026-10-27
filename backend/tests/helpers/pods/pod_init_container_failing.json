@@ -1,0 +1,195 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "styrmin-semaphore-cfc7bb7b9-v9l2d",
+    "namespace": "styrmin-abbe13cf-4a8b-41b4-982d-f9b97f642222",
+    "labels": {
+      "app.kubernetes.io/instance": "styrmin-abbe13cf-4a8b-41b4-982d-f9b97f642222",
+      "app.kubernetes.io/managed-by": "Helm",
+      "app.kubernetes.io/name": "semaphore",
+      "app.kubernetes.io/version": "2.16.47",
+      "helm.sh/chart": "semaphore-16.0.11",
+      "pod-template-hash": "cfc7bb7b9",
+      "styrmin/component": "server",
+      "styrmin/deployment_id": "abbe13cf-4a8b-41b4-982d-f9b97f642222",
+      "styrmin/environment_id": "baa007cf-f1ab-4bdc-9b83-1be98d87cb92"
+    }
+  },
+  "spec": {
+    "nodeName": "styrmin-obs-worker",
+    "initContainers": [
+      {
+        "name": "admin",
+        "image": "semaphoreui/semaphore:v2.16.47",
+        "restartPolicy": null
+      }
+    ],
+    "containers": [
+      {
+        "name": "semaphore",
+        "image": "semaphoreui/semaphore:v2.16.47"
+      }
+    ]
+  },
+  "status": {
+    "allocatedResources": {
+      "cpu": "100m",
+      "memory": "64Mi"
+    },
+    "conditions": [
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-27T07:41:13Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "PodReadyToStartContainers"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-27T07:41:12Z",
+        "message": "containers with incomplete status: [admin]",
+        "observedGeneration": 1,
+        "reason": "ContainersNotInitialized",
+        "status": "False",
+        "type": "Initialized"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-27T07:41:12Z",
+        "message": "containers with unready status: [semaphore]",
+        "observedGeneration": 1,
+        "reason": "ContainersNotReady",
+        "status": "False",
+        "type": "Ready"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-27T07:41:12Z",
+        "message": "containers with unready status: [semaphore]",
+        "observedGeneration": 1,
+        "reason": "ContainersNotReady",
+        "status": "False",
+        "type": "ContainersReady"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-27T07:41:12Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "PodScheduled"
+      }
+    ],
+    "containerStatuses": [
+      {
+        "image": "semaphoreui/semaphore:v2.16.47",
+        "imageID": "",
+        "lastState": {},
+        "name": "semaphore",
+        "ready": false,
+        "restartCount": 0,
+        "started": false,
+        "state": {
+          "waiting": {
+            "reason": "PodInitializing"
+          }
+        },
+        "volumeMounts": [
+          {
+            "mountPath": "/etc/semaphore/config.json",
+            "name": "config"
+          },
+          {
+            "mountPath": "/tmp/semaphore",
+            "name": "workdir"
+          },
+          {
+            "mountPath": "/etc/semaphore/requirements.txt",
+            "name": "config"
+          },
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access-cxsps",
+            "readOnly": true,
+            "recursiveReadOnly": "Disabled"
+          }
+        ]
+      }
+    ],
+    "initContainerStatuses": [
+      {
+        "allocatedResources": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "containerID": "containerd://5387883320212fdb5a8c6c46a47d52bced03c41f92f4145bdfa1bb92ef278a36",
+        "image": "docker.io/semaphoreui/semaphore:v2.16.47",
+        "imageID": "docker.io/semaphoreui/semaphore@sha256:71aabf9314d1051ab92025f26809daea72bd90cb78a6a2badfe15400acf11619",
+        "lastState": {
+          "terminated": {
+            "containerID": "containerd://71eb680e472c0a6a384d511ee71c2ea73d17461f14f99a48e458fbf903f45c46",
+            "exitCode": 2,
+            "finishedAt": "2026-10-27T08:10:56Z",
+            "reason": "Error",
+            "startedAt": "2026-10-27T08:06:56Z"
+          }
+        },
+        "name": "admin",
+        "ready": false,
+        "resources": {
+          "requests": {
+            "cpu": "100m",
+            "memory": "64Mi"
+          }
+        },
+        "restartCount": 7,
+        "started": true,
+        "state": {
+          "running": {
+            "startedAt": "2026-10-27T08:16:05Z"
+          }
+        },
+        "user": {
+          "linux": {
+            "gid": 0,
+            "supplementalGroups": [
+              0,
+              1001
+            ],
+            "uid": 1001
+          }
+        },
+        "volumeMounts": [
+          {
+            "mountPath": "/etc/semaphore/config.json",
+            "name": "config"
+          },
+          {
+            "mountPath": "/tmp/semaphore",
+            "name": "workdir"
+          },
+          {
+            "mountPath": "/etc/semaphore/requirements.txt",
+            "name": "config"
+          },
+          {
+            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+            "name": "kube-api-access-cxsps",
+            "readOnly": true,
+            "recursiveReadOnly": "Disabled"
+          }
+        ]
+      }
+    ],
+    "observedGeneration": 1,
+    "phase": "Pending",
+    "qosClass": "Burstable",
+    "resources": {
+      "requests": {
+        "cpu": "100m",
+        "memory": "64Mi"
+      }
+    },
+    "startTime": "2026-10-27T07:41:12Z"
+  }
+}

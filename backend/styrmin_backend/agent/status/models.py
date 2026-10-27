@@ -31,6 +31,14 @@ class PodPhase(str, Enum):
 # Pod status report (mutation ReportPodStatuses)
 # ---------------------------------------------------------------------------
 
+#: The ``kind`` of each ``containerStatuses`` entry (ADR-088): a container, an init
+#: container, a sidecar (an init container with ``restartPolicy: Always``), or the pod
+#: itself when it is not scheduled.
+CONTAINER_KIND = "container"
+INIT_CONTAINER_KIND = "init"
+SIDECAR_KIND = "sidecar"
+POD_KIND = "pod"
+
 
 class PodStatusData(BaseModel):
     """Matches GraphQL ``PodStatusInput``."""

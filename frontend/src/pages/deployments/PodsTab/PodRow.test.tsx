@@ -76,3 +76,164 @@ describe("PodRow", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("PodRow failure causes (#574)", () => {
+  async function expand(pod: Pod) {
+    await render(<PodRow pod={pod} now={NOW} />);
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: new RegExp(pod.podName) }),
+    );
+  }
+
+  it("shows why a pod is not scheduled", async () => {
+    await expand(
+      makePod({
+        phase: "PENDING",
+        ready: false,
+        nodeName: null,
+        startedAt: null,
+        containerStatuses: [
+          {
+            name: "PodScheduled",
+            kind: "pod",
+            ready: false,
+            state: "waiting:Unschedulable",
+            message:
+              "0/2 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found",
+            restart_count: 0,
+            image: "",
+            started_at: null,
+          },
+        ] as unknown as Record<string, unknown>,
+      }),
+    );
+
+    const notice = screen.getByTestId("pod-condition");
+    expect(notice).toHaveTextContent("Not scheduled: Unschedulable");
+    expect(notice).toHaveTextContent(
+      "0/2 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found",
+    );
+    // The pod entry is not a container.
+    expect(screen.queryByTestId("container-row")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("No container statuses reported yet."),
+    ).toBeInTheDocument();
+  });
+
+  it("lists a failing init container before the container, with its restarts", async () => {
+    await expand(
+      makePod({
+        phase: "PENDING",
+        ready: false,
+        restartCount: 5,
+        containerStatuses: [
+          {
+            name: "admin",
+            kind: "init",
+            ready: false,
+            state: "waiting:CrashLoopBackOff",
+            message: "back-off 2m40s restarting failed container=admin",
+            restart_count: 5,
+            image: "docker.io/semaphoreui/semaphore:v2.16.47",
+            started_at: null,
+          },
+          {
+            name: "semaphore",
+            kind: "container",
+            ready: false,
+            state: "waiting:PodInitializing",
+            message: null,
+            restart_count: 0,
+            image: "semaphoreui/semaphore:v2.16.47",
+            started_at: null,
+          },
+        ] as unknown as Record<string, unknown>,
+      }),
+    );
+
+    const rows = screen.getAllByTestId("container-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("admin");
+    expect(rows[0]).toHaveTextContent("init");
+    expect(rows[0]).toHaveTextContent("5");
+    expect(rows[0]).toHaveTextContent("waiting: CrashLoopBackOff");
+    expect(rows[1]).toHaveTextContent("semaphore");
+    expect(rows[1]).not.toHaveTextContent("init");
+    expect(screen.queryByTestId("pod-condition")).not.toBeInTheDocument();
+  });
+
+  it("marks a sidecar as a sidecar, not as an init container", async () => {
+    // A sidecar is an init container with `restartPolicy: Always` that runs next
+    // to the containers; this one fails its readiness probe.
+    await expand(
+      makePod({
+        containerStatuses: [
+          {
+            name: "proxy",
+            kind: "sidecar",
+            ready: false,
+            state: "running",
+            message: null,
+            restart_count: 0,
+            image: "docker.io/library/busybox:1.36",
+            started_at: "2026-10-27T11:36:55+00:00",
+          },
+          {
+            name: "app",
+            kind: "container",
+            ready: true,
+            state: "running",
+            message: null,
+            restart_count: 0,
+            image: "docker.io/library/busybox:1.36",
+            started_at: "2026-10-27T11:36:55+00:00",
+          },
+        ] as unknown as Record<string, unknown>,
+      }),
+    );
+
+    const rows = screen.getAllByTestId("container-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("proxy");
+    expect(rows[0]).toHaveTextContent("sidecar");
+    expect(rows[0]).not.toHaveTextContent("init");
+    expect(rows[1]).toHaveTextContent("app");
+    expect(rows[1]).not.toHaveTextContent("sidecar");
+  });
+
+  it("shows the kubelet message under the container", async () => {
+    const message =
+      'Back-off pulling image "traefik/whoami:v1.99.99": ErrImagePull: not found';
+    await expand(
+      makePod({
+        phase: "PENDING",
+        ready: false,
+        containerStatuses: [
+          {
+            name: "app",
+            kind: "container",
+            ready: false,
+            state: "waiting:ImagePullBackOff",
+            message,
+            restart_count: 0,
+            image: "traefik/whoami:v1.99.99",
+            started_at: null,
+          },
+        ] as unknown as Record<string, unknown>,
+      }),
+    );
+
+    expect(screen.getByTestId("container-message")).toHaveTextContent(message);
+  });
+
+  it("shows an entry without a kind as a container", async () => {
+    // Rows stored by an agent older than #574 have no kind and no message.
+    await expand(makePod());
+
+    const [row] = screen.getAllByTestId("container-row");
+    expect(row).toHaveTextContent("api");
+    expect(row).not.toHaveTextContent("init");
+    expect(screen.queryByTestId("container-message")).not.toBeInTheDocument();
+  });
+});
