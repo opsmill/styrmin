@@ -268,3 +268,74 @@ async def test_update_cluster_validation_error(client: StyrminClient, mock_trans
     with pytest.raises(OperationFailedError, match="Invalid cluster config") as exc:
         await client.clusters.update({"external_url_port": 0}, cluster_name="test-cluster")
     assert exc.value.typename == "VALIDATION_ERROR"
+
+
+_CLUSTER_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+_CLUSTER_RESPONSE = {"data": {"cluster": {"id": _CLUSTER_ID, "name": "local", "config": {}, "capabilities": {}}}}
+
+
+def _sent(mock_transport: AsyncMock) -> list[tuple[str, dict[str, Any]]]:
+    """The operation name and the variables of each request, in order."""
+    return [(call.args[0].lstrip().split("(", 1)[0], call.args[1]) for call in mock_transport.execute.await_args_list]
+
+
+async def test_get_pod_statuses_of_cluster(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.side_effect = [
+        _CLUSTER_RESPONSE,
+        {
+            "data": {
+                "podStatuses": [
+                    {
+                        "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                        "deploymentId": "11111111-2222-3333-4444-555555555555",
+                        "podName": "app-a-0",
+                        "namespace": "styrmin-11111111-2222-3333-4444-555555555555",
+                        "phase": "PENDING",
+                        "ready": False,
+                        "restartCount": 2,
+                        "containerStatuses": [],
+                        "nodeName": None,
+                        "componentName": None,
+                        "startedAt": None,
+                        "lastPolledAt": None,
+                    }
+                ]
+            }
+        },
+    ]
+
+    pods = await client.clusters.get_pod_statuses(UUID(_CLUSTER_ID))
+
+    assert _sent(mock_transport) == [
+        ("query GetCluster", {"clusterId": _CLUSTER_ID}),
+        ("query GetPodStatuses", {"clusterId": _CLUSTER_ID}),
+    ]
+    assert [(pod.pod_name, pod.ready, pod.restart_count) for pod in pods] == [("app-a-0", False, 2)]
+
+
+async def test_get_pod_statuses_of_cluster_by_name(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.side_effect = [_CLUSTER_RESPONSE, {"data": {"podStatuses": []}}]
+
+    assert await client.clusters.get_pod_statuses(cluster_name="local") == []
+    assert _sent(mock_transport) == [
+        ("query GetCluster", {"clusterName": "local"}),
+        ("query GetPodStatuses", {"clusterId": _CLUSTER_ID}),
+    ]
+
+
+async def test_get_pod_statuses_of_unknown_cluster(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.return_value = {
+        "data": {"cluster": None},
+        "errors": [{"message": "Cluster not found", "extensions": {"code": "NOT_FOUND"}}],
+    }
+
+    with pytest.raises(ResourceNotFoundError, match="Cluster not found"):
+        await client.clusters.get_pod_statuses(_CLUSTER_ID)
+    assert [name for name, _ in _sent(mock_transport)] == ["query GetCluster"]
+
+
+async def test_get_pod_statuses_of_cluster_graphql_error(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    mock_transport.execute.side_effect = [_CLUSTER_RESPONSE, {"errors": [{"message": "boom"}]}]
+
+    with pytest.raises(OperationFailedError, match="boom"):
+        await client.clusters.get_pod_statuses(_CLUSTER_ID)

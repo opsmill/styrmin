@@ -890,6 +890,23 @@ capture recorded no longer exists when Styrmin creates the counterpart.
 Styrmin records that deployment as failed, clones the other deployments,
 and reports `PARTIAL`.
 
+When the clone is `COMPLETED` or `PARTIAL`, a script can check the new
+environment with one call for its pods and one for its services:
+
+```python
+from styrmin_sdk.models import EnvironmentCloneStatus
+
+clone = await client.environment_clones.wait_for_clone(clone_id)
+if clone.status in (EnvironmentCloneStatus.COMPLETED, EnvironmentCloneStatus.PARTIAL):
+    environment_id = clone.created_environment.id
+    pods = await client.environments.get_pod_statuses(environment_id)
+    services = await client.environments.get_services(environment_id)
+```
+
+A pod that started less than about 5 seconds ago is not in `pods` yet.
+See [Reading pod statuses from a script](./status-reporting.md#reading-pod-statuses-from-a-script)
+and [Listing the services of an environment](./ingress-and-networking.md#listing-the-services-of-an-environment).
+
 Styrmin also records a deployment whose restore failed as failed, with
 the reason `the restore failed`, followed by the restore's error when it
 has one. The clone records a deployment as cloned when it starts the

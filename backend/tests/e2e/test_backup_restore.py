@@ -2764,17 +2764,12 @@ async def test_environment_clone_lifecycle(
         peer_counterpart_deployment_id = counterpart_ids[peer_deployment_id]
 
         # SC-001 of spec 030, FR-016 of #518: each counterpart holds its peers' aliases.
-        # ``environmentServices`` also lists internal deployments, which the
+        # ``environments.get_services`` also lists internal deployments, which the
         # ``deployment`` query hides.
-        raw_services = await client._transport.execute(
-            load_query("get_environment_services"),
-            {"environmentId": str(created_environment_id)},
-        )
-        assert "errors" not in raw_services, raw_services
         created_services: dict[str, list[str]] = {}
-        for service in raw_services["data"]["environmentServices"]:
-            created_services.setdefault(str(service["deploymentId"]), []).append(
-                service["resolvedName"]
+        for service in await client.environments.get_services(created_environment_id):
+            created_services.setdefault(str(service.deployment_id), []).append(
+                service.resolved_name
             )
         for counterpart_id in counterpart_ids.values():
             expected_aliases = {

@@ -8,6 +8,10 @@ Verifies that:
 2. A pod added to the deployment's namespace WITHOUT the
    ``styrmin/component`` label is reported with ``componentName == None``
    (no drop, no fabrication, no rejection).
+3. The pod statuses of the deployment's environment, read by name, and of
+   its cluster contain the same pods for the deployment as the
+   deployment's own, and an unknown environment raises
+   ``ResourceNotFoundError``.
 
 We use the already-running ``deployed_simple_app`` session fixture
 (driver: ``simple-app``, single component ``server``) so this test
@@ -29,7 +33,7 @@ from uuid import UUID
 import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Pod as AsyncPod
-from styrmin_sdk import StyrminClient
+from styrmin_sdk import ResourceNotFoundError, StyrminClient
 
 from tests.e2e.drivers import ScenarioDriver
 
@@ -87,6 +91,8 @@ async def _poll_pod_statuses_until(
 @pytest.mark.ci
 async def test_pod_component_attribution(
     deployed_simple_app: dict,
+    scenario_environment_id: str,
+    styrmin_resources: dict,
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
 ) -> None:
     _, client = session_scenario_driver
@@ -130,6 +136,45 @@ async def test_pod_component_attribution(
             f"{pod_status.pod_name!r} disagrees with the live "
             f"styrmin/component label {live!r}"
         )
+
+    # The environment, read by name, and the cluster each return the
+    # deployment's pods in one call. The three reads run one after the other,
+    # so a pod that is replaced between them makes them differ: poll until
+    # they agree.
+    environment = await client.environments.get(scenario_environment_id)
+    scopes: dict[str, set[str]] = {}
+    deadline = time.time() + 60.0
+    while True:
+        deployment_pods = await client.deployments.get_pod_statuses(deployment_id)
+        environment_pods = await client.environments.get_pod_statuses(
+            environment_name=environment.name,
+            cluster_name=environment.cluster.name,
+        )
+        cluster_pods = await client.clusters.get_pod_statuses(
+            styrmin_resources["cluster_id"]
+        )
+        scopes = {
+            "deployment": {p.pod_name for p in deployment_pods},
+            "environment": {
+                p.pod_name for p in environment_pods if p.deployment_id == deployment_id
+            },
+            "cluster": {
+                p.pod_name for p in cluster_pods if p.deployment_id == deployment_id
+            },
+        }
+        if scopes["deployment"] and (
+            scopes["deployment"] == scopes["environment"] == scopes["cluster"]
+        ):
+            break
+        assert time.time() < deadline, (
+            f"the environment and cluster reads never returned the pods of the "
+            f"deployment read for deployment {deployment_id}: {scopes}"
+        )
+        await asyncio.sleep(5.0)
+
+    # A cluster ID passed as an environment ID matches no environment.
+    with pytest.raises(ResourceNotFoundError):
+        await client.environments.get_pod_statuses(styrmin_resources["cluster_id"])
 
     # 2) Inject an unlabelled busybox pod into the deployment's namespace
     #    and verify the agent reports it with component_name=None.

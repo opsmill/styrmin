@@ -226,6 +226,62 @@ within about 15 seconds.
   seconds without one.
 - The GraphQL API returns the same data in the `podStatuses` and
   `deploymentStatuses` fields, so external dashboards can read it too.
+  The Python SDK reads the pod statuses as described in
+  [Reading pod statuses from a script](#reading-pod-statuses-from-a-script).
+
+### Reading pod statuses from a script
+
+The Python SDK reads the stored pod statuses of:
+
+- one deployment, with `deployments.get_pod_statuses(deployment_id)`;
+- every deployment of an environment, with
+  `environments.get_pod_statuses()`;
+- every deployment of every environment of a cluster, with
+  `clusters.get_pod_statuses()`.
+
+`environments.get_pod_statuses()` takes the environment's ID, or its name
+with the ID or name of its cluster, as `environments.get()` does.
+`clusters.get_pod_statuses()` takes the cluster's ID or name. Both read
+the environment or the cluster first, so an unknown ID or name raises
+`ResourceNotFoundError`.
+
+```python
+from styrmin_sdk import StyrminClient
+from styrmin_sdk.models import PodPhase
+
+async with StyrminClient(server_address="https://styrmin.example") as client:
+    pods = await client.environments.get_pod_statuses(
+        environment_name="staging", cluster_name="local"
+    )
+    serving = [pod for pod in pods if pod.phase is not PodPhase.SUCCEEDED]
+    if not serving or not all(pod.ready for pod in serving):
+        raise SystemExit("a pod is not ready, or no pod is reported yet")
+```
+
+The example leaves out the pods in the `SUCCEEDED` phase, such as the pod
+of a finished job, because such a pod is never ready. `all()` is true for
+an empty list, so the example also checks that the list is not empty.
+
+The environment and cluster reads:
+
+- include the internal deployments, such as the ingress controller of a
+  dedicated ingress. `deployments.list()` leaves these deployments out
+  unless you pass `include_internal=True`;
+- leave out the deleted deployments;
+- return the pods in no fixed order;
+- return the pods of the last report, which can be about 5 seconds old.
+  A pod that started after that report is not in the list yet, so a new
+  environment, such as a clone right after its restore, can return an
+  empty list.
+
+`clusters.get_pod_statuses()` returns every pod of the cluster in one
+response, without paging, so its size grows with the number of pods.
+`environments.get_pod_statuses()` reads one environment at a time.
+
+Each item is a `PodStatus` from `styrmin_sdk.models`. Its `deployment_id`
+names the deployment of the pod, and its `phase` is a `PodPhase`.
+`deployments.get_pod_statuses()` returns the same fields, except
+`deployment_id`.
 
 ### Next steps
 

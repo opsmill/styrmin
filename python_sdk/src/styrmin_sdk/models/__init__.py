@@ -6,6 +6,7 @@ from styrmin_sdk.graphql._generated.enums import (
     EnvironmentCloneStatus,
     EnvironmentRestoreStatus,
     IngressControllerAction,
+    PodPhase,
     ReplicaSource,
     StepKind,
     StepStatus,
@@ -58,6 +59,10 @@ from styrmin_sdk.graphql._generated.get_environment_restore import (
 from styrmin_sdk.graphql._generated.get_environment_restore import (
     GetEnvironmentRestoreEnvironmentRestoreSkippedConstituents as SkippedConstituent,
 )
+from styrmin_sdk.graphql._generated.get_environment_services import (
+    GetEnvironmentServicesEnvironmentServices as DeployedService,
+)
+from styrmin_sdk.graphql._generated.get_pod_statuses import GetPodStatusesPodStatuses as PodStatus
 from styrmin_sdk.graphql._generated.get_restore import GetRestoreRestore as Restore
 from styrmin_sdk.graphql._generated.get_step_output import GetStepOutputStep as StepOutput
 from styrmin_sdk.graphql._generated.get_task import GetTaskTask as Task
@@ -120,6 +125,7 @@ __all__ = [
     "ComponentConfigInput",
     "ComponentReplicas",
     "Context",
+    "DeployedService",
     "Deployment",
     "DeploymentConfigInput",
     "DeploymentManifest",
@@ -139,6 +145,8 @@ __all__ = [
     "HelmChart",
     "IngressControllerAction",
     "ParameterValueInput",
+    "PodPhase",
+    "PodStatus",
     "ReplicaSource",
     "ResolvedManifest",
     "ResourceRequirementsInput",

@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from styrmin_sdk._input_checks import to_graphql_enum_names, validate_input_strict
 from styrmin_sdk._queries import load_query
 from styrmin_sdk.graphql._generated.create_cluster import CreateCluster, CreateClusterCreateCluster
 from styrmin_sdk.graphql._generated.get_cluster import GetCluster, GetClusterCluster
+from styrmin_sdk.graphql._generated.get_pod_statuses import GetPodStatuses
 from styrmin_sdk.graphql._generated.input_types import UpdateClusterInput
 from styrmin_sdk.graphql._generated.list_clusters import ListClusters, ListClustersClusters
 from styrmin_sdk.graphql._generated.update_cluster import UpdateCluster, UpdateClusterUpdateCluster
 from styrmin_sdk.resources._base import BaseResource, JsonValue
+
+if TYPE_CHECKING:
+    from styrmin_sdk.models import PodStatus
 
 #: The server starts one redeploy per changed deployment before it answers.
 UPDATE_CLUSTER_TIMEOUT_SECONDS = 600.0
@@ -66,6 +70,37 @@ class ClusterResource(BaseResource):
         result = await self._transport.execute(load_query("get_cluster"), variables)
         self._check_graphql_errors(result)
         return self._parse(GetCluster, result["data"], "cluster", GetClusterCluster)
+
+    async def get_pod_statuses(
+        self,
+        cluster_id: str | UUID | None = None,
+        cluster_name: str | None = None,
+    ) -> list[PodStatus]:
+        """Read the pod statuses of every deployment of every environment of a cluster.
+
+        Takes the same arguments as :meth:`get`: the cluster's ID or its name. The method
+        reads the cluster first, so an unknown ID or name raises ``ResourceNotFoundError``.
+
+        - The response lists every pod of the cluster at once, without paging, so its
+          size grows with the number of pods. ``environments.get_pod_statuses()``
+          reads one environment.
+        - Internal deployments, such as the ingress controller of a dedicated ingress,
+          are included. ``deployments.list(environment_id, include_internal=True)``
+          lists them.
+        - Deleted deployments are left out.
+        - The order of the list is not fixed.
+        - The agent reports pods about every 5 seconds, so a pod can be up to one report
+          old, and a pod that started since the last report is missing.
+          ``all(pod.ready for pod in pods)`` is also true for an empty list, and the pod
+          of a finished job, in the ``SUCCEEDED`` phase, is never ready.
+        """
+        cluster = await self.get(cluster_id, cluster_name)
+        result = await self._transport.execute(
+            load_query("get_pod_statuses"),
+            {"clusterId": str(cluster.id)},
+        )
+        self._check_graphql_errors(result)
+        return GetPodStatuses.model_validate(result["data"]).pod_statuses
 
     async def update(
         self,

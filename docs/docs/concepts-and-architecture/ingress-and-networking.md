@@ -423,6 +423,32 @@ must stay in the meantime. Then delete the alias:
 kubectl delete service --namespace <namespace> <alias>
 ```
 
+#### Listing the services of an environment
+
+In the Python SDK, `environments.get_services()` lists the services of
+every deployment of an environment. It takes the environment's ID, or its
+name with the ID or name of its cluster, as `environments.get()` does, and
+raises `ResourceNotFoundError` when no environment matches.
+
+Each service gives:
+
+- `resolved_name`: the name by which the other deployments of the
+  environment connect to the service, and the name of its aliases. It is
+  the service name that the driver declares, or the service name override
+  of the deployment.
+- `driver_service_name`, `kind`, `scope`, `port` and `component`, as the
+  driver declares them.
+- `deployment_id`: the deployment that owns the service.
+
+The list includes the services of internal deployments, such as the
+ingress controller of a dedicated ingress. `deployments.list()` leaves
+these deployments out unless you pass `include_internal=True`. The list
+leaves out deleted deployments, because Styrmin removes their services
+when the deletion ends, and its order is not fixed.
+
+The list gives no URL or FQDN. `deployments.get()` returns them for one
+deployment, in `deployed_services`.
+
 ### What you configure
 
 - **Once per cluster:** an FQDN suffix and an ingress for the Styrmin

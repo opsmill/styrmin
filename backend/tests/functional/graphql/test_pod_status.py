@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+from uuid import UUID
+
 import pytest
 from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from styrmin_backend.db.models import PodPhase, PodStatus
+from styrmin_backend.db.models import Deployment, DeploymentState, PodPhase, PodStatus
 
 from .conftest import gql
 from .seeds import seed_cluster, seed_deployment, seed_environment
@@ -118,3 +121,81 @@ async def test_pod_statuses_filters_by_each_arg(
     assert names == {"pod-a"}, (
         f"filter_arg={filter_arg} should restrict to pod-a; got {names}"
     )
+
+
+def _pod_report(deployment_id: UUID, pod_name: str) -> dict[str, Any]:
+    return {
+        "deploymentId": str(deployment_id),
+        "pods": [
+            {
+                "podName": pod_name,
+                "namespace": f"styrmin-{deployment_id}",
+                "phase": "RUNNING",
+                "ready": True,
+                "restartCount": 0,
+                "containerStatuses": None,
+                "nodeName": "node-1",
+                "startedAt": None,
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize("filter_arg", ["environmentId", "clusterId"])
+@pytest.mark.asyncio
+async def test_pod_statuses_of_environment_and_cluster_leave_out_deleted_deployments(
+    client: AsyncClient, session: AsyncSession, filter_arg: str
+) -> None:
+    """A deployment that becomes DELETED keeps the pods of the agent's last report.
+
+    The agent stops reporting a DELETED deployment, so nothing removes those rows.
+    """
+    cluster = await seed_cluster(session)
+    environment = await seed_environment(session, cluster=cluster)
+    remaining = await seed_deployment(session, environment=environment)
+    deleted = await seed_deployment(session, environment=environment)
+    deleted.status = DeploymentState.DELETING
+    session.add(deleted)
+    await session.commit()
+    cluster_id, environment_id = cluster.id, environment.id
+    remaining_id, deleted_id = remaining.id, deleted.id
+
+    await gql(
+        client,
+        "report_pod_statuses",
+        {
+            "reports": [
+                _pod_report(remaining_id, "remaining-pod"),
+                _pod_report(deleted_id, "terminating-pod"),
+            ]
+        },
+    )
+    reported = await gql(
+        client,
+        "report_deployment_statuses",
+        {
+            "reports": [
+                {
+                    "deploymentId": str(deleted_id),
+                    "phase": "Deleted",
+                    "displayState": "Deleted",
+                }
+            ]
+        },
+    )
+    assert reported["reportDeploymentStatuses"]["deploymentsUpdated"] == 1
+    session.expire_all()
+    tombstoned = await session.get(Deployment, deleted_id)
+    assert tombstoned is not None
+    assert tombstoned.deleted_at is not None
+
+    if filter_arg == "environmentId":
+        variables = {"environmentId": str(environment_id)}
+    else:
+        variables = {"clusterId": str(cluster_id)}
+    data = await gql(client, "list_pod_statuses", variables)
+
+    assert {row["podName"] for row in data["podStatuses"]} == {"remaining-pod"}
+    # The deployment's own read is unchanged.
+    data = await gql(client, "list_pod_statuses", {"deploymentId": str(deleted_id)})
+    assert {row["podName"] for row in data["podStatuses"]} == {"terminating-pod"}

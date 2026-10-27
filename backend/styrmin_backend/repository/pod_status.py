@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from uuid import UUID
 
 from sqlalchemy import delete
-from sqlmodel import select
+from sqlmodel import col, select
 
 from styrmin_backend.db.models import PodStatus
 from styrmin_backend.repository.base import BaseRepository
@@ -31,12 +31,12 @@ class PodStatusRepository(BaseRepository[PodStatus], ABC):
 
     @abstractmethod
     async def find_by_environment(self, environment_id: UUID) -> list[PodStatus]:
-        """Get all pod statuses for an environment."""
+        """Get the pod statuses of the environment's deployments that are not deleted."""
         raise NotImplementedError("Method not implemented yet.")
 
     @abstractmethod
     async def find_by_cluster(self, cluster_id: UUID) -> list[PodStatus]:
-        """Get all pod statuses for a cluster."""
+        """Get the pod statuses of the cluster's deployments that are not deleted."""
         raise NotImplementedError("Method not implemented yet.")
 
 
@@ -96,19 +96,27 @@ class SQLModelPodStatusRepository(
         return result.rowcount  # type: ignore[return-value]
 
     async def find_by_environment(self, environment_id: UUID) -> list[PodStatus]:
-        """Get all pod statuses for an environment via Deployment -> Environment."""
+        """Get the pod statuses of the environment's deployments that are not deleted.
+
+        The agent stops reporting a deployment once it is deleted, so the pods of its
+        last report stay in the table.
+        """
         from styrmin_backend.db.models import Deployment
 
         statement = (
             select(self.model_class)
             .join(Deployment, self.model_class.deployment_id == Deployment.id)
             .where(Deployment.environment_id == environment_id)
+            .where(col(Deployment.deleted_at).is_(None))
         )
         result = await self.session.exec(statement)
         return list(result.all())
 
     async def find_by_cluster(self, cluster_id: UUID) -> list[PodStatus]:
-        """Get all pod statuses for a cluster via Deployment -> Environment -> Cluster."""
+        """Get the pod statuses of the cluster's deployments that are not deleted.
+
+        See ``find_by_environment`` for why deleted deployments can still have rows.
+        """
         from styrmin_backend.db.models import Deployment, Environment
 
         statement = (
@@ -116,6 +124,7 @@ class SQLModelPodStatusRepository(
             .join(Deployment, self.model_class.deployment_id == Deployment.id)
             .join(Environment, Deployment.environment_id == Environment.id)
             .where(Environment.cluster_id == cluster_id)
+            .where(col(Deployment.deleted_at).is_(None))
         )
         result = await self.session.exec(statement)
         return list(result.all())
