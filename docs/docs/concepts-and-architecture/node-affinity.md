@@ -147,11 +147,11 @@ no node matches both. Styrmin saves this config without a warning.
 
 What you view:
 
-- The deployment's **Pods** tab shows the pods as `PENDING`, without the
-  reason. To read why the scheduler did not place a pod, expand the pod,
-  open **Commands**, and run the **Events** or the **Describe** command.
-  The `FailedScheduling` event says that the nodes didn't match the
-  pod's node affinity.
+- The deployment's **Pods** tab shows the pods as `PENDING`. When you
+  expand a pod, it shows `Not scheduled: Unschedulable` and the
+  scheduler's message, which says that the nodes didn't match the pod's
+  node affinity or selector. When the deployment fails, the error of the
+  failed step names these pods with the same reason and message.
 - The deployment becomes `FAILED` when its pods are not ready within the
   readiness timeout, and FluxCD rolls the release back at the HelmRelease
   timeout. See

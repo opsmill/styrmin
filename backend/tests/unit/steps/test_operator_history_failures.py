@@ -1038,3 +1038,204 @@ async def test_failure_without_pod_reasons_keeps_the_cr_message(
 
     helmrelease = await _step(uow, parents, HELMRELEASE)
     assert _errors(helmrelease) == [(1, TIMEOUT, _at(300))]
+
+
+# --- Pod reasons: scheduling, init containers and messages (#574) ------------------
+
+UNSCHEDULABLE = (
+    "0/2 nodes are available: pod has unbound immediate PersistentVolumeClaims. "
+    "not found"
+)
+
+
+def _entry(
+    name: str,
+    state: str,
+    *,
+    kind: str = "container",
+    message: str | None = None,
+    restart_count: int = 0,
+    ready: bool = False,
+) -> dict[str, Any]:
+    """One ``containerStatuses`` entry as the agent reports it (ADR-088)."""
+    return {
+        "name": name,
+        "kind": kind,
+        "ready": ready,
+        "state": state,
+        "message": message,
+        "restart_count": restart_count,
+        "image": "" if kind == "pod" else "registry.example.com/app:1.0",
+        "started_at": None,
+    }
+
+
+async def _seed_entries(
+    uow: SqlModelUnitOfWork,
+    parents: Parents,
+    name: str,
+    *entries: dict[str, Any],
+    phase: PodPhase = PodPhase.PENDING,
+) -> None:
+    uow.session.add(
+        PodStatus(
+            pod_name=name,
+            namespace="styrmin-steps",
+            phase=phase,
+            container_statuses=list(entries),
+            deployment_id=parents.deployment_id,
+            last_polled_at=T0,
+        )
+    )
+    await uow.session.flush()
+
+
+async def _timed_out_error(uow: SqlModelUnitOfWork, parents: Parents) -> str:
+    await apply_operator_report(_timed_out(parents), _at(300), uow)
+    helmrelease = await _step(uow, parents, HELMRELEASE)
+    return helmrelease.errors[0].message
+
+
+async def test_pod_reasons_name_a_pod_that_is_not_scheduled(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    await _running_helmrelease(uow, parents)
+    await _seed_entries(
+        uow,
+        parents,
+        "app-0",
+        _entry(
+            "PodScheduled", "waiting:Unschedulable", kind="pod", message=UNSCHEDULABLE
+        ),
+    )
+
+    assert await _timed_out_error(uow, parents) == (
+        f"{TIMEOUT}\nPods not ready: app-0 (Unschedulable: {UNSCHEDULABLE})"
+    )
+
+
+async def test_pod_reasons_name_a_failing_init_container(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    # The back-off message of CrashLoopBackOff only gives the delay, so it is left out.
+    await _running_helmrelease(uow, parents)
+    await _seed_entries(
+        uow,
+        parents,
+        "semaphore-0",
+        _entry(
+            "admin",
+            "waiting:CrashLoopBackOff",
+            kind="init",
+            message="back-off 2m40s restarting failed container=admin",
+            restart_count=5,
+        ),
+        _entry("semaphore", "waiting:PodInitializing"),
+    )
+
+    assert await _timed_out_error(uow, parents) == (
+        f"{TIMEOUT}\nPods not ready: semaphore-0 (init container admin: CrashLoopBackOff)"
+    )
+
+
+@pytest.mark.parametrize(
+    ("restarts", "text"),
+    [
+        (0, "still running"),
+        (1, "running after 1 restart"),
+        (5, "running after 5 restarts"),
+    ],
+)
+async def test_pod_reasons_name_an_init_container_that_runs_again(
+    uow: SqlModelUnitOfWork, parents: Parents, restarts: int, text: str
+) -> None:
+    # Between two back-offs the init container runs again, with no reason to read.
+    # Without a restart, it may wait for a service that does not answer (0 restarts).
+    await _running_helmrelease(uow, parents)
+    await _seed_entries(
+        uow,
+        parents,
+        "semaphore-0",
+        _entry("admin", "running", kind="init", restart_count=restarts),
+        _entry("semaphore", "waiting:PodInitializing"),
+    )
+
+    assert await _timed_out_error(uow, parents) == (
+        f"{TIMEOUT}\nPods not ready: semaphore-0 (init container admin: {text})"
+    )
+
+
+async def test_pod_reasons_keep_the_kubelet_message_on_one_line(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    await _running_helmrelease(uow, parents)
+    await _seed_entries(
+        uow,
+        parents,
+        "app-0",
+        _entry(
+            "app",
+            "waiting:CreateContainerConfigError",
+            message='secret "db-credentials"\n  not found',
+        ),
+    )
+
+    assert await _timed_out_error(uow, parents) == (
+        f"{TIMEOUT}\nPods not ready: app-0 "
+        '(app: CreateContainerConfigError: secret "db-credentials" not found)'
+    )
+
+
+async def test_pod_reasons_cut_a_long_message(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    await _running_helmrelease(uow, parents)
+    await _seed_entries(
+        uow, parents, "app-0", _entry("app", "waiting:ErrImagePull", message="x" * 400)
+    )
+
+    assert await _timed_out_error(uow, parents) == (
+        f"{TIMEOUT}\nPods not ready: app-0 (app: ErrImagePull: {'x' * 299}…)"
+    )
+
+
+@pytest.mark.parametrize(
+    "reason", ["RunContainerError", "CreatePodSandboxError", "ErrImageNeverPull"]
+)
+async def test_pod_reasons_name_any_reason_that_is_not_a_starting_one(
+    uow: SqlModelUnitOfWork, parents: Parents, reason: str
+) -> None:
+    await _running_helmrelease(uow, parents)
+    await _seed_entries(uow, parents, "app-0", _entry("app", f"waiting:{reason}"))
+
+    assert await _timed_out_error(uow, parents) == (
+        f"{TIMEOUT}\nPods not ready: app-0 (app: {reason})"
+    )
+
+
+async def test_pod_reasons_skip_starting_and_ready_containers(
+    uow: SqlModelUnitOfWork, parents: Parents
+) -> None:
+    await _running_helmrelease(uow, parents)
+    await _seed_entries(
+        uow,
+        parents,
+        "app-0",
+        _entry("migrate", "terminated:Completed", kind="init", restart_count=2),
+        _entry("app", "waiting:PodInitializing"),
+    )
+    await _seed_entries(
+        uow,
+        parents,
+        "app-1",
+        _entry("proxy", "running", kind="init", ready=True),
+        _entry("app", "running", restart_count=3, ready=True),
+        _entry("worker", "waiting:ContainerCreating"),
+        # Not ready without a restart, as when its readiness probe fails: not named.
+        _entry("web", "running"),
+    )
+
+    await apply_operator_report(_timed_out(parents), _at(300), uow)
+
+    helmrelease = await _step(uow, parents, HELMRELEASE)
+    assert _errors(helmrelease) == [(1, TIMEOUT, _at(300))]

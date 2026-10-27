@@ -1,0 +1,92 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "styrmin-app-7dd9b47888-7l7n2",
+    "namespace": "styrmin-452c34e0-e0ce-4640-870b-8591ce96e3c0",
+    "labels": {
+      "app.kubernetes.io/controller": "main",
+      "app.kubernetes.io/instance": "styrmin-452c34e0-e0ce-4640-870b-8591ce96e3c0",
+      "app.kubernetes.io/name": "styrmin-452c34e0-e0ce-4640-870b-8591ce96e3c0",
+      "pod-template-hash": "7dd9b47888",
+      "styrmin/component": "app",
+      "styrmin/deployment_id": "452c34e0-e0ce-4640-870b-8591ce96e3c0",
+      "styrmin/environment_id": "6c0a1563-8fdb-4351-9947-4e283b3ecd16"
+    }
+  },
+  "spec": {
+    "nodeName": "styrmin-obs-worker",
+    "initContainers": [],
+    "containers": [
+      {
+        "name": "app",
+        "image": "traefik/whoami:v1.99.99"
+      }
+    ]
+  },
+  "status": {
+    "conditions": [
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-27T08:00:13Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "PodReadyToStartContainers"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-27T08:00:13Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "Initialized"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-27T08:00:13Z",
+        "message": "containers with unready status: [app]",
+        "observedGeneration": 1,
+        "reason": "ContainersNotReady",
+        "status": "False",
+        "type": "Ready"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-27T08:00:13Z",
+        "message": "containers with unready status: [app]",
+        "observedGeneration": 1,
+        "reason": "ContainersNotReady",
+        "status": "False",
+        "type": "ContainersReady"
+      },
+      {
+        "lastProbeTime": null,
+        "lastTransitionTime": "2026-10-27T08:00:13Z",
+        "observedGeneration": 1,
+        "status": "True",
+        "type": "PodScheduled"
+      }
+    ],
+    "containerStatuses": [
+      {
+        "image": "traefik/whoami:v1.99.99",
+        "imageID": "",
+        "lastState": {},
+        "name": "app",
+        "ready": false,
+        "restartCount": 0,
+        "started": false,
+        "state": {
+          "waiting": {
+            "message": "Back-off pulling image \"traefik/whoami:v1.99.99\": ErrImagePull: rpc error: code = NotFound desc = failed to pull and unpack image \"docker.io/traefik/whoami:v1.99.99\": failed to resolve reference \"docker.io/traefik/whoami:v1.99.99\": docker.io/traefik/whoami:v1.99.99: not found",
+            "reason": "ImagePullBackOff"
+          }
+        }
+      }
+    ],
+    "observedGeneration": 1,
+    "phase": "Pending",
+    "qosClass": "BestEffort",
+    "resources": {},
+    "startTime": "2026-10-27T08:00:13Z"
+  }
+}

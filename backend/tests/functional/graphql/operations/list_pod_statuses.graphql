@@ -15,5 +15,6 @@ query ListPodStatuses(
         ready
         restartCount
         nodeName
+        containerStatuses
     }
 }

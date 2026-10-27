@@ -20,6 +20,9 @@ from styrmin_backend.agent.service.kubernetes.primitives import (
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.agent.status.models import (
+    CONTAINER_KIND,
+    INIT_CONTAINER_KIND,
+    POD_KIND,
     DeploymentStatusReport,
     DeploymentPodStatusReport,
     EnvironmentForStatus,
@@ -48,48 +51,137 @@ _CRD_PLURAL = "styrmindeployments"
 # ``component_name = None`` rather than dropped or coerced.
 _COMPONENT_LABEL_KEY = "styrmin/component"
 
+_POD_SCHEDULED = "PodScheduled"
+#: Waiting reasons whose kubelet message holds what a command in the container printed:
+#: the message of ``PostStartHookError`` quotes the output of the ``postStart`` hook.
+_REASONS_WITH_CONTAINER_OUTPUT = frozenset({"PostStartHookError"})
+
+
+def _entry(
+    name: str,
+    kind: str,
+    state: str,
+    *,
+    message: str | None = None,
+    ready: bool = False,
+    restart_count: int = 0,
+    image: str = "",
+    started_at: str | None = None,
+) -> dict:
+    """One ``containerStatuses`` entry; every kind has the same keys (ADR-088)."""
+    return {
+        "name": name,
+        "kind": kind,
+        "ready": ready,
+        "state": state,
+        "message": message,
+        "restart_count": restart_count,
+        "image": image,
+        "started_at": started_at,
+    }
+
+
+def _container_entry(cs, kind: str) -> dict:  # type: ignore[no-untyped-def]
+    """One ``containerStatuses`` entry from a V1ContainerStatus.
+
+    ``message`` is the kubelet's message of a waiting container, such as the
+    registry error of ``ErrImagePull``. The message of a terminated container,
+    and the message of a waiting reason that quotes the container's output, are
+    left out: the container writes them.
+    """
+    state = "unknown"
+    message = None
+    if cs.state:
+        if cs.state.running:
+            state = "running"
+        elif cs.state.waiting:
+            reason = cs.state.waiting.reason
+            state = f"waiting:{reason or 'unknown'}"
+            if reason not in _REASONS_WITH_CONTAINER_OUTPUT:
+                message = cs.state.waiting.message or None
+        elif cs.state.terminated:
+            state = f"terminated:{cs.state.terminated.reason or 'unknown'}"
+    return _entry(
+        cs.name,
+        kind,
+        state,
+        message=message,
+        ready=cs.ready or False,
+        restart_count=cs.restart_count or 0,
+        image=cs.image or "",
+        started_at=(
+            cs.state.running.started_at.isoformat()
+            if cs.state and cs.state.running and cs.state.running.started_at
+            else None
+        ),
+    )
+
+
+def _scheduling_entry(status) -> dict | None:  # type: ignore[no-untyped-def]
+    """The ``pod`` entry of a pod that is not scheduled, with the scheduler's reason and message."""
+    for condition in status.conditions or ():
+        if condition.type == _POD_SCHEDULED and condition.status == "False":
+            return _entry(
+                _POD_SCHEDULED,
+                POD_KIND,
+                f"waiting:{condition.reason or 'unknown'}",
+                message=condition.message or None,
+            )
+    return None
+
+
+def _is_initialized(status) -> bool:  # type: ignore[no-untyped-def]
+    return any(
+        condition.type == "Initialized" and condition.status == "True"
+        for condition in status.conditions or ()
+    )
+
+
+def _restart_count(pod) -> int:  # type: ignore[no-untyped-def]
+    """The pod's restarts as ``kubectl get pods`` counts them.
+
+    While an init container has not finished, the restarts of the init containers;
+    after that, the restarts of the containers and of the sidecar init containers.
+    """
+    status = pod.status
+    init_statuses = status.init_container_statuses or []
+    if init_statuses and not _is_initialized(status):
+        return sum(cs.restart_count or 0 for cs in init_statuses)
+    sidecars = {
+        container.name
+        for container in ((pod.spec.init_containers if pod.spec else None) or ())
+        if container.restart_policy == "Always"
+    }
+    return sum(cs.restart_count or 0 for cs in status.container_statuses or ()) + sum(
+        cs.restart_count or 0 for cs in init_statuses if cs.name in sidecars
+    )
+
 
 def _extract_pod_data(pod) -> PodStatusData:  # type: ignore[no-untyped-def]
-    """Extract relevant status fields from a V1Pod object."""
+    """Extract relevant status fields from a V1Pod object.
+
+    ``containerStatuses`` lists, in this order, a ``pod`` entry when the pod is not
+    scheduled, the init containers and the containers (ADR-088).
+    """
     status = pod.status
     container_statuses_raw = status.container_statuses or []
 
     container_statuses = []
-    total_restarts = 0
-    all_ready = True
+    scheduling = _scheduling_entry(status)
+    if scheduling is not None:
+        container_statuses.append(scheduling)
+    container_statuses.extend(
+        _container_entry(cs, INIT_CONTAINER_KIND)
+        for cs in status.init_container_statuses or ()
+    )
+    container_statuses.extend(
+        _container_entry(cs, CONTAINER_KIND) for cs in container_statuses_raw
+    )
 
-    for cs in container_statuses_raw:
-        total_restarts += cs.restart_count or 0
-        if not cs.ready:
-            all_ready = False
-
-        state = "unknown"
-        if cs.state:
-            if cs.state.running:
-                state = "running"
-            elif cs.state.waiting:
-                state = f"waiting:{cs.state.waiting.reason or 'unknown'}"
-            elif cs.state.terminated:
-                state = f"terminated:{cs.state.terminated.reason or 'unknown'}"
-
-        container_statuses.append(
-            {
-                "name": cs.name,
-                "ready": cs.ready or False,
-                "state": state,
-                "restart_count": cs.restart_count or 0,
-                "image": cs.image or "",
-                "started_at": (
-                    cs.state.running.started_at.isoformat()
-                    if cs.state and cs.state.running and cs.state.running.started_at
-                    else None
-                ),
-            }
-        )
-
-    # If no container statuses yet (pod is Pending), mark as not ready
-    if not container_statuses_raw:
-        all_ready = False
+    # A pod without container statuses (not scheduled or not started) is not ready.
+    all_ready = bool(container_statuses_raw) and all(
+        cs.ready for cs in container_statuses_raw
+    )
 
     phase = PodPhase((status.phase or "Unknown").upper())
 
@@ -108,7 +200,7 @@ def _extract_pod_data(pod) -> PodStatusData:  # type: ignore[no-untyped-def]
         namespace=pod.metadata.namespace,
         phase=phase,
         ready=all_ready,
-        restartCount=total_restarts,
+        restartCount=_restart_count(pod),
         containerStatuses=container_statuses or None,
         nodeName=pod.spec.node_name if pod.spec else None,
         componentName=component_name,

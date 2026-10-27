@@ -17,6 +17,7 @@ import pytest
 from httpx import AsyncClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from styrmin_backend.agent.status.reporter import _extract_pod_data
 from styrmin_backend.db.models import (
     Role,
     Step as StepRow,
@@ -29,6 +30,8 @@ from styrmin_backend.db.models import (
 from styrmin_backend.domain.steps import MAX_OUTPUT_LINES
 from styrmin_backend.services.auth.bootstrap import ensure_actions_service_account
 from styrmin_backend.services.auth.session import create_session
+
+from tests.helpers.pods import load_pod
 
 from ._queries import load_query
 from .seeds import seed_application_instance, seed_deployment, seed_task, seed_user
@@ -302,6 +305,76 @@ async def test_failed_helmrelease_report_reaches_the_database_and_read_only(
         False,
     )
     assert returned["operator:prerequisites"]["status"] == "SUCCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_failure_causes_of_kind_pods_reach_the_step_and_read_only(
+    unauth_client: AsyncClient, session: AsyncSession, admin_token: str
+) -> None:
+    """#574: the agent's report of three pods from kind names each cause in the step error."""
+    rollout = await _seed_rollout(session, helmrelease_running=True)
+    pods = [
+        _extract_pod_data(await load_pod(name)).model_dump(mode="json", by_alias=True)
+        for name in (
+            "pod_image_pull_failing",
+            "pod_init_container_failing",
+            "pod_not_scheduled",
+        )
+    ]
+    await _post(
+        unauth_client,
+        "report_pod_statuses",
+        {"reports": [{"deploymentId": str(rollout.deployment_id), "pods": pods}]},
+        admin_token,
+    )
+    timeout = "Deployment did not reach Ready within 270s (phase: CreatingHelmRelease)"
+    await _report_status(
+        unauth_client, admin_token, rollout, message=timeout, conditions=[]
+    )
+
+    image_message = (
+        'Back-off pulling image "traefik/whoami:v1.99.99": ErrImagePull: rpc error: '
+        "code = NotFound desc = failed to pull and unpack image "
+        '"docker.io/traefik/whoami:v1.99.99": failed to resolve reference '
+        '"docker.io/traefik/whoami:v1.99.99": docker.io/traefik/whoami:v1.99.99: not found'
+    )
+    expected = (
+        f"{timeout}\nPods not ready: "
+        f"styrmin-app-5c88845fb4-4ggxf (Unschedulable: 0/2 nodes are available: "
+        "pod has unbound immediate PersistentVolumeClaims. not found), "
+        f"styrmin-app-7dd9b47888-7l7n2 (app: ImagePullBackOff: {image_message}), "
+        "styrmin-semaphore-cfc7bb7b9-v9l2d (init container admin: running after 7 restarts)"
+    )
+    row = await _stored(session, rollout.step_ids["operator:helmrelease"])
+    assert row.status is StepStatus.FAILED
+    assert [message for _attempt, message, _at in _stored_errors(row)] == [expected]
+
+    read_only = await _token(session, Role.READ_ONLY)
+    data = await _post(
+        unauth_client, "get_task_steps", {"taskId": str(rollout.task_id)}, read_only
+    )
+    step = {s["key"]: s for s in data["task"]["steps"]}["operator:helmrelease"]
+    assert step["error"] == expected
+    data = await _post(
+        unauth_client,
+        "list_pod_statuses",
+        {"deploymentId": str(rollout.deployment_id)},
+        read_only,
+    )
+    returned = {pod["podName"]: pod for pod in data["podStatuses"]}
+    assert returned["styrmin-semaphore-cfc7bb7b9-v9l2d"]["restartCount"] == 7
+    assert [
+        (entry["kind"], entry["name"], entry["state"], entry["message"])
+        for entry in returned["styrmin-app-5c88845fb4-4ggxf"]["containerStatuses"]
+    ] == [
+        (
+            "pod",
+            "PodScheduled",
+            "waiting:Unschedulable",
+            "0/2 nodes are available: pod has unbound immediate PersistentVolumeClaims. "
+            "not found",
+        )
+    ]
 
 
 @pytest.mark.asyncio

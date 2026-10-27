@@ -12,14 +12,16 @@ the target version:
 
 The prerequisites scenario fills a ``ResourceQuota`` so the operator cannot
 re-create a network policy, the missing-namespace scenario (#313) deletes the
-deployment's namespace before an update, and the HelmRelease scenario applies a
-manifest with ``apply(wait=True)`` whose image override cannot be pulled. The
-HelmRelease scenario runs last in the module, because it leaves the deployment
-failed.
+deployment's namespace before an update, the pod-status scenario (#574) adds a
+pod that no node accepts and a pod whose init container fails, and the
+HelmRelease scenario applies a manifest with ``apply(wait=True)`` whose image
+override cannot be pulled. The HelmRelease scenario runs last in the module,
+because it leaves the deployment failed.
 
-The first four tests are ``api_only``: they read the steps through the SDK,
-and the frontend component tests (``StepListFailures.test.tsx``) cover how each
-failure looks on the page. The HelmRelease test runs under both entrypoints.
+The first five tests are ``api_only``: they read the steps and pod statuses
+through the SDK, and the frontend component tests (``StepListFailures.test.tsx``,
+``PodRow.test.tsx``) cover how each failure looks on the page. The HelmRelease
+test runs under both entrypoints.
 """
 
 from __future__ import annotations
@@ -97,6 +99,14 @@ AFTER_ROLLED_BACK_WATCH = 15.0
 # Below uvicorn's 5-second keep-alive timeout, so a read never reuses a connection
 # that the server closes at that moment.
 POLL_INTERVAL = 3.0
+
+# Two pods that #574's test adds to the deployment's namespace: one that no node
+# accepts, and one whose init container exits with an error.
+NOT_SCHEDULED_POD = "e2e-574-not-scheduled"
+INIT_FAILING_POD = "e2e-574-init-fails"
+# The kubelet restarts the init container after 10 s, and the agent reports every 5 s.
+POD_CAUSES_TIMEOUT = 120.0
+POD_DELETE_TIMEOUT = 60.0
 
 CR_GROUP = "styrmin.io"
 CR_VERSION = "v1alpha1"
@@ -398,6 +408,75 @@ async def _manifest_with_image(
     )
 
 
+def _failure_cause_pods(image: str) -> list[dict[str, Any]]:
+    """A pod that no node accepts, and a pod whose init container exits with 3."""
+    container = {
+        "name": "app",
+        "image": image,
+        "imagePullPolicy": "IfNotPresent",
+        "command": ["sh", "-c", "sleep 3600"],
+    }
+    return [
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {"name": NOT_SCHEDULED_POD},
+            "spec": {
+                "nodeSelector": {"styrmin.io/e2e-missing-node": "true"},
+                "containers": [container],
+                "terminationGracePeriodSeconds": 0,
+            },
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {"name": INIT_FAILING_POD},
+            "spec": {
+                "initContainers": [
+                    {
+                        "name": "fail",
+                        "image": image,
+                        "imagePullPolicy": "IfNotPresent",
+                        "command": ["sh", "-c", "exit 3"],
+                    }
+                ],
+                "containers": [container],
+                "terminationGracePeriodSeconds": 0,
+            },
+        },
+    ]
+
+
+def _entries(pod: Any, kind: str) -> list[dict[str, Any]]:
+    return [e for e in pod.container_statuses or () if e.get("kind") == kind]
+
+
+async def _delete_pods(
+    core: kubeclient.CoreV1Api, namespace: str, names: list[str]
+) -> None:
+    """Delete the pods and wait until they are gone, so later tests do not list them."""
+    for name in names:
+        try:
+            await core.delete_namespaced_pod(
+                name=name, namespace=namespace, grace_period_seconds=0
+            )
+        except ApiException as exc:
+            if exc.status != 404:
+                raise
+    deadline = time.monotonic() + POD_DELETE_TIMEOUT
+    for name in names:
+        while True:
+            try:
+                await core.read_namespaced_pod(name=name, namespace=namespace)
+            except ApiException as exc:
+                if exc.status == 404:
+                    break
+                raise
+            if time.monotonic() >= deadline:
+                raise AssertionError(f"pod {name} still exists in {namespace}")
+            await asyncio.sleep(1.0)
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -584,6 +663,85 @@ async def test_update_recreates_a_missing_namespace(
     await core.read_namespace(name=namespace)
     assert (await _styrmin_deployment_status(api, namespace)).get("phase"), namespace
     await driver.wait_for_deployment_running(deployment_id=deployment_id)
+
+
+@pytest.mark.api_only(
+    reason=(
+        "Creates pods with the Kubernetes API and reads the pod statuses through the SDK; "
+        "PodRow.test.tsx covers how the Pods tab shows them, so the [ui-chromium] variant "
+        "adds no coverage."
+    )
+)
+@pytest.mark.ci
+async def test_pod_statuses_name_scheduling_and_init_container_failures(
+    failing_actions_deployment: dict[str, Any],
+    simple_app_image: str,
+) -> None:
+    """#574: the stored pod statuses say why a pod is not scheduled and which init container fails.
+
+    The agent reports every pod of the deployment's namespace, so the test adds two
+    pods there and reads them back through the SDK, as the Pods tab and the failed
+    step do. It deletes them before the HelmRelease test, whose step error lists
+    the pods of the namespace.
+    """
+    client: StyrminClient = failing_actions_deployment["client"]
+    deployment_id = failing_actions_deployment["deployment_id"]
+    namespace = failing_actions_deployment["namespace"]
+    core = kubeclient.CoreV1Api(failing_actions_deployment["api"])
+    names = [NOT_SCHEDULED_POD, INIT_FAILING_POD]
+    try:
+        # Inside the try, so a failed second creation still deletes the first pod.
+        for pod in _failure_cause_pods(simple_app_image):
+            await core.create_namespaced_pod(namespace=namespace, body=pod)
+        deadline = time.monotonic() + POD_CAUSES_TIMEOUT
+        while True:
+            pods = {
+                pod.pod_name: pod
+                for pod in await client.deployments.get_pod_statuses(deployment_id)
+            }
+            not_scheduled = pods.get(NOT_SCHEDULED_POD)
+            init_failing = pods.get(INIT_FAILING_POD)
+            if (
+                not_scheduled is not None
+                and _entries(not_scheduled, "pod")
+                and init_failing is not None
+                and any(
+                    e.get("restart_count", 0) >= 1
+                    for e in _entries(init_failing, "init")
+                )
+            ):
+                break
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"no failure causes in the pod statuses after {POD_CAUSES_TIMEOUT}s: "
+                    f"{not_scheduled!r} {init_failing!r}"
+                )
+            await asyncio.sleep(POLL_INTERVAL)
+    finally:
+        await _delete_pods(core, namespace, names)
+
+    # The pod that no node accepts: the PodScheduled condition, its reason and message.
+    assert not_scheduled.container_statuses[0]["kind"] == "pod", not_scheduled
+    [scheduling] = _entries(not_scheduled, "pod")
+    assert scheduling["name"] == "PodScheduled", scheduling
+    assert scheduling["state"] == "waiting:Unschedulable", scheduling
+    assert "node affinity/selector" in (scheduling["message"] or ""), scheduling
+    assert _entries(not_scheduled, "container") == [], not_scheduled
+
+    # The pod whose init container fails: the init container, before the container.
+    kinds = [e.get("kind") for e in init_failing.container_statuses]
+    assert kinds == ["init", "container"], init_failing
+    [init] = _entries(init_failing, "init")
+    assert init["name"] == "fail", init
+    assert init["state"] in {
+        "running",
+        "terminated:Error",
+        "waiting:CrashLoopBackOff",
+    }, init
+    # kubectl counts the init container's restarts while the pod initializes.
+    assert init_failing.restart_count == init["restart_count"] >= 1, init_failing
+    [app] = _entries(init_failing, "container")
+    assert app["state"] == "waiting:PodInitializing", app
 
 
 @pytest.mark.ci
