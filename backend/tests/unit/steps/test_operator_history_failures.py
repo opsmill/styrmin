@@ -1165,6 +1165,56 @@ async def test_pod_reasons_name_an_init_container_that_runs_again(
     )
 
 
+@pytest.mark.parametrize(
+    ("sidecar", "text"),
+    [
+        # Its readiness probe fails: the container started next to it.
+        (_entry("proxy", "running", kind="sidecar"), "not ready"),
+        (
+            _entry("proxy", "running", kind="sidecar", restart_count=2),
+            "running after 2 restarts",
+        ),
+        (
+            _entry(
+                "proxy",
+                "waiting:CrashLoopBackOff",
+                kind="sidecar",
+                message="back-off 20s restarting failed container=proxy",
+                restart_count=3,
+            ),
+            "CrashLoopBackOff",
+        ),
+        (
+            _entry(
+                "proxy",
+                "waiting:ErrImagePull",
+                kind="sidecar",
+                message='failed to pull image "proxy:9.9": not found',
+            ),
+            'ErrImagePull: failed to pull image "proxy:9.9": not found',
+        ),
+    ],
+)
+async def test_pod_reasons_name_a_sidecar_as_a_sidecar(
+    uow: SqlModelUnitOfWork, parents: Parents, sidecar: dict[str, Any], text: str
+) -> None:
+    # A sidecar is an init container with `restartPolicy: Always`: it runs for the
+    # pod's whole life, so "still running" is not a cause for it.
+    await _running_helmrelease(uow, parents)
+    await _seed_entries(
+        uow,
+        parents,
+        "app-0",
+        sidecar,
+        _entry("app", "running", ready=True),
+        phase=PodPhase.RUNNING,
+    )
+
+    assert await _timed_out_error(uow, parents) == (
+        f"{TIMEOUT}\nPods not ready: app-0 (sidecar proxy: {text})"
+    )
+
+
 async def test_pod_reasons_keep_the_kubelet_message_on_one_line(
     uow: SqlModelUnitOfWork, parents: Parents
 ) -> None:
@@ -1228,7 +1278,7 @@ async def test_pod_reasons_skip_starting_and_ready_containers(
         uow,
         parents,
         "app-1",
-        _entry("proxy", "running", kind="init", ready=True),
+        _entry("proxy", "running", kind="sidecar", ready=True),
         _entry("app", "running", restart_count=3, ready=True),
         _entry("worker", "waiting:ContainerCreating"),
         # Not ready without a restart, as when its readiness probe fails: not named.

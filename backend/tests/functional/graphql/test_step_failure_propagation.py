@@ -311,7 +311,7 @@ async def test_failed_helmrelease_report_reaches_the_database_and_read_only(
 async def test_failure_causes_of_kind_pods_reach_the_step_and_read_only(
     unauth_client: AsyncClient, session: AsyncSession, admin_token: str
 ) -> None:
-    """#574: the agent's report of three pods from kind names each cause in the step error."""
+    """#574: the agent's report of four pods from kind names each cause in the step error."""
     rollout = await _seed_rollout(session, helmrelease_running=True)
     pods = [
         _extract_pod_data(await load_pod(name)).model_dump(mode="json", by_alias=True)
@@ -319,6 +319,7 @@ async def test_failure_causes_of_kind_pods_reach_the_step_and_read_only(
             "pod_image_pull_failing",
             "pod_init_container_failing",
             "pod_not_scheduled",
+            "pod_sidecar_not_ready",
         )
     ]
     await _post(
@@ -340,6 +341,7 @@ async def test_failure_causes_of_kind_pods_reach_the_step_and_read_only(
     )
     expected = (
         f"{timeout}\nPods not ready: "
+        "sidecar-not-ready (sidecar proxy: not ready), "
         f"styrmin-app-5c88845fb4-4ggxf (Unschedulable: 0/2 nodes are available: "
         "pod has unbound immediate PersistentVolumeClaims. not found), "
         f"styrmin-app-7dd9b47888-7l7n2 (app: ImagePullBackOff: {image_message}), "
@@ -375,6 +377,10 @@ async def test_failure_causes_of_kind_pods_reach_the_step_and_read_only(
             "not found",
         )
     ]
+    assert [
+        (entry["kind"], entry["name"], entry["ready"])
+        for entry in returned["sidecar-not-ready"]["containerStatuses"]
+    ] == [("sidecar", "proxy", False), ("container", "app", True)]
 
 
 @pytest.mark.asyncio

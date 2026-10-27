@@ -411,6 +411,46 @@ class TestExtractPodDataFailureCauses:
 
         assert result.restart_count == 4
         assert result.ready is True
+        assert [(e["name"], e["kind"]) for e in result.container_statuses or ()] == [
+            ("migrate", "init"),
+            ("proxy", "sidecar"),
+            ("app", "container"),
+        ]
+
+    def test_initializing_pod_counts_init_container_and_sidecar_restarts(
+        self,
+    ) -> None:
+        # kubectl counts every init container's restarts, sidecars included, until the
+        # pod is initialized.
+        pod = _make_pod(
+            phase="Pending",
+            init_container_statuses=[
+                _make_container_status(name="proxy", ready=False, restart_count=2),
+                _make_container_status(
+                    name="migrate",
+                    ready=False,
+                    restart_count=3,
+                    state="waiting",
+                    reason="CrashLoopBackOff",
+                ),
+            ],
+            container_statuses=[
+                _make_container_status(
+                    name="app", ready=False, state="waiting", reason="PodInitializing"
+                )
+            ],
+            conditions=[_make_condition("Initialized", "False")],
+            sidecars=("proxy",),
+        )
+
+        result = _extract_pod_data(pod)
+
+        assert result.restart_count == 5
+        assert [(e["name"], e["kind"]) for e in result.container_statuses or ()] == [
+            ("proxy", "sidecar"),
+            ("migrate", "init"),
+            ("app", "container"),
+        ]
 
     def test_waiting_message_is_kept(self) -> None:
         message = 'failed to pull image "traefik/whoami:v1.99.99": not found'
@@ -526,6 +566,20 @@ class TestExtractPodDataFromKind:
             "waiting:ImagePullBackOff",
         )
         assert entry["message"].endswith("docker.io/traefik/whoami:v1.99.99: not found")
+
+    @pytest.mark.anyio
+    async def test_pod_with_sidecar_that_is_not_ready(self) -> None:
+        # The sidecar `proxy` fails its readiness probe; the container `app` started and is ready.
+        result = _extract_pod_data(await load_pod("pod_sidecar_not_ready"))
+
+        assert (result.phase, result.restart_count) == (PodPhase.RUNNING, 0)
+        assert [
+            (e["name"], e["kind"], e["state"], e["ready"])
+            for e in result.container_statuses or ()
+        ] == [
+            ("proxy", "sidecar", "running", False),
+            ("app", "container", "running", True),
+        ]
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ from styrmin_backend.agent.status.models import (
     CONTAINER_KIND,
     INIT_CONTAINER_KIND,
     POD_KIND,
+    SIDECAR_KIND,
     DeploymentStatusReport,
     DeploymentPodStatusReport,
     EnvironmentForStatus,
@@ -137,21 +138,25 @@ def _is_initialized(status) -> bool:  # type: ignore[no-untyped-def]
     )
 
 
-def _restart_count(pod) -> int:  # type: ignore[no-untyped-def]
+def _sidecar_names(pod) -> frozenset[str]:  # type: ignore[no-untyped-def]
+    """The init containers with ``restartPolicy: Always``: they run for the pod's whole life."""
+    return frozenset(
+        container.name
+        for container in ((pod.spec.init_containers if pod.spec else None) or ())
+        if container.restart_policy == "Always"
+    )
+
+
+def _restart_count(pod, sidecars: frozenset[str]) -> int:  # type: ignore[no-untyped-def]
     """The pod's restarts as ``kubectl get pods`` counts them.
 
-    While an init container has not finished, the restarts of the init containers;
-    after that, the restarts of the containers and of the sidecar init containers.
+    While an init container has not finished, the restarts of the init containers and
+    sidecars; after that, the restarts of the containers and of the sidecars.
     """
     status = pod.status
     init_statuses = status.init_container_statuses or []
     if init_statuses and not _is_initialized(status):
         return sum(cs.restart_count or 0 for cs in init_statuses)
-    sidecars = {
-        container.name
-        for container in ((pod.spec.init_containers if pod.spec else None) or ())
-        if container.restart_policy == "Always"
-    }
     return sum(cs.restart_count or 0 for cs in status.container_statuses or ()) + sum(
         cs.restart_count or 0 for cs in init_statuses if cs.name in sidecars
     )
@@ -161,17 +166,21 @@ def _extract_pod_data(pod) -> PodStatusData:  # type: ignore[no-untyped-def]
     """Extract relevant status fields from a V1Pod object.
 
     ``containerStatuses`` lists, in this order, a ``pod`` entry when the pod is not
-    scheduled, the init containers and the containers (ADR-088).
+    scheduled, the init containers and sidecars in the pod's order, and the
+    containers (ADR-088).
     """
     status = pod.status
     container_statuses_raw = status.container_statuses or []
+    sidecars = _sidecar_names(pod)
 
     container_statuses = []
     scheduling = _scheduling_entry(status)
     if scheduling is not None:
         container_statuses.append(scheduling)
     container_statuses.extend(
-        _container_entry(cs, INIT_CONTAINER_KIND)
+        _container_entry(
+            cs, SIDECAR_KIND if cs.name in sidecars else INIT_CONTAINER_KIND
+        )
         for cs in status.init_container_statuses or ()
     )
     container_statuses.extend(
@@ -200,7 +209,7 @@ def _extract_pod_data(pod) -> PodStatusData:  # type: ignore[no-untyped-def]
         namespace=pod.metadata.namespace,
         phase=phase,
         ready=all_ready,
-        restartCount=_restart_count(pod),
+        restartCount=_restart_count(pod, sidecars),
         containerStatuses=container_statuses or None,
         nodeName=pod.spec.node_name if pod.spec else None,
         componentName=component_name,

@@ -163,6 +163,45 @@ describe("PodRow failure causes (#574)", () => {
     expect(screen.queryByTestId("pod-condition")).not.toBeInTheDocument();
   });
 
+  it("marks a sidecar as a sidecar, not as an init container", async () => {
+    // A sidecar is an init container with `restartPolicy: Always` that runs next
+    // to the containers; this one fails its readiness probe.
+    await expand(
+      makePod({
+        containerStatuses: [
+          {
+            name: "proxy",
+            kind: "sidecar",
+            ready: false,
+            state: "running",
+            message: null,
+            restart_count: 0,
+            image: "docker.io/library/busybox:1.36",
+            started_at: "2026-10-27T11:36:55+00:00",
+          },
+          {
+            name: "app",
+            kind: "container",
+            ready: true,
+            state: "running",
+            message: null,
+            restart_count: 0,
+            image: "docker.io/library/busybox:1.36",
+            started_at: "2026-10-27T11:36:55+00:00",
+          },
+        ] as unknown as Record<string, unknown>,
+      }),
+    );
+
+    const rows = screen.getAllByTestId("container-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("proxy");
+    expect(rows[0]).toHaveTextContent("sidecar");
+    expect(rows[0]).not.toHaveTextContent("init");
+    expect(rows[1]).toHaveTextContent("app");
+    expect(rows[1]).not.toHaveTextContent("sidecar");
+  });
+
   it("shows the kubelet message under the container", async () => {
     const message =
       'Back-off pulling image "traefik/whoami:v1.99.99": ErrImagePull: not found';

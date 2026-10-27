@@ -189,22 +189,30 @@ stored pod statuses, after `Pods not ready:`. For each pod, it gives:
 - why the pod is not scheduled, with the scheduler's reason and message,
   for example
   `Unschedulable: 0/2 nodes are available: pod has unbound immediate PersistentVolumeClaims.`;
-- each container or init container that waits or ended with a reason,
-  such as `ImagePullBackOff`, `CrashLoopBackOff` or
+- each container, init container or sidecar that waits or ended with a
+  reason, such as `ImagePullBackOff`, `CrashLoopBackOff` or
   `CreateContainerConfigError`, and the kubelet's message for that
   reason. The reasons `ContainerCreating`, `PodInitializing` and
   `Completed` are left out, because the container is starting or has done
   its work, and so is the message of `CrashLoopBackOff`, which only gives
   the delay before the next start;
-- each container or init container that is not ready and runs again after
-  restarts, for example `init container admin: running after 7 restarts`;
+- each container, init container or sidecar that is not ready and runs
+  again after restarts, for example
+  `init container admin: running after 7 restarts`;
 - each init container that is still running and has not restarted, for
   example one that waits for a database: `init container wait-for-db: still running`.
-  The pod cannot start its containers until its init containers end.
+  The pod cannot start its containers until its init containers end;
+- each sidecar that is running, is not ready and has not restarted, for
+  example one whose readiness probe fails: `sidecar proxy: not ready`. A
+  sidecar is an init container with `restartPolicy: Always`: it runs for
+  the pod's whole life, and the containers start once it has started.
+  Kubernetes keeps the pod not ready while one of its sidecars is not
+  ready.
 
 Each message is cut to 300 characters; the **Pods** tab shows it whole.
 The error does not name a pod without such a cause, for example a pod
-that fails its readiness probe, or a pod that has finished. It does not
+whose container, not a sidecar, runs without restarts and fails its
+readiness probe, or a pod that has finished. It does not
 contain container logs or Kubernetes events: a volume claim that names a
 missing storage class shows as an unbound volume claim, and the name of
 the class is only in the claim's events.
@@ -266,23 +274,27 @@ Each pod status has a `containerStatuses` list. Each entry has a `kind`:
   is the scheduler's message. The list has this entry only while the pod
   is not scheduled, and it comes first.
 - `init`: an init container.
+- `sidecar`: an init container with `restartPolicy: Always`, which runs
+  next to the containers for the pod's whole life.
 - `container`: a container.
 
-An `init` or `container` entry has `name`, `image`, `ready`,
+Init containers and sidecars are listed in the pod's order, before the
+containers. An `init`, `sidecar` or `container` entry has `name`, `image`, `ready`,
 `restart_count`, `started_at`, `state` (`running`, `waiting:<reason>`,
 `terminated:<reason>` or `unknown`) and `message`, the kubelet's message
 of a waiting container. Styrmin does not store the message of a
 terminated container, because the container writes it, nor the message
 of `PostStartHookError`, which quotes the output of the container's
 `postStart` hook. The pod's
-`restartCount` counts the restarts of its init containers while it
-initializes, and of its containers after that, as `kubectl get pods`
-does. An entry without `kind` comes from an older agent and is a
+`restartCount` counts the restarts of its init containers and sidecars
+while it initializes, and of its containers and sidecars after that, as
+`kubectl get pods` does. An entry without `kind` comes from an older agent and is a
 container.
 
 The **Pods** tab of a deployment shows the same data: when you expand a
 pod, it shows why the pod is not scheduled above its containers, marks
-init containers with `init`, and shows each message under its container.
+init containers with `init` and sidecars with `sidecar`, and shows each
+message under its container.
 
 `environments.get_pod_statuses()` takes the environment's ID, or its name
 with the ID or name of its cluster, as `environments.get()` does.

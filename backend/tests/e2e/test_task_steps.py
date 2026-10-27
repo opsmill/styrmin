@@ -13,10 +13,10 @@ the target version:
 The prerequisites scenario fills a ``ResourceQuota`` so the operator cannot
 re-create a network policy, the missing-namespace scenario (#313) deletes the
 deployment's namespace before an update, the pod-status scenario (#574) adds a
-pod that no node accepts and a pod whose init container fails, and the
-HelmRelease scenario applies a manifest with ``apply(wait=True)`` whose image
-override cannot be pulled. The HelmRelease scenario runs last in the module,
-because it leaves the deployment failed.
+pod that no node accepts, a pod whose init container fails and a pod whose
+sidecar is not ready, and the HelmRelease scenario applies a manifest with
+``apply(wait=True)`` whose image override cannot be pulled. The HelmRelease
+scenario runs last in the module, because it leaves the deployment failed.
 
 The first five tests are ``api_only``: they read the steps and pod statuses
 through the SDK, and the frontend component tests (``StepListFailures.test.tsx``,
@@ -100,10 +100,12 @@ AFTER_ROLLED_BACK_WATCH = 15.0
 # that the server closes at that moment.
 POLL_INTERVAL = 3.0
 
-# Two pods that #574's test adds to the deployment's namespace: one that no node
-# accepts, and one whose init container exits with an error.
+# Three pods that #574's test adds to the deployment's namespace: one that no node
+# accepts, one whose init container exits with an error, and one whose sidecar (an
+# init container with `restartPolicy: Always`) fails its readiness probe.
 NOT_SCHEDULED_POD = "e2e-574-not-scheduled"
 INIT_FAILING_POD = "e2e-574-init-fails"
+SIDECAR_NOT_READY_POD = "e2e-574-sidecar-not-ready"
 # The kubelet restarts the init container after 10 s, and the agent reports every 5 s.
 POD_CAUSES_TIMEOUT = 120.0
 POD_DELETE_TIMEOUT = 60.0
@@ -409,7 +411,8 @@ async def _manifest_with_image(
 
 
 def _failure_cause_pods(image: str) -> list[dict[str, Any]]:
-    """A pod that no node accepts, and a pod whose init container exits with 3."""
+    """A pod that no node accepts, a pod whose init container exits with 3, and a pod
+    whose sidecar fails its readiness probe."""
     container = {
         "name": "app",
         "image": image,
@@ -438,6 +441,26 @@ def _failure_cause_pods(image: str) -> list[dict[str, Any]]:
                         "image": image,
                         "imagePullPolicy": "IfNotPresent",
                         "command": ["sh", "-c", "exit 3"],
+                    }
+                ],
+                "containers": [container],
+                "terminationGracePeriodSeconds": 0,
+            },
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {"name": SIDECAR_NOT_READY_POD},
+            "spec": {
+                "initContainers": [
+                    {
+                        **container,
+                        "name": "proxy",
+                        "restartPolicy": "Always",
+                        "readinessProbe": {
+                            "exec": {"command": ["sh", "-c", "exit 1"]},
+                            "periodSeconds": 2,
+                        },
                     }
                 ],
                 "containers": [container],
@@ -679,16 +702,17 @@ async def test_pod_statuses_name_scheduling_and_init_container_failures(
 ) -> None:
     """#574: the stored pod statuses say why a pod is not scheduled and which init container fails.
 
-    The agent reports every pod of the deployment's namespace, so the test adds two
-    pods there and reads them back through the SDK, as the Pods tab and the failed
-    step do. It deletes them before the HelmRelease test, whose step error lists
-    the pods of the namespace.
+    They also tell a sidecar apart from an init container. The agent reports every
+    pod of the deployment's namespace, so the test adds three pods there and reads
+    them back through the SDK, as the Pods tab and the failed step do. It deletes
+    them before the HelmRelease test, whose step error lists the pods of the
+    namespace.
     """
     client: StyrminClient = failing_actions_deployment["client"]
     deployment_id = failing_actions_deployment["deployment_id"]
     namespace = failing_actions_deployment["namespace"]
     core = kubeclient.CoreV1Api(failing_actions_deployment["api"])
-    names = [NOT_SCHEDULED_POD, INIT_FAILING_POD]
+    names = [NOT_SCHEDULED_POD, INIT_FAILING_POD, SIDECAR_NOT_READY_POD]
     try:
         # Inside the try, so a failed second creation still deletes the first pod.
         for pod in _failure_cause_pods(simple_app_image):
@@ -701,6 +725,7 @@ async def test_pod_statuses_name_scheduling_and_init_container_failures(
             }
             not_scheduled = pods.get(NOT_SCHEDULED_POD)
             init_failing = pods.get(INIT_FAILING_POD)
+            sidecar_pod = pods.get(SIDECAR_NOT_READY_POD)
             if (
                 not_scheduled is not None
                 and _entries(not_scheduled, "pod")
@@ -709,12 +734,17 @@ async def test_pod_statuses_name_scheduling_and_init_container_failures(
                     e.get("restart_count", 0) >= 1
                     for e in _entries(init_failing, "init")
                 )
+                and sidecar_pod is not None
+                and any(
+                    e.get("state") == "running"
+                    for e in _entries(sidecar_pod, "container")
+                )
             ):
                 break
             if time.monotonic() >= deadline:
                 raise AssertionError(
                     f"no failure causes in the pod statuses after {POD_CAUSES_TIMEOUT}s: "
-                    f"{not_scheduled!r} {init_failing!r}"
+                    f"{not_scheduled!r} {init_failing!r} {sidecar_pod!r}"
                 )
             await asyncio.sleep(POLL_INTERVAL)
     finally:
@@ -742,6 +772,19 @@ async def test_pod_statuses_name_scheduling_and_init_container_failures(
     assert init_failing.restart_count == init["restart_count"] >= 1, init_failing
     [app] = _entries(init_failing, "container")
     assert app["state"] == "waiting:PodInitializing", app
+
+    # The pod whose sidecar fails its readiness probe: the sidecar is not an init
+    # container, and the container started next to it.
+    kinds = [e.get("kind") for e in sidecar_pod.container_statuses]
+    assert kinds == ["sidecar", "container"], sidecar_pod
+    [sidecar] = _entries(sidecar_pod, "sidecar")
+    assert (sidecar["name"], sidecar["state"], sidecar["ready"]) == (
+        "proxy",
+        "running",
+        False,
+    ), sidecar
+    [app] = _entries(sidecar_pod, "container")
+    assert app["state"] == "running", app
 
 
 @pytest.mark.ci

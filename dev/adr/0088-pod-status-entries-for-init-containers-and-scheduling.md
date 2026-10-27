@@ -32,14 +32,17 @@ types.
 
 ## Decision
 
-The agent writes three kinds of entries into `containerStatuses`, in this order. Each entry has a
+The agent writes four kinds of entries into `containerStatuses`, in this order. Each entry has a
 `kind` key:
 
 1. `pod`: only when the pod's `PodScheduled` condition is `False`. `name` is `PodScheduled`, `state` is
    `waiting:<condition reason>`, and `message` is the scheduler's message. `ready` is false,
    `restart_count` 0, `image` empty and `started_at` null, so that code reading the older keys works.
    A container name cannot be `PodScheduled`, because Kubernetes container names are lower case.
-2. `init`: one entry per `status.initContainerStatuses`, with the keys of a container.
+2. `init` or `sidecar`: one entry per `status.initContainerStatuses`, in the pod's order, with the
+   keys of a container. The kind is `sidecar` when the init container of the same name in
+   `spec.initContainers` has `restartPolicy: Always`, and `init` otherwise. A sidecar runs for the
+   pod's whole life: once it has started, the containers start next to it.
 3. `container`: one entry per `status.containerStatuses`, as before.
 
 Every entry gains `message`: the kubelet's message of a waiting container, or null. The message of a
@@ -48,26 +51,35 @@ program printed. For the same reason, the message of `PostStartHookError` is not
 quotes in it the output of the `postStart` hook command.
 
 `restartCount` of the pod counts as `kubectl get pods` does: while the pod is not `Initialized`, the
-restarts of its init containers; after that, the restarts of its containers and of its sidecar init
-containers (`restartPolicy: Always`).
+restarts of its init containers and sidecars; after that, the restarts of its containers and
+sidecars.
 
 The step error lists each pod that has not finished, with these causes:
 
 - for the `pod` entry: `<reason>: <message>`;
-- for a container or an init container that waits or ended with any reason except `ContainerCreating`,
-  `PodInitializing` and `Completed`: `<name>: <reason>: <message>`, with `init container <name>` for
-  an init container. The message of `CrashLoopBackOff` is left out, because it only gives the back-off
-  delay;
-- for a container or an init container that is not ready and runs again after restarts:
+- for a container, an init container or a sidecar that waits or ended with any reason except
+  `ContainerCreating`, `PodInitializing` and `Completed`: `<name>: <reason>: <message>`, with
+  `init container <name>` for an init container and `sidecar <name>` for a sidecar. The message of
+  `CrashLoopBackOff` is left out, because it only gives the back-off delay;
+- for a container, an init container or a sidecar that is not ready and runs again after restarts:
   `<name>: running after <n> restarts`;
 - for an init container that runs, is not ready and has not restarted, such as one that waits for a
   service that does not answer: `init container <name>: still running`. The pod cannot start its
-  containers until the init container ends, so it is a cause even without a restart. A container that
-  runs without restarts and is not ready, for example because its readiness probe fails, is not
-  named.
+  containers until the init container ends, so it is a cause even without a restart;
+- for a sidecar that runs, is not ready and has not restarted, for example because its readiness
+  probe fails: `sidecar <name>: not ready`. A sidecar does not end, so `still running` does not
+  describe it. The kubelet keeps the pod not ready while a sidecar is not ready, but the pod's
+  stored `ready` does not count sidecars ([issue #578](https://github.com/opsmill/styrmin/issues/578)):
+  the Pods tab shows the pod as ready, and without this cause the step error would not name the pod
+  either. A sidecar whose startup probe has not passed gets the same cause, although the next
+  containers of its pod wait for it: an entry does not say whether its container has started.
+
+A container that runs without restarts and is not ready, for example because its readiness probe
+fails, is not named.
 
 Each message is put on one line and cut to 300 characters. The Pods tab shows the `pod` entry above
-the containers, an `init` tag on init containers, and each message under its container.
+the containers, an `init` tag on init containers, a `sidecar` tag on sidecars, and each message
+under its container.
 
 ## Alternatives considered
 
@@ -82,16 +94,21 @@ the containers, an `init` tag on init containers, and each message under its con
   misses, such as `RunContainerError` or `CreatePodSandboxError`, would again leave the error without a
   cause. Rejected in favour of leaving out only the reasons of a container that starts or has done its
   work.
+- **A `sidecar` flag on `init` entries instead of a `sidecar` kind.** It keeps every entry of
+  `initContainerStatuses` under one kind, as Kubernetes lists them. Each reader that names or marks
+  init containers would have to read two keys, and the flag would mean nothing on the other kinds.
+  Not chosen.
 - **Storing the last termination of each container (`lastState.terminated`).** It would give the exit
   code of a failing init container. It is the subject of #207, which also covers containers that run
   again, so it is left to that issue.
 
 ## Consequences
 
-- A user can read why a pod is not scheduled, or which init container fails, in the failed step, in
-  `styrminctl tasks get` and in the Pods tab, without `kubectl`.
-- Scripts that read `containerStatuses` through the API or the SDK can find a `pod` entry and `init`
-  entries. A script that treats every entry as a container must skip entries whose `kind` is `pod`.
+- A user can read why a pod is not scheduled, which init container fails or which sidecar is not
+  ready, in the failed step, in `styrminctl tasks get` and in the Pods tab, without `kubectl`.
+- Scripts that read `containerStatuses` through the API or the SDK can find a `pod` entry, `init`
+  entries and `sidecar` entries. A script that treats every entry as a container must skip entries
+  whose `kind` is `pod`.
 - Rows stored by an older agent have no `kind` and no `message`. The step error and the Pods tab read
   them as containers, until the next report replaces them within about 5 seconds.
 - The step error is longer when the kubelet's message is long, for example the registry error of an
@@ -105,12 +122,14 @@ the containers, an `init` tag on init containers, and each message under its con
 ## Confirmation
 
 - `TestExtractPodDataFailureCauses` and `TestExtractPodDataFromKind` in
-  `backend/tests/unit/agent/test_status_reporter.py`. The second class runs the agent on three pods
-  read from a kind cluster, kept in `backend/tests/helpers/pods/`.
+  `backend/tests/unit/agent/test_status_reporter.py`. The second class runs the agent on four pods
+  read from a kind cluster, kept in `backend/tests/helpers/pods/`, one of them with a sidecar whose
+  readiness probe fails.
 - The `#574` tests in `backend/tests/unit/steps/test_operator_history_failures.py`.
 - `test_failure_causes_of_kind_pods_reach_the_step_and_read_only` in
   `backend/tests/functional/graphql/test_step_failure_propagation.py`.
 - `PodRow failure causes (#574)` in `frontend/src/pages/deployments/PodsTab/PodRow.test.tsx`.
 - `test_pod_statuses_name_scheduling_and_init_container_failures` in
   `backend/tests/e2e/test_task_steps.py`: on a vCluster, a pod that no node accepts gets the `pod`
-  entry, and a pod whose init container exits with an error gets its `init` entry and restarts.
+  entry, a pod whose init container exits with an error gets its `init` entry and restarts, and a
+  pod whose sidecar fails its readiness probe gets a `sidecar` entry that runs and is not ready.

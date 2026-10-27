@@ -9,6 +9,12 @@ v1.37.0) on 2026-10-27:
 - ``pod_init_container_failing``: the Semaphore driver's ``admin`` init container
   fails its DNS lookups and runs again after 7 restarts;
 - ``pod_image_pull_failing``: an image tag that does not exist.
+
+``pod_sidecar_not_ready`` was created by hand on another kind cluster
+(``styrmin-fix574``) on the same day: a sidecar (an init container with
+``restartPolicy: Always``) whose readiness probe runs ``false``, next to a
+container that is ready. Its file also keeps the ``restartPolicy`` of the
+sidecar, which the agent reads; the readiness probe is left out.
 """
 
 from __future__ import annotations

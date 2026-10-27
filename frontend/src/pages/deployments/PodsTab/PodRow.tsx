@@ -12,9 +12,10 @@ type Pod = GetDeploymentPodsQuery["podStatuses"][number];
 // and ADR-088. snake_case because it is serialized straight from a Python dict
 // via the GraphQL JSON scalar; no codegen mapping happens. `kind` is missing
 // from entries that an agent older than #574 reported: they are containers.
+// A `sidecar` is an init container with `restartPolicy: Always`.
 type AgentContainerStatus = {
   name: string;
-  kind?: "container" | "init" | "pod";
+  kind?: "container" | "init" | "sidecar" | "pod";
   image?: string;
   ready?: boolean;
   state?: string;
@@ -178,9 +179,9 @@ function ExpandedPanel({
                   }`}
                 />
                 <span className="truncate font-mono">{c.name}</span>
-                {c.kind === "init" && (
+                {(c.kind === "init" || c.kind === "sidecar") && (
                   <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                    init
+                    {c.kind}
                   </span>
                 )}
               </span>

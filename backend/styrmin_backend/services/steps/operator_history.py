@@ -19,7 +19,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from styrmin_backend.agent.status.models import INIT_CONTAINER_KIND, POD_KIND
+from styrmin_backend.agent.status.models import (
+    INIT_CONTAINER_KIND,
+    POD_KIND,
+    SIDECAR_KIND,
+)
 from styrmin_backend.db.models import PodPhase
 from styrmin_backend.domain import steps
 from styrmin_backend.domain.models import Step, StepKind, StepStatus, Task, TaskType
@@ -70,6 +74,8 @@ _DEFAULT_FAILURE = "The operator reported a failure"
 _STARTING_REASONS = frozenset({"ContainerCreating", "PodInitializing", "Completed"})
 #: Reasons whose kubelet message only gives the back-off delay.
 _REASONS_WITHOUT_MESSAGE = frozenset({"CrashLoopBackOff"})
+#: The word before the name of an init container or a sidecar in a pod cause.
+_KIND_LABELS = {INIT_CONTAINER_KIND: "init container", SIDECAR_KIND: "sidecar"}
 _MAX_MESSAGE = 300
 _MAX_PODS = 5
 #: Finished pods, such as those of a failed Job, are not part of the rollout.
@@ -398,13 +404,16 @@ def _entry_cause(entry: Mapping[str, Any]) -> str | None:
     """Why one ``containerStatuses`` entry keeps its pod from being ready, or None.
 
     - The ``pod`` entry of a pod that is not scheduled: ``<reason>: <message>``.
-    - A container or init container that waits or ended with a reason other than
-      a starting one: ``<name>: <reason>: <message>``.
-    - A container or init container that runs again after restarts and is not
-      ready: ``<name>: running after <n> restarts``.
+    - A container, init container or sidecar that waits or ended with a reason
+      other than a starting one: ``<name>: <reason>: <message>``.
+    - A container, init container or sidecar that runs again after restarts and is
+      not ready: ``<name>: running after <n> restarts``.
     - An init container that runs, is not ready and has not restarted, such as one
       that waits for a service: ``init container <name>: still running``. The pod
       cannot start its containers until it ends.
+    - A sidecar that runs, is not ready and has not restarted, such as one whose
+      readiness probe fails: ``sidecar <name>: not ready``. A sidecar runs for the
+      pod's whole life, so it does not end.
     """
     kind = entry.get("kind")
     state = entry.get("state")
@@ -412,8 +421,8 @@ def _entry_cause(entry: Mapping[str, Any]) -> str | None:
     if kind == POD_KIND:
         return _with_message(reason, entry) if reason else None
     name = entry.get("name")
-    is_init = kind == INIT_CONTAINER_KIND
-    label = f"init container {name}" if is_init else str(name)
+    word = _KIND_LABELS.get(kind) if isinstance(kind, str) else None
+    label = f"{word} {name}" if word else str(name)
     if reason is not None and reason not in _STARTING_REASONS:
         if reason in _REASONS_WITHOUT_MESSAGE:
             return f"{label}: {reason}"
@@ -423,7 +432,9 @@ def _entry_cause(entry: Mapping[str, Any]) -> str | None:
     restarts = entry.get("restart_count")
     if isinstance(restarts, int) and restarts > 0:
         return f"{label}: running after {restarts} restart{'s' if restarts > 1 else ''}"
-    return f"{label}: still running" if is_init else None
+    if kind == INIT_CONTAINER_KIND:
+        return f"{label}: still running"
+    return f"{label}: not ready" if kind == SIDECAR_KIND else None
 
 
 def _with_message(reason: str, entry: Mapping[str, Any]) -> str:
