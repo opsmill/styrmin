@@ -110,10 +110,14 @@ SIMPLE_APP_BACKUP_COMPONENTS = ("database",)
 # instance and the backup stays listed only through its history (#304).
 BACKUP_HISTORY_SERVER_ENV_VARS = {"STYRMIN_E2E_BACKUP_HISTORY": "1"}
 
+# Set on ``server`` after the lifecycle restore, so the edit after the restore
+# gives the deployment a new instance (#426).
+AFTER_RESTORE_SERVER_ENV_VARS = {"STYRMIN_E2E_AFTER_RESTORE": "1"}
+
 # The lifecycle test upgrades the session-shared simple-app deployment after the
-# backup (the #304 reproduction) and leaves it upgraded, as the other upgrade
-# tests do: a downgrade would run the driver's action Job a second time, which
-# fails while the first Job exists (#374).
+# backup (the #304 reproduction), and its restore puts 0.1.0 back (#426). It
+# never asks for a downgrade: a downgrade would run the driver's action Job a
+# second time, which fails while the first Job exists (#374).
 SIMPLE_APP_VERSION = "0.1.0"
 SIMPLE_APP_UPGRADED_VERSION = "0.2.0"
 
@@ -858,13 +862,14 @@ async def test_backup_and_restore_lifecycle(
     the deployment a new instance; the backup stays in the deployment's
     backup history with the application version it was taken at, and the
     restore and delete below act on that backup of an earlier instance. The
-    restore puts the 0.1.0 instance's resources back while the deployment
-    keeps its 0.2.0 active instance.
+    restore puts the 0.1.0 instance's resources back and makes that instance
+    the deployment's active instance (#426). A config edit after the restore
+    then gives the deployment a new instance at 0.1.0, not at 0.2.0.
 
     And #532: the restore names only the backup. The server records the
     namespace of the backup's deployment and that deployment's active 0.2.0
-    instance as the restore's target, not the 0.1.0 instance the backup
-    belongs to.
+    instance, at the time of the restore, as the restore's target, not the
+    0.1.0 instance the backup belongs to.
     """
     client: StyrminClient = styrmin_resources["client"]
     kubeconfig_path = vcluster["kubeconfig_path"]
@@ -1117,8 +1122,9 @@ async def test_backup_and_restore_lifecycle(
                 assert resp.json()["counter"] == pre_backup_count + 1
 
         # 5a. The restore put back the 0.1.0 instance's StyrminDeployment and
-        #     HelmRelease, and the deployment keeps its 0.2.0 active instance:
-        #     what the docs describe for a backup of an earlier instance.
+        #     HelmRelease, and Styrmin records that instance as the deployment's
+        #     active instance (#426): what the docs describe for a backup of an
+        #     earlier instance.
         assert (
             await served_simple_app_version(
                 kubeconfig_path, namespace, expected=SIMPLE_APP_VERSION
@@ -1126,27 +1132,57 @@ async def test_backup_and_restore_lifecycle(
             == SIMPLE_APP_VERSION
         )
         restored_deployment = await client.deployments.get(deployment_id)
-        assert restored_deployment.application_version == SIMPLE_APP_UPGRADED_VERSION
+        assert restored_deployment.application_version == SIMPLE_APP_VERSION
         assert restored_deployment.application_instance is not None
-        assert str(restored_deployment.application_instance.id) == str(
-            upgraded_instance.id
-        ), "The restore should not change the deployment's active instance"
+        assert str(restored_deployment.application_instance.id) == (
+            backed_up_instance_id
+        ), "The restore should make the backup's instance the active instance"
 
         # 5b. #532: the server chose where the restore lands. It recorded the
         #     backup's deployment's namespace and that deployment's active
-        #     0.2.0 instance, although the backup belongs to the 0.1.0 instance
-        #     (FR-001, FR-004, ADR-063).
+        #     0.2.0 instance, which was the active one when the restore was
+        #     created, although the backup belongs to the 0.1.0 instance (FR-001,
+        #     FR-004, ADR-063). The restore then made the 0.1.0 instance active.
         recorded_restore = await client.backups.get_restore(created_restore.id)
         assert recorded_restore.target_namespace == f"styrmin-{deployment_id}", (
             "An in-place restore should land in the namespace of the backup's "
             f"deployment, got {recorded_restore.target_namespace!r}"
         )
-        assert str(recorded_restore.target_instance_id) == str(
-            restored_deployment.application_instance.id
-        ), (
-            "An in-place restore should record the deployment's active instance, "
-            f"got {recorded_restore.target_instance_id!r}"
+        assert str(recorded_restore.target_instance_id) == str(upgraded_instance.id), (
+            "An in-place restore should record the deployment's active instance "
+            f"when it is created, got {recorded_restore.target_instance_id!r}"
         )
+
+        # 5c. #426: the next config edit builds its instance from the restored
+        #     0.1.0 instance, so it gives the deployment a new instance and
+        #     does not put 0.2.0 back. The ``finally`` reverts the edit.
+        await scenario_driver.set_component_env_vars(
+            deployment_id=deployment_id,
+            component="server",
+            env_vars={**previous_server_env_vars, **AFTER_RESTORE_SERVER_ENV_VARS},
+        )
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=deployment_id, timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS
+        )
+        await wait_for_pods_ready(kubeconfig_path, namespace)
+
+        edited_after_restore = await client.deployments.get(deployment_id)
+        assert edited_after_restore.application_instance is not None
+        assert str(edited_after_restore.application_instance.id) not in {
+            backed_up_instance_id,
+            str(edited_instance.id),
+            str(upgraded_instance.id),
+        }, "The config edit after the restore should give the deployment a new instance"
+        assert edited_after_restore.application_version == SIMPLE_APP_VERSION, (
+            "The config edit after the restore should keep the restored version, "
+            f"got {edited_after_restore.application_version!r}"
+        )
+        assert (
+            await served_simple_app_version(
+                kubeconfig_path, namespace, expected=SIMPLE_APP_VERSION
+            )
+            == SIMPLE_APP_VERSION
+        ), "The config edit after the restore should keep serving the restored version"
 
         # 6. Delete backup and verify
         await scenario_driver.delete_backup(backup_id=backup.id)

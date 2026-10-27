@@ -139,9 +139,16 @@ You can restore a backup of an earlier instance into the deployment,
 for example a backup taken before an upgrade. The restore writes the
 earlier instance's `StyrminDeployment` and `HelmRelease` to the
 deployment's namespace again, with that instance's application version
-and config. Styrmin does not change the deployment's active instance, so
-the deployment page and `styrminctl` keep showing the application version
-of the active instance.
+and config. When the restore completes, Styrmin makes that instance the
+deployment's active instance, and gives the deployment that instance's
+application version, config, parameters, and driver version. The
+deployment page and `styrminctl` then show the application version that
+runs, and the next change to the deployment starts from the restored
+state. A backup you take after the restore belongs to that instance.
+
+If Styrmin cannot record the instance, the restore still completes and
+the deployment keeps its previous active instance. The server log has the
+error.
 
 Before such a restore:
 

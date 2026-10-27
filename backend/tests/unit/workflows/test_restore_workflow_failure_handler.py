@@ -74,6 +74,8 @@ class RestoreRun:
     deployment_running_calls: list[dict[str, Any]] = field(default_factory=list)
     #: What the flow body raised, when the caller asked for it to be captured.
     raised: BaseException | None = None
+    #: The instance the restored backup was taken of.
+    backup_instance_id: UUID | None = None
 
     def warnings(self) -> str:
         return "\n".join(
@@ -132,6 +134,7 @@ async def _run_restore_workflow(
     backup.name = "styrmin-backup-1"
     backup.instance_id = uuid4()
     backup.component_statuses = None
+    run.backup_instance_id = backup.instance_id
 
     own_namespace = f"styrmin-{deployment_uuid}"
     flow_namespace = own_namespace if target_namespace is None else target_namespace
@@ -455,3 +458,56 @@ async def test_a_restore_into_another_namespace_fails_before_the_cluster_is_chan
     assert [call["deployment_id"] for call in run.deployment_failed_calls] == [
         run.deployment_id
     ]
+
+
+# ---------------------------------------------------------------------------
+# The restored instance becomes the active instance (#426)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_an_in_place_restore_records_the_restored_instance_as_active() -> None:
+    with patch(
+        f"{MODULE}.adopt_restored_instance", AsyncMock(return_value=True)
+    ) as adopt:
+        run = await _run_restore_workflow()
+
+    adopt.assert_awaited_once()
+    assert adopt.await_args.kwargs["deployment_id"] == run.deployment_id
+    assert adopt.await_args.kwargs["instance_id"] == run.backup_instance_id
+    assert len(run.deployment_running_calls) == 1
+
+
+@pytest.mark.anyio
+async def test_a_cross_target_restore_leaves_the_counterpart_instance_alone() -> None:
+    """A clone's counterpart has its own instance; the source's instance is not its."""
+    with patch(f"{MODULE}.adopt_restored_instance", AsyncMock()) as adopt:
+        await _run_restore_workflow(source_deployment_id=uuid4())
+
+    adopt.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_a_failed_restore_records_no_instance() -> None:
+    with patch(f"{MODULE}.adopt_restored_instance", AsyncMock()) as adopt:
+        await _run_restore_workflow(velero_phase="Failed")
+
+    adopt.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_a_failed_instance_record_does_not_fail_a_restore_that_ran() -> None:
+    """The cluster runs the restored instance: the restore completes, the failure is logged."""
+    with patch(
+        f"{MODULE}.adopt_restored_instance",
+        AsyncMock(side_effect=RuntimeError("database unavailable")),
+    ):
+        run = await _run_restore_workflow()
+
+    assert [call["status"].value for call in run.status_calls] == [
+        "in_progress",
+        "completed",
+    ]
+    assert len(run.deployment_running_calls) == 1
+    assert run.deployment_failed_calls == []
+    assert "database unavailable" in str(run.logger.error.call_args)

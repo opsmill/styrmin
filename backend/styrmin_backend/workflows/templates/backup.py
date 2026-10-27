@@ -54,6 +54,7 @@ from styrmin_backend.db.models import BackupStatus, RestoreStatus
 from styrmin_backend.domain import steps
 from styrmin_backend.domain.models import StepParent
 from styrmin_backend.services.auth.action_token import action_api_token
+from styrmin_backend.services.deployment import adopt_restored_instance
 from styrmin_backend.services.backup.metadata import (
     BackupMetadata,
     read_backup_metadata,
@@ -1114,6 +1115,11 @@ async def execute_restore_workflow(
                         uow=uow,
                     )
                     logger.info(f"Restore {restore_uuid} completed successfully")
+                if not is_cross_target:
+                    await _adopt_restored_instance(
+                        deployment_id=UUID(deployment_id),
+                        instance_id=backup.instance_id,
+                    )
                 await _set_deployment_status_running(
                     deployment_id=UUID(deployment_id), uow=uow
                 )
@@ -1173,6 +1179,32 @@ async def execute_restore_workflow(
                 error_message=str(e),
             )
         raise
+
+
+async def _adopt_restored_instance(deployment_id: UUID, instance_id: UUID) -> None:
+    """Record the restored instance as the deployment's active instance (#426).
+
+    The cluster already runs the restored instance, so a failure here does not
+    fail the restore: it is logged, and the deployment keeps the active instance
+    it had, as before this step existed. Its own unit of work keeps a failed
+    write from touching the status writes that follow.
+    """
+    run_logger = get_run_logger()
+    try:
+        async with get_unit_of_work() as uow:
+            changed = await adopt_restored_instance(
+                deployment_id=deployment_id, instance_id=instance_id, uow=uow
+            )
+        if changed:
+            run_logger.info(
+                f"Instance {instance_id} is now the active instance of deployment "
+                f"{deployment_id}"
+            )
+    except Exception as exc:
+        run_logger.error(
+            f"The restore completed but instance {instance_id} could not be recorded "
+            f"as the active instance of deployment {deployment_id}: {exc}"
+        )
 
 
 async def _set_deployment_status_running(deployment_id: UUID, uow: Any) -> None:

@@ -598,6 +598,9 @@ describe("DeploymentDetailPage backups tab review follow-ups (#304)", () => {
     const warning = screen.getByTestId("restore-earlier-instance-warning");
     expect(warning).toHaveTextContent("earlier instance");
     expect(warning).toHaveTextContent("HelmRelease");
+    expect(warning).toHaveTextContent(
+      "Styrmin makes that instance the deployment's active instance, so this page shows version 2.4.0",
+    );
   });
 
   it("shows both versions without a warning for a backup of the current instance", async () => {

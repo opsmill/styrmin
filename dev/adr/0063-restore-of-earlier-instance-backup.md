@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-10-10
 **Source**: [issue #304](https://github.com/opsmill/styrmin/issues/304), specs/archive/011-deployment-backup-history/spec.md (Assumptions, FR-008), and the review-round commits `d81320c2`, `1d8b0c3b` and `68da40c8`
+**Amended by**: [ADR-087](0087-restore-of-earlier-instance-backup-activates-that-instance.md) (a restore of an earlier instance's backup makes that instance the active instance; decision 1 and the consequences about the active instance no longer hold)
 **Related**: [ADR-008](0008-deployment-soft-delete-tombstoning.md) (amended here: a deleted deployment's backups can be listed but not restored into it), [ADR-062](0062-backup-history-derived-through-instances.md) (the backup history that makes these backups visible)
 
 ## Context

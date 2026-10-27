@@ -266,11 +266,12 @@ async def _confirm_backup_of_earlier_instance(
         f"at application version {backup_version}. The deployment runs application version "
         f"{current_version} now."
     )
-    instance_outcome = (
-        "Styrmin keeps the current instance as the deployment's active instance."
-        if active_instance is not None
-        else "The deployment has no active instance, and the restore does not give it one."
-    )
+    if active_instance is None:
+        instance_outcome = "The deployment has no active instance, and the restore does not give it one."
+    elif is_earlier_instance:
+        instance_outcome = "When the restore completes, Styrmin makes that instance the deployment's active instance."
+    else:
+        instance_outcome = "Styrmin keeps the current instance as the deployment's active instance."
     console.print(
         "The restore puts back the StyrminDeployment and HelmRelease that the backup holds, with "
         f"that application version and config. {instance_outcome}"

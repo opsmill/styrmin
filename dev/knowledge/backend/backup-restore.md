@@ -525,8 +525,10 @@ affected. A cross-target restore adds the HelmRelease to this list (see
 The backup history (`get_backups(deployment_id=...)`) lists backups of instances that are no longer active, for example a backup taken before an upgrade. An in-place restore of such a backup goes through the same stages:
 
 - The restore puts the earlier instance's `StyrminDeployment` and `HelmRelease` back in the deployment's namespace, with that instance's application version and config.
-- `create_restore` does not compare the backup's application version with the deployment's, and does not change `deployment.active_application_instance_id`. The deployment page and `styrminctl` keep showing the active instance's application version. `test_backup_and_restore_lifecycle` checks this after an upgrade from 0.1.0 to 0.2.0.
-- The restored `StyrminDeployment` carries the earlier instance's spec. What the status reporter's stale-instance guard ([data-models.md](data-models.md)) does with its reports after such a restore is not known. No test covers it.
+- `create_restore` does not compare the backup's application version with the deployment's.
+- After a completed in-place restore, `execute_restore_workflow` calls `adopt_restored_instance` (`services/deployment.py`), which makes the backup's instance the deployment's active instance (#426). It writes nothing to the cluster. It sets the deployment's `application_version`, `config` (from the instance's `context.deployment.config`), `parameters` and `application_driver_version_id` from the instance. When the driver version differs, it also rebuilds the deployment's components from the instance's `context.components` and reconciles the deployed services against that driver version, keeping the service names the deployment has. A cross-target restore (environment clone) does not call it. A failure is logged and does not fail the restore: the cluster already runs the instance.
+- The restored `StyrminDeployment` carries the earlier instance's spec, so its status reports name the instance that is now active. The status reporter's stale-instance guard ([data-models.md](data-models.md)) skips a report that names another instance. No test covers the reports after a restore.
+- `test_adopt_restored_instance.py` checks that an instance generated from the deployment after the call matches the active instance, which is the comparison the next update makes, and that asking for the later version after the restore starts an upgrade instead of being a no-op. `test_backup_and_restore_lifecycle` restores a 0.1.0 backup after an upgrade to 0.2.0, then checks that the next config edit gives the deployment a new instance and that 0.1.0 stays both recorded and served.
 
 The clients, not the server, warn before such a restore:
 
@@ -534,7 +536,7 @@ The clients, not the server, warn before such a restore:
 - `styrminctl backups restore --last` picks the newest completed backup in the history whose expiry date has not passed, and prints how many expired backups it skipped. For a backup of an earlier instance or of another version it prints both versions and asks for confirmation; `--yes` skips the question, and without a terminal the command refuses unless `--yes` is passed. It refuses a deleted deployment before it asks.
 - The Backups tab marks a backup whose expiry date has passed as expired and disables its restore, because Velero deletes a backup when it expires.
 
-Design rationale: [ADR-063](../../adr/0063-restore-of-earlier-instance-backup.md).
+Design rationale: [ADR-063](../../adr/0063-restore-of-earlier-instance-backup.md), amended by [ADR-087](../../adr/0087-restore-of-earlier-instance-backup-activates-that-instance.md).
 
 ### Display state mapping
 

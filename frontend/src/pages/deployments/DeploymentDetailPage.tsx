@@ -298,9 +298,11 @@ export default function DeploymentDetailPage() {
     !!selectedBackup &&
     !!instanceId &&
     selectedBackup.instance.id !== instanceId;
-  const restoreInstanceOutcome = instanceId
-    ? "Styrmin keeps the current instance as the deployment's active instance"
-    : "The deployment has no active instance, and the restore does not give it one";
+  const restoreInstanceOutcome = !instanceId
+    ? "The deployment has no active instance, and the restore does not give it one"
+    : selectedBackupIsOfEarlierInstance
+      ? "When the restore completes, Styrmin makes that instance the deployment's active instance"
+      : "Styrmin keeps the current instance as the deployment's active instance";
   const selectedBackupNeedsWarning =
     !!selectedBackup &&
     (selectedBackupIsOfEarlierInstance ||
@@ -803,8 +805,13 @@ export default function DeploymentDetailPage() {
                 runs version {deployment.applicationVersion} now. The restore
                 puts back the StyrminDeployment and HelmRelease that the backup
                 holds, with that application version and config.{" "}
-                {restoreInstanceOutcome}, so this page keeps showing version{" "}
-                {deployment.applicationVersion}.
+                {restoreInstanceOutcome}, so this page{" "}
+                {selectedBackupIsOfEarlierInstance ? "shows" : "keeps showing"}{" "}
+                version{" "}
+                {selectedBackupIsOfEarlierInstance
+                  ? selectedBackup.instance.applicationVersion
+                  : deployment.applicationVersion}
+                .
               </AlertDescription>
             </Alert>
           )}
