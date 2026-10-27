@@ -7,17 +7,25 @@ deployment must match the active instance, so the same request changes nothing.
 """
 
 from uuid import uuid4
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from styrmin_backend.domain.models import Component, Deployment, InstanceStatus
+from styrmin_backend.domain.models import (
+    Component,
+    Deployment,
+    InstanceStatus,
+    TaskType,
+)
 from styrmin_backend.services.deployment import (
     _update_is_noop,
     adopt_restored_instance,
+    update_deployment_version,
 )
 from styrmin_backend.services.exceptions import DeploymentNotFoundError
 from styrmin_backend.services.reconciliation import generate_instance_from_deployment
 from tests.unit.services.test_update_deployment_noop import (
+    _fake_apply_state,
     _make_uow,
     _seed_steady_state_deployment,
 )
@@ -80,6 +88,42 @@ async def test_restored_instance_becomes_the_active_instance_with_its_state() ->
     assert after.config == {"env_vars": {"FOO": "bar"}}
     assert after.parameters == {}
     await _assert_matches_active_instance(uow, after)
+
+
+@pytest.mark.asyncio
+@patch("styrmin_backend.services.deployment.apply_state", new_callable=AsyncMock)
+async def test_asking_for_the_later_version_after_the_restore_is_an_upgrade(
+    mock_apply_state: AsyncMock,
+) -> None:
+    mock_apply_state.side_effect = _fake_apply_state
+    uow = _make_uow()
+    deployment_id = uuid4()
+    deployment = await _seed_steady_state_deployment(
+        uow=uow, deployment_id=deployment_id, environment_id=uuid4()
+    )
+    earlier = deployment.active_instance
+    deployment.application_version = "1.5.0"
+    await _activate_new_instance(uow, deployment)
+    await adopt_restored_instance(
+        deployment_id=deployment_id, instance_id=earlier.id, uow=uow
+    )
+
+    # The later version is what the deployment ran before the restore, not what it runs now
+    async with uow:
+        task = await update_deployment_version(
+            deployment_id=deployment_id, version="1.5.0", uow=uow
+        )
+
+    assert task is not None, (
+        "asking for the later version after the restore must not be a no-op"
+    )
+    assert task.type == TaskType.UPGRADE_INSTANCE
+    mock_apply_state.assert_called_once()
+    assert mock_apply_state.call_args.kwargs["current_instance"].id == earlier.id
+    async with uow:
+        after = await uow.deployments.find(id=deployment_id)
+    assert after.application_version == "1.5.0"
+    assert after.active_instance.id != earlier.id
 
 
 @pytest.mark.asyncio

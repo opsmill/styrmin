@@ -110,10 +110,14 @@ SIMPLE_APP_BACKUP_COMPONENTS = ("database",)
 # instance and the backup stays listed only through its history (#304).
 BACKUP_HISTORY_SERVER_ENV_VARS = {"STYRMIN_E2E_BACKUP_HISTORY": "1"}
 
+# Set on ``server`` after the lifecycle restore, so the edit after the restore
+# gives the deployment a new instance (#426).
+AFTER_RESTORE_SERVER_ENV_VARS = {"STYRMIN_E2E_AFTER_RESTORE": "1"}
+
 # The lifecycle test upgrades the session-shared simple-app deployment after the
-# backup (the #304 reproduction) and leaves it upgraded, as the other upgrade
-# tests do: a downgrade would run the driver's action Job a second time, which
-# fails while the first Job exists (#374).
+# backup (the #304 reproduction), and its restore puts 0.1.0 back (#426). It
+# never asks for a downgrade: a downgrade would run the driver's action Job a
+# second time, which fails while the first Job exists (#374).
 SIMPLE_APP_VERSION = "0.1.0"
 SIMPLE_APP_UPGRADED_VERSION = "0.2.0"
 
@@ -859,7 +863,8 @@ async def test_backup_and_restore_lifecycle(
     backup history with the application version it was taken at, and the
     restore and delete below act on that backup of an earlier instance. The
     restore puts the 0.1.0 instance's resources back and makes that instance
-    the deployment's active instance (#426).
+    the deployment's active instance (#426). A config edit after the restore
+    then gives the deployment a new instance at 0.1.0, not at 0.2.0.
 
     And #532: the restore names only the backup. The server records the
     namespace of the backup's deployment and that deployment's active 0.2.0
@@ -1147,6 +1152,37 @@ async def test_backup_and_restore_lifecycle(
             "An in-place restore should record the deployment's active instance "
             f"when it is created, got {recorded_restore.target_instance_id!r}"
         )
+
+        # 5c. #426: the next config edit builds its instance from the restored
+        #     0.1.0 instance, so it gives the deployment a new instance and
+        #     does not put 0.2.0 back. The ``finally`` reverts the edit.
+        await scenario_driver.set_component_env_vars(
+            deployment_id=deployment_id,
+            component="server",
+            env_vars={**previous_server_env_vars, **AFTER_RESTORE_SERVER_ENV_VARS},
+        )
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=deployment_id, timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS
+        )
+        await wait_for_pods_ready(kubeconfig_path, namespace)
+
+        edited_after_restore = await client.deployments.get(deployment_id)
+        assert edited_after_restore.application_instance is not None
+        assert str(edited_after_restore.application_instance.id) not in {
+            backed_up_instance_id,
+            str(edited_instance.id),
+            str(upgraded_instance.id),
+        }, "The config edit after the restore should give the deployment a new instance"
+        assert edited_after_restore.application_version == SIMPLE_APP_VERSION, (
+            "The config edit after the restore should keep the restored version, "
+            f"got {edited_after_restore.application_version!r}"
+        )
+        assert (
+            await served_simple_app_version(
+                kubeconfig_path, namespace, expected=SIMPLE_APP_VERSION
+            )
+            == SIMPLE_APP_VERSION
+        ), "The config edit after the restore should keep serving the restored version"
 
         # 6. Delete backup and verify
         await scenario_driver.delete_backup(backup_id=backup.id)
@@ -3240,100 +3276,3 @@ async def test_environment_clone_lifecycle(
                 deployment_id=primary_deployment_id,
                 timeout=CLEANUP_WAIT_TIMEOUT_SECONDS,
             )
-
-
-@pytest.mark.shard_backup
-async def test_restore_of_earlier_instance_keeps_styrmin_in_sync(
-    scenario_driver: ScenarioDriver,
-    styrmin_resources: dict,
-    deployed_simple_app: dict,
-    simple_app_image_v2: str,  # noqa: ARG001 — ensures the 0.2.0 image is built
-    velero_ready: None,  # noqa: ARG001 — ensures Velero is up before backup/restore
-    vcluster: dict,
-) -> None:
-    """#426: after a restore of the backup of an earlier instance, Styrmin records what runs.
-
-    Back up at 0.1.0, upgrade to 0.2.0, restore that backup, then check the version Styrmin
-    records, the backup of the restored data, a config edit that asks for no version change,
-    and an upgrade back to 0.2.0.
-    """
-    client: StyrminClient = styrmin_resources["client"]
-    kubeconfig_path = vcluster["kubeconfig_path"]
-    deployment_id = deployed_simple_app["deployment_id"]
-    namespace = deployed_simple_app["namespace"]
-
-    async def recorded() -> tuple[str, str]:
-        deployment = await client.deployments.get(deployment_id)
-        assert deployment.application_instance is not None
-        return deployment.application_version, str(deployment.application_instance.id)
-
-    async def running(expected: str, *, timeout: float = 90.0) -> str | None:
-        return await served_simple_app_version(
-            kubeconfig_path, namespace, expected=expected, timeout=timeout
-        )
-
-    # The deployment starts at 0.1.0 when this test runs alone, or after one that restores it.
-    version, instance_a = await recorded()
-    assert version == SIMPLE_APP_VERSION, f"expected 0.1.0 at the start, got {version}"
-
-    created = await scenario_driver.create_backup(instance_id=instance_a)
-    backup = await scenario_driver.wait_for_backup(backup_id=created.id, max_wait=180)
-    assert backup.status == "completed"
-
-    await scenario_driver.upgrade_deployment(
-        deployment_id=deployment_id, version=SIMPLE_APP_UPGRADED_VERSION
-    )
-    await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment_id, timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS
-    )
-    await wait_for_pods_ready(kubeconfig_path, namespace)
-    version, instance_b = await recorded()
-    assert version == SIMPLE_APP_UPGRADED_VERSION
-    assert instance_b != instance_a
-
-    restore_ref = await scenario_driver.create_restore(backup_id=backup.id)
-    restore = await scenario_driver.wait_for_restore(
-        restore_id=restore_ref.id, max_wait=300
-    )
-    assert restore.status == "completed"
-    await wait_for_pods_ready(kubeconfig_path, namespace)
-
-    # The cluster and Styrmin agree, on the restored instance
-    assert await running(SIMPLE_APP_VERSION) == SIMPLE_APP_VERSION
-    assert await recorded() == (SIMPLE_APP_VERSION, instance_a)
-
-    # A backup of the restored data belongs to the restored instance, at its version
-    created = await scenario_driver.create_backup(instance_id=instance_a)
-    await scenario_driver.wait_for_backup(backup_id=created.id, max_wait=180)
-    listed = {
-        str(b.id): b
-        for b in await client.backups.list_backups(deployment_id=deployment_id)
-    }[str(created.id)]
-    assert str(listed.instance_id) == instance_a
-    assert listed.instance.application_version == SIMPLE_APP_VERSION
-
-    # A config edit asks for no version change, so the version stays
-    await scenario_driver.set_component_env_vars(
-        deployment_id=deployment_id,
-        component="server",
-        env_vars={"STYRMIN_E2E_AFTER_RESTORE": "1"},
-    )
-    await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment_id, timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS
-    )
-    await wait_for_pods_ready(kubeconfig_path, namespace)
-    assert (
-        await running(SIMPLE_APP_UPGRADED_VERSION, timeout=45.0) == SIMPLE_APP_VERSION
-    )
-    assert (await recorded())[0] == SIMPLE_APP_VERSION
-
-    # Asking for 0.2.0 is a real change after the restore, and takes effect
-    await scenario_driver.upgrade_deployment(
-        deployment_id=deployment_id, version=SIMPLE_APP_UPGRADED_VERSION
-    )
-    await scenario_driver.wait_for_deployment_running(
-        deployment_id=deployment_id, timeout=FANOUT_RECONCILE_TIMEOUT_SECONDS
-    )
-    await wait_for_pods_ready(kubeconfig_path, namespace)
-    assert await running(SIMPLE_APP_UPGRADED_VERSION) == SIMPLE_APP_UPGRADED_VERSION
-    assert (await recorded())[0] == SIMPLE_APP_UPGRADED_VERSION
