@@ -37,8 +37,8 @@ from styrmin_sdk.driver_format.errors import (
 )
 from styrmin_sdk.driver_format.example_context import (
     ExampleContext,
+    apply_context_file,
     build_example_context,
-    merge_context_file,
 )
 from styrmin_sdk.driver_format.models.resources.actions import ActionDefinition
 from styrmin_sdk.driver_format.models.resources.driver import DriverSpec
@@ -52,7 +52,15 @@ Severity = Literal["error", "warning"]
 #: The checks of the values template and its render. An error of one of them does not
 #: change the context, so the ``context`` command ignores them.
 TEMPLATE_CHECKS = frozenset(
-    {"template-file", "template-syntax", "retired-filter", "undefined-variable", "render", "values-yaml"}
+    {
+        "template-file",
+        "template-syntax",
+        "retired-filter",
+        "undefined-variable",
+        "render",
+        "values-yaml",
+        "render-skipped",
+    }
 )
 YamlPath = tuple[str | int, ...]
 
@@ -233,16 +241,20 @@ def _check_spec_file(path: Path, out: _Collector) -> tuple[DriverSpec | None, No
     return spec, root, data
 
 
-def _declared_actions(spec: DriverSpec | None, data: object) -> list[ActionDefinition]:
-    """The declared actions: from the model, or, when the model is invalid, each valid raw entry."""
+def _declared_actions(spec: DriverSpec | None, data: object) -> list[tuple[int, ActionDefinition]]:
+    """The declared actions with their index in ``spec.actions``.
+
+    From the model, or, when the model is invalid, each valid raw entry, still with its index
+    in the YAML list so that its line can be found.
+    """
     if spec is not None:
-        return list(spec.spec.actions or [])
+        return list(enumerate(spec.spec.actions or []))
     spec_data = data.get("spec") if isinstance(data, dict) else None
     raw = spec_data.get("actions") if isinstance(spec_data, dict) else None
-    actions: list[ActionDefinition] = []
-    for entry in raw if isinstance(raw, list) else []:
+    actions: list[tuple[int, ActionDefinition]] = []
+    for index, entry in enumerate(raw if isinstance(raw, list) else []):
         try:
-            actions.append(ActionDefinition.model_validate(entry))
+            actions.append((index, ActionDefinition.model_validate(entry)))
         except PydanticValidationError:
             continue
     return actions
@@ -284,7 +296,10 @@ def _check_template(path: Path, out: _Collector) -> tuple[str, bool]:
     return template, True
 
 
-def _check_actions(actions: list[ActionDefinition], root: Node | None, path: Path, out: _Collector) -> None:
+def _check_actions(
+    declared: list[tuple[int, ActionDefinition]], root: Node | None, path: Path, out: _Collector
+) -> None:
+    actions = [action for _index, action in declared]
     if not actions:
         return
     try:
@@ -305,28 +320,32 @@ def _check_actions(actions: list[ActionDefinition], root: Node | None, path: Pat
     except SyntaxError as err:
         out.add("error", out.actions_file, err.lineno, f"invalid Python: {err.msg}", "actions-syntax")
         return
-    for action in missing:
-        index = actions.index(action)
-        line = node_line(root, ("spec", "actions", index, "location"))
-        out.add("error", out.spec_file, line, missing_entrypoint_message(action), "action-entrypoint")
+    missing_ids = {id(action) for action in missing}
+    for index, action in declared:
+        if id(action) in missing_ids:
+            line = node_line(root, ("spec", "actions", index, "location"))
+            out.add("error", out.spec_file, line, missing_entrypoint_message(action), "action-entrypoint")
 
 
 def _build_context(report: CheckReport, root: Node | None, context_data: object | None, out: _Collector) -> None:
     """Build the example context and merge the context file, whatever the state of the template."""
     if report.spec is None:
         return
-    try:
-        example = build_example_context(report.spec, report.template)
-    except (ContextError, ServiceError) as err:
-        out.add("error", out.spec_file, None, f"The example context cannot be built: {err!s}", "example-context")
-        return
-    report.example = example
-    for warning in example.warnings:
-        out.add("warning", out.spec_file, node_line(root, warning.path), warning.message, "placeholder")
-    context = example.context
+    template_replaced = False
     if context_data is not None:
         # A ContextFileError reaches the command, which exits with 2.
-        context, template_replaced = merge_context_file(context, context_data, report.template)
+        example, context, template_replaced = apply_context_file(report.spec, report.template, context_data)
+    else:
+        try:
+            example = build_example_context(report.spec, report.template)
+        except (ContextError, ServiceError) as err:
+            out.add("error", out.spec_file, None, f"The example context cannot be built: {err!s}", "example-context")
+            return
+        context = example.context
+    report.example = example
+    for warning in example.warnings:
+        out.add("warning", out.spec_file, node_line(root, warning.path), warning.message, warning.kind)
+    if context_data is not None:
         if template_replaced:
             out.add(
                 "warning",
@@ -381,6 +400,14 @@ def run_checks(
         if report.template_valid and report.context is not None:
             retired = any(d.check == "retired-filter" for d in out.items)
             _render_template(report, report.context, out, retired_reported=retired)
+    elif report.template_valid and report.template.strip():
+        out.add(
+            "warning",
+            out.template_file,
+            None,
+            f"not rendered, because {Path(out.spec_file).name} has errors; its undefined variables are not checked",
+            "render-skipped",
+        )
 
     report.diagnostics = out.sorted()
     return report

@@ -232,3 +232,31 @@ def test_a_render_failure_is_an_error_with_its_line_and_the_undefined_uses_befor
     assert f"{driver}/values.j2.yml:2: error: Chart values template rendering failed: TypeError:" in result.out
     assert result.code == 1
     assert not result.err
+
+
+def test_a_missing_action_function_names_its_own_line_when_another_action_is_invalid(example_copy, run_cli) -> None:
+    driver = example_copy("simple-app")
+
+    def change(data: dict) -> None:
+        data["spec"]["actions"][0] = {"name": "broken", "hook": "upgrade"}
+        data["spec"]["actions"][1]["location"] = "actions.py::gone"
+
+    edit_spec(driver, change)
+    line = _spec_line(driver, "actions.py::gone")
+
+    result = run_cli("check", str(driver))
+
+    assert f"{driver}/driver.styrmin.yml:{line}: error: Missing entrypoint for action pre_setup: gone\n" in result.out
+
+
+def test_a_template_that_is_not_rendered_because_of_spec_errors_says_so(example_copy, run_cli) -> None:
+    driver = example_copy("simple-app")
+    edit_spec(driver, lambda data: data["spec"].update(version=1))
+
+    result = run_cli("check", str(driver))
+
+    assert (
+        f"{driver}/values.j2.yml: warning: not rendered, because driver.styrmin.yml has errors; "
+        "its undefined variables are not checked\n" in result.out
+    )
+    assert result.code == 1

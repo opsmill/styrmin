@@ -36,7 +36,14 @@ docker run --rm -v "$PWD/my-driver:/work/my-driver:ro" \
   styrmin-driver check /work/my-driver
 ```
 
-The image applies the rules of the Styrmin version in its tag.
+The image applies the rules of the Styrmin version in its tag. Images of
+Styrmin 0.1.55 and earlier do not have the command. `styrmin-driver --version`
+prints the version of the SDK package, not the Styrmin release.
+
+`styrmin-driver` renders `values.j2.yml` with Jinja as the agent does,
+without a sandbox, so a template can run Python code on the machine that
+runs the command. Run it on drivers you trust, or in an isolated job, for
+example for a pull request from a fork.
 
 ### Commands
 
@@ -138,8 +145,16 @@ instance:
 
 - A mapping merges into the example context key by key. Any other value,
   including a list, replaces the example's value.
+- The `config` of `cluster`, `environment` and `deployment` is merged into
+  `instance.config`, as on the server. The service entries are then built
+  again with the FQDN suffix of the result, unless the file sets `services`.
+- The warnings about a value that the example context makes up are left out
+  when the file sets that value.
 - The result must match the context model. A key that the model does not
   have stops the command with exit code 2, and the error names the key.
+- The keys of `parameters`, `labels`, `services` and `capabilities` are not
+  checked: a misspelt parameter name, or a value of the wrong kind, is
+  accepted.
 - `app.helm.chart.values_template` is always the text of the directory's
   `values.j2.yml`.
 - The `spec.context` of a `StyrminDeployment` is a full context in JSON. Pass

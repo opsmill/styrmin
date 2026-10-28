@@ -95,6 +95,10 @@ FILE_CASES: dict[str, Callable[[Path], None]] = {
         p / "driver.styrmin.yml"
     ).write_text("kind: [unclosed\n"),
     "missing driver spec file": lambda p: (p / "driver.styrmin.yml").unlink(),
+    "empty driver spec file": lambda p: (p / "driver.styrmin.yml").write_text(""),
+    "driver spec file that is a list": lambda p: (p / "driver.styrmin.yml").write_text(
+        "- a\n"
+    ),
 }
 
 
@@ -149,3 +153,19 @@ def test_the_example_driver_loads_and_passes_check() -> None:
     get_local_driver_loader(path=str(EXAMPLE)).load_driver()
 
     assert run_checks(EXAMPLE).errors == []
+
+
+def test_a_driver_spec_file_that_is_not_a_mapping_gives_a_message_without_a_module_path(
+    tmp_path: Path,
+) -> None:
+    driver = tmp_path / "driver"
+    shutil.copytree(EXAMPLE, driver)
+    (driver / "driver.styrmin.yml").write_text("")
+
+    with pytest.raises(ServiceError) as raised:
+        get_local_driver_loader(path=str(driver)).load_driver()
+
+    assert str(raised.value) == (
+        "Error while deserializing the driver resource: Provided data is not of expected type: "
+        "DriverSpec() argument after ** must be a mapping, not NoneType"
+    )

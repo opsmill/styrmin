@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+from styrmin_sdk.driver_format.context.fqdn import compute_primary_fqdn
+from styrmin_sdk.driver_format.example_context import EXAMPLE_DEPLOYMENT_ID
 
 from .conftest import EXAMPLES
 
@@ -146,3 +148,53 @@ def test_a_context_file_with_an_invalid_env_var_name_exits_with_2(tmp_path: Path
 
     assert result.code == 2
     assert "1BAD" in result.err
+
+
+def _ingress_host(values: dict) -> str:
+    return values["ingress"]["hosts"][0]["host"]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "instance:\n  config:\n    fqdn_suffix: apps.example.org\n",
+        "cluster:\n  config:\n    fqdn_suffix: apps.example.org\n",
+    ],
+    ids=["instance config", "cluster config"],
+)
+def test_an_fqdn_suffix_in_the_context_file_reaches_the_service_fqdns(content: str, tmp_path: Path, run_cli) -> None:
+    context = _write(tmp_path, "ctx.yml", content)
+
+    values = _render(run_cli, EXAMPLES / "simple-app", context)
+    data = yaml.safe_load(run_cli("context", str(EXAMPLES / "simple-app"), "--context", str(context)).out)
+
+    expected = compute_primary_fqdn("simple-app", str(EXAMPLE_DEPLOYMENT_ID), "apps.example.org")
+    assert data["instance"]["config"]["fqdn_suffix"] == "apps.example.org"
+    assert data["services"]["simple-app"]["primary_fqdn"] == expected
+    assert _ingress_host(values) == expected
+
+
+def test_services_set_by_the_context_file_are_kept(tmp_path: Path, run_cli) -> None:
+    context = _write(
+        tmp_path,
+        "ctx.yml",
+        "instance:\n  config:\n    fqdn_suffix: apps.example.org\n"
+        "services:\n  simple-app:\n    primary_fqdn: given.example.org\n",
+    )
+
+    values = _render(run_cli, EXAMPLES / "simple-app", context)
+
+    assert _ingress_host(values) == "given.example.org"
+
+
+def test_warnings_about_values_that_the_context_file_sets_are_left_out(tmp_path: Path, run_cli) -> None:
+    context = _write(tmp_path, "ctx.yml", "app:\n  version: '5.0'\nparameters:\n  image_repository: repo/app\n")
+
+    without = run_cli("check", str(EXAMPLES / "generic-app"))
+    with_file = run_cli("check", str(EXAMPLES / "generic-app"), "--context", str(context))
+
+    assert "no default_version" in without.out
+    assert "has no default" in without.out
+    assert "no default_version" not in with_file.out
+    assert "has no default" not in with_file.out
+    assert with_file.out.endswith("no errors\n")

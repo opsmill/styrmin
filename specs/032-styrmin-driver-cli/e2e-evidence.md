@@ -109,3 +109,58 @@ Checks after the fixes, on the same working tree:
 | `uv run pytest -q cli/tests` | 416 passed |
 | `uv lock --check` | passes |
 | `sleep infinity \| uv run pytest "backend/tests/e2e/test_deploy_app.py::test_styrmin_driver_matches_helm_release[api-chromium]" -v -s --pdb -p no:cacheprovider` | `1 passed, 4 warnings in 213.00s`, ended 2026-10-28T15:38:46+01:00, session vCluster `pytest-f02eaa92-2ec4-44c5-8099-1488723b8a77`, image rebuilt from the working tree |
+
+## E2E test of the move: load errors reach the client (2026-10-28)
+
+The move adds no user-visible behaviour, but its risk is that a moved error stops reaching API clients: the GraphQL error extension (`backend/styrmin_backend/api/errors.py`) sends the message and code only for a `ServiceError`, and masks any other error as "An internal error occurred". This test loads two driver directories that a load refuses, from a `broken-drivers` repository of the session git server, and checks the code, the message and the metadata that the client receives, and that `styrmin-driver check` reports the same message.
+
+- Node: `backend/tests/e2e/test_deploy_app.py::test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver`, two cases (`missing-action`: `VALIDATION_ERROR`; `retired-filter`: `RETIRED_TEMPLATE_FILTER` with `filter: component_command`), `api_only`, shard `shard_general`.
+- Fixtures: `backend/tests/e2e/fixtures/drivers/broken/{missing-action,retired-filter}/`, the `broken-drivers` repository added to the `git_server` fixture (`backend/tests/e2e/conftest.py`) and to the git server image (`backend/tests/e2e/fixtures/git-server/Dockerfile`). No deployment starts.
+- Command: `sleep infinity | uv run pytest backend/tests/e2e/test_deploy_app.py -k "driver_load_errors and api-chromium" -v -s --pdb -p no:cacheprovider`
+- First run: an error in the `git_server` fixture, `GitProtocolError: access denied or repository not exported: /broken-drivers.git`, because the git server image creates each bare repository it serves. The Dockerfile now creates `broken-drivers.git`.
+- Second run: ended 2026-10-28T15:51:50+01:00, session vCluster `pytest-d1881941-656c-4605-8cbc-0c97686ca480`.
+
+  ```text
+  backend/tests/e2e/test_deploy_app.py::test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver[api-chromium-missing-action-VALIDATION_ERROR-Missing entrypoint for action upgrade: upgrade_missing-metadata0] PASSED
+  backend/tests/e2e/test_deploy_app.py::test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver[api-chromium-retired-filter-RETIRED_TEMPLATE_FILTER-values.j2.yml line 2 calls the 'component_command' template filter, which was removed-metadata1] PASSED
+  =========== 2 passed, 14 deselected, 4 warnings in 128.77s (0:02:08) ===========
+  ```
+
+## Dependency scan (2026-10-28)
+
+- Command: `trivy fs --scanners vuln --format json --output <file> .`, in two clean worktrees: the branch at `7e12cd36` and `develop` at `8f450f69`. Clean worktrees, because the working checkout holds `.venv` and `node_modules` that the base checkout does not.
+- Trivy 0.74.0; vulnerability database version 2, updated 2026-10-28 13:01:10 UTC.
+- Targets in both: `uv.lock`, `backend/uv.lock`, `docs/pnpm-lock.yaml`, `frontend/pnpm-lock.yaml`.
+- Findings: 194 on the branch, 194 on `develop`, 0 new (compared by `VulnerabilityID`, `PkgName` and `InstalledVersion`). The added dependencies `jinja2` 3.1.6 and `packaging` 25.0 were already in `uv.lock`.
+
+## Code review of the branch (2026-10-28)
+
+The repository's `code-review` skill ran in an agent that did not write the change, at high thoroughness, on the commits `f449e4ca` and `7e12cd36` on top of `develop` (`8f450f69`) and on the uncommitted E2E test of the move. It found 1 CRITICAL, 12 IMPORTANT and 29 MINOR findings.
+
+| Finding | Resolution |
+|---------|------------|
+| CRITICAL: an FQDN suffix in a context file did not reach the service FQDNs (`host: None`) | Fixed: `apply_context_file` resolves the `config` of `cluster`, `environment` and `deployment` into `instance.config`, as the server does, and builds the service entries again from the merged context unless the file sets `services`. Tests: `test_context_file.py::test_an_fqdn_suffix_in_the_context_file_reaches_the_service_fqdns` (2 cases), `::test_services_set_by_the_context_file_are_kept`. |
+| A missing action function at the wrong line when another action is invalid | Fixed: the YAML index of each action is kept. Test: `test_check_errors.py::test_a_missing_action_function_names_its_own_line_when_another_action_is_invalid`. |
+| A load message changed in the move (it named the SDK module) | Fixed: the message names `DriverSpec()` without a module; ADR-089 records the change. Tests: two SC-003 cases and `test_a_driver_spec_file_that_is_not_a_mapping_gives_a_message_without_a_module_path`. |
+| The new E2E test compared only the start of each message | Fixed: the whole message of `styrmin-driver`, migration guide included, must be in the server's message. |
+| The template render is not sandboxed | Kept, documented: the agent renders the same way; the reference page says to run the command on trusted drivers or in an isolated job. A sandbox would reject templates that the agent accepts. |
+| The placeholder warnings stayed when the context file set the value | Fixed. Test: `test_context_file.py::test_warnings_about_values_that_the_context_file_sets_are_left_out`. |
+| An error in `driver.styrmin.yml` hid the template errors without a note | Fixed: a warning says that `values.j2.yml` was not rendered. Test: `test_check_errors.py::test_a_template_that_is_not_rendered_because_of_spec_errors_says_so`. |
+| The YAML error of the rendered values gives a line of the rendered text | Kept: the message is the agent's message (FR-001). Showing the rendered text is a follow-up. |
+| One pull request or two; conflicts with open PR #575 on `context/models/contexts.py` | Kept: a decision for the user. |
+| `docs/docs/beta-status.md` listed #23 as "Coming next" | Fixed: moved to "Using application drivers". |
+| `--version` prints the SDK version; the first image with the command is not named | Fixed in the docs: the reference page says that `--version` prints the SDK version and that images of 0.1.55 and earlier do not have the command. |
+| Developer pages named the old backend paths | Fixed: `dev/knowledge/backend/data-models.md`, `hooks-and-actions.md` and `deployment-env-vars.md` name the SDK paths and say that the old paths re-export. |
+| No follow-up issues exist | Kept: creating issues is the user's decision. |
+
+The 29 MINOR findings are left as they are.
+
+Checks after the fixes:
+
+| Command | Result |
+|---------|--------|
+| `uv run invoke lint` | exit code 0 |
+| `uv run pytest tests --ignore=tests/e2e -q -n auto` (in `backend/`) | 5809 passed, 8 skipped, 1 failed: the same telemetry timing test, which fails on a clean `HEAD` too |
+| `uv run pytest -q python_sdk/tests` | 486 passed, 1 xfailed (`slurpit`) |
+| `uv run pytest -q cli/tests` | 416 passed |
+| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 251.70s`, ended 2026-10-28T16:26:55+01:00, session vCluster `pytest-580b9c82-3ef4-4991-a354-8dd69bac0618`: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |
