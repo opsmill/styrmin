@@ -3,6 +3,7 @@ from uuid import UUID
 
 from loguru import logger
 from pydantic import ValidationError
+from styrmin_sdk.driver_format.context.service_entries import build_service_entries
 
 from styrmin_backend.agent.service.kubernetes.utils import (
     get_kubernetes_reference,
@@ -30,25 +31,19 @@ from styrmin_backend.context.models.input import (
     UtilityInput,
     UtilityKindInput,
 )
-from styrmin_backend.context.fqdn import (
-    compute_service_address,
-    service_gets_ingress,
-)
-from styrmin_backend.context.models.services import ServiceReference
 from styrmin_backend.context.resolvers import (
     _resolve_scheduling_config,
     resolve_global_context,
 )
 from styrmin_backend.db.models import DeployedService
 from styrmin_backend.domain.models import Deployment
-from styrmin_backend.services.env_vars.exceptions import (
-    EnvVarSizeLimitExceededError,
-)
 from styrmin_backend.services.container_overrides.resolver import (
     ContainerOverridesResolver,
 )
+from styrmin_backend.services.env_vars.exceptions import (
+    EnvVarSizeLimitExceededError,
+)
 from styrmin_backend.services.env_vars.resolver import EnvVarsResolver
-from styrmin_backend.services.image_overrides.resolver import ImageOverridesResolver
 from styrmin_backend.services.env_vars.validator import (
     PER_SCOPE_BYTE_CAP,
     _serialised_dict_bytes,
@@ -57,6 +52,7 @@ from styrmin_backend.services.exceptions import (
     DeploymentNotFoundError,
     InvalidSchedulingConfigError,
 )
+from styrmin_backend.services.image_overrides.resolver import ImageOverridesResolver
 from styrmin_backend.services.scheduling.validator import (
     expand_deployment_references,
 )
@@ -246,62 +242,24 @@ async def generate_context_from_deployment(
             deployed_services=deployed_services,
             uow=uow,
         )
-        services_dict: dict = {}
-        deployed_services_list: list[dict] = []
-        for svc in _order_deployed_services(
+        (
+            context.services,
+            context.deployed_services,
+            has_own_services,
+        ) = build_service_entries(
             deployed_services,
-            deployment_id=deployment.id,
+            config=context.instance.config,
+            service_overrides=service_overrides,
             declared_names=[
                 declared["name"]
                 for declared in application_driver_version.services or []
             ],
-        ):
-            # An override applies only to a service whose Ingress Styrmin builds.
-            override = (
-                service_overrides.get(svc.deployment_id, {}).get(
-                    svc.driver_service_name
-                )
-                if service_gets_ingress(svc.scope, svc.kind)
-                else None
-            )
-            address = compute_service_address(
-                context.instance.config,
-                override,
-                service_host=svc.resolved_name,
-                environment_name=env_name,
-                app_name=app_name,
-                deployment_id=deployment.id,
-            )
-            ref = ServiceReference(
-                host=svc.resolved_name,
-                port=svc.port,
-                kind=svc.kind,
-                primary_fqdn=address.primary_fqdn,
-                human_readable_fqdn=address.human_readable_fqdn,
-                ingress_class=address.ingress_class,
-                overridden=address.overridden,
-            )
-            services_dict[svc.driver_service_name] = ref.model_dump()
-            deployed_services_list.append(
-                {
-                    "driver_service_name": svc.driver_service_name,
-                    "resolved_name": svc.resolved_name,
-                    "port": svc.port,
-                    "kind": svc.kind,
-                    "scope": svc.scope,
-                    "deployment_id": str(svc.deployment_id),
-                    "component": svc.component,
-                    "ingress_class": address.ingress_class,
-                    "fqdn_suffix": address.fqdn_suffix,
-                }
-            )
-        context.services = services_dict
-        context.deployed_services = deployed_services_list
+            app_name=app_name,
+            deployment_id=deployment.id,
+            environment_name=env_name,
+        )
 
         # Auto-add service-discovery utility when this deployment has services
-        has_own_services = any(
-            str(svc.deployment_id) == str(deployment.id) for svc in deployed_services
-        )
         if has_own_services:
             context.utilities.append(UtilityContext(kind=UtilityKind.SERVICE_DISCOVERY))
 
@@ -345,36 +303,6 @@ async def generate_context_from_deployment(
         )
 
         return context
-
-
-def _order_deployed_services(
-    deployed_services: Sequence[DeployedService],
-    *,
-    deployment_id: UUID,
-    declared_names: Sequence[str],
-) -> list[DeployedService]:
-    """Order the services of an environment deterministically.
-
-    The repository query has no ``ORDER BY``. The services of other deployments come first,
-    by deployment id and service name. The services of this deployment come last, in the
-    order in which its driver version declares them (the Ingress builder gives the
-    application address to the first one). Because the services of this deployment come
-    last, they win a ``services`` key that a peer shares with them. A service that the
-    driver version does not declare sorts after the declared ones, by name.
-    """
-    declared_index = {name: index for index, name in enumerate(declared_names)}
-
-    def sort_key(svc: DeployedService) -> tuple[int, str, int, str]:
-        if svc.deployment_id != deployment_id:
-            return (0, str(svc.deployment_id), 0, svc.driver_service_name)
-        return (
-            1,
-            "",
-            declared_index.get(svc.driver_service_name, len(declared_index)),
-            svc.driver_service_name,
-        )
-
-    return sorted(deployed_services, key=sort_key)
 
 
 async def _service_overrides_by_deployment(

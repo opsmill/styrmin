@@ -1,4 +1,13 @@
-from .code import ActionsCode
-from .driver import DriverSpec
+"""Re-export of ``styrmin_sdk.driver_format.models.resources``.
 
-DriverResource = DriverSpec | ActionsCode | str
+The module moved to the SDK, which the server, the agent and styrmin-driver share
+(ADR-0089). This path keeps the backend's imports working.
+"""
+
+from styrmin_sdk.driver_format.models.resources import (
+    DriverResource,
+)
+
+__all__ = [
+    "DriverResource",
+]
