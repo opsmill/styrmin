@@ -579,6 +579,10 @@ def _prepare_driver(
 
 COLLECTION_HELPER_MODULE = "collection_helper"
 
+#: Test drivers that a load refuses, served from the ``broken-drivers`` repository.
+BROKEN_DRIVERS_DIR = FIXTURES_DIR / "drivers" / "broken"
+BROKEN_DRIVER_NAMES = ("missing-action", "retired-filter")
+
 
 def _import_sibling_module(driver_dir: Path) -> None:
     """Make ``actions.py`` import a module next to it: every action then fails to
@@ -687,6 +691,13 @@ async def git_server(
         )
     _import_sibling_module(collection / "drivers" / "simple-app")
     repo_dirs["driver-collection"] = str(collection)
+
+    # Two driver directories that a load refuses (spec 032): their errors must reach the
+    # client with their code and message, now that the driver code lives in the SDK.
+    broken = tmp_repo / "broken-drivers"
+    for name in BROKEN_DRIVER_NAMES:
+        shutil.copytree(BROKEN_DRIVERS_DIR / name, broken / "drivers" / name)
+    repo_dirs["broken-drivers"] = str(broken)
 
     for repo_dir in repo_dirs.values():
         porcelain.init(repo_dir)

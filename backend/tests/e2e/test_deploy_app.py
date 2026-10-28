@@ -17,7 +17,13 @@ import yaml
 from kubernetes_asyncio import client as kubeclient
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
-from tests.e2e.conftest import PROJECT_ROOT, _portforward, _wait_for_http
+from styrmin_sdk.exceptions import StyrminAPIError
+from tests.e2e.conftest import (
+    BROKEN_DRIVERS_DIR,
+    PROJECT_ROOT,
+    _portforward,
+    _wait_for_http,
+)
 from tests.e2e.drivers import ScenarioDriver, StepRef, TaskLinkRef, TimelineEntry
 from tests.e2e.pages.environments import EnvironmentDetailPage, EnvironmentsListPage
 
@@ -690,3 +696,71 @@ async def test_styrmin_driver_matches_helm_release(
         check=False,
     )
     assert in_image.returncode == 0, f"{in_image.stdout}{in_image.stderr}"
+
+
+@pytest.mark.api_only(
+    reason=(
+        "Loads invalid drivers through the SDK and compares the GraphQL errors with "
+        "styrmin-driver; no UI flow exercised."
+    ),
+)
+@pytest.mark.ci
+@pytest.mark.parametrize(
+    ("name", "code", "message", "metadata"),
+    [
+        (
+            "missing-action",
+            "VALIDATION_ERROR",
+            "Missing entrypoint for action upgrade: upgrade_missing",
+            {},
+        ),
+        (
+            "retired-filter",
+            "RETIRED_TEMPLATE_FILTER",
+            "values.j2.yml line 2 calls the 'component_command' template filter, which was removed",
+            {"filter": "component_command"},
+        ),
+    ],
+)
+async def test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver(
+    styrmin_resources: dict,
+    git_server: dict[str, str],
+    name: str,
+    code: str,
+    message: str,
+    metadata: dict[str, str],
+) -> None:
+    """The driver code moved to the SDK (ADR-089); a load still reports its errors to clients.
+
+    The GraphQL error extension sends a client the message and code of an error only when
+    the error is a ``ServiceError`` (``api/errors.py``); any other error becomes "An
+    internal error occurred". The load of each driver directory must give its code, its
+    message and its metadata, and ``styrmin-driver check`` must report the same message.
+    """
+    client: StyrminClient = styrmin_resources["client"]
+
+    with pytest.raises(StyrminAPIError) as raised:
+        await client.drivers.load_version(
+            repository_url=git_server["broken-drivers"],
+            branch="master",
+            driver_directory=f"drivers/{name}",
+        )
+
+    assert raised.value.typename == code
+    assert message in str(raised.value)
+    for key, value in metadata.items():
+        assert raised.value.extensions.get(key) == value
+
+    checked = await asyncio.to_thread(
+        _styrmin_driver, "check", str(BROKEN_DRIVERS_DIR / name)
+    )
+    assert checked.returncode == 1, checked.stdout + checked.stderr
+    errors = [
+        line.split(" error: ", 1)[1]
+        for line in checked.stdout.splitlines()
+        if " error: " in line
+    ]
+    assert len(errors) == 1, checked.stdout
+    # The whole message of styrmin-driver, migration guide included, is in the server's message.
+    assert errors[0].startswith(message)
+    assert errors[0] in str(raised.value)
