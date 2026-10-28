@@ -1,35 +1,17 @@
-from typing import Annotated, Literal
+"""Re-export of ``styrmin_sdk.driver_format.models.structure.source``.
 
-from pydantic import BaseModel, Field
+The module moved to the SDK, which the server, the agent and styrmin-driver share
+(ADR-0089). This path keeps the backend's imports working.
+"""
 
+from styrmin_sdk.driver_format.models.structure.source import (
+    DriverSource,
+    GitSource,
+    LocalSource,
+)
 
-class GitSource(BaseModel):
-    """The source of a driver loaded from a remote git repository.
-
-    Args:
-        repository (str): The repository URL.
-        branch (str): The branch name.
-        token (str): The token to access the repository.
-        driver_directory (str | None): The stored driver directory relative to the
-            repository root; None for the repository root.
-    """
-
-    type: Literal["git"] = "git"
-    repository: str
-    branch: str
-    token: str
-    driver_directory: str | None = None
-
-
-class LocalSource(BaseModel):
-    """The source of a driver loaded from a local filesystem directory.
-
-    Args:
-        path (str): The absolute path to the driver directory.
-    """
-
-    type: Literal["local"] = "local"
-    path: str
-
-
-DriverSource = Annotated[GitSource | LocalSource, Field(discriminator="type")]
+__all__ = [
+    "DriverSource",
+    "GitSource",
+    "LocalSource",
+]

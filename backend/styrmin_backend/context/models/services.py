@@ -1,25 +1,13 @@
-"""Service reference context model for Jinja2 template rendering.
+"""Re-export of ``styrmin_sdk.driver_format.context.models.services``.
 
-Provides a read-only view of a deployed service, injected into the template
-context so consuming applications can reference services via
-``{{ services.<name>.url }}``, ``{{ services.<name>.host }}``, etc.
+The module moved to the SDK, which the server, the agent and styrmin-driver share
+(ADR-0089). This path keeps the backend's imports working.
 """
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from styrmin_sdk.driver_format.context.models.services import (
+    ServiceReference,
+)
 
-
-class ServiceReference(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    host: str
-    port: int
-    kind: str
-    primary_fqdn: str | None = None
-    human_readable_fqdn: str | None = None
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def url(self) -> str:
-        if self.kind in ("http", "https"):
-            return f"{self.kind}://{self.host}:{self.port}"
-        return f"{self.host}:{self.port}"
+__all__ = [
+    "ServiceReference",
+]

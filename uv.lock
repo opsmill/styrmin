@@ -2697,10 +2697,14 @@ version = "0.1.0"
 source = { editable = "backend" }
 dependencies = [
     { name = "alembic" },
+    { name = "styrmin-sdk" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "alembic", specifier = ">=1.14.0" }]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.14.0" },
+    { name = "styrmin-sdk", editable = "python_sdk" },
+]
 
 [[package]]
 name = "styrmin-mvp"
@@ -2811,6 +2815,8 @@ version = "0.1.0"
 source = { editable = "python_sdk" }
 dependencies = [
     { name = "httpx" },
+    { name = "jinja2" },
+    { name = "packaging" },
     { name = "pydantic" },
     { name = "pyyaml" },
 ]
@@ -2818,6 +2824,8 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
+    { name = "jinja2", specifier = ">=3.1.0" },
+    { name = "packaging", specifier = ">=24.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pyyaml", specifier = ">=6.0.1,<7.0.0" },
 ]
