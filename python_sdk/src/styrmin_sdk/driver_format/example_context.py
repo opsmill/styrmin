@@ -8,7 +8,7 @@ configuration, with fixed identifiers (specs/032-styrmin-driver-cli, research R-
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from packaging.specifiers import InvalidSpecifier, Specifier
@@ -41,10 +41,16 @@ FALLBACK_APPLICATION_VERSION = "0.0.0"
 
 @dataclass(frozen=True)
 class ExampleWarning:
-    """A value that the example context had to make up, with the YAML path of the declaration."""
+    """A value that the example context had to make up, with the YAML path of the declaration.
+
+    ``kind`` is ``placeholder`` for a parameter without a default, whose name is ``subject``,
+    and ``version-placeholder`` for a driver without ``default_version``.
+    """
 
     path: tuple[str | int, ...]
     message: str
+    kind: Literal["placeholder", "version-placeholder"]
+    subject: str = ""
 
 
 @dataclass
@@ -105,12 +111,19 @@ def example_application_version(supported_versions: str) -> str:
     return FALLBACK_APPLICATION_VERSION
 
 
-def build_example_context(driver_spec: DriverSpec, values_template: str) -> ExampleContext:
+def build_example_context(
+    driver_spec: DriverSpec,
+    values_template: str,
+    *,
+    configs: Mapping[str, Mapping[str, Any]] | None = None,
+    environment_name: str | None = None,
+) -> ExampleContext:
     """Build the context that the server would build for a new deployment of the driver.
 
     The parameters are the defaults, and a placeholder for each parameter without one. The
-    cluster, the environment and the deployment have no configuration. The identifiers are
-    the ``EXAMPLE_*`` constants.
+    identifiers are the ``EXAMPLE_*`` constants. ``configs`` gives the configuration of the
+    ``cluster``, the ``environment`` and the ``deployment``, empty by default; the server's
+    resolver merges them into ``instance.config``, as it does for a deployment.
     """
     spec = driver_spec.spec
     warnings: list[ExampleWarning] = []
@@ -127,6 +140,8 @@ def build_example_context(driver_spec: DriverSpec, values_template: str) -> Exam
                         f"parameter '{definition.name}' has no default; the example context uses "
                         f"the placeholder {values[definition.name]!r}"
                     ),
+                    kind="placeholder",
+                    subject=definition.name,
                 )
             )
     parameters = validate_parameter_values(definitions=definitions, values=values)
@@ -141,6 +156,7 @@ def build_example_context(driver_spec: DriverSpec, values_template: str) -> Exam
                     f"no default_version; the example context uses application version '{version}'; "
                     "set app.version in a context file to change it"
                 ),
+                kind="version-placeholder",
             )
         )
 
@@ -148,7 +164,9 @@ def build_example_context(driver_spec: DriverSpec, values_template: str) -> Exam
     components = spec.components.model_dump() if spec.components else {}
     context_input = ContextInput.model_validate(
         {
-            "config": {"cluster": {}, "environment": {}, "deployment": {}},
+            "config": {
+                level: dict((configs or {}).get(level) or {}) for level in ("cluster", "environment", "deployment")
+            },
             "instance": {
                 "deployment_id": EXAMPLE_DEPLOYMENT_ID,
                 "namespace": namespace,
@@ -170,7 +188,7 @@ def build_example_context(driver_spec: DriverSpec, values_template: str) -> Exam
             },
             "components": [{"name": name, "enabled": True, "config": config} for name, config in components.items()],
             "utilities": [{"kind": UtilityKind.INGRESS.value}],
-            "environment_name": EXAMPLE_ENVIRONMENT_NAME,
+            "environment_name": environment_name or EXAMPLE_ENVIRONMENT_NAME,
             "labels": {"environment_id": EXAMPLE_ENVIRONMENT_ID, "deployment_id": EXAMPLE_DEPLOYMENT_ID},
             "parameters": parameters,
             "driver_version": f"{driver_spec.metadata.name} {spec.version} (example)",
@@ -181,6 +199,20 @@ def build_example_context(driver_spec: DriverSpec, values_template: str) -> Exam
     context.cluster.capabilities = {}
     context.environment.capabilities = {}
 
+    build_driver_service_entries(context, driver_spec)
+    return ExampleContext(context=context, warnings=warnings)
+
+
+def build_driver_service_entries(
+    context: GlobalContext, driver_spec: DriverSpec, *, add_service_discovery: bool = True
+) -> None:
+    """Set the ``services`` and ``deployed_services`` of ``context`` from the driver's services.
+
+    The entries use the context's application name, deployment ID, environment name and
+    resolved FQDN suffix, as the server builds them for a deployment that owns these
+    services. The ``service-discovery`` utility is added when the driver declares services,
+    unless ``add_service_discovery`` is false.
+    """
     rows = [
         _ServiceRow(
             driver_service_name=service.name,
@@ -188,20 +220,79 @@ def build_example_context(driver_spec: DriverSpec, values_template: str) -> Exam
             port=service.port,
             kind=service.kind.value,
             component=service.component,
-            deployment_id=EXAMPLE_DEPLOYMENT_ID,
+            deployment_id=context.instance.deployment_id,
         )
-        for service in spec.services or []
+        for service in driver_spec.spec.services or []
     ]
     context.services, context.deployed_services, has_own_services = build_service_entries(
         rows,
-        app_name=driver_spec.metadata.name,
-        deployment_id=EXAMPLE_DEPLOYMENT_ID,
-        environment_name=EXAMPLE_ENVIRONMENT_NAME,
+        app_name=context.app.name,
+        deployment_id=context.instance.deployment_id,
+        environment_name=context.environment.name,
         fqdn_suffix=context.instance.config.fqdn_suffix,
     )
-    if has_own_services:
+    if (
+        add_service_discovery
+        and has_own_services
+        and all(u.kind != UtilityKind.SERVICE_DISCOVERY for u in context.utilities)
+    ):
         context.utilities.append(UtilityContext(kind=UtilityKind.SERVICE_DISCOVERY))
-    return ExampleContext(context=context, warnings=warnings)
+
+
+def _sets(data: Mapping[str, Any], *path: str) -> bool:
+    """Whether the context file sets the key at ``path``."""
+    node: object = data
+    for key in path:
+        if not isinstance(node, Mapping) or key not in node:
+            return False
+        node = node[key]
+    return True
+
+
+def apply_context_file(
+    driver_spec: DriverSpec, values_template: str, data: object
+) -> tuple[ExampleContext, GlobalContext, bool]:
+    """The example context of the driver with an author's context file applied (R-008).
+
+    As on the server, the configuration of the ``cluster``, the ``environment`` and the
+    ``deployment`` in the file is resolved into ``instance.config``. The file is then merged
+    into the result. Unless the file sets ``services`` or ``deployed_services``, the service
+    entries are built again from the merged context, so that an FQDN suffix of the file
+    reaches the service FQDNs. The warnings about a value that the file sets are left out.
+
+    Returns the example context with its remaining warnings, the merged context, and whether
+    the file set a different values template.
+
+    Raises:
+        ContextFileError: If ``data`` is not a mapping, its configuration is invalid, or the
+            merged context does not match the context model.
+    """
+    if not isinstance(data, Mapping):
+        raise ContextFileError([("", f"the top level must be a mapping, not {type(data).__name__}")])
+    configs: dict[str, Mapping[str, Any]] = {}
+    for level in ("cluster", "environment", "deployment"):
+        section = data.get(level)
+        config = section.get("config") if isinstance(section, Mapping) else None
+        if isinstance(config, Mapping):
+            configs[level] = config
+    environment = data.get("environment")
+    name = environment.get("name") if isinstance(environment, Mapping) else None
+    try:
+        example = build_example_context(
+            driver_spec, values_template, configs=configs, environment_name=name if isinstance(name, str) else None
+        )
+    except (ContextError, ServiceError, ValidationError, ValueError, TypeError) as err:
+        raise ContextFileError([("", f"the configuration in the context file is invalid: {err}")]) from err
+    context, template_replaced = merge_context_file(example.context, data, values_template)
+    if not _sets(data, "services") and not _sets(data, "deployed_services"):
+        build_driver_service_entries(context, driver_spec, add_service_discovery=not _sets(data, "utilities"))
+    warnings = [
+        w
+        for w in example.warnings
+        if not (w.kind == "version-placeholder" and _sets(data, "app", "version"))
+        and not (w.kind == "placeholder" and _sets(data, "parameters", w.subject))
+    ]
+    return ExampleContext(context=example.context, warnings=warnings), context, template_replaced
 
 
 def _merge(base: Any, overlay: Any) -> Any:  # noqa: ANN401

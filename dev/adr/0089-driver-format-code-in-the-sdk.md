@@ -77,8 +77,11 @@ Python 3.12 (`per-file-target-version`), so syntax that Python 3.12 cannot parse
 ## Consequences
 
 - Good, because `styrmin-driver` and the server apply one copy of the rules.
-- Good, because no import path, message or class of the backend changes; the backend test suite
-  passed unchanged after the move.
+- Good, because no import path or class of the backend changes, and one message only: for a
+  `driver.styrmin.yml` that is not a mapping, "Provided data is not of expected type: ..." now
+  names the class `DriverSpec` without its module, where it named
+  `styrmin_backend.services.driver.models.resources.driver.DriverSpec` before the move. The
+  backend test suite passed unchanged after the move.
 - Bad, because the backend now depends on the SDK, and the SDK depends on Jinja2 and packaging,
   which every SDK user installs.
 - Bad, because a test that patches an attribute of a moved module at its backend path no longer

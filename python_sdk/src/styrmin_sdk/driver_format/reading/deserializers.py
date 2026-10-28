@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import Any, Generic, TypeVar
 
 from pydantic import ValidationError
@@ -17,6 +18,12 @@ class Deserializer(Generic[ModelType]):
 
     def deserialize(self, data: Any) -> ModelType:
         """Serialize the object."""
+        if not isinstance(data, Mapping):
+            # The message of Python's TypeError would name the module of the model class.
+            raise DeserializationError(
+                f"Provided data is not of expected type: {self.model.__name__}() argument after ** "
+                f"must be a mapping, not {type(data).__name__}"
+            )
         try:
             return self.model(**data)
         except TypeError as err:

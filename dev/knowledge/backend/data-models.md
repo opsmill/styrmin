@@ -1,12 +1,18 @@
 # Backend Data Models Documentation
 
+> The context models, the driver models and the driver checks moved to the SDK package
+> `styrmin_sdk.driver_format` (`python_sdk/src/styrmin_sdk/driver_format/`,
+> [ADR-089](../../adr/0089-driver-format-code-in-the-sdk.md)). Their old backend paths still
+> import, through modules that re-export the SDK names. A path below that starts with
+> `driver_format/` is in that package.
+
 ## Overview
 
 The backend uses two types of models:
 
 1. **Database Models** (`db/models.py`) - SQLModel ORM models for persistence
 2. **Domain Models** (`domain/models.py`) - Pydantic models for business logic
-3. **Context Models** (`context/models/`) - Pydantic models for deployment context
+3. **Context Models** (`driver_format/context/models/`) - Pydantic models for deployment context
 
 ## Database Models
 
@@ -208,15 +214,15 @@ stored before 017 carry no `container` key and count as containerless.
 
 The declaration can also carry `replicas` (the driver default replica count, a `StrictInt` from 1
 to 2147483647) and `singleton` (a `StrictBool`, default `false`). `ReplicaDeclaration`
-(`context/models/components.py`) types both keys and is the base of the driver-load
-`ArbitrarySectionModel` (`services/driver/models/resources/driver.py`) and of the context
+(`driver_format/context/models/components.py`) types both keys and is the base of the driver-load
+`ArbitrarySectionModel` (`driver_format/models/resources/driver.py`) and of the context
 `ArbitrarySectionModel`:
 
 - `singleton: true` with `replicas` greater than 1 fails the driver load with the field path
   `spec.components.<name>`.
 - `model_dump()` leaves out `replicas` when it is `None` and `singleton` when it is `false`, so a
   declaration that uses neither key is stored and serialised as before 023.
-- `split_replica_keys` (`context/models/components.py`) splits the replica keys of a stored
+- `split_replica_keys` (`driver_format/context/models/components.py`) splits the replica keys of a stored
   declaration into the valid ones and the invalid ones. A row stored before 023 can hold an untyped
   `replicas` or `singleton` that the typed fields reject. It tries `singleton` first, then
   `replicas`, so when `singleton: true` and a `replicas` above 1 are both stored, `replicas` is the
@@ -647,7 +653,7 @@ class Task(BaseModel):
 
 ## Context Models
 
-Located in `styrmin_backend/context/models/`, these models represent the deployment context passed to Helm templates.
+Located in `styrmin_sdk/driver_format/context/models/`, these models represent the deployment context passed to Helm templates.
 
 ### GlobalContext
 
@@ -766,7 +772,7 @@ class ResolvedConfig(DeploymentConfig):
 <!-- Extracted from specs/023-per-component-replicas on 2026-10-15 -->
 
 `DeploymentConfig.components` maps each component name to a `ComponentConfigBlock`
-(`context/models/config.py`, `extra="forbid"`), the per-component overrides of a deployment:
+(`driver_format/context/models/config.py`, `extra="forbid"`), the per-component overrides of a deployment:
 
 | Field | Type | Notes |
 |-------|------|-------|
@@ -926,6 +932,6 @@ Both FQDN fields default to `None` when `ResolvedConfig.fqdn_suffix` is unset. W
 | [db/migrations/versions/e2f3a4b5c6d7_add_steps.py](backend/styrmin_backend/db/migrations/versions/e2f3a4b5c6d7_add_steps.py) | Alembic revision for `step`, `task.instance_id` and `task.started_by_step_id` |
 | [repository/installation.py](backend/styrmin_backend/repository/installation.py) | Install ID data access (`get_or_create_install_id`) |
 | [db/migrations/versions/3b926acd0791_add_installation.py](backend/styrmin_backend/db/migrations/versions/3b926acd0791_add_installation.py) | Alembic revision for the `installation` table |
-| [context/models/contexts.py](backend/styrmin_backend/context/models/contexts.py) | Deployment context models |
-| [context/models/config.py](backend/styrmin_backend/context/models/config.py) | Configuration models |
-| [context/models/helm.py](backend/styrmin_backend/context/models/helm.py) | Helm-related models |
+| [driver_format/context/models/contexts.py](python_sdk/src/styrmin_sdk/driver_format/context/models/contexts.py) | Deployment context models |
+| [driver_format/context/models/config.py](python_sdk/src/styrmin_sdk/driver_format/context/models/config.py) | Configuration models |
+| [driver_format/context/models/helm.py](python_sdk/src/styrmin_sdk/driver_format/context/models/helm.py) | Helm-related models |

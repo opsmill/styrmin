@@ -1,5 +1,11 @@
 # Deployment Env Vars
 
+> The context models, the driver models and the driver checks moved to the SDK package
+> `styrmin_sdk.driver_format` (`python_sdk/src/styrmin_sdk/driver_format/`,
+> [ADR-089](../../adr/0089-driver-format-code-in-the-sdk.md)). Their old backend paths still
+> import, through modules that re-export the SDK names. A path below that starts with
+> `driver_format/` is in that package.
+
 A free-form `dict[str, str]` of environment variables that users can set
 on a deployment without a driver change. The platform resolves the merged
 dict and merges it, after the chart renders, into the **component
@@ -319,20 +325,20 @@ foot setting them in the past.
 
 | Concern | Location |
 |---------|----------|
-| Pydantic config models | `backend/styrmin_backend/context/models/config.py` (`EnvironmentConfig.env_vars`, `DeploymentConfig.env_vars`) |
+| Pydantic config models | `python_sdk/src/styrmin_sdk/driver_format/context/models/config.py` (`EnvironmentConfig.env_vars`, `DeploymentConfig.env_vars`) |
 | Validator | `backend/styrmin_backend/services/env_vars/validator.py` |
 | Resolver (merge + orphan detection) | `backend/styrmin_backend/services/env_vars/resolver.py` |
-| Component container field + validation | `backend/styrmin_backend/services/driver/models/resources/driver.py::ArbitrarySectionModel`, `backend/styrmin_backend/context/models/components.py::ArbitrarySectionModel` |
+| Component container field + validation | `python_sdk/src/styrmin_sdk/driver_format/models/resources/driver.py::ArbitrarySectionModel`, `python_sdk/src/styrmin_sdk/driver_format/context/models/components.py::ArbitrarySectionModel` |
 | Patch builder | `backend/styrmin_backend/services/component_container/patch_builder.py::build_component_container_patches` |
 | Applicability rule | `backend/styrmin_backend/services/component_container/overrides.py` (`override_applies`, `applicable_overrides`) |
 | Patch blocks | `backend/styrmin_backend/agent/service/kubernetes/resources/blocks/patches.py::ContainerMergePatch`, `::ComponentContainerPatch` |
-| Patch placement + rendering-context exposure | `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py` (`ApplicationHelmReleaseBuilder.build`, `render_value_template`, retired `component_env_vars` stub) |
+| Patch placement + rendering-context exposure | `backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py` (`ApplicationHelmReleaseBuilder.build`, `render_value_template`, which calls `render_values` of `python_sdk/src/styrmin_sdk/driver_format/rendering.py`, where the retired `component_env_vars` stub now lives) |
 | Write guard | `backend/styrmin_backend/services/deployment.py::_validate_component_container_targets` (env vars, image, `command` and `args` overrides); error in `services/env_vars/exceptions.py` |
 | Retired-filter error | `backend/styrmin_backend/services/exceptions.py::RetiredTemplateFilterError` |
 | Guard failure parser + error | `backend/styrmin_backend/services/component_container/exceptions.py` (`parse_guard_failure`, `ComponentContainerNotFoundError`) |
 | Guard failure surfacing | `backend/styrmin_backend/operator/reconciler.py::read_helmrelease_guard_failure`, `operator/handlers/styrmin_deployment.py::_fail_on_component_container_guard` |
 | HelmRelease / CR apply | `backend/styrmin_backend/agent/service/kubernetes/primitives.py::upsert_custom_resource` (`replace_spec_keys_on_update`); callers in `operator/pipeline.py` and `agent/tasks/orchestration.py` |
-| Driver-side docs | `backend/styrmin_backend/services/driver/models/resources/env_vars.py` |
+| Driver-side docs | `python_sdk/src/styrmin_sdk/driver_format/models/resources/env_vars.py` |
 | Reference driver | `driver/examples/simple-app/driver.styrmin.yml` and `driver/examples/simple-app/src/helm/templates/deployment.yaml` |
 | GraphQL types | `backend/styrmin_backend/api/definitions/deployment/model.py`, `.../environment/model.py`, `.../application_driver/model.py`, `.../deployment_timeline/model.py` |
 | Frontend gating | `frontend/src/components/deployment/configuration/sections/edit/ComponentOverridesSection.tsx`, `frontend/src/pages/drivers/driver-detail/tabs/ComponentsTab.tsx` |

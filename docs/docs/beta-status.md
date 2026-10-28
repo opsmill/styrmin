@@ -104,6 +104,10 @@ links to the page that explains it.
 - Run the actions of a driver version at the commit that the driver version
   was loaded from. A push to the driver's branch does not change the actions
   of the deployments that use it.
+- Check a driver and view the Helm values that it renders on your machine,
+  without a Styrmin server or a cluster, with `styrmin-driver check`,
+  `render`, `diff` and `context`. See
+  [`styrmin-driver`](./reference/styrmin-driver.md).
 
 ### Running Styrmin
 
@@ -384,9 +388,6 @@ Some already have a written design or an open pull request, as noted.
 
 ### Writing and loading application drivers
 
-- Check the files of a driver and render its templates on your machine,
-  without a Styrmin server or a cluster. Tracked in
-  [opsmill/styrmin#23](https://github.com/opsmill/styrmin/issues/23).
 - Load a driver version from a Git tag or a commit, in addition to the tip
   of a branch. Tracked in
   [opsmill/styrmin#528](https://github.com/opsmill/styrmin/issues/528).
