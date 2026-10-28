@@ -1,0 +1,21 @@
+---
+# E2E test driver (backend/tests/e2e/test_deploy_app.py): its values.j2.yml
+# calls the component_command filter, which Styrmin removed, so a load refuses
+# it with RETIRED_TEMPLATE_FILTER. The git-server fixture serves it from the
+# broken-drivers repository; no deployment uses it.
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: retired-filter
+spec:
+  version: "1"
+  supported_versions: ">=0.1,<1.0"
+  default_version: "0.1.0"
+  info:
+    description: Test driver that calls a removed template filter
+    authors: [opsmill]
+    license: Apache-2.0
+  helm:
+    main:
+      location: simple-app
+      version: 0.1.0
