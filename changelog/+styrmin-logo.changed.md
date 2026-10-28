@@ -1,1 +1,0 @@
-Changed the web UI favicon, the logo at the top of the sidebar, the sign-in page and the documentation site logo, favicon and link preview image to the Styrmin logo, and set the documentation site address in link previews to docs.styrmin.app.

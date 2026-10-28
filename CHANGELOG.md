@@ -11,6 +11,26 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [Styrmin - v0.1.55](https://github.com/opsmill/styrmin/tree/v0.1.55) - 2026-10-28
+
+### Added
+
+- Added `client.deployments.wait_for_task()` to the Python SDK. It takes the task that a create, update, scale, upgrade, deletion, start or stop of components, or job returns, and waits until the change has finished: until the task result, which covers the task's hooks and the operator's rollout, is final, then until the deployment is `running`, or `deleted` after a deletion. It returns whether the change succeeded and, when it did not, the failed step, the deployment status or the timeout. ([#545](https://github.com/opsmill/styrmin/issues/545))
+- Added `environments.get_pod_statuses()`, `environments.get_services()` and `clusters.get_pod_statuses()` to the Python SDK. A script now reads the pod statuses of every deployment of an environment or of a cluster, or the services of every deployment of an environment, in one call instead of one call per deployment. Each method takes an ID or a name, as `environments.get()` and `clusters.get()` do, and raises `ResourceNotFoundError` when nothing matches. ([#547](https://github.com/opsmill/styrmin/issues/547))
+
+### Changed
+
+- Changed the FluxCD controllers that the agent chart installs from helm-controller v1.6.5 and source-controller v1.9.6 (Flux v2.9.6) to helm-controller v1.7.1 and source-controller v1.10.1 (Flux v2.10.0). When a change of env vars or image overrides fails before Helm stores a release, for example because the component container is not found, helm-controller now keeps the HelmRelease not ready and tries again, instead of reporting the previous release in sync ([fluxcd/helm-controller#1607](https://github.com/fluxcd/helm-controller/issues/1607)). The agent therefore no longer reads FluxCD's Kubernetes Events, and its ClusterRole no longer allows `list` on `events`. After FluxCD rolls back a failed upgrade, it now tries again until it has used its 3 retries, instead of reporting the rolled-back release ready: a rollout whose pods cannot start still shows `Error` from the readiness timeout on, and becomes `Failed` with the message `Failed to upgrade after 4 attempt(s): …` about 20 minutes after the change with the default timeouts, instead of `Failed` with `FluxCD rolled the release back after release v<N> failed` right after the first rollback. The FluxCD project supports Flux v2.10 on Kubernetes 1.35.2 and later.
+- Changed the documentation links in error messages and in the Helm chart README to docs.styrmin.app.
+- Changed the web UI favicon, the logo at the top of the sidebar, the sign-in page and the documentation site logo, favicon and link preview image to the Styrmin logo, and set the documentation site address in link previews to docs.styrmin.app.
+
+### Fixed
+
+- A restore of the backup of an earlier instance now makes that instance the deployment's active instance, with its application version, config, parameters and driver version. Before, the deployment page and `styrminctl` kept showing the later version while the cluster ran the earlier one, a backup taken afterwards was listed at the later version, and the next config edit applied the later version over the restored one. ([#426](https://github.com/opsmill/styrmin/issues/426))
+- A deployment that is being deleted no longer becomes `deleted` while Kubernetes is still removing its namespace. The agent's status reporter set `deleted` as soon as the deployment's `StyrminDeployment` was gone, but Kubernetes deletes that resource with the rest of the namespace's contents, before it removes the namespace itself. ([#545](https://github.com/opsmill/styrmin/issues/545))
+- The `podStatuses` query no longer returns the pods of deleted deployments when it filters by `environmentId` or `clusterId`. The agent stops reporting a deployment once it is deleted, so the pods of its last report could stay in these lists. ([#547](https://github.com/opsmill/styrmin/issues/547))
+- Fixed failed deployments that did not say why a pod could not be scheduled or why an init container failed. The failed "Install or upgrade the HelmRelease" or "Wait for the deployment to be ready" step, `styrminctl tasks get`, the Pods tab and `podStatuses` now show the scheduler's reason and message for a pod that is not scheduled, list init containers and sidecars with their state and restarts, name an init container that is still running and a sidecar that is not ready, keep the kubelet's message of a waiting container, and name any waiting or ended container reason instead of eight fixed ones. ([#574](https://github.com/opsmill/styrmin/issues/574))
+
 ## [Styrmin - v0.1.54](https://github.com/opsmill/styrmin/tree/v0.1.54) - 2026-10-25
 
 ### Housekeeping
