@@ -1,8 +1,9 @@
-"""Run every check of a driver directory and collect every problem, with its file and line.
+"""Run the checks of a driver directory and collect their problems, with their file and line.
 
 The server's load stops at the first problem. ``run_checks`` runs the same checks, with the
-same messages, and keeps going, so that ``styrmin-driver check`` reports every problem in
-one run (specs/032-styrmin-driver-cli, FR-001, FR-009, research R-005 and R-015).
+same messages, and goes on after a problem where the next check does not depend on it, so
+that ``styrmin-driver check`` reports more problems in one run than a load. Some problems
+hide others (specs/032-styrmin-driver-cli, FR-001, FR-009, research R-005 and R-015).
 """
 
 import re
@@ -378,9 +379,10 @@ def run_checks(
 ) -> CheckReport:
     """Run the checks of a load from a local directory on ``root``, and render its template.
 
-    Every problem is collected. The example context is built, and the context file merged,
-    whenever ``driver.styrmin.yml`` is valid; the template is rendered only when its syntax
-    is valid too. ``context_data`` is the content of an author's context file.
+    Each check runs, and its problems are collected. The example context is built, and the
+    context file merged, whenever ``driver.styrmin.yml`` matches the driver model; the
+    template is rendered only when its syntax is valid too. ``context_data`` is the content
+    of an author's context file.
 
     Raises:
         ContextFileError: If ``context_data`` cannot be merged or the result is invalid.

@@ -1,4 +1,4 @@
-"""User story 1: ``check`` reports every error with its file and line (FR-001, FR-007 to FR-010, FR-012)."""
+"""User story 1: ``check`` reports the errors it finds with their file and line (FR-001, FR-007 to FR-010, FR-012)."""
 
 import os
 from pathlib import Path
@@ -84,6 +84,25 @@ def test_an_invalid_field_and_a_missing_action_function_are_reported_together(ex
     assert "error: spec.info.license: Input should be a valid string (found 1)" in result.out
     assert "error: Missing entrypoint for action upgrade: upgrade_missing" in result.out
     assert result.out.count(" error: ") == 2
+    assert result.code == 1
+
+
+def test_errors_of_the_checks_across_fields_do_not_stop_the_render(example_copy, run_cli) -> None:
+    driver = example_copy("simple-app")
+
+    def change(data: dict) -> None:
+        data["spec"]["components"]["database"]["backup"] = {"enabled": True, "kind": "action"}
+        data["spec"]["env_vars"][1]["components"] = ["ghost"]
+
+    edit_spec(driver, change)
+    _insert_template_line(driver, 12, "# admin: {{ parameters.admn_email }}")
+
+    result = run_cli("check", str(driver))
+
+    assert "error: Component 'database': action backup requires action hooks" in result.out
+    assert "error: env var doc 'DB_POOL_SIZE' references component 'ghost'" in result.out
+    assert f"{driver}/values.j2.yml:12: error: undefined variable 'parameters.admn_email'\n" in result.out
+    assert result.out.count(" error: ") == 3
     assert result.code == 1
 
 

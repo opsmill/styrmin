@@ -86,7 +86,7 @@ description: "Task list for 032-styrmin-driver-cli"
 
 ## Phase 3: User Story 1 - Check a driver before loading it (Priority: P1) 🎯 MVP
 
-**Goal**: `styrmin-driver check <dir>` runs the load's checks and a render with the example context, reports every error with its file and line, and exits with 0 or 1.
+**Goal**: `styrmin-driver check <dir>` runs the load's checks and a render with the example context, reports the errors it finds with their file and line, and exits with 0 or 1.
 
 **Independent Test**: [quickstart.md](quickstart.md) scenarios 1 and 2: the eight example drivers pass; a driver with an undefined variable on line 12 and a missing action function gets both errors and exit code 1.
 
