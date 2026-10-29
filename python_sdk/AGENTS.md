@@ -60,7 +60,7 @@ server, database, cluster or network
 | `driver_format/cli.py` | `main(argv) -> int`: the commands `check`, `render`, `diff` and `context`, their output streams and exit codes (0, 1, 2). |
 | `driver_format/diagnostics.py` | `run_checks`: every check of a load, collected, with the YAML line of each error in `driver.styrmin.yml`. |
 | `driver_format/example_context.py` | `build_example_context` and `merge_context_file`: the example context and the merge of a context file. |
-| `driver_format/rendering.py` | `render_values` (the agent's render) and `render_values_checked`, which records each undefined variable that the render reaches, with its line. |
+| `driver_format/rendering.py` | `render_values` (the agent's render) and `render_values_checked`, which renders as the agent and records the undefined variables that it finds, with their line. |
 | `driver_format/diff.py` | `compare_values`: values compared after both sides are written in one format. |
 
 Its tests are in `tests/driver_format/`; a fixture there turns off network

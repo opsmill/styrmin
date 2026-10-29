@@ -141,7 +141,7 @@ def render_values(values_template: str, context: GlobalContext) -> dict:
         raise InvalidChartValuesError(f"The chart values are not valid YAML: {e!s}") from e
 
 
-# The check render of styrmin-driver: each undefined variable that it reaches, with its line.
+# The check render of styrmin-driver: the undefined variables that it finds, with their line.
 
 
 @dataclass(frozen=True)
@@ -245,40 +245,56 @@ def _failure_line(error: BaseException) -> int | None:
     return line
 
 
-class _KnownAbsent(SilentUndefined):
-    """A field of the context model without a value: it renders as on the agent.
+# The values of the check render are named as the agent's, so that a message that names the
+# class of a value, such as ``'dict object' has no attribute 'x'`` or ``bad operand type for
+# abs(): 'SilentUndefined'``, is the agent's message.
+_KnownMapping.__module__, _KnownMapping.__name__, _KnownMapping.__qualname__ = "builtins", "dict", "dict"
 
-    Its messages name the mapping as the agent's do (``'dict object' has no attribute ...``),
-    not the internal ``_KnownMapping`` class.
+
+def _is_undefined(value: object) -> bool:
+    # On the agent, every undefined value is a ``SilentUndefined``, and any two are equal.
+    return isinstance(value, (_KnownAbsent, _CheckingUndefined))
+
+
+def _is_dunder(name: str) -> bool:
+    return name[:2] == "__" and name[-2:] == "__"
+
+
+class _KnownAbsent(SilentUndefined):
+    """An undefined value of the agent that is not a use to record. It behaves as on the agent.
+
+    For example a field of the context model without a value, an undefined value that Jinja
+    makes itself, such as ``loop.previtem`` on the first item, or a name read on the empty
+    string that the agent gives for a name read on an undefined value.
     """
 
     __slots__ = ()
 
-    @property
-    def _undefined_message(self) -> str:
-        if isinstance(self._undefined_obj, _KnownMapping):
-            return f"'dict object' has no attribute {self._undefined_name!r}"
-        return super()._undefined_message
+    def __eq__(self, other: object) -> bool:
+        return _is_undefined(other)
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+    def __hash__(self) -> int:
+        return id(SilentUndefined)
 
 
-# A TypeError names the class of the value, such as ``bad operand type for abs()``: the agent's.
 _KnownAbsent.__name__ = _KnownAbsent.__qualname__ = SilentUndefined.__name__
 
 
-class _CheckingUndefined(jinja2.Undefined):
-    """An ``Undefined`` that records each use of an unknown name in ``_uses``.
+class _CheckingUndefined(SilentUndefined):
+    """The agent's ``SilentUndefined``, which also records each use of an unknown name in ``_uses``.
+
+    Each method gives the agent's result, or fails as on the agent. A use is recorded when the
+    render reads the value: writes it out, tests it, loops over it, compares it, uses it in an
+    operation, calls it, or reads an item or a name of it. ``render_values_checked`` also
+    records an unknown name passed to a filter, a test, a function or a method. A use that
+    reads none of these, such as ``x in mapping``, is not recorded.
 
     A name that the context model knows, such as a field without a value, and an undefined
-    value that Jinja makes itself, such as ``loop.previtem`` on the first item, get a
-    ``_KnownAbsent`` instead, so they render as on the agent and are not recorded.
-    A use of an unknown name is recorded when the render reads its value: writes it out,
-    tests it, loops over it, uses it in an operation, calls it, or reads a subscript or an
-    index of it or with it. ``render_values_checked`` also makes each filter, test, function
-    and method record an unknown name passed to it. Where the agent's render fails, the
-    render goes on with an empty value when it can, to find the next use; a slice such as
-    ``s[:x]`` stops it. Some uses read no value and are not recorded, such as
-    ``x in mapping``, or ``[x] | length`` on a list that holds ``x``.
-    ``_for_render`` makes a subclass with its own ``_root_known`` and ``_uses`` for one render.
+    value that Jinja makes itself get a ``_KnownAbsent`` instead. ``_for_render`` makes a
+    subclass with its own ``_root_known`` and ``_uses`` for one render.
     """
 
     __slots__ = ()
@@ -287,14 +303,20 @@ class _CheckingUndefined(jinja2.Undefined):
 
     @classmethod
     def _for_render(cls, root_known: frozenset[str], uses: list[UndefinedUse]) -> type[jinja2.Undefined]:
-        # Named as the agent's class, so that a TypeError that names the class is the agent's.
         return type(SilentUndefined.__name__, (cls,), {"__slots__": (), "_root_known": root_known, "_uses": uses})
 
     def __new__(cls, *args: object, **kwargs: object) -> jinja2.Undefined:
         obj = kwargs.get("obj", args[1] if len(args) > 1 else missing)
         name = kwargs.get("name", args[2] if len(args) > 2 else None)
-        if name is None:
-            # Jinja's own undefined values (a hint and no name), such as loop.previtem.
+        if isinstance(name, jinja2.Undefined):
+            # An undefined key or index, such as ``s[x]``: the use is the key's.
+            if isinstance(name, _CheckingUndefined):
+                name._record()
+            return _KnownAbsent(*args, **kwargs)
+        if name is None or isinstance(obj, jinja2.Undefined) or (isinstance(obj, str) and not obj):
+            # Jinja's own undefined values (a hint and no name), and a name read on the empty
+            # string that the agent gives for a name read on an undefined value, whose use is
+            # recorded. A name read on an empty string of the context is not recorded either.
             return _KnownAbsent(*args, **kwargs)
         if obj is missing:
             known = cls._root_known
@@ -304,203 +326,130 @@ class _CheckingUndefined(jinja2.Undefined):
             known = frozenset()
         if isinstance(name, str) and name in known:
             return _KnownAbsent(*args, **kwargs)
-        if isinstance(name, _CheckingUndefined):
-            # An undefined key or index, such as ``s[x]``, for which Jinja gives an undefined
-            # value, as on the agent: the use is the key's (see ``_record``).
-            name._record()
         return super().__new__(cls)
 
     def _label(self) -> str:
         obj, name = self._undefined_obj, self._undefined_name
         if obj is missing:
             return str(name)
-        if isinstance(obj, _CheckingUndefined):
-            return f"{obj._label()}.{name}"
         if isinstance(obj, _KnownMapping):
             return _child_path(obj._path, name)
         return f"<{type(obj).__name__}>.{name}"
 
     def _record(self) -> None:
-        # A name read on an undefined value: its parent, the first missing name, is the use.
-        # A value read with an undefined key: the key is the use.
-        if isinstance(self._undefined_obj, _CheckingUndefined) or isinstance(self._undefined_name, _CheckingUndefined):
-            return
         use = UndefinedUse(line=_template_line(), name=self._label())
         if use not in self._uses:
             self._uses.append(use)
 
-    def _fail_with_undefined_error(self, *args: object, **kwargs: object) -> str:  # ty: ignore[invalid-method-override]  # noqa: ARG002
+    def _record_and_fail(self, *args: object, **kwargs: object) -> NoReturn:  # noqa: ARG002
         self._record()
-        return ""
-
-    def _use_as_false(self, *args: object, **kwargs: object) -> bool:  # noqa: ARG002
-        self._record()
-        return False
+        jinja2.Undefined._fail_with_undefined_error(self)
 
     def __getattr__(self, name: str) -> object:
-        if name[:1] == "_":
+        if _is_dunder(name):
             raise AttributeError(name)
+        # A name read on an undefined value: the agent gives an empty string, and the use is
+        # the undefined value's, the first missing name.
         self._record()
-        return type(self)(obj=self, name=name)
+        return super().__getattr__(name)
 
     def __str__(self) -> str:
         self._record()
-        return ""
+        return super().__str__()
 
     def __repr__(self) -> str:
-        # A list or a dict that holds the value renders it with repr, as ``Undefined`` on the agent.
         self._record()
-        return "Undefined"
+        return super().__repr__()
 
     def __bool__(self) -> bool:
         self._record()
-        return False
+        return super().__bool__()
 
     def __iter__(self) -> Iterator[object]:
         self._record()
-        return iter(())
+        return super().__iter__()
 
     def __len__(self) -> int:
         self._record()
-        return 0
-
-    def __int__(self) -> int:
-        self._record()
-        return 0
-
-    def __index__(self) -> NoReturn:
-        # A list index and a slice read the value as an index. They fail as on the agent: Jinja
-        # then gives an undefined value for an index, and a slice fails.
-        self._record()
-        raise TypeError(f"{type(self).__name__!r} object cannot be interpreted as an integer")
-
-    def __float__(self) -> float:
-        self._record()
-        return 0.0
-
-    def __complex__(self) -> complex:
-        self._record()
-        return 0j
+        return super().__len__()
 
     def __eq__(self, other: object) -> bool:
         self._record()
-        return type(self) is type(other)
+        return _is_undefined(other)
 
     def __ne__(self, other: object) -> bool:
         return not self.__eq__(other)
 
-    __hash__ = jinja2.Undefined.__hash__
+    def __hash__(self) -> int:
+        return id(SilentUndefined)
 
-    # ``jinja2.Undefined`` binds these to its own failure method when the class is defined,
-    # so they must be bound again here to record the use (jinja2/runtime.py, class Undefined).
-    __add__ = __radd__ = __sub__ = __rsub__ = _fail_with_undefined_error
-    __mul__ = __rmul__ = __div__ = __rdiv__ = _fail_with_undefined_error
-    __truediv__ = __rtruediv__ = _fail_with_undefined_error
-    __floordiv__ = __rfloordiv__ = _fail_with_undefined_error
-    __mod__ = __rmod__ = _fail_with_undefined_error
-    __pos__ = __neg__ = _fail_with_undefined_error
-    __call__ = __getitem__ = _fail_with_undefined_error
-    __pow__ = __rpow__ = _fail_with_undefined_error
-    __lt__ = __le__ = __gt__ = __ge__ = _use_as_false
-
-
-# Filters that raise whatever they receive, so that a driver that calls one gets the typed error.
-_RETIRED_FILTERS = frozenset({component_env_vars, component_command, component_args})
+    # ``jinja2.Undefined`` binds these to its own failure method when the class is defined
+    # (jinja2/runtime.py, class Undefined). They fail as on the agent, after the record.
+    __add__ = __radd__ = __sub__ = __rsub__ = _record_and_fail
+    __mul__ = __rmul__ = __div__ = __rdiv__ = _record_and_fail
+    __truediv__ = __rtruediv__ = _record_and_fail
+    __floordiv__ = __rfloordiv__ = _record_and_fail
+    __mod__ = __rmod__ = _record_and_fail
+    __pos__ = __neg__ = _record_and_fail
+    __call__ = __getitem__ = _record_and_fail
+    __lt__ = __le__ = __gt__ = __ge__ = _record_and_fail
+    __int__ = __float__ = __complex__ = _record_and_fail
+    __pow__ = __rpow__ = _record_and_fail
 
 
-def _record_undefined(args: tuple[object, ...], kwargs: dict[str, object]) -> list[_CheckingUndefined]:
-    undefined = [value for value in (*args, *kwargs.values()) if isinstance(value, _CheckingUndefined)]
-    for value in undefined:
-        value._record()
-    return undefined
+def _record_undefined(args: tuple[object, ...], kwargs: dict[str, object]) -> None:
+    for value in (*args, *kwargs.values()):
+        if isinstance(value, _CheckingUndefined):
+            value._record()
 
 
-def _empty_after(undefined: _CheckingUndefined, name: str) -> jinja2.Undefined:
-    # An empty value that records no use of its own, since its parent's use is recorded. The
-    # name is that of the filter or the function; no message shows it.
-    return type(undefined)(obj=undefined, name=name)
+def _recording(func: Callable[..., object]) -> Callable[..., object]:
+    """``func``, a filter or a test, which first records each unknown name passed to it.
 
-
-def _checking_filter(name: str, func: Callable[..., object]) -> Callable[..., object]:
-    """``func``, the filter ``name``, which records each unknown name passed to it.
-
-    Some filters do not read the value (``items``, ``pprint``, a filter that returns a
-    generator), and others fail with a ``TypeError`` that does not name it (``abs``, ``round``).
-    The filter gives its own result, as on the agent, so that an ``if`` on it takes the
-    agent's branch; when the filter fails, the result is an empty value, so that the render
-    goes on.
+    Many filters and tests read nothing of the value, such as ``items``, ``pprint``, ``abs`` or
+    ``none``. The result, or the failure, is the agent's.
     """
 
     # ``functools.wraps`` keeps ``jinja_pass_arg``, so Jinja still passes the context to ``func``.
     @functools.wraps(func)
-    def checked(*args: object, **kwargs: object) -> object:
-        undefined = _record_undefined(args, kwargs)
-        if not undefined or func in _RETIRED_FILTERS:
-            return func(*args, **kwargs)
-        try:
-            return func(*args, **kwargs)
-        except Exception:  # noqa: BLE001 - the use is recorded; the agent's render fails here
-            return _empty_after(undefined[0], name)
+    def recorded(*args: object, **kwargs: object) -> object:
+        _record_undefined(args, kwargs)
+        return func(*args, **kwargs)
 
-    return checked
-
-
-def _checking_test(func: Callable[..., bool]) -> Callable[..., bool]:
-    """``func``, which records each unknown name passed to it.
-
-    Most tests, such as ``none`` or ``string``, do not read the value. The test gives its
-    own result, as on the agent, or false when it fails.
-    """
-
-    @functools.wraps(func)
-    def checked(*args: object, **kwargs: object) -> bool:
-        if not _record_undefined(args, kwargs):
-            return func(*args, **kwargs)
-        try:
-            return func(*args, **kwargs)
-        except Exception:  # noqa: BLE001 - the use is recorded; the agent's render fails here
-            return False
-
-    return checked
+    return recorded
 
 
 class _CheckingContext(jinja2.runtime.Context):
-    """A context whose calls record each unknown name passed to a function or a method.
+    """A context whose calls first record each unknown name passed to a function or a method.
 
-    The call gives its own result, as on the agent. When it fails, for example
-    ``'abc'.startswith(x)`` or ``range(x)``, the result is an empty value, so that the render
-    goes on. A macro is called as on the agent: a use inside it is recorded where the macro
-    uses it.
+    The result, or the failure, is the agent's. A macro is not checked here: a use inside it
+    is recorded where the macro uses it.
     """
 
     def call(self, obj: Callable[..., object], /, *args: object, **kwargs: object) -> object:
-        undefined = [] if isinstance(obj, jinja2.runtime.Macro) else _record_undefined(args, kwargs)
-        if not undefined:
-            return super().call(obj, *args, **kwargs)
-        try:
-            return super().call(obj, *args, **kwargs)
-        except Exception:  # noqa: BLE001 - the use is recorded; the agent's render fails here
-            return _empty_after(undefined[0], getattr(obj, "__name__", "call"))
+        if not isinstance(obj, jinja2.runtime.Macro):
+            _record_undefined(args, kwargs)
+        return super().call(obj, *args, **kwargs)
 
 
 def _checked_json_default(value: object) -> object:
-    # ``tojson`` calls this for a value that JSON cannot hold, such as an undefined value in a list.
+    # ``tojson`` calls this for a value that JSON cannot hold, such as an undefined value in a
+    # list. It fails as on the agent, after the record.
     if isinstance(value, _CheckingUndefined):
         value._record()
-        return None
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def render_values_checked(values_template: str, context: GlobalContext) -> RenderResult:
-    """Render a values template as ``render_values`` does, and record each undefined use it reaches.
+    """Render a values template as ``render_values`` does, and record the undefined uses it finds.
 
-    A variable is undefined when its name is neither a field of the context model nor a key
-    of the context. A field without a value renders as on the agent: an empty string that
-    tests as false. Each filter, test, function and method records an undefined variable
-    passed to it, apart from the ``default`` filter and the ``defined`` and ``undefined``
-    tests, and gives its own result, or an empty value where it fails. For a template
-    without undefined variables, the values equal those of ``render_values`` for the same
-    context.
+    The undefined values are the agent's, which also record their uses (``_CheckingUndefined``),
+    so the render fails where the agent's render fails, with its message. A variable is
+    undefined when its name is neither a field of the context model nor a key of the
+    context. A field without a value is not recorded. Each filter, test, function and method
+    records an undefined variable passed to it, apart from the ``default`` filter and the
+    ``defined`` and ``undefined`` tests. For a template without undefined variables, the
+    values equal those of ``render_values`` for the same context.
 
     A render that fails does not raise: ``RenderResult.failure`` says why, with the template
     line when it is known, whatever the exception, and the undefined uses found before the
@@ -515,12 +464,12 @@ def render_values_checked(values_template: str, context: GlobalContext) -> Rende
     environment.context_class = _CheckingContext
     # Each environment has its own copy of the filters and tests, so the agent's are unchanged.
     environment.filters.update(
-        {name: _checking_filter(name, func) for name, func in environment.filters.items() if func is not do_default}
+        {name: _recording(func) for name, func in environment.filters.items() if func is not do_default}
     )
     # Jinja types its tests by their arguments; each one takes a value and gives a bool.
-    cast("dict[str, Callable[..., bool]]", environment.tests).update(
+    cast("dict[str, Callable[..., object]]", environment.tests).update(
         {
-            name: _checking_test(func)
+            name: _recording(func)
             for name, func in environment.tests.items()
             if func not in {test_defined, test_undefined}
         }

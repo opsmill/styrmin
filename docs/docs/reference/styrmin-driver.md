@@ -87,9 +87,10 @@ in one run, but some errors hide others. For example:
   syntax error or an error against the driver model stops the render;
 - a syntax error in `values.j2.yml` or in `actions.py` stops the other
   checks of that file;
-- the render reports each undefined variable that it reaches, and stops at
-  its first other error, such as `{{ 1 + "a" }}` or a removed filter. The
-  variables after that error are not checked.
+- the render stops where the server's render fails, for example at
+  `{{ 1 + "a" }}`, at `{{ parameters.x + 1 }}` when `parameters.x` is
+  undefined, or at a removed filter. The variables after that point are not
+  checked.
 
 Fix what `check` reports and run it again, until it reports no error.
 
@@ -123,8 +124,9 @@ with a line. What it gives depends on how the template uses it:
   `'dict object' has no attribute 'admn_email'`, and
   `{{ parameters.admn_email | abs }}` with a `TypeError`.
 
-`check` and `render` report the uses that their render finds as errors, with
-their line, for example:
+`check` and `render` render the template with the server's undefined values,
+which also record their uses, and report each use that they record as an
+error, with its line, for example:
 
 ```text
 my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
@@ -134,19 +136,20 @@ my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
   model nor a key of the context.
 - A field of the context model without a value, such as
   `instance.config.fqdn_suffix` when no FQDN suffix is set, is not an error.
-  It renders as on the server: an empty string that tests as false. A use
-  that makes the server's render fail, such as
-  `instance.config.fqdn_suffix + 1`, makes the render fail with the server's
-  message.
-- The render reports a use of an undefined variable when the template writes
-  it out, tests it in an `if`, loops over it, uses it in an operation, or
-  passes it to a filter, a test, a function or a method. Where the server's
-  render fails at that use, the render reports it and, when it can, goes on
-  with an empty value, to find the next use. Some uses stop the render after
-  the report, for example the slice `[1, 2, 3][:parameters.x]`.
-- Some uses read no value and are not reported, for example
-  `parameters.x in parameters`, `{% if [parameters.x] %}` or
-  `[parameters.x] | length`.
+  It renders as on the server: an empty string that tests as false.
+- A use is recorded when the template writes the variable out, tests it in
+  an `if`, loops over it, compares it, uses it in an operation, reads a name
+  or an item of it, or passes it to a filter, a test, a function or a
+  method. A name read on an undefined variable, such as `parameters.x.y`, is
+  reported as the variable, `parameters.x`.
+- Where the server's render fails, the render fails too, with the server's
+  message and the line, for example at `{{ parameters.x + 1 }}` or at
+  `{{ parameters.x | abs }}`. The uses after that point are not checked in
+  that run.
+- Some uses are not recorded, for example `parameters.x in parameters`,
+  `{% if [parameters.x] %}`, `[parameters.x] | length`, `parameters.get('x')`,
+  and a slice bound such as `[1, 2, 3][:parameters.x]`, where the render fails
+  with the server's message.
 - The `default()` filter and the `is defined` and `is undefined` tests are
   allowed. They apply to the last name of a path:
   `parameters.x.y | default('z')` is an error when `parameters.x` is

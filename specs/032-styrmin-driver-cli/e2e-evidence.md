@@ -175,7 +175,8 @@ The `code-review` skill ran in an agent that did not write the change, at high e
 | `ffb001c3..4cb12cff` | 5 CRITICAL, 12 IMPORTANT, 12 MINOR | `fd682a75` |
 | `ffb001c3..fd682a75` | 3 CRITICAL, 8 IMPORTANT, 11 MINOR | `fbb24f78`, `9236b94b` |
 | `ffb001c3..9236b94b` | 2 CRITICAL, 3 IMPORTANT, 19 MINOR | `3e8c8283` |
-| `9236b94b..3e8c8283` | 3 CRITICAL, 5 IMPORTANT, 11 MINOR | the commit that adds this row |
+| `9236b94b..3e8c8283` | 3 CRITICAL, 5 IMPORTANT, 11 MINOR | `3b406375` |
+| `3e8c8283..3b406375` | 3 CRITICAL, 3 IMPORTANT, 12 MINOR | the commit that adds this row |
 
 Each review read the text that the review before it led to, and found statements in it that were false. The findings of the review of `9236b94b`, and what changed in `3e8c8283`:
 
@@ -198,7 +199,7 @@ MINOR findings of that review left as they are:
 - The message for a missing `actions.py` does not give the next step that the reference page gives.
 - A YAML syntax error in `driver.styrmin.yml` skips the checks of `actions.py` with no warning.
 
-The findings of the review of `3e8c8283`, and what changed in the commit that adds this table. 12 of the new tests fail with the `rendering.py` of `3e8c8283`.
+The findings of the review of `3e8c8283`, and what changed in `3b406375`. 12 of the new tests fail with the `rendering.py` of `3e8c8283`.
 
 | Finding | Resolution |
 |---------|------------|
@@ -224,13 +225,35 @@ MINOR findings of that review left as they are:
 - This file records each review round.
 - The commit `3e8c8283` has the type `fix(sdk)`, and about half of its diff is documentation.
 
+The review of `3b406375` found that the check render still took other branches than the agent's render, and that the call wrapper of `3b406375` hid errors. The cause of these findings, and of most findings of the reviews before, is one design choice: after a use that makes the agent's render fail, the check render went on with a value of its own. The author of the brief chose on 2026-10-29 that the check render renders as the agent's ([spec, clarifications of 2026-10-29](spec.md#session-2026-10-29-reviews-of-the-documentation-of-check)), and confirmed the narrowing of FR-009 on the same day. The findings of the review of `3b406375`, and what changed in the commit that adds the last row of the table above. 26 of the 88 tests of `test_rendering_check_mode.py` fail with the `rendering.py` of `3b406375`.
+
+| Finding | Resolution |
+|---------|------------|
+| CRITICAL: the check render took another branch than the agent's render for a name read on an undefined variable (`{% if parameters.x.y is string %}`, `is defined`, `\| pprint`), and for an undefined variable compared with a field without a value. The `pprint` case was new in `3b406375`. The commit message, a docstring, R-003 and this file said that the branch is the agent's. | Fixed: the undefined values of the check render are the agent's `SilentUndefined`, which also record their uses. A name read on one gives the agent's empty string. Tests: `test_rendering_check_mode.py::test_after_an_undefined_variable_the_render_takes_the_branch_of_the_agent` (6 new cases). |
+| CRITICAL: the plan, the reference page, FR-009, step 9 and two docstrings still said that `check` reports each undefined variable that the render reaches, and the commit message of `3b406375` said they no longer did. | Fixed: they say that `check` reports the undefined variables that its render finds. |
+| CRITICAL: an error inside a call that also receives an undefined variable was hidden, such as a removed filter or `"{}{}".format(x)`. New in `3b406375`. | Fixed: the wrappers record, then call the filter, test or function, and do not catch its errors. Tests: `::test_an_error_in_a_call_that_receives_an_undefined_variable_is_not_hidden`, and the `format` case of `::test_a_use_that_the_agent_fails_on_is_reported_and_fails_as_on_the_agent`. |
+| IMPORTANT: a slice with an undefined bound stopped the render with a message that is not the agent's. New in `3b406375`. | Fixed: it fails with the agent's message. The use is not recorded, and the reference page says so. Test: `::test_a_slice_with_an_undefined_bound_is_not_reported_and_fails_as_on_the_agent`. |
+| IMPORTANT: a key that is a field without a value, or one of Jinja's own undefined values, was reported with a made-up name, such as `components.`. | Fixed: it is not recorded. Test: `::test_a_key_or_a_name_read_on_a_field_without_a_value_is_not_reported` (4 cases). |
+| IMPORTANT: `{{ parameters.image.split(":")[0] }}` gave a second error named `<str>.0`. | Fixed: the render fails as on the agent, with `'str' object is not callable`, and reports `parameters.image` once. |
+
+MINOR findings of that review fixed: `__int__`, `__float__` and `<` on an undefined variable fail as on the agent; a name that starts with `_` read on an undefined variable gives the agent's empty string; the reference page names `parameters.get('x')` among the uses that are not reported; line 16 of the spec gives the three results on the server; the decision of R-003 no longer says that the render records each use instead of failing; the narrowing of FR-009 is confirmed.
+
+MINOR findings of that review left as they are:
+
+- The case `{% if X == '' %}` of the branch test also passes with the module of `3e8c8283`. It stays as a guard.
+- A missing name of a defined value is reported as `<int>.value`, and the reference page does not explain this form.
+- The last sentence of `changelog/23.added.md` describes the server.
+- The speed of the check render was not measured after this change. The reviewer measured 0.0349 s on `3b406375` against 0.0088 s for the agent, for 40,000 filter calls and 20,000 method calls.
+- A parameter named `values`, `items`, `keys` or `get` is hidden by the method of the mapping, as on the agent.
+- The limits of `check` are described on the reference page, and the spec and the research repeat parts of them.
+
 Checks after the fixes, on the working tree of the commit that adds the last row of the table of reviews:
 
 | Command | Result |
 |---------|--------|
 | `uv run invoke lint` | exit code 0 |
 | `uv run pytest tests --ignore=tests/e2e -q -n auto` (in `backend/`) | 5809 passed, 8 skipped, 1 failed: the telemetry timing test of the first table, which failed there on a clean checkout too. Not run again on a clean checkout. |
-| `uv run pytest -q python_sdk/tests` | 532 passed, 1 xfailed (`slurpit`) |
+| `uv run pytest -q python_sdk/tests` | 556 passed, 1 xfailed (`slurpit`) |
 | `uv run pytest -q cli/tests` | 416 passed |
 | `cd docs && pnpm build` | `[SUCCESS] Generated static files in "build".` |
-| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 166.13s`, ended 2026-10-29T13:08:00+01:00, session vCluster `pytest-ca8a110c-db97-40e2-9848-773dd942f904`, image built from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver`. Three docstrings of `rendering.py` were rewrapped after this run; lint and the SDK tests ran again after it. |
+| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 158.92s`, ended 2026-10-29T13:34:57+01:00, session vCluster `pytest-1b0864de-c5e9-4e0c-b8a6-03d555dbb807`, image built from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |
