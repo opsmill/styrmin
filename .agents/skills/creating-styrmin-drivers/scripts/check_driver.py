@@ -42,9 +42,17 @@ from typing import Any
 
 try:
     import jinja2
+    from jinja2.exceptions import SecurityError
+    from jinja2.sandbox import SandboxedEnvironment
     import yaml
 except ImportError:  # pragma: no cover
-    print("FAIL: install the requirements first: pip install pyyaml jinja2 packaging")
+    print('FAIL: install the requirements first: pip install pyyaml "jinja2>=3.1.6" packaging')
+    sys.exit(2)
+
+# Jinja2 before 3.1.6 lets a template escape the sandbox (CVE-2025-27516), and the sandbox is what
+# stops chart text in values.j2.yml from running code on this machine.
+if tuple(int(x) for x in re.findall(r"\d+", jinja2.__version__)[:3]) < (3, 1, 6):
+    print(f'FAIL: Jinja2 {jinja2.__version__} is too old: pip install "jinja2>=3.1.6"')
     sys.exit(2)
 
 try:
@@ -514,6 +522,14 @@ class RecordingUndefined(jinja2.Undefined):
     __getitem__ = __getattr__  # type: ignore[assignment]
 
 
+class CheckSandbox(SandboxedEnvironment):
+    """Jinja's sandbox, raising on an unsafe attribute instead of returning an undefined value
+    (RecordingUndefined renders undefined values as an empty string)."""
+
+    def unsafe_undefined(self, obj: Any, attribute: str) -> jinja2.Undefined:
+        raise SecurityError(f"access to attribute {attribute!r} of a {type(obj).__name__} object is unsafe")
+
+
 def retired_filter(name: str):
     def _filter(*args: Any, **kwargs: Any) -> str:
         raise jinja2.TemplateRuntimeError(
@@ -545,7 +561,8 @@ def duplicate_keys(text: str) -> list[str]:
 
 def render_values(template_text: str, context: dict) -> dict | None:
     s = "template"
-    env = jinja2.Environment(undefined=RecordingUndefined)
+    # The sandbox stops a template, or chart text copied into it, from running code on this machine.
+    env = CheckSandbox(undefined=RecordingUndefined)
     env.filters["to_fqdn_label"] = to_fqdn_label
     env.filters["split"] = lambda value, sep=None: str(value).split(sep)
     for name in ("component_env_vars", "component_command", "component_args"):
@@ -557,6 +574,9 @@ def render_values(template_text: str, context: dict) -> dict | None:
         return None
     except jinja2.TemplateError as e:
         fail(s, f"values.j2.yml: {e}")
+        return None
+    except Exception as e:  # noqa: BLE001
+        fail(s, f"values.j2.yml does not render: {type(e).__name__}: {e}")
         return None
     for name in sorted(set(UNDEFINED_SEEN)):
         fail(s, f"undefined template variable {name!r}: Styrmin renders it as an empty string. "
@@ -591,10 +611,27 @@ RENDERED: dict[str, Any] = {}
 # 3. helm template
 
 
+CHART_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def unsafe_chart_reference(location: str, version: str) -> str | None:
+    """Why helm must not get this chart location or version, or None. Each one is a separate helm
+    argument, so a value that starts with '-' would be read as a helm flag."""
+    if not location.startswith(("oci://", "http://", "https://")):
+        return f"helm.main.location {location!r} must be an oci:// or https:// chart location"
+    if not location.startswith("oci://") and not CHART_NAME.match(location.rsplit("/", 1)[-1]):
+        return f"helm.main.location {location!r} must end with the chart name (letters, digits, '.', '_', '-')"
+    if version.startswith("-"):
+        return f"helm.main.version {version!r} is not a chart version"
+    return None
+
+
 def chart_defaults(spec: dict, workdir: Path) -> tuple[dict, dict[str, dict]] | None:
     """The chart's default values, and each subchart's (from the pulled chart), keyed by name or alias."""
     location = spec["helm"]["main"]["location"].rstrip("/")
     version = str(spec["helm"]["main"]["version"])
+    if unsafe_chart_reference(location, version):
+        return None
     ref = [location] if location.startswith("oci://") else [location.rsplit("/", 1)[1], "--repo", location.rsplit("/", 1)[0]]
     pull_dir = workdir / "pulled"
     shutil.rmtree(pull_dir, ignore_errors=True)
@@ -723,6 +760,10 @@ def helm_template(spec: dict, values: dict, workdir: Path) -> list[dict] | None:
         return None
     location = spec["helm"]["main"]["location"].rstrip("/")
     version = str(spec["helm"]["main"]["version"])
+    problem = unsafe_chart_reference(location, version)
+    if problem:
+        fail(s, problem)
+        return None
     values_file = workdir / "values.rendered.yaml"
     values_file.write_text(yaml.safe_dump(values, sort_keys=False))
     cmd = [helm, "template", NAMESPACE]
@@ -1350,7 +1391,7 @@ def check_image(image: str) -> None:
         if status == 401:
             auth = hdrs.get("www-authenticate") or ""
             params = dict(re.findall(r'(\w+)="([^"]*)"', auth))
-            if "realm" in params:
+            if params.get("realm", "").startswith("https://"):
                 token_url = f"{params['realm']}?service={params.get('service', '')}&scope=repository:{repo}:pull"
                 _, _, tbody = _http(token_url, {})
                 token = json.loads(tbody or b"{}").get("token") or json.loads(tbody or b"{}").get("access_token")

@@ -1,7 +1,7 @@
 ---
 name: creating-styrmin-drivers
 description: 'Writes a Styrmin application driver (driver.styrmin.yml, values.j2.yml, and actions.py only when needed) for an application that has a Helm chart, and checks it offline with a bundled script until it passes. TRIGGER when: the user asks to make, create, write or package a Styrmin driver for an application ("make a styrmin driver for NetBox", "we need a driver to deploy X on Styrmin"). DO NOT TRIGGER when: deploying or upgrading an application with an existing driver, changing Styrmin itself, or writing a plain Helm chart.'
-compatibility: Needs helm 3, Python 3.10+ with PyYAML, Jinja2 and packaging (or uv), and internet access to read the chart and the image registries. Targets Styrmin 0.1.54.
+compatibility: Needs helm 3, Python 3.10+ with PyYAML, Jinja2 3.1.6 or later and packaging (or uv), and internet access to read the chart and the image registries. Targets Styrmin 0.1.54.
 metadata:
   version: '0.1.15'
   author: OpsMill
@@ -93,7 +93,7 @@ Copy this checklist into `NOTES.md` and tick each item:
 ```
 
 The scripts are in `<skill-dir>/scripts/` and need helm 3 and Python with PyYAML, Jinja2 and
-packaging (`pip install pyyaml jinja2 packaging`).
+packaging (`pip install pyyaml "jinja2>=3.1.6" packaging`).
 
 ### 1. Find the chart
 

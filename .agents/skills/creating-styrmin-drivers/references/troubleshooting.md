@@ -17,6 +17,8 @@ Each line: what you see, the usual cause, the fix.
 | deployment uses an older or other driver version | the highest `spec.version` wins | raise `spec.version`, or pin with `--driver-version-id` |
 | `Duplicate service name` / service name already used | another deployment of the environment declares the same service | deploy in another environment |
 | install fails: `resource ... already exists` | two charts render the same object name (often a NetworkPolicy) | rename one |
+| `check_driver.py`: `Jinja syntax error` on a line with a Helm template string such as `{{ include ... }}` or `{{ .Release.Name }}` | Styrmin renders `values.j2.yml` with Jinja first, and Helm template strings use the same `{{` | write the string as `{% raw %}{{ ... }}{% endraw %}`, as the scaffold does for text from the chart |
+| `check_driver.py`: `access to attribute ... is unsafe` | the template reads an internal attribute of a Python object (a name that starts with `_`, or one such as `mro`) | use only the context variables and filters in references/context.md |
 | first start never finishes, liveness restarts the pod | probes kill the container during migrations | raise the startup probe's `failureThreshold`, keep the first start under 270 s |
 
 Useful commands on a cluster:
