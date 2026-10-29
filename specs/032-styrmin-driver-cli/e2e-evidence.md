@@ -177,14 +177,17 @@ The `code-review` skill ran in an agent that did not write the change, at high e
 | `ffb001c3..9236b94b` | 2 CRITICAL, 3 IMPORTANT, 19 MINOR | `3e8c8283` |
 | `9236b94b..3e8c8283` | 3 CRITICAL, 5 IMPORTANT, 11 MINOR | `3b406375` |
 | `3e8c8283..3b406375` | 3 CRITICAL, 3 IMPORTANT, 12 MINOR | `aebf9750` |
-| `3b406375..aebf9750` | 3 CRITICAL, 4 IMPORTANT, 14 MINOR | the commit that adds this row |
+| `3b406375..aebf9750` | 3 CRITICAL, 4 IMPORTANT, 14 MINOR | `24e9f88b` |
+| `aebf9750..24e9f88b` | 4 CRITICAL, 2 IMPORTANT, 12 MINOR | the commit that adds this row |
 
 Each review read the text that the review before it led to, and found statements in it that were false. The tables below name the tests as the commit that made the change named them. `aebf9750` and the commit after it renamed or replaced some of them:
 
 - `test_uses_in_operations_calls_subscripts_and_comparisons_are_all_reported` is now `test_a_use_in_an_operation_a_call_or_a_subscript_is_reported`, one template per use;
 - `test_an_undefined_variable_passed_to_a_filter_a_test_or_a_function_is_reported_and_the_render_goes_on` is replaced by `test_a_use_that_the_agent_renders_with_no_message_is_reported_and_renders_as_on_the_agent` and `test_a_use_that_the_agent_fails_on_is_reported_and_fails_as_on_the_agent`;
 - `test_a_slice_with_an_undefined_variable_is_reported_and_fails_as_on_the_agent` is now `test_a_slice_with_an_undefined_bound_is_not_reported_and_fails_as_on_the_agent`;
-- `test_a_key_or_a_name_read_on_a_field_without_a_value_is_not_reported` is now `test_a_field_without_a_value_or_a_jinja_undefined_value_as_a_key_or_a_parent_is_not_reported`. The findings of the review of `9236b94b`, and what changed in `3e8c8283`:
+- `test_a_key_or_a_name_read_on_a_field_without_a_value_is_not_reported` is now `test_a_field_without_a_value_or_a_jinja_undefined_value_as_a_key_or_a_parent_is_not_reported`.
+
+The findings of the review of `9236b94b`, and what changed in `3e8c8283`:
 
 | Finding | Resolution |
 |---------|------------|
@@ -253,7 +256,7 @@ MINOR findings of that review left as they are:
 - A parameter named `values`, `items`, `keys` or `get` is hidden by the method of the mapping, as on the agent.
 - The limits of `check` are described on the reference page, and the spec and the research repeat parts of them.
 
-The findings of the review of `aebf9750`, and what changed in the commit that adds the last row of the table of reviews. 6 of the 94 tests of `test_rendering_check_mode.py` fail with the `rendering.py` of `aebf9750`. The outputs and the recorded uses of the 99 templates tried in the reviews before are the same as with `aebf9750`.
+The findings of the review of `aebf9750`, and what changed in `24e9f88b`. 6 of the 94 tests of `test_rendering_check_mode.py` fail with the `rendering.py` of `aebf9750`. The outputs and the recorded uses of the 99 templates tried in the reviews before are the same as with `aebf9750`.
 
 | Finding | Resolution |
 |---------|------------|
@@ -263,7 +266,7 @@ The findings of the review of `aebf9750`, and what changed in the commit that ad
 | IMPORTANT: an undefined key was recorded a second time, at the line of a later failure, because the failure message reads the key. New in `aebf9750`. | Fixed: the value that Jinja gives for an undefined key holds a key that records nothing. Test: `::test_an_undefined_key_is_reported_once_at_the_line_that_reads_it`. |
 | IMPORTANT: R-003, its link anchors and the data model still described a render that reports what it reaches, and rejected `StrictUndefined` for a reason that now applies to the chosen render too. | Fixed: R-003 says that the render reports what it finds, and that `StrictUndefined` fails also on a variable that the agent writes out as an empty string. |
 | IMPORTANT: step 9 of the guide claimed that `check` reports any use of an undefined variable, a sentence lost its subject, and the page did not say that a failing use stops the render. | Fixed: step 9 points to the list of uses that are not reported, and says that the rest of the template is checked once a failing use is fixed. |
-| IMPORTANT: when the render stops, the output does not say that the rest of the template was not checked. | Kept: the error gives the line where the render stopped, and the reference page and step 9 say that the rest of the template is not checked in that run. The author of the brief chose this behaviour. |
+| IMPORTANT: when the render stops, the output does not say that the rest of the template was not checked. | Kept: the error gives the line where the render stopped, and the reference page and step 9 say that the rest of the template is not checked in that run. The author of the brief chose this behaviour ([spec, clarifications of 2026-10-29](spec.md#session-2026-10-29-reviews-of-the-documentation-of-check)). |
 
 MINOR findings of that review fixed: the renaming of the mapping class and its side effects; the tests named in this file that were renamed (listed above); the name of the test that includes `loop.previtem`; the sentence of the reference page that mixed uses that render and a slice that fails; a verification for the new requirement of FR-007; the long line in step 9.
 
@@ -278,13 +281,35 @@ MINOR findings of that review left as they are:
 - A misspelt variable inside `is defined` is not reported, as the reference page says. An unknown filter stops the render, and the page does not list it among the errors that hide others.
 - The reviewer did not run `uv run invoke lint`, because it writes generated code; its check-only parts pass.
 
+The findings of the review of `24e9f88b`, and what changed in the commit that adds the last row of the table of reviews. 2 of the 98 tests of `test_rendering_check_mode.py` fail with the `rendering.py` of `24e9f88b`. The 110 templates tried in the reviews before give the same outputs and recorded uses as with `24e9f88b`.
+
+| Finding | Resolution |
+|---------|------------|
+| CRITICAL: the table of mappings was keyed by `id` and did not hold the mappings, so a mapping that the template removes, such as `instance.pop('config')`, could be freed and its `id` given to a new dict. A use on that dict then got the path of the removed mapping, or was not recorded. New in `24e9f88b`. | Fixed: each entry holds its mapping, and a lookup checks that the value is that mapping. Test: `test_rendering_check_mode.py::test_a_mapping_that_the_template_removes_keeps_its_path`. |
+| CRITICAL: R-003 said that the tool wraps each mapping in a `dict` subclass. | Fixed: it says that the mappings are plain dicts and that their paths are in a table of the render. |
+| CRITICAL: R-003 said that `_KnownMapping` is named `dict` in the module `builtins`. | Fixed: it describes the context variable that holds the state of the render. |
+| CRITICAL: a docstring said that `_CheckingUndefined` has no members of its own, so that a name read on it gives the agent's result; `__doc__` is one, and `{{ parameters.typo.__doc__ }}` differs from the agent's. | Fixed: the docstring says that the class adds no attribute whose name does not start with `__`. |
+| IMPORTANT: the reference page said that a name read on an undefined variable is reported as the variable; a name that starts with `_undefined_` or `__` is not. | Fixed: the page says so. |
+| IMPORTANT: the page said that a comparison is recorded; `parameters.x in 'abc'` is not, and fails with a `TypeError` that does not name the variable. | Fixed: the page lists it among the uses that are not recorded. |
+
+MINOR findings of that review fixed: a name read on a literal, such as `{{ "abc".nmae }}`, is recorded again, with no line, as the state of the render is set while the template is compiled (test `::test_a_name_read_on_a_literal_is_reported_with_no_line`); R-003 says how a name read on a string that is not empty is recorded; the sentence of this file that was joined to a list; a case for `is sameas` in `::test_both_values_of_a_comparison_are_reported`; a test that a render that fails leaves no use for the next render (`::test_a_render_that_fails_leaves_no_use_for_the_next_render`); step 9 says that the rest of the template is not checked in that run; a link to the clarification where the author of the brief chose the design.
+
+MINOR findings of that review left as they are:
+
+- The templates tried in the reviews are in the reviewers' scratch folders, not in the repository.
+- `{{ [x] == [x] }}` and `{{ x in [x] }}` do not record `x`, because Python compares the items of a list by identity first.
+- A macro argument that the call leaves out is reported as an undefined variable, and the reference page does not say so.
+- Not verified: the prefix of the message that the server shows for a render that fails with a `TypeError`.
+- `tasks.md` T032 still describes the `dict` subclass; it records the task as it was done.
+- `{{ parameters.typo.__doc__ }}` renders the docstring of the check render's class.
+
 Checks after the fixes, on the working tree of the commit that adds the last row of the table of reviews:
 
 | Command | Result |
 |---------|--------|
 | `uv run invoke lint` | exit code 0 |
 | `uv run pytest tests --ignore=tests/e2e -q -n auto` (in `backend/`) | 5809 passed, 8 skipped, 1 failed: the telemetry timing test of the first table, which failed there on a clean checkout too. Not run again on a clean checkout. |
-| `uv run pytest -q python_sdk/tests` | 562 passed, 1 xfailed (`slurpit`) |
+| `uv run pytest -q python_sdk/tests` | 566 passed, 1 xfailed (`slurpit`) |
 | `uv run pytest -q cli/tests` | 416 passed |
 | `cd docs && pnpm build` | `[SUCCESS] Generated static files in "build".` |
-| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 171.45s (0:02:51)`, ended 2026-10-29T14:07:31+01:00, session vCluster `pytest-e0bf2052-99d6-4edc-bf62-55ae86397ccc`, image built from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |
+| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 168.56s (0:02:48)`, ended 2026-10-29T15:05:16+01:00, session vCluster `pytest-454f2f18-0bb9-428c-8494-dd382a92b46f`, image built from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |
