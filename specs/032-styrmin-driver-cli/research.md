@@ -48,7 +48,7 @@ None of the moved modules imports the database, sqlmodel, sqlalchemy, strawberry
 
 **Alternatives considered**: a second error base in the SDK, with `api/errors.py` checking both. Rejected: every place that handles `ServiceError` would need the second base too, and missing one changes what a client receives.
 
-## R-003: One render reports the undefined variables that it reaches, with their line and full name
+## R-003: One render reports the undefined variables that it finds, with their line and full name
 
 **Decision**: The tool renders with its own subclass of the agent's undefined class that records each use (amended below: it then fails where the agent's render fails). It records:
 
@@ -77,7 +77,7 @@ Uses that are recorded: printing, `if` and other boolean tests, iteration, compa
 - The undefined class of each check render is named `SilentUndefined`, and `_KnownMapping` is named `dict` in the module `builtins`, so that a message that names the class of a value is the agent's.
 - Some uses do not read the value and are not recorded: `x in mapping`, which hashes it; `{% if [x] %}`; `[x] | length`, where the list holds it; `mapping.get('x')`; and a slice bound (`[1, 2, 3][:x]`), because Jinja does not route a slice through `getitem` (`jinja2/compiler.py`, `visit_Getitem`). The render then fails with the agent's message.
 
-**Rationale**: FR-009 requires the undefined variables that the render reaches in one run, with their line (FR-007). `jinja2.StrictUndefined` stops at the first one and gives no line in the exception; the line is only in the traceback.
+**Rationale**: FR-009 asks for the undefined variables that the render finds in one run, with their line (FR-007). `jinja2.StrictUndefined` fails at the first use of any undefined variable, also one that the agent's render writes out as an empty string, and gives no line in the exception; the line is only in the traceback.
 
 **Alternatives considered**:
 

@@ -342,7 +342,9 @@ def test_an_error_in_a_call_that_receives_an_undefined_variable_is_not_hidden() 
         "{{ instance.config.fqdn_suffix.a.b }}",
     ],
 )
-def test_a_key_or_a_name_read_on_a_field_without_a_value_is_not_reported(expression: str) -> None:
+def test_a_field_without_a_value_or_a_jinja_undefined_value_as_a_key_or_a_parent_is_not_reported(
+    expression: str,
+) -> None:
     _spec, _template, context = _example("simple-app")
     template = f"a: '{expression}'\n"
 
@@ -383,3 +385,45 @@ def test_filters_that_take_the_context_or_the_environment_give_the_values_of_the
     assert not checked.undefined
     assert checked.failure is None
     assert checked.values == render_values(template, context)
+
+
+@pytest.mark.parametrize(
+    ("expression", "names"),
+    [
+        ("{% if instance.config.fqdn_suffix == X %}equal{% endif %}", ["parameters.typo"]),
+        ("{{ X == Y }}", ["parameters.typo", "parameters.other"]),
+        ("{{ X != Y }}", ["parameters.typo", "parameters.other"]),
+        ("{{ [X] == [Y] }}", ["parameters.typo", "parameters.other"]),
+    ],
+)
+def test_both_values_of_a_comparison_are_reported(expression: str, names: list[str]) -> None:
+    _spec, _template, context = _example("simple-app")
+    template = f"a: '{expression.replace('X', 'parameters.typo').replace('Y', 'parameters.other')}'\n"
+
+    checked = render_values_checked(template, context)
+
+    assert [(u.line, u.name) for u in checked.undefined] == [(1, name) for name in names]
+    assert checked.values == render_values(template, context)
+
+
+def test_names_that_start_with_an_underscore_render_as_on_the_agent() -> None:
+    _spec, _template, context = _example("simple-app")
+    context = context.model_copy(update={"parameters": {**context.parameters, "_path": "from-the-context"}})
+    template = "a: '{{ parameters._path }}'\nb: '{{ instance._known | length }}'\nc: '{{ parameters.typo._uses }}'\n"
+
+    checked = render_values_checked(template, context)
+
+    assert checked.values == render_values(template, context) == {"a": "from-the-context", "b": "0", "c": ""}
+    assert [(u.line, u.name) for u in checked.undefined] == [(2, "instance._known"), (3, "parameters.typo")]
+
+
+def test_an_undefined_key_is_reported_once_at_the_line_that_reads_it() -> None:
+    _spec, _template, context = _example("simple-app")
+    template = "{% set v = {}[parameters.typo] %}\na: '{{ v + 1 }}'\n"
+
+    checked = render_values_checked(template, context)
+
+    assert [(u.line, u.name) for u in checked.undefined] == [(1, "parameters.typo")]
+    assert checked.failure is not None
+    assert checked.failure.line == 2
+    assert checked.failure.message == _agent_failure(template, context)

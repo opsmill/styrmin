@@ -147,9 +147,10 @@ my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
   `{{ parameters.x | abs }}`. The uses after that point are not checked in
   that run.
 - Some uses are not recorded, for example `parameters.x in parameters`,
-  `{% if [parameters.x] %}`, `[parameters.x] | length`, `parameters.get('x')`,
-  and a slice bound such as `[1, 2, 3][:parameters.x]`, where the render fails
-  with the server's message.
+  `{% if [parameters.x] %}`, `[parameters.x] | length` and
+  `parameters.get('x')`. A slice bound such as `[1, 2, 3][:parameters.x]` is
+  not recorded either: the render fails there with the server's message, at
+  its line.
 - The `default()` filter and the `is defined` and `is undefined` tests are
   allowed. They apply to the last name of a path:
   `parameters.x.y | default('z')` is an error when `parameters.x` is
