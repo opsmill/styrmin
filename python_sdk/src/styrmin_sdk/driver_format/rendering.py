@@ -198,7 +198,7 @@ class _CheckRender:
 
     def mapping(self, obj: object) -> tuple[str, frozenset[str]] | None:
         entry = self.mappings.get(id(obj))
-        return (entry[1], entry[2]) if entry is not None and entry[0] is obj else None
+        return (entry[1], entry[2]) if entry is not None else None
 
 
 # The check render that is running, if any. An undefined value made outside it records nothing.
@@ -519,11 +519,12 @@ def render_values_checked(values_template: str, context: GlobalContext) -> Rende
         **environment.policies["json.dumps_kwargs"],
         "default": _checked_json_default,
     }
-    # Set before the template is compiled too: Jinja evaluates some constant expressions, such
-    # as ``"abc".nmae``, when it compiles, and their uses get no line.
+    template = environment.from_string(values_template)
+    # Set only while the template renders. Jinja evaluates some constant expressions, such as
+    # ``"abc".nmae``, in every branch when it compiles, and the agent's render does not fail
+    # on them, so they are not recorded.
     token = _CHECK_RENDER.set(render)
     try:
-        template = environment.from_string(values_template)
         text = template.render(wrapped)
     except RetiredTemplateFilterError as e:
         failure = RenderFailure(kind="retired-filter", message=str(e), line=_failure_line(e))
