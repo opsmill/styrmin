@@ -197,6 +197,7 @@ class _CheckRender:
     uses: list[UndefinedUse] = field(default_factory=list)
 
     def mapping(self, obj: object) -> tuple[str, frozenset[str]] | None:
+        # The ``id`` is enough, because each entry holds its mapping (see ``_wrap``).
         entry = self.mappings.get(id(obj))
         return (entry[1], entry[2]) if entry is not None else None
 
@@ -491,7 +492,7 @@ def render_values_checked(values_template: str, context: GlobalContext) -> Rende
 
     A render that fails does not raise: ``RenderResult.failure`` says why, with the template
     line when it is known, whatever the exception, and the undefined uses found before the
-    failure are kept.
+    failure are kept. A template that does not compile raises, as in ``render_values``.
     """
     render = _CheckRender()
     wrapped = _wrap(context, context.model_dump(exclude_none=True), "", render.mappings)
@@ -520,9 +521,8 @@ def render_values_checked(values_template: str, context: GlobalContext) -> Rende
         "default": _checked_json_default,
     }
     template = environment.from_string(values_template)
-    # Set only while the template renders. Jinja evaluates some constant expressions, such as
-    # ``"abc".nmae``, in every branch when it compiles, and the agent's render does not fail
-    # on them, so they are not recorded.
+    # Set only while the template renders: Jinja evaluates some constant expressions, such as
+    # ``{{ "abc".nmae }}``, when it compiles, also in branches that the render does not take.
     token = _CHECK_RENDER.set(render)
     try:
         text = template.render(wrapped)

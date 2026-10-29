@@ -436,26 +436,39 @@ def test_an_undefined_key_is_reported_once_at_the_line_that_reads_it() -> None:
     assert checked.failure.message == _agent_failure(template, context)
 
 
+def _dicts(value: object):
+    if isinstance(value, dict):
+        yield value
+        for item in value.values():
+            yield from _dicts(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _dicts(item)
+
+
 def test_the_render_state_holds_each_mapping_of_the_context() -> None:
     # A mapping that a template removes, such as ``instance.pop("config")``, stays alive, so
     # that no dict that the template makes later gets its id and its path.
     _spec, _template, context = _example("simple-app")
     render = _CheckRender()
-    _wrap(context, context.model_dump(exclude_none=True), "", render.mappings)
+    wrapped = _wrap(context, context.model_dump(exclude_none=True), "", render.mappings)
+    mappings = list(_dicts(wrapped))
 
-    assert render.mappings
-    assert all(isinstance(entry[0], dict) and id(entry[0]) == key for key, entry in render.mappings.items())
+    assert len(mappings) > 1
+    assert len(render.mappings) == len(mappings)
+    assert all(render.mappings[id(mapping)][0] is mapping for mapping in mappings)
 
 
 @pytest.mark.parametrize(
     "template",
     [
+        "a: '{{ \"abc\".nmae }}'\n",
         "a: x\n{% if false %}b: '{{ \"abc\".nmae }}'\n{% endif %}",
         'a: x\n{% macro unused() %}{{ {"k": 1}.zz }}{% endmacro %}',
         "a: x\n{% if true %}{% else %}b: '{{ \"abc\".nmae }}'{% endif %}",
     ],
 )
-def test_a_constant_expression_in_a_branch_that_the_render_does_not_take_is_not_reported(template: str) -> None:
+def test_a_name_read_on_a_literal_that_jinja_evaluates_when_it_compiles_is_not_reported(template: str) -> None:
     _spec, _template, context = _example("simple-app")
 
     checked = render_values_checked(template, context)
@@ -463,6 +476,29 @@ def test_a_constant_expression_in_a_branch_that_the_render_does_not_take_is_not_
     assert not checked.undefined
     assert checked.failure is None
     assert checked.values == render_values(template, context)
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "a: '{% if \"abc\".nmae %}y{% endif %}'\n",
+        "a: '{{ app.version.nmae }}'\n",
+    ],
+)
+def test_a_name_read_on_a_string_is_reported_with_the_kind_of_the_value(template: str) -> None:
+    _spec, _template, context = _example("simple-app")
+
+    checked = render_values_checked(template, context)
+
+    assert [(u.line, u.name) for u in checked.undefined] == [(1, "<str>.nmae")]
+    assert checked.values == render_values(template, context)
+
+
+def test_a_name_read_on_an_empty_string_of_the_context_is_not_reported() -> None:
+    _spec, _template, context = _example("simple-app")
+    context = context.model_copy(update={"parameters": {**context.parameters, "empty": ""}})
+
+    assert not render_values_checked("a: '{{ parameters.empty.nmae }}'\n", context).undefined
 
 
 def test_the_render_state_is_reset_after_a_render_that_fails() -> None:
