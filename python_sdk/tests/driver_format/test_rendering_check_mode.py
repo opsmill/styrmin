@@ -170,3 +170,36 @@ def test_undefined_uses_found_before_a_render_failure_are_kept() -> None:
     assert [(u.line, u.name) for u in checked.undefined] == [(1, "parameters.typo")]
     assert checked.failure is not None
     assert checked.failure.line == 2
+
+
+def test_uses_through_the_items_and_tojson_filters_are_reported() -> None:
+    template = (
+        "a: '{% for k, v in parameters.typo_items | items %}{{ k }}{% endfor %}'\n"
+        "b: '{{ parameters.typo_json | tojson }}'\n"
+        "c: '{{ [parameters.typo_list] | tojson }}'\n"
+        "d: '{{ parameters.typo_last }}'\n"
+    )
+
+    assert _uses(template) == [
+        (1, "parameters.typo_items"),
+        (2, "parameters.typo_json"),
+        (3, "parameters.typo_list"),
+        (4, "parameters.typo_last"),
+    ]
+
+
+def test_items_and_tojson_on_fields_without_a_value_render_as_on_the_agent() -> None:
+    _spec, _template, context = _example("simple-app")
+    loop = "a: '[{% for k, v in instance.config.env_vars | items %}{{ k }}{% endfor %}]'\n"
+    json = "a: '{{ instance.config.fqdn_suffix | tojson }}'\n"
+
+    checked_loop = render_values_checked(loop, context)
+    checked_json = render_values_checked(json, context)
+
+    assert not checked_loop.undefined
+    assert checked_loop.values == render_values(loop, context) == {"a": "[]"}
+    assert not checked_json.undefined
+    assert checked_json.failure is not None
+    with pytest.raises(TypeError) as agent_error:
+        render_values(json, context)
+    assert checked_json.failure.message == f"Chart values template rendering failed: TypeError: {agent_error.value}"

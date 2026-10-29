@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, NoReturn
 
 import jinja2
+from jinja2.filters import do_items
 from jinja2.utils import missing
 from pydantic import BaseModel, RootModel
 from yaml import YAMLError, safe_load
@@ -138,7 +139,7 @@ def render_values(values_template: str, context: GlobalContext) -> dict:
         raise InvalidChartValuesError(f"The chart values are not valid YAML: {e!s}") from e
 
 
-# The check render of styrmin-driver: every undefined variable with its template line.
+# The check render of styrmin-driver: each undefined variable that it reaches, with its line.
 
 
 @dataclass(frozen=True)
@@ -264,8 +265,9 @@ class _CheckingUndefined(jinja2.Undefined):
     A name that the context model knows, such as a field without a value, and an undefined
     value that Jinja makes itself, such as ``loop.previtem`` on the first item, get a
     ``_KnownAbsent`` instead, so they render as on the agent and are not recorded.
-    Every use of an unknown name is recorded, including in an operation, a call or a
-    subscript; the render then goes on with an empty value, to find the next use.
+    Each use that reads an unknown name is recorded, including in an operation, a call, a
+    subscript, or the ``items`` and ``tojson`` filters; the render then goes on with an empty
+    value, to find the next use.
     ``_for_render`` makes a subclass with its own ``_root_known`` and ``_uses`` for one render.
     """
 
@@ -375,8 +377,24 @@ class _CheckingUndefined(jinja2.Undefined):
     __lt__ = __le__ = __gt__ = __ge__ = _use_as_false
 
 
+def _checked_items(value: object) -> Iterator[tuple[object, object]]:
+    # Jinja's ``items`` gives an empty loop for an undefined value without using it.
+    if isinstance(value, _CheckingUndefined):
+        value._record()
+    return do_items(value)
+
+
+def _checked_json_default(value: object) -> object:
+    # ``tojson`` calls this for a value that JSON cannot hold, such as an undefined value.
+    if isinstance(value, _CheckingUndefined):
+        value._record()
+        return None
+    name = "SilentUndefined" if isinstance(value, SilentUndefined) else type(value).__name__
+    raise TypeError(f"Object of type {name} is not JSON serializable")
+
+
 def render_values_checked(values_template: str, context: GlobalContext) -> RenderResult:
-    """Render a values template as ``render_values`` does, and record every undefined variable.
+    """Render a values template as ``render_values`` does, and record each undefined use it reaches.
 
     A variable is undefined when its name is neither a field of the context model nor a key
     of the context. A field without a value renders as on the agent: an empty string that
@@ -393,6 +411,12 @@ def render_values_checked(values_template: str, context: GlobalContext) -> Rende
         raise TypeError("The context dump is not a mapping")
     uses: list[UndefinedUse] = []
     environment = get_jinja_environment(undefined=_CheckingUndefined._for_render(wrapped._known, uses))
+    environment.filters["items"] = _checked_items
+    # A new dict: Jinja copies its default policies shallowly, so this one is shared.
+    environment.policies["json.dumps_kwargs"] = {
+        **environment.policies["json.dumps_kwargs"],
+        "default": _checked_json_default,
+    }
     template = environment.from_string(values_template)
     try:
         text = template.render(wrapped)
