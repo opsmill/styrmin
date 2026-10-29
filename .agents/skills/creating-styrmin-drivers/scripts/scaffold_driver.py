@@ -237,6 +237,25 @@ def find_paths(node, predicate, prefix: str = "", depth: int = 0) -> list[str]:
     return out
 
 
+# The only Jinja expressions the scaffold writes itself. Any other Jinja delimiter in the draft comes
+# from the chart (a Helm `tpl` string, or a payload), and Styrmin and check_driver.py would run it.
+OWN_JINJA = re.compile(r"\{\{ (?:services\['[A-Za-z0-9_.-]+'\]\.(?:primary_fqdn|human_readable_fqdn)"
+                       r"|instance\.config\.standard_storage\.storage_class|app\.version) \}\}")
+JINJA_START = re.compile(r"\{[{%#]")
+
+
+def escape_chart_jinja(text: str) -> str:
+    """Makes every Jinja delimiter literal text, except in the scaffold's own expressions."""
+    def literal(part: str) -> str:
+        return JINJA_START.sub(lambda m: "{% raw %}" + m.group() + "{% endraw %}", part)
+
+    out, pos = [], 0
+    for m in OWN_JINJA.finditer(text):
+        out += [literal(text[pos:m.start()]), m.group()]
+        pos = m.end()
+    return "".join([*out, literal(text[pos:])])
+
+
 def nested(paths_values: list[tuple[str, str]], indent: int = 0) -> str:
     """Renders dotted paths with already-quoted scalar values as nested YAML lines."""
     tree: dict = {}
@@ -817,7 +836,7 @@ def main() -> None:
               "# can resolve DNS. For a single-container application, start again from examples/app-template/",
               "# (the bjw-s app-template chart renders NetworkPolicies). Otherwise say in the README that this",
               "# chart cannot run under Styrmin. See \"When no value can carry the policy\" in references/networking.md."]
-    (out / "values.j2.yml").write_text("\n".join(v) + "\n")
+    (out / "values.j2.yml").write_text(escape_chart_jinja("\n".join(v) + "\n"))
 
     readme = f"""# {a.driver_name} driver for Styrmin
 
