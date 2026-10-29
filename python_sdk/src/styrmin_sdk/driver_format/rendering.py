@@ -3,13 +3,15 @@
 The agent renders a deployment's values with ``render_values`` (ADR-0089).
 """
 
+import functools
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Any, Literal, NoReturn
+from typing import Any, Literal, NoReturn, cast
 
 import jinja2
-from jinja2.filters import do_items
+from jinja2.filters import do_default
+from jinja2.tests import test_defined, test_undefined
 from jinja2.utils import missing
 from pydantic import BaseModel, RootModel
 from yaml import YAMLError, safe_load
@@ -259,15 +261,19 @@ class _KnownAbsent(SilentUndefined):
         return super()._undefined_message
 
 
+# A TypeError names the class of the value, such as ``bad operand type for abs()``: the agent's.
+_KnownAbsent.__name__ = _KnownAbsent.__qualname__ = SilentUndefined.__name__
+
+
 class _CheckingUndefined(jinja2.Undefined):
     """An ``Undefined`` that records each use of an unknown name in ``_uses``.
 
     A name that the context model knows, such as a field without a value, and an undefined
     value that Jinja makes itself, such as ``loop.previtem`` on the first item, get a
     ``_KnownAbsent`` instead, so they render as on the agent and are not recorded.
-    Each use that reads an unknown name is recorded, including in an operation, a call, a
-    subscript, or the ``items`` and ``tojson`` filters; the render then goes on with an empty
-    value, to find the next use.
+    Each use of an unknown name is recorded, including in an operation, a call, a subscript
+    or an index; ``render_values_checked`` also makes each filter and test record an unknown
+    name passed to it. The render then goes on with an empty value, to find the next use.
     ``_for_render`` makes a subclass with its own ``_root_known`` and ``_uses`` for one render.
     """
 
@@ -331,6 +337,11 @@ class _CheckingUndefined(jinja2.Undefined):
         self._record()
         return ""
 
+    def __repr__(self) -> str:
+        # A list or a dict that holds the value renders it with repr, as ``Undefined`` on the agent.
+        self._record()
+        return "Undefined"
+
     def __bool__(self) -> bool:
         self._record()
         return False
@@ -344,6 +355,11 @@ class _CheckingUndefined(jinja2.Undefined):
         return 0
 
     def __int__(self) -> int:
+        self._record()
+        return 0
+
+    def __index__(self) -> int:
+        # ``range()`` and a list index read the value as an index.
         self._record()
         return 0
 
@@ -377,20 +393,55 @@ class _CheckingUndefined(jinja2.Undefined):
     __lt__ = __le__ = __gt__ = __ge__ = _use_as_false
 
 
-def _checked_items(value: object) -> Iterator[tuple[object, object]]:
-    # Jinja's ``items`` gives an empty loop for an undefined value without using it.
-    if isinstance(value, _CheckingUndefined):
+# Filters that raise whatever they receive, so that a driver that calls one gets the typed error.
+_RETIRED_FILTERS = frozenset({component_env_vars, component_command, component_args})
+
+
+def _record_undefined(args: tuple[object, ...], kwargs: dict[str, object]) -> list[_CheckingUndefined]:
+    undefined = [value for value in (*args, *kwargs.values()) if isinstance(value, _CheckingUndefined)]
+    for value in undefined:
         value._record()
-    return do_items(value)
+    return undefined
+
+
+def _checking_filter(name: str, func: Callable[..., object]) -> Callable[..., object]:
+    """``func``, the filter ``name``, which records each unknown name passed to it, then gives an empty value.
+
+    Some filters do not read the value (``items``, ``pprint``, a filter that returns a
+    generator), and others fail with a ``TypeError`` that does not name it (``abs``, ``round``).
+    """
+
+    # ``functools.wraps`` keeps ``jinja_pass_arg``, so Jinja still passes the context to ``func``.
+    @functools.wraps(func)
+    def checked(*args: object, **kwargs: object) -> object:
+        undefined = _record_undefined(args, kwargs)
+        if undefined and func not in _RETIRED_FILTERS:
+            # An empty value of the use already recorded: an undefined value records no use of its own.
+            return type(undefined[0])(obj=undefined[0], name=name)
+        return func(*args, **kwargs)
+
+    return checked
+
+
+def _checking_test(func: Callable[..., bool]) -> Callable[..., bool]:
+    """``func``, which records each unknown name passed to it and is then false.
+
+    Most tests, such as ``none`` or ``string``, do not read the value.
+    """
+
+    @functools.wraps(func)
+    def checked(*args: object, **kwargs: object) -> bool:
+        return False if _record_undefined(args, kwargs) else func(*args, **kwargs)
+
+    return checked
 
 
 def _checked_json_default(value: object) -> object:
-    # ``tojson`` calls this for a value that JSON cannot hold, such as an undefined value.
+    # ``tojson`` calls this for a value that JSON cannot hold, such as an undefined value in a list.
     if isinstance(value, _CheckingUndefined):
         value._record()
         return None
-    name = "SilentUndefined" if isinstance(value, SilentUndefined) else type(value).__name__
-    raise TypeError(f"Object of type {name} is not JSON serializable")
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def render_values_checked(values_template: str, context: GlobalContext) -> RenderResult:
@@ -398,8 +449,10 @@ def render_values_checked(values_template: str, context: GlobalContext) -> Rende
 
     A variable is undefined when its name is neither a field of the context model nor a key
     of the context. A field without a value renders as on the agent: an empty string that
-    tests as false. For a template without undefined variables, the values equal those of
-    ``render_values`` for the same context.
+    tests as false. Each filter and test records an undefined variable passed to it, apart
+    from the ``default`` filter and the ``defined`` and ``undefined`` tests. For a template
+    without undefined variables, the values equal those of ``render_values`` for the same
+    context.
 
     A render that fails does not raise: ``RenderResult.failure`` says why, with the template
     line when it is known, whatever the exception, and the undefined uses found before the
@@ -411,7 +464,18 @@ def render_values_checked(values_template: str, context: GlobalContext) -> Rende
         raise TypeError("The context dump is not a mapping")
     uses: list[UndefinedUse] = []
     environment = get_jinja_environment(undefined=_CheckingUndefined._for_render(wrapped._known, uses))
-    environment.filters["items"] = _checked_items
+    # Each environment has its own copy of the filters and tests, so the agent's are unchanged.
+    environment.filters.update(
+        {name: _checking_filter(name, func) for name, func in environment.filters.items() if func is not do_default}
+    )
+    # Jinja types its tests by their arguments; each one takes a value and gives a bool.
+    cast("dict[str, Callable[..., bool]]", environment.tests).update(
+        {
+            name: _checking_test(func)
+            for name, func in environment.tests.items()
+            if func not in {test_defined, test_undefined}
+        }
+    )
     # A new dict: Jinja copies its default policies shallowly, so this one is shared.
     environment.policies["json.dumps_kwargs"] = {
         **environment.policies["json.dumps_kwargs"],

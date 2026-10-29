@@ -96,9 +96,10 @@ Fix what `check` reports and run it again, until it reports no error.
 The render takes only some branches of the template. A variable used only in
 a branch that the render does not take is not checked, and `check` does not
 warn about it: for example in an `{% if %}` that is false, in the
-`{% else %}` of an `{% if %}` that is true, or in a `{% for %}` over an
-empty list. To check that branch, give a context file that makes the render
-take it. `render` and `diff` have the same limit.
+`{% else %}` of an `{% if %}` that is true, in a `{% for %}` over an empty
+list, or in a macro that the template never calls. To check that branch,
+give a context file that makes the render take it. `render` and `diff` have
+the same limit.
 
 Most messages are those of a load. `check` also writes messages of its own,
 for example for an undefined variable or for a file that is not UTF-8. When
@@ -112,8 +113,12 @@ warnings and do not change the exit code.
 #### Undefined variables
 
 On the server, a variable that the context does not define renders as an
-empty string, and nothing reports it. `check` and `render` report it as an
-error, for example:
+empty string when the template writes it out, and nothing reports it. Some
+other uses make the render fail with a message that gives no line: for
+example, `{{ parameters.admn_email + 1 }}` fails with
+`'dict object' has no attribute 'admn_email'`, and
+`{{ parameters.admn_email | abs }}` with a `TypeError`. `check` and `render`
+report each use as an error, with its line, for example:
 
 ```text
 my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
@@ -124,20 +129,15 @@ my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
 - A field of the context model without a value, such as
   `instance.config.fqdn_suffix` when no FQDN suffix is set, is not an error.
   It renders as on the server: an empty string that tests as false.
-- An `is defined` test and the `default()` filter are allowed. They apply to
-  the last name of a path: `parameters.x.y | default('z')` is an error when
-  `parameters.x` is undefined.
-- An `if` test on an undefined variable is an error, because the test would
-  otherwise be false with no message.
-- A variable passed to a filter is an error when the filter reads it. This
-  includes `items`, which gives an empty loop on the server, and `tojson`,
-  which fails on the server with a `TypeError` that does not name the
-  variable.
-- A filter that does not read the variable gives no error: `default()`;
-  `pprint`, which renders it as `Undefined`; and a filter that returns a
-  generator, such as `map` or `select`, when the output does not use the
-  generator. For example, `{{ x | select }}` renders as
-  `<generator object ...>`, on the server too.
+- Each use of an undefined variable that the render reaches is an error: the
+  template writes it out, tests it in an `if`, loops over it, uses it in an
+  operation, or passes it to a filter, a test or `range()`.
+- The `default()` filter and the `is defined` and `is undefined` tests are
+  allowed. They apply to the last name of a path:
+  `parameters.x.y | default('z')` is an error when `parameters.x` is
+  undefined.
+- A variable stored with `{% set %}`, or passed to a macro, is reported at
+  the line that uses it.
 
 ### The example context
 

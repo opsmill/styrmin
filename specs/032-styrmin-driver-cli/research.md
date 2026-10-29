@@ -250,9 +250,9 @@ styrmin-driver = "styrmin_sdk.driver_format.cli:main"
 
 **Alternatives considered**: `pytest-socket`. Rejected: a new dependency.
 
-## R-015: Every error in one run, while the load still stops at the first
+## R-015: Several errors in one run, while the load still stops at the first
 
-**Amended after the review of 2026-10-29**: `check` calls every check, but some checks stop at their first problem, and some problems stop other checks, so `check` reports more errors in one run than a load, not every error. FR-001, FR-007 and FR-009 of the [spec](spec.md#functional-requirements), as narrowed in its clarifications of 2026-10-28, replace the wording of this section.
+**Amended after the reviews of 2026-10-29**: `check` runs each check that can run, but some checks stop at their first problem, and some problems stop other checks, so `check` can report more errors in one run than a load, not every error. FR-001, FR-007 and FR-009 of the [spec](spec.md#functional-requirements), as narrowed in its clarifications of 2026-10-29, replace the wording of this section.
 
 **Decision**: The SDK exposes each check as a function. The functions that can find several problems return a list:
 

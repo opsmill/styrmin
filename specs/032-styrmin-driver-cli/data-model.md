@@ -22,7 +22,7 @@ One problem or warning that a command found.
 | `severity` | `error` or `warning` | Any `error` gives exit code 1; warnings do not change the exit code (FR-010). |
 | `file` | path | The file of the problem, as the author named the directory. |
 | `line` | integer or none | Known for template errors, undefined variables, `actions.py` syntax errors, and `driver.styrmin.yml` fields ([R-005](research.md#r-005-line-numbers-for-errors-in-driverstyrminyml)). None for a missing file. |
-| `message` | text | The load's message for the same problem, without the load's wrapping prefix ([R-015](research.md#r-015-every-error-in-one-run-while-the-load-still-stops-at-the-first)), or one of the tool's own messages ([contracts/cli.md](contracts/cli.md#message-format)). |
+| `message` | text | The load's message for the same problem, without the load's wrapping prefix ([R-015](research.md#r-015-several-errors-in-one-run-while-the-load-still-stops-at-the-first)), or one of the tool's own messages ([contracts/cli.md](contracts/cli.md#message-format)). |
 | `check` | name | The check that found it: `spec-file`, `spec-model`, `env-var-docs`, `backup`, `template-syntax`, `retired-filter`, `actions-syntax`, `action-entrypoint`, `undefined-variable`, `values-yaml`, `load-warning`, `placeholder`, `version-placeholder`. Used by the tests to compare with the load (SC-003). |
 
 Ordering: by file, then line, then the order in which the checks ran.

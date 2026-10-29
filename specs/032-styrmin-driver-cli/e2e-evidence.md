@@ -60,7 +60,7 @@ Run on 2026-10-28 from the clone, with `uv run`.
 | Scenario | Result |
 |----------|--------|
 | 1. Eight example drivers | Seven exit with 0. `slurpit` exits with 1: `values.j2.yml:84` and `:89` read `services.slurpit`, which the driver does not declare. See "Open decision" below. |
-| 2. Every error in one run | A copy of `simple-app` with `{{ parameters.admn_email }}` on line 12 and the upgrade action pointing to `upgrade_missing`: two errors (`driver.styrmin.yml:62` and `values.j2.yml:12`), exit code 1; exit code 0 after both fixes. |
+| 2. Several errors in one run | A copy of `simple-app` with `{{ parameters.admn_email }}` on line 12 and the upgrade action pointing to `upgrade_missing`: two errors (`driver.styrmin.yml:62` and `values.j2.yml:12`), exit code 1; exit code 0 after both fixes. |
 | 3. Render with a context file | `context` on `generic-app` prints the context and one placeholder warning. Both renders exit with 0; `diff` of the two outputs shows only the image tag (`'0'` against `1.2.3`). A file with `parameterz` exits with 2 and names `parameterz`. |
 | 4. Compare values | `diff` against the saved render: no output, exit code 0. With the context file: a unified diff of the image tag, exit code 1. |
 | 5. Exit code 2 | A directory that does not exist, `--bogus`, and a base file that does not exist: exit code 2 each. |
@@ -164,3 +164,46 @@ Checks after the fixes:
 | `uv run pytest -q python_sdk/tests` | 486 passed, 1 xfailed (`slurpit`) |
 | `uv run pytest -q cli/tests` | 416 passed |
 | `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 251.70s`, ended 2026-10-28T16:26:55+01:00, session vCluster `pytest-580b9c82-3ef4-4991-a354-8dd69bac0618`: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |
+
+## Code reviews of the commit that states the limits of `check`
+
+The `code-review` skill ran in an agent that did not write the change, at high effort, on each version of the commit that states the limits of `check`. The versions `38eed3d4`, `4cb12cff` and `fd682a75` were replaced before any push. `fbb24f78` and `9236b94b` replace `fd682a75`, and the commit that adds this section fixes the findings of the last review.
+
+| Diff reviewed | Findings | Changes made in |
+|---------------|----------|-----------------|
+| `ffb001c3..38eed3d4` | 3 CRITICAL, 3 IMPORTANT, 8 MINOR | `4cb12cff` |
+| `ffb001c3..4cb12cff` | 5 CRITICAL, 12 IMPORTANT, 12 MINOR | `fd682a75` |
+| `ffb001c3..fd682a75` | 3 CRITICAL, 8 IMPORTANT, 11 MINOR | `fbb24f78`, `9236b94b` |
+| `ffb001c3..9236b94b` | 2 CRITICAL, 3 IMPORTANT, 19 MINOR | the commit that adds this section |
+
+Each review read the text that the review before it led to, and found statements in it that were false. The findings of the last review, and what changed:
+
+| Finding | Resolution |
+|---------|------------|
+| CRITICAL: step 9 of the driver guide said that the server renders an undefined variable as an empty string, apart from a few filters. `{{ x + 1 }}`, `{{ x \| int }}` and other uses make the server's render fail. | Fixed: the reference page and the guide say that the server renders it as an empty string when the template writes it out, and that some other uses make the render fail with a message that gives no line. |
+| CRITICAL: `abs`, `round` and `range()` on an undefined variable stopped the check render with a `TypeError` that named the internal class `CheckingUndefined`, not the variable, so the variables after it were not checked. | Fixed: the check render makes each filter and test record an undefined variable passed to it, apart from `default()` and the `defined` and `undefined` tests, and then goes on with an empty value. `range()`, a list index, and a list or dict that the template writes out record it too. A field of the context model without a value fails with the agent's message. Tests: `test_rendering_check_mode.py::test_an_undefined_variable_passed_to_a_filter_or_a_test_is_reported_and_the_render_goes_on` (15 cases), `::test_a_retired_filter_given_an_undefined_variable_still_fails_with_its_error`, `::test_filters_on_fields_without_a_value_render_or_fail_as_on_the_agent`. 13 of them fail without the change. |
+| IMPORTANT: the narrowing of the brief's FR-009, from every error to more errors than a load, is not confirmed. | Kept: a decision for the author of the brief and the reviewer. |
+| IMPORTANT: FR-009, R-015 and the docstring of `run_checks` said that every check runs, but some checks run only when another passes. | Fixed: they say that each check that can run does, and what each check needs. |
+| IMPORTANT: a test such as `is none` or `is string` on an undefined variable was false, with no error. | Fixed by the change of the second CRITICAL finding. |
+
+MINOR findings fixed: FR-009 gives examples of what `check` reports; the changelog says "can report more errors"; the dates of the clarifications; the R-015 heading; the reference page no longer describes the server's output of `items`, `tojson`, `pprint` and the filters that return a generator; `indent` on an undefined variable no longer adds a second error; a list index no longer records a second use; `map` and `select` on an undefined variable are reported; the page says that a variable stored with `{% set %}` or passed to a macro is reported at the line that uses it, and that a macro the template never calls is not checked; the wrap of step 9.
+
+MINOR findings left as they are:
+
+- The reference page does not say that `check` reports every invalid field of `driver.styrmin.yml`, because the review of `38eed3d4` found cases where it does not, such as an invalid environment variable name.
+- No success criterion measures how many more errors `check` reports than a load.
+- `tojson` records the undefined variables of a dict in the order of its keys, not of the template. They share the line.
+- A passing `check` does not say that some branches were not rendered.
+- The message for a missing `actions.py` does not give the next step that the reference page gives.
+- A YAML syntax error in `driver.styrmin.yml` skips the checks of `actions.py` with no warning.
+
+Checks after the fixes, on the working tree of the commit:
+
+| Command | Result |
+|---------|--------|
+| `uv run invoke lint` | exit code 0 |
+| `uv run pytest tests --ignore=tests/e2e -q -n auto` (in `backend/`) | 5809 passed, 8 skipped, 1 failed: the same telemetry timing test, which fails on a clean `HEAD` too |
+| `uv run pytest -q python_sdk/tests` | 504 passed, 1 xfailed (`slurpit`) |
+| `uv run pytest -q cli/tests` | 416 passed |
+| `cd docs && pnpm build` | `[SUCCESS] Generated static files in "build".` |
+| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 156.29s`, ended 2026-10-29T11:17:58+01:00, session vCluster `pytest-21a15522-06b1-431f-aa3b-5052a0427470`, image rebuilt from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |

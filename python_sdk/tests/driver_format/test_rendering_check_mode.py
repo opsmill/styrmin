@@ -48,6 +48,8 @@ def test_is_defined_and_default_are_not_uses() -> None:
         "a: '{% if parameters.helth_path is defined %}x{% endif %}'\n"
         "b: '{{ parameters.helth_path | default(\"/\") }}'\n"
         "c: '{{ nope | default(1) }}'\n"
+        "d: '{{ nope | d(1) }}'\n"
+        "e: '{% if nope is undefined %}x{% endif %}'\n"
     )
 
     assert _uses(template) == []
@@ -172,34 +174,69 @@ def test_undefined_uses_found_before_a_render_failure_are_kept() -> None:
     assert checked.failure.line == 2
 
 
-def test_uses_through_the_items_and_tojson_filters_are_reported() -> None:
-    template = (
-        "a: '{% for k, v in parameters.typo_items | items %}{{ k }}{% endfor %}'\n"
-        "b: '{{ parameters.typo_json | tojson }}'\n"
-        "c: '{{ [parameters.typo_list] | tojson }}'\n"
-        "d: '{{ parameters.typo_last }}'\n"
-    )
+# On the agent, each of these renders without a message or fails with a TypeError that does not
+# name the variable. X is the undefined variable.
+_FILTERS_AND_TESTS_THAT_MISS_THE_NAME = [
+    "{% for k, v in X | items %}{{ k }}{% endfor %}",
+    "{{ X | tojson }}",
+    "{{ [X] | tojson }}",
+    "{{ X | abs }}",
+    "{{ X | round }}",
+    "{{ X | pprint }}",
+    "{{ X | select }}",
+    '{{ X | map("upper") | list }}',
+    "{{ X | indent(2) }}",
+    '{{ "a,b" | split(X) }}',
+    "{% if X is none %}y{% endif %}",
+    "{% if X is string %}y{% endif %}",
+    "{% for i in range(X) %}x{% endfor %}",
+    "{{ [X] }}",
+    "{{ [1, 2][X] }}",
+]
 
-    assert _uses(template) == [
-        (1, "parameters.typo_items"),
-        (2, "parameters.typo_json"),
-        (3, "parameters.typo_list"),
-        (4, "parameters.typo_last"),
-    ]
+
+@pytest.mark.parametrize("expression", _FILTERS_AND_TESTS_THAT_MISS_THE_NAME)
+def test_an_undefined_variable_passed_to_a_filter_or_a_test_is_reported_and_the_render_goes_on(
+    expression: str,
+) -> None:
+    _spec, _template, context = _example("simple-app")
+    template = f"a: '{expression.replace('X', 'parameters.typo')}'\n" + "b: '{{ parameters.typo_last }}'\n"
+
+    checked = render_values_checked(template, context)
+
+    assert [(u.line, u.name) for u in checked.undefined] == [(1, "parameters.typo"), (2, "parameters.typo_last")]
+    assert checked.failure is None
 
 
-def test_items_and_tojson_on_fields_without_a_value_render_as_on_the_agent() -> None:
+def test_a_retired_filter_given_an_undefined_variable_still_fails_with_its_error() -> None:
+    _spec, _template, context = _example("simple-app")
+
+    checked = render_values_checked("a: '{{ parameters.typo | component_command }}'\n", context)
+
+    assert [(u.line, u.name) for u in checked.undefined] == [(1, "parameters.typo")]
+    assert checked.failure is not None
+    assert checked.failure.kind == "retired-filter"
+    assert checked.failure.line == 1
+
+
+def test_filters_on_fields_without_a_value_render_or_fail_as_on_the_agent() -> None:
     _spec, _template, context = _example("simple-app")
     loop = "a: '[{% for k, v in instance.config.env_vars | items %}{{ k }}{% endfor %}]'\n"
-    json = "a: '{{ instance.config.fqdn_suffix | tojson }}'\n"
+    failing = [
+        "a: '{{ instance.config.fqdn_suffix | tojson }}'\n",
+        "a: '{{ instance.config.external_url_port | abs }}'\n",
+        "a: '{{ instance.config.external_url_port | round }}'\n",
+        "a: '{% for i in range(instance.config.external_url_port) %}x{% endfor %}'\n",
+    ]
 
     checked_loop = render_values_checked(loop, context)
-    checked_json = render_values_checked(json, context)
 
     assert not checked_loop.undefined
     assert checked_loop.values == render_values(loop, context) == {"a": "[]"}
-    assert not checked_json.undefined
-    assert checked_json.failure is not None
-    with pytest.raises(TypeError) as agent_error:
-        render_values(json, context)
-    assert checked_json.failure.message == f"Chart values template rendering failed: TypeError: {agent_error.value}"
+    for template in failing:
+        checked = render_values_checked(template, context)
+        assert not checked.undefined
+        assert checked.failure is not None
+        with pytest.raises(TypeError) as agent_error:
+            render_values(template, context)
+        assert checked.failure.message == f"Chart values template rendering failed: TypeError: {agent_error.value}"
