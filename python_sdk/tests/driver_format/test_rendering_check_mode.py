@@ -174,9 +174,9 @@ def test_undefined_uses_found_before_a_render_failure_are_kept() -> None:
     assert checked.failure.line == 2
 
 
-# On the agent, each of these renders without a message or fails with a TypeError that does not
+# On the agent, each of these renders without a message or fails with a message that does not
 # name the variable. X is the undefined variable.
-_FILTERS_AND_TESTS_THAT_MISS_THE_NAME = [
+_USES_THAT_THE_AGENT_DOES_NOT_REPORT = [
     "{% for k, v in X | items %}{{ k }}{% endfor %}",
     "{{ X | tojson }}",
     "{{ [X] | tojson }}",
@@ -192,11 +192,16 @@ _FILTERS_AND_TESTS_THAT_MISS_THE_NAME = [
     "{% for i in range(X) %}x{% endfor %}",
     "{{ [X] }}",
     "{{ [1, 2][X] }}",
+    '{% set s = {"k": 1} %}{{ s[X] }}',
+    '{{ "abc".startswith(X) }}',
+    '{{ "abc".replace(X, "x") }}',
+    '{{ {"k": 1}.get(X) }}',
+    "{{ dict(k=X) | length }}",
 ]
 
 
-@pytest.mark.parametrize("expression", _FILTERS_AND_TESTS_THAT_MISS_THE_NAME)
-def test_an_undefined_variable_passed_to_a_filter_or_a_test_is_reported_and_the_render_goes_on(
+@pytest.mark.parametrize("expression", _USES_THAT_THE_AGENT_DOES_NOT_REPORT)
+def test_an_undefined_variable_passed_to_a_filter_a_test_or_a_function_is_reported_and_the_render_goes_on(
     expression: str,
 ) -> None:
     _spec, _template, context = _example("simple-app")
@@ -240,3 +245,74 @@ def test_filters_on_fields_without_a_value_render_or_fail_as_on_the_agent() -> N
         with pytest.raises(TypeError) as agent_error:
             render_values(template, context)
         assert checked.failure.message == f"Chart values template rendering failed: TypeError: {agent_error.value}"
+
+
+# The agent renders each of these without failing. X is the undefined variable; Y is read only
+# in the branch that the agent does not take.
+_BRANCHES_AFTER_AN_UNDEFINED_VARIABLE = [
+    "{% if X | length == 0 %}empty{% else %}{{ Y }}{% endif %}",
+    "{% if X | list == [] %}empty{% else %}{{ Y }}{% endif %}",
+    "{% if X is iterable %}iterable{% else %}{{ Y }}{% endif %}",
+    "{% if X is sequence %}sequence{% else %}{{ Y }}{% endif %}",
+    "{% if X == '' %}{{ Y }}{% else %}not empty{% endif %}",
+    "{% if [1, 2][X] == 1 %}{{ Y }}{% else %}undefined{% endif %}",
+    "{% if X | pprint == 'Undefined' %}undefined{% else %}{{ Y }}{% endif %}",
+]
+
+
+@pytest.mark.parametrize("expression", _BRANCHES_AFTER_AN_UNDEFINED_VARIABLE)
+def test_after_an_undefined_variable_the_render_takes_the_branch_of_the_agent(expression: str) -> None:
+    _spec, _template, context = _example("simple-app")
+    template = f'a: "{expression.replace("X", "parameters.typo").replace("Y", "parameters.not_reached")}"\n'
+
+    checked = render_values_checked(template, context)
+
+    assert [(u.line, u.name) for u in checked.undefined] == [(1, "parameters.typo")]
+    assert checked.values == render_values(template, context)
+
+
+def test_a_slice_with_an_undefined_variable_is_reported_and_fails_as_on_the_agent() -> None:
+    _spec, _template, context = _example("simple-app")
+    template = "a: '{{ [1, 2, 3][:parameters.typo] }}'\n"
+
+    checked = render_values_checked(template, context)
+
+    assert [(u.line, u.name) for u in checked.undefined] == [(1, "parameters.typo")]
+    assert checked.failure is not None
+    assert checked.failure.message == (
+        "Chart values template rendering failed: TypeError: 'SilentUndefined' object cannot be interpreted as an integer"
+    )
+    with pytest.raises(TypeError):
+        render_values(template, context)
+
+
+# Filters that Jinja passes the context, the evaluation context or the environment to.
+_FILTERS_THAT_TAKE_THE_CONTEXT_OR_THE_ENVIRONMENT = [
+    "{{ [{'a': 1}, {'a': 2}] | map(attribute='a') | sum }}",
+    "{{ [{'a': 1}, {'a': 2}] | selectattr('a', 'gt', 1) | list }}",
+    "{{ [1, 2, 3] | select('odd') | list }}",
+    "{{ [1, 2, 3] | reject('odd') | list }}",
+    "{{ [{'a': 1}, {'a': 1}] | groupby('a') | list }}",
+    "{{ ['b', 'a'] | sort | join(',') }}",
+    "{{ ['b', 'a', 'a'] | unique | list }}",
+    "{{ [3, 1] | min }}-{{ [3, 1] | max }}",
+    "{{ 'hello world foo' | truncate(9) }}",
+    "{{ 'hello world foo' | wordwrap(5) }}",
+    "{{ {'a': 1} | xmlattr | replace('\"', '') }}",
+    "{{ instance | attr('config') | length }}",
+    "{{ components | dictsort | first | first }}",
+    "{{ 'upper' is filter }}-{{ 'odd' is test }}",
+    "{{ 'Hello' | replace('l', 'L') }}",
+]
+
+
+@pytest.mark.parametrize("expression", _FILTERS_THAT_TAKE_THE_CONTEXT_OR_THE_ENVIRONMENT)
+def test_filters_that_take_the_context_or_the_environment_give_the_values_of_the_agent(expression: str) -> None:
+    _spec, _template, context = _example("simple-app")
+    template = f'a: "{expression}"\n'
+
+    checked = render_values_checked(template, context)
+
+    assert not checked.undefined
+    assert checked.failure is None
+    assert checked.values == render_values(template, context)

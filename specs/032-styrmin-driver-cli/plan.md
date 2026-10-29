@@ -6,7 +6,7 @@
 
 ## Summary
 
-A driver author finds most errors in a driver only when a running Styrmin loads or deploys it, and an undefined template variable renders as an empty string with no message ([#23](https://github.com/opsmill/styrmin/issues/23)). This plan does two things:
+A driver author finds most errors in a driver only when a running Styrmin loads or deploys it, and an undefined template variable that the template writes out renders as an empty string with no message ([#23](https://github.com/opsmill/styrmin/issues/23)). This plan does two things:
 
 - It moves the code that reads, checks and renders a driver directory, with the context model that templates read, from the backend to a new SDK package, `styrmin_sdk.driver_format`. The backend keeps every import path through re-export modules, so its behaviour does not change (research R-001, R-002).
 - It adds the command `styrmin-driver` to the SDK, with four commands: `check`, `render`, `diff` and `context`. They build an example context with the server's own context function, render with a mode that reports every undefined variable with its line, and need no server, database, cluster or network (R-003 to R-010).
