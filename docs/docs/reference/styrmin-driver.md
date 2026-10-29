@@ -49,7 +49,7 @@ example for a pull request from a fork.
 
 | Command | What it does | Standard output |
 |---------|--------------|-----------------|
-| `styrmin-driver check <dir> [--context <file>]` | Runs the checks of a load, then renders `values.j2.yml` with the example context. Reports every error and warning. | One entry per error and warning, then a summary line. |
+| `styrmin-driver check <dir> [--context <file>]` | Runs the checks of a load and renders `values.j2.yml` with the example context. Reports the errors and warnings it finds; some errors hide others (see [What `check` checks](#what-check-checks)). | One entry per error and warning, then a summary line. |
 | `styrmin-driver render <dir> [--context <file>]` | Renders `values.j2.yml` and parses the result as YAML, as the agent does. Does not check `actions.py`. | The Helm values as YAML, and nothing else. Nothing when the command fails. |
 | `styrmin-driver diff <dir> --base <file> [--context <file>]` | Renders as `render` does and compares the values with a saved values file. | A unified diff when the values differ. Nothing when they are the same. |
 | `styrmin-driver context <dir> [--context <file>]` | Builds the example context, merged with the context file when you give one. It exits with 1 only when `driver.styrmin.yml` has errors: it does not check `values.j2.yml`, whose problems do not change the context. | The context as YAML. |
@@ -60,24 +60,54 @@ example for a pull request from a fork.
 
 ### What `check` checks
 
-- `driver.styrmin.yml` against the driver model: every invalid field, each on
-  its own line.
-- The documentation of environment variables and the backup configuration.
-- The syntax of `values.j2.yml`, and the template filters that Styrmin removed.
-- Each action of `spec.actions` whose function `actions.py` does not define,
-  and a syntax error in `actions.py`. `check` reads `actions.py` without
-  running it.
-- The render of `values.j2.yml`, when `driver.styrmin.yml` and the template
-  syntax are valid:
-  - every use of an undefined variable, with its line;
-  - an error while rendering, such as `{{ 1 + "a" }}`, with its line;
-  - rendered text that is not valid YAML.
-- A driver file that cannot be read, or is not UTF-8.
+`check` runs the checks of a load from a local directory, then renders
+`values.j2.yml` once:
 
-The messages are those of a load. A load stops at the first error; `check`
-reports every error it finds in one run. Load warnings, such as a
-`spec.info.icon` that is not an `https` URL, are warnings and do not change
-the exit code.
+- `driver.styrmin.yml` against the driver model, and the checks across its
+  fields: the environment variables documented in `spec.env_vars`, and the
+  `backup` block of each component;
+- the syntax of `values.j2.yml`, and the template filters that Styrmin
+  removed;
+- when `spec.actions` declares actions, the syntax of `actions.py` and the
+  functions that the actions name. `check` reads `actions.py` without
+  running it, so it does not report an import that fails, and a load does
+  not either;
+- each file that it reads: the file must be readable and UTF-8;
+- when `driver.styrmin.yml` matches the driver model and the template syntax
+  is valid, the render of `values.j2.yml` with the example context, merged
+  with your context file when you give one with `--context` (see
+  [Context files](#context-files)): undefined variables, errors while
+  rendering, and rendered text that is not valid YAML.
+
+A load stops at the first check that fails. `check` can report more errors
+in one run, but some errors hide others. For example:
+
+- an error in `driver.styrmin.yml` can stop other checks of that file. A
+  YAML syntax error in it also stops the checks of `actions.py`, and a YAML
+  syntax error or an error against the driver model stops the render;
+- a syntax error in `values.j2.yml` or in `actions.py` stops the other
+  checks of that file;
+- the render reports each undefined variable that it reaches, and stops at
+  its first other error, such as `{{ 1 + "a" }}` or a removed filter. The
+  variables after that error are not checked.
+
+Fix what `check` reports and run it again, until it reports no error.
+
+The render takes only some branches of the template. A variable used only in
+a branch that the render does not take is not checked, and `check` does not
+warn about it: for example in an `{% if %}` that is false, in the
+`{% else %}` of an `{% if %}` that is true, or in a `{% for %}` over an
+empty list. To check that branch, give a context file that makes the render
+take it. `render` and `diff` have the same limit.
+
+Most messages are those of a load. `check` also writes messages of its own,
+for example for an undefined variable or for a file that is not UTF-8. When
+`spec.actions` declares actions and `actions.py` is missing, a load from a
+local directory fails and a load from a Git repository accepts the driver;
+`check` reports the missing file. Add `actions.py`, or remove `spec.actions`.
+
+Load warnings, such as a `spec.info.icon` that is not an `https` URL, are
+warnings and do not change the exit code.
 
 #### Undefined variables
 
@@ -99,6 +129,15 @@ my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
   `parameters.x` is undefined.
 - An `if` test on an undefined variable is an error, because the test would
   otherwise be false with no message.
+- A variable passed to a filter is an error when the filter reads it. This
+  includes `items`, which gives an empty loop on the server, and `tojson`,
+  which fails on the server with a `TypeError` that does not name the
+  variable.
+- A filter that does not read the variable gives no error: `default()`;
+  `pprint`, which renders it as `Undefined`; and a filter that returns a
+  generator, such as `map` or `select`, when the output does not use the
+  generator. For example, `{{ x | select }}` renders as
+  `<generator object ...>`, on the server too.
 
 ### The example context
 

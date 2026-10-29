@@ -33,7 +33,7 @@ The result of the checks on one driver directory.
 
 | Field | Type | Rule |
 |-------|------|------|
-| `diagnostics` | list of diagnostics | Every problem found in one run (FR-009). |
+| `diagnostics` | list of diagnostics | The problems found in one run (FR-009). |
 | `spec` | driver model or none | None when `driver.styrmin.yml` is missing, is not valid YAML, or does not match the driver model. |
 | `template` | text | The text of `values.j2.yml`, or `""`. |
 | `rendered` | Helm values or none | Present only when `spec` is present and the template syntax is valid, so the render ran (FR-009). |

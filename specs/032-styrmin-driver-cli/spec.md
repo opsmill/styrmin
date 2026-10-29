@@ -55,13 +55,18 @@ The plan found two cases where the brief's rules would make SC-001 fail, and cha
 - Q: Where are the tests of SC-003? → A: In `backend/tests/unit/services/driver/test_styrmin_driver_matches_load.py`, because they compare `check` with the real server load; the SDK's tests do not import the backend. 29 cases pass.
 - Q: Does `context` exit with 1 when the template has an error? → A: No. `context` exits with 1 only when `driver.styrmin.yml` has errors, because an error of the template does not change the context ([contracts/cli.md](contracts/cli.md)).
 
+### Session 2026-10-28 (review of the documentation of `check`)
+
+- Q: Does `check` report every error of a driver in one run, as the brief's FR-009 asks? → A: No. It can report more errors in one run than a load, but some errors hide others: the checks call the load's code, which stops at some errors; a YAML syntax error or an error against the driver model in `driver.styrmin.yml` stops the render; and the render stops at its first error other than an undefined variable, and takes only some branches of the template. Two reviews of the documentation found more cases each time the documentation listed them one by one, so the reference page states the rule, gives examples, and tells the author to fix what `check` reports and run it again, until it reports no error. FR-001, FR-007 and FR-009 are narrowed to match. The narrowing is for the reviewer and the author of the brief to confirm.
+- Q: Is an undefined variable passed to a filter an error (FR-007)? → A: Yes, when the filter reads it. A review found that `items` turned an undefined variable into an empty loop with no error, and that `tojson` failed with a `TypeError` that did not name the variable. The check render now reports the variable in both cases. `default()`, `pprint` and a filter that returns a generator, such as `map` or `select`, do not read the variable, so they give no error; the generator is read only when the output uses it.
+
 ## User Scenarios & Testing *(mandatory)*
 
 The users are a person, or an AI agent such as one that runs the `creating-styrmin-drivers` skill, who writes a driver on their own machine with no Styrmin running. Later, CI in a repository of community drivers runs the same commands and reads the exit code. The brief orders the three journeys below by priority. Each can be tested on its own, and all three ship in one change.
 
 ### User Story 1 - Check a driver before loading it (Priority: P1)
 
-The author runs `styrmin-driver check <dir>`. The tool runs the checks that a load from a local directory runs, then renders `values.j2.yml` with the example context, where an undefined variable is an error. It reports every error it finds in one run, each with its file and line, and exits with 0 when the driver passes and 1 when it has errors.
+The author runs `styrmin-driver check <dir>`. The tool runs the checks that a load from a local directory runs, then renders `values.j2.yml` with the example context, where an undefined variable is an error. It reports in one run the errors that it finds, more than a load reports, each with its file and, when it is known, its line, and exits with 0 when the driver passes and 1 when it has errors.
 
 **Why this priority**: Today the author learns of each error from a load, one error per load, and never learns of an undefined variable. This is the brief's first priority.
 
@@ -119,7 +124,7 @@ The author changes a driver template and wants to view what the change does to t
 ### Edge Cases
 
 - `values.j2.yml` has a syntax error. Jinja stops parsing at the first one, so `check` reports that one error, with the other errors it found in `driver.styrmin.yml` and `actions.py`, and does not render the template (FR-009).
-- `driver.styrmin.yml` is invalid. The tool cannot build the example context from it, so `check` reports the errors in the file and does not render the template (FR-009).
+- `driver.styrmin.yml` is not valid YAML or does not match the driver model. The tool cannot build the example context from it, so `check` reports the errors in the file and does not render the template (FR-009). An error of a check across fields, or a missing action function, does not stop the render.
 - A template tests `{% if parameters.helth_path %}` where the parameter is not declared. This is an error, because the test would otherwise be false with no message. `{% if parameters.helth_path is defined %}` and `{{ parameters.helth_path | default('/') }}` are not errors (FR-007).
 - The real context leaves out a key when its value is empty. For example, `instance.config.fqdn_suffix` is absent when no FQDN suffix is set, because the renderer dumps the context with `exclude_none=True` ([`render_value_template`](../../backend/styrmin_backend/agent/service/kubernetes/resources/builders/application.py#L224-L285)). `generic-app`, `infrahub` and `infrahub-enterprise` read such keys in `values.j2.yml` (`instance.config.fqdn_suffix`, `instance.config.external_url_scheme`, `instance.config.external_url_port`). Such a key is a field of the context model, so it is not an error, and it renders as on the agent (FR-007).
 - A context file sets a list. The list replaces the list of the example context. It is not merged item by item (FR-003).
@@ -135,7 +140,7 @@ The author changes a driver template and wants to view what the change does to t
 
 The numbers FR-001 to FR-014 are the numbers of the brief. FR-015 to FR-017 are added by this spec.
 
-- **FR-001**: `check` MUST run the same checks as a load from a local directory, with the same code and the same messages:
+- **FR-001**: `check` MUST run the same checks as a load from a local directory, with the same code and the same messages, without the prefix that the load adds, such as "Error while deserializing the driver resource: ", and apart from the messages that only the tool writes ([contracts/cli.md, "Message format"](contracts/cli.md#message-format)):
   - `driver.styrmin.yml` against the driver model;
   - the checks across fields of `driver.styrmin.yml` that the load runs after it: the documentation of environment variables and the backup configuration ([`loaders.py`](../../backend/styrmin_backend/services/driver/loaders.py#L74-L82)). The brief does not list these two checks; this spec adds them because the load runs them;
   - the syntax of `values.j2.yml`, and the retired template filters;
@@ -157,17 +162,14 @@ The numbers FR-001 to FR-014 are the numbers of the brief. FR-015 to FR-017 are 
   Verification: the output validates against the context model.
 - **FR-006**: The example context MUST contain every key that a real context contains for the same driver, including utilities such as the ingress.
   Verification: in the E2E test, the example context of `simple-app` has every key of the context in the `StyrminDeployment` resource of its deployment.
-- **FR-007**: Any use of an undefined variable MUST be an error that names the file, the line and the variable. A variable is undefined when its name is neither a field of the context model nor a key that the context holds. A field of the context model that has no value, such as `instance.config.fqdn_suffix` when no FQDN suffix is set, is not an error: it renders as the agent renders it, as an empty string that tests as false ([research R-004](research.md#r-004-a-field-of-the-context-model-without-a-value-is-not-an-error)). An `is defined` test and the `default()` filter are allowed. An `if` test on an undefined variable is an error.
+- **FR-007**: Any use of an undefined variable that the render reaches MUST be an error that names the file, the line and the variable, including when the variable is passed to a filter that reads it, such as `items` or `tojson`. A filter that does not read it gives no error: `default()`, `pprint`, and a filter that returns a generator, such as `map` or `select`, when the output does not use the generator. A variable is undefined when its name is neither a field of the context model nor a key that the context holds. A field of the context model that has no value, such as `instance.config.fqdn_suffix` when no FQDN suffix is set, is not an error: it renders as the agent renders it, as an empty string that tests as false ([research R-004](research.md#r-004-a-field-of-the-context-model-without-a-value-is-not-an-error)). An `is defined` test and the `default()` filter are allowed. An `if` test on an undefined variable is an error.
   Verification: `{{ parameters.admn_email }}` on line 12 gives an error that names `values.j2.yml`, line 12 and `parameters.admn_email`. `{% if instance.config.fqdn_suffix %}` with no suffix set gives no error, and the output equals the agent's output.
 - **FR-008**: A template syntax error MUST name the file and the line.
   Verification: an unclosed `{% if %}` gives an error with the file and the line.
-- **FR-009**: `check` MUST report every error it finds in one run:
-  - every invalid field of `driver.styrmin.yml`, and every error of the checks across its fields (FR-001);
-  - the first template syntax error, because Jinja stops parsing there;
-  - every missing action function;
-  - every undefined variable.
-
-  The render runs only when `driver.styrmin.yml` and the template syntax are valid.
+- **FR-009**: `check` MUST run each of its checks in the same run, so that it can report more errors in one run than a load, which stops at the first. Some errors hide others, and `check` need not report them in the same run:
+  - the checks of `driver.styrmin.yml` call the load's code, which stops at some errors, for example at the first invalid environment variable name; the checks across its fields run only when the driver model is valid; a YAML syntax error in the file also stops the checks of `actions.py`;
+  - a syntax error in `values.j2.yml` or `actions.py` stops the other checks of that file;
+  - the render runs only when `driver.styrmin.yml` matches the driver model and the template syntax is valid. It reports each undefined variable that it reaches, stops at its first other error, and takes only some branches of the template.
   Verification: a driver with an invalid field and a missing action function gets both errors in one run.
 - **FR-010**: Load warnings, such as an invalid `spec.info.icon`, MUST be printed and MUST NOT change the exit code.
   Verification: an invalid `spec.info.icon` gives a warning and exit code 0.

@@ -19,7 +19,7 @@ Expected: one summary line per driver, with no errors, and no `FAILED` line. War
 - `generic-app` and `infrahub-mcp` each print one placeholder warning for a parameter ([research R-006](research.md#r-006-placeholder-values-for-parameters-without-a-default));
 - every driver except `semaphore` prints one warning for the application version, because only `semaphore` sets `default_version` ([R-007](research.md#r-007-how-the-example-context-is-built)).
 
-## 2. Every error in one run, with its file and line (user story 1)
+## 2. Several errors in one run, with their file and line (user story 1)
 
 ```bash
 cp -r driver/examples/simple-app "$TMPDIR/broken"
