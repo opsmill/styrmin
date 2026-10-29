@@ -67,7 +67,7 @@ The Helm values that `render` writes and `diff` compares.
 
 | Field | Rule |
 |-------|------|
-| text | The template rendered with the merged context, in the strict mode of [R-003](research.md#r-003-one-render-reports-the-undefined-variables-that-it-reaches-with-their-line-and-full-name) and [R-004](research.md#r-004-a-field-of-the-context-model-without-a-value-is-not-an-error). |
+| text | The template rendered with the merged context, with the check render of [R-003](research.md#r-003-one-render-reports-the-undefined-variables-that-it-finds-with-their-line-and-full-name) and [R-004](research.md#r-004-a-field-of-the-context-model-without-a-value-is-not-an-error). |
 | values | The text parsed with `yaml.safe_load`, as the agent parses it. Text that is not valid YAML is an error, exit code 1 ([R-018](research.md#r-018-render-writes-the-values-that-helm-receives)). |
 
 ## Base values file
