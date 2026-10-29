@@ -132,7 +132,9 @@ export function setUnauthenticatedHandler(cb: ErrorCallback | null): void {
 }
 ```
 
-`AuthProvider` registers `() => { queryClient.clear(); window.location.assign('/login'); }` on mount and clears it on unmount. Before the fetcher throws `UnauthenticatedError`, it invokes the handler — which is what triggers the redirect. The throw still happens so calling hooks see an error and stop their loading state.
+`AuthProvider` registers a handler on mount and clears it on unmount. Before the fetcher throws `UnauthenticatedError`, it invokes the handler — which is what triggers the redirect. The throw still happens so calling hooks see an error and stop their loading state.
+
+The handler and Logout share one sign-out function. It sets the `CurrentUser` query to `{ currentUser: null }`, writes `currentUser: null` into `router.options.context`, navigates to `/login`, and then removes the other cached queries and the mutation cache. It must not call `queryClient.clear()` first: that removes the `CurrentUser` query without notifying `AuthProvider`, so the router keeps the old user, the `/login` guard sends the browser back to `/`, and the page's rejected queries start the cycle again (#579).
 
 This shape keeps the fetcher transport-only (no React imports), avoids a React Context dependency on every call, and isolates the side-effect to one registered callback.
 

@@ -34,6 +34,19 @@ export interface AuthContextValue {
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
+// Write the user into router.options.context right away, without waiting for
+// AuthProvider's next render, so that a navigate() call made just after sees
+// it in the route guards.
+function setRouterUser(currentUser: CurrentUser | null): void {
+  router.options.context = {
+    ...router.options.context,
+    auth: {
+      ...router.options.context?.auth,
+      currentUser,
+    } as AuthContextValue,
+  };
+}
+
 interface AuthProviderProps {
   children: ReactNode;
 }
@@ -62,14 +75,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const data = queryClient.getQueryData<CurrentUserQuery>(
       useCurrentUserQuery.getKey(),
     );
-    // eslint-disable-next-line react-hooks/immutability
-    router.options.context = {
-      ...router.options.context,
-      auth: {
-        ...router.options.context?.auth,
-        currentUser: data?.currentUser ?? null,
-      } as AuthContextValue,
-    };
+    setRouterUser(data?.currentUser ?? null);
+  }, [queryClient]);
+
+  // Shared by Logout and by any UNAUTHENTICATED response.
+  const signOutLocally = useCallback(async () => {
+    const currentUserKey = useCurrentUserQuery.getKey();
+    // Set the user to null in the CurrentUser query instead of removing it.
+    // queryClient.clear() removed that query without notifying this
+    // component, so AuthProvider and router.options.context kept the old
+    // user, the /login guard sent the browser back to "/", the page's queries
+    // failed with UNAUTHENTICATED, and the cycle repeated without end.
+    queryClient.setQueryData<CurrentUserQuery>(currentUserKey, {
+      currentUser: null,
+    });
+    setRouterUser(null);
+    await router.navigate({ to: "/login" });
+    // Drop the previous user's data after the navigation to /login.
+    queryClient.removeQueries({
+      predicate: (query) => query.queryKey[0] !== currentUserKey[0],
+    });
+    queryClient.getMutationCache().clear();
   }, [queryClient]);
 
   const logout = useCallback(async () => {
@@ -83,21 +109,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } catch {
       // Swallow — the local cleanup below is what matters for the UX.
     }
-    queryClient.clear();
-    await router.navigate({ to: "/login" });
-  }, [queryClient]);
+    await signOutLocally();
+  }, [signOutLocally]);
 
   // Register the UNAUTHENTICATED handler so any subsequent query that gets
-  // rejected with code=UNAUTHENTICATED clears the cache and bounces to /login.
+  // rejected with code=UNAUTHENTICATED signs the user out locally and
+  // bounces to /login.
   useEffect(() => {
     setUnauthenticatedHandler(() => {
-      queryClient.clear();
-      void router.navigate({ to: "/login" });
+      void signOutLocally();
     });
     return () => {
       setUnauthenticatedHandler(null);
     };
-  }, [queryClient]);
+  }, [signOutLocally]);
 
   const value = useMemo<AuthContextValue>(
     () => ({ currentUser, loading, refresh, logout }),
