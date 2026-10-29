@@ -662,8 +662,8 @@ uv run styrmin-driver render driver/examples/my-app > values.yml
 
 `check` runs the checks of a load, then renders `values.j2.yml` with an
 example context, and reports the errors it finds in one run, each with its
-file and, when it is known, its line. A variable that the context does not
-define is an error. On the server, it gives no error with a line: it renders
+file and, when it is known, its line. It reports a variable that the context
+does not define as an error when the render uses it. On the server, it gives no error with a line: it renders
 as an empty string or another value, or the render fails with a message that
 gives no line; see
 [Undefined variables](../reference/styrmin-driver.md#undefined-variables).
