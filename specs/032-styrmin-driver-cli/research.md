@@ -48,7 +48,7 @@ None of the moved modules imports the database, sqlmodel, sqlalchemy, strawberry
 
 **Alternatives considered**: a second error base in the SDK, with `api/errors.py` checking both. Rejected: every place that handles `ServiceError` would need the second base too, and missing one changes what a client receives.
 
-## R-003: One render reports every undefined variable, with its line and its full name
+## R-003: One render reports the undefined variables that it reaches, with their line and full name
 
 **Decision**: The tool renders with its own subclass of `jinja2.Undefined` that records each use instead of failing. It records:
 
@@ -69,7 +69,14 @@ Uses that are recorded: printing, `if` and other boolean tests, iteration, compa
 - An undefined value that Jinja makes itself, with a hint and no name (`loop.previtem` on the first item), is not a variable: it renders as on the agent.
 - `render_values_checked` does not raise. `RenderResult.failure` gives the kind (`render`, `retired-filter`, `values-yaml`), the message and the template line, read from the traceback that Jinja rewrites (frames named `<template>`), for any exception. The undefined uses found before the failure are kept.
 
-**Rationale**: FR-009 requires every undefined variable in one run, with its line (FR-007). `jinja2.StrictUndefined` stops at the first one and gives no line in the exception; the line is only in the traceback.
+**Amended after the reviews of 2026-10-29**:
+
+- Many filters, tests and Python methods do not call the methods of the undefined value, so the use was not recorded: `items`, `pprint` and `is none` gave a value with no error, and `abs`, `round`, `range()` and `'abc'.startswith(x)` failed with a `TypeError` that did not name the variable. `render_values_checked` now wraps each filter and test of its environment, apart from `default`, `defined` and `undefined`, and uses a `Context` subclass whose `call` wraps each function and method call, apart from macros. Each wrapper records an undefined value passed to it, then calls the filter, test or function: its own result keeps the agent's branch in an `if`, and an exception gives an empty value, so that the render goes on.
+- A list index or a dict key that is undefined (`s[x]`) is recorded once, as the key; Jinja then gives an undefined value, as on the agent.
+- The undefined classes of the check render are named `SilentUndefined`, so that a `TypeError` that names the class gives the agent's message.
+- Some uses do not read the value and are not recorded: `x in mapping`, which hashes it; `{% if [x] %}`; `[x] | length`, where the list holds it. A slice with an undefined bound (`[1, 2, 3][:x]`) is recorded and stops the render, as Jinja does not route a slice through `getitem`.
+
+**Rationale**: FR-009 requires the undefined variables that the render reaches in one run, with their line (FR-007). `jinja2.StrictUndefined` stops at the first one and gives no line in the exception; the line is only in the traceback.
 
 **Alternatives considered**:
 

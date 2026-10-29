@@ -112,13 +112,19 @@ warnings and do not change the exit code.
 
 #### Undefined variables
 
-On the server, a variable that the context does not define renders as an
-empty string when the template writes it out, and nothing reports it. Some
-other uses make the render fail with a message that gives no line: for
-example, `{{ parameters.admn_email + 1 }}` fails with
-`'dict object' has no attribute 'admn_email'`, and
-`{{ parameters.admn_email | abs }}` with a `TypeError`. `check` and `render`
-report each use as an error, with its line, for example:
+On the server, a variable that the context does not define gives no error
+with a line. What it gives depends on how the template uses it:
+
+- written out, it renders as an empty string;
+- some filters and tests give a value with no error, for example `0` for
+  `| length`, `Undefined` for `| pprint`, and false for `is none`;
+- other uses make the render fail with a message that gives no line: for
+  example, `{{ parameters.admn_email + 1 }}` fails with
+  `'dict object' has no attribute 'admn_email'`, and
+  `{{ parameters.admn_email | abs }}` with a `TypeError`.
+
+`check` and `render` report the uses that their render finds as errors, with
+their line, for example:
 
 ```text
 my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
@@ -128,10 +134,19 @@ my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
   model nor a key of the context.
 - A field of the context model without a value, such as
   `instance.config.fqdn_suffix` when no FQDN suffix is set, is not an error.
-  It renders as on the server: an empty string that tests as false.
-- Each use of an undefined variable that the render reaches is an error: the
-  template writes it out, tests it in an `if`, loops over it, uses it in an
-  operation, or passes it to a filter, a test or `range()`.
+  It renders as on the server: an empty string that tests as false. A use
+  that makes the server's render fail, such as
+  `instance.config.fqdn_suffix + 1`, makes the render fail with the server's
+  message.
+- The render reports a use of an undefined variable when the template writes
+  it out, tests it in an `if`, loops over it, uses it in an operation, or
+  passes it to a filter, a test, a function or a method. Where the server's
+  render fails at that use, the render reports it and, when it can, goes on
+  with an empty value, to find the next use. Some uses stop the render after
+  the report, for example the slice `[1, 2, 3][:parameters.x]`.
+- Some uses read no value and are not reported, for example
+  `parameters.x in parameters`, `{% if [parameters.x] %}` or
+  `[parameters.x] | length`.
 - The `default()` filter and the `is defined` and `is undefined` tests are
   allowed. They apply to the last name of a path:
   `parameters.x.y | default('z')` is an error when `parameters.x` is
