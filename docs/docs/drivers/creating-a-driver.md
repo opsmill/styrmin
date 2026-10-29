@@ -663,17 +663,17 @@ uv run styrmin-driver render driver/examples/my-app > values.yml
 `check` runs the checks of a load, then renders `values.j2.yml` with an
 example context, and reports the errors it finds in one run, each with its
 file and, when it is known, its line. A variable that the context does not
-define is an error, although the server renders it as an empty string,
-apart from the cases in
+define is an error. On the server, it renders as an empty string, or the
+render fails with a message that gives no line; see
 [Undefined variables](../reference/styrmin-driver.md#undefined-variables).
 Some errors hide others, so fix what `check` reports and run it again, until
 it reports no error. `check` does not check the variables of a branch of the
 template that the render does not take; see
 [What `check` checks](../reference/styrmin-driver.md#what-check-checks).
-`render` writes the Helm values that the deployment would receive. To render with other values, such as a parameter or an FQDN
-suffix, give a context file with `--context`. See
-[`styrmin-driver`](../reference/styrmin-driver.md) for every command and
-option.
+`render` writes the Helm values that the deployment would receive. To render
+with other values, such as a parameter or an FQDN suffix, give a context file
+with `--context`. See [`styrmin-driver`](../reference/styrmin-driver.md) for
+every command and option.
 
 When the check passes, load the driver:
 

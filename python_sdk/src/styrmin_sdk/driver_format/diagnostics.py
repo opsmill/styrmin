@@ -379,10 +379,11 @@ def run_checks(
 ) -> CheckReport:
     """Run the checks of a load from a local directory on ``root``, and render its template.
 
-    Each check runs, and its problems are collected. The example context is built, and the
-    context file merged, whenever ``driver.styrmin.yml`` matches the driver model; the
-    template is rendered only when its syntax is valid too. ``context_data`` is the content
-    of an author's context file.
+    Each check that can run does, and its problems are collected. The checks of
+    ``actions.py`` need ``driver.styrmin.yml`` to be valid YAML. The checks across fields,
+    the example context and the merge of the context file need it to match the driver model;
+    the template is rendered only when its syntax is valid too. ``context_data`` is the
+    content of an author's context file.
 
     Raises:
         ContextFileError: If ``context_data`` cannot be merged or the result is invalid.
