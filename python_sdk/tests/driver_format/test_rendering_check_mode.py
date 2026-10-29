@@ -5,7 +5,13 @@ from styrmin_sdk.driver_format.errors import ChartValuesTemplateRenderingError
 from styrmin_sdk.driver_format.example_context import build_example_context
 from styrmin_sdk.driver_format.models.structure.directory import DriverDirectory
 from styrmin_sdk.driver_format.reading.files import get_resource_file_loader
-from styrmin_sdk.driver_format.rendering import render_values, render_values_checked
+from styrmin_sdk.driver_format.rendering import (
+    _CHECK_RENDER,  # noqa: PLC2701 — testing the render state
+    _CheckRender,  # noqa: PLC2701 — testing the render state
+    _wrap,  # noqa: PLC2701 — testing the render state
+    render_values,
+    render_values_checked,
+)
 
 from .conftest import EXAMPLE_NAMES, EXAMPLES
 
@@ -430,31 +436,39 @@ def test_an_undefined_key_is_reported_once_at_the_line_that_reads_it() -> None:
     assert checked.failure.message == _agent_failure(template, context)
 
 
-def test_a_mapping_that_the_template_removes_keeps_its_path() -> None:
+def test_the_render_state_holds_each_mapping_of_the_context() -> None:
+    # A mapping that a template removes, such as ``instance.pop("config")``, stays alive, so
+    # that no dict that the template makes later gets its id and its path.
     _spec, _template, context = _example("simple-app")
-    # The loop makes new dicts while the removed mapping would be freed, so that one of them
-    # would get its id.
-    template = (
-        'a: \'{{ instance.pop("config") is none }}'
-        "{% for i in range(500) %}{% set d = dict() %}{{ d.fqdn_suffix }}{{ d.zz }}{% endfor %}'\n"
-    )
+    render = _CheckRender()
+    _wrap(context, context.model_dump(exclude_none=True), "", render.mappings)
+
+    assert render.mappings
+    assert all(isinstance(entry[0], dict) and id(entry[0]) == key for key, entry in render.mappings.items())
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "a: x\n{% if false %}b: '{{ \"abc\".nmae }}'\n{% endif %}",
+        'a: x\n{% macro unused() %}{{ {"k": 1}.zz }}{% endmacro %}',
+        "a: x\n{% if true %}{% else %}b: '{{ \"abc\".nmae }}'{% endif %}",
+    ],
+)
+def test_a_constant_expression_in_a_branch_that_the_render_does_not_take_is_not_reported(template: str) -> None:
+    _spec, _template, context = _example("simple-app")
 
     checked = render_values_checked(template, context)
 
-    assert [(u.line, u.name) for u in checked.undefined] == [(1, "<dict>.fqdn_suffix"), (1, "<dict>.zz")]
+    assert not checked.undefined
+    assert checked.failure is None
+    assert checked.values == render_values(template, context)
 
 
-def test_a_name_read_on_a_literal_is_reported_with_no_line() -> None:
-    # Jinja evaluates the expression when it compiles the template, so the use has no line.
-    assert _uses("a: '{{ \"abc\".nmae }}'\n") == [(None, "<str>.nmae")]
-
-
-def test_a_render_that_fails_leaves_no_use_for_the_next_render() -> None:
+def test_the_render_state_is_reset_after_a_render_that_fails() -> None:
     _spec, _template, context = _example("simple-app")
 
     failed = render_values_checked("a: '{{ parameters.typo + 1 }}'\n", context)
-    after = render_values_checked("a: '{{ parameters.other }}'\n", context)
 
     assert failed.failure is not None
-    assert [(u.line, u.name) for u in after.undefined] == [(1, "parameters.other")]
-    assert after.failure is None
+    assert _CHECK_RENDER.get() is None
