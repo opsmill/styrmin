@@ -16,19 +16,28 @@ Single dual-entrypoint scenario that exercises the full auth path:
 
 This is the explicit "shipped to a pass" requirement for the feature
 (FR-026, SC-004).
+
+``test_logout_shows_sign_in_page`` (``ui_only``) checks that Logout in the
+web UI shows ``/login`` and stays there (#579).
 """
 
 from __future__ import annotations
 
 import uuid
-from typing import AsyncGenerator
+from typing import TYPE_CHECKING, AsyncGenerator
+from urllib.parse import urlparse
 
 import pytest
+from playwright.async_api import expect
 from styrmin_sdk import StyrminClient
 from styrmin_sdk.exceptions import StyrminAuthorizationError, StyrminError
 from styrmin_sdk.graphql._generated.enums import Role
 
 from tests.e2e.pages.login import LoginPage
+from tests.e2e.pages.user_menu import UserMenu
+
+if TYPE_CHECKING:
+    from playwright.async_api import Page, Request
 
 
 # In ui-mode this test spins up its OWN short-lived BrowserContext (no
@@ -208,3 +217,60 @@ async def test_auth_lifecycle(
             display_name=forbidden_username,
             role=Role.READ_ONLY,
         )
+
+
+@pytest.mark.ui_only(
+    reason="Logout is a button in the web UI; the redirect to /login has no SDK equivalent.",
+)
+async def test_logout_shows_sign_in_page(
+    auth_lifecycle_test_user: tuple[str, str, str, str],
+    styrmin_deployment: str,
+    session_ui_page: "Page",
+) -> None:
+    """Logout shows ``/login`` and the browser stays there (#579).
+
+    Before the fix, ``/login`` sent the browser back to ``/``, whose queries
+    were rejected with ``UNAUTHENTICATED``, which sent it to ``/login`` again:
+    the page switched between the two routes without end and sent hundreds of
+    GraphQL requests per second until a reload.
+
+    The test signs in as its own user in a clean ``BrowserContext``, so the
+    Logout does not end the admin session that the other UI tests share.
+    """
+    _, username, _, password = auth_lifecycle_test_user
+    browser = session_ui_page.context.browser
+    assert browser is not None, "session_ui_page must be attached to a live browser"
+    context = await browser.new_context(base_url=styrmin_deployment)
+    try:
+        page = await context.new_page()
+        login_page = LoginPage(page)
+        await login_page.goto()
+        await login_page.fill_username(username)
+        await login_page.fill_password(password)
+        await login_page.submit()
+        await login_page.wait_for_redirect()
+        await expect(page.get_by_role("heading", name="Environments")).to_be_visible(
+            timeout=15_000
+        )
+
+        graphql_requests: list[str] = []
+
+        def record(request: "Request") -> None:
+            if urlparse(request.url).path == "/graphql":
+                graphql_requests.append(request.url)
+
+        page.on("request", record)
+        await UserMenu(page).logout()
+
+        await expect(
+            page.get_by_role("heading", name="Sign in to Styrmin")
+        ).to_be_visible(timeout=15_000)
+        # Long enough for a redirect loop to send hundreds of requests.
+        await page.wait_for_timeout(2_000)
+        assert urlparse(page.url).path == "/login"
+        assert len(graphql_requests) < 10, (
+            f"{len(graphql_requests)} GraphQL requests from the Logout click "
+            "until 2 s after the sign-in page showed"
+        )
+    finally:
+        await context.close()

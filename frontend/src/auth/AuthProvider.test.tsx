@@ -169,7 +169,7 @@ describe("AuthProvider", () => {
     expect(auth?.currentUser?.username).toBe("alice");
   });
 
-  it("invokes the registered handler, clears the query cache, and navigates to /login when a later request returns UNAUTHENTICATED", async () => {
+  it("invokes the registered handler, signs the user out, drops cached data, and navigates to /login when a later request returns UNAUTHENTICATED", async () => {
     mockFetchOnce({
       data: {
         currentUser: {
@@ -183,11 +183,19 @@ describe("AuthProvider", () => {
       },
     });
     const queryClient = makeQueryClient();
-    const clearSpy = vi.spyOn(queryClient, "clear");
 
     renderProvider(queryClient, <Consumer />);
     await waitFor(() => {
       expect(screen.getByTestId("user")).toHaveTextContent("alice");
+    });
+    queryClient.setQueryData(["ListClusters"], { clusters: [] });
+    // The /login guard reads router.options.context when navigate() runs.
+    let routerUserAtNavigate: unknown = "not called";
+    navigateMock.mockImplementationOnce(() => {
+      routerUserAtNavigate = (
+        routerOptions.context as { auth?: { currentUser?: unknown } }
+      ).auth?.currentUser;
+      return Promise.resolve();
     });
 
     // Now arrange a second request that returns an UNAUTHENTICATED error.
@@ -214,7 +222,11 @@ describe("AuthProvider", () => {
       name: "UnauthenticatedError",
     });
 
-    expect(clearSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.getByTestId("user")).toHaveTextContent("anon");
+    });
     expect(navigateMock).toHaveBeenCalledWith({ to: "/login" });
+    expect(routerUserAtNavigate).toBeNull();
+    expect(queryClient.getQueryData(["ListClusters"])).toBeUndefined();
   });
 });
