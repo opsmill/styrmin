@@ -184,20 +184,21 @@ class RenderResult:
 class _CheckRender:
     """The state of one check render.
 
-    ``mappings`` holds the path and the names that a template may read of each mapping of
-    the context, by the mapping's ``id``. The mappings are plain dicts, as on the agent, and
-    stay alive during the render, so no other value has their ``id``. For a mapping dumped
-    from a Pydantic model, the known names are the model's fields, so a field without a
-    value is known although ``exclude_none`` left it out. For any other mapping, they are its
-    keys.
+    ``mappings`` holds, by the mapping's ``id``, each mapping of the context with its path
+    and the names that a template may read. The mappings are plain dicts, as on the agent.
+    The entry holds the mapping, so that it stays alive and no other value gets its ``id``,
+    also when a template removes it from the context. For a mapping dumped from a Pydantic
+    model, the known names are the model's fields, so a field without a value is known
+    although ``exclude_none`` left it out. For any other mapping, they are its keys.
     """
 
-    mappings: dict[int, tuple[str, frozenset[str]]] = field(default_factory=dict)
+    mappings: dict[int, tuple[dict, str, frozenset[str]]] = field(default_factory=dict)
     root_known: frozenset[str] = frozenset()
     uses: list[UndefinedUse] = field(default_factory=list)
 
     def mapping(self, obj: object) -> tuple[str, frozenset[str]] | None:
-        return self.mappings.get(id(obj)) if isinstance(obj, dict) else None
+        entry = self.mappings.get(id(obj))
+        return (entry[1], entry[2]) if entry is not None and entry[0] is obj else None
 
 
 # The check render that is running, if any. An undefined value made outside it records nothing.
@@ -208,7 +209,7 @@ def _child_path(path: str, key: object) -> str:
     return f"{path}.{key}" if path else str(key)
 
 
-def _wrap(value: object, dumped: object, path: str, mappings: dict[int, tuple[str, frozenset[str]]]) -> object:
+def _wrap(value: object, dumped: object, path: str, mappings: dict[int, tuple[dict, str, frozenset[str]]]) -> object:
     """A copy of ``dumped`` (the dump of ``value``) whose mappings are in ``mappings``, with their path."""
     if isinstance(value, RootModel):
         return _wrap(value.root, dumped, path, mappings)
@@ -217,7 +218,7 @@ def _wrap(value: object, dumped: object, path: str, mappings: dict[int, tuple[st
         if isinstance(value, BaseModel):
             known |= set(type(value).model_fields) | set(type(value).model_computed_fields)
         mapping: dict[object, object] = {}
-        mappings[id(mapping)] = (path, frozenset(known))
+        mappings[id(mapping)] = (mapping, path, frozenset(known))
         for key, item in dumped.items():
             if isinstance(value, BaseModel):
                 source = getattr(value, str(key), None)
@@ -333,8 +334,10 @@ class _CheckingUndefined(SilentUndefined):
     loops over it, compares it, uses it in an operation, calls it, or reads an item or a name
     of it. ``render_values_checked`` also records an unknown name passed to a filter, a test,
     a function or a method. A use that reads none of these, such as ``x in mapping``, is not
-    recorded. The class has no members of its own apart from these methods, so that a
-    template that reads a name on the value gets the agent's result.
+    recorded. The class adds no attribute whose name does not start with ``__``, so that a
+    template that reads such a name on the value gets the agent's result. The attributes of
+    ``jinja2.Undefined`` itself, such as ``_undefined_name``, are the agent's and record
+    nothing.
 
     A name that the context model knows, such as a field without a value, and an undefined
     value that Jinja makes itself get a ``_KnownAbsent`` instead.
@@ -516,9 +519,11 @@ def render_values_checked(values_template: str, context: GlobalContext) -> Rende
         **environment.policies["json.dumps_kwargs"],
         "default": _checked_json_default,
     }
-    template = environment.from_string(values_template)
+    # Set before the template is compiled too: Jinja evaluates some constant expressions, such
+    # as ``"abc".nmae``, when it compiles, and their uses get no line.
     token = _CHECK_RENDER.set(render)
     try:
+        template = environment.from_string(values_template)
         text = template.render(wrapped)
     except RetiredTemplateFilterError as e:
         failure = RenderFailure(kind="retired-filter", message=str(e), line=_failure_line(e))

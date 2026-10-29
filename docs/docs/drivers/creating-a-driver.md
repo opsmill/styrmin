@@ -670,9 +670,10 @@ On the server, such a variable gives no error with a line: it renders as an
 empty string or another value, or the render fails with a message that gives
 no line. Where the server's render fails, for example at
 `{{ parameters.x + 1 }}`, the render of `check` fails too, and the rest of
-the template is checked once that use is fixed. Some errors hide others, so fix
-what `check` reports and run it again, until it reports no error. `check` does not check the variables of a branch of the
-template that the render does not take; see
+the template is not checked in that run. Some errors hide others, so fix
+what `check` reports and run it again, until it reports no error. `check`
+does not check the variables of a branch of the template that the render
+does not take; see
 [What `check` checks](../reference/styrmin-driver.md#what-check-checks).
 `render` writes the Helm values that the deployment would receive. To render
 with other values, such as a parameter or an FQDN suffix, give a context file

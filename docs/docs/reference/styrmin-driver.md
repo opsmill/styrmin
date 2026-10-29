@@ -141,14 +141,15 @@ my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
   an `if`, loops over it, compares it, uses it in an operation, reads a name
   or an item of it, or passes it to a filter, a test, a function or a
   method. A name read on an undefined variable, such as `parameters.x.y`, is
-  reported as the variable, `parameters.x`.
+  reported as the variable, `parameters.x`, apart from a name that starts
+  with `__` or `_undefined_`.
 - Where the server's render fails, the render fails too, with the server's
   message and the line, for example at `{{ parameters.x + 1 }}` or at
   `{{ parameters.x | abs }}`. The uses after that point are not checked in
   that run.
 - Some uses are not recorded, for example `parameters.x in parameters`,
-  `{% if [parameters.x] %}`, `[parameters.x] | length` and
-  `parameters.get('x')`. A slice bound such as `[1, 2, 3][:parameters.x]` is
+  `parameters.x in 'abc'`, `{% if [parameters.x] %}`,
+  `[parameters.x] | length` and `parameters.get('x')`. A slice bound such as `[1, 2, 3][:parameters.x]` is
   not recorded either: the render fails there with the server's message, at
   its line.
 - The `default()` filter and the `is defined` and `is undefined` tests are

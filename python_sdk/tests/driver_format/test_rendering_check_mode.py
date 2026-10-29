@@ -394,6 +394,7 @@ def test_filters_that_take_the_context_or_the_environment_give_the_values_of_the
         ("{{ X == Y }}", ["parameters.typo", "parameters.other"]),
         ("{{ X != Y }}", ["parameters.typo", "parameters.other"]),
         ("{{ [X] == [Y] }}", ["parameters.typo", "parameters.other"]),
+        ("{{ X is sameas Y }}", ["parameters.typo", "parameters.other"]),
     ],
 )
 def test_both_values_of_a_comparison_are_reported(expression: str, names: list[str]) -> None:
@@ -427,3 +428,33 @@ def test_an_undefined_key_is_reported_once_at_the_line_that_reads_it() -> None:
     assert checked.failure is not None
     assert checked.failure.line == 2
     assert checked.failure.message == _agent_failure(template, context)
+
+
+def test_a_mapping_that_the_template_removes_keeps_its_path() -> None:
+    _spec, _template, context = _example("simple-app")
+    # The loop makes new dicts while the removed mapping would be freed, so that one of them
+    # would get its id.
+    template = (
+        'a: \'{{ instance.pop("config") is none }}'
+        "{% for i in range(500) %}{% set d = dict() %}{{ d.fqdn_suffix }}{{ d.zz }}{% endfor %}'\n"
+    )
+
+    checked = render_values_checked(template, context)
+
+    assert [(u.line, u.name) for u in checked.undefined] == [(1, "<dict>.fqdn_suffix"), (1, "<dict>.zz")]
+
+
+def test_a_name_read_on_a_literal_is_reported_with_no_line() -> None:
+    # Jinja evaluates the expression when it compiles the template, so the use has no line.
+    assert _uses("a: '{{ \"abc\".nmae }}'\n") == [(None, "<str>.nmae")]
+
+
+def test_a_render_that_fails_leaves_no_use_for_the_next_render() -> None:
+    _spec, _template, context = _example("simple-app")
+
+    failed = render_values_checked("a: '{{ parameters.typo + 1 }}'\n", context)
+    after = render_values_checked("a: '{{ parameters.other }}'\n", context)
+
+    assert failed.failure is not None
+    assert [(u.line, u.name) for u in after.undefined] == [(1, "parameters.other")]
+    assert after.failure is None
