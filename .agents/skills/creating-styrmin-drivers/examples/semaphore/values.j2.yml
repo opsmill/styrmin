@@ -1,0 +1,98 @@
+# Helm values for semaphoreui/semaphore 16.0.11, rendered by Styrmin from the deployment's context.
+fullnameOverride: styrmin-semaphore
+
+image:
+  repository: semaphoreui/semaphore
+  tag: "v{{ app.version }}"          # the image tags carry a "v" prefix, the app version does not
+  pullPolicy: IfNotPresent
+
+database:
+  type: postgres
+  host: styrmin-postgresql           # = postgresql.fullnameOverride below
+  port: 5432
+  name: semaphore
+  username: semaphore
+  # Fixed, not generated: a restored or cloned deployment must keep working with its data.
+  password: semaphore-db-password
+  options:
+    sslmode: disable
+
+admin:
+  create: true
+  username: admin
+  password: admin-password
+  email: admin@example.com
+
+ingress:
+  enabled: true
+  hosts:
+    - host: "{{ services['semaphore'].primary_fqdn }}"
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: "{{ services['semaphore'].human_readable_fqdn }}"
+      paths:
+        - path: /
+          pathType: Prefix
+
+# Semaphore keeps its data in PostgreSQL; its own volume only caches repository checkouts.
+persistence:
+  enabled: false
+
+postgresql:
+  enabled: true
+  fullnameOverride: styrmin-postgresql
+  image:
+    # Bitnami removed versioned tags from docker.io/bitnami in 2025: use bitnamilegacy.
+    repository: bitnamilegacy/postgresql
+    tag: 17.6.0-debian-12-r4
+  metrics:
+    enabled: false
+  auth:
+    username: semaphore
+    password: semaphore-db-password
+    database: semaphore
+  primary:
+    persistence:
+      enabled: true
+      size: 1Gi
+      storageClass: "{{ instance.config.standard_storage.storage_class }}"
+    # The postgres backup strategy dumps into a volume named `backup` mounted at /backup.
+    extraVolumes:
+      - name: backup
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: backup
+        mountPath: /backup
+  # Styrmin denies all egress in the deployment namespace. The semaphore chart cannot add
+  # objects, so the Bitnami subchart's extraDeploy ships the policy for every pod of the release.
+  extraDeploy:
+    - apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: styrmin-semaphore-egress
+      spec:
+        podSelector: {}
+        policyTypes: [Egress]
+        egress:
+          # DNS
+          - to:
+              - namespaceSelector: {}
+                podSelector:
+                  matchExpressions:
+                    - key: k8s-app
+                      operator: In
+                      values: [kube-dns, coredns]
+            ports:
+              - port: 53
+                protocol: UDP
+              - port: 53
+                protocol: TCP
+          # The other pods of this deployment (Semaphore -> PostgreSQL)
+          - to:
+              - podSelector: {}
+          # The internet, without private ranges (Semaphore clones playbook repositories)
+          - to:
+              - ipBlock:
+                  cidr: 0.0.0.0/0
+                  except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10]

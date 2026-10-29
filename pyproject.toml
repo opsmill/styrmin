@@ -143,6 +143,7 @@ exclude = [
     "examples",
     "_generated",
     "specs",
+    ".agents",
 ]
 
 
