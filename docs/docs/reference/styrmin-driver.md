@@ -154,10 +154,10 @@ my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
   `{% if [parameters.x] %}`, `[parameters.x] | length`,
   `parameters.get('x')`, `{{ 'abc'.nmae }}`, and a name read on an empty
   string, such as `{{ parameters.tag.nmae }}` when `tag` is `""`. To check
-  a name read on `tag`, give `tag` a value that is not empty in a context
-  file (see [Context files](#context-files)); `check` then reports the
-  misspelt name as `<str>.nmae`. `parameters.x in 'abc'` and a slice bound
-  such as
+  a name read on `tag`, give `tag` a string that is not empty, such as
+  `"1.2.3"`, in a context file (see [Context files](#context-files));
+  `check` then reports the misspelled name as `<str>.nmae`.
+  `parameters.x in 'abc'` and a slice bound such as
   `[1, 2, 3][:parameters.x]` are not reported either, and the render fails
   there with the server's message, at its line.
 - The `default()` filter and the `is defined` and `is undefined` tests are
@@ -220,7 +220,7 @@ instance:
 - The result must match the context model. A key that the model does not
   have stops the command with exit code 2, and the error names the key.
 - The keys of `parameters`, `labels`, `services` and `capabilities` are not
-  checked: a misspelt parameter name, or a value of the wrong kind, is
+  checked: a misspelled parameter name, or a value of the wrong kind, is
   accepted.
 - `app.helm.chart.values_template` is always the text of the directory's
   `values.j2.yml`.
