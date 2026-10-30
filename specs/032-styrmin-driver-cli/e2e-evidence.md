@@ -167,7 +167,7 @@ Checks after the fixes:
 
 ## Code reviews of the commit that states the limits of `check`
 
-The `code-review` skill ran in an agent that did not write the change, at high effort, on each version of the commit that states the limits of `check`, and on each commit after it. The versions `38eed3d4`, `4cb12cff` and `fd682a75` were replaced before any push; `fbb24f78` and `9236b94b` replace `fd682a75`. From the review of `7716b06c` on, a false statement is graded by its effect on a driver author (the rule is before the table of that review), so the counts of the rows before and after it do not compare.
+The `code-review` skill ran in an agent that did not write the change, at high effort, on each version of the commit that states the limits of `check`, and on each commit after it. The versions `38eed3d4`, `4cb12cff` and `fd682a75` were replaced before any push; `fbb24f78` and `9236b94b` replace `fd682a75`. From the review of `7716b06c` on, a false statement is graded by its effect on a driver author (the rule is before the table of that review), so the counts of the rows before and after that review do not compare.
 
 | Diff reviewed | Findings | Changes made in |
 |---------------|----------|-----------------|
@@ -183,11 +183,13 @@ The `code-review` skill ran in an agent that did not write the change, at high e
 | `94e02f4e..12249ea2` | 4 CRITICAL, 2 IMPORTANT, 8 MINOR | `31d8afb6` |
 | `12249ea2..31d8afb6` | 3 CRITICAL, 5 IMPORTANT, 7 MINOR | `7716b06c` |
 | `31d8afb6..7716b06c` | 0 CRITICAL, 4 IMPORTANT, 13 MINOR | `8a04237f` |
-| `7716b06c..8a04237f` | 0 CRITICAL, 4 IMPORTANT, 8 MINOR | the commit that adds this row |
+| `7716b06c..8a04237f` | 0 CRITICAL, 4 IMPORTANT, 8 MINOR | `683a7005` |
+| `8a04237f..683a7005` | 0 CRITICAL, 1 IMPORTANT, 11 MINOR | the commit that adds this row |
 
 Each review read the text that the review before it led to, and found statements in it that were false. The tables below name the tests as the commit that made the change named them. Later commits renamed or replaced some of them:
 
 - `test_a_mapping_that_the_template_removes_keeps_its_path` is replaced by `test_the_render_state_holds_each_mapping_of_the_context`;
+- `test_a_render_that_fails_leaves_no_use_for_the_next_render` is replaced by `test_the_render_state_is_reset_after_a_render_that_fails`;
 - `test_a_constant_expression_in_a_branch_that_the_render_does_not_take_is_not_reported` is now `test_a_name_read_on_a_literal_that_jinja_replaces_with_its_result_when_it_compiles_is_not_reported`;
 - `test_uses_in_operations_calls_subscripts_and_comparisons_are_all_reported` is now `test_a_use_in_an_operation_a_call_or_a_subscript_is_reported`, one template per use;
 - `test_an_undefined_variable_passed_to_a_filter_a_test_or_a_function_is_reported_and_the_render_goes_on` is replaced by `test_a_use_that_the_agent_renders_with_no_message_is_reported_and_renders_as_on_the_agent` and `test_a_use_that_the_agent_fails_on_is_reported_and_fails_as_on_the_agent`;
@@ -374,7 +376,7 @@ The findings of the review of `7716b06c`, and what changed in `8a04237f`. The co
 |---------|------------|
 | IMPORTANT: R-003 said that a name that the undefined value has is not recorded; a method that the template writes out, such as `{{ parameters.x.__init__ }}`, is recorded, because its text holds the undefined value. | Fixed in R-003. |
 | IMPORTANT: this file said that each finding of the review of `31d8afb6` came from a rule of the reference page; three did not. | Fixed: "most findings". |
-| IMPORTANT: the commit message of `7716b06c` says that the page gives three cases as examples; they are in R-003 and in this file, not on the page. | Kept: the message is committed. One of the cases is in R-003; the three are in this file, in the tables of the reviews of `31d8afb6` and `7716b06c`. |
+| IMPORTANT: the commit message of `7716b06c` says that the page gives three cases as examples; they are in R-003 and in this file, not on the page. | Kept: the message is committed. One of the cases is in R-003. In this file, two are in the table of the review of `31d8afb6`, and the third is in the list of MINOR findings left by the review of `7716b06c`. |
 | IMPORTANT: R-003 ended a list of uses that are not recorded with "The render then fails with the agent's message", which holds only for `x in 'abc'` and a slice bound. | Fixed: the sentence names those two. |
 
 MINOR findings of that review fixed: the test of a literal is renamed `test_rendering_check_mode.py::test_a_name_read_on_a_literal_that_jinja_replaces_with_its_result_when_it_compiles_is_not_reported`, and the code comment says "replaces"; the reference page names `render` with `check` for the `<str>` message, says that `parameters.x` is the variable to fix, and says how to check a name read on an empty string; R-003 says that the check render cannot tell the agent's empty string from an empty string of the context; the string test is renamed `::test_a_name_read_on_a_string_is_reported_with_the_type_of_the_value`; the compile test also compares the messages of both renders; step 9 of the guide no longer says that the reference page lists every exception.
@@ -386,7 +388,7 @@ MINOR findings of that review left as they are:
 - No test covers the `{% if 'abc'.nmae | length %}` case, nor the `<int>`, `<list>` or `<UUID>` names.
 - The findings already kept or left in the review of `31d8afb6`: "recorded" and "reported" on the page; one error for two identical misspellings on one line; the `docs:` type of a commit that also changes tests.
 
-The findings of the review of `8a04237f`, and what changed in the commit that adds the last row of the table of reviews. The reviewer found every statement of the user documentation true for the templates it tried. This commit changes only Markdown files.
+The findings of the review of `8a04237f`, and what changed in `683a7005`. The reviewer found every statement of the user documentation true for the templates it tried. This commit changes only Markdown files.
 
 | Finding | Resolution |
 |---------|------------|
@@ -400,9 +402,22 @@ MINOR findings of that review fixed: the introduction of the table of reviews sa
 MINOR findings of that review left as they are:
 
 - The compile test compares the messages of the two errors, not their lines.
-- `{{ parameters.x.__str__ }}` gives another text in the check render than on the agent; it reads Python internals.
+- `{{ parameters.x.__str__ }}`, and the other methods and attributes of the check render's class, such as `__add__` or `__slots__`, give another text in the check render than on the agent; they read Python internals.
 - The page shows only the `<str>` type; `<bool>` and `<UUID>` also occur.
-- A key with a hyphen is reported as `services.simple-app.nmae`, which is not valid Jinja. Not verified.
+- A key with a hyphen is reported as `services.simple-app.nmae`, which is not valid Jinja.
+
+The findings of the review of `683a7005`, and what changed in the commit that adds the last row of the table of reviews. The reviewer found every statement that `683a7005` adds to `docs/` and to R-003 true on both renders. This commit changes only Markdown files.
+
+| Finding | Resolution |
+|---------|------------|
+| IMPORTANT: this file said that the three cases of the commit message of `7716b06c` are in tables; one is in a list of MINOR findings. | Fixed: the row says where each is. |
+
+MINOR findings of that review fixed: the list of renamed tests names `test_a_render_that_fails_leaves_no_use_for_the_next_render`; R-003 says that a written-out method defined in Python is recorded because its text calls `repr()` of the undefined value; the hyphenated key is verified; the list of internals that give another text names more than `__str__`; "before and after that review" in the introduction of the table of reviews; step 9 of the guide gives a name read on a parameter whose value is an empty string as its example; the reference page links to "Context files" and says what `check` reports once `tag` has a value.
+
+MINOR findings of that review left as they are:
+
+- The bullet of the reference page on uses that are not reported is long.
+- The page does not say that a field without a value, such as `instance.config.fqdn_suffix`, hides a name read on it in the same way; the page gives examples, not a full list.
 
 Checks after the fixes, on the working tree of the commit that adds the last row of the table of reviews:
 
@@ -413,4 +428,4 @@ Checks after the fixes, on the working tree of the commit that adds the last row
 | `uv run pytest -q python_sdk/tests` | 574 passed, 1 xfailed (`slurpit`) |
 | `uv run pytest -q cli/tests` | 416 passed |
 | `cd docs && pnpm build` | `[SUCCESS] Generated static files in "build".` |
-| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 147.20s (0:02:27)`, ended 2026-10-30T08:21:20+01:00, session vCluster `pytest-0dbff5ef-9f36-4e3a-9ea5-14fb7c918084`, image built from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |
+| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 158.39s (0:02:38)`, ended 2026-10-30T08:33:29+01:00, session vCluster `pytest-fb4f7ae3-c2bf-4f2c-816a-8bf1526fe54b`, image built from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |

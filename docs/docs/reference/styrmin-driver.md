@@ -154,8 +154,10 @@ my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
   `{% if [parameters.x] %}`, `[parameters.x] | length`,
   `parameters.get('x')`, `{{ 'abc'.nmae }}`, and a name read on an empty
   string, such as `{{ parameters.tag.nmae }}` when `tag` is `""`. To check
-  that name, give `parameters.tag` a value that is not empty in a context
-  file (`--context`). `parameters.x in 'abc'` and a slice bound such as
+  a name read on `tag`, give `tag` a value that is not empty in a context
+  file (see [Context files](#context-files)); `check` then reports the
+  misspelt name as `<str>.nmae`. `parameters.x in 'abc'` and a slice bound
+  such as
   `[1, 2, 3][:parameters.x]` are not reported either, and the render fails
   there with the server's message, at its line.
 - The `default()` filter and the `is defined` and `is undefined` tests are
