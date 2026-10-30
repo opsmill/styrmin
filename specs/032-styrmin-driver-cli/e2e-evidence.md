@@ -181,14 +181,17 @@ The `code-review` skill ran in an agent that did not write the change, at high e
 | `aebf9750..24e9f88b` | 4 CRITICAL, 2 IMPORTANT, 12 MINOR | `94e02f4e` |
 | `24e9f88b..94e02f4e` | 2 CRITICAL, 4 IMPORTANT, 7 MINOR | `12249ea2` |
 | `94e02f4e..12249ea2` | 4 CRITICAL, 2 IMPORTANT, 8 MINOR | `31d8afb6` |
-| `12249ea2..31d8afb6` | 3 CRITICAL, 5 IMPORTANT, 7 MINOR | the commit that adds this row |
+| `12249ea2..31d8afb6` | 3 CRITICAL, 5 IMPORTANT, 7 MINOR | `7716b06c` |
+| `31d8afb6..7716b06c` | 0 CRITICAL, 4 IMPORTANT, 13 MINOR | the commit that adds this row |
 
-Each review read the text that the review before it led to, and found statements in it that were false. The tables below name the tests as the commit that made the change named them. `aebf9750` and the commit after it renamed or replaced some of them:
+Each review read the text that the review before it led to, and found statements in it that were false. The tables below name the tests as the commit that made the change named them. Later commits renamed or replaced some of them:
 
 - `test_uses_in_operations_calls_subscripts_and_comparisons_are_all_reported` is now `test_a_use_in_an_operation_a_call_or_a_subscript_is_reported`, one template per use;
 - `test_an_undefined_variable_passed_to_a_filter_a_test_or_a_function_is_reported_and_the_render_goes_on` is replaced by `test_a_use_that_the_agent_renders_with_no_message_is_reported_and_renders_as_on_the_agent` and `test_a_use_that_the_agent_fails_on_is_reported_and_fails_as_on_the_agent`;
 - `test_a_slice_with_an_undefined_variable_is_reported_and_fails_as_on_the_agent` is now `test_a_slice_with_an_undefined_bound_is_not_reported_and_fails_as_on_the_agent`;
-- `test_a_key_or_a_name_read_on_a_field_without_a_value_is_not_reported` is now `test_a_field_without_a_value_or_a_jinja_undefined_value_as_a_key_or_a_parent_is_not_reported`.
+- `test_a_key_or_a_name_read_on_a_field_without_a_value_is_not_reported` is now `test_a_field_without_a_value_or_a_jinja_undefined_value_as_a_key_or_a_parent_is_not_reported`;
+- `test_a_name_read_on_a_literal_that_jinja_evaluates_when_it_compiles_is_not_reported` is now `test_a_name_read_on_a_literal_that_jinja_replaces_with_its_result_when_it_compiles_is_not_reported`;
+- `test_a_name_read_on_a_string_is_reported_with_the_kind_of_the_value` is now `test_a_name_read_on_a_string_is_reported_with_the_type_of_the_value`.
 
 The findings of the review of `9236b94b`, and what changed in `3e8c8283`:
 
@@ -339,7 +342,7 @@ MINOR findings of that review left as they are:
 - At `parameters.x in 'abc'`, the message names `SilentUndefined` and not the variable, as on the server.
 - The reference page uses both "recorded" and "reported", and the uses that `check` does not report are described in five places.
 
-The findings of the review of `31d8afb6`, and what changed in the commit that adds the last row of the table of reviews. All of them are in the text and the tests, and the code of the check render does not change. Each finding came from a rule that the reference page stated about literals, names that start with `__` or the type of a value. The page now gives examples of these cases, and R-003 gives the rules.
+The findings of the review of `31d8afb6`, and what changed in `7716b06c`. All of them are in the text and the tests, and the code of the check render does not change. Most findings came from a rule that the reference page stated about literals, names that start with `__` or the type of a value. The page now gives examples of these cases, and R-003 gives the rules.
 
 | Finding | Resolution |
 |---------|------------|
@@ -360,6 +363,26 @@ MINOR findings of that review left as they are:
 - The reference page still uses both "recorded" and "reported", and describes the uses that are not reported in several places.
 - No test covers the `<int>`, `<list>`, `<bool>` or `<dict>` names.
 
+From the review of `7716b06c` on, a false statement counts as CRITICAL when a driver author could meet it with a template that they would plausibly write, and as IMPORTANT when it holds only for templates that read Python or Jinja internals or a misspelt name on a literal, or when it is in the research notes or this file and does not mislead a driver author.
+
+The findings of the review of `7716b06c`, and what changed in the commit that adds the last row of the table of reviews. The code of the check render does not change, apart from a comment.
+
+| Finding | Resolution |
+|---------|------------|
+| IMPORTANT: R-003 said that a name that the undefined value has is not recorded; a method that the template writes out, such as `{{ parameters.x.__init__ }}`, is recorded, because its text holds the undefined value. | Fixed in R-003. |
+| IMPORTANT: this file said that each finding of the review of `31d8afb6` came from a rule of the reference page; three did not. | Fixed: "most findings". |
+| IMPORTANT: the commit message of `7716b06c` says that the page gives three cases as examples; they are in R-003 and in this file, not on the page. | Kept: the message is committed; the cases are in R-003 and in the table above. |
+| IMPORTANT: R-003 ended a list of uses that are not recorded with "The render then fails with the agent's message", which holds only for `x in 'abc'` and a slice bound. | Fixed: the sentence names those two. |
+
+MINOR findings of that review fixed: the test of a literal is renamed `test_rendering_check_mode.py::test_a_name_read_on_a_literal_that_jinja_replaces_with_its_result_when_it_compiles_is_not_reported`, and the code comment says "replaces"; the reference page names `render` with `check` for the `<str>` message, says that `parameters.x` is the variable to fix, and says how to check a name read on an empty string; R-003 says that the check render cannot tell the agent's empty string from an empty string of the context; the string test is renamed `::test_a_name_read_on_a_string_is_reported_with_the_type_of_the_value`; the compile test also compares the messages of both renders; step 9 of the guide no longer says that the reference page lists every exception.
+
+MINOR findings of that review left as they are:
+
+- The page shows only the `<str>` type; a name read on an id gives `<UUID>.nmae`.
+- The single example `{{ 'abc'.nmae }}` can suggest that names read on literals are never reported.
+- No test covers the `{% if 'abc'.nmae | length %}` case, nor the `<int>`, `<list>` or `<UUID>` names.
+- The findings already kept or left in the review of `31d8afb6`: "recorded" and "reported" on the page; one error for two identical misspellings on one line; the `docs:` type of a commit that also changes tests.
+
 Checks after the fixes, on the working tree of the commit that adds the last row of the table of reviews:
 
 | Command | Result |
@@ -369,4 +392,4 @@ Checks after the fixes, on the working tree of the commit that adds the last row
 | `uv run pytest -q python_sdk/tests` | 574 passed, 1 xfailed (`slurpit`) |
 | `uv run pytest -q cli/tests` | 416 passed |
 | `cd docs && pnpm build` | `[SUCCESS] Generated static files in "build".` |
-| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 170.34s (0:02:50)`, ended 2026-10-29T17:16:52+01:00, session vCluster `pytest-ec9e3b39-534d-4b51-9184-95ecb6b81c2c`, image built from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |
+| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 153.08s (0:02:33)`, ended 2026-10-30T08:06:39+01:00, session vCluster `pytest-9e041967-c873-4ef8-804b-da6253a5c49f`, image built from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |

@@ -521,8 +521,9 @@ def render_values_checked(values_template: str, context: GlobalContext) -> Rende
         "default": _checked_json_default,
     }
     template = environment.from_string(values_template)
-    # Set only while the template renders: Jinja evaluates some constant expressions, such as
-    # ``{{ "abc".nmae }}``, when it compiles, also in branches that the render does not take.
+    # Set only while the template renders: when it compiles, Jinja replaces some constant
+    # expressions, such as ``{{ "abc".nmae }}``, with their result, also in branches that the
+    # render does not take.
     token = _CHECK_RENDER.set(render)
     try:
         text = template.render(wrapped)
