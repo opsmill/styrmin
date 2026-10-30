@@ -143,9 +143,9 @@ my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
   method. For example, `{{ parameters.x.y }}` is reported as `parameters.x`,
   the variable to fix.
 - When `check` or `render` reports a name read on a value that is not a
-  mapping of the
-  context, the message gives the type of the value in place of its path: for
-  `{{ app.version.nmae }}`, `undefined variable '<str>.nmae'`.
+  mapping of the context, the message gives the type of the value in place
+  of its path: for `{{ app.version.nmae }}`,
+  `undefined variable '<str>.nmae'`.
 - Where the server's render fails, the render fails too, with the server's
   message and the line, for example at `{{ parameters.x + 1 }}` or at
   `{{ parameters.x | abs }}`. The uses after that point are not checked in
@@ -153,8 +153,9 @@ my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
 - Some uses are not reported, for example `parameters.x in parameters`,
   `{% if [parameters.x] %}`, `[parameters.x] | length`,
   `parameters.get('x')`, `{{ 'abc'.nmae }}`, and a name read on an empty
-  string, such as `{{ parameters.tag.nmae }}` when `tag` is `""`; to check
-  that name, give `tag` a value in a context file. `parameters.x in 'abc'` and a slice bound such as
+  string, such as `{{ parameters.tag.nmae }}` when `tag` is `""`. To check
+  that name, give `parameters.tag` a value that is not empty in a context
+  file (`--context`). `parameters.x in 'abc'` and a slice bound such as
   `[1, 2, 3][:parameters.x]` are not reported either, and the render fails
   there with the server's message, at its line.
 - The `default()` filter and the `is defined` and `is undefined` tests are
