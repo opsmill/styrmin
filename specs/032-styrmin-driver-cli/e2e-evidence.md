@@ -185,7 +185,8 @@ The `code-review` skill ran in an agent that did not write the change, at high e
 | `31d8afb6..7716b06c` | 0 CRITICAL, 4 IMPORTANT, 13 MINOR | `8a04237f` |
 | `7716b06c..8a04237f` | 0 CRITICAL, 4 IMPORTANT, 8 MINOR | `683a7005` |
 | `8a04237f..683a7005` | 0 CRITICAL, 1 IMPORTANT, 11 MINOR | `fb4d8a80` |
-| `683a7005..fb4d8a80` | 0 CRITICAL, 3 IMPORTANT, 11 MINOR | the commit that adds this row |
+| `683a7005..fb4d8a80` | 0 CRITICAL, 3 IMPORTANT, 11 MINOR | `19301e5d` |
+| `fb4d8a80..19301e5d` | 0 CRITICAL, 2 IMPORTANT, 14 MINOR | the commit that adds this row |
 
 Each review read the text that the review before it led to, and found statements in it that were false. The tables and lists below name the tests as the commit that made the change named them. Later commits renamed or replaced some of them:
 
@@ -290,7 +291,7 @@ MINOR findings of that review left as they are:
 - A name read on an empty string of the context is not recorded, and the same name read on a string that is not empty is recorded as `<str>.foo`. R-003 says so; the reference page does not.
 - The decision of 2026-10-29 is recorded as made in a review session with no link.
 - Not verified: what the server shows for a render that fails with a `TypeError`. The agent's `render_values` wraps only `jinja2.TemplateRuntimeError`, so the prefix of the message is not known.
-- A misspelt variable inside `is defined` is not reported, as the reference page says. An unknown filter stops the render, and the page does not list it among the errors that hide others.
+- A misspelled variable inside `is defined` is not reported, as the reference page says. An unknown filter stops the render, and the page does not list it among the errors that hide others.
 - The reviewer did not run `uv run invoke lint`, because it writes generated code; its check-only parts pass.
 
 The findings of the review of `24e9f88b`, and what changed in `94e02f4e`. 2 of the 98 tests of `test_rendering_check_mode.py` failed with the `rendering.py` of `24e9f88b` in the runs made then; the review of the next commit found that one of them, the test of a removed mapping, fails only in some runs, and it is replaced (see below). The 110 templates tried in the reviews before give the same outputs and recorded uses as with `24e9f88b`.
@@ -369,7 +370,7 @@ MINOR findings of that review left as they are:
 - The reference page still uses both "recorded" and "reported", and describes the uses that are not reported in several places.
 - No test covers the `<int>`, `<list>`, `<bool>` or `<dict>` names.
 
-From the review of `7716b06c` on, a false statement counts as CRITICAL when a driver author could meet it with a template that they would plausibly write. It counts as IMPORTANT when it is false only for templates that read Python or Jinja internals or a misspelt name on a literal, or when it is in the research notes or this file and does not mislead a driver author.
+From the review of `7716b06c` on, a false statement counts as CRITICAL when a driver author could meet it with a template that they would plausibly write. It counts as IMPORTANT when it is false only for templates that read Python or Jinja internals or a misspelled name on a literal, or when it is in the research notes or this file and does not mislead a driver author.
 
 The findings of the review of `7716b06c`, and what changed in `8a04237f`. The code of the check render does not change, apart from a comment.
 
@@ -407,7 +408,7 @@ MINOR findings of that review left as they are:
 - The page shows only the `<str>` type; `<bool>` and `<UUID>` also occur.
 - A key with a hyphen is reported as `services.simple-app.nmae`, which is not valid Jinja. Not verified.
 
-The findings of the review of `683a7005`, and what changed in `fb4d8a80`. The reviewer found every statement that `683a7005` adds to `docs/` and to R-003 true on both renders. This commit changes only Markdown files.
+The findings of the review of `683a7005`, and what changed in `fb4d8a80`. The reviewer found every statement that `683a7005` adds to `docs/` and to R-003 true on both renders. `fb4d8a80` changes only Markdown files.
 
 | Finding | Resolution |
 |---------|------------|
@@ -416,10 +417,10 @@ The findings of the review of `683a7005`, and what changed in `fb4d8a80`. The re
 MINOR findings of that review, in the reviewer's order:
 
 1. The list of renamed tests left out `test_a_render_that_fails_leaves_no_use_for_the_next_render`. Fixed.
-2. R-003 described the result of writing out a method, not what decides it. Fixed: it says that writing out the method calls `repr()` of the undefined value.
+2. R-003 described the result of writing out a method, not what decides it. Fixed in `fb4d8a80`, which said that the text of the method calls `repr()`; `19301e5d` says that writing out the method calls `repr()` of the undefined value.
 3. A sentence in the list of R-003 did not match the other items. Fixed: the clause is in parentheses.
-4. The hyphenated key was marked "Not verified", and the claim holds. Fixed: it is verified (`{{ services['simple-app'].nmae }}` gives `services.simple-app.nmae`); the record of the review of `8a04237f` keeps its own words.
-5. `__str__` is only one example of internals that give another text. Fixed in this note: `__add__`, `__slots__` and the other members of the check render's class also do; the record of the review of `8a04237f` keeps its own words.
+4. The hyphenated key was marked "Not verified", and the claim holds. Fixed in `fb4d8a80`, which removed the words from the record of the review of `8a04237f`; `19301e5d` puts them back, and this note says that the claim is verified (`{{ services['simple-app'].nmae }}` gives `services.simple-app.nmae`); the record of the review of `8a04237f` keeps its own words.
+5. `__str__` is only one example of internals that give another text. Fixed in `fb4d8a80`, in the record of the review of `8a04237f`; `19301e5d` moves the note here: `__add__`, `__slots__` and `__doc__` also give another text, and `__module__` does not; the record of the review of `8a04237f` keeps its own words.
 6. "before and after it" was unclear. Fixed: "before and after that review".
 7. The example of step 9 of the guide was unusual. Fixed: a name read on a parameter whose value is an empty string.
 8. The advice about a context file did not link to the format. Fixed: the page links to "Context files".
@@ -427,7 +428,7 @@ MINOR findings of that review, in the reviewer's order:
 10. The advice did not say what the error names. Fixed: `<str>.nmae`.
 11. The page does not say that a field without a value hides a name read on it, as an empty string does. Left: the page gives examples, not a full list.
 
-The findings of the review of `fb4d8a80`, and what changed in the commit that adds the last row of the table of reviews. The reviewer followed the advice of the reference page as a driver author would, and it worked with a string value. This commit changes only Markdown files.
+The findings of the review of `fb4d8a80`, and what changed in `19301e5d`. The reviewer followed the advice of the reference page as a driver author would, and it worked with a string value. `19301e5d` changes only Markdown files.
 
 | Finding | Resolution |
 |---------|------------|
@@ -445,6 +446,28 @@ MINOR findings of that review left as they are:
 - The bullet on uses that are not reported is long.
 - The page does not say that a field without a value hides a name read on it.
 
+The findings of the review of `19301e5d`, and what changed in the commit that adds the last row of the table of reviews. The reviewer found everything that `19301e5d` tells a driver author true, and followed the advice of the reference page with a string value. The commit that adds the last row changes only Markdown files.
+
+| Finding | Resolution |
+|---------|------------|
+| IMPORTANT: the record of the review of `683a7005`, headed "what changed in `fb4d8a80`", described in its items 2, 4 and 5 what `19301e5d` did. | Fixed: each of these items says which commit did what. |
+| IMPORTANT: this file said that all the other members of the check render's class give another text than on the agent; `{{ parameters.x.__module__ }}` gives the same. | Fixed: the note names `__add__`, `__slots__` and `__doc__`, and says that `__module__` gives the same text. |
+
+MINOR findings of that review fixed: the advice of the reference page now names `image_tag`, the parameter that the example of "Context files" sets, so that an author who copies that example gets the error; the advice names `--context`; this file writes "misspelled", as the Markdown guidelines ask; the sections of the reviews of `683a7005` and `fb4d8a80` name the commit that "changes only Markdown files".
+
+MINOR findings of that review left as they are:
+
+- The page does not say why `"1.2.3"` is quoted; without quotes, `1.2` gives `<float>.nmae`, still at the right line.
+- The page does not say that a value in the context file changes the branches that the render takes.
+- The page does not say that a use that is not reported gives `0 errors` with no warning.
+- R-003 says "writes out a bound method"; a filter such as `| string` on it also records the use.
+- R-003 writes `x.__new__` without braces, and its text in the check render names the private class.
+- The record of the review of `8a04237f` says "Not verified" for the hyphenated key, and does not point to the note that verifies it.
+- "listed 9 or 10" is a range, not a count; it is accurate.
+- A quote nests another quote in one row.
+- The bullet on uses that are not reported is long.
+- The commit message of `19301e5d` does not name all its edits.
+
 Checks after the fixes, on the working tree of the commit that adds the last row of the table of reviews. Each command ran again on that working tree:
 
 | Command | Result |
@@ -454,4 +477,4 @@ Checks after the fixes, on the working tree of the commit that adds the last row
 | `uv run pytest -q python_sdk/tests` | 574 passed, 1 xfailed (`slurpit`) |
 | `uv run pytest -q cli/tests` | 416 passed |
 | `cd docs && pnpm build` | `[SUCCESS] Generated static files in "build".` |
-| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 175.88s (0:02:55)`, ended 2026-10-30T08:44:35+01:00, session vCluster `pytest-9597331a-55d1-421a-bd16-2dcdec6dac0a`, image built from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |
+| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 161.60s (0:02:41)`, ended 2026-10-30T08:56:14+01:00, session vCluster `pytest-6a181ce5-1260-4fea-a6e0-ac791bb0c7b7`, image built from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |
