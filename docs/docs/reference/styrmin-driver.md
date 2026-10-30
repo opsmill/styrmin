@@ -153,10 +153,11 @@ my-driver/values.j2.yml:12: error: undefined variable 'parameters.admn_email'
 - Some uses are not reported, for example `parameters.x in parameters`,
   `{% if [parameters.x] %}`, `[parameters.x] | length`,
   `parameters.get('x')`, `{{ 'abc'.nmae }}`, and a name read on an empty
-  string, such as `{{ parameters.tag.nmae }}` when `tag` is `""`. To check
-  a name read on `tag`, give `tag` a string that is not empty, such as
-  `"1.2.3"`, in a context file (see [Context files](#context-files));
-  `check` then reports the misspelled name as `<str>.nmae`.
+  string, such as `{{ parameters.image_tag.nmae }}` when `image_tag` is
+  `""`. To check a name read on `image_tag`, give `image_tag` a string that
+  is not empty, such as `"1.2.3"`, in a context file that you pass with
+  `--context` (see [Context files](#context-files)); `check` then reports
+  the misspelled name as `<str>.nmae`.
   `parameters.x in 'abc'` and a slice bound such as
   `[1, 2, 3][:parameters.x]` are not reported either, and the render fails
   there with the server's message, at its line.
