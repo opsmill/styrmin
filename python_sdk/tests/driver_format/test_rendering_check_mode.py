@@ -471,7 +471,9 @@ def test_the_render_state_holds_each_mapping_of_the_context() -> None:
         "a: x\n{% if true %}{% else %}b: '{{ \"abc\".nmae }}'{% endif %}",
     ],
 )
-def test_a_name_read_on_a_literal_that_jinja_evaluates_when_it_compiles_is_not_reported(template: str) -> None:
+def test_a_name_read_on_a_literal_that_jinja_replaces_with_its_result_when_it_compiles_is_not_reported(
+    template: str,
+) -> None:
     _spec, _template, context = _example("simple-app")
 
     checked = render_values_checked(template, context)
@@ -489,7 +491,7 @@ def test_a_name_read_on_a_literal_that_jinja_evaluates_when_it_compiles_is_not_r
         "a: '{{ \"abc\".nmae ~ app.version }}'\n",
     ],
 )
-def test_a_name_read_on_a_string_is_reported_with_the_kind_of_the_value(template: str) -> None:
+def test_a_name_read_on_a_string_is_reported_with_the_type_of_the_value(template: str) -> None:
     _spec, _template, context = _example("simple-app")
 
     checked = render_values_checked(template, context)
@@ -515,10 +517,11 @@ def test_a_template_that_does_not_compile_raises_as_on_the_agent() -> None:
     _spec, _template, context = _example("simple-app")
     template = "a: '{{ x'\n"
 
-    with pytest.raises(jinja2.TemplateSyntaxError):
+    with pytest.raises(jinja2.TemplateSyntaxError) as agent_error:
         render_values(template, context)
-    with pytest.raises(jinja2.TemplateSyntaxError):
+    with pytest.raises(jinja2.TemplateSyntaxError) as check_error:
         render_values_checked(template, context)
+    assert str(check_error.value) == str(agent_error.value)
 
 
 def test_the_render_state_is_reset_after_a_render_that_fails() -> None:
