@@ -180,7 +180,8 @@ The `code-review` skill ran in an agent that did not write the change, at high e
 | `3b406375..aebf9750` | 3 CRITICAL, 4 IMPORTANT, 14 MINOR | `24e9f88b` |
 | `aebf9750..24e9f88b` | 4 CRITICAL, 2 IMPORTANT, 12 MINOR | `94e02f4e` |
 | `24e9f88b..94e02f4e` | 2 CRITICAL, 4 IMPORTANT, 7 MINOR | `12249ea2` |
-| `94e02f4e..12249ea2` | 4 CRITICAL, 2 IMPORTANT, 8 MINOR | the commit that adds this row |
+| `94e02f4e..12249ea2` | 4 CRITICAL, 2 IMPORTANT, 8 MINOR | `31d8afb6` |
+| `12249ea2..31d8afb6` | 3 CRITICAL, 5 IMPORTANT, 7 MINOR | the commit that adds this row |
 
 Each review read the text that the review before it led to, and found statements in it that were false. The tables below name the tests as the commit that made the change named them. `aebf9750` and the commit after it renamed or replaced some of them:
 
@@ -320,14 +321,14 @@ MINOR findings of that review fixed: the test that a failed render leaves no use
 
 MINOR finding of that review left as it is: the known names of each mapping are fixed when the context is wrapped. After `{% set c = instance.pop("config") %}`, `{{ instance.config }}` is not reported, because `config` is a field of the context model; the server renders an empty string there.
 
-The findings of the review of `12249ea2`, and what changed in the commit that adds the last row of the table of reviews. The code of the check render does not change; the 110 templates tried in the reviews before give the same outputs and recorded uses as with `24e9f88b`. In each of 3 runs, the 104 tests of `test_rendering_check_mode.py` pass with the `rendering.py` of `12249ea2`; 4 fail with that of `94e02f4e`, and 1 with that of `24e9f88b`.
+The findings of the review of `12249ea2`, and what changed in `31d8afb6`. The code of the check render does not change; the 110 templates tried in the reviews before give the same outputs and recorded uses as with `24e9f88b`. In each of 3 runs, the 104 tests of `test_rendering_check_mode.py` pass with the `rendering.py` of `12249ea2`; 4 fail with that of `94e02f4e`, and 1 with that of `24e9f88b`.
 
 | Finding | Resolution |
 |---------|------------|
 | CRITICAL: the reference page said that a name that starts with `__` or `_undefined_` renders as on the server; `{{ parameters.x.__doc__ }}` and `{{ parameters.x.__slots__ }}` do not. New in `12249ea2`. | Fixed: the page says only that such a name is not reported. |
 | CRITICAL: the reference page, the commit message of `12249ea2`, R-003 and this file said that a name read on a literal is not recorded; it is recorded when Jinja does not evaluate it while compiling, such as in `{% if "abc".nmae %}`. The reason given, that the agent's render does not fail there, was wrong. New in `12249ea2`. | Fixed: the page lists a name read on a literal that the template writes out, and says that a name read on a value that is not a mapping of the context is reported with the kind of the value, such as `<str>.nmae`, unless the value is an empty string. R-003 and the code comment give the reason: Jinja evaluates some constant expressions when it compiles, and the state of the render is not set then. Tests: `test_rendering_check_mode.py::test_a_name_read_on_a_string_is_reported_with_the_kind_of_the_value` (2 cases), `::test_a_name_read_on_an_empty_string_of_the_context_is_not_reported`. |
 | CRITICAL: R-003 said both that the state of the render is set while the template compiles and renders, and that it is set only while it renders. | Fixed: it says only the second. |
-| CRITICAL: R-003 said that `render_values_checked` does not raise, for any exception; a template that does not compile raises. | Fixed: R-003 and the docstring say that a template that does not compile raises, as in `render_values`, and that `check` compiles it before. |
+| CRITICAL: R-003 said that `render_values_checked` does not raise, for any exception; a template that does not compile raises. | Fixed: R-003 and the docstring say that a template that does not compile raises, as in `render_values`; R-003 says that `check` compiles it before. |
 | IMPORTANT: `::test_the_render_state_holds_each_mapping_of_the_context` checked only that each entry of the table holds a dict, not that each mapping of the context is in the table. | Fixed: it walks the mappings that `_wrap` returns, and checks that each is in the table and held by its entry. |
 | IMPORTANT: no test covered how a name read on a string is recorded. | Fixed with the second CRITICAL finding. |
 
@@ -338,13 +339,34 @@ MINOR findings of that review left as they are:
 - At `parameters.x in 'abc'`, the message names `SilentUndefined` and not the variable, as on the server.
 - The reference page uses both "recorded" and "reported", and the uses that `check` does not report are described in five places.
 
+The findings of the review of `31d8afb6`, and what changed in the commit that adds the last row of the table of reviews. All of them are in the text and the tests, and the code of the check render does not change. Each finding came from a rule that the reference page stated about literals, names that start with `__` or the type of a value. The page now gives examples of these cases, and R-003 gives the rules.
+
+| Finding | Resolution |
+|---------|------------|
+| CRITICAL: the reference page said that a name read on a literal that the template writes out is not recorded; `{{ "abc".nmae ~ app.version }}` is recorded. New in `31d8afb6`. | Fixed: the page gives `{{ 'abc'.nmae }}` as an example of a use that is not reported. R-003 says that Jinja replaces some expressions that hold only constants with their result when it compiles, and that a use elsewhere is recorded. Test: the `~` case of `test_rendering_check_mode.py::test_a_name_read_on_a_string_is_reported_with_the_kind_of_the_value`. |
+| CRITICAL: the reference page and R-003 said that a name that starts with `__` or `_undefined_` is not reported; only a name that the undefined value has is not, and `{{ parameters.x.__foo }}` is reported as `parameters.x`. | Fixed: the page no longer states it. R-003 says that a name that the undefined value has, such as `x._undefined_name` or `x.__class__`, is not recorded. |
+| CRITICAL: R-003 and the commit message of `31d8afb6` said that a use in `{% if "abc".nmae %}` is recorded because Jinja does not evaluate it when it compiles; Jinja does, but does not replace it with its result. | Fixed in R-003. |
+| IMPORTANT: the page said that a name read on any value that is not a mapping of the context is reported with the type of the value, unless it is an empty string; some are not reported, such as `{% if 'abc'.nmae \| length %}`. | Fixed: the page says what the message gives when `check` reports such a name, and the uses that are not reported are given as examples. |
+| IMPORTANT: `::test_a_name_read_on_an_empty_string_of_the_context_is_not_reported` checked only that no use is recorded, so it also passed when the render failed. | Fixed: it also checks that the render does not fail and that the values are the agent's. |
+| IMPORTANT: the page did not say what the `<str>` of a message means. | Fixed: the page says that the message gives the type of the value in place of its path. |
+| IMPORTANT: a message such as `undefined variable '<str>.nmae'` does not show the expression, and two misspellings of the same name on one line give one error. | Kept: the error gives the line and the missing name. |
+| IMPORTANT: the page gave no reason why a name read on an empty string is not reported. | Fixed: R-003 gives the reason, and the page lists it as an example of a use that is not reported. |
+
+MINOR findings of that review fixed: the long line on the reference page; this file said that the docstring says that `check` compiles the template before, which only R-003 says; a test that a template that does not compile raises, from both renders (`::test_a_template_that_does_not_compile_raises_as_on_the_agent`); the return type of `_dicts`.
+
+MINOR findings of that review left as they are:
+
+- `{{ parameters.x.__doc__ }}` renders the docstring of the check render's class, which can make `check` report a YAML error where the server renders valid text.
+- The reference page still uses both "recorded" and "reported", and describes the uses that are not reported in several places.
+- No test covers the `<int>`, `<list>`, `<bool>` or `<dict>` names.
+
 Checks after the fixes, on the working tree of the commit that adds the last row of the table of reviews:
 
 | Command | Result |
 |---------|--------|
 | `uv run invoke lint` | exit code 0 |
 | `uv run pytest tests --ignore=tests/e2e -q -n auto` (in `backend/`) | 5809 passed, 8 skipped, 1 failed: the telemetry timing test of the first table, which failed there on a clean checkout too. Not run again on a clean checkout. |
-| `uv run pytest -q python_sdk/tests` | 572 passed, 1 xfailed (`slurpit`) |
+| `uv run pytest -q python_sdk/tests` | 574 passed, 1 xfailed (`slurpit`) |
 | `uv run pytest -q cli/tests` | 416 passed |
 | `cd docs && pnpm build` | `[SUCCESS] Generated static files in "build".` |
-| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 150.48s (0:02:30)`, ended 2026-10-29T16:58:48+01:00, session vCluster `pytest-ce66cb41-fe0e-4031-87d2-dbe2a8e732fc`, image built from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |
+| `sleep infinity \| uv run pytest backend/tests/e2e/test_deploy_app.py -k "styrmin_driver and api-chromium" -v -s --pdb -p no:cacheprovider` | `3 passed, 13 deselected, 4 warnings in 170.34s (0:02:50)`, ended 2026-10-29T17:16:52+01:00, session vCluster `pytest-ec9e3b39-534d-4b51-9184-95ecb6b81c2c`, image built from the working tree: `test_styrmin_driver_matches_helm_release` and the two cases of `test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver` |
