@@ -664,7 +664,7 @@ uv run styrmin-driver render driver/examples/my-app > values.yml
 example context as the server does, and reports the errors it finds, each
 with its file and, when it is known, its line. It reports the variables that
 the context does not define and that the render uses, apart from some uses,
-such as `parameters.x in parameters`; see
+such as a name read on a parameter whose value is an empty string; see
 [Undefined variables](../reference/styrmin-driver.md#undefined-variables).
 On the server, such a variable gives no error with a line: it renders as an
 empty string or another value, or the render fails with a message that gives
