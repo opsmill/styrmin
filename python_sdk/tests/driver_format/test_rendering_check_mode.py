@@ -1,5 +1,8 @@
 """The check render: the undefined variables that it finds, with their line and name (research R-003 and R-004)."""
 
+from collections.abc import Iterator
+
+import jinja2
 import pytest
 from styrmin_sdk.driver_format.errors import ChartValuesTemplateRenderingError
 from styrmin_sdk.driver_format.example_context import build_example_context
@@ -436,7 +439,7 @@ def test_an_undefined_key_is_reported_once_at_the_line_that_reads_it() -> None:
     assert checked.failure.message == _agent_failure(template, context)
 
 
-def _dicts(value: object):
+def _dicts(value: object) -> Iterator[dict]:
     if isinstance(value, dict):
         yield value
         for item in value.values():
@@ -483,6 +486,7 @@ def test_a_name_read_on_a_literal_that_jinja_evaluates_when_it_compiles_is_not_r
     [
         "a: '{% if \"abc\".nmae %}y{% endif %}'\n",
         "a: '{{ app.version.nmae }}'\n",
+        "a: '{{ \"abc\".nmae ~ app.version }}'\n",
     ],
 )
 def test_a_name_read_on_a_string_is_reported_with_the_kind_of_the_value(template: str) -> None:
@@ -498,7 +502,23 @@ def test_a_name_read_on_an_empty_string_of_the_context_is_not_reported() -> None
     _spec, _template, context = _example("simple-app")
     context = context.model_copy(update={"parameters": {**context.parameters, "empty": ""}})
 
-    assert not render_values_checked("a: '{{ parameters.empty.nmae }}'\n", context).undefined
+    template = "a: '{{ parameters.empty.nmae }}'\n"
+
+    checked = render_values_checked(template, context)
+
+    assert not checked.undefined
+    assert checked.failure is None
+    assert checked.values == render_values(template, context)
+
+
+def test_a_template_that_does_not_compile_raises_as_on_the_agent() -> None:
+    _spec, _template, context = _example("simple-app")
+    template = "a: '{{ x'\n"
+
+    with pytest.raises(jinja2.TemplateSyntaxError):
+        render_values(template, context)
+    with pytest.raises(jinja2.TemplateSyntaxError):
+        render_values_checked(template, context)
 
 
 def test_the_render_state_is_reset_after_a_render_that_fails() -> None:
