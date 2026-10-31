@@ -11,6 +11,12 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [Styrmin - v0.1.56](https://github.com/opsmill/styrmin/tree/v0.1.56) - 2026-10-31
+
+### Fixed
+
+- Fixed Logout in the web UI: it now shows the sign-in page right away, instead of switching between the current page and the sign-in page and sending hundreds of rejected requests per second until the page was reloaded. ([#579](https://github.com/opsmill/styrmin/issues/579))
+
 ## [Styrmin - v0.1.55](https://github.com/opsmill/styrmin/tree/v0.1.55) - 2026-10-28
 
 ### Added
