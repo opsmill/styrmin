@@ -796,7 +796,8 @@ def _parse_application_version(version: str) -> Version:
     except InvalidVersion as e:
         raise InvalidVersionSyntaxError(
             f"Version {version!r} is not a valid application version "
-            f"(expected a dotted numeric version such as 1.0.0)"
+            f"(Styrmin reads application versions as PEP 440 versions, "
+            f"for example 1.0.0, 1.0.0rc1 or 2026.8.5)"
         ) from e
 
 

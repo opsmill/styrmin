@@ -195,11 +195,21 @@ Notes:
 
 - **`metadata.name`** is the name users see. If you change it later,
   you must re-create every deployment that uses the old name.
-- **`supported_versions`** is a [PEP 440 / semver
-  specifier](https://semver.org/) of the application versions this
-  driver supports. Styrmin refuses to deploy an application version
-  outside this range, so a user cannot select a version that you have
-  not tested.
+- **`supported_versions`** is a [PEP 440 version
+  specifier](https://peps.python.org/pep-0440/#version-specifiers) of
+  the application versions this driver supports. Styrmin refuses to
+  deploy an application version outside this range, so a user cannot
+  select a version that you have not tested.
+  - Styrmin reads the application version of a deployment as a PEP 440
+    version, such as `1.6.0`, `1.6.0rc1` or `2026.8.5`. It refuses a
+    version in another format, such as `latest`, a commit hash or
+    `1.2.3-ls45`, and the same applies to `default_version`.
+  - A pre-release such as `1.6.0rc1` is outside a range unless the range
+    names a pre-release. For example, `>=1.5,<2.0` excludes `1.6.0rc1`,
+    and `>=1.6.0rc0,<2.0` includes it.
+  - If the application uses image tags in another format, let the user
+    set the tag in a driver parameter. The [generic-app
+    driver](./generic-app.md) does this with `image_tag`.
 - **`helm.main.location`** is a chart location that the Styrmin server
   can pass to Helm: an OCI URL (`oci://registry.example.com/charts/foo`),
   an HTTP repository URL, or a relative path in a chart directory of

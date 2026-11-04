@@ -19,6 +19,12 @@ describe("isApplicationVersionShape", () => {
     "v1.6.0",
     "V1.6.0",
     "1!1.6.0",
+    // The same list is `PEP_440_VERSIONS` in
+    // backend/tests/unit/services/test_driver_version_resolution.py.
+    // PEP 440 also allows `_` as a separator and inside a local version.
+    "1.2.3_rc1",
+    "1.2.3+build_5",
+    "2026.8.5",
   ])("accepts %s", (value) => {
     expect(isApplicationVersionShape(value)).toBe(true);
   });
