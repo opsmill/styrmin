@@ -114,7 +114,6 @@ from styrmin_backend.services.backup_storage_locations import (
     create_backup_storage_location as create_bsl_service,
     delete_backup_storage_location as delete_bsl_service,
     get_bsl_assignment,
-    request_bsl_cluster_cleanup,
     request_bsl_cluster_cleanup_if_unused,
     unassign_backup_storage_location as unassign_bsl_service,
     update_backup_storage_location as update_bsl_service,
@@ -680,6 +679,7 @@ class Mutation:
         )
 
         # Dispatch BSL sync flows
+        reassigned_from: UUID | None = None
         try:
             async with uow:
                 env = await uow.environments.get(environment_id)
@@ -706,23 +706,20 @@ class Mutation:
                                 "endpoint": bsl.endpoint,
                             },
                         )
-
-                    # Handle reassignment: delete old BSL from cluster if it was the last reference
+                    # Reassignment: the old location may now be unused
                     if old_bsl_id and old_bsl_id != backup_storage_location_id:
-                        old_bsl = await uow.backup_storage_locations.get(old_bsl_id)
-                        if old_bsl:
-                            old_remaining = [
-                                e
-                                for e in old_bsl.environments
-                                if e.cluster_id == cluster_id
-                            ]
-                            if not old_remaining:
-                                await request_bsl_cluster_cleanup(old_bsl_id)
+                        reassigned_from = old_bsl_id
+
+            # Outside the block above: the check opens its own unit of work.
+            # It removes the old location from the cluster if it was the last reference.
+            if reassigned_from is not None and cluster_id is not None:
+                await request_bsl_cluster_cleanup_if_unused(
+                    reassigned_from, cluster_id, uow
+                )
         except Exception as exc:
-            logger.warning(
-                "Failed to dispatch BSL sync workflow for environment {}: {}",
+            logger.opt(exception=exc).warning(
+                "Failed to dispatch BSL sync workflow for environment {}",
                 environment_id,
-                exc,
             )
 
         from styrmin_backend.services.environments import get_environment
@@ -748,10 +745,9 @@ class Mutation:
             try:
                 await request_bsl_cluster_cleanup_if_unused(*assignment, uow)
             except Exception as exc:
-                logger.warning(
-                    "Failed to dispatch BSL delete workflow for environment {}: {}",
+                logger.opt(exception=exc).warning(
+                    "Failed to dispatch BSL delete workflow for environment {}",
                     environment_id,
-                    exc,
                 )
 
         from styrmin_backend.services.environments import get_environment

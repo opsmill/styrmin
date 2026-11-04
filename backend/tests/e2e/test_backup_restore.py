@@ -2446,6 +2446,7 @@ async def test_bsl_cluster_objects_are_removed_when_nothing_uses_the_location(
         # The environment delete submits the removal before it returns, so a run
         # that was wrongly submitted already exists here.
         await client.environments.delete(environment_id=environment_ids[0])
+        environment_ids.pop(0)
         assert await bsl_removal_run_states(kubeconfig_path, bsl_id) == [], (
             "Deleting one of two environments that share the location must not "
             "submit a removal"
@@ -2453,8 +2454,8 @@ async def test_bsl_cluster_objects_are_removed_when_nothing_uses_the_location(
         bsls, secrets = await bsl_cluster_objects(kubeconfig_path, bsl_id)
         assert bsls == {id_name} and set(secrets) == {f"{id_name}-credentials"}
 
-        await client.environments.delete(environment_id=environment_ids[1])
-        environment_ids.clear()
+        await client.environments.delete(environment_id=environment_ids[0])
+        environment_ids.pop(0)
         await wait_for_bsl_cluster_objects(
             kubeconfig_path,
             bsl_id,

@@ -225,6 +225,13 @@ Manages environments within clusters.
 
 The `environment_deleted` log line records the number of environment backups and deployments deleted, the teardown requests that succeeded and failed, the clone records discarded, kept, deleted and failed, and `bsl_cleanup`: `no_location`, `location_still_used`, `requested` or `failed`.
 
+**Deliberate order in `delete_backup_storage_location`.** The service deletes the row and flushes it, then submits `sync_bsl_delete`, then commits. The order is on purpose: a database refusal shows before anything is submitted, and a submission that Prefect refuses rolls the row delete back, so the location is kept and the delete can be retried. Two failures remain:
+
+- The commit fails after the submission was accepted. The flow then removes the objects (the flow run does not depend on the transaction) and the location row stays with no objects in the cluster. Nothing breaks: the row has no environment, and assigning it to an environment creates the objects again, because the create flow makes them when none carries the location's id label (`create_velero_bsl_task`). Not reproduced; this follows from reading the code.
+- The Prefect call runs inside the open transaction, so a slow call keeps the transaction, and the flushed delete of the location row, open for as long as the call takes. How long a call to an unreachable Prefect server takes to fail is not measured.
+
+**Residual race between the count and an assignment (not fixed).** `delete_environment` and `unassign_backup_storage_location` decide with a count query after their commit. An environment assigned to the same location before the count is seen. An assignment that commits after the count is not seen, so the delete submits `sync_bsl_delete` while the assignment, which saw the environment already gone, submits `sync_bsl_create`. The order in which the two runs execute is not defined, so the objects can end up missing although an environment uses the location. Closing it needs the two paths to serialize on the location, for example with a lock on its row, which this change does not add. The unassign path had the same race before this change, because it decided before the unassign. Not reproduced. An operator sees it as a backup that fails because no Velero object carries the location's id label; assigning the location again creates the objects.
+
 #### Environment-config fanout
 
 <!-- Extracted from specs/009-environment-update on 2026-05-08 -->

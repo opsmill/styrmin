@@ -75,7 +75,6 @@ export default function BackupStorageLocationDetailPage() {
   const credSubmitting = useStore(credForm.store, (s) => s.isSubmitting);
 
   const handleDelete = async () => {
-    if (deleteBslMutation.isPending) return;
     setDeleteError(null);
     try {
       await deleteBslMutation.mutateAsync({ backupStorageLocationId: id });

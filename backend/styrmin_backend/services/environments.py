@@ -573,8 +573,10 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
         await uow.environments.delete(environment)
         await uow.commit()
 
-    # Decided after the delete, with a fresh count: an environment assigned to
-    # the location, or deleted, while this delete ran is seen.
+    # Decided after the delete, with a fresh count of the database. An
+    # environment that was assigned to the location, or deleted, before this
+    # count is seen; one assigned after the count is not (see "Deleting an
+    # environment" in dev/knowledge/backend/services.md).
     bsl_cleanup = "no_location"
     if bsl_id is not None:
         try:

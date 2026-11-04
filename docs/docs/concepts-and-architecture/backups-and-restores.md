@@ -414,6 +414,13 @@ If Styrmin cannot submit the removal, the result depends on the action:
   to an environment, so you cannot delete any BSL while Prefect is
   unreachable.
 
+If you assign the BSL to another environment of the cluster at the same
+moment as you delete or unassign the last environment that used it, the
+objects can be removed although an environment now uses the BSL. A
+backup of that environment then fails because no Velero object carries
+the BSL's id label. Assign the BSL to the environment again to create the
+objects. This was not reproduced.
+
 The `environment_deleted` log line of an environment delete ends with
 `bsl_cleanup=`, which is one of `no_location`, `location_still_used`,
 `requested` and `failed`.
