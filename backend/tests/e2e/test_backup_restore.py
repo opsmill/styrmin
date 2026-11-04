@@ -17,7 +17,6 @@ from prefect.client.orchestration import PrefectClient
 from prefect.client.schemas.filters import FlowFilter, FlowFilterName
 from prefect.exceptions import ObjectNotFound
 from styrmin_sdk import StyrminClient
-from styrmin_sdk._queries import load_query
 from styrmin_sdk.exceptions import OperationFailedError, ResourceNotFoundError
 
 from tests.e2e.conftest import _portforward, _wait_for_http
@@ -1777,9 +1776,34 @@ async def _read_status_and_last_poll(
     client: StyrminClient, deployment_id
 ) -> tuple[str, datetime | None]:
     """Read ``deployment.status`` and the last agent status report time together."""
-    deployment = await client.deployments.get_status(deployment_id)
+    deployment = await client.deployments.get_crd_status(deployment_id)
     crd_status = deployment.crd_status
     return deployment.status, crd_status.last_polled_at if crd_status else None
+
+
+async def _wait_for_reported_ready(
+    client: StyrminClient, deployment_id, max_wait: float, poll: float = 1.0
+) -> None:
+    """Wait until the agent reports the ``Ready`` phase, then check its ``Ready`` condition.
+
+    ``deployed_simple_app`` is shared by the shard, so a report from an earlier
+    test's rollout can still be the last one.
+    """
+    deadline = asyncio.get_event_loop().time() + max_wait
+    crd_status = None
+    while asyncio.get_event_loop().time() < deadline:
+        crd_status = (await client.deployments.get_crd_status(deployment_id)).crd_status
+        if crd_status is not None and crd_status.phase == "Ready":
+            ready = next((c for c in crd_status.conditions if c.type_ == "Ready"), None)
+            assert ready is not None, crd_status
+            assert ready.status == "True", ready
+            assert ready.last_transition_time is not None, ready
+            return
+        await asyncio.sleep(poll)
+    raise AssertionError(
+        f"Deployment {deployment_id} reported no Ready phase within {max_wait}s: "
+        f"{crd_status!r}"
+    )
 
 
 async def _status_after_next_report(
@@ -1836,6 +1860,7 @@ async def test_restore_lifecycle_transitions(
     await _wait_for_deployment_status(
         client, deployment_id, expected={"running"}, max_wait=30
     )
+    await _wait_for_reported_ready(client, deployment_id, max_wait=60)
 
     backup = await driver.create_backup(instance_id=instance_id)
     backup = await driver.wait_for_backup(backup_id=backup.id, max_wait=180)

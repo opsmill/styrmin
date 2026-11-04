@@ -42,16 +42,13 @@ import asyncio
 import time
 import uuid
 from pathlib import Path
-from typing import Any, AsyncGenerator, Callable
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable
 
 import pytest
 from kubernetes_asyncio import client as kubeclient
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
 from styrmin_sdk.exceptions import OperationFailedError
-from styrmin_sdk.graphql._generated.get_deployment_status import (
-    GetDeploymentStatusDeployment,
-)
 from styrmin_sdk.models import (
     ComponentConfigInput,
     EnvVarInput,
@@ -72,6 +69,9 @@ from tests.e2e.helpers.workloads import (
     wait_for_ready_container_image,
 )
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
+
+if TYPE_CHECKING:
+    from styrmin_sdk.models import DeploymentCrdStatus
 
 pytestmark = [
     pytest.mark.shard_configuration,
@@ -303,16 +303,16 @@ def _pod_shape(workload: Any) -> dict[str, Any]:
 async def _wait_for_deployment_status(
     client: StyrminClient,
     deployment_id: str,
-    predicate: Callable[[GetDeploymentStatusDeployment], bool],
+    predicate: Callable[[DeploymentCrdStatus], bool],
     *,
     description: str,
     timeout: float = RECONCILE_TIMEOUT_SECONDS,
-) -> GetDeploymentStatusDeployment:
+) -> DeploymentCrdStatus:
     """Poll ``Deployment.status`` and ``crdStatus`` until ``predicate`` holds."""
     deadline = time.monotonic() + timeout
-    deployment: GetDeploymentStatusDeployment | None = None
+    deployment: DeploymentCrdStatus | None = None
     while time.monotonic() < deadline:
-        deployment = await client.deployments.get_status(deployment_id)
+        deployment = await client.deployments.get_crd_status(deployment_id)
         if predicate(deployment):
             return deployment
         await asyncio.sleep(2)
@@ -871,6 +871,7 @@ async def test_misnamed_container_never_added(
     )
     assert helm_condition.status == "False", helm_condition
     assert helm_condition.reason == "ComponentContainerNotFound", helm_condition
+    assert helm_condition.last_transition_time is not None, helm_condition
 
     # Nothing was applied: no container added, the chart image still runs.
     apps = kubeclient.AppsV1Api(vcluster["api"])

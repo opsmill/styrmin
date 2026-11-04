@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock
@@ -202,7 +203,7 @@ async def test_get_deployment_not_found(client: StyrminClient, mock_transport: A
         await client.deployments.get("11111111-2222-3333-4444-555555555555")
 
 
-async def test_get_status_returns_the_operator_status(client: StyrminClient, mock_transport: AsyncMock) -> None:
+async def test_get_crd_status_returns_the_reported_status(client: StyrminClient, mock_transport: AsyncMock) -> None:
     mock_transport.execute.return_value = {
         "data": {
             "deployment": {
@@ -233,7 +234,7 @@ async def test_get_status_returns_the_operator_status(client: StyrminClient, moc
         }
     }
 
-    deployment = await client.deployments.get_status("11111111-2222-3333-4444-555555555555")
+    deployment = await client.deployments.get_crd_status("11111111-2222-3333-4444-555555555555")
 
     query, variables = mock_transport.execute.call_args.args
     assert "query GetDeploymentStatus(" in query
@@ -248,30 +249,39 @@ async def test_get_status_returns_the_operator_status(client: StyrminClient, moc
         "False",
         "ComponentContainerNotFound",
     )
+    assert condition.last_transition_time == datetime(2026, 10, 22, 10, 0, tzinfo=UTC)
     assert deployment.crd_status.managed_resource_counts is not None
     assert deployment.crd_status.managed_resource_counts.helm_releases == 1
     assert deployment.crd_status.last_polled_at is not None
 
 
-async def test_get_status_before_the_first_report(client: StyrminClient, mock_transport: AsyncMock) -> None:
+async def test_get_crd_status_before_the_first_report(client: StyrminClient, mock_transport: AsyncMock) -> None:
     mock_transport.execute.return_value = {
         "data": {"deployment": {"name": "my-app", "status": "pending", "crdStatus": None}}
     }
 
-    deployment = await client.deployments.get_status("11111111-2222-3333-4444-555555555555")
+    deployment = await client.deployments.get_crd_status("11111111-2222-3333-4444-555555555555")
 
     assert deployment.status == "pending"
     assert deployment.crd_status is None
 
 
-async def test_get_status_not_found(client: StyrminClient, mock_transport: AsyncMock) -> None:
+async def test_get_crd_status_not_found(client: StyrminClient, mock_transport: AsyncMock) -> None:
     mock_transport.execute.return_value = {
         "data": {"deployment": None},
         "errors": [{"message": "Deployment not found", "extensions": {"code": "NOT_FOUND"}}],
     }
 
     with pytest.raises(ResourceNotFoundError, match="Deployment not found"):
-        await client.deployments.get_status("11111111-2222-3333-4444-555555555555")
+        await client.deployments.get_crd_status("11111111-2222-3333-4444-555555555555")
+
+
+async def test_get_crd_status_of_an_internal_deployment(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    # The server returns null without an error for an internal deployment.
+    mock_transport.execute.return_value = {"data": {"deployment": None}}
+
+    with pytest.raises(ResourceNotFoundError, match="Deployment 11111111-2222-3333-4444-555555555555 not found"):
+        await client.deployments.get_crd_status("11111111-2222-3333-4444-555555555555")
 
 
 async def test_get_by_name_success(client: StyrminClient, mock_transport: AsyncMock) -> None:
