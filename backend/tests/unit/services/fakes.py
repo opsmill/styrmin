@@ -138,6 +138,16 @@ class FakeEnvironmentRepository(FakeRepository[Environment], EnvironmentReposito
                 return environment
         return None
 
+    async def count_using_backup_storage_location(
+        self, backup_storage_location_id: UUID, cluster_id: UUID
+    ) -> int:
+        return sum(
+            1
+            for environment in self.models
+            if environment.backup_storage_location_id == backup_storage_location_id
+            and environment.cluster_id == cluster_id
+        )
+
 
 class FakeHelmRepositoryRepository(
     FakeRepository[HelmRepository], HelmRepositoryRepository
@@ -851,6 +861,9 @@ class FakeUtilityRepository(FakeRepository[Utility], UtilityRepository):
 
 class _FakeSession:
     async def refresh(self, obj: object) -> None:
+        pass
+
+    async def flush(self) -> None:
         pass
 
     def begin_nested(self) -> contextlib.nullcontext[None]:

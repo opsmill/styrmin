@@ -648,26 +648,24 @@ class BackupStorageLocationInUseError(ServiceError):
 
 
 class BackupStorageLocationCleanupError(ServiceError):
-    """The cleanup of a backup storage location could not be submitted.
+    """The removal of a backup storage location's cluster objects could not be submitted.
 
-    Deleting a location removes its Velero object and credentials Secret from
-    the cluster first. When that cleanup cannot be submitted, the delete is
-    refused and the location is kept, because once its row is gone nothing
-    records that the cluster objects exist.
+    Deleting a location submits the Prefect flow that removes its Velero
+    object and credentials Secret from the cluster. When Prefect does not
+    accept the flow run, the delete is refused and the location is kept,
+    because once its row is gone nothing records that the cluster objects
+    exist. The cluster was not contacted.
     """
 
     error_code = "OPERATION_FAILED"
-    default_message = (
-        "Could not remove the backup storage location from the cluster; "
-        "it was not deleted"
-    )
 
     def __init__(self, name: str, message: str = "") -> None:
         self.name = name
         super().__init__(
             message
-            or f"Could not remove backup storage location '{name}' from the "
-            "cluster; it was not deleted. Try again."
+            or f"Could not submit the removal of backup storage location '{name}' "
+            "to Prefect; it was not deleted. Check that Prefect is running and "
+            "reachable, then try again."
         )
 
     @property

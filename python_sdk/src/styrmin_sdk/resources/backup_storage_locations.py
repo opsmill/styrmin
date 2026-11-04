@@ -111,9 +111,16 @@ class BackupStorageLocationResource(BaseResource):
         )
 
     async def delete(self, bsl_id: str | UUID) -> bool:
-        """Delete a BSL. Returns True on success.
+        """Delete a BSL and its Velero object and credentials Secret. Returns True on success.
 
-        Raises OperationFailedError if the BSL is in use by environments.
+        Raises OperationFailedError in two cases. Its ``typename`` is the server's
+        error code and tells them apart:
+
+        - ``IN_USE``: environments still use the BSL. Unassign them first.
+        - ``OPERATION_FAILED``: Styrmin could not submit the removal of the BSL's cluster
+          objects to Prefect, and the BSL was kept. Check that Prefect is reachable and
+          call ``delete`` again.
+
         Raises ResourceNotFoundError if the BSL does not exist.
         """
         result = await self._transport.execute(

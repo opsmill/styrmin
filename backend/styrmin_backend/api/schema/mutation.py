@@ -109,11 +109,13 @@ from styrmin_backend.services.auth.users import (
     update_user as update_user_service,
 )
 from styrmin_backend.services.backup_storage_locations import (
+    BSL_CLUSTER_NAMESPACE,
     assign_backup_storage_location as assign_bsl_service,
     create_backup_storage_location as create_bsl_service,
     delete_backup_storage_location as delete_bsl_service,
-    get_bsl_id_to_remove_from_cluster,
+    get_bsl_assignment,
     request_bsl_cluster_cleanup,
+    request_bsl_cluster_cleanup_if_unused,
     unassign_backup_storage_location as unassign_bsl_service,
     update_backup_storage_location as update_bsl_service,
 )
@@ -621,7 +623,10 @@ class Mutation:
                 )
                 await prefect_manager.run_action(
                     action=PrefectAction.SYNC_BSL_UPDATE_CREDENTIALS,
-                    parameters={"bsl_id": str(bsl.id), "namespace": "styrmin"},
+                    parameters={
+                        "bsl_id": str(bsl.id),
+                        "namespace": BSL_CLUSTER_NAMESPACE,
+                    },
                 )
             except Exception as exc:
                 logger.warning(
@@ -695,7 +700,7 @@ class Mutation:
                             action=PrefectAction.SYNC_BSL_CREATE,
                             parameters={
                                 "bsl_id": str(bsl.id),
-                                "namespace": "styrmin",
+                                "namespace": BSL_CLUSTER_NAMESPACE,
                                 "bucket": bsl.bucket,
                                 "region": bsl.region,
                                 "endpoint": bsl.endpoint,
@@ -715,8 +720,9 @@ class Mutation:
                                 await request_bsl_cluster_cleanup(old_bsl_id)
         except Exception as exc:
             logger.warning(
-                f"Failed to dispatch BSL sync workflow for environment {environment_id}",
-                exc_info=exc,
+                "Failed to dispatch BSL sync workflow for environment {}: {}",
+                environment_id,
+                exc,
             )
 
         from styrmin_backend.services.environments import get_environment
@@ -732,20 +738,20 @@ class Mutation:
     ) -> Environment | None:
         uow = info.context["uow"]
 
-        # Capture the BSL to remove from the cluster before unassigning: it is
-        # set only when this is the last environment of the cluster using it
-        bsl_id = await get_bsl_id_to_remove_from_cluster(environment_id, uow)
+        # Read the assignment before unassigning: it is gone afterwards
+        assignment = await get_bsl_assignment(environment_id, uow)
 
         await unassign_bsl_service(environment_id=environment_id, uow=uow)
 
         # Delete BSL from cluster if this was the last environment referencing it
-        if bsl_id:
+        if assignment is not None:
             try:
-                await request_bsl_cluster_cleanup(bsl_id)
+                await request_bsl_cluster_cleanup_if_unused(*assignment, uow)
             except Exception as exc:
                 logger.warning(
-                    f"Failed to dispatch BSL delete workflow for environment {environment_id}",
-                    exc_info=exc,
+                    "Failed to dispatch BSL delete workflow for environment {}: {}",
+                    environment_id,
+                    exc,
                 )
 
         from styrmin_backend.services.environments import get_environment
