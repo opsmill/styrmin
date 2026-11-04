@@ -37,7 +37,7 @@ A driver contains:
   at a hook (`setup` or `upgrade`) and a mode (`pre`, `core`, or `post`).
   Use them for migrations, seeding, smoke tests, and any other step that
   the application needs before or after its Helm release.
-- **Supported application versions.** A semver specifier of the
+- **Supported application versions.** A PEP 440 version specifier of the
   application versions that this driver supports.
 
 ### Drivers, driver versions, and deployments

@@ -4,9 +4,12 @@ import {
   exampleVersionForRange,
   invalidApplicationVersionMessage,
   isApplicationVersionShape,
+  normalizeApplicationVersion,
 } from "@/lib/applicationVersion";
 
 describe("isApplicationVersionShape", () => {
+  // The first group is `PEP_440_VERSIONS` in
+  // backend/tests/unit/services/test_driver_version_resolution.py.
   it.each([
     "1",
     "1.0",
@@ -15,26 +18,73 @@ describe("isApplicationVersionShape", () => {
     "2.0rc1",
     "1.0.post1",
     "1.0.0-beta+build.1",
-    // Forms the backend parser also accepts (PEP 440 v-prefix and epoch).
     "v1.6.0",
     "V1.6.0",
     "1!1.6.0",
-    // The same list is `PEP_440_VERSIONS` in
-    // backend/tests/unit/services/test_driver_version_resolution.py.
     // PEP 440 also allows `_` as a separator and inside a local version.
     "1.2.3_rc1",
     "1.2.3+build_5",
     "2026.8.5",
+    // Other spellings the grammar allows: normalized pre, post and dev forms.
+    "1.0.0-rc.1",
+    "1.0.0-alpha.1",
+    "1.0.0RC1",
+    "1.0-1",
+    "1.0.rev2",
+    "1.0.dev3",
+    "1.0a1.post2.dev3+local.7",
+    "0!1.0",
+    "1.0.0.0",
+    "1.0.0-beta",
   ])("accepts %s", (value) => {
     expect(isApplicationVersionShape(value)).toBe(true);
   });
 
-  it.each(["tata", "", "v", "vv1.0.0", "!1.0", "1.", ".1", "1..0", "latest"])(
-    "rejects %j",
+  // Surrounding whitespace is allowed; the form trims it before it sends it.
+  it.each([" 1.6.0", "1.6.0 ", " 1.6.0 ", "1.6.0\n", "\t1.6.0"])(
+    "accepts padded %j",
     (value) => {
-      expect(isApplicationVersionShape(value)).toBe(false);
+      expect(isApplicationVersionShape(value)).toBe(true);
     },
   );
+
+  // Strings that are not PEP 440 versions, so the server refuses them:
+  // image tags with a suffix, a commit hash, a date with dashes, moving tags.
+  // The first six matched the pattern before it followed the PEP 440 grammar.
+  it.each([
+    "3f2a9c1",
+    "2024-10-01",
+    "1.2.3-ls45",
+    "7.1.0-alpine",
+    "1.2.3-SNAPSHOT",
+    "1.0.0-x.7.z.92",
+    "1.0.0.",
+    "1.0.0-final",
+    "tata",
+    "",
+    "   ",
+    "v",
+    "vv1.0.0",
+    "!1.0",
+    "1.",
+    ".1",
+    "1..0",
+    "latest",
+    "main",
+    "2.580.1-lts-jdk21",
+    "1.2.3.RELEASE",
+    "1.2.3 4",
+  ])("rejects %j", (value) => {
+    expect(isApplicationVersionShape(value)).toBe(false);
+  });
+});
+
+describe("normalizeApplicationVersion", () => {
+  it("trims surrounding whitespace and keeps the rest", () => {
+    expect(normalizeApplicationVersion(" 1.6.0\n")).toBe("1.6.0");
+    expect(normalizeApplicationVersion("1.6.0")).toBe("1.6.0");
+    expect(normalizeApplicationVersion("  ")).toBe("");
+  });
 });
 
 describe("exampleVersionForRange", () => {

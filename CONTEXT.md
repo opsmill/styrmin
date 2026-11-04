@@ -131,7 +131,7 @@ The content-addressable identifier carried by each **application driver version*
 _Avoid_: "driver hash" alone (ambiguous across source types), "version hash" (conflates with **driver version**), "build id".
 
 **Application version**:
-The user-facing version of the deployed application (e.g. `infrahub` `1.6.0`), distinct from the **driver version** that knows how to deploy it. A **driver version** declares a semver specifier (`application_supported_versions`) describing which **application versions** it can deploy.
+The user-facing version of the deployed application (e.g. `infrahub` `1.6.0`), distinct from the **driver version** that knows how to deploy it. A **driver version** declares a PEP 440 version specifier (`application_supported_versions`) describing which **application versions** it can deploy.
 _Avoid_: "app version" (in code is fine, in prose write it out), conflating with **driver version**.
 
 **Latest-wins driver-version resolution**:

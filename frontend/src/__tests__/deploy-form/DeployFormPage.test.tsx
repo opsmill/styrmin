@@ -592,7 +592,8 @@ describe("DeployFormPage application version validation (#329)", () => {
       makeQueryResult(drivers),
     );
     await renderPage();
-    const user = userEvent.setup();
+    // The select popup can keep `pointer-events: none` while it opens.
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
     await user.type(screen.getByLabelText("Deployment Name"), "my-app");
     await user.click(await screen.findByTestId("driver-version-select"));
     await user.click(await screen.findByText("simple-app v0.1.0@aaaaaaa"));
@@ -638,5 +639,42 @@ describe("DeployFormPage application version validation (#329)", () => {
     expect(
       screen.queryByText(/Enter a version in the supported range/),
     ).not.toBeInTheDocument();
+  });
+
+  it("sends a version padded with spaces without them", async () => {
+    const user = await fillForm("  0.2.0  ");
+
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+
+    await waitFor(() => {
+      expect(noopMutationResult.mutateAsync).toHaveBeenCalledTimes(1);
+    });
+    expect(noopMutationResult.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ version: "0.2.0" }),
+    );
+  });
+
+  it("rejects a version that is not PEP 440 even when it starts with digits", async () => {
+    const user = await fillForm("1.2.3-ls45");
+
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+
+    expect(
+      await screen.findByText(/Enter a version in the supported range/),
+    ).toBeInTheDocument();
+    expect(noopMutationResult.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("sends no version when the field holds only spaces", async () => {
+    const user = await fillForm("   ");
+
+    await user.click(screen.getByRole("button", { name: "Deploy" }));
+
+    await waitFor(() => {
+      expect(noopMutationResult.mutateAsync).toHaveBeenCalledTimes(1);
+    });
+    expect(noopMutationResult.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ version: null }),
+    );
   });
 });

@@ -21,6 +21,7 @@ from styrmin_backend.services.deployment import (
     _ensure_pin_supports_version,
     _parse_application_version,
     _resolve_latest_matching_version,
+    _supported_ranges,
 )
 from styrmin_backend.services.exceptions import InvalidVersionSyntaxError
 
@@ -187,3 +188,22 @@ class TestParseApplicationVersion:
     def test_rejects_non_pep_440_versions_with_typed_error(self, version: str) -> None:
         with pytest.raises(InvalidVersionSyntaxError, match=repr(version)):
             _parse_application_version(version)
+
+
+class TestSupportedRanges:
+    """The ranges quoted in a "not supported" message."""
+
+    def test_lists_each_range_once_newest_driver_version_first(self) -> None:
+        driver = _driver(
+            [
+                _adv("1", supported=">=0.1,<1.0"),
+                _adv("3", supported=">=2.0,<3.0"),
+                _adv("2", supported=">=1.0,<2.0"),
+                _adv("4", supported=">=2.0,<3.0"),
+            ]
+        )
+        # ";" separates ranges, because a range itself holds commas.
+        assert _supported_ranges(driver) == ">=2.0,<3.0; >=1.0,<2.0; >=0.1,<1.0"
+
+    def test_without_driver_versions(self) -> None:
+        assert _supported_ranges(_driver([])) == "none"

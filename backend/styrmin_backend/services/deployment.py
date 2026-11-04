@@ -802,14 +802,19 @@ def _parse_application_version(version: str) -> Version:
 
 
 def _supported_ranges(application_driver: ApplicationDriver) -> str:
-    """Human-readable, de-duplicated list of the driver's supported version ranges."""
-    ranges = sorted(
-        {
-            driver_version.application_supported_versions
-            for driver_version in application_driver.versions
-        }
-    )
-    return ", ".join(ranges) if ranges else "none"
+    """The driver's supported version ranges, for an error message.
+
+    Each range appears once, ordered by the driver version that declares it,
+    latest first (:func:`_driver_version_sort_key`). A range can hold commas
+    (``>=1.0,<2.0``), so the ranges are separated with ``;``.
+    """
+    ranges: list[str] = []
+    for driver_version in sorted(
+        application_driver.versions, key=_driver_version_sort_key, reverse=True
+    ):
+        if driver_version.application_supported_versions not in ranges:
+            ranges.append(driver_version.application_supported_versions)
+    return "; ".join(ranges) if ranges else "none"
 
 
 def _resolve_latest_matching_version(

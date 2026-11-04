@@ -37,6 +37,7 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 import {
   invalidApplicationVersionMessage,
   isApplicationVersionShape,
+  normalizeApplicationVersion,
 } from "@/lib/applicationVersion";
 
 /**
@@ -50,14 +51,17 @@ function buildDeployFormSchema(supportedVersions: string | null | undefined) {
     applicationDriverVersionId: z
       .string()
       .min(1, "Application driver version is required"),
-    // Empty means "use the driver's default version" (the mutation treats an
-    // empty string as no version); anything else must look like a version.
+    // Empty (or only spaces) means "use the driver's default version": the
+    // form sends null. Anything else, once trimmed, must be a PEP 440 version.
     // Range enforcement stays server-side; see lib/applicationVersion.ts.
     applicationVersion: z
       .string()
-      .refine((v) => v === "" || isApplicationVersionShape(v), {
-        message: invalidApplicationVersionMessage(supportedVersions),
-      }),
+      .refine(
+        (v) => !normalizeApplicationVersion(v) || isApplicationVersionShape(v),
+        {
+          message: invalidApplicationVersionMessage(supportedVersions),
+        },
+      ),
   });
 }
 
@@ -141,7 +145,8 @@ export default function DeployFormPage() {
           // Pin the version the form shows, so its fields match the checks.
           driverVersionId: selectedVersion!.id,
           name: value.name,
-          version: value.applicationVersion || null,
+          version:
+            normalizeApplicationVersion(value.applicationVersion) || null,
           environmentId,
           parameters:
             Object.keys(dynamicParams).length > 0
