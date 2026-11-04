@@ -75,6 +75,7 @@ export default function BackupStorageLocationDetailPage() {
   const credSubmitting = useStore(credForm.store, (s) => s.isSubmitting);
 
   const handleDelete = async () => {
+    if (deleteBslMutation.isPending) return;
     setDeleteError(null);
     try {
       await deleteBslMutation.mutateAsync({ backupStorageLocationId: id });
@@ -185,9 +186,14 @@ export default function BackupStorageLocationDetailPage() {
             </Dialog>
           </IfRole>
           <IfRole minimum="READ_WRITE">
-            <Button size="sm" variant="destructive" onClick={handleDelete}>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteBslMutation.isPending}
+            >
               <Trash2 className="h-4 w-4 mr-1" />
-              Delete
+              {deleteBslMutation.isPending ? "Deleting..." : "Delete"}
             </Button>
           </IfRole>
         </div>
