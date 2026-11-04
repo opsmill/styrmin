@@ -13,6 +13,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
+
 from styrmin_backend.db.models import ApplicationDriver, ApplicationDriverVersion
 from styrmin_backend.services.deployment import (
     _driver_version_sort_key,
@@ -112,3 +114,40 @@ class TestResolveLatestMatchingVersion:
         second_build = _adv("1", supported=">=0.1,<1.0", created_on=_T2)
         driver = _driver([first_build, second_build])
         assert _resolve_latest_matching_version(driver, "0.5.0") is second_build
+
+
+class TestPrereleaseMatching:
+    """A range matches a prerelease only if the range names one (PEP 440, #591).
+
+    The rows of the three ranges are the table of
+    ``docs/docs/drivers/creating-a-driver.md``. The last two rows are the
+    clauses that the table does not show: ``!=`` does not count, a bound does.
+    """
+
+    @pytest.mark.parametrize(
+        ("supported", "application_version", "matches"),
+        [
+            (">=1.5,<2.0", "1.12.0b0", False),
+            (">=1.5,<2.0", "1.12.0rc1", False),
+            (">=1.5,<2.0", "1.12.0.dev1", False),
+            (">=1.5,<2.0", "1.12.0", True),
+            (">=1.5,<2.0", "1.9.0rc1", False),
+            (">=1.12.0b0,<1.13", "1.12.0b0", True),
+            (">=1.12.0b0,<1.13", "1.12.0", True),
+            (">=1.12.0b0,<1.13", "1.9.0rc1", False),
+            (">=1.5.0b0,<2.0", "1.12.0b0", True),
+            (">=1.5.0b0,<2.0", "1.12.0", True),
+            (">=1.5.0b0,<2.0", "1.9.0rc1", True),
+            (">=1.5.0b0,<2.0", "1.6.0.dev1", True),
+            (">=1.5,!=1.12.0b0,<2.0", "1.12.0b1", False),
+            (">=1.5,<2.0b0", "1.12.0b1", True),
+        ],
+    )
+    def test_range_matches_a_prerelease_only_if_it_names_one(
+        self, supported: str, application_version: str, matches: bool
+    ) -> None:
+        driver = _driver([_adv("1", supported=supported)])
+
+        resolved = _resolve_latest_matching_version(driver, application_version)
+
+        assert (resolved is not None) is matches

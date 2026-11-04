@@ -822,14 +822,62 @@ async def _load_pinned_driver_version(
     return pinned
 
 
+def _prerelease_explanation(version: Version, ranges: Iterable[str]) -> str:
+    """Explain why a prerelease is refused, or return an empty string.
+
+    A range matches a prerelease only if one of its clauses names a prerelease,
+    and a ``!=`` clause does not count (PEP 440). The explanation is given only
+    when it is the reason: the
+    version is a prerelease and some range would accept it if prereleases were
+    allowed. A prerelease that no range accepts anyway gets no explanation,
+    because naming a prerelease in a range would not help.
+    """
+    if not version.is_prerelease or not any(
+        SpecifierSet(supported).contains(version, prereleases=True)
+        for supported in ranges
+    ):
+        return ""
+    return (
+        f" Version {version} is a prerelease, and a range matches a prerelease "
+        f"only if one of its clauses names a prerelease (a != clause does not count)."
+    )
+
+
+def _unsupported_version_error(
+    application_driver: ApplicationDriver, version: str
+) -> InvalidVersionError:
+    """The refusal of ``version`` when no driver version of the driver supports it.
+
+    Lists every supported range once, newest driver version first, so the
+    person can see what the driver accepts, and explains the prerelease rule
+    when it is the reason.
+    """
+    ranges = list(
+        dict.fromkeys(
+            driver_version.application_supported_versions
+            for driver_version in sorted(
+                application_driver.versions, key=_driver_version_sort_key, reverse=True
+            )
+        )
+    )
+    listed = f" (supported ranges: {', '.join(ranges)})" if ranges else ""
+    return InvalidVersionError(
+        f"Version {version} is not supported by the application driver "
+        f"{application_driver.name}{listed}."
+        f"{_prerelease_explanation(Version(version), ranges)}"
+    )
+
+
 def _ensure_pin_supports_version(
     pinned: ApplicationDriverVersion, version: str
 ) -> None:
     """Reject a pin whose specifier does not cover the requested version."""
-    if Version(version) not in SpecifierSet(pinned.application_supported_versions):
+    target = Version(version)
+    if target not in SpecifierSet(pinned.application_supported_versions):
         raise InvalidVersionError(
             f"Version {version} is not supported by driver version {pinned.id} "
-            f"(supports {pinned.application_supported_versions})"
+            f"(supports {pinned.application_supported_versions})."
+            f"{_prerelease_explanation(target, [pinned.application_supported_versions])}"
         )
 
 
@@ -985,9 +1033,7 @@ async def update_deployment_version(
                 app_version=version,
             )
             if target_driver_version is None:
-                raise InvalidVersionError(
-                    f"Version {version} is not supported by the application driver {application_driver.name}"
-                )
+                raise _unsupported_version_error(application_driver, version)
             logger.info(
                 "Resolved latest matching driver version: id={} supports={}",
                 target_driver_version.id,
@@ -1897,9 +1943,7 @@ async def deploy_application(
         )
 
         if application_driver_version is None:
-            raise InvalidVersionError(
-                f"Version {version} is not supported by the application driver {driver_name}"
-            )
+            raise _unsupported_version_error(application, version)
 
         # Reject component-level env var blocks targeting components the
         # selected driver does not declare (FR-010). Surface

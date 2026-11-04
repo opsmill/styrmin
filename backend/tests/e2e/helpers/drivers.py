@@ -64,6 +64,57 @@ async def publish_misnamed_simple_app_driver(
     return await client.drivers.load_version(git_server["simple-app"], MISNAMED_BRANCH)
 
 
+async def publish_simple_app_driver_build(
+    *,
+    client: StyrminClient,
+    vcluster: dict,
+    git_server: dict[str, str],
+    tmp_path: Path,
+    name: str,
+    branch: str,
+    driver_version: str,
+    supported_versions: str,
+) -> ApplicationDriverVersion:
+    """Load one build of ``name``: simple-app with its own driver version and range.
+
+    Two builds with the same ``name`` and different ``driver_version`` and
+    ``supported_versions`` are two driver versions of one application driver (#591).
+    """
+    repo_dir = tmp_path / branch
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
+    git_svc = await AsyncService.get("git-server", namespace="default", api=kr8s_api)
+    async with _portforward(git_svc, remote_port=9418) as local_port:
+        # Clone the harness copy so the chart location already points at the chart server.
+        local_url = f"git://localhost:{local_port}/simple-app.git"
+        await asyncio.to_thread(porcelain.clone, local_url, str(repo_dir))
+
+        spec_path = repo_dir / "driver.styrmin.yml"
+        spec = yaml.safe_load(spec_path.read_text())
+        spec["metadata"]["name"] = name
+        spec["spec"]["version"] = driver_version
+        spec["spec"]["supported_versions"] = supported_versions
+        spec_path.write_text(yaml.dump(spec, default_flow_style=False))
+
+        await asyncio.to_thread(
+            porcelain.add, str(repo_dir), paths=["driver.styrmin.yml"]
+        )
+        await asyncio.to_thread(
+            porcelain.commit,
+            str(repo_dir),
+            message=f"{name} {driver_version}: supports {supported_versions}".encode(),
+            author=b"test <test@test.com>",
+            committer=b"test <test@test.com>",
+        )
+        await asyncio.to_thread(
+            porcelain.push,
+            str(repo_dir),
+            remote_location=local_url,
+            refspecs=[f"HEAD:refs/heads/{branch}".encode()],
+            force=True,
+        )
+    return await client.drivers.load_version(git_server["simple-app"], branch)
+
+
 # The container of the Styrmin server pod, and the agent pod and its container
 # (helm/styrmin and helm/agent). The agent's Prefect process worker runs every
 # action of a driver version.
