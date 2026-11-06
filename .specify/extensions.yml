@@ -12,13 +12,6 @@ hooks:
     prompt: Commit implementation changes?
     description: Auto-commit after implementation
     condition: null
-  - extension: review
-    command: speckit.review.run
-    enabled: true
-    optional: true
-    prompt: Run PR review on implemented changes?
-    description: Comprehensive review after implementation
-    condition: null
   before_constitution:
   - extension: git
     command: speckit.git.initialize
