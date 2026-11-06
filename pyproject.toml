@@ -283,7 +283,7 @@ type = "datetime.datetime"
 type = "int"
 
 [tool.rumdl]
-exclude = [".venv", "node_modules", "dev", ".claude", "specs", ".github/agents", ".specify/extensions", ".specify/templates", ".agents", ".github/workflows"]
+exclude = [".venv", "node_modules", "dev", ".claude", "specs", ".github/agents", ".specify/extensions", ".specify/presets", ".specify/templates", ".agents", ".github/workflows"]
 disable = [
     "MD013",  # Line length
     "MD033",  # Inline HTML
