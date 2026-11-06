@@ -1,17 +1,17 @@
 {
   "integration": "claude",
-  "version": "0.11.3",
-  "installed_at": "2026-06-21T13:06:17.522498+00:00",
+  "version": "1.2.5",
+  "installed_at": "2026-11-06T08:43:04.050846+00:00",
   "files": {
-    ".agents/skills/speckit-analyze/SKILL.md": "0c6d0525b97b523851a3ea8fc0efdcf477dfa65bef8c4d976b6da2f220f32c86",
-    ".agents/skills/speckit-clarify/SKILL.md": "eb8907c57e9af2c54952370a45e3fb66cb21a64dc7b3d361615bab914c13becf",
-    ".agents/skills/speckit-constitution/SKILL.md": "c1a044aba243ca6aff627fb5e4404feb6f1108d4f7dd174631bee3ae477d6c15",
-    ".agents/skills/speckit-implement/SKILL.md": "042a0415ce60a5b66adf039da431d9a98cb4897ff330635e0bab0becbbaf3cd2",
-    ".agents/skills/speckit-converge/SKILL.md": "a6acccbb6630f04fa716967c68f3be9da96762805ddd2bf284fad36324c5c876",
-    ".agents/skills/speckit-plan/SKILL.md": "fd0e312109109d09d6b691d232925b54df11681e79e1dc333ad49b210d5efb00",
-    ".agents/skills/speckit-checklist/SKILL.md": "b05086a11d4b98dcb85822e8a468ef30b8353f132b6dac1359080b93833c4666",
-    ".agents/skills/speckit-specify/SKILL.md": "ebe19db388407058a6b078b3a66ea7198cb89795dc75680ba3c457f11bc8bf7a",
-    ".agents/skills/speckit-tasks/SKILL.md": "023b1c75a62dc6fd8bff67855ebb82ec54a8104e727571aa72200c8afcc3f99b",
-    ".agents/skills/speckit-taskstoissues/SKILL.md": "aa1151798a551fb52c439ca75c02d4f2e7b40c6c7d11fc025265cf1230c67cb1"
+    ".agents/skills/speckit-analyze/SKILL.md": "3237cd827194efaf6bb06ba05ef9bc1a703a223d362f5e34d0558c5a38ae34d0",
+    ".agents/skills/speckit-clarify/SKILL.md": "164f49ef87cb2e922585316f5281b455a8e1940b1efd25317d517a567acae472",
+    ".agents/skills/speckit-constitution/SKILL.md": "60c27f3962e78edf204b2b2e7cba91a616980860b61d6bf2051dc6965d483dda",
+    ".agents/skills/speckit-implement/SKILL.md": "7186d59488f89dcf23abd17baed118b05c242d4f62f1de3f9f44625a2b1728f0",
+    ".agents/skills/speckit-converge/SKILL.md": "9f93c1d573592f146670202210128ed24a9d75c92133951b19a2bb0e34eac13b",
+    ".agents/skills/speckit-plan/SKILL.md": "9e97fc0b4ce895c70a1ea720dc0377618c23e27c83ecf4d87b6e0f6c323790a4",
+    ".agents/skills/speckit-checklist/SKILL.md": "5dc436df0c727e9078bf182dd385e5cb1b60ee67ebe644d3f659ec12e3b78abb",
+    ".agents/skills/speckit-specify/SKILL.md": "d4d93f2444355136e78bb533988aa2dd560dc4b258f4923f67b1a437e7de38f8",
+    ".agents/skills/speckit-tasks/SKILL.md": "d148aeda1011260c4465c5f105fa1e045a0b0224ccb3e6e0c1ec32c732cae1ae",
+    ".agents/skills/speckit-taskstoissues/SKILL.md": "471edc95cb41acdc18d4ab3c0f024334bbc4bac9936f955dde30fc3cb9d77473"
   }
 }
