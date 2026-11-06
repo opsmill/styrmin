@@ -60,6 +60,11 @@ dev = [
 
 [tool.ty]
 
+[tool.ty.src]
+exclude = [
+    ".specify/**",
+]
+
 [tool.ty.environment]
 python-version = "3.14"
 extra-paths = ["backend"]
@@ -143,6 +148,7 @@ exclude = [
     "examples",
     "_generated",
     "specs",
+    ".specify",
 ]
 
 
