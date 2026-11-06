@@ -84,10 +84,9 @@ async def apply_environment_id(
     Each test deploys ``simple-app``, which registers a per-env service named
     ``simple-app``. The shared ``scenario_environment_id`` already has that
     service registered (via ``deployed_simple_app`` and other session
-    fixtures), and ``ResolvedManifest`` has no ``service_name_overrides``
-    surface, so reusing the session env collides on
-    ``ResourceAlreadyExistsError``. A fresh env per test is the simplest
-    isolation that doesn't require expanding the manifest schema.
+    fixtures), so reusing the session env collides on
+    ``ResourceAlreadyExistsError`` unless the manifest sets a service name
+    override. A fresh env per test is the simplest isolation.
     """
     driver, client = session_scenario_driver
     env_id = await _create_apply_env(driver, styrmin_resources)
@@ -277,6 +276,95 @@ async def test_apply_creates_updates_then_noops(
     assert after.status == before.status, (
         f"no-op re-apply must not change deployment status; "
         f"{before.status!r} -> {after.status!r}"
+    )
+
+
+@pytest.mark.api_only(
+    reason="apply has no UI flow; api/sdk and ui variants would re-run identical SDK calls",
+)
+async def test_apply_creates_a_second_deployment_with_a_service_name_override(
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    apply_environment_id: str,
+    styrmin_resources: dict,  # noqa: ARG001 — transitive: cluster/BSL/driver loaded
+    simple_app_image: str,  # noqa: ARG001 — ensures the image is built
+    tmp_path: Path,
+) -> None:
+    """A manifest creates a second deployment of one driver in the same environment.
+
+    ``simple-app`` declares the service ``simple-app`` and a service name is unique
+    within an environment, so the second deployment needs an override. The manifest
+    sets it in ``spec.config.service_name_overrides``, which ``apply`` passes to the
+    ``deploy`` mutation when it creates the deployment. Before, ``apply`` dropped the
+    key and the second create failed with ``Service name 'simple-app' already exists``.
+
+    - First deployment: no override, so it keeps the service name ``simple-app``.
+    - Second deployment: ``created``, runs, and its service is named by the override.
+    """
+    driver, client = session_scenario_driver
+    environment = await client.environments.get(environment_id=apply_environment_id)
+    # A service name must be a DNS label, so no underscore, unlike a pytest tmp_path name.
+    suffix = uuid.uuid4().hex[:8]
+    override_name = f"simple-app-b-{suffix}"
+
+    def manifest_doc(name: str, config: dict) -> dict:
+        return {
+            "apiVersion": "styrmin/v1",
+            "kind": "Deployment",
+            "metadata": {"name": name},
+            "spec": {
+                "driver": "simple-app",
+                "version": "0.1.0",
+                "environment": environment.name,
+                "config": config,
+                "parameters": {},
+            },
+        }
+
+    first = await client.deployments.apply(
+        _resolve_manifest_from_doc(
+            manifest_doc(f"apply-e2e-a-{suffix}", {}), tmp_path / "first.yaml"
+        )
+    )
+    assert first.action == "created", (
+        f"first apply should create the deployment, got action={first.action!r} "
+        f"(reason={first.failure_reason!r})"
+    )
+
+    second_doc = manifest_doc(
+        f"apply-e2e-b-{suffix}",
+        {
+            "service_name_overrides": [
+                {"driver_service_name": "simple-app", "override_name": override_name}
+            ]
+        },
+    )
+    second = await client.deployments.apply(
+        _resolve_manifest_from_doc(second_doc, tmp_path / "second.yaml")
+    )
+    assert second.action == "created", (
+        f"a manifest with a service name override must create the second deployment, "
+        f"got action={second.action!r} (reason={second.failure_reason!r})"
+    )
+    assert second.deployment_id is not None
+    await driver.wait_for_deployment_running(
+        deployment_id=str(second.deployment_id), timeout=300.0
+    )
+
+    deployed = await client.deployments.get(str(second.deployment_id))
+    resolved = {
+        s.driver_service_name: s.resolved_name for s in deployed.deployed_services
+    }
+    assert resolved == {"simple-app": override_name}, (
+        f"the service of the second deployment must carry the override; got {resolved!r}"
+    )
+
+    # Applying the same manifest again changes nothing: the override already holds.
+    again = await client.deployments.apply(
+        _resolve_manifest_from_doc(second_doc, tmp_path / "second.yaml")
+    )
+    assert again.action == "unchanged", (
+        f"re-applying the manifest with the override must be a no-op, got "
+        f"action={again.action!r} (reason={again.failure_reason!r})"
     )
 
 
@@ -560,8 +648,8 @@ async def test_apply_files_batch_continues_past_failure(
     Asserts on per-outcome shape and on cluster-side state for the two
     successful deployments.
 
-    Two envs are needed because the manifest schema has no
-    ``service_name_overrides`` surface and ``simple-app`` registers a
+    Two envs are needed because these manifests set no
+    ``service_name_overrides`` and ``simple-app`` registers a
     fixed per-env service name. ``alpha`` and ``gamma`` (which reuses
     ``alpha``'s deployment name to trigger the driver-mismatch failure)
     target the primary env; ``beta`` lives in a secondary env so its own

@@ -947,6 +947,157 @@ async def test_apply_create_sends_component_replicas(client: StyrminClient, mock
     assert deploy_vars["config"] == {"components": [{"name": "task-worker", "replicas": 4}]}
 
 
+_SEMAPHORE_EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "deployments" / "semaphore.yml"
+
+
+async def test_apply_create_sends_service_name_overrides(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """``spec.config.service_name_overrides`` reaches the ``deploy`` mutation as its own argument.
+
+    Without it a second ``generic-app`` in one environment is refused (``Service name 'app'
+    already exists``), because the typed config has no such field and the key was dropped.
+    """
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _missing_deployment_response(),
+        _deploy_response(),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(
+            config={
+                "service_name_overrides": [{"driver_service_name": "app", "override_name": "batfish"}],
+                "envVars": [{"name": "MY_ENV", "value": "value01"}],
+            }
+        )
+    )
+
+    assert outcome.action == "created"
+    deploy_vars = mock_transport.execute.call_args_list[2].args[1]
+    assert deploy_vars["serviceNameOverrides"] == [{"driverServiceName": "app", "overrideName": "batfish"}]
+    # The other config fields still go through the typed config, without the overrides.
+    assert deploy_vars["config"] == {"envVars": [{"name": "MY_ENV", "value": "value01"}]}
+
+
+async def test_apply_create_accepts_camel_case_service_name_overrides(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _missing_deployment_response(),
+        _deploy_response(),
+    ]
+
+    await client.deployments.apply(
+        _resolved_manifest(
+            config={"serviceNameOverrides": [{"driverServiceName": "app", "overrideName": "batfish"}]},
+        )
+    )
+
+    deploy_vars = mock_transport.execute.call_args_list[2].args[1]
+    assert deploy_vars["serviceNameOverrides"] == [{"driverServiceName": "app", "overrideName": "batfish"}]
+    # A config that holds only the overrides sends no typed config.
+    assert "config" not in deploy_vars
+
+
+async def test_apply_create_without_service_name_overrides_sends_none(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _missing_deployment_response(),
+        _deploy_response(),
+    ]
+
+    await client.deployments.apply(_resolved_manifest(config={"envVars": [{"name": "MY_ENV", "value": "value01"}]}))
+
+    assert "serviceNameOverrides" not in mock_transport.execute.call_args_list[2].args[1]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "app=batfish",
+        {"driver_service_name": "app", "override_name": "batfish"},
+        [{"driver_service_name": "app"}],
+        ["app"],
+    ],
+)
+async def test_apply_create_refuses_a_malformed_service_name_override(
+    client: StyrminClient, mock_transport: AsyncMock, value: object
+) -> None:
+    """A malformed value fails before any mutation, like the other config fields."""
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _missing_deployment_response(),
+    ]
+
+    with pytest.raises(ManifestValidationError, match="service_name_overrides"):
+        await client.deployments.apply(_resolved_manifest(config={"service_name_overrides": value}))
+
+    assert not any(op.startswith("mutation") for op in _operation_names(mock_transport))
+
+
+async def test_apply_create_treats_a_null_service_name_overrides_as_unset(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """A key with no value, such as a list whose entries are all commented out, sets nothing.
+
+    It created fine before overrides were read, and the update path already accepts it.
+    """
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _missing_deployment_response(),
+        _deploy_response(),
+    ]
+
+    outcome = await client.deployments.apply(_resolved_manifest(config={"service_name_overrides": None}))
+
+    assert outcome.action == "created"
+    deploy_vars = mock_transport.execute.call_args_list[2].args[1]
+    assert "serviceNameOverrides" not in deploy_vars
+    assert "config" not in deploy_vars
+
+
+@pytest.mark.parametrize("path", ["create", "update"])
+async def test_apply_refuses_both_spellings_of_service_name_overrides(
+    client: StyrminClient, mock_transport: AsyncMock, path: str
+) -> None:
+    """Both spellings at once are ambiguous, and create and update must refuse them alike."""
+    existing = _missing_deployment_response() if path == "create" else _existing_deployment_response(version="1.0.0")
+    mock_transport.execute.side_effect = [_list_environments_response(), existing]
+
+    with pytest.raises(ManifestValidationError, match="both service_name_overrides and serviceNameOverrides"):
+        await client.deployments.apply(
+            _resolved_manifest(
+                config={
+                    "service_name_overrides": [{"driver_service_name": "app", "override_name": "b"}],
+                    "serviceNameOverrides": [{"driverServiceName": "app", "overrideName": "c"}],
+                }
+            )
+        )
+
+    assert not any(op.startswith("mutation") for op in _operation_names(mock_transport))
+
+
+async def test_apply_update_sends_service_name_overrides(client: StyrminClient, mock_transport: AsyncMock) -> None:
+    """The update path already carried the overrides, since its input model has the field. This pins it."""
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+    ]
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(
+            config={"service_name_overrides": [{"driver_service_name": "app", "override_name": "batfish"}]},
+        )
+    )
+
+    assert outcome.action == "updated"
+    version_vars = mock_transport.execute.call_args_list[2].args[1]
+    assert version_vars["input"] == {"serviceNameOverrides": [{"driverServiceName": "app", "overrideName": "batfish"}]}
+
+
 _REPLICAS_MANIFEST = """\
 apiVersion: styrmin/v1
 kind: Deployment
@@ -984,6 +1135,23 @@ async def test_apply_files_sends_manifest_replicas_and_omits_a_cleared_one(
     assert outcome.inapplicable_overrides == {}
     version_vars = mock_transport.execute.call_args_list[2].args[1]
     assert version_vars["input"] == {"components": [{"name": "task-worker", "replicas": 4}, {"name": "server"}]}
+
+
+async def test_apply_files_creates_from_the_documented_example_with_its_service_name_override(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """``examples/deployments/semaphore.yml`` is the manifest the docs show: its override must reach ``deploy``."""
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _missing_deployment_response(),
+        _deploy_response(),
+    ]
+
+    [outcome] = await client.deployments.apply_files([_SEMAPHORE_EXAMPLE], overrides=ApplyOverrides(environment="prod"))
+
+    assert outcome.action == "created"
+    deploy_vars = mock_transport.execute.call_args_list[2].args[1]
+    assert deploy_vars["serviceNameOverrides"] == [{"driverServiceName": "semaphore", "overrideName": "ansible"}]
 
 
 async def test_apply_skips_the_applicability_read_when_no_block_sets_an_override(

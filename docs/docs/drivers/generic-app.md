@@ -163,8 +163,28 @@ application could not reach DNS or the internet
 Every deployment of `generic-app` declares the service name `app`, and a service
 name is unique within an environment. The second deployment in an environment
 fails with `ALREADY_EXISTS`, so give each deployment its own service name with a
-service name override, when you create it. A manifest cannot set one yet: use
-the SDK or the API.
+service name override, when you create it. In a manifest, set it in
+`spec.config.service_name_overrides`:
+
+```yaml
+apiVersion: styrmin/v1
+kind: Deployment
+metadata:
+  name: ansible
+spec:
+  driver: generic-app
+  version: "2.17.12"
+  environment: demo
+  cluster: local
+  config:
+    service_name_overrides:
+      - driver_service_name: app
+        override_name: ansible
+  parameters:
+    image_repository: semaphoreui/semaphore
+```
+
+With the SDK or the API, pass the override to the `deploy` mutation:
 
 ```python
 await client.deployments.create(
