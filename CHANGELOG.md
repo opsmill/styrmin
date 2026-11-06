@@ -11,6 +11,12 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [Styrmin - v0.1.57](https://github.com/opsmill/styrmin/tree/v0.1.57) - 2026-11-06
+
+### Fixed
+
+- Fixed `styrminctl deployments apply` and the SDK `deployments.apply()` ignoring `spec.config.service_name_overrides` when they create a deployment, so a manifest can now create a second `generic-app` in an environment. A malformed `service_name_overrides` now raises a `ManifestValidationError` instead of being ignored. ([#596](https://github.com/opsmill/styrmin/issues/596))
+
 ## [Styrmin - v0.1.56](https://github.com/opsmill/styrmin/tree/v0.1.56) - 2026-10-31
 
 ### Fixed
