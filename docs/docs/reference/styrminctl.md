@@ -763,6 +763,17 @@ spec:
 
 `spec.parameters` stays a `{name: value}` map.
 
+`spec.config.service_name_overrides` gives a service of the deployment another
+name than the one its driver declares. It is a list of `{driver_service_name,
+override_name}` entries, as in
+[`examples/deployments/semaphore.yml`](https://github.com/opsmill/styrmin/blob/develop/examples/deployments/semaphore.yml).
+A service name is unique within an environment, so a second deployment of a
+driver that declares the same service name, such as
+[`generic-app`](../drivers/generic-app.md#several-deployments-in-one-environment),
+needs an override when `apply` creates it. An entry that is not a
+`{driver_service_name, override_name}` pair fails before `apply` creates or updates
+anything.
+
 `components[].image` is the component's
 [image override](../concepts-and-architecture/image-overrides.md): one full
 reference with an explicit tag or digest, where every `{{ app.version }}`

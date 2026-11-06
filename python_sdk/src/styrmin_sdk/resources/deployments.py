@@ -63,6 +63,7 @@ from styrmin_sdk.graphql._generated.input_types import (
     DeploymentConfigInput,
     EnvVarInput,
     ParameterValueInput,
+    ServiceNameOverride,
     UpdateDeploymentInput,
 )
 from styrmin_sdk.graphql._generated.list_deployments import (
@@ -251,6 +252,8 @@ def _build_update_input(manifest: ResolvedManifest) -> UpdateDeploymentInput:
     """
     config_payload: dict[str, Any] = dict(manifest.config)
     check_replica_counts(config_payload, source=f"manifest {manifest.source_path}: spec.config")
+    # Refuse a malformed override, or both spellings, as the create path does
+    _build_service_name_overrides(manifest)
     if manifest.parameters:
         config_payload.setdefault(
             "parameters",
@@ -351,6 +354,45 @@ def _override_kinds(block: ComponentConfigInput) -> list[OverrideKind]:
     return kinds
 
 
+_SERVICE_NAME_OVERRIDE_KEYS = ("service_name_overrides", "serviceNameOverrides")
+
+
+def _build_service_name_overrides(manifest: ResolvedManifest) -> list[dict[str, str]] | None:
+    """Read ``spec.config.service_name_overrides`` as the rows the ``deploy`` mutation takes.
+
+    The ``deploy`` mutation takes the overrides as its own argument, not inside the typed
+    deployment config, so the create path reads them from the manifest config here. The update
+    path needs no such step: its input model already has the field. Both key spellings are
+    accepted, as for the other config fields, but not both together. Returns ``None`` when the
+    manifest sets none, or sets the key to null.
+
+    Raises:
+        ManifestValidationError: Both spellings are set, or the value is not a list of
+            ``{driver_service_name, override_name}`` rows.
+    """
+    present = [candidate for candidate in _SERVICE_NAME_OVERRIDE_KEYS if candidate in manifest.config]
+    if len(present) > 1:
+        raise ManifestValidationError(
+            f"manifest {manifest.source_path}: spec.config sets both {present[0]} and {present[1]}: keep one"
+        )
+    if not present or manifest.config[present[0]] is None:
+        # A key with no value, such as a list whose entries are all commented out, sets nothing.
+        return None
+    key = present[0]
+    rows = manifest.config[key]
+    if not isinstance(rows, list):
+        raise ManifestValidationError(
+            f"manifest {manifest.source_path}: spec.config.{key} must be a list of "
+            f"{{driver_service_name, override_name}} rows, got {type(rows).__name__}"
+        )
+    try:
+        return [ServiceNameOverride.model_validate(row).model_dump(by_alias=True) for row in rows]
+    except ValidationError as exc:
+        raise ManifestValidationError(
+            f"manifest {manifest.source_path}: spec.config.{key} does not match ServiceNameOverride: {exc}",
+        ) from exc
+
+
 def _build_config_input(manifest: ResolvedManifest) -> DeploymentConfigInput | None:
     """Build the typed ``DeploymentConfigInput`` for the create path.
 
@@ -368,7 +410,8 @@ def _build_config_input(manifest: ResolvedManifest) -> DeploymentConfigInput | N
         return None
     check_replica_counts(manifest.config, source=f"manifest {manifest.source_path}: spec.config")
     try:
-        return DeploymentConfigInput.model_validate(dict(manifest.config))
+        config = {key: value for key, value in manifest.config.items() if key not in _SERVICE_NAME_OVERRIDE_KEYS}
+        return DeploymentConfigInput.model_validate(config) if config else None
     except ValidationError as exc:
         raise ManifestValidationError(
             f"manifest {manifest.source_path}: spec.config does not match DeploymentConfigInput: {exc}",
@@ -870,6 +913,7 @@ class DeploymentResource(BaseResource):
                     name=manifest.name,
                     config=_build_config_input(manifest),
                     parameters=_build_parameters_input(manifest),
+                    service_name_overrides=_build_service_name_overrides(manifest),
                 )
             except ResourceAlreadyExistsError:
                 # Concurrent apply: someone else won the create race. Re-look
