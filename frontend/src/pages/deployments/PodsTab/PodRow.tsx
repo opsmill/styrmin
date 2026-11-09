@@ -71,7 +71,7 @@ export function PodRow({ pod, now }: PodRowProps) {
           )}
         </span>
         <span className="w-[110px] shrink-0">
-          <PodPhaseBadge phase={pod.phase} />
+          <PodPhaseBadge phase={pod.phase} ready={pod.ready} />
         </span>
         <span className="w-16 shrink-0 text-right font-mono text-[13px] text-foreground">
           {pod.ready ? "1/1" : "0/1"}

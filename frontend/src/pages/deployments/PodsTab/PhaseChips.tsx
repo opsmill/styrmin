@@ -3,8 +3,13 @@ import { classifyStaleness } from "./classifyStaleness";
 
 type PodLike = {
   phase: PodPhase;
+  ready: boolean;
   lastPolledAt?: string | null;
 };
+
+// A pod in phase RUNNING whose containers are not all ready, for example one
+// in CrashLoopBackOff, counts apart from the ready ones so it never shows green.
+type ChipKind = PodPhase | "NOT_READY";
 
 interface PhaseChipsProps {
   pods: readonly PodLike[];
@@ -12,13 +17,18 @@ interface PhaseChipsProps {
 }
 
 const phaseStyles: Record<
-  PodPhase,
+  ChipKind,
   { pill: string; dot: string; label: string }
 > = {
   RUNNING: {
     pill: "bg-emerald-50 text-emerald-700",
     dot: "bg-emerald-500",
     label: "running",
+  },
+  NOT_READY: {
+    pill: "bg-amber-50 text-amber-800",
+    dot: "bg-amber-500",
+    label: "not ready",
   },
   PENDING: {
     pill: "bg-amber-50 text-amber-800",
@@ -43,8 +53,9 @@ const phaseStyles: Record<
 };
 
 // Stable display order so chip positions don't shuffle between renders.
-const PHASE_ORDER: PodPhase[] = [
+const PHASE_ORDER: ChipKind[] = [
   "RUNNING",
+  "NOT_READY",
   "PENDING",
   "SUCCEEDED",
   "FAILED",
@@ -61,10 +72,12 @@ export function PhaseChips({ pods, now }: PhaseChipsProps) {
     );
   }
 
-  const counts = new Map<PodPhase, number>();
+  const counts = new Map<ChipKind, number>();
   let staleCount = 0;
   for (const pod of pods) {
-    counts.set(pod.phase, (counts.get(pod.phase) ?? 0) + 1);
+    const kind: ChipKind =
+      pod.phase === "RUNNING" && !pod.ready ? "NOT_READY" : pod.phase;
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
     if (classifyStaleness(pod.lastPolledAt, now) !== "fresh") staleCount += 1;
   }
 
@@ -77,7 +90,7 @@ export function PhaseChips({ pods, now }: PhaseChipsProps) {
         return (
           <span
             key={phase}
-            data-testid={`phase-chip-${phase.toLowerCase()}`}
+            data-testid={`phase-chip-${phase.toLowerCase().replace("_", "-")}`}
             className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium tracking-wide ${s.pill}`}
           >
             <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />

@@ -244,6 +244,33 @@ The deployment page reloads its data every 10 seconds. With the 5-second
 report interval, a change of an operator-phase step appears on the page
 within about 15 seconds.
 
+### How the UI colors the status of an application
+
+The UI shows green only when the application runs and its pods are ready:
+
+- **Environment status** on the environment list and the environment
+  page: `Healthy` when every deployment in the environment is running,
+  `Failed` when one has failed, and `Pending` otherwise, for example
+  while a deployment is deploying, restoring or deleting. Deleted
+  deployments do not count.
+- **Endpoint and component dots** on a deployment's Overview tab: green
+  when the deployment is running and every pod of the component that
+  has not finished is ready, amber while the deployment is not running
+  or a pod is not ready, red when the deployment has failed, and gray
+  when the component is disabled or no pod is reported for it. Styrmin
+  labels with their component only the pods of a Deployment or a
+  StatefulSet, so the dots of a component that runs as a DaemonSet, a
+  Job or a CronJob stay gray. Hover over a dot to read how many pods are
+  ready.
+- **Pod badges and counters** on the Pods tab: Kubernetes keeps a pod in
+  phase `Running` while its container restarts, so a running pod that
+  is not ready shows as `NOT READY` in amber.
+
+The deployment status (`Running`) comes from the operator. Once a
+deployment is `Running`, the operator does not check its pods again, so
+the deployment status stays `Running` when its pods stop being ready.
+The endpoint and component dots and the Pods tab show the pods' state.
+
 ### What this means in practice
 
 - The UI is _eventually consistent_, with a delay of about 5 seconds. A

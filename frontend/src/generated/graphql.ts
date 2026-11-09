@@ -1939,7 +1939,7 @@ export type GetDeploymentQueryVariables = Exact<{
 }>;
 
 
-export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriver: { __typename?: 'ApplicationDriver', id: string, name: string }, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', name: string, replicas?: number | null }> }, environment: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown> } }, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean, container?: string | null }>, componentImageOverrides: Array<{ __typename?: 'ComponentImageOverride', component: string, reference: string, resolvedReference: string, isOrphaned: boolean, isApplicable: boolean }>, componentContainerOverrides: Array<{ __typename?: 'ComponentContainerOverrides', component: string, command?: Array<string> | null, args?: Array<string> | null, isOrphaned: boolean, isApplicable: boolean }>, componentReplicas: Array<{ __typename?: 'ComponentReplicas', component: string, count?: number | null, source: ReplicaSource, override?: number | null, singleton: boolean, isOrphaned: boolean, isApplicable: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null, primaryUrl?: string | null, humanReadableUrl?: string | null }> } | null };
+export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriver: { __typename?: 'ApplicationDriver', id: string, name: string }, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', name: string, replicas?: number | null }> }, environment: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown> } }, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean, container?: string | null }>, componentImageOverrides: Array<{ __typename?: 'ComponentImageOverride', component: string, reference: string, resolvedReference: string, isOrphaned: boolean, isApplicable: boolean }>, componentContainerOverrides: Array<{ __typename?: 'ComponentContainerOverrides', component: string, command?: Array<string> | null, args?: Array<string> | null, isOrphaned: boolean, isApplicable: boolean }>, componentReplicas: Array<{ __typename?: 'ComponentReplicas', component: string, count?: number | null, source: ReplicaSource, override?: number | null, singleton: boolean, isOrphaned: boolean, isApplicable: boolean }>, podStatuses: Array<{ __typename?: 'PodStatus', id: string, componentName?: string | null, phase: PodPhase, ready: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, component: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null, primaryUrl?: string | null, humanReadableUrl?: string | null }> } | null };
 
 export type GetDeploymentPodsQueryVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
@@ -2834,11 +2834,18 @@ export const GetDeploymentDocument = `
       isOrphaned
       isApplicable
     }
+    podStatuses {
+      id
+      componentName
+      phase
+      ready
+    }
     deployedServices {
       id
       driverServiceName
       resolvedName
       kind
+      component
       port
       primaryFqdn
       humanReadableFqdn

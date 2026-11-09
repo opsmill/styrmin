@@ -77,11 +77,18 @@ query GetDeployment($deploymentId: UUID!) {
       isOrphaned
       isApplicable
     }
+    podStatuses {
+      id
+      componentName
+      phase
+      ready
+    }
     deployedServices {
       id
       driverServiceName
       resolvedName
       kind
+      component
       port
       primaryFqdn
       humanReadableFqdn

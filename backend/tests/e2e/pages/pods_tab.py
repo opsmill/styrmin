@@ -37,9 +37,10 @@ class PodsTabPage:
 
         Healthy sections start collapsed (see ``shouldSectionAutoExpand``
         on the frontend), so pod rows are not mounted until the section
-        opens. This waits for a section to advertise a RUNNING pod via
-        its phase-chip summary, expands that section if it isn't open,
-        and then resolves the pod row inside it.
+        opens. This waits for a section to advertise a ready RUNNING pod
+        via its phase-chip summary (a RUNNING pod that is not ready counts
+        in the "not ready" chip instead), expands that section if it isn't
+        open, and then resolves the first RUNNING pod row inside it.
 
         Returns the pod name (``data-pod-name`` attribute) of the first such
         row, so the caller can build per-pod assertions.

@@ -8,6 +8,7 @@ import type { PodPhase } from "@/generated/graphql";
  */
 interface PodPhaseBadgeProps {
   phase: PodPhase;
+  ready: boolean;
 }
 
 const phaseClasses: Record<PodPhase, { dot: string; pill: string }> = {
@@ -18,15 +19,21 @@ const phaseClasses: Record<PodPhase, { dot: string; pill: string }> = {
   UNKNOWN: { dot: "bg-zinc-400", pill: "bg-zinc-100 text-zinc-700" },
 };
 
-export function PodPhaseBadge({ phase }: PodPhaseBadgeProps) {
-  const cls = phaseClasses[phase];
+// Kubernetes keeps a pod in phase RUNNING while its container restarts, so a
+// RUNNING pod that is not ready shows amber and says so instead of green.
+const notReadyClasses = phaseClasses.PENDING;
+
+export function PodPhaseBadge({ phase, ready }: PodPhaseBadgeProps) {
+  const notReady = phase === "RUNNING" && !ready;
+  const cls = notReady ? notReadyClasses : phaseClasses[phase];
   return (
     <span
       data-pod-phase={phase}
+      data-pod-ready={ready}
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium tracking-wide ${cls.pill}`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${cls.dot}`} />
-      {phase}
+      {notReady ? "NOT READY" : phase}
     </span>
   );
 }

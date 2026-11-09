@@ -13,15 +13,25 @@ describe("deriveEnvHealth", () => {
     );
   });
 
-  it("reports pending when a deployment is still in progress", () => {
-    expect(
-      deriveEnvHealth([{ status: "running" }, { status: "in_progress" }]),
-    ).toBe("pending");
-  });
+  it.each(["pending", "deploying", "restoring", "deleting"])(
+    "reports pending while a deployment is %s",
+    (status) => {
+      expect(deriveEnvHealth([{ status: "running" }, { status }])).toBe(
+        "pending",
+      );
+    },
+  );
 
-  it("reports active when every deployment is settled and none failed", () => {
+  it("reports active when every deployment is running", () => {
     expect(
       deriveEnvHealth([{ status: "running" }, { status: "running" }]),
     ).toBe("active");
+  });
+
+  it("leaves deleted deployments out", () => {
+    expect(
+      deriveEnvHealth([{ status: "running" }, { status: "deleted" }]),
+    ).toBe("active");
+    expect(deriveEnvHealth([{ status: "deleted" }])).toBe("pending");
   });
 });

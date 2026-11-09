@@ -67,6 +67,10 @@ import {
   withDriverDirectory,
 } from "@/lib/driverVersion";
 import { taskResultDisplay } from "@/lib/task-display";
+import {
+  deriveComponentReadiness,
+  type ComponentReadiness,
+} from "@/lib/component-readiness";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const DEPLOYMENT_TABS = [
@@ -466,7 +470,18 @@ export default function DeploymentDetailPage() {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="h-[7px] w-[7px] rounded-full bg-success" />
+                      <ReadinessDot
+                        testId="endpoint-readiness"
+                        readiness={deriveComponentReadiness({
+                          componentName: service.component,
+                          enabled:
+                            deployment.components.find(
+                              (c) => c.name === service.component,
+                            )?.enabled ?? true,
+                          deploymentStatus: deployment.status,
+                          pods: deployment.podStatuses,
+                        })}
+                      />
                       <span className="text-[13px] font-semibold text-foreground">
                         {service.driverServiceName}
                       </span>
@@ -524,12 +539,14 @@ export default function DeploymentDetailPage() {
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <div
-                        className={`h-[7px] w-[7px] rounded-full ${
-                          component.enabled
-                            ? "bg-success"
-                            : "bg-muted-foreground/30"
-                        }`}
+                      <ReadinessDot
+                        testId="component-readiness"
+                        readiness={deriveComponentReadiness({
+                          componentName: component.name,
+                          enabled: component.enabled,
+                          deploymentStatus: deployment.status,
+                          pods: deployment.podStatuses,
+                        })}
                       />
                       <span
                         className={`text-[13px] font-medium ${
@@ -541,13 +558,7 @@ export default function DeploymentDetailPage() {
                         {component.name}
                       </span>
                     </div>
-                    <span
-                      className={`text-[11px] ${
-                        component.enabled
-                          ? "text-success"
-                          : "text-muted-foreground"
-                      }`}
-                    >
+                    <span className="text-[11px] text-muted-foreground">
                       {component.enabled ? "enabled" : "disabled"}
                     </span>
                   </div>
@@ -1061,6 +1072,26 @@ export default function DeploymentDetailPage() {
 // ---------------------------------------------------------------------------
 // ServiceAddressRow
 // ---------------------------------------------------------------------------
+
+/** The dot before an endpoint or a component, colored by the component's readiness. */
+function ReadinessDot({
+  readiness,
+  testId,
+}: {
+  readiness: ComponentReadiness;
+  testId: string;
+}) {
+  return (
+    <div
+      role="img"
+      aria-label={readiness.label}
+      title={readiness.label}
+      data-testid={testId}
+      data-readiness={readiness.state}
+      className={`h-[7px] w-[7px] rounded-full ${readiness.dot}`}
+    />
+  );
+}
 
 function ServiceAddressRow({
   url,
