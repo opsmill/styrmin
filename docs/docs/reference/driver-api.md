@@ -29,8 +29,8 @@ specification:
 
 - `apiVersion`, `kind`, `metadata`
 - `spec.version`: the application driver version
-- `spec.supported_versions`: a semver specifier for the application
-  versions this driver supports
+- `spec.supported_versions`: a PEP 440 version specifier for the
+  application versions this driver supports
 - `spec.info`: the icon (logo URL), description and links shown on the
   driver pages; the authors and license
 - `spec.helm.main`: the Helm chart reference (location, version, values

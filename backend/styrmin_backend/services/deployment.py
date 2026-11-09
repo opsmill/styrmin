@@ -75,6 +75,7 @@ from styrmin_backend.services.exceptions import (
     IngressControllerNotHealthyError,
     InvalidContextError,
     InvalidVersionError,
+    InvalidVersionSyntaxError,
 )
 from styrmin_backend.services.ingress_controller.driver import INTERNAL_DRIVER_NAME
 from styrmin_backend.services.parameters import (
@@ -782,6 +783,40 @@ def _driver_version_sort_key(
     return (parseable, parsed, created_ts, driver_version.id)
 
 
+def _parse_application_version(version: str) -> Version:
+    """Parse a user-supplied application version string.
+
+    ``packaging.version.InvalidVersion`` is a third-party exception: left
+    uncaught it escapes the resolver and the API masks it as an internal
+    error. Re-raise it as the typed :class:`InvalidVersionSyntaxError`
+    (``VALIDATION_ERROR``) so the client learns which value was rejected.
+    """
+    try:
+        return Version(version)
+    except InvalidVersion as e:
+        raise InvalidVersionSyntaxError(
+            f"Version {version!r} is not a valid application version "
+            f"(Styrmin reads application versions as PEP 440 versions, "
+            f"for example 1.0.0, 1.0.0rc1 or 2026.8.5)"
+        ) from e
+
+
+def _supported_ranges(application_driver: ApplicationDriver) -> str:
+    """The driver's supported version ranges, for an error message.
+
+    Each range appears once, ordered by the driver version that declares it,
+    latest first (:func:`_driver_version_sort_key`). A range can hold commas
+    (``>=1.0,<2.0``), so the ranges are separated with ``;``.
+    """
+    ranges: list[str] = []
+    for driver_version in sorted(
+        application_driver.versions, key=_driver_version_sort_key, reverse=True
+    ):
+        if driver_version.application_supported_versions not in ranges:
+            ranges.append(driver_version.application_supported_versions)
+    return "; ".join(ranges) if ranges else "none"
+
+
 def _resolve_latest_matching_version(
     application_driver: ApplicationDriver,
     app_version: str,
@@ -792,7 +827,7 @@ def _resolve_latest_matching_version(
     specifier matches the requested application version, pick the latest by
     :func:`_driver_version_sort_key` — never the implicit DB insertion order.
     """
-    target = Version(app_version)
+    target = _parse_application_version(app_version)
     candidates = [
         driver_version
         for driver_version in application_driver.versions
@@ -826,7 +861,9 @@ def _ensure_pin_supports_version(
     pinned: ApplicationDriverVersion, version: str
 ) -> None:
     """Reject a pin whose specifier does not cover the requested version."""
-    if Version(version) not in SpecifierSet(pinned.application_supported_versions):
+    if _parse_application_version(version) not in SpecifierSet(
+        pinned.application_supported_versions
+    ):
         raise InvalidVersionError(
             f"Version {version} is not supported by driver version {pinned.id} "
             f"(supports {pinned.application_supported_versions})"
@@ -898,6 +935,8 @@ async def update_deployment_version(
     Raises:
         InvalidContextError: If the context is invalid.
         DriverVersionNotFoundError: If the pinned driver version does not exist.
+        InvalidVersionSyntaxError: If ``version`` is not a parseable application
+            version string.
         InvalidVersionError: If no driver version (or the pinned one) supports
             ``version``, or the pin belongs to a different driver.
         InvalidImageReferenceError: If an image override applicable in the
@@ -986,7 +1025,9 @@ async def update_deployment_version(
             )
             if target_driver_version is None:
                 raise InvalidVersionError(
-                    f"Version {version} is not supported by the application driver {application_driver.name}"
+                    f"Version {version} is not supported by the application driver "
+                    f"{application_driver.name} "
+                    f"(supported: {_supported_ranges(application_driver)})"
                 )
             logger.info(
                 "Resolved latest matching driver version: id={} supports={}",
@@ -1819,6 +1860,8 @@ async def deploy_application(
             in a component config of the driver version, names a deployment that
             is not a live deployment of the environment.
         DriverVersionNotFoundError: If the pinned driver version does not exist.
+        InvalidVersionSyntaxError: If ``version`` is not a parseable application
+            version string.
         InvalidVersionError: If no driver version (or the pinned one) supports
             the resolved version, or the pin belongs to a different driver.
 
@@ -1898,7 +1941,8 @@ async def deploy_application(
 
         if application_driver_version is None:
             raise InvalidVersionError(
-                f"Version {version} is not supported by the application driver {driver_name}"
+                f"Version {version} is not supported by the application driver "
+                f"{driver_name} (supported: {_supported_ranges(application)})"
             )
 
         # Reject component-level env var blocks targeting components the

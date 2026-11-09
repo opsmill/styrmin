@@ -110,7 +110,7 @@ class ApplicationDriverVersion(StyrminModel, table=True):
     # compare equal). See specs/013-driver-fingerprint.
 
     version: str
-    application_supported_versions: str          # Semver specifier
+    application_supported_versions: str          # PEP 440 version specifier
     default_version: str | None = None           # Default app version when unspecified
     source_type: str = "git"                     # "git", "local", ...
     source_repository: str

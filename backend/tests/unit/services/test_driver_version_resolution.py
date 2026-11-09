@@ -13,11 +13,17 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
+
 from styrmin_backend.db.models import ApplicationDriver, ApplicationDriverVersion
 from styrmin_backend.services.deployment import (
     _driver_version_sort_key,
+    _ensure_pin_supports_version,
+    _parse_application_version,
     _resolve_latest_matching_version,
+    _supported_ranges,
 )
+from styrmin_backend.services.exceptions import InvalidVersionSyntaxError
 
 
 def _adv(
@@ -112,3 +118,92 @@ class TestResolveLatestMatchingVersion:
         second_build = _adv("1", supported=">=0.1,<1.0", created_on=_T2)
         driver = _driver([first_build, second_build])
         assert _resolve_latest_matching_version(driver, "0.5.0") is second_build
+
+
+class TestUnparseableRequestedVersion:
+    """A non-version string from the user must raise the typed syntax error
+    (``VALIDATION_ERROR``) rather than leak ``packaging.version.InvalidVersion``,
+    which the API would mask as an internal error (#329).
+    """
+
+    def test_resolve_latest_matching_version_raises_typed_error(self) -> None:
+        driver = _driver([_adv("1.0.0", supported=">=1.0.0")])
+        with pytest.raises(InvalidVersionSyntaxError, match="'tata'"):
+            _resolve_latest_matching_version(driver, "tata")
+
+    def test_ensure_pin_supports_version_raises_typed_error(self) -> None:
+        pinned = _adv("1.0.0", supported=">=1.0.0")
+        with pytest.raises(InvalidVersionSyntaxError, match="'tata'"):
+            _ensure_pin_supports_version(pinned, "tata")
+
+    def test_error_names_the_accepted_version_format(self) -> None:
+        # An application that tags releases another way (``1.2.3-ls45``,
+        # ``latest``, a commit hash) must learn which format Styrmin reads.
+        with pytest.raises(InvalidVersionSyntaxError, match="PEP 440"):
+            _parse_application_version("1.2.3-ls45")
+
+
+# The deploy form checks the shape of the version field with
+# ``APPLICATION_VERSION_PATTERN`` in ``frontend/src/lib/applicationVersion.ts``.
+# That pattern must let through everything the server parses, so a value the
+# server accepts is never blocked in the browser. The list below is the one in
+# ``frontend/src/lib/applicationVersion.test.ts``: keep the two in step.
+PEP_440_VERSIONS = [
+    "1",
+    "1.0",
+    "1.0.0",
+    "0.2.0",
+    "2.0rc1",
+    "1.0.post1",
+    "1.0.0-beta+build.1",
+    "v1.6.0",
+    "V1.6.0",
+    "1!1.6.0",
+    "1.2.3_rc1",
+    "1.2.3+build_5",
+    "2026.8.5",
+]
+
+# Versions that are not PEP 440: release tags with a distribution suffix,
+# date-style strings and moving tags. These cannot be a deployment's
+# application version, because Styrmin compares it with the driver's range.
+NON_PEP_440_VERSIONS = [
+    "latest",
+    "main",
+    "3f2a9c1",
+    "2024-10-01",
+    "1.2.3-ls45",
+    "7.1.0-alpine",
+    "1.2.3-SNAPSHOT",
+    "1.0.0-x.7.z.92",
+]
+
+
+class TestParseApplicationVersion:
+    @pytest.mark.parametrize("version", PEP_440_VERSIONS)
+    def test_parses_pep_440_versions(self, version: str) -> None:
+        _parse_application_version(version)
+
+    @pytest.mark.parametrize("version", NON_PEP_440_VERSIONS)
+    def test_rejects_non_pep_440_versions_with_typed_error(self, version: str) -> None:
+        with pytest.raises(InvalidVersionSyntaxError, match=repr(version)):
+            _parse_application_version(version)
+
+
+class TestSupportedRanges:
+    """The ranges quoted in a "not supported" message."""
+
+    def test_lists_each_range_once_newest_driver_version_first(self) -> None:
+        driver = _driver(
+            [
+                _adv("1", supported=">=0.1,<1.0"),
+                _adv("3", supported=">=2.0,<3.0"),
+                _adv("2", supported=">=1.0,<2.0"),
+                _adv("4", supported=">=2.0,<3.0"),
+            ]
+        )
+        # ";" separates ranges, because a range itself holds commas.
+        assert _supported_ranges(driver) == ">=2.0,<3.0; >=1.0,<2.0; >=0.1,<1.0"
+
+    def test_without_driver_versions(self) -> None:
+        assert _supported_ranges(_driver([])) == "none"
