@@ -1,0 +1,2 @@
+replicaCount: 1
+command: {{ components | component_command }}

@@ -3,6 +3,7 @@ from uuid import UUID
 
 from loguru import logger
 from pydantic import ValidationError
+from styrmin_sdk.driver_format.context.service_entries import build_service_entries
 
 from styrmin_backend.agent.service.kubernetes.utils import (
     get_kubernetes_reference,
@@ -28,24 +29,18 @@ from styrmin_backend.context.models.input import (
     UtilityInput,
     UtilityKindInput,
 )
-from styrmin_backend.context.fqdn import (
-    compute_human_readable_fqdn,
-    compute_primary_fqdn,
-)
-from styrmin_backend.context.models.services import ServiceReference
 from styrmin_backend.context.resolvers import (
     _resolve_scheduling_config,
     resolve_global_context,
 )
 from styrmin_backend.domain.models import Deployment
-from styrmin_backend.services.env_vars.exceptions import (
-    EnvVarSizeLimitExceededError,
-)
 from styrmin_backend.services.container_overrides.resolver import (
     ContainerOverridesResolver,
 )
+from styrmin_backend.services.env_vars.exceptions import (
+    EnvVarSizeLimitExceededError,
+)
 from styrmin_backend.services.env_vars.resolver import EnvVarsResolver
-from styrmin_backend.services.image_overrides.resolver import ImageOverridesResolver
 from styrmin_backend.services.env_vars.validator import (
     PER_SCOPE_BYTE_CAP,
     _serialised_dict_bytes,
@@ -54,6 +49,7 @@ from styrmin_backend.services.exceptions import (
     DeploymentNotFoundError,
     InvalidSchedulingConfigError,
 )
+from styrmin_backend.services.image_overrides.resolver import ImageOverridesResolver
 from styrmin_backend.services.scheduling.validator import (
     expand_deployment_references,
 )
@@ -238,37 +234,19 @@ async def generate_context_from_deployment(
         deployed_services = await uow.deployed_services.get_by_environment_id(
             deployment.environment_id
         )
-        services_dict: dict = {}
-        deployed_services_list: list[dict] = []
-        for svc in deployed_services:
-            ref = ServiceReference(
-                host=svc.resolved_name,
-                port=svc.port,
-                kind=svc.kind,
-                primary_fqdn=compute_primary_fqdn(
-                    app_name, str(deployment.id), fqdn_suffix
-                ),
-                human_readable_fqdn=compute_human_readable_fqdn(
-                    svc.resolved_name, env_name, fqdn_suffix
-                ),
-            )
-            services_dict[svc.driver_service_name] = ref.model_dump()
-            deployed_services_list.append(
-                {
-                    "resolved_name": svc.resolved_name,
-                    "port": svc.port,
-                    "kind": svc.kind,
-                    "deployment_id": str(svc.deployment_id),
-                    "component": svc.component,
-                }
-            )
-        context.services = services_dict
-        context.deployed_services = deployed_services_list
+        (
+            context.services,
+            context.deployed_services,
+            has_own_services,
+        ) = build_service_entries(
+            deployed_services,
+            app_name=app_name,
+            deployment_id=deployment.id,
+            environment_name=env_name,
+            fqdn_suffix=fqdn_suffix,
+        )
 
         # Auto-add service-discovery utility when this deployment has services
-        has_own_services = any(
-            str(svc.deployment_id) == str(deployment.id) for svc in deployed_services
-        )
         if has_own_services:
             context.utilities.append(UtilityContext(kind=UtilityKind.SERVICE_DISCOVERY))
 

@@ -131,6 +131,9 @@ members = ["cli", "backend", "python_sdk"]
 
 [tool.ruff]
 line-length = 120
+# The SDK declares Python 3.12 as its minimum (python_sdk/pyproject.toml); lint rejects syntax
+# that Python 3.12 cannot parse in it. See specs/032-styrmin-driver-cli/research.md, R-011.
+per-file-target-version = { "python_sdk/**/*.py" = "py312" }
 
 exclude = [
     ".git",
@@ -250,6 +253,33 @@ max-complexity = 10
 ]
 "tasks/__init__.py" = [
     "RUF067", # __init__ module should only contain docstrings and re-exports (Invoke tasks pattern)
+]
+# Code moved from the backend to the SDK (ADR-0089). The backend's ruff configuration does not
+# extend this one, so these rules never applied to it, and the move did not change the code.
+# UP042 (StrEnum) and PTH123/PLW1514 (encoding) would change behaviour. Review the rest later.
+"python_sdk/src/styrmin_sdk/driver_format/{models,context,reading}/**/*.py" = [
+    "ANN401",  # Dynamically typed expressions (typing.Any) are disallowed
+    "C901",    # Function is too complex
+    "FURB101", # open and read should be replaced by Path.read_text()
+    "PLC0415", # import should be at the top-level of a file (breaks import cycles)
+    "PLR0911", # Too many return statements
+    "PLR0912", # Too many branches
+    "PLR0917", # Too many positional arguments
+    "PLR5501", # Use elif instead of else then if
+    "PLR6201", # Use a set literal when testing for membership
+    "PLR6301", # Method could be a function, class method, or static method
+    "PLW1514", # open in text mode without explicit encoding
+    "PTH123",  # open() should be replaced by Path.open()
+    "RUF003",  # Comment contains ambiguous unicode character
+    "RUF067",  # __init__ module should only contain docstrings and re-exports
+    "S101",    # Use of assert detected
+    "UP042",   # Class inherits from both str and enum.Enum
+    "UP046",   # Generic class uses Generic subclass instead of type parameters
+]
+"python_sdk/src/styrmin_sdk/driver_format/checks.py" = [
+    "ANN401",  # Dynamically typed expressions (typing.Any) are disallowed
+    "PLC0415", # import should be at the top-level of a file (breaks an import cycle)
+    "PLR6301", # Method could be a function, class method, or static method
 ]
 "cli/src/styrminctl/commands/*.py" = [
     "TC001", # Type aliases from types.py are used at runtime by Cyclopts for parameter resolution

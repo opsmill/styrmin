@@ -1,8 +1,9 @@
-from typing import NoReturn
-
-import jinja2
 from prefect import task
-from yaml import YAMLError, safe_load
+from styrmin_sdk.driver_format.rendering import (
+    SilentUndefined as SilentUndefined,
+    get_jinja_environment as get_jinja_environment,
+    render_values,
+)
 
 from styrmin_backend.agent.service.kubernetes.resources.blocks.metadata import (
     Annotations,
@@ -14,38 +15,12 @@ from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     TargetPatch,
     TemplateLabelPatch,
 )
-from styrmin_backend.agent.service.kubernetes.resources.builders.backup_annotations import (
-    build_backup_volume_annotation_patches,
-)
-from styrmin_backend.services.driver.models.resources.backup import (
-    ComponentBackupConfig,
-)
-from styrmin_backend.services.component_container.patch_builder import (
-    build_component_container_patches,
-)
-from styrmin_backend.services.replicas.patch_builder import (
-    build_component_replica_patches,
-)
-from styrmin_backend.services.exceptions import (
-    CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL,
-    RetiredTemplateFilterError,
-    SchedulingPatchRenderingError,
-)
-from styrmin_backend.services.scheduling.patch_builder import (
-    build_affinity_patches,
-    build_node_affinity_patches,
-    build_resources_patches,
-    build_runtime_class_patches,
-    build_tolerations_patches,
-    build_topology_spread_patches,
-)
 from styrmin_backend.agent.service.kubernetes.resources.blocks.spec import (
     PostRenderers,
     Values,
 )
-from styrmin_backend.agent.service.kubernetes.resources.builders.exceptions import (
-    ChartValuesTemplateRenderingError,
-    InvalidChartValuesError,
+from styrmin_backend.agent.service.kubernetes.resources.builders.backup_annotations import (
+    build_backup_volume_annotation_patches,
 )
 from styrmin_backend.agent.service.kubernetes.resources.custom_resource import (
     HelmRelease,
@@ -54,7 +29,6 @@ from styrmin_backend.agent.service.kubernetes.resources.utilities.base import (
     Utility,
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
-from styrmin_backend.context.fqdn import to_fqdn_label
 from styrmin_backend.context.models.config import (
     PostRenderInjection,
     SchedulingConfig,
@@ -67,43 +41,28 @@ from styrmin_backend.operator.config import (
     LABEL_OPERATOR_MANAGED,
     LABEL_OPERATOR_MANAGED_VALUE,
 )
+from styrmin_backend.services.component_container.patch_builder import (
+    build_component_container_patches,
+)
+from styrmin_backend.services.driver.models.resources.backup import (
+    ComponentBackupConfig,
+)
+from styrmin_backend.services.exceptions import (
+    SchedulingPatchRenderingError,
+)
+from styrmin_backend.services.replicas.patch_builder import (
+    build_component_replica_patches,
+)
+from styrmin_backend.services.scheduling.patch_builder import (
+    build_affinity_patches,
+    build_node_affinity_patches,
+    build_resources_patches,
+    build_runtime_class_patches,
+    build_tolerations_patches,
+    build_topology_spread_patches,
+)
 
 from .base import build_minimal_helm_release
-
-
-def split_string(value: str, separator: str | None = None) -> list[str]:
-    """Split a string into a list."""
-    return value.split(separator)
-
-
-def component_env_vars(*args: object, **kwargs: object) -> NoReturn:  # noqa: ARG001
-    """Retired filter: Styrmin injects env vars by post-render patch (017 FR-007).
-
-    Stays registered so a driver still calling it gets the typed error.
-    """
-    raise RetiredTemplateFilterError
-
-
-def component_command(*args: object, **kwargs: object) -> NoReturn:  # noqa: ARG001
-    """Retired filter: Styrmin applies ``command`` by post-render patch (022 FR-005).
-
-    Stays registered so a driver still calling it gets the typed error.
-    """
-    raise RetiredTemplateFilterError(
-        filter_name="component_command",
-        migration_guide=CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL,
-    )
-
-
-def component_args(*args: object, **kwargs: object) -> NoReturn:  # noqa: ARG001
-    """Retired filter: Styrmin applies ``args`` by post-render patch (022 FR-005).
-
-    Stays registered so a driver still calling it gets the typed error.
-    """
-    raise RetiredTemplateFilterError(
-        filter_name="component_args",
-        migration_guide=CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL,
-    )
 
 
 def _validate_renders(patches: list[TargetPatch]) -> list[TargetPatch]:
@@ -157,26 +116,6 @@ def _build_all_scheduling_patches_for(
     return patches
 
 
-def get_jinja_environment(**kwargs: object) -> jinja2.Environment:
-    """Create a Jinja2 environment with all custom filters registered."""
-    env = jinja2.Environment(**kwargs)  # type: ignore[arg-type]
-    env.filters["to_fqdn_label"] = to_fqdn_label
-    env.filters["split"] = split_string
-    env.filters["component_env_vars"] = component_env_vars
-    env.filters["component_command"] = component_command
-    env.filters["component_args"] = component_args
-    return env
-
-
-class SilentUndefined(jinja2.Undefined):
-    """
-    Dont break pageloads because vars arent there!
-    """
-
-    def _fail_with_undefined_error(self, *args, **kwargs) -> str:  # type: ignore[no-untyped-def, override]
-        return ""
-
-
 class ApplicationHelmReleaseBuilder:
     """A builder for HelmRelease custom resources.
 
@@ -224,65 +163,11 @@ class ApplicationHelmReleaseBuilder:
     def render_value_template(values_template: str, context: GlobalContext) -> dict:
         """Render the value template with the given context.
 
-        Args:
-            value_template (str): The value template to render.
-            context (GlobalContext): The context to render the value template with.
-
-        Returns:
-            dict: The rendered value template.
-
-        Rendering contract surfaced to driver templates:
-            The Jinja rendering dict is produced by
-            ``GlobalContext.model_dump(exclude_none=True)``. Driver
-            ``values_template`` files consume the resolved env vars through
-            two stable, named paths on this dict:
-
-            - ``instance.config.env_vars`` (``dict[str, str]`` | absent) —
-              the deployment-effective merged env vars (environment-scope
-              values overlaid with deployment-scope values per the
-              deepest-wins precedence in 008-deployment-env-vars).
-            - ``components[<name>].env_vars.config`` (``dict[str, str]`` |
-              absent) — the per-component effective merged env vars
-              (env → deployment → component layers combined).
-
-            Both paths use ``model_dump(exclude_none=True)`` semantics: the
-            ``env_vars`` (and per-component ``env_vars.config``) keys are
-            absent from the dict whenever no env vars are set at the
-            relevant scope.
-
-            These paths are read-only data (e.g. to build a ConfigMap).
-            Styrmin injects env vars into each component's declared
-            component container by post-render patch, not through the values
-            template (see :meth:`build_component_container_post_rendering_patches` and
-            ``dev/guides/driver-env-var-consumption.md``).
-
-            ``ingress_class`` is template data in both modes, with or without
-            a dedicated ingress controller. Driver templates do not need to
-            set the Ingress class, because Styrmin sets it, or removes it
-            with a dedicated ingress controller, after the chart renders (see
-            ``IngressUtility.build_app_post_rendering_patches``).
+        The render moved to ``styrmin_sdk.driver_format.rendering.render_values``
+        (ADR-0089), which documents the rendering contract. This Prefect task keeps
+        the agent's call site.
         """
-        # Turn the context model into a dict
-        context_dict: dict = context.model_dump(exclude_none=True)
-
-        # Render the value template using jinja
-        environment = get_jinja_environment(undefined=SilentUndefined)
-        template = environment.from_string(values_template)
-
-        try:
-            # TODO: Remove the temporary silencing of the UndefinedError
-            values = template.render(context_dict)
-        except jinja2.TemplateRuntimeError as e:
-            raise ChartValuesTemplateRenderingError(
-                f"Chart values template rendering failed: {e!s}"
-            ) from e
-
-        try:
-            return safe_load(values)
-        except YAMLError as e:
-            raise InvalidChartValuesError(
-                f"The chart values are not valid YAML: {e!s}"
-            ) from e
+        return render_values(values_template=values_template, context=context)
 
     def build_target_for_label_patches(
         self, labels: dict[str, str], label_prefix: str = "styrmin"

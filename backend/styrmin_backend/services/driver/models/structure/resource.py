@@ -1,30 +1,17 @@
-from enum import Enum
-from pathlib import Path
+"""Re-export of ``styrmin_sdk.driver_format.models.structure.resource``.
 
-from pydantic import BaseModel
+The module moved to the SDK, which the server, the agent and styrmin-driver share
+(ADR-0089). This path keeps the backend's imports working.
+"""
 
+from styrmin_sdk.driver_format.models.structure.resource import (
+    ResourceFile,
+    Role,
+    Syntax,
+)
 
-class Role(str, Enum):
-    """The role enum."""
-
-    DRIVER_SPEC = "driver_spec"
-    VALUES_TEMPLATE = "values_template"
-    ACTIONS_CODE = "actions_code"
-
-
-class Syntax(str, Enum):
-    """The syntax enum."""
-
-    YAML = "yaml"
-    JSON = "json"
-    STR = "str"
-    PYTHON = "python"
-
-
-class ResourceFile(BaseModel):
-    """A resource file of the driver directory."""
-
-    role: Role
-    optional: bool = False
-    syntax: Syntax
-    path: Path
+__all__ = [
+    "ResourceFile",
+    "Role",
+    "Syntax",
+]

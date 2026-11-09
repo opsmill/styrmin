@@ -199,6 +199,13 @@ database and merges configuration from every relevant source: the cluster,
 the environment, the deployment itself, the application driver, and the
 Helm chart.
 
+The model, its resolver and the code that renders a driver's values template
+with it live in the SDK package `styrmin_sdk.driver_format`, with the code that
+reads and checks a driver directory. The backend imports them, at their old
+backend paths, so the server's load, the agent's render and the offline command
+`styrmin-driver` apply one set of rules
+([ADR-089](../adr/0089-driver-format-code-in-the-sdk.md)).
+
 ### 3.2 Composition
 
 ```text

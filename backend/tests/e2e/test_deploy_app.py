@@ -1,16 +1,29 @@
 import asyncio
 import contextlib
+import json
+import os
+import subprocess  # noqa: S404 - runs the styrmin-driver console script and docker with fixed argv
+import sys
 import time
 import warnings
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
 import kr8s.asyncio
 import pytest
+import yaml
+from kubernetes_asyncio import client as kubeclient
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
-from tests.e2e.conftest import _portforward, _wait_for_http
+from styrmin_sdk.exceptions import StyrminAPIError
+from tests.e2e.conftest import (
+    BROKEN_DRIVERS_DIR,
+    PROJECT_ROOT,
+    _portforward,
+    _wait_for_http,
+)
 from tests.e2e.drivers import ScenarioDriver, StepRef, TaskLinkRef, TimelineEntry
 from tests.e2e.pages.environments import EnvironmentDetailPage, EnvironmentsListPage
 
@@ -539,3 +552,215 @@ async def test_environment_views_hide_ingress_controller(
     assert await environments.read_card_summary(
         environment_id=scenario_environment_id
     ) == (expected_status, len(application_ids))
+
+
+# The context keys that the example context cannot know: the configuration and the
+# capabilities of the session's cluster, environment and deployment, and what that
+# configuration adds per component (specs/032-styrmin-driver-cli, research R-013).
+_ENVIRONMENT_SPECIFIC_PREFIXES = (
+    "cluster.config",
+    "cluster.capabilities",
+    "environment.config",
+    "environment.capabilities",
+    "deployment.config",
+    "instance.config",
+    "deployed_services",
+)
+_ENVIRONMENT_SPECIFIC_COMPONENT_KEYS = {
+    "scheduling",
+    "env_vars",
+    "container_override",
+    "image_override",
+}
+
+
+def _key_paths(data: object, prefix: str = "") -> set[str]:
+    """Every key path of a JSON value; list items share the path ``<key>[]``."""
+    paths: set[str] = set()
+    if isinstance(data, dict):
+        for key, value in data.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            paths.add(path)
+            paths |= _key_paths(value, path)
+    elif isinstance(data, list):
+        for item in data:
+            paths |= _key_paths(item, f"{prefix}[]")
+    return paths
+
+
+def _example_should_hold(path: str, example_services: set[str]) -> bool:
+    if path.startswith(_ENVIRONMENT_SPECIFIC_PREFIXES):
+        return False
+    parts = path.split(".")
+    if parts[0] == "services" and len(parts) > 1 and parts[1] not in example_services:
+        return False  # a service of another deployment of the session's environment
+    return not (
+        parts[0] == "components"
+        and len(parts) > 2
+        and parts[2] in _ENVIRONMENT_SPECIFIC_COMPONENT_KEYS
+    )
+
+
+def _styrmin_driver(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run the ``styrmin-driver`` console script of the test environment (a clone)."""
+    command = [str(Path(sys.executable).parent / "styrmin-driver"), *args]
+    return subprocess.run(
+        command, capture_output=True, text=True, check=False, cwd=PROJECT_ROOT
+    )  # noqa: S603
+
+
+@pytest.mark.api_only(
+    reason=(
+        "Reads the StyrminDeployment and HelmRelease of the session deployment and runs "
+        "styrmin-driver on the machine and in the Styrmin image; no UI flow exercised."
+    ),
+)
+@pytest.mark.ci
+async def test_styrmin_driver_matches_helm_release(
+    deployed_simple_app: dict,
+    vcluster: dict,
+    tmp_path: Path,
+) -> None:
+    """SC-004, FR-006 and FR-014 of specs/032-styrmin-driver-cli.
+
+    ``styrmin-driver render`` with the context of the session deployment gives the values
+    of its HelmRelease; the example context holds every key of that context that does not
+    come from the session's configuration; and ``styrmin-driver check`` passes in the image.
+    """
+    namespace = deployed_simple_app["namespace"]
+    custom_objects = kubeclient.CustomObjectsApi(vcluster["api"])
+    driver_dir = str(PROJECT_ROOT / "driver" / "examples" / "simple-app")
+
+    # SC-004. The operator renders the HelmRelease from spec.context of the StyrminDeployment;
+    # retry while a change of an earlier test may still be in flight.
+    deadline = time.monotonic() + 120
+    while True:
+        resource = await custom_objects.get_namespaced_custom_object(
+            group="styrmin.io",
+            version="v1alpha1",
+            namespace=namespace,
+            plural="styrmindeployments",
+            name=namespace,
+        )
+        release = await custom_objects.get_namespaced_custom_object(
+            group="helm.toolkit.fluxcd.io",
+            version="v2",
+            namespace=namespace,
+            plural="helmreleases",
+            name=namespace,
+        )
+        context_file = tmp_path / "context.json"
+        context_file.write_text(json.dumps(resource["spec"]["context"]))
+        rendered = await asyncio.to_thread(
+            _styrmin_driver, "render", driver_dir, "--context", str(context_file)
+        )
+        assert rendered.returncode == 0, rendered.stderr
+        if (
+            yaml.safe_load(rendered.stdout) == release["spec"].get("values")
+            or time.monotonic() > deadline
+        ):
+            break
+        await asyncio.sleep(5)
+    assert yaml.safe_load(rendered.stdout) == release["spec"].get("values")
+
+    # FR-006.
+    example = await asyncio.to_thread(_styrmin_driver, "context", driver_dir)
+    assert example.returncode == 0, example.stderr
+    example_context = yaml.safe_load(example.stdout)
+    example_paths = _key_paths(example_context)
+    expected = {
+        path
+        for path in _key_paths(resource["spec"]["context"])
+        if _example_should_hold(path, set(example_context.get("services", {})))
+    }
+    assert sorted(expected - example_paths) == []
+
+    # FR-014.
+    image = (
+        f"{os.environ.get('STYRMIN_IMAGE_NAME', 'registry.opsmill.io/opsmill/styrmin')}:"
+        + os.environ.get("STYRMIN_IMAGE_VER", "latest")
+    )
+    in_image = await asyncio.to_thread(
+        subprocess.run,
+        [
+            "docker",
+            "run",
+            "--rm",
+            image,
+            "styrmin-driver",
+            "check",
+            "/styrmin/drivers/simple-app",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert in_image.returncode == 0, f"{in_image.stdout}{in_image.stderr}"
+
+
+@pytest.mark.api_only(
+    reason=(
+        "Loads invalid drivers through the SDK and compares the GraphQL errors with "
+        "styrmin-driver; no UI flow exercised."
+    ),
+)
+@pytest.mark.ci
+@pytest.mark.parametrize(
+    ("name", "code", "message", "metadata"),
+    [
+        (
+            "missing-action",
+            "VALIDATION_ERROR",
+            "Missing entrypoint for action upgrade: upgrade_missing",
+            {},
+        ),
+        (
+            "retired-filter",
+            "RETIRED_TEMPLATE_FILTER",
+            "values.j2.yml line 2 calls the 'component_command' template filter, which was removed",
+            {"filter": "component_command"},
+        ),
+    ],
+)
+async def test_driver_load_errors_reach_the_client_with_the_message_of_styrmin_driver(
+    styrmin_resources: dict,
+    git_server: dict[str, str],
+    name: str,
+    code: str,
+    message: str,
+    metadata: dict[str, str],
+) -> None:
+    """The driver code moved to the SDK (ADR-089); a load still reports its errors to clients.
+
+    The GraphQL error extension sends a client the message and code of an error only when
+    the error is a ``ServiceError`` (``api/errors.py``); any other error becomes "An
+    internal error occurred". The load of each driver directory must give its code, its
+    message and its metadata, and ``styrmin-driver check`` must report the same message.
+    """
+    client: StyrminClient = styrmin_resources["client"]
+
+    with pytest.raises(StyrminAPIError) as raised:
+        await client.drivers.load_version(
+            repository_url=git_server["broken-drivers"],
+            branch="master",
+            driver_directory=f"drivers/{name}",
+        )
+
+    assert raised.value.typename == code
+    assert message in str(raised.value)
+    for key, value in metadata.items():
+        assert raised.value.extensions.get(key) == value
+
+    checked = await asyncio.to_thread(
+        _styrmin_driver, "check", str(BROKEN_DRIVERS_DIR / name)
+    )
+    assert checked.returncode == 1, checked.stdout + checked.stderr
+    errors = [
+        line.split(" error: ", 1)[1]
+        for line in checked.stdout.splitlines()
+        if " error: " in line
+    ]
+    assert len(errors) == 1, checked.stdout
+    # The whole message of styrmin-driver, migration guide included, is in the server's message.
+    assert errors[0].startswith(message)
+    assert errors[0] in str(raised.value)

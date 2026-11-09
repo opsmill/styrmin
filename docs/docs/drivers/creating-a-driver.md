@@ -652,6 +652,36 @@ default to every parameter that you may retire later.
 
 ### Step 9: Load and test
 
+Before you load the driver, check it and view the Helm values it renders on
+your machine. `styrmin-driver` needs no Styrmin server, database or cluster:
+
+```shell
+uv run styrmin-driver check driver/examples/my-app
+uv run styrmin-driver render driver/examples/my-app > values.yml
+```
+
+`check` runs the checks of a load, then renders `values.j2.yml` with an
+example context as the server does, and reports the errors it finds, each
+with its file and, when it is known, its line. It reports the variables that
+the context does not define and that the render uses, apart from some uses,
+such as a name read on a parameter whose value is an empty string; see
+[Undefined variables](../reference/styrmin-driver.md#undefined-variables).
+On the server, such a variable gives no error with a line: it renders as an
+empty string or another value, or the render fails with a message that gives
+no line. Where the server's render fails, for example at
+`{{ parameters.x + 1 }}`, the render of `check` fails too, and the rest of
+the template is not checked in that run. Some errors hide others, so fix
+what `check` reports and run it again, until it reports no error. `check`
+does not check the variables of a branch of the template that the render
+does not take; see
+[What `check` checks](../reference/styrmin-driver.md#what-check-checks).
+`render` writes the Helm values that the deployment would receive. To render
+with other values, such as a parameter or an FQDN suffix, give a context file
+with `--context`. See [`styrmin-driver`](../reference/styrmin-driver.md) for
+every command and option.
+
+When the check passes, load the driver:
+
 ```shell
 uv run styrminctl drivers load-local-version /styrmin/drivers/my-app
 ```

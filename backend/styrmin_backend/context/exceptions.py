@@ -1,30 +1,20 @@
-class ContextError(Exception):
-    """Base class for exceptions in this module."""
+"""Re-export of ``styrmin_sdk.driver_format.context.exceptions``, plus scheduling errors.
 
+The context errors moved to the SDK (ADR-0089). The scheduling-related service errors
+are re-exported here, as before, so the resolvers and their callers can raise them
+under one import path (FR-003, FR-005, FR-001d).
+"""
 
-class InvalidClusterContextError(ContextError):
-    """The cluster context is invalid."""
+from styrmin_sdk.driver_format.context.exceptions import (
+    ContextError,
+    InvalidApplicationContextError,
+    InvalidClusterContextError,
+    InvalidContextError,
+    InvalidDeploymentContextError,
+    InvalidEnvironmentContextError,
+)
 
-
-class InvalidEnvironmentContextError(ContextError):
-    """The environment context is invalid."""
-
-
-class InvalidApplicationContextError(ContextError):
-    """The application context is invalid."""
-
-
-class InvalidDeploymentContextError(ContextError):
-    """The instance context is invalid."""
-
-
-class InvalidContextError(ContextError):
-    """The context is invalid."""
-
-
-# Re-export scheduling-related service errors so the resolvers package can
-# raise them under a consistent import path (FR-003, FR-005, FR-001d).
-from styrmin_backend.services.exceptions import (  # noqa: E402
+from styrmin_backend.services.exceptions import (
     InvalidSchedulingConfigError,
     UnclonedDeploymentReferenceError,
     UnknownComponentInConfigError,

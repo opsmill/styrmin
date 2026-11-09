@@ -35,8 +35,16 @@ A random UUID that lets OpsMill count distinct installs in **telemetry** without
 _Avoid_: "instance ID" (an **instance** is the realised state of a **deployment**), "customer ID" (it identifies no customer).
 
 **SDK / styrmin-sdk**:
-The async Python client SDK that wraps GraphQL operations as typed Pydantic models. Used by **CLI**, **E2E tests**, and external callers. Types are generated from `schema.graphql` via ariadne-codegen.
+The async Python client SDK that wraps GraphQL operations as typed Pydantic models. Used by **CLI**, **E2E tests**, and external callers. Types are generated from `schema.graphql` via ariadne-codegen. It also holds the driver format code that the **server**'s driver load, the **agent**'s render and the **driver CLI** share: reading, checking and rendering a **driver directory**, and the **context** model (`styrmin_sdk.driver_format`, [ADR-089](dev/adr/0089-driver-format-code-in-the-sdk.md)).
 _Avoid_: "python client", "API client".
+
+**Driver CLI / styrmin-driver**:
+The command-line tool that checks, renders and compares an **application driver** on the author's machine, with no **server**, **database** or **cluster**. Installed with the **SDK**, and present in the Styrmin image. Commands: `check`, `render`, `diff`, `context`. Runs the same rules as a load from a local directory and the same renderer as the **agent**, except that an undefined template variable is an error. A field of the **context** model without a value is not an undefined variable: it renders as on the **agent**. Exits with 0 on success, 1 when the driver has errors or the values differ, and 2 when the command cannot run. See [`docs/docs/reference/styrmin-driver.md`](docs/docs/reference/styrmin-driver.md).
+_Avoid_: "driver linter", "driver validator", "styrminctl drivers check".
+
+**Example context**:
+The **context** that the **driver CLI** builds from a **driver directory**: the context that the **server** would build for a new **deployment** with the default parameters, on a **cluster** and an **environment** with no configuration. It holds the parameter defaults, components, services and chart from the **driver specification file**, `default_version` as the **application version**, fixed IDs, and an environment named `example`. A parameter without a default gets a placeholder of its kind; a driver without `default_version` gets the version of the first `>=`, `==` or `~=` clause of `supported_versions`, in the order written, or `0.0.0`; the **driver CLI** writes a warning for each. An author's context file overrides parts of it.
+_Avoid_: "default context", "mock context", "fake context".
 
 **Frontend**:
 The React 19 + Vite SPA that consumes the GraphQL API. Single-page application; not server-rendered.

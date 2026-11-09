@@ -1,5 +1,11 @@
 # Hooks and User Actions
 
+> The context models, the driver models and the driver checks moved to the SDK package
+> `styrmin_sdk.driver_format` (`python_sdk/src/styrmin_sdk/driver_format/`,
+> [ADR-089](../../adr/0089-driver-format-code-in-the-sdk.md)). Their old backend paths still
+> import, through modules that re-export the SDK names. A path below that starts with
+> `driver_format/` is in that package.
+
 ## Overview
 
 Application drivers can define **user actions** - custom Prefect workflows that execute driver-specific logic during deployment lifecycle events. Actions are organized into **hooks** with **modes** that determine when they run relative to the core operation.
@@ -98,7 +104,7 @@ def post_setup(context):
 
 ### HookKind Enum
 
-Located in `services/driver/models/resources/actions.py`:
+Located in `driver_format/models/resources/actions.py`:
 
 ```python
 class HookKind(str, Enum):
@@ -119,7 +125,7 @@ class ActionDefinition(BaseModel):
     image: str | None = None   # Job variable "image"; no effect today, see "Work Pools"
 ```
 
-Actions are embedded directly in the `Specification` model (`services/driver/models/resources/driver.py`) as an optional list:
+Actions are embedded directly in the `Specification` model (`driver_format/models/resources/driver.py`) as an optional list:
 
 ```python
 class Specification(BaseModel):
@@ -144,7 +150,7 @@ class Action(StyrminModel, table=True):
 
 ## Validation
 
-### UserActionsValidator (`services/driver/validators.py`)
+### UserActionsValidator (`driver_format/checks.py`)
 
 Validates that all declared actions have corresponding function implementations:
 
@@ -626,9 +632,9 @@ If the new driver version declares no `upgrade`/`core` action, `_handle_upgrade`
 
 | File | Purpose |
 |------|---------|
-| [services/driver/models/resources/actions.py](backend/styrmin_backend/services/driver/models/resources/actions.py) | `HookKind`, `ActionDefinition` |
-| [services/driver/models/resources/driver.py](backend/styrmin_backend/services/driver/models/resources/driver.py) | `Specification` (embeds `actions: list[ActionDefinition]`) |
-| [services/driver/validators.py](backend/styrmin_backend/services/driver/validators.py) | `UserActionsValidator` (AST validation) |
+| [driver_format/models/resources/actions.py](python_sdk/src/styrmin_sdk/driver_format/models/resources/actions.py) | `HookKind`, `ActionDefinition` |
+| [driver_format/models/resources/driver.py](python_sdk/src/styrmin_sdk/driver_format/models/resources/driver.py) | `Specification` (embeds `actions: list[ActionDefinition]`) |
+| [driver_format/checks.py](python_sdk/src/styrmin_sdk/driver_format/checks.py) | `UserActionsValidator` (AST validation) |
 | [services/user.py](../../../backend/styrmin_backend/services/user.py) | `ActionsWorkflowBuilder` (git and local sources) |
 | [services/applications.py](../../../backend/styrmin_backend/services/applications.py) | `ensure_action_registrations`: action registration during driver loading, also for a stored driver version |
 | [services/driver/hooks.py](../../../backend/styrmin_backend/services/driver/hooks.py) | `ActionRegistrationKey`, `resolve_setup_hooks`, `resolve_upgrade_hooks`, `load_command_for` |
