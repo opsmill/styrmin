@@ -81,6 +81,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Shared by Logout and by any UNAUTHENTICATED response.
   const signOutLocally = useCallback(async () => {
     const currentUserKey = useCurrentUserQuery.getKey();
+    // Cancel a CurrentUser fetch that is still in flight, for example the
+    // re-fetch that follows a profile save. setQueryData does not cancel it,
+    // so its response, sent while the session was still valid, would arrive
+    // after this sign-out and write the signed-in user back into the cache.
+    await queryClient.cancelQueries({ queryKey: currentUserKey });
     // Set the user to null in the CurrentUser query instead of removing it.
     // queryClient.clear() removed that query without notifying this
     // component, so AuthProvider and router.options.context kept the old
