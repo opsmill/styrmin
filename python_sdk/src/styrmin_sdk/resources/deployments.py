@@ -400,6 +400,35 @@ def _effective_image_overrides(update_input: UpdateDeploymentInput, stored_confi
     }
 
 
+#: Fields of ``UpdateDeploymentInput`` that the backend does not store in the deployment config
+#: (``split_update_deployment_input``): setting only these keeps the stored config.
+_NON_CONFIG_UPDATE_FIELDS = frozenset({"name", "parameters", "service_name_overrides"})
+
+
+def _dropped_service_overrides(update_input: UpdateDeploymentInput, stored_config: object) -> list[str]:
+    """Services whose stored ingress override the update clears, sorted (#598).
+
+    The backend replaces the whole stored config when the input sets at least one config field
+    other than ``name``, ``parameters`` and ``serviceNameOverrides``. When that input has no
+    ``services``, the stored overrides go with it. An explicit ``services`` list, even an empty
+    one, is the author's choice and is not reported. A stored block with neither an ingress
+    class nor an FQDN suffix is no override.
+    """
+    if update_input.services is not None:
+        return []
+    sets_config = any(field not in _NON_CONFIG_UPDATE_FIELDS for field in update_input.model_dump(exclude_none=True))
+    stored = stored_config.get("services") if isinstance(stored_config, dict) else None
+    if not sets_config or not isinstance(stored, dict):
+        return []
+    return sorted(
+        name
+        for name, block in stored.items()
+        if isinstance(name, str)
+        and isinstance(block, dict)
+        and (block.get("ingress_class") or block.get("fqdn_suffix"))
+    )
+
+
 def _override_kinds(block: ComponentConfigInput) -> list[OverrideKind]:
     """The override kinds a component block sets, in a fixed order."""
     kinds: list[OverrideKind] = []
@@ -1078,6 +1107,7 @@ class DeploymentResource(BaseResource):
             inapplicable_components=list(inapplicable),
             inapplicable_overrides=inapplicable,
             applicability_check_error=check_error,
+            dropped_service_overrides=_dropped_service_overrides(update_input, existing.config),
         )
 
     async def _inapplicable_overrides(

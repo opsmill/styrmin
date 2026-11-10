@@ -54,7 +54,8 @@ the `services` ingress overrides, `env_vars` and the others. A manifest whose
 are the exception.
 
 For example, a manifest whose `spec.config` has `components` and no `services`
-clears the stored service ingress overrides. To clear the last override when
+clears the stored service ingress overrides, and `apply` prints a `warning:` line
+on stderr that names the services. To clear the last override when
 nothing else stays in `spec.config`, write `services: []`. See
 [Service ingress overrides](https://docs.styrmin.app/docs/concepts-and-architecture/service-ingress-overrides).
 

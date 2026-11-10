@@ -896,6 +896,18 @@ components as `ApplyOutcome.pinned_image_components`, with
 `ApplyOutcome.target_version` set on an `updated` outcome that changes the
 version.
 
+When a manifest sets `spec.config` keys and no `services`, `apply` replaces the
+whole stored config, so the stored service ingress overrides are cleared. The
+command prints a warning on stderr that names each service whose override is
+cleared. The exit code is unchanged. The SDK returns the names as
+`ApplyOutcome.dropped_service_overrides`.
+
+```text
+updated my-app
+warning: my-app: the stored ingress override of service web is cleared: spec.config has keys and no services. Add web to spec.config.services to keep it
+0 created, 1 updated, 0 unchanged, 0 failed
+```
+
 :::note Overrides in the apply that changes the version
 
 Every component override (`env_vars`, `command`, `args`, `image`, `replicas`)

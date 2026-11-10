@@ -218,7 +218,9 @@ spec:
 - Each row names the service as the driver declares it: the driver service
   name, not a service name override.
 - `spec.config` replaces the whole stored config on every apply. A manifest
-  with other `spec.config` keys and no `services` clears the stored overrides.
+  with other `spec.config` keys and no `services` clears the stored overrides,
+  and `styrminctl deployments apply` prints a `warning:` line on stderr that
+  names the services whose override is cleared. The exit code is unchanged.
   A manifest with an empty or no `spec.config` keeps the stored config,
   overrides included. To clear the last override of a deployment whose
   manifest sets nothing else, write `services: []`.

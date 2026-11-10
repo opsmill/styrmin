@@ -2477,6 +2477,98 @@ async def test_apply_create_reports_no_pinned_components(client: StyrminClient, 
 
 
 # ---------------------------------------------------------------------------
+# apply: stored service ingress overrides that the manifest drops (#598, I3)
+# ---------------------------------------------------------------------------
+
+STORED_SERVICE_OVERRIDES: dict[str, Any] = {
+    "services": {
+        "web": {"ingress_class": "tailscale", "fqdn_suffix": None},
+        "task-manager": {"ingress_class": None, "fqdn_suffix": "tailnet.example.ts.net"},
+        "empty": {"ingress_class": None, "fqdn_suffix": None},
+    },
+    "ip_whitelist": ["10.0.0.0/8"],
+}
+
+
+async def test_apply_config_without_services_reports_the_dropped_service_overrides(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """A manifest with config keys and no ``services`` replaces the stored config, so it clears the overrides."""
+    mock_transport.execute.side_effect = _apply_update_side_effect(
+        existing_version="1.0.0", stored_config=STORED_SERVICE_OVERRIDES
+    )
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(version="1.0.0", config={"ip_whitelist": ["10.0.0.0/8"]})
+    )
+
+    assert outcome.action == "updated"
+    # Sorted; a stored block with neither field is no override, so "empty" is not named.
+    assert outcome.dropped_service_overrides == ["task-manager", "web"]
+
+
+async def test_apply_config_with_services_reports_no_dropped_service_overrides(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    mock_transport.execute.side_effect = _apply_update_side_effect(
+        existing_version="1.0.0", stored_config=STORED_SERVICE_OVERRIDES
+    )
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(
+            version="1.0.0",
+            config={"ip_whitelist": ["10.0.0.0/8"], "services": [{"name": "web", "ingressClass": "traefik"}]},
+        )
+    )
+
+    assert outcome.action == "updated"
+    assert outcome.dropped_service_overrides == []
+
+
+async def test_apply_explicit_empty_services_reports_no_dropped_service_overrides(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """``services: []`` is the documented way to clear the overrides: the author asked for it."""
+    mock_transport.execute.side_effect = _apply_update_side_effect(
+        existing_version="1.0.0", stored_config=STORED_SERVICE_OVERRIDES
+    )
+
+    outcome = await client.deployments.apply(_resolved_manifest(version="1.0.0", config={"services": []}))
+
+    assert outcome.action == "updated"
+    assert outcome.dropped_service_overrides == []
+
+
+async def test_apply_without_config_keeps_the_stored_config_and_reports_nothing(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    """No config key: the backend keeps the stored config, parameters merge, so no override is dropped."""
+    mock_transport.execute.side_effect = _apply_update_side_effect(
+        existing_version="1.0.0", stored_config=STORED_SERVICE_OVERRIDES
+    )
+
+    outcome = await client.deployments.apply(_resolved_manifest(version="1.0.0", parameters={"replicas": 2}))
+
+    assert outcome.action == "updated"
+    assert outcome.dropped_service_overrides == []
+
+
+async def test_apply_config_without_services_reports_nothing_when_none_is_stored(
+    client: StyrminClient, mock_transport: AsyncMock
+) -> None:
+    mock_transport.execute.side_effect = _apply_update_side_effect(
+        existing_version="1.0.0", stored_config={"ip_whitelist": ["10.0.0.0/8"], "services": None}
+    )
+
+    outcome = await client.deployments.apply(
+        _resolved_manifest(version="1.0.0", config={"ip_whitelist": ["192.168.0.0/16"]})
+    )
+
+    assert outcome.action == "updated"
+    assert outcome.dropped_service_overrides == []
+
+
+# ---------------------------------------------------------------------------
 # list (deployments-by-environment; backs the styrminctl deployment lookup)
 # ---------------------------------------------------------------------------
 
