@@ -330,7 +330,9 @@ class IngressUtility(Utility):
                 annotations, class_name, _ = _override_class_rules(config, override)
             else:
                 # ``settings`` is built whenever a service without an override exists.
-                settings = settings or build_ingress_settings(context, release_reference)
+                settings = settings or build_ingress_settings(
+                    context, release_reference
+                )
                 annotations = dict(settings.annotations)
                 class_name = settings.class_name
             if class_name:

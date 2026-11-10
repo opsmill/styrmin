@@ -354,9 +354,15 @@ export type DeployedService = {
   component: Scalars['String']['output'];
   deploymentId: Scalars['UUID']['output'];
   driverServiceName: Scalars['String']['output'];
+  /** True when the suffix of `humanReadableFqdn` and `humanReadableUrl` comes from the service's ingress override. */
+  fqdnSuffixOverridden: Scalars['Boolean']['output'];
   humanReadableFqdn?: Maybe<Scalars['String']['output']>;
   humanReadableUrl?: Maybe<Scalars['String']['output']>;
   id: Scalars['UUID']['output'];
+  /** Effective ingress class of the Ingress that Styrmin builds for this service: the service's override, else the resolved class. Null for a service that is not external, and where the deployment is not read. */
+  ingressClass?: Maybe<Scalars['String']['output']>;
+  /** True when `ingressClass` comes from the service's ingress override. */
+  ingressClassOverridden: Scalars['Boolean']['output'];
   kind: Scalars['String']['output'];
   port: Scalars['Int']['output'];
   primaryFqdn?: Maybe<Scalars['String']['output']>;
@@ -397,6 +403,8 @@ export type Deployment = {
   parameters: Scalars['JSON']['output'];
   podStatuses: Array<PodStatus>;
   resolvedScheduling: Array<ResolvedComponentScheduling>;
+  /** The stored ingress overrides of this deployment's services, sorted by service name. Empty when none is stored. Read `deployedServices` for the effective class and host of each service. */
+  serviceIngressOverrides: Array<ServiceIngressOverride>;
   status: Scalars['String']['output'];
 };
 
@@ -430,6 +438,8 @@ export type DeploymentConfigInput = {
   runtimeClass?: InputMaybe<Scalars['String']['input']>;
   /** Hierarchical pod scheduling & resource configuration (affinities, tolerations, topology spread, resource requests/limits, runtime class, post-render injection opt-outs). */
   scheduling?: InputMaybe<SchedulingInput>;
+  /** Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override. */
+  services?: InputMaybe<Array<ServiceConfigInput>>;
   /** Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment. */
   standardStorage?: InputMaybe<StandardStorageInput>;
 };
@@ -1462,6 +1472,16 @@ export type SchedulingInput = {
   topologySpreadConstraints?: InputMaybe<Array<TopologySpreadConstraintInput>>;
 };
 
+/** Per-service ingress override block for a deployment: the ingress class and the FQDN suffix of one service that the driver declares ``scope: external``. */
+export type ServiceConfigInput = {
+  /** FQDN suffix for this service only, used in its readable host. Null or omitted: the resolved suffix applies. */
+  fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
+  /** Ingress class for this service only. Null or omitted: the resolved class applies. */
+  ingressClass?: InputMaybe<Scalars['String']['input']>;
+  /** The driver service name. It must be declared by the driver version the deployment is bound to after the write, with scope ``external``. */
+  name: Scalars['String']['input'];
+};
+
 export type ServiceDefinition = {
   __typename?: 'ServiceDefinition';
   component: Scalars['String']['output'];
@@ -1469,6 +1489,17 @@ export type ServiceDefinition = {
   name: Scalars['String']['output'];
   port: Scalars['Int']['output'];
   scope: Scalars['String']['output'];
+};
+
+/** The stored ingress override of one service of a deployment, as set through `services` on the deployment config input. */
+export type ServiceIngressOverride = {
+  __typename?: 'ServiceIngressOverride';
+  /** FQDN suffix for this service only. Null when not overridden. */
+  fqdnSuffix?: Maybe<Scalars['String']['output']>;
+  /** Ingress class for this service only. Null when not overridden. */
+  ingressClass?: Maybe<Scalars['String']['output']>;
+  /** The driver service name. */
+  name: Scalars['String']['output'];
 };
 
 export type ServiceNameOverride = {
@@ -1711,6 +1742,8 @@ export type UpdateDeploymentInput = {
   scheduling?: InputMaybe<SchedulingInput>;
   /** Full-replacement list of service-name overrides applied at deploy time. Each entry maps a driver-declared service name to the operator-chosen override name. */
   serviceNameOverrides?: InputMaybe<Array<ServiceNameOverride>>;
+  /** Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override. */
+  services?: InputMaybe<Array<ServiceConfigInput>>;
   /** Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment. */
   standardStorage?: InputMaybe<StandardStorageInput>;
 };

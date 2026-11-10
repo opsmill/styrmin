@@ -60,6 +60,27 @@ class DeployedService:
     human_readable_fqdn: str | None = None
     primary_url: str | None = None
     human_readable_url: str | None = None
+    ingress_class: str | None = strawberry.field(
+        default=None,
+        description=(
+            "Effective ingress class of the Ingress that Styrmin builds for this "
+            "service: the service's override, else the resolved class. Null for a "
+            "service that is not external, and where the deployment is not read."
+        ),
+    )
+    ingress_class_overridden: bool = strawberry.field(
+        default=False,
+        description=(
+            "True when `ingressClass` comes from the service's ingress override."
+        ),
+    )
+    fqdn_suffix_overridden: bool = strawberry.field(
+        default=False,
+        description=(
+            "True when the suffix of `humanReadableFqdn` and `humanReadableUrl` "
+            "comes from the service's ingress override."
+        ),
+    )
 
     instance: strawberry.Private[DeployedServiceModel]
 
@@ -76,6 +97,9 @@ class DeployedService:
         human_readable_fqdn: str | None = None,
         primary_url: str | None = None,
         human_readable_url: str | None = None,
+        ingress_class: str | None = None,
+        ingress_class_overridden: bool = False,
+        fqdn_suffix_overridden: bool = False,
     ) -> DeployedService:
         return cls(
             id=instance.id,
@@ -89,6 +113,9 @@ class DeployedService:
             human_readable_fqdn=human_readable_fqdn,
             primary_url=primary_url,
             human_readable_url=human_readable_url,
+            ingress_class=ingress_class,
+            ingress_class_overridden=ingress_class_overridden,
+            fqdn_suffix_overridden=fqdn_suffix_overridden,
             instance=instance,
         )
 

@@ -8,21 +8,16 @@ effective class and suffix on ``DeployedService``) project the persisted state.
 Written before the implementation (T027, T028). Source: ``specs/033-service-ingress-override/``
 ``contracts/graphql-and-manifest.md``, ``data-model.md`` and FR-006.
 
-Names assumed from the contract (the contract says its names are a proposal, and ``schema.graphql``
-is the authority after T029):
+Names (the contract proposed them, ``schema.graphql`` is the authority):
 
 * input ``ServiceConfigInput { name, ingressClass, fqdnSuffix }`` and ``DeploymentConfigInput.services``;
-* output ``Deployment.services { name ingressClass fqdnSuffix }`` for the stored overrides (the
-  contract says "on the deployment config type", but ``Deployment.config`` is untyped JSON, so the
-  typed output has no other home than ``Deployment``);
+* output ``Deployment.serviceIngressOverrides { name ingressClass fqdnSuffix }`` for the stored overrides
+  (``Deployment.config`` is untyped JSON, so the typed output has no other home than ``Deployment``);
 * ``DeployedService.ingressClass``, ``ingressClassOverridden``, ``fqdnSuffixOverridden``.
 
-The writes reuse the existing operation files and put ``services`` in the variables, so no
-operation file names a field that ``schema.graphql`` does not have yet and ``uv run invoke
-validate-graphql`` stays green. The reads of the new output fields cannot be a ``.graphql`` file
-before T029 regenerates the schema; ``_read_deployment`` adds the new selections to an existing
-operation through the ``graphql`` AST, as ``dev/guides/graphql-propagation-tests.md`` does for a
-removed argument. T029 replaces this helper with ``.graphql`` files.
+The writes reuse the existing operation files and put ``services`` in the variables. The reads
+use ``operations/get_deployment_service_ingress.graphql``, which ``uv run invoke validate-graphql``
+checks against ``schema.graphql``.
 """
 
 from __future__ import annotations
@@ -31,9 +26,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
-import graphql
 import pytest
-from graphql import FieldNode, NameNode, OperationDefinitionNode, SelectionSetNode
 from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -271,60 +264,12 @@ async def _task_count(session: AsyncSession, deployment_id: UUID) -> int:
     return len(rows.all())
 
 
-def _field(name: str, *children: str) -> FieldNode:
-    return FieldNode(
-        name=NameNode(value=name),
-        selection_set=SelectionSetNode(
-            selections=tuple(FieldNode(name=NameNode(value=c)) for c in children)
-        )
-        if children
-        else None,
+async def _read_deployment(client: AsyncClient, deployment_id: UUID) -> dict[str, Any]:
+    """Read the stored overrides and the effective class and host of each service."""
+    data = await gql(
+        client, "get_deployment_service_ingress", {"deploymentId": str(deployment_id)}
     )
-
-
-async def _read_deployment(
-    client: AsyncClient, deployment_id: UUID, *selections: FieldNode
-) -> dict[str, Any]:
-    """Read ``deployment(deploymentId:)`` through ``get_deployment_config`` plus ``selections``.
-
-    The operation is parsed from its file and the selections are added through the AST, so the
-    request is valid against the live schema only when the planned output fields exist. The
-    request fails with a GraphQL validation error until T028 adds them.
-    """
-    document = graphql.parse(load_query("get_deployment_config"))
-    [operation] = document.definitions
-    assert isinstance(operation, OperationDefinitionNode)
-    [deployment_field] = operation.selection_set.selections
-    assert isinstance(deployment_field, FieldNode)
-    assert deployment_field.selection_set is not None
-    deployment_field.selection_set = SelectionSetNode(
-        selections=(*deployment_field.selection_set.selections, *selections)
-    )
-    response = await client.post(
-        "/graphql",
-        json={
-            "query": graphql.print_ast(document),
-            "variables": {"deploymentId": str(deployment_id)},
-        },
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert "errors" not in payload, payload
-    return payload["data"]["deployment"]
-
-
-STORED_SERVICES_FIELD = _field("services", "name", "ingressClass", "fqdnSuffix")
-DEPLOYED_SERVICES_FIELD = _field(
-    "deployedServices",
-    "driverServiceName",
-    "scope",
-    "ingressClass",
-    "ingressClassOverridden",
-    "fqdnSuffixOverridden",
-    "humanReadableFqdn",
-    "humanReadableUrl",
-    "primaryFqdn",
-)
+    return data["deployment"]
 
 
 def _by_name(rows: list[dict[str, Any]], key: str) -> dict[str, dict[str, Any]]:
@@ -428,6 +373,30 @@ async def test_update_deployment_row_with_both_fields_null_stores_no_override(
 
     assert "errors" not in payload, payload
     assert not await _stored_services(session, deployment_id)
+
+
+@pytest.mark.asyncio
+async def test_update_deployment_refuses_a_service_listed_twice(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """A second row for a service must not silently replace the first."""
+    _arm_prefect(prefect_manager_mock)
+    deployment_id = await _seed_deployment(session)
+
+    payload = await _post_update(
+        client,
+        deployment_id,
+        {
+            "services": [
+                TASK_MANAGER_OVERRIDE_INPUT,
+                {"name": "task-manager", "ingressClass": "other-class"},
+            ]
+        },
+    )
+
+    [error] = payload["errors"]
+    assert error["extensions"]["code"] == "DUPLICATE_SERVICE_NAME"
+    assert await _task_count(session, deployment_id) == 0
 
 
 @pytest.mark.asyncio
@@ -570,9 +539,9 @@ async def test_deployment_services_field_reads_the_stored_overrides(
         },
     )
 
-    deployment = await _read_deployment(client, deployment_id, STORED_SERVICES_FIELD)
+    deployment = await _read_deployment(client, deployment_id)
 
-    assert _by_name(deployment["services"], "name") == {
+    assert _by_name(deployment["serviceIngressOverrides"], "name") == {
         "task-manager": {
             "name": "task-manager",
             "ingressClass": OVERRIDE_CLASS,
@@ -588,9 +557,9 @@ async def test_deployment_services_field_is_empty_without_an_override(
 ) -> None:
     deployment_id = await _seed_deployment(session)
 
-    deployment = await _read_deployment(client, deployment_id, STORED_SERVICES_FIELD)
+    deployment = await _read_deployment(client, deployment_id)
 
-    assert not deployment["services"]
+    assert not deployment["serviceIngressOverrides"]
 
 
 @pytest.mark.asyncio
@@ -621,7 +590,7 @@ async def test_deployed_service_reads_the_override_and_marks_it(
         session, config={"services": {"task-manager": TASK_MANAGER_OVERRIDE_STORED}}
     )
 
-    deployment = await _read_deployment(client, deployment_id, DEPLOYED_SERVICES_FIELD)
+    deployment = await _read_deployment(client, deployment_id)
 
     services = _by_name(deployment["deployedServices"], "driverServiceName")
     primary_fqdn = services["api"]["primaryFqdn"]
@@ -657,7 +626,7 @@ async def test_deployed_service_marks_only_the_field_that_is_overridden(
         config={"services": {"task-manager": {"fqdn_suffix": OVERRIDE_SUFFIX}}},
     )
 
-    deployment = await _read_deployment(client, deployment_id, DEPLOYED_SERVICES_FIELD)
+    deployment = await _read_deployment(client, deployment_id)
 
     task_manager = _by_name(deployment["deployedServices"], "driverServiceName")[
         "task-manager"
@@ -676,7 +645,7 @@ async def test_deployed_service_without_an_override_reads_the_resolved_values(
 ) -> None:
     deployment_id = await _seed_deployment(session)
 
-    deployment = await _read_deployment(client, deployment_id, DEPLOYED_SERVICES_FIELD)
+    deployment = await _read_deployment(client, deployment_id)
 
     services = _by_name(deployment["deployedServices"], "driverServiceName")
     for name in ("task-manager", "api"):
@@ -695,7 +664,7 @@ async def test_deployed_service_ingress_class_is_null_for_an_internal_service(
     """contract: ``ingressClass`` is null for a service that is not external."""
     deployment_id = await _seed_deployment(session)
 
-    deployment = await _read_deployment(client, deployment_id, DEPLOYED_SERVICES_FIELD)
+    deployment = await _read_deployment(client, deployment_id)
 
     infrahub = _by_name(deployment["deployedServices"], "driverServiceName")["infrahub"]
     assert infrahub["scope"] == "internal"

@@ -157,6 +157,37 @@ class ComponentConfigInput:
     )
 
 
+@strawberry.input(
+    description=(
+        "Per-service ingress override block for a deployment: the ingress "
+        "class and the FQDN suffix of one service that the driver declares "
+        "``scope: external``."
+    )
+)
+class ServiceConfigInput:
+    name: str = strawberry.field(
+        description=(
+            "The driver service name. It must be declared by the driver "
+            "version the deployment is bound to after the write, with scope "
+            "``external``."
+        )
+    )
+    ingress_class: str | None = strawberry.field(
+        default=None,
+        description=(
+            "Ingress class for this service only. Null or omitted: the "
+            "resolved class applies."
+        ),
+    )
+    fqdn_suffix: str | None = strawberry.field(
+        default=None,
+        description=(
+            "FQDN suffix for this service only, used in its readable host. "
+            "Null or omitted: the resolved suffix applies."
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Shared deployment-config input
 #
@@ -187,6 +218,17 @@ class DeploymentConfigInput:
             "Flattened by the resolver to a dict keyed on ``name``; "
             "duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An "
             "empty list explicitly clears every per-component block."
+        ),
+    )
+    services: list[ServiceConfigInput] | None = strawberry.field(
+        default=None,
+        description=(
+            "Full-replacement list of per-service ingress override blocks. "
+            "Flattened by the resolver to a dict keyed on ``name``; duplicate "
+            "names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in "
+            "the list has no override after the write, and an empty list "
+            "explicitly clears every override. A row with both ``ingressClass`` "
+            "and ``fqdnSuffix`` null is the same as no override."
         ),
     )
     env_vars: list[EnvVarInput] | None = strawberry.field(
@@ -365,6 +407,9 @@ def update_deployment_input_to_dict(input: UpdateDeploymentInput) -> dict[str, A
       ``env_vars`` sub-list is flattened recursively with scope
       ``f"component:{name}"``; ``command``/``args``/``image``/``replicas``
       pass through verbatim.
+    * ``services`` — list of ``{name, ingress_class?, fqdn_suffix?}`` →
+      ``dict[str, dict]`` keyed on ``name`` with duplicate-name detection
+      raising :class:`DuplicateServiceNameError` (#598).
     * ``service_name_overrides`` — list of
       ``{driver_service_name, override_name}`` →
       ``dict[str, str]`` keyed on ``driver_service_name``.
@@ -394,6 +439,10 @@ def update_deployment_input_to_dict(input: UpdateDeploymentInput) -> dict[str, A
             if value is None:
                 continue
             result["components"] = _flatten_components(value)
+        elif key == "services":
+            if value is None:
+                continue
+            result["services"] = _flatten_services(value)
         elif key == "service_name_overrides":
             if value is None:
                 continue
@@ -442,7 +491,7 @@ def deployment_config_input_to_dict(input: DeploymentConfigInput) -> dict[str, A
 
     The create (``deploy``) counterpart of
     :func:`update_deployment_input_to_dict`: it flattens the two list-shaped
-    config fields (``env_vars`` / ``components``) into the maps the service
+    config fields (``env_vars`` / ``components`` / ``services``) into the maps the service
     layer and the source-of-truth ``DeploymentConfig`` Pydantic model expect,
     and passes every other field through :func:`_convert_value` unchanged.
 
@@ -464,6 +513,8 @@ def deployment_config_input_to_dict(input: DeploymentConfigInput) -> dict[str, A
             result["env_vars"] = _flatten_env_vars(value, scope="deployment")
         elif key == "components":
             result["components"] = _flatten_components(value)
+        elif key == "services":
+            result["services"] = _flatten_services(value)
         else:
             result[key] = value
     return result
@@ -554,11 +605,34 @@ def _flatten_components(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
     return out
 
 
+def _flatten_services(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Flatten a list of service-config rows into ``dict[str, dict]`` keyed on ``name``.
+
+    Unset fields are already dropped by ``_convert_value``. Duplicate service names
+    raise :class:`DuplicateServiceNameError`. A row with no field set is not stored: it
+    is the same as no override (data-model.md).
+    """
+    from styrmin_backend.services.service_ingress.exceptions import (
+        DuplicateServiceNameError,
+    )
+
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        name = row["name"]
+        if name in out:
+            raise DuplicateServiceNameError(name=name)
+        block = {key: value for key, value in row.items() if key != "name"}
+        if block:
+            out[name] = block
+    return out
+
+
 __all__ = [
     "ComponentConfigInput",
     "DeploymentConfigInput",
     "DeploymentUpdate",
     "ParameterValueInput",
+    "ServiceConfigInput",
     "UpdateDeploymentInput",
     "deployment_config_input_to_dict",
     "parameter_inputs_to_dict",

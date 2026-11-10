@@ -451,6 +451,19 @@ type DeployedService {
   humanReadableFqdn: String
   primaryUrl: String
   humanReadableUrl: String
+
+  """
+  Effective ingress class of the Ingress that Styrmin builds for this service: the service's override, else the resolved class. Null for a service that is not external, and where the deployment is not read.
+  """
+  ingressClass: String
+
+  """True when `ingressClass` comes from the service's ingress override."""
+  ingressClassOverridden: Boolean!
+
+  """
+  True when the suffix of `humanReadableFqdn` and `humanReadableUrl` comes from the service's ingress override.
+  """
+  fqdnSuffixOverridden: Boolean!
   deploymentId: UUID!
 }
 
@@ -497,6 +510,11 @@ type Deployment {
   One row per component the bound driver version declares, plus one per orphaned replica override, sorted by component name.
   """
   componentReplicas: [ComponentReplicas!]!
+
+  """
+  The stored ingress overrides of this deployment's services, sorted by service name. Empty when none is stored. Read `deployedServices` for the effective class and host of each service.
+  """
+  serviceIngressOverrides: [ServiceIngressOverride!]!
   crdStatus: DeploymentStatusType
   createdBy: User!
 
@@ -514,6 +532,11 @@ input DeploymentConfigInput {
   Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block.
   """
   components: [ComponentConfigInput!] = null
+
+  """
+  Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override.
+  """
+  services: [ServiceConfigInput!] = null
 
   """
   Deployment-scoped environment variables. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload.
@@ -1324,12 +1347,46 @@ input SchedulingInput {
   inject: PostRenderInjectionInput = null
 }
 
+"""
+Per-service ingress override block for a deployment: the ingress class and the FQDN suffix of one service that the driver declares ``scope: external``.
+"""
+input ServiceConfigInput {
+  """
+  The driver service name. It must be declared by the driver version the deployment is bound to after the write, with scope ``external``.
+  """
+  name: String!
+
+  """
+  Ingress class for this service only. Null or omitted: the resolved class applies.
+  """
+  ingressClass: String = null
+
+  """
+  FQDN suffix for this service only, used in its readable host. Null or omitted: the resolved suffix applies.
+  """
+  fqdnSuffix: String = null
+}
+
 type ServiceDefinition {
   name: String!
   kind: String!
   scope: String!
   port: Int!
   component: String!
+}
+
+"""
+The stored ingress override of one service of a deployment, as set through `services` on the deployment config input.
+"""
+type ServiceIngressOverride {
+  """The driver service name."""
+  name: String!
+
+  """Ingress class for this service only. Null when not overridden."""
+  ingressClass: String
+
+  """FQDN suffix for this service only. Null when not overridden."""
+  fqdnSuffix: String
 }
 
 input ServiceNameOverride {
@@ -1594,6 +1651,11 @@ input UpdateDeploymentInput {
   Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block.
   """
   components: [ComponentConfigInput!] = null
+
+  """
+  Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override.
+  """
+  services: [ServiceConfigInput!] = null
 
   """
   Deployment-scoped environment variables. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload.

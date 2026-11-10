@@ -850,9 +850,9 @@ class Mutation:
         accept an identical configuration payload. The typed inputs are
         flattened to the plain dicts ``deploy_application`` expects via the
         shared converters — list-shaped ``env_vars`` / ``components`` /
-        ``parameters`` carry typed duplicate-name detection
+        ``services`` / ``parameters`` carry typed duplicate-name detection
         (``DUPLICATE_ENV_VAR_NAME`` / ``DUPLICATE_COMPONENT_NAME`` /
-        ``DUPLICATE_PARAMETER_NAME``) intact.
+        ``DUPLICATE_SERVICE_NAME`` / ``DUPLICATE_PARAMETER_NAME``) intact.
         """
         uow = info.context["uow"]
         current_user = info.context["current_user"]
@@ -906,10 +906,10 @@ class Mutation:
         semantics) and split by ``split_update_deployment_input`` into the
         four keyword arguments the service-layer ``update_deployment`` accepts. List-shape fields
         (``parameters``, ``service_name_overrides``, ``components``,
-        ``env_vars``) are flattened to dicts with typed duplicate-name
+        ``services``, ``env_vars``) are flattened to dicts with typed duplicate-name
         detection by ``update_deployment_input_to_dict`` so codes like
         ``DUPLICATE_PARAMETER_NAME`` / ``DUPLICATE_ENV_VAR_NAME`` /
-        ``DUPLICATE_COMPONENT_NAME`` reach the GraphQL boundary intact.
+        ``DUPLICATE_COMPONENT_NAME`` / ``DUPLICATE_SERVICE_NAME`` reach the GraphQL boundary intact.
         The ``InternalDeploymentError`` guard runs before conversion so
         internal deployments reject without doing any input work.
         """
