@@ -348,8 +348,11 @@ Each point has its source. None blocks this decision.
   so after commit `a0885121` it selects none of the operator-managed NetworkPolicies, which carry
   the real reference. The teardown deletes them by the real reference, and the runs left nothing
   behind. A HelmRelease deleted alone was not tested.
-- `apply_utility_resources` logs "the CRD type may not be installed yet" for every failed Ingress
-  apply. This hid the 403 of the first end-to-end run. Not changed.
+- `apply_utility_resources` logged "the CRD type may not be installed yet" for every failed Ingress
+  apply, which hid the 403 of the first end-to-end run. The review fixes make an Ingress error fail
+  the flow, skip a custom kind only on status 404, and log the status and reason. A NetworkPolicy
+  is still skipped on any error, with the status and reason logged: the same pattern as before,
+  left open.
 - `DeploymentResource.scale` sends `components` and, since this change, the stored `services`. It
   still clears every other stored config key (a probe showed `ip_whitelist` and `env_vars` cleared).
   That behavior exists before this change.
@@ -364,3 +367,37 @@ Each point has its source. None blocks this decision.
   ADR-018 are not changed here, because a schema description change needs regeneration and approval.
 - The Tailscale `spec.tls` question and the optional `tls` hosts field are open
   (research D-011).
+- A class-only override on the first declared service removes the application address from its
+  Ingress (it follows research D-003). The owner of the feature decides whether that is wanted. The
+  documentation states the effect.
+- `_service_overrides_by_deployment` in `services/context.py` reads every peer deployment with
+  `uow.deployments.find` on each context generation, so the cost grows with the number of
+  deployments. It was not measured.
+- With `dedicated_ingress` on a cluster that has a default IngressClass, the API server may add
+  `spec.ingressClassName`, and the spec comparison would then replace the Ingress on each pass.
+  This is plausible and not verified.
+- `list_managed_resources` returns no Ingress when the list call fails, so the operator would create
+  the desired Ingresses again in each cycle and never delete a stale one. The other kinds have the
+  same pattern. The Ingress drift handlers return without a log when the release-reference label is
+  missing.
+- `_deployment_labels` leaves out a label that has no value. A missing `styrmin/environment_id`
+  would make a dedicated controller ignore the Ingress again, and nothing logs it.
+- The `ingress_class` key of the `deployed_services` entries is not read by any code, and the
+  `settings or build_ingress_settings(...)` fallback in the builder cannot run. Some unit tests still
+  carry `importlib` indirection and "planned symbol" comments, four test files repeat a context
+  fixture, and two frontend helpers (`servicesWithInvalidSuffix`, `servicesWithInvalidClass`) are twins.
+- The suffix rule and the ingress class rule exist in Python and in TypeScript with no shared test
+  cases. Twenty-one edge cases were compared by hand. `deployed_services` is an untyped
+  `list[dict[str, Any]]`; the builder now reads it with `.get`, and a typed model is a larger change.
+- Not tested: the unit test that joins `compute_service_address` and the builder; the read of an
+  override back through the CLI or a manifest command; Tailscale (SC-005 needs a Tailscale operator).
+  FR-005, FR-011 and FR-014 are covered by documentation only.
+- The `ValueError` for a missing FQDN suffix reaches Prefect as a plain exception. The review fixes
+  change its text only.
+- The spec does not say what happens when the first declared service is external with kind `tcp` or
+  `udp`. Today no Styrmin-built Ingress carries the application address. A unit test pins that
+  behavior.
+- The description of the `services` field of `DeploymentConfigInput` (shared by `UpdateDeploymentInput`)
+  still lists only "removes or declares `internal`" for `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`.
+  It was not changed, because the description of `UpdateDeploymentInput` is not changed here. The
+  description of `ServiceConfigInput.name` and the contract name the `tcp` and `udp` case.
