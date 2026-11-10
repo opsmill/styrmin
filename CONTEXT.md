@@ -131,11 +131,11 @@ The content-addressable identifier carried by each **application driver version*
 _Avoid_: "driver hash" alone (ambiguous across source types), "version hash" (conflates with **driver version**), "build id".
 
 **Application version**:
-The user-facing version of the deployed application (e.g. `infrahub` `1.6.0`), distinct from the **driver version** that knows how to deploy it. A **driver version** declares a semver specifier (`application_supported_versions`) describing which **application versions** it can deploy.
+The user-facing version of the deployed application (e.g. `infrahub` `1.6.0`), distinct from the **driver version** that knows how to deploy it. A **driver version** declares a semver specifier (`application_supported_versions`) describing which **application versions** it can deploy. The version a person types is stored unchanged (`1.12.0-beta.1` stays `1.12.0-beta.1`), and a **prerelease** may be requested.
 _Avoid_: "app version" (in code is fine, in prose write it out), conflating with **driver version**.
 
 **Prerelease** (application version):
-An **application version** that PEP 440 treats as a prerelease: a beta (`1.12.0b0`), a release candidate (`1.12.0rc1`) or a development build (`1.12.0.dev1`). A **driver version**'s `application_supported_versions` range matches a prerelease only if one of its clauses names a prerelease (a `!=` clause does not count), so `>=1.5,<2.0` refuses `1.12.0b0` and `>=1.12.0b0,<1.13` accepts it. When a request for a prerelease is refused for that reason, the error says so and lists the supported ranges. See [issue #591](https://github.com/opsmill/styrmin/issues/591).
+An **application version** that PEP 440 treats as a prerelease: a beta (`1.12.0b0`), a release candidate (`1.12.0rc1`) or a development build (`1.12.0.dev1`). A **driver version**'s `application_supported_versions` range accepts a prerelease when its numbers fit the range, so `>=1.5,<2.0` accepts `1.12.0b0`. PEP 440 orders a prerelease below its final release, so `>=1.12.0,<1.13` refuses `1.12.0b0`, and `>=1.12.0b0,<1.13` accepts it. A driver cannot forbid prereleases. When a request for an unsupported version is refused, the error lists the supported ranges. See [issue #591](https://github.com/opsmill/styrmin/issues/591).
 _Avoid_: "beta" as the general term, since a beta is one kind of prerelease.
 
 **Latest-wins driver-version resolution**:

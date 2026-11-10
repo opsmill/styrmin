@@ -228,37 +228,48 @@ Notes:
 
 #### Prereleases in `supported_versions`
 
-A range matches a prerelease of the application, such as a beta
+A range accepts a prerelease of the application, such as a beta
 (`1.12.0b0`), a release candidate (`1.12.0rc1`) or a development build
-(`1.12.0.dev1`), only if one of the range's clauses names a prerelease. A
-`!=` clause does not count. This is how
-[PEP 440 defines the matching of prereleases](https://peps.python.org/pep-0440/#handling-of-pre-releases).
-The range `>=1.5,<2.0` therefore accepts `1.12.0` but refuses `1.12.0b0`,
-even though `1.12.0b0` is between the two bounds, and `>=1.5,!=1.12.0b0,<2.0`
-still refuses `1.12.0b1`.
+(`1.12.0.dev1`), when its numbers fit the range. The range does not have to
+name a prerelease. The range `>=1.5,<2.0` therefore accepts `1.12.0b0` and
+`1.9.0rc1`.
 
-| `supported_versions` | `1.12.0b0` | `1.12.0` | `1.9.0rc1` |
-|---|---|---|---|
-| `>=1.5,<2.0` | refused | accepted | refused |
-| `>=1.12.0b0,<1.13` | accepted | accepted | refused, below the lower bound |
-| `>=1.5.0b0,<2.0` | accepted | accepted | accepted |
+[PEP 440](https://peps.python.org/pep-0440/#handling-of-pre-releases) still
+orders a prerelease below its final release. So a prerelease of the lower
+bound is below the range, and a prerelease of the upper bound is outside it:
+`>=1.12.0,<1.13` refuses `1.12.0b0`, and `<2.0` refuses `2.0.0b1`.
 
-To let users deploy a prerelease, publish a driver version with a range
-for one minor series of the application, with the first prerelease as the
-lower bound and the next minor version as the upper bound, for example
-`>=1.12.0b0,<1.13`. Do not add a prerelease to a wide range, as in
-`>=1.5.0b0,<2.0`: a range that names a prerelease anywhere accepts every
-prerelease inside the whole range, here every beta, release candidate and
-development build from `1.5` to `2.0`.
+The rule applies when a person creates a deployment, upgrades one or pins a
+driver version, and when Styrmin loads a driver: it checks `default_version`
+against `supported_versions` the same way.
 
-The range `>=1.12.0b0,<1.13` also accepts the stable releases `1.12.0` and
-later `1.12.x` patch releases. When its driver version has the highest
-`spec.version` of the driver, Styrmin binds those deployments to it too, as
-the latest-wins rule does for any ranges that overlap.
+| `supported_versions` | Application version | Accepted |
+|---|---|---|
+| `>=1.5,<2.0` | `1.12.0b0`, `1.9.0rc1`, `1.12.0.dev3`, `1.12.0` | yes |
+| `>=1.5,<2.0` | `2.0.0b1`, `2.0.0rc1` | no, a prerelease of the upper bound |
+| `>=1.5,<2.0` | `1.5.0a1`, `1.5.0.dev1`, `1.4.0rc1` | no, below the lower bound |
+| `>=1.12.0,<1.13` | `1.12.0b0`, `1.9.0rc1`, `1.12.0.dev3` | no, below the lower bound |
+| `>=1.12.0b0,<1.13` | `1.12.0b0`, `1.12.0` | yes |
+| `==1.12.0` | `1.12.0b0` | no |
+| `!=1.12.0b0` | `1.12.0b1` | yes |
 
-When Styrmin refuses a prerelease because no range names one, the error
-says so and lists the supported ranges of the driver, newest driver version
-first.
+To accept the prereleases of one release, such as `1.12.0`, write the first
+prerelease as the lower bound, for example `>=1.12.0b0,<1.13`. This range
+also accepts the stable release `1.12.0` and later `1.12.x` patch releases.
+When its driver version has the highest `spec.version` of the driver,
+Styrmin binds those deployments to it too, as the latest-wins rule does for
+any ranges that overlap.
+
+A driver cannot forbid prereleases. A range that looks stable, such as
+`>=1.5,<2.0`, accepts every prerelease between its bounds. To keep a
+prerelease out, set the bounds so that its numbers fall outside the range.
+
+Styrmin stores the application version as the person typed it:
+`1.12.0-beta.1` stays `1.12.0-beta.1`.
+
+When no driver version supports the application version, the error names
+the version and lists every supported range of the driver, newest driver
+version first. It does not mention prereleases.
 
 ### Step 3: Declare the components
 
