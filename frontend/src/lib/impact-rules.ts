@@ -175,13 +175,13 @@ export const impactRules: ImpactRule[] = [
   {
     matcher: "services[*].ingressClass",
     consequence:
-      "Ingress of this service will be recreated under the new class; other services are not affected",
+      "Ingress of this service will be recreated under the new class; other services are not affected. An overridden Ingress carries only the ingress class: the IP allow-list, the external DNS record and the application address are not applied to it",
     severity: "warning",
   },
   {
     matcher: "services[*].fqdnSuffix",
     consequence:
-      "External DNS record of this service will be republished under the new suffix; other services are not affected",
+      "Ingress of this service will use hosts under the new suffix; other services are not affected. An overridden Ingress carries only the ingress class: no entry-point, external DNS, Cloudflare or allow-list annotation is set, so the IP allow-list and the external DNS record are not applied to it, and the application address is not on it",
     severity: "warning",
   },
   {

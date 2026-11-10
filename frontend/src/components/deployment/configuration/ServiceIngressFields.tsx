@@ -63,6 +63,14 @@ export function ServiceIngressFields({ services, value, onChange }: Props) {
 
   return (
     <div className="space-y-3">
+      <p
+        data-testid="service-ingress-override-note"
+        className="text-xs text-muted-foreground"
+      >
+        An overridden Ingress carries only the ingress class. The IP allow-list,
+        the external DNS record and the application address are not applied to
+        it.
+      </p>
       {external.map(({ driverServiceName: name }) => {
         const row = rows.find((candidate) => candidate?.name === name);
         const ingressClass = row?.ingressClass ?? "";

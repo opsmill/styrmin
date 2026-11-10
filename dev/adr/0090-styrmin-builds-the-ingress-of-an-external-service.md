@@ -370,6 +370,10 @@ Each point has its source. None blocks this decision.
 - A class-only override on the first declared service removes the application address from its
   Ingress (it follows research D-003). The owner of the feature decides whether that is wanted. The
   documentation states the effect.
+- No warning is shown or returned when a deployment sets `ip_whitelist` and a service gets an
+  override. The overridden Ingress has no allow-list annotation, so the allow-list is not applied to
+  that service (FR-004, FR-005). The help text of the override fields and the entry in the Review
+  dialog state that. A write-time warning or refusal is a candidate for a later change.
 - `_service_overrides_by_deployment` in `services/context.py` reads every peer deployment with
   `uow.deployments.find` on each context generation, so the cost grows with the number of
   deployments. It was not measured.

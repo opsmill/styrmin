@@ -600,4 +600,23 @@ describe("impact-rules.ts: service ingress overrides (#598)", () => {
     expect(narrow).toBeDefined();
     expect(narrow!.consequence).not.toBe(wide!.consequence);
   });
+
+  it("states that an overridden Ingress carries only the ingress class", () => {
+    // An overridden Ingress has the class annotation and no entry-point,
+    // external-dns, Cloudflare or allow-list annotation (FR-004), and the
+    // application address is not on it (FR-002). The Review dialog entry must
+    // say what happens, so it must not claim that a DNS record is republished.
+    for (const matcher of [
+      "services[*].ingressClass",
+      "services[*].fqdnSuffix",
+    ]) {
+      const rule = impactRules.find((r) => r.matcher === matcher);
+      expect(rule).toBeDefined();
+      expect(rule!.consequence).toContain("only the ingress class");
+      expect(rule!.consequence).toContain("IP allow-list");
+      expect(rule!.consequence).toContain("external DNS record");
+      expect(rule!.consequence).toContain("application address");
+      expect(rule!.consequence).not.toMatch(/republished/i);
+    }
+  });
 });

@@ -161,6 +161,18 @@ describe("ServiceOverridesSection: ingress override fields", () => {
     }
   });
 
+  it("says that an overridden Ingress carries only the ingress class", () => {
+    renderSection();
+
+    const help = screen.getByTestId("service-ingress-override-note");
+    expect(help).toHaveTextContent(
+      "An overridden Ingress carries only the ingress class",
+    );
+    expect(help).toHaveTextContent("IP allow-list");
+    expect(help).toHaveTextContent("external DNS record");
+    expect(help).toHaveTextContent("application address");
+  });
+
   it("offers no ingress field for an internal service (FR-009 is prevented in the UI)", () => {
     renderSection();
 
