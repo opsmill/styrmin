@@ -27,13 +27,14 @@ from styrmin_backend.context.fqdn import (
     compute_external_url,
     compute_primary_fqdn,
     compute_service_address,
+    service_gets_ingress,
 )
 from styrmin_backend.context.models.config import (
     ComponentConfigBlock,
     DeploymentConfig,
     EnvironmentConfig,
     ResolvedConfig,
-    ServiceConfigBlock,
+    parse_service_overrides,
 )
 from styrmin_backend.domain.models import Component as ComponentEntity
 from styrmin_backend.domain.models import (
@@ -448,21 +449,21 @@ class Deployment:
                 ingress_class=ingress_class,
                 fqdn_suffix=fqdn_suffix,
             )
-            stored_overrides = {
-                name: ServiceConfigBlock.model_validate(block)
-                for name, block in (self.instance.config or {})
-                .get("services", {})
-                .items()
-            }
+            stored_overrides = parse_service_overrides(self.instance.config)
 
             results: list[DeployedServiceType] = []
             for s in services:
-                # An override applies only to a service whose Ingress Styrmin builds.
+                # An override applies only to a service whose Ingress Styrmin builds
+                # (the rule that the context and the Ingress builder use).
                 is_external = s.scope == "external"
-                override = stored_overrides.get(s.driver_service_name)
+                override = (
+                    stored_overrides.get(s.driver_service_name)
+                    if service_gets_ingress(s.scope, s.kind)
+                    else None
+                )
                 address = compute_service_address(
                     resolved_config,
-                    override if is_external else None,
+                    override,
                     service_host=s.resolved_name,
                     environment_name=environment_name,
                     app_name=app_name,
@@ -482,14 +483,10 @@ class Deployment:
                         ),
                         ingress_class=address.ingress_class if is_external else None,
                         ingress_class_overridden=(
-                            is_external
-                            and override is not None
-                            and override.ingress_class is not None
+                            override is not None and override.ingress_class is not None
                         ),
                         fqdn_suffix_overridden=(
-                            is_external
-                            and override is not None
-                            and override.fqdn_suffix is not None
+                            override is not None and override.fqdn_suffix is not None
                         ),
                     )
                 )
@@ -920,18 +917,15 @@ class Deployment:
         )
     )
     def service_ingress_overrides(self) -> list[ServiceIngressOverride]:
-        stored = (self.instance.config or {}).get("services") or {}
-        rows: list[ServiceIngressOverride] = []
-        for name in sorted(stored):
-            block = ServiceConfigBlock.model_validate(stored[name])
-            rows.append(
-                ServiceIngressOverride(
-                    name=name,
-                    ingress_class=block.ingress_class,
-                    fqdn_suffix=block.fqdn_suffix,
-                )
+        stored = parse_service_overrides(self.instance.config)
+        return [
+            ServiceIngressOverride(
+                name=name,
+                ingress_class=stored[name].ingress_class,
+                fqdn_suffix=stored[name].fqdn_suffix,
             )
-        return rows
+            for name in sorted(stored)
+        ]
 
     @strawberry.field
     async def crd_status(self, info: strawberry.Info) -> DeploymentStatusType | None:

@@ -568,6 +568,76 @@ async def test_deployment_services_field_is_empty_without_an_override(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config", [{"services": None}, {"services": {}}], ids=["null", "empty"]
+)
+async def test_a_stored_services_key_with_no_block_reads_as_no_override(
+    client: AsyncClient, session: AsyncSession, config: dict[str, Any]
+) -> None:
+    """The three places that read ``config["services"]`` treat a stored ``null`` like a missing key (review M1)."""
+    deployment_id = await _seed_deployment(session, config=config)
+
+    deployment = await _read_deployment(client, deployment_id)
+
+    assert not deployment["serviceIngressOverrides"]
+    services = _by_name(deployment["deployedServices"], "driverServiceName")
+    assert services["task-manager"]["ingressClassOverridden"] is False
+    assert services["task-manager"]["fqdnSuffixOverridden"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scope", "kind", "applies"),
+    [
+        ("external", "http", True),
+        ("external", "https", True),
+        ("external", "tcp", False),
+        ("external", "udp", False),
+        ("internal", "http", False),
+    ],
+)
+async def test_the_context_and_the_graphql_read_agree_on_which_service_an_override_applies_to(
+    client: AsyncClient,
+    session: AsyncSession,
+    scope: str,
+    kind: str,
+    applies: bool,
+) -> None:
+    """A stored override applies only to a service that Styrmin builds an Ingress for. The context
+    that the operator reads and ``deployedServices`` give the same class and the same mark (review M2)."""
+    services = [
+        {
+            "name": "svc",
+            "kind": kind,
+            "scope": scope,
+            "port": 8080,
+            "component": "server",
+        }
+    ]
+    deployment_id = await _seed_deployment(
+        session,
+        config={"services": {"svc": {"ingress_class": OVERRIDE_CLASS}}},
+        services=services,
+    )
+
+    deployment = await _read_deployment(client, deployment_id)
+    response = await client.get(f"/deployments/{deployment_id}/context")
+
+    assert response.status_code == 200, response.text
+    read_model = _by_name(deployment["deployedServices"], "driverServiceName")["svc"]
+    from_context = response.json()["services"]["svc"]
+    assert from_context["overridden"] is applies
+    assert read_model["ingressClassOverridden"] is applies
+    assert from_context["ingress_class"] == (
+        OVERRIDE_CLASS if applies else CLUSTER_CLASS
+    )
+    if scope == "external":
+        assert read_model["ingressClass"] == from_context["ingress_class"]
+    else:
+        assert read_model["ingressClass"] is None
+
+
+@pytest.mark.asyncio
 async def test_deployment_config_json_reads_the_stored_overrides(
     client: AsyncClient, session: AsyncSession
 ) -> None:

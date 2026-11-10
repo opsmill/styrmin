@@ -1,4 +1,5 @@
 import re
+from collections.abc import Mapping
 from typing import Any, Literal
 from uuid import UUID
 
@@ -746,6 +747,20 @@ class ServiceConfigBlock(BaseModel):
     @property
     def is_empty(self) -> bool:
         return self.ingress_class is None and self.fqdn_suffix is None
+
+
+def parse_service_overrides(
+    config: Mapping[str, Any] | None,
+) -> dict[str, ServiceConfigBlock]:
+    """Return the service ingress overrides of a stored deployment config, keyed by driver service name.
+
+    The one reader of ``config["services"]`` outside the ``DeploymentConfig`` model: a config
+    that is ``None``, has no ``services`` key, or has ``"services": null`` holds no override.
+    """
+    stored = (config or {}).get("services") or {}
+    return {
+        name: ServiceConfigBlock.model_validate(block) for name, block in stored.items()
+    }
 
 
 class DeploymentConfig(ClusterConfig, EnvironmentConfig):

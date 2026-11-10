@@ -18,6 +18,7 @@ from styrmin_backend.context.models.config import (
     EnvironmentConfig,
     SchedulingConfig,
     ServiceConfigBlock,
+    parse_service_overrides,
 )
 from styrmin_backend.context.models.contexts import (
     GlobalContext,
@@ -29,7 +30,10 @@ from styrmin_backend.context.models.input import (
     UtilityInput,
     UtilityKindInput,
 )
-from styrmin_backend.context.fqdn import compute_service_address
+from styrmin_backend.context.fqdn import (
+    compute_service_address,
+    service_gets_ingress,
+)
 from styrmin_backend.context.models.services import ServiceReference
 from styrmin_backend.context.resolvers import (
     _resolve_scheduling_config,
@@ -252,11 +256,17 @@ async def generate_context_from_deployment(
                 for declared in application_driver_version.services or []
             ],
         ):
-            address = compute_service_address(
-                context.instance.config,
+            # An override applies only to a service whose Ingress Styrmin builds.
+            override = (
                 service_overrides.get(svc.deployment_id, {}).get(
                     svc.driver_service_name
-                ),
+                )
+                if service_gets_ingress(svc.scope, svc.kind)
+                else None
+            )
+            address = compute_service_address(
+                context.instance.config,
+                override,
                 service_host=svc.resolved_name,
                 environment_name=env_name,
                 app_name=app_name,
@@ -384,13 +394,9 @@ async def _service_overrides_by_deployment(
     }
     for owner_id in {svc.deployment_id for svc in deployed_services} - {deployment.id}:
         owner = await uow.deployments.find(owner_id)
-        stored = ((owner.config if owner is not None else None) or {}).get(
-            "services"
-        ) or {}
-        overrides[owner_id] = {
-            name: ServiceConfigBlock.model_validate(block)
-            for name, block in stored.items()
-        }
+        overrides[owner_id] = parse_service_overrides(
+            owner.config if owner is not None else None
+        )
     return overrides
 
 
