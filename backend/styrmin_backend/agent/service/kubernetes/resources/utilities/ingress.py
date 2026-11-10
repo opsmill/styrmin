@@ -69,6 +69,22 @@ def _resolved_class_rules(
     return {}, None, False
 
 
+def _missing_suffix_message(
+    context: GlobalContext, service_name: str | None = None
+) -> str:
+    """Return the error text for a deployment that has no FQDN suffix to build an Ingress host from."""
+    target = (
+        f"the Ingress of service {service_name!r} of deployment "
+        if service_name
+        else "the Ingress of deployment "
+    )
+    return (
+        f"FQDN suffix is required to build {target}{context.instance.deployment_id} "
+        f"(application {context.app.name!r}): no FQDN suffix is set on the cluster, the "
+        "environment or the deployment."
+    )
+
+
 def build_ingress_settings(
     context: GlobalContext, release_reference: str
 ) -> IngressSettings:
@@ -82,9 +98,8 @@ def build_ingress_settings(
     """
     config = context.instance.config
     if not config.fqdn_suffix:
-        raise ValueError("FQDN suffix is required to build the ingress patch.")
-    # The operator reads ``release_reference`` from a label that a HelmRelease managed through the
-    # StyrminDeployment CRD does not have, so it passes an empty value: use the instance's one.
+        raise ValueError(_missing_suffix_message(context))
+    # ``release_reference`` is empty when a caller has no label to read it from: use the instance's one.
     reference = release_reference or context.instance.release_reference
     annotations = {
         "traefik.ingress.kubernetes.io/router.entrypoints": "web,websecure",
@@ -266,7 +281,8 @@ class IngressUtility(Utility):
         overrides: Mapping[str, ServiceConfigBlock], service: dict[str, Any]
     ) -> ServiceConfigBlock | None:
         """Return the override of a service, or ``None`` when it has none or a block with no field set."""
-        override = overrides.get(service["driver_service_name"])
+        name = service.get("driver_service_name")
+        override = overrides.get(name) if name else None
         return None if override is None or override.is_empty else override
 
     def _build_service_ingresses(
@@ -282,13 +298,18 @@ class IngressUtility(Utility):
         own_services = [
             service
             for service in context.deployed_services
-            if service["deployment_id"] == str(context.instance.deployment_id)
+            if service.get("deployment_id") == str(context.instance.deployment_id)
         ]
+        # A context that an earlier release stored (the StyrminDeployment resource of a deployment
+        # that exists today) has no ``scope`` or ``driver_service_name`` in its entries, and neither do
+        # the entries of a peer deployment. Such an entry is treated as not external, so no Ingress is
+        # built for it: this release adds the Ingress to a service only once the context is regenerated.
         buildable = [
             service
             for service in own_services
-            if service["scope"] == "external"
-            and service["kind"] in _INGRESS_SERVICE_KINDS
+            if service.get("scope") == "external"
+            and service.get("driver_service_name")
+            and service.get("kind") in _INGRESS_SERVICE_KINDS
         ]
         if not buildable:
             return []
@@ -314,7 +335,7 @@ class IngressUtility(Utility):
                 compute_human_readable_fqdn(
                     service["resolved_name"],
                     context.environment.name,
-                    service["fqdn_suffix"],
+                    service.get("fqdn_suffix"),
                 )
             ]
             # The application address uses the resolved suffix, so an overridden Ingress
@@ -323,7 +344,11 @@ class IngressUtility(Utility):
                 hosts.append(primary_fqdn)
             unique_hosts = list(dict.fromkeys(host for host in hosts if host))
             if not unique_hosts:
-                continue
+                # No host without an FQDN suffix: raise as the chart patch does, so an Ingress is never
+                # left out silently (for example a class-only override with no suffix anywhere).
+                raise ValueError(
+                    _missing_suffix_message(context, service["driver_service_name"])
+                )
             spec: dict[str, Any] = {
                 "rules": [
                     {

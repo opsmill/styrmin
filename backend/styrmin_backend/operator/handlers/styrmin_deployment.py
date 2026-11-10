@@ -981,7 +981,9 @@ async def kopf_styrmin_deployment_timer(
         try:
             desired_all = build_desired_resources_from_crd(crd_spec, ns)
         except Exception:
-            logger.warning(
+            # ``logger.exception`` keeps the traceback and the error text: with a warning only, a
+            # context that cannot be built switches the drift correction off with no trace.
+            logger.exception(
                 "Failed to build desired resources for drift check on %s/%s", ns, name
             )
             return
@@ -1012,6 +1014,15 @@ async def kopf_styrmin_deployment_timer(
                     result.updated,
                     result.deleted,
                 )
+                if result.has_errors:
+                    logger.warning(
+                        "Drift reconciliation of %s in %s/%s had %d error(s): %s",
+                        kind,
+                        ns,
+                        name,
+                        len(result.errors),
+                        "; ".join(result.errors),
+                    )
 
 
 # --- Ordered deletion (US3 + spec 008) ---

@@ -17,11 +17,29 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
+from uuid import UUID
 
 import pytest
 from kubernetes_asyncio import client as kubeclient
 from kubernetes_asyncio.client.api_client import ApiException
 
+from styrmin_backend.context.models.config import (
+    ClusterConfig,
+    DeploymentConfig,
+    EnvironmentConfig,
+    ResolvedConfig,
+)
+from styrmin_backend.context.models.contexts import (
+    ApplicationContext,
+    ClusterContext,
+    DeploymentContext,
+    EnvironmentContext,
+    GlobalContext,
+    InstanceContext,
+    UtilityContext,
+    UtilityKind,
+)
+from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryInfo
 from styrmin_backend.operator import reconciler as reconciler_module
 from styrmin_backend.operator.config import (
     ANNOTATION_DEPLOYMENT_ID,
@@ -336,6 +354,67 @@ class _Recorder:
         return [r["kind"] for call in self.reconciled for r in call[action]]
 
 
+class _RecordingLogger(_Logger):
+    """A logger that keeps the warnings and the exceptions that the operator writes."""
+
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+        self.exceptions: list[str] = []
+
+    def warning(self, message: str, *args: Any, **__: Any) -> None:
+        self.warnings.append(message % args if args else message)
+
+    def exception(self, message: str, *args: Any, **__: Any) -> None:
+        self.exceptions.append(message % args if args else message)
+
+
+def _context_stored_before_this_release() -> dict[str, Any]:
+    """The ``context`` of a StyrminDeployment resource that an earlier release wrote.
+
+    ``deployed_services`` has only the keys that exist before #598.
+    """
+    context = GlobalContext(
+        cluster=ClusterContext(
+            config=ClusterConfig(
+                ingress_class="traefik", fqdn_suffix="test.styrmin.com"
+            )
+        ),
+        environment=EnvironmentContext(name="test", config=EnvironmentConfig()),
+        deployment=DeploymentContext(config=DeploymentConfig()),
+        instance=InstanceContext(
+            config=ResolvedConfig(
+                ingress_class="traefik", fqdn_suffix="test.styrmin.com"
+            ),
+            deployment_id=UUID(int=1),
+            namespace=NAMESPACE,
+            release_reference=RELEASE_REF,
+        ),
+        app=ApplicationContext(
+            name="testapp",
+            version="1.0.0",
+            helm=HelmInfo(
+                chart=ChartInfo(
+                    id=UUID(int=7), name="testapp", version="1.0.0", values_template=""
+                ),
+                repository=RepositoryInfo(
+                    id=UUID(int=8), url="oci://charts.example.com/t"
+                ),
+            ),
+        ),
+        utilities=[UtilityContext(kind=UtilityKind.INGRESS)],
+        deployed_services=[
+            {
+                "resolved_name": "web",
+                "port": 8080,
+                "kind": "http",
+                "deployment_id": str(UUID(int=1)),
+                "component": "server",
+            }
+        ],
+    )
+    return context.model_dump(mode="json")
+
+
 class TestReconcileLoopsIncludeIngress:
     @pytest.mark.anyio
     async def test_the_helmrelease_timer_reconciles_ingresses(
@@ -446,6 +525,155 @@ class TestReconcileLoopsIncludeIngress:
 
         assert "Ingress" in recorder.listed_kinds
         assert recorder.reconciled_kinds("to_create") == ["Ingress"]
+
+    @pytest.mark.anyio
+    async def test_the_deployment_timer_reconciles_a_context_stored_before_this_release(
+        self, mocker: Any
+    ) -> None:
+        """Review F1: the StyrminDeployment resource of a deployment that exists today holds a context
+        whose ``deployed_services`` entries have none of the keys that #598 added. The timer must
+        still rebuild the desired NetworkPolicy, Secret and Service from it, and build no Ingress.
+        """
+        recorder = _Recorder(mocker)
+        mocker.patch.object(
+            reconciler_module, "list_managed_resources", recorder.list_managed_resources
+        )
+        mocker.patch.object(
+            reconciler_module, "reconcile_resources", recorder.reconcile_resources
+        )
+        mocker.patch.object(
+            handlers_module,
+            "_fail_on_component_container_guard",
+            mocker.AsyncMock(return_value=False),
+        )
+        logger = _RecordingLogger()
+
+        await handlers_module.kopf_styrmin_deployment_timer(
+            body={"metadata": {}},
+            spec={
+                "releaseReference": RELEASE_REF,
+                "context": _context_stored_before_this_release(),
+            },
+            status={"phase": DeploymentPhase.READY.value},
+            name="my-deployment",
+            namespace=NAMESPACE,
+            patch=SimpleNamespace(status={}),
+            logger=logger,
+            stopped=_NotStopped(),
+        )
+
+        assert logger.exceptions == []
+        assert logger.warnings == []
+        assert recorder.listed_kinds == [
+            "NetworkPolicy",
+            "Secret",
+            "Service",
+            "Ingress",
+        ]
+
+    @pytest.mark.anyio
+    async def test_the_deployment_timer_logs_the_error_of_a_context_it_cannot_build(
+        self, mocker: Any
+    ) -> None:
+        """Review F1: a build error must leave the traceback in the log, not a bare warning."""
+        mocker.patch(
+            "styrmin_backend.operator.pipeline.build_desired_resources_from_crd",
+            side_effect=KeyError("scope"),
+        )
+        mocker.patch.object(
+            handlers_module,
+            "_fail_on_component_container_guard",
+            mocker.AsyncMock(return_value=False),
+        )
+        logger = _RecordingLogger()
+
+        await handlers_module.kopf_styrmin_deployment_timer(
+            body={"metadata": {}},
+            spec={"releaseReference": RELEASE_REF},
+            status={"phase": DeploymentPhase.READY.value},
+            name="my-deployment",
+            namespace=NAMESPACE,
+            patch=SimpleNamespace(status={}),
+            logger=logger,
+            stopped=_NotStopped(),
+        )
+
+        assert len(logger.exceptions) == 1
+        assert "my-deployment" in logger.exceptions[0]
+
+    @pytest.mark.anyio
+    async def test_the_deployment_timer_logs_the_errors_of_a_reconciliation(
+        self, mocker: Any
+    ) -> None:
+        mocker.patch(
+            "styrmin_backend.operator.pipeline.build_desired_resources_from_crd",
+            lambda *_: [_ingress("styrmin-svc-web")],
+        )
+
+        async def _list(**_: Any) -> list[dict[str, Any]]:
+            return []
+
+        async def _reconcile(**_: Any) -> ReconcileResult:
+            return ReconcileResult(errors=["Ingress styrmin-svc-web: 422 invalid host"])
+
+        mocker.patch.object(reconciler_module, "list_managed_resources", _list)
+        mocker.patch.object(reconciler_module, "reconcile_resources", _reconcile)
+        mocker.patch.object(
+            handlers_module,
+            "_fail_on_component_container_guard",
+            mocker.AsyncMock(return_value=False),
+        )
+        logger = _RecordingLogger()
+
+        await handlers_module.kopf_styrmin_deployment_timer(
+            body={"metadata": {}},
+            spec={"releaseReference": RELEASE_REF},
+            status={"phase": DeploymentPhase.READY.value},
+            name="my-deployment",
+            namespace=NAMESPACE,
+            patch=SimpleNamespace(status={}),
+            logger=logger,
+            stopped=_NotStopped(),
+        )
+
+        assert any("422 invalid host" in warning for warning in logger.warnings)
+
+    @pytest.mark.anyio
+    async def test_the_helmrelease_timer_logs_the_errors_of_a_reconciliation(
+        self, mocker: Any
+    ) -> None:
+        async def _fetch_context(_: str) -> object:
+            return object()
+
+        async def _list(**_: Any) -> list[dict[str, Any]]:
+            return []
+
+        async def _reconcile(**_: Any) -> ReconcileResult:
+            return ReconcileResult(errors=["Ingress styrmin-svc-web: 422 invalid host"])
+
+        mocker.patch.object(helmrelease_module, "fetch_context", _fetch_context)
+        mocker.patch.object(
+            helmrelease_module,
+            "build_desired_resources",
+            lambda **_: [_ingress("styrmin-svc-web")],
+        )
+        mocker.patch.object(helmrelease_module, "list_managed_resources", _list)
+        mocker.patch.object(helmrelease_module, "reconcile_resources", _reconcile)
+        logger = _RecordingLogger()
+
+        await helmrelease_module.kopf_helmrelease_timer(
+            body={},
+            meta={
+                "name": "hr",
+                "labels": {LABEL_RELEASE_REFERENCE: RELEASE_REF},
+                "annotations": {ANNOTATION_DEPLOYMENT_ID: "deadbeef"},
+            },
+            spec={},
+            namespace=NAMESPACE,
+            logger=logger,
+        )
+
+        assert any("422 invalid host" in warning for warning in logger.warnings)
 
     @pytest.mark.anyio
     async def test_the_teardown_deletes_the_ingresses(

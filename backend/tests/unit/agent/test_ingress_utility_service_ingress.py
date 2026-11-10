@@ -746,3 +746,99 @@ class TestServiceOverride:
         )
 
         assert set(_by_service(_build(context))) == {"web"}
+
+
+class TestDeploymentWithoutAnyFqdnSuffix:
+    """A service that gets an Ingress needs a host, so the builder never skips one silently (review F3)."""
+
+    def test_a_class_only_override_without_any_suffix_raises(self) -> None:
+        """The same configuration without the override raises, so the override must not hide the error."""
+        context = _context(
+            [_service("web", fqdn_suffix=None)],
+            fqdn_suffix=None,
+            overrides={"web": ServiceConfigBlock(ingress_class=OVERRIDE_CLASS)},
+        )
+
+        with pytest.raises(ValueError, match="FQDN suffix is required") as error:
+            _build(context)
+
+        assert "web" in str(error.value)
+        assert str(DEPLOYMENT_ID) in str(error.value)
+
+    def test_every_external_service_has_a_suffix_override_and_no_error_is_raised(
+        self,
+    ) -> None:
+        context = _context(
+            [
+                _service("web", fqdn_suffix=None),
+                _service("task-manager", port=4200, fqdn_suffix=None),
+            ],
+            fqdn_suffix=None,
+            overrides={
+                "web": ServiceConfigBlock(fqdn_suffix="a.example.net"),
+                "task-manager": ServiceConfigBlock(fqdn_suffix="b.example.net"),
+            },
+        )
+
+        ingresses = _by_service(_build(context))
+
+        assert set(ingresses) == {"web", "task-manager"}
+        assert _hosts(ingresses["web"]) == [
+            compute_human_readable_fqdn("web", ENVIRONMENT_NAME, "a.example.net")
+        ]
+
+    def test_one_overridden_and_one_plain_service_without_a_cluster_suffix_raises(
+        self,
+    ) -> None:
+        context = _context(
+            [
+                _service("web", fqdn_suffix=None),
+                _service("task-manager", port=4200, fqdn_suffix=None),
+            ],
+            fqdn_suffix=None,
+            overrides={"task-manager": ServiceConfigBlock(fqdn_suffix="b.example.net")},
+        )
+
+        with pytest.raises(ValueError, match="FQDN suffix is required"):
+            _build(context)
+
+
+class TestContextStoredBeforeThisRelease:
+    """A context written by an earlier release has none of the keys that #598 added (review F1).
+
+    The StyrminDeployment resource of every deployment that exists today holds such a context, and
+    the drift timer of the operator rebuilds the utility resources from it.
+    """
+
+    @staticmethod
+    def _old_shape(context: GlobalContext) -> GlobalContext:
+        old_keys = ("resolved_name", "port", "kind", "deployment_id", "component")
+        context.deployed_services = [
+            {key: service[key] for key in old_keys}
+            for service in context.deployed_services
+        ]
+        return context
+
+    def test_the_builder_skips_entries_without_a_scope(self) -> None:
+        context = self._old_shape(_context([_service("web"), _service("api")]))
+
+        assert _build(context) == []
+
+    def test_the_other_utility_resources_are_still_built(self) -> None:
+        context = self._old_shape(
+            _context([_service("web")], ip_whitelist=["10.0.0.0/8"])
+        )
+
+        resources = IngressUtility().build_resources(context, RELEASE_REF, NAMESPACE)
+
+        assert resources
+        assert all(resource["kind"] != "Ingress" for resource in resources)
+
+    def test_an_old_entry_beside_a_new_one_builds_only_the_new_one(self) -> None:
+        context = _context([_service("web"), _service("api")])
+        context.deployed_services[0] = {
+            key: context.deployed_services[0][key]
+            for key in ("resolved_name", "port", "kind", "deployment_id", "component")
+        }
+
+        assert set(_by_service(_build(context))) == {"api"}

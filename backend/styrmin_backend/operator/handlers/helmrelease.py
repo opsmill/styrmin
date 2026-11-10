@@ -345,6 +345,14 @@ async def kopf_helmrelease_timer(  # noqa: ARG001
             result.deleted,
             len(result.errors),
         )
+        if result.has_errors:
+            logger.warning(
+                "Periodic reconciliation of NetworkPolicy in %s/%s had %d error(s): %s",
+                ns,
+                helmrelease_name,
+                len(result.errors),
+                "; ".join(result.errors),
+            )
 
     # Reconcile other utility resources (Prefect-created, operator-reconciled)
     for kind in ("Service", "Secret", "Ingress"):
@@ -369,3 +377,12 @@ async def kopf_helmrelease_timer(  # noqa: ARG001
                 result.deleted,
                 len(result.errors),
             )
+            if result.has_errors:
+                logger.warning(
+                    "Periodic reconciliation of %s in %s/%s had %d error(s): %s",
+                    kind,
+                    ns,
+                    helmrelease_name,
+                    len(result.errors),
+                    "; ".join(result.errors),
+                )
