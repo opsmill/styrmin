@@ -1,7 +1,7 @@
 """Kopf handlers for utility resource drift detection.
 
 Watches for modifications and deletions of Styrmin-managed utility resources
-(NetworkPolicies, Services, Secrets, Middlewares) and triggers reconciliation.
+(NetworkPolicies, Services, Ingresses, Secrets, Middlewares) and triggers reconciliation.
 """
 
 from __future__ import annotations
@@ -327,6 +327,71 @@ async def kopf_on_service_delete(
     await _reconcile_resource_drift(
         namespace=namespace or "",
         resource_kind="Service",
+        resource_name=meta.get("name", ""),
+        release_reference=release_reference,
+        change_type="deleted",
+        logger=logger,
+    )
+
+
+# --- Kopf handler registrations for Ingress drift (#598) ---
+#
+# The label filter keeps these handlers to the Ingress objects that Styrmin builds
+# (``UtilityResourceBuilder`` sets ``app.kubernetes.io/managed-by: styrmin`` and the
+# release reference on them). An Ingress that a chart renders carries neither label,
+# so Helm keeps ownership of it. ``list_managed_resources`` uses the same two labels
+# as its selector, so the reconcile never deletes a chart's Ingress.
+
+
+@kopf.on.update(
+    group="networking.k8s.io",
+    version="v1",
+    plural="ingresses",
+    labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
+)
+async def kopf_on_ingress_update(
+    body: dict[str, Any],
+    meta: kopf.Meta,
+    namespace: str | None,
+    logger: kopf.Logger,
+    **_: Any,
+) -> None:
+    labels = dict(meta.get("labels", {}))
+    release_reference = labels.get(LABEL_RELEASE_REFERENCE, "")
+    if not release_reference:
+        return
+
+    await _reconcile_resource_drift(
+        namespace=namespace or "",
+        resource_kind="Ingress",
+        resource_name=meta.get("name", ""),
+        release_reference=release_reference,
+        change_type="modified",
+        logger=logger,
+    )
+
+
+@kopf.on.delete(
+    group="networking.k8s.io",
+    version="v1",
+    plural="ingresses",
+    labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE},
+)
+async def kopf_on_ingress_delete(
+    body: dict[str, Any],
+    meta: kopf.Meta,
+    namespace: str | None,
+    logger: kopf.Logger,
+    **_: Any,
+) -> None:
+    labels = dict(meta.get("labels", {}))
+    release_reference = labels.get(LABEL_RELEASE_REFERENCE, "")
+    if not release_reference:
+        return
+
+    await _reconcile_resource_drift(
+        namespace=namespace or "",
+        resource_kind="Ingress",
         resource_name=meta.get("name", ""),
         release_reference=release_reference,
         change_type="deleted",

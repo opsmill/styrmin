@@ -50,10 +50,10 @@
 - [X] T015 Use the address function in `generate_context_from_deployment` in `backend/styrmin_backend/services/context.py`, add `scope` and the effective class and suffix to each `deployed_services` entry, and read the owning deployment's override for services of other deployments (T008).
 - [X] T016 Move the annotation and class rules of `build_app_post_rendering_patches` into one helper in `backend/styrmin_backend/agent/service/kubernetes/resources/utilities/ingress.py`, used by the chart patch and by the new builder (research D-006). T011 must still pass.
 - [X] T017 Build the Ingress objects in `IngressUtility.build_resources` in `backend/styrmin_backend/agent/service/kubernetes/resources/utilities/ingress.py` for the no-override case (T009): name `styrmin-svc-<driver service name>`, `styrmin.io/service-name` label, hosts, backend, class, annotations.
-- [ ] T018 [P] Add `Ingress` to `list_managed_resources` and `delete_kubernetes_resource` in `backend/styrmin_backend/operator/reconciler.py` (T010).
-- [ ] T019 Add `Ingress` to the reconcile loops in `backend/styrmin_backend/operator/handlers/helmrelease.py` (line 342) and `backend/styrmin_backend/operator/handlers/styrmin_deployment.py` (lines 991 and 1162).
-- [ ] T020 [P] Add kopf update and delete drift handlers for `ingresses` in `backend/styrmin_backend/operator/handlers/utility_resources.py`, following the NetworkPolicy and Service handlers.
-- [ ] T021 Confirm that the Prefect path applies the Ingress: read `backend/styrmin_backend/agent/tasks/extra.py` (`_apply_utility`, `_filter_out_operator_managed_resources`) and add a unit test in `backend/tests/unit/agent/test_utility_resources.py` that an `Ingress` object is neither filtered out nor left unlabeled.
+- [X] T018 [P] Add `Ingress` to `list_managed_resources` and `delete_kubernetes_resource` in `backend/styrmin_backend/operator/reconciler.py` (T010).
+- [X] T019 Add `Ingress` to the reconcile loops in `backend/styrmin_backend/operator/handlers/helmrelease.py` (line 342) and `backend/styrmin_backend/operator/handlers/styrmin_deployment.py` (lines 991 and 1162).
+- [X] T020 [P] Add kopf update and delete drift handlers for `ingresses` in `backend/styrmin_backend/operator/handlers/utility_resources.py`, following the NetworkPolicy and Service handlers.
+- [X] T021 Confirm that the Prefect path applies the Ingress: read `backend/styrmin_backend/agent/tasks/extra.py` (`_apply_utility`, `_filter_out_operator_managed_resources`) and add a unit test in `backend/tests/unit/agent/test_utility_resources.py` that an `Ingress` object is neither filtered out nor left unlabeled.
 
 **Checkpoint**: unit tests T007 to T011 pass. An external service gets a Styrmin-built Ingress with the resolved class, and the operator keeps it in step.
 

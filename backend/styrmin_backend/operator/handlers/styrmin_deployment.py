@@ -988,7 +988,7 @@ async def kopf_styrmin_deployment_timer(
 
         release_ref = crd_spec.get("releaseReference", "")
 
-        for kind in ("NetworkPolicy", "Secret", "Service"):
+        for kind in ("NetworkPolicy", "Secret", "Service", "Ingress"):
             desired_kind = [r for r in desired_all if r.get("kind") == kind]
             actual_kind = await list_managed_resources(
                 namespace=ns,
@@ -1131,7 +1131,7 @@ async def _teardown_owned_resources(
 ) -> None:
     """Reverse-order teardown of resources owned by a StyrminDeployment.
 
-    Order: Service aliases in all namespaces -> Services/Middlewares -> HelmRelease ->
+    Order: Service aliases in all namespaces -> Ingresses/Services -> HelmRelease ->
     NetworkPolicies/Secrets.
     Errors are logged and swallowed — teardown is best-effort and
     finalisers / 404s should not block the lifecycle.
@@ -1157,9 +1157,9 @@ async def _teardown_owned_resources(
         logger=logger,
     )
 
-    # Step 2: Services and Middlewares.
-    logger.info("Teardown step 2: Services / Middlewares for %s/%s", namespace, name)
-    for kind in ("Service",):
+    # Step 2: Ingresses and Services.
+    logger.info("Teardown step 2: Ingresses / Services for %s/%s", namespace, name)
+    for kind in ("Ingress", "Service"):
         resources = await list_managed_resources(
             namespace=namespace, release_reference=release_reference, kind=kind
         )

@@ -5,6 +5,7 @@ and T022 (extensibility).
 """
 
 from typing import Any
+from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -15,6 +16,9 @@ from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     TargetPatch,
 )
 from styrmin_backend.agent.service.kubernetes.resources.blocks.spec import PostRenderers
+from styrmin_backend.agent.service.kubernetes.resources.builders.utility import (
+    UtilityResourceBuilder,
+)
 from styrmin_backend.agent.service.kubernetes.resources.utilities.base import Utility
 from styrmin_backend.agent.service.kubernetes.resources.utilities.ingress import (
     IngressUtility,
@@ -914,3 +918,91 @@ class TestChartIngressPatchesAreUnchanged:
         patches = ingress_utility.build_app_post_rendering_patches(ctx, RELEASE_REF)
 
         assert all(tp.target.render_value() == {"kind": "Ingress"} for tp in patches)
+
+
+class TestPrefectPathAppliesTheServiceIngress:
+    """#598 T021 (research D-002): the Prefect flow applies the Ingress that Styrmin builds.
+
+    Only ``NetworkPolicy`` is left to the operator when Prefect applies a utility. An Ingress must
+    reach the apply flow, and it must carry the ownership labels that the operator uses to list,
+    restore and delete it (``list_managed_resources`` selects on them).
+    """
+
+    @staticmethod
+    def _built_resources() -> list[dict[str, Any]]:
+        ctx = _make_context()
+        ctx.instance.deployment_id = UUID("00000000-0000-0000-0000-000000000001")
+        ctx.deployed_services = [
+            {**_EXTERNAL_SERVICE, "fqdn_suffix": "test.styrmin.com"}
+        ]
+        return UtilityResourceBuilder(context=ctx).build(
+            utility=IngressUtility(),
+            release_reference=RELEASE_REF,
+            namespace=NAMESPACE,
+        )
+
+    def test_the_filter_keeps_the_ingress_and_drops_only_network_policies(self) -> None:
+        from styrmin_backend.agent.tasks.extra import (
+            _filter_out_operator_managed_resources,
+        )
+
+        built = self._built_resources()
+        kept = _filter_out_operator_managed_resources(built)
+
+        assert {r["kind"] for r in built} >= {"Ingress", "NetworkPolicy"}
+        assert "NetworkPolicy" not in {r["kind"] for r in kept}
+        assert [r for r in kept if r["kind"] == "Ingress"] == [
+            r for r in built if r["kind"] == "Ingress"
+        ]
+
+    def test_the_built_ingress_carries_the_ownership_labels(self) -> None:
+        (ingress,) = [r for r in self._built_resources() if r["kind"] == "Ingress"]
+
+        labels = ingress["metadata"]["labels"]
+        assert labels["app.kubernetes.io/managed-by"] == "styrmin"
+        assert labels["styrmin.io/release-reference"] == RELEASE_REF
+        assert labels["styrmin.io/utility-kind"] == "ingress"
+        assert labels["styrmin.io/service-name"] == "web"
+
+    async def test_apply_utility_hands_the_ingress_to_the_apply_flow(self) -> None:
+        from styrmin_backend.agent.tasks.extra import _apply_utility
+        from styrmin_backend.context.models.contexts import UtilityContext, UtilityKind
+
+        ctx = _make_context()
+        ctx.instance.deployment_id = UUID("00000000-0000-0000-0000-000000000001")
+        ctx.deployed_services = [
+            {**_EXTERNAL_SERVICE, "fqdn_suffix": "test.styrmin.com"}
+        ]
+        apply_flow = uuid4()
+
+        async def _render(**kwargs: Any) -> list[dict[str, Any]]:
+            return UtilityResourceBuilder(context=kwargs["context"]).build(
+                utility=kwargs["utility"],
+                release_reference=kwargs["release_reference"],
+                namespace=kwargs["namespace"],
+            )
+
+        run = AsyncMock()
+        with (
+            patch(
+                "styrmin_backend.agent.tasks.extra.render_utility_resources", _render
+            ),
+            patch("styrmin_backend.agent.tasks.extra.arun_deployment", run),
+        ):
+            await _apply_utility(
+                utility=UtilityContext(kind=UtilityKind.INGRESS),
+                release_reference=RELEASE_REF,
+                context=ctx,
+                namespace=NAMESPACE,
+                apply_flow=apply_flow,
+                action="Install",
+            )
+
+        run.assert_awaited_once()
+        applied = run.await_args.kwargs["parameters"]["resources"]
+        (ingress,) = [r for r in applied if r["kind"] == "Ingress"]
+        assert ingress["metadata"]["name"] == "styrmin-svc-web"
+        assert (
+            ingress["metadata"]["labels"]["app.kubernetes.io/managed-by"] == "styrmin"
+        )
+        assert "NetworkPolicy" not in {r["kind"] for r in applied}

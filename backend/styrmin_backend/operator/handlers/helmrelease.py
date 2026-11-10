@@ -339,7 +339,7 @@ async def kopf_helmrelease_timer(  # noqa: ARG001
         )
 
     # Reconcile other utility resources (Prefect-created, operator-reconciled)
-    for kind in ("Service", "Secret"):
+    for kind in ("Service", "Secret", "Ingress"):
         desired_kind = filter_resources_by_kind(desired_all, kind)
         actual_kind = await list_managed_resources(
             namespace=ns,

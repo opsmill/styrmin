@@ -106,11 +106,16 @@ def _api(mocker: Any, api_class: type, patched_name: str, **async_methods: Any) 
     ``spec`` makes a misspelled or missing method raise ``AttributeError`` instead of passing.
     """
     api = mocker.MagicMock(spec=api_class)
+    # A bound method as the spec: the signature of an unbound one has ``self``, so
+    # ``assert_awaited_once_with(name=..., namespace=...)`` could never match.
+    signature_source = api_class(api_client=mocker.MagicMock())
     for method, result in async_methods.items():
         setattr(
             api,
             method,
-            mocker.AsyncMock(spec=getattr(api_class, method), return_value=result),
+            mocker.AsyncMock(
+                spec=getattr(signature_source, method), return_value=result
+            ),
         )
     mocker.patch.object(reconciler_module.kubeclient, patched_name, return_value=api)
     return api
@@ -473,6 +478,92 @@ class TestReconcileLoopsIncludeIngress:
 
         assert "Ingress" in recorder.listed_kinds
         assert deleted == [ingress]
+
+
+class TestIngressDriftHandlers:
+    """T020: the drift handlers act on the Ingress that Styrmin builds, never on a chart's Ingress.
+
+    The kopf label filter (``managed-by: styrmin``) keeps a chart's Ingress (``managed-by: Helm``)
+    away from the handlers. A handler also returns when the release-reference label is missing.
+    """
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        ("handler_name", "change_type"),
+        [
+            ("kopf_on_ingress_update", "modified"),
+            ("kopf_on_ingress_delete", "deleted"),
+        ],
+    )
+    async def test_reconciles_the_drift_of_a_styrmin_ingress(
+        self, mocker: Any, handler_name: str, change_type: str
+    ) -> None:
+        from styrmin_backend.operator.handlers import utility_resources
+
+        reconcile = mocker.patch.object(
+            utility_resources, "_reconcile_resource_drift", mocker.AsyncMock()
+        )
+
+        await getattr(utility_resources, handler_name)(
+            body={},
+            meta={
+                "name": "styrmin-svc-web",
+                "labels": _ingress()["metadata"]["labels"],
+            },
+            namespace=NAMESPACE,
+            logger=_Logger(),
+        )
+
+        reconcile.assert_awaited_once_with(
+            namespace=NAMESPACE,
+            resource_kind="Ingress",
+            resource_name="styrmin-svc-web",
+            release_reference=RELEASE_REF,
+            change_type=change_type,
+            logger=mocker.ANY,
+        )
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "handler_name", ["kopf_on_ingress_update", "kopf_on_ingress_delete"]
+    )
+    async def test_ignores_an_ingress_without_a_release_reference(
+        self, mocker: Any, handler_name: str
+    ) -> None:
+        from styrmin_backend.operator.handlers import utility_resources
+
+        reconcile = mocker.patch.object(
+            utility_resources, "_reconcile_resource_drift", mocker.AsyncMock()
+        )
+
+        await getattr(utility_resources, handler_name)(
+            body={},
+            meta={
+                "name": "chart-ingress",
+                "labels": {"app.kubernetes.io/managed-by": "styrmin"},
+            },
+            namespace=NAMESPACE,
+            logger=_Logger(),
+        )
+
+        reconcile.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_a_helm_ingress_is_not_listed_for_the_deployment(
+        self, networking_api: Any, core_api: Any
+    ) -> None:
+        """The selector needs both Styrmin labels, so Helm's Ingress is outside the diff and is never deleted."""
+        await list_managed_resources(
+            namespace=NAMESPACE, release_reference=RELEASE_REF, kind="Ingress"
+        )
+
+        selector = networking_api.list_namespaced_ingress.call_args.kwargs[
+            "label_selector"
+        ].split(",")
+        assert sorted(selector) == [
+            "app.kubernetes.io/managed-by=styrmin",
+            f"styrmin.io/release-reference={RELEASE_REF}",
+        ]
 
 
 class _NotStopped:
