@@ -118,42 +118,44 @@ class TestResolveLatestMatchingVersion:
         driver = _driver([first_build, second_build])
         assert _resolve_latest_matching_version(driver, "0.5.0") is second_build
 
-
-class TestPrereleaseMatching:
-    """A range matches a prerelease only if the range names one (PEP 440, #591).
-
-    The rows of the three ranges are the table of
-    ``docs/docs/drivers/creating-a-driver.md``. The last two rows are the
-    clauses that the table does not show: ``!=`` does not count, a bound does.
-    """
-
     @pytest.mark.parametrize(
-        ("supported", "application_version", "matches"),
-        [
-            (">=1.5,<2.0", "1.12.0b0", False),
-            (">=1.5,<2.0", "1.12.0rc1", False),
-            (">=1.5,<2.0", "1.12.0.dev1", False),
-            (">=1.5,<2.0", "1.12.0", True),
-            (">=1.5,<2.0", "1.9.0rc1", False),
-            (">=1.12.0b0,<1.13", "1.12.0b0", True),
-            (">=1.12.0b0,<1.13", "1.12.0", True),
-            (">=1.12.0b0,<1.13", "1.9.0rc1", False),
-            (">=1.5.0b0,<2.0", "1.12.0b0", True),
-            (">=1.5.0b0,<2.0", "1.12.0", True),
-            (">=1.5.0b0,<2.0", "1.9.0rc1", True),
-            (">=1.5.0b0,<2.0", "1.6.0.dev1", True),
-            (">=1.5,!=1.12.0b0,<2.0", "1.12.0b1", False),
-            (">=1.5,<2.0b0", "1.12.0b1", True),
-        ],
+        "application_version", ["1.12.0b0", "1.12.0-beta.1", "1.12.0.b0"]
     )
-    def test_range_matches_a_prerelease_only_if_it_names_one(
-        self, supported: str, application_version: str, matches: bool
+    def test_prerelease_fitting_the_numbers_of_the_range_resolves(
+        self, application_version: str
     ) -> None:
-        driver = _driver([_adv("1", supported=supported)])
+        """#591: a range that names no prerelease still accepts one that fits."""
+        driver_version = _adv("1", supported=">=1.5,<2.0")
+        driver = _driver([driver_version])
 
-        resolved = _resolve_latest_matching_version(driver, application_version)
+        assert _resolve_latest_matching_version(driver, application_version) is (
+            driver_version
+        )
 
-        assert (resolved is not None) is matches
+    def test_prerelease_of_the_excluded_upper_bound_does_not_resolve(self) -> None:
+        driver = _driver([_adv("1", supported=">=1.5,<2.0")])
+
+        assert _resolve_latest_matching_version(driver, "2.0.0b1") is None
+
+    def test_prerelease_below_the_lower_bound_does_not_resolve(self) -> None:
+        driver = _driver([_adv("1", supported=">=1.12.0,<1.13")])
+
+        assert _resolve_latest_matching_version(driver, "1.12.0b0") is None
+
+    @pytest.mark.parametrize("insertion_order", ["lower-first", "higher-first"])
+    def test_latest_wins_among_overlapping_ranges_for_a_prerelease(
+        self, insertion_order: str
+    ) -> None:
+        standard = _adv("1", supported=">=1.5,<2.0", created_on=_T1)
+        naming_a_prerelease = _adv("2", supported=">=1.12.0b0,<1.13", created_on=_T1)
+        versions = [standard, naming_a_prerelease]
+        if insertion_order == "higher-first":
+            versions.reverse()
+        driver = _driver(versions)
+
+        assert _resolve_latest_matching_version(driver, "1.12.0b0") is (
+            naming_a_prerelease
+        )
 
 
 class TestNonPep440VersionBehaviour:

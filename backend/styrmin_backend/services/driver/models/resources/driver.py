@@ -86,6 +86,7 @@ from pydantic_core import PydanticCustomError
 
 from styrmin_backend.context.models.components import ReplicaDeclaration
 from styrmin_backend.services.exceptions import CONTAINER_OVERRIDES_MIGRATION_GUIDE_URL
+from styrmin_backend.services.version_range import version_fits_range
 
 from ._shared import Kind
 from .actions import ActionDefinition
@@ -340,8 +341,9 @@ class Specification(BaseModel):
     @model_validator(mode="after")
     def validate_default_version(self) -> Self:
         if self.default_version is not None:
-            specifier = SpecifierSet(self.supported_versions)
-            if Version(self.default_version) not in specifier:
+            if not version_fits_range(
+                Version(self.default_version), self.supported_versions
+            ):
                 msg = (
                     f"default_version '{self.default_version}' does not satisfy "
                     f"supported_versions '{self.supported_versions}'"

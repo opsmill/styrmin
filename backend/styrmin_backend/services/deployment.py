@@ -115,6 +115,7 @@ from styrmin_backend.services.steps.recorder import (
 )
 from styrmin_backend.services.steps.reads import check_starting_step
 from styrmin_backend.services.unit_of_work import UnitOfWork
+from styrmin_backend.services.version_range import version_fits_range
 from styrmin_backend.workflows.dependency import get_manager
 from styrmin_backend.workflows.manager import PrefectManager
 
@@ -796,7 +797,7 @@ def _resolve_latest_matching_version(
     candidates = [
         driver_version
         for driver_version in application_driver.versions
-        if target in SpecifierSet(driver_version.application_supported_versions)
+        if version_fits_range(target, driver_version.application_supported_versions)
     ]
     if not candidates:
         return None
