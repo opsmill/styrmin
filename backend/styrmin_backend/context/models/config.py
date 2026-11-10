@@ -655,7 +655,8 @@ class ComponentConfigBlock(BaseModel):
 
 
 _FQDN_SUFFIX_MAX_LENGTH = 253
-_FQDN_SUFFIX_LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+# Matched with ``fullmatch``: ``re.match`` with ``$`` accepts a trailing newline.
+_FQDN_SUFFIX_LABEL_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 
 
 def validate_service_fqdn_suffix(value: str) -> str:
@@ -674,7 +675,7 @@ def validate_service_fqdn_suffix(value: str) -> str:
             f"fqdn_suffix {value!r} is longer than {_FQDN_SUFFIX_MAX_LENGTH} characters."
         )
     for label in value.split("."):
-        if not _FQDN_SUFFIX_LABEL_RE.match(label):
+        if not _FQDN_SUFFIX_LABEL_RE.fullmatch(label):
             raise ValueError(
                 f"fqdn_suffix {value!r} is not a DNS name: each dot-separated label must "
                 "have 1 to 63 lowercase letters, digits or hyphens, and start and end "

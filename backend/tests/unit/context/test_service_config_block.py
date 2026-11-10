@@ -68,6 +68,20 @@ _INVALID_SUFFIXES = {
     "slash": "example.com/path",
     "label-over-63": f"{'a' * 64}.example.com",
     "total-over-253": ".".join(["a" * 60] * 5),
+    # A value that reaches a Kubernetes host or annotation must not carry a line break or
+    # other whitespace or control character. ``re.match`` with ``$`` lets a trailing
+    # newline through; the rule must match the whole value.
+    "trailing-newline": "example.com\n",
+    "leading-newline": "\nexample.com",
+    "trailing-space": "example.com ",
+    "leading-space": " example.com",
+    "tab": "example\t.com",
+    "trailing-tab": "example.com\t",
+    "carriage-return": "example.com\r",
+    "newline-inside-a-label": "exa\nmple.com",
+    "newline-between-labels": "example\n.com",
+    "null-byte": "example.com\x00",
+    "non-breaking-space": "example\u00a0.com",
 }
 _VALID_SUFFIXES = [
     _GOOD_SUFFIX,

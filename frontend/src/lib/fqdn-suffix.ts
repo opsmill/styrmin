@@ -8,10 +8,10 @@ import type { ServiceConfigInput } from "@/generated/graphql";
  * of dot-separated labels, each of 1 to 63 lowercase letters, digits or hyphens
  * that starts and ends with a letter or a digit, at most 253 characters in
  * total, with no leading, trailing or doubled dot. Keep the two in step: the
- * backend rejects what this lets through. (The backend checks each label with
- * `re.match` and `$`, so it also accepts a suffix that ends in a newline; this
- * rule rejects it, as a DNS name cannot hold one.) An empty suffix is no override, so it
- * is not an error.
+ * backend rejects what this lets through. (The backend matches each label with
+ * `re.fullmatch`, so, like this rule, it rejects a suffix that ends in a newline.)
+ * An empty suffix is no override, so it is not an error here; the backend rejects an
+ * empty string and a client clears an override by omitting the field.
  */
 export const FQDN_SUFFIX_MAX_LENGTH = 253;
 
