@@ -174,7 +174,7 @@ Question: does `_is_service_or_middleware` and `execute_phase_services` in `back
 
 - Traffic. The test asserts Kubernetes objects. No Tailscale ingress controller runs in the fixtures, so nothing proves that the overridden host answers. `test_infrahub_services.py` covers the Prefect UI through the dedicated Traefik; it was not run in this chunk. I read it: it looks for the host `task-manager-test-environment.styrmin.com` and sends traffic with that `Host` header through Traefik. The Ingress that Styrmin builds has that host, path `/`, and `kubernetes.io/ingress.class: traefik`, so the assertions look unchanged, but this is by reading.
 - The UI variant (deferred to T048).
-- The label `styrmin.io/release-reference: ""` on the Ingress that the operator builds. It is empty because of the same missing HelmRelease label. The kopf drift handlers on utility resources read that label to find the HelmRelease. This is the existing behavior of every Styrmin-built utility resource, and was not changed.
+- The label `styrmin.io/release-reference: ""` on the Ingress that the operator builds. It is empty because of the same missing HelmRelease label. The kopf drift handlers on utility resources read that label to find the HelmRelease. This is the existing behavior of every Styrmin-built utility resource. It was a defect, fixed in commit `a0885121`; see the section "Release-reference label".
 - The message "the CRD type may not be installed yet" in `apply_utility_resources` is also logged when an Ingress fails to apply, which hid the 403 of run 1. Not changed.
 - Other end-to-end tests with `AsyncIngress` (`test_ingress_controller.py`, `test_cluster_update.py`, `test_environment_update.py`, `test_deployments_apply.py`, `configuration/test_drawer_networking_edit.py`) were read for assertions on the Prefect Ingress of the chart and on Ingress counts. They use other drivers than Infrahub Enterprise, so no assertion changed; they were not run.
 
@@ -426,7 +426,7 @@ PASSED14:50:06 info Removing vCluster container vcluster.cp.pytest-1fedb299-5207
 
 - Failing line: `assert _comparable(task_manager_cleared) == _comparable(task_manager_before)` (step "clear the override"). The only difference is the label `styrmin.io/release-reference` of the Ingress `styrmin-svc-task-manager`: `'styrmin-57254668-cd66-4b0a-a759-f93e9179ec09'` before and `''` after clearing. The label was still `''` when the vCluster was inspected about four minutes later (`kubectl get ingress -A`, saved in `<scratchpad>/ingress-after-fail.yaml`); the Ingress `resourceVersion` kept changing about every 6 seconds while its `generation` stayed 7.
 - Not caused by this chunk: the commits since the last green run of this test (`7bcc9576`) change no operator, Ingress builder or label code (`git diff --stat 7bcc9576 HEAD -- backend/styrmin_backend` lists `inputs.py`, `config.py`, `deployment.py` and the new `service_ingress/` files only). The same node passed on run 2 and on the earlier runs of this evidence file.
-- Cause: not proven. Observed in the source: the Ingress label comes from the `release_reference` passed to the builder (`builders/utility.py:39`). The StyrminDeployment timer passes the CRD's `releaseReference` (`operator/handlers/styrmin_deployment.py`, around line 990), and the HelmRelease timer passes the value of a HelmRelease label that a CRD-managed HelmRelease does not have, so it passes `''` (`operator/handlers/helmrelease.py:171,280`; the comment at `utilities/ingress.py:85` says so). The hypothesis is that, depending on which reconciler wrote last, the label is the real reference or `''`. This was not tested; the operator logs were not read.
+- Cause: found later, see the section "Release-reference label" at the end of this file. At the time of this run it was not proven. Observed in the source: the Ingress label comes from the `release_reference` passed to the builder (`builders/utility.py:39`). The StyrminDeployment timer passes the CRD's `releaseReference` (`operator/handlers/styrmin_deployment.py`, around line 990), and the HelmRelease timer passes the value of a HelmRelease label that a CRD-managed HelmRelease does not have, so it passes `''` (`operator/handlers/helmrelease.py:171,280`; the comment at `utilities/ingress.py:85` says so). The hypothesis is that, depending on which reconciler wrote last, the label is the real reference or `''`. This was not tested; the operator logs were not read.
 - Nothing was changed for this failure: no assertion was weakened and no source was edited. It is open and listed as a risk for the final report. The run was repeated once on the same commit and passed.
 
 ## Not verified (T054)
@@ -434,5 +434,151 @@ PASSED14:50:06 info Removing vCluster container vcluster.cp.pytest-1fedb299-5207
 - Traffic: the refusals are checked as GraphQL errors, cluster objects and task lists; no request was sent through an ingress controller.
 - UI for the refusals: covered by Vitest only (`ConfigDiffDialog.test.tsx`, `DeployFormPage.test.tsx`, `UpgradeErrorAlert.test.tsx`), not by an end-to-end UI run, because the test is `api_only`.
 - UI visuals (layout, colors) of the error alerts.
-- The cause of the release-reference label difference above.
+- (Resolved, see the section "Release-reference label".) The cause of the release-reference label difference above.
 - The test ran on one machine (macOS, Docker); the CI matrix was not run.
+
+## Release-reference label
+
+Question: why was the label `styrmin.io/release-reference` of the Ingress `styrmin-svc-task-manager` `''` after the override was cleared, and `styrmin-<uuid>` before? Times are UTC. `<scratchpad>` is `/private/tmp/claude-503/-Users-Simon-styrmin-598-spec/2ab6e2fa-7180-493d-8211-590f003133bd/scratchpad`.
+
+### Where a Styrmin-built object gets its label
+
+Every Styrmin-built utility resource gets the label from `UtilityResourceBuilder.build` (`agent/service/kubernetes/resources/builders/utility.py`, the line `labels["styrmin.io/release-reference"] = release_reference` before the fix), from the `release_reference` argument. Nothing else writes that label (`grep -rn "release-reference" backend/styrmin_backend`). The HelmRelease that the StyrminDeployment pipeline creates carries only `app.kubernetes.io/managed-by` and `styrmin.io/operator-managed` (`ApplicationHelmReleaseBuilder.build`, `builders/application.py`, around line 436), so a HelmRelease never has the label.
+
+| Code path | Release reference it passes to the builder | Label written before the fix | How it finds the object it reconciles |
+|---|---|---|---|
+| Prefect flows `install_utility` and `update_utility` (`agent/tasks/extra.py`, `orchestration.py`) | `context.instance.release_reference` | the real reference | not applicable (they apply what they render) |
+| Pipeline phases 1 and 3 (`operator/pipeline.py`, `build_desired_resources_from_crd`) | `spec.releaseReference` of the StyrminDeployment, which `build_styrmin_deployment_body` receives as `context.instance.release_reference` | the real reference | not applicable |
+| StyrminDeployment timer in phase Ready (`handlers/styrmin_deployment.py`, around line 990) | `spec.releaseReference` | the real reference | selector `managed-by=styrmin,release-reference=<real>` |
+| HelmRelease timer (`handlers/helmrelease.py`, `kopf_helmrelease_timer`) | the label of the HelmRelease, which is never set, so `''` | `''` | selector `managed-by=styrmin,release-reference=` |
+| Drift handlers for Ingress, Service, Secret and NetworkPolicy (`handlers/utility_resources.py`) | the label of the object that changed; they return at once when it is empty | not applicable | `_find_helmrelease_for_resource` selects a HelmRelease by that label, which a HelmRelease never has |
+| HelmRelease create handler (`on_helmrelease_create`) | the label of the HelmRelease; it skips the HelmRelease when it is empty ("CRD-managed") | not applicable | not applicable |
+| Update path (`reconcile_resources` to `apply_kubernetes_resource`) | none of its own: it applies the object that the caller built, `create`, and on HTTP 409 `replace` of the whole object | whatever the caller built | not applicable |
+
+### Hypothesis
+
+The two timers pass different release references for the same objects. Each timer lists the objects with its own reference, does not find the objects that the other timer last wrote, treats them as missing, and "creates" them. The create hits HTTP 409, so `apply_kubernetes_resource` replaces the object with a body that carries the caller's label. The label therefore flips on every pass. What the test reads depends on which timer wrote last. This predicts that the label of every Styrmin-built object flips, not only the Ingress.
+
+What would prove it wrong: a flat label on the Service, Secret or NetworkPolicy, or the flip stopping when the HelmRelease carries the label.
+
+### Observed on the real stack, before the fix
+
+- Commit `83874cce` (clean tree), `[api-chromium]`, started 2026-11-10T14:00:24Z, vCluster `pytest-e24eed7b-d8c4-460b-b4c1-3789c55abb72`, kubeconfig `/private/var/folders/h8/b5b4gccj4h5c0sjlqjymm1y40000gq/T/pytest-of-Simon/pytest-1438/vcluster0/kubeconfig` (the vCluster was deleted afterwards). Command, from the repository root:
+
+  ```bash
+  sleep 86400 | uv run pytest "backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_moves_only_the_overridden_service" -k api-chromium -v -s --pdb > <scratchpad>/pdb-diag-before.log 2>&1
+  ```
+
+- Result: FAILED (the test stopped at the pdb prompt, so the vCluster stayed up). The failing assertion is the same as in "Failed run 1": `_comparable(task_manager_cleared) == _comparable(task_manager_before)`, with the label `''` against `'styrmin-a36fef25-499d-4d2d-8867-8118474ca801'` (`<scratchpad>/pdb-diag-before.log`, line 707).
+- A read-only monitor (`<scratchpad>/label_monitor.sh`) ran `kubectl get ingress,svc,secret,networkpolicy -A -l app.kubernetes.io/managed-by=styrmin` every 2 seconds and wrote the label and the `resourceVersion` (`<scratchpad>/label-monitor-before.txt`, 1488 lines). Summary of `<scratchpad>/summarize_labels.sh`:
+
+  ```text
+  Ingress styrmin-svc-task-manager     samples=124 distinct_label_values=2 distinct_resourceVersions=66 last=(empty)
+  NetworkPolicy default-deny-egress    samples=127 distinct_label_values=2 distinct_resourceVersions=71 last=(empty)
+  Secret ingress-auth                  samples=127 distinct_label_values=2 distinct_resourceVersions=60 last=(empty)
+  Service task-manager                 samples=125 distinct_label_values=2 distinct_resourceVersions=81 last=(empty)
+  Service infrahub-enterprise          samples=125 distinct_label_values=2 distinct_resourceVersions=93 last=(empty)
+  ```
+
+  The Ingress flips between `''` and the real reference every 2 to 25 seconds from 14:04:02, for example `14:04:34 real, 14:04:36 empty, 14:04:39 real, 14:04:42 empty`.
+- The operator log (`<scratchpad>/operator-before.log`) alternates two writers for the same object, each reporting a creation: `kopf.objects: Periodic reconciliation for <ns>/<release> (Ingress): created=1 updated=0 deleted=0 errors=0` (HelmRelease timer) at 14:08:04, 14:08:11 and 14:08:17, and `Drift reconciled for Ingress in <ns>/<ns>: +1 ~0 -0` (StyrminDeployment timer) at 14:08:01, 14:08:07 and 14:08:14. 73 lines `Created Ingress/styrmin-svc-task-manager` in the log.
+
+### Refutation attempts
+
+- Flat label on another kind: refuted. Service, Secret and NetworkPolicy flip the same way (table above), so the cause is not specific to the Ingress.
+- The flip stops when the HelmRelease carries the label: confirmed in a throwaway copy of the unit test (not committed) that adds `styrmin.io/release-reference` to the HelmRelease handed to the timer. All six timer tests passed on the unfixed source.
+- A different writer than the two timers: not found. `grep` shows no other place that writes the label. The Prefect flows and the pipeline phases also write the objects, with the real reference; the live monitor shows the flips continue for minutes after they have run, so they do not explain a repeating flip.
+- Caused by the commits after the last green run: no. Commit `b5bf9399` of this feature added `Ingress` to both reconcile loops (`git show b5bf9399`), and the same loops already listed Service, Secret and NetworkPolicy, which flip on commit `83874cce` (monitor above). Not checked: whether those three kinds flipped on commits before this feature. Inferred: the test passed when the last writer before its read was the StyrminDeployment timer.
+
+### Reproduction (unit tests that fail on the unfixed source)
+
+New file `backend/tests/unit/test_ingress_release_reference_label.py`. It runs the real builder, the real `reconcile_resources` and both real timers against an in-memory cluster that selects objects by label like the API server (an object matches `key=value` only when it has the label with that value, an empty value included). The HelmRelease given to the HelmRelease timer has the labels that the pipeline gives it. The older timer tests in `test_ingress_operator_reconcile.py` gave the HelmRelease the label `styrmin.io/release-reference`, which a real HelmRelease never has, so they could not show this.
+
+Without the fix (`git apply -R` of the source change; `<scratchpad>/unit-before-fix.txt`):
+
+```text
+FAILED ...::TestTheBuilderLabel::test_an_empty_release_reference_still_labels_with_the_one_of_the_instance
+FAILED ...::TestTheTimersAgree::test_the_helmrelease_timer_creates_the_ingress_with_the_instance_reference[asyncio]
+FAILED ...::TestTheTimersAgree::test_the_helmrelease_timer_leaves_the_label_of_the_deployment_timer[asyncio]
+FAILED ...::TestTheTimersAgree::test_the_deployment_timer_leaves_the_label_of_the_helmrelease_timer[asyncio]
+FAILED ...::TestTheTimersAgree::test_alternating_passes_write_the_ingress_once_and_keep_one_label[asyncio]
+FAILED ...::TestTheTimersAgree::test_the_helmrelease_timer_deletes_an_ingress_that_is_no_longer_desired[asyncio]
+FAILED ...::TestTheTimersAgree::test_an_ingress_with_an_empty_label_is_relabelled_once[asyncio]
+7 failed, 2 passed in 0.22s
+```
+
+The failures have the right reason: `assert '' == 'styrmin-00000000-0000-0000-0000-0000000000aa'`, `assert {'', 'styrmin-...'} == {'styrmin-...'}` and `assert 2 == 1` (the Ingress written twice). With the fix: `9 passed in 0.19s` (`<scratchpad>/unit-after-fix.txt`). With only the builder change (no timer change), 4 tests still fail: the timers still do not see each other's objects, rewrite them on every pass, and the HelmRelease timer never deletes an Ingress that the StyrminDeployment timer wrote.
+
+### Fix (commit `a0885121a21c592a4a271fc56f0490033b906e63`)
+
+- `operator/handlers/helmrelease.py`, `kopf_helmrelease_timer`: `release_reference = release_reference or context.instance.release_reference`, after the context is fetched. This is the root cause. The instance's reference is the value that the StyrminDeployment timer and the Prefect flows already use.
+- `agent/service/kubernetes/resources/builders/utility.py`: the builder applies the same fallback, so no caller can write an empty label. This alone is not enough (see above).
+- A news fragment `changelog/+operator-release-reference-label.fixed.md`.
+- The fix is the same cause for Service, Secret and NetworkPolicy. It was not asked for separately; the one change in the timer covers all four kinds, because the timer uses one release reference for all of them.
+- The update path (`apply_kubernetes_resource`) was not changed: it replaces the object with the body of the caller, so it keeps the label that the builder wrote. An object that an earlier version left with an empty label is not listed by the real selector, is created again once with the real label, and stays (test `test_an_ingress_with_an_empty_label_is_relabelled_once`).
+
+### End-to-end runs on the fix commit
+
+All runs started on commit `a0885121a21c592a4a271fc56f0490033b906e63` with an empty `git status --short`, run one after the other by `<scratchpad>/run_all.sh`. Each used the command below, from the repository root, with `<node id>` and `<expr>` from the table. The label monitor ran in each run (`<scratchpad>/runs/<name>/labels.txt`). The kubeconfig files are deleted with each session.
+
+```bash
+sleep 86400 | uv run pytest "<node id>" -k "<expr>" -v -s --pdb > <scratchpad>/runs/<name>/pdb.log 2>&1
+```
+
+| Run | Node id, `-k` | Started | vCluster | Kubeconfig directory (`.../T/pytest-of-Simon/<dir>/vcluster0/kubeconfig`) | Result |
+|---|---|---|---|---|---|
+| api-1 | `backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_moves_only_the_overridden_service`, `api-chromium` | 2026-11-10T14:15:11Z | `pytest-3c6fa79a-7a23-433a-9184-56cc281f7ae4` | `pytest-1440` | passed |
+| api-2 | same | 2026-11-10T14:20:20Z | `pytest-aba3720e-bea8-42d5-94f0-a3ff40b677ae` | `pytest-1441` | passed |
+| api-3 | same | 2026-11-10T14:25:18Z | `pytest-b52191a3-e980-4660-94a5-84122c0fe462` | `pytest-1442` | passed |
+| ui-1 | same, `ui-chromium` | 2026-11-10T14:30:17Z | `pytest-a7b7a894-eb12-4ca6-8cdb-17f4a1e0e733` | `pytest-1443` | passed |
+| refusals | `backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_refusals_name_the_service`, `api-chromium` | 2026-11-10T14:35:46Z | `pytest-cd6ce5d0-bab0-4685-ae3b-17a4037ddce8` | `pytest-1444` | passed |
+| generic | `backend/tests/e2e/test_deploy_generic_app.py::test_deploy_generic_app`, `api-chromium` | 2026-11-10T14:41:24Z | `pytest-73e0c977-c48e-488b-8e05-0f376ffc7d34` | `pytest-1445` | passed |
+
+Verbatim result lines (ANSI colors removed; `-s` puts the vCluster log in front of `PASSED`):
+
+```text
+api-1    PASSED15:19:48 info Removing vCluster container vcluster.cp.pytest-3c6fa79a-7a23-433a-9184-56cc281f7ae4...
+         =========== 1 passed, 1 deselected, 4 warnings in 282.21s (0:04:42) ============
+api-2    PASSED15:24:51 info Removing vCluster container vcluster.cp.pytest-aba3720e-bea8-42d5-94f0-a3ff40b677ae...
+         =========== 1 passed, 1 deselected, 4 warnings in 277.21s (0:04:37) ============
+api-3    PASSED15:29:49 info Removing vCluster container vcluster.cp.pytest-b52191a3-e980-4660-94a5-84122c0fe462...
+         =========== 1 passed, 1 deselected, 4 warnings in 276.02s (0:04:36) ============
+ui-1     PASSED15:35:16 info Removing vCluster container vcluster.cp.pytest-a7b7a894-eb12-4ca6-8cdb-17f4a1e0e733...
+         =========== 1 passed, 1 deselected, 4 warnings in 303.48s (0:05:03) ============
+refusals PASSED15:40:50 info Removing vCluster container vcluster.cp.pytest-cd6ce5d0-bab0-4685-ae3b-17a4037ddce8...
+         =========== 1 passed, 1 deselected, 4 warnings in 309.82s (0:05:09) ============
+generic  PASSED15:44:29 info Removing vCluster container vcluster.cp.pytest-73e0c977-c48e-488b-8e05-0f376ffc7d34...
+         =========== 1 passed, 1 deselected, 4 warnings in 187.11s (0:03:07) ============
+```
+
+Label of the Ingress `styrmin-svc-task-manager` and of the other Styrmin-built objects on the live stack, every 2 seconds for the whole run (`summarize_labels.sh`):
+
+```text
+api-1    Ingress samples=43 distinct_label_values=1 distinct_resourceVersions=7   (Secret 1 value, NetworkPolicy 1 value, Services 1 value)
+api-2    Ingress samples=50 distinct_label_values=1 distinct_resourceVersions=6
+api-3    Ingress samples=49 distinct_label_values=1 distinct_resourceVersions=8
+ui-1     Ingress samples=52 distinct_label_values=1 distinct_resourceVersions=8
+refusals Ingress samples=60 distinct_label_values=1 distinct_resourceVersions=10
+```
+
+In `api-2` the `resourceVersion` of the Ingress is 1706 from 14:22:42 to 14:24:06 (84 seconds, about 16 timer passes of 5 seconds) and changes only when the test sets or clears the override (2391, 2409, 2475) and at 2630 and 2669 (the cause of those two changes was not checked). The label has one value in every sample, before the override, with it, after clearing it, and in the minute after.
+
+### Not verified, and what remains
+
+- The label was read by the monitor and by the test's own assertion; no pdb prompt was reached in any of the six runs, so no pdb log shows the label value. The test passed, so its assertion `_comparable(task_manager_cleared) == _comparable(task_manager_before)` holds, and it includes the label.
+- Three passes of a test that failed once in two do not prove that it cannot fail again. The proof is the unit test and the flat label in the monitor of five runs.
+- Services are still rewritten about every 5 seconds after the fix (`distinct_resourceVersions` 23 to 37 per run, label unchanged). Not investigated, not caused by the label, not changed. The Ingress is not rewritten, so it is a different cause that applies to Services only. Not verified: whether it was there before the fix (the before-fix monitor cannot tell, the label also changed).
+- The Ingress drift handlers (`kopf_on_ingress_update` and `kopf_on_ingress_delete`) now receive the real label instead of `''`, so they no longer return at once. They call `_find_helmrelease_for_resource`, which selects a HelmRelease by that label; a HelmRelease never has it, so they log `No HelmRelease found ... skipping reconciliation` and do nothing. The same holds for the Service, Secret and NetworkPolicy handlers. Not changed: giving the HelmRelease the label is a larger change and not needed for this defect. The number of such log lines in a run was not counted.
+- `on_helmrelease_delete` still passes the label of the HelmRelease (empty) to `cleanup_operator_resources`. After the fix the operator-managed NetworkPolicies carry the real reference, so that cleanup selects none of them. `_teardown_owned_resources` deletes them by the real reference and the namespace is deleted, so nothing stays behind in the runs; a HelmRelease deleted alone (not through the deployment) was not tested.
+- The Service `app` that `generic` lists with `<none>` is a Service in another namespace without the label (an alias, ADR-073); it is a different object and its `resourceVersion` never changed.
+- The tests ran on one machine (macOS, Docker); the CI matrix was not run.
+
+### 5 Whys
+
+1. Why did the test fail once? Because the label of the Ingress read after clearing the override was `''` and the one read before was `styrmin-<uuid>` (proven: `pdb-diag-before.log` line 707, and the same difference in "Failed run 1").
+2. Why did the label change without any user action? Because two operator timers rewrite the same Ingress every few seconds, one with the real reference and one with `''` (proven: monitor flips every 2 to 25 seconds; the operator log shows both timers reporting `created=1` for the Ingress in turn).
+3. Why does each timer rewrite what the other wrote? Because each lists the objects by `release-reference=<its value>`, finds none of the other's, "creates" them, gets HTTP 409 and replaces the object with a body that carries its own label (proven: `list_managed_resources` selector, `apply_kubernetes_resource` 409 branch, the unit tests with the in-memory cluster).
+4. Why do the timers use different values? Because the HelmRelease timer reads the value from a label of the HelmRelease, and the pipeline creates the HelmRelease without that label (proven: `ApplicationHelmReleaseBuilder.build` sets two other labels; no other writer of the label; the unit tests pass when the label is added to the HelmRelease).
+5. Why was this written that way? Because the operator was designed when HelmReleases carried the label (the archived `001-k8s-operator` data model says so), and the StyrminDeployment pipeline later created HelmReleases without it; the handlers kept reading the label (inferred from the archived specs and the comment "CRD-managed" in `on_helmrelease_create`; not verified in the history).
+6. Why was it not detected earlier? Because the unit tests of the timer gave the HelmRelease the label that a real one never has, no test ran the two timers against one cluster, and the flip leaves no error: the objects are always present and valid. The first symptom was a wrong host name annotation in this feature's first end-to-end runs, which was fixed in the annotation (`build_ingress_settings`) and not traced back to the empty reference (proven by "Run 2" of the first section and the comment in `ingress.py`).
+
