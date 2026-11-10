@@ -133,7 +133,10 @@ pod does not have.
 
 - **Public address.** The application is published at the address Styrmin
   generates for its service, and at a readable one made of the service name and
-  the environment name.
+  the environment name. The driver declares the `app` service `scope: external`
+  and renders no Ingress of its own, so Styrmin builds the one Ingress of the
+  deployment, named `styrmin-svc-app`, with the cluster's ingress class and
+  annotations.
 - **Other applications of the environment.** An application can call the other
   applications of its environment, and they can call it, by service name. A
   name resolves only after the application it names has started and Styrmin has
@@ -157,6 +160,14 @@ Styrmin's policies allow outbound connections only for Traefik, Prefect and
 Infrahub pods and to the environment, so without its own policies the
 application could not reach DNS or the internet
 ([opsmill/styrmin#284](https://github.com/opsmill/styrmin/issues/284)).
+
+### Upgrading from driver version 1
+
+Driver version 1 rendered an Ingress in the chart. Styrmin also builds an Ingress
+for an `external` service, so a deployment that stays on version 1 has two
+Ingresses on the same hosts once Styrmin runs a release that builds it. Version 2
+renders no Ingress. To end with one Ingress, load version 2 of the driver and
+upgrade the deployment to it.
 
 ### Several deployments in one environment
 

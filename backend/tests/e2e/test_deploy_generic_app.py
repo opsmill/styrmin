@@ -6,16 +6,26 @@ application on port 8080, so the page answering there proves the whole path:
 the deployment's environment variable reaches the component container, the
 driver's Service targets the right port, and the health check passes.
 
-Asserts on the resulting workload and network policies, read back from the
-vcluster API server.
+Asserts on the resulting workload, network policies and Ingress, read back from
+the vcluster API server.
+
+The driver declares its ``app`` service ``scope: external`` and renders no Ingress
+of its own (#598, FR-012), so the deployment has exactly one Ingress, the one that
+Styrmin builds for the service (SC-006). The test deletes the deployment at the end
+and asserts that the Ingress goes with it.
 """
 
 from __future__ import annotations
+
+import asyncio
+import time
+from typing import Any
 
 import httpx
 import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Deployment as AsyncDeployment
+from kr8s.asyncio.objects import Ingress as AsyncIngress
 from kr8s.asyncio.objects import NetworkPolicy as AsyncNetworkPolicy
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
@@ -28,6 +38,7 @@ from styrmin_sdk.models import (
 
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
+from tests.e2e.helpers.ingress import wait_for_deployment_status
 from tests.e2e.helpers.workloads import container_spec
 
 pytestmark = [
@@ -37,6 +48,51 @@ pytestmark = [
 # Fixed by the generic-app values template's ``fullnameOverride``.
 WORKLOAD = "styrmin-app"
 WHOAMI_VERSION = "1.10.3"
+
+# The Ingress that Styrmin builds for the ``app`` service (``styrmin-svc-<service name>``).
+SERVICE_INGRESS = "styrmin-svc-app"
+SERVICE_NAME_LABEL = "styrmin.io/service-name"
+# The operator watches the Ingress that Styrmin builds, so kopf adds its own
+# bookkeeping annotation. Styrmin's ingress rules do not set it.
+OPERATOR_BOOKKEEPING_PREFIX = "kopf.zalando.org/"
+
+# Set by the session fixtures (conftest ``styrmin_resources``): a dedicated ingress
+# controller (Traefik) serves the environment, and ``external_dns_endpoints_type`` is
+# ``NodeExternalIP``, with no ``ip_whitelist``.
+CLUSTER_SUFFIX = "styrmin.com"
+DEDICATED_IMPLEMENTATION = "traefik"
+# The annotations that the chart Ingress of generic-app carried before it stopped
+# rendering one: the post-render patch of Styrmin set them on it (ADR-071).
+FORMER_CHART_INGRESS_ANNOTATION_KEYS = {
+    "traefik.ingress.kubernetes.io/router.entrypoints",
+    "external-dns.alpha.kubernetes.io/hostname",
+    "external-dns.alpha.kubernetes.io/cloudflare-proxied",
+    "external-dns.alpha.kubernetes.io/endpoints-type",
+    "kubernetes.io/ingress.class",
+}
+
+INGRESS_TIMEOUT_SECONDS = 120.0
+DELETE_TIMEOUT_SECONDS = 480.0
+
+
+async def _wait_for_service_ingress(
+    kr8s_api: Any, namespace: str
+) -> dict[str, dict[str, Any]]:
+    """The Ingress objects of the namespace, by name, once the Ingress of the ``app`` service exists.
+
+    The operator creates it on its next periodic reconciliation of the HelmRelease, not
+    before the deployment is running, so a single read can come too early.
+    """
+    deadline = time.monotonic() + INGRESS_TIMEOUT_SECONDS
+    while True:
+        ingresses = {
+            ing.name: dict(ing.raw)
+            async for ing in AsyncIngress.list(namespace=namespace, api=kr8s_api)
+            if isinstance(ing, AsyncIngress)
+        }
+        if SERVICE_INGRESS in ingresses or time.monotonic() > deadline:
+            return ingresses
+        await asyncio.sleep(2)
 
 
 @pytest.mark.api_only(
@@ -106,3 +162,60 @@ async def test_deploy_generic_app(
         async for policy in AsyncNetworkPolicy.list(namespace=namespace, api=kr8s_api)
     }
     assert {f"{WORKLOAD}-ingress", f"{WORKLOAD}-egress"} <= policies, sorted(policies)
+
+    # Exactly one Ingress, built by Styrmin for the ``app`` service: the chart renders
+    # none (FR-012, SC-006).
+    ingresses = await _wait_for_service_ingress(kr8s_api, namespace)
+    assert set(ingresses) == {SERVICE_INGRESS}, (
+        "Expected the Ingress that Styrmin builds for the app service and no chart "
+        f"Ingress: {sorted(ingresses)}"
+    )
+    ingress = ingresses[SERVICE_INGRESS]
+    assert ingress["metadata"]["labels"][SERVICE_NAME_LABEL] == "app"
+
+    # It carries the application address and the readable host (FR-001, FR-002), as
+    # the deployment reports them.
+    deployment = await client.deployments.get(str(task.deployment_id))
+    (app_service,) = [
+        s for s in deployment.deployed_services if s.driver_service_name == "app"
+    ]
+    assert app_service.primary_fqdn.endswith(f"-{deployment.id}.{CLUSTER_SUFFIX}")
+    assert app_service.human_readable_fqdn.startswith("app-")
+    assert app_service.human_readable_fqdn.endswith(f".{CLUSTER_SUFFIX}")
+    hosts = [rule["host"] for rule in ingress["spec"]["rules"]]
+    assert sorted(hosts) == sorted(
+        [app_service.primary_fqdn, app_service.human_readable_fqdn]
+    ), hosts
+    for rule in ingress["spec"]["rules"]:
+        (path,) = rule["http"]["paths"]
+        assert path["backend"]["service"] == {"name": "app", "port": {"number": 8080}}
+
+    # The resolved class and annotations: the ones the chart Ingress carried before.
+    # With the dedicated controller, the class is set in the annotation only.
+    annotations = {
+        key: value
+        for key, value in ingress["metadata"].get("annotations", {}).items()
+        if not key.startswith(OPERATOR_BOOKKEEPING_PREFIX)
+    }
+    assert set(annotations) == FORMER_CHART_INGRESS_ANNOTATION_KEYS, annotations
+    assert annotations["kubernetes.io/ingress.class"] == DEDICATED_IMPLEMENTATION
+    assert ingress["spec"].get("ingressClassName") is None
+    assert annotations["external-dns.alpha.kubernetes.io/hostname"].startswith(
+        f"styrmin-{deployment.id}-"
+    ), "the host name annotation must carry the release reference"
+    assert annotations["external-dns.alpha.kubernetes.io/hostname"].endswith(
+        f".{CLUSTER_SUFFIX}"
+    )
+    assert "tls" not in ingress["spec"]
+
+    # Deleting the deployment deletes its namespace, and the Ingress with it.
+    await client.deployments.delete(str(task.deployment_id))
+    await wait_for_deployment_status(
+        client, str(task.deployment_id), "deleted", timeout=DELETE_TIMEOUT_SECONDS
+    )
+    remaining = [
+        ing.name
+        async for ing in AsyncIngress.list(namespace=namespace, api=kr8s_api)
+        if isinstance(ing, AsyncIngress)
+    ]
+    assert remaining == [], f"Ingress left after the deletion: {remaining}"

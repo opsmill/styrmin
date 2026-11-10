@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import httpx
 import kr8s.asyncio
 import pytest
+from kr8s.asyncio.objects import Ingress as AsyncIngress
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
 from tests.e2e.conftest import _portforward, _wait_for_http
@@ -77,6 +78,19 @@ async def test_deploy_simple_app(
                 f"http://localhost:{local_port}/count", timeout=10
             )
             assert response.status_code == 200
+
+    # SC-003 (#598): simple-app declares its only service ``scope: internal``, so Styrmin
+    # builds no Ingress for it. The namespace has the one Ingress that the chart renders,
+    # as before the service ingress override.
+    ingresses = [
+        ing
+        async for ing in AsyncIngress.list(namespace=namespace, api=kr8s_api)
+        if isinstance(ing, AsyncIngress)
+    ]
+    assert [ing.name for ing in ingresses] == ["styrmin-simple-app"], (
+        f"Expected only the chart Ingress: {sorted(ing.name for ing in ingresses)}"
+    )
+    assert "styrmin.io/service-name" not in ingresses[0].labels
 
 
 async def _assert_upgrade_action_succeeded(
