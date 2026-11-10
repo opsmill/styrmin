@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,6 +21,7 @@ from styrmin_backend.context.fqdn import (
     compute_human_readable_fqdn,
     compute_primary_fqdn,
 )
+from styrmin_backend.context.models.config import ResolvedConfig, ServiceConfigBlock
 from styrmin_backend.context.models.contexts import GlobalContext
 
 SERVICE_INGRESS_NAME_PREFIX = "styrmin-svc-"
@@ -44,6 +46,26 @@ class IngressSettings:
     annotations: dict[str, str]
     class_name: str | None
     remove_class_name: bool
+
+
+def _resolved_class_rules(
+    config: ResolvedConfig,
+) -> tuple[dict[str, str], str | None, bool]:
+    """Return the class annotation, ``spec.ingressClassName`` and removal flag of the resolved config."""
+    if config.dedicated_ingress is not None:
+        # The dedicated controller reads no IngressClass, so it ignores any Ingress that sets spec.ingressClassName.
+        return (
+            {"kubernetes.io/ingress.class": config.dedicated_ingress.implementation},
+            None,
+            True,
+        )
+    if config.ingress_class:
+        return (
+            {"kubernetes.io/ingress.class": config.ingress_class},
+            config.ingress_class,
+            False,
+        )
+    return {}, None, False
 
 
 def build_ingress_settings(
@@ -74,22 +96,30 @@ def build_ingress_settings(
         annotations["external-dns.alpha.kubernetes.io/endpoints-type"] = (
             config.external_dns_endpoints_type
         )
-    class_name: str | None = None
-    remove_class_name = False
-    if config.dedicated_ingress is not None:
-        # The dedicated controller reads no IngressClass, so it ignores any Ingress that sets spec.ingressClassName.
-        annotations["kubernetes.io/ingress.class"] = (
-            config.dedicated_ingress.implementation
-        )
-        remove_class_name = True
-    elif config.ingress_class:
-        annotations["kubernetes.io/ingress.class"] = config.ingress_class
-        class_name = config.ingress_class
+    class_annotations, class_name, remove_class_name = _resolved_class_rules(config)
+    annotations.update(class_annotations)
     return IngressSettings(
         annotations=annotations,
         class_name=class_name,
         remove_class_name=remove_class_name,
     )
+
+
+def _override_class_rules(
+    config: ResolvedConfig, override: ServiceConfigBlock
+) -> tuple[dict[str, str], str | None, bool]:
+    """Return the class rules of an overridden service.
+
+    The override class replaces the resolved rules, the dedicated controller rule included
+    (FR-008). Without an override class, the resolved rules apply.
+    """
+    if override.ingress_class:
+        return (
+            {"kubernetes.io/ingress.class": override.ingress_class},
+            override.ingress_class,
+            False,
+        )
+    return _resolved_class_rules(config)
 
 
 class IngressUtility(Utility):
@@ -209,6 +239,14 @@ class IngressUtility(Utility):
 
         return resources
 
+    @staticmethod
+    def _active_override(
+        overrides: Mapping[str, ServiceConfigBlock], service: dict[str, Any]
+    ) -> ServiceConfigBlock | None:
+        """Return the override of a service, or ``None`` when it has none or a block with no field set."""
+        override = overrides.get(service["driver_service_name"])
+        return None if override is None or override.is_empty else override
+
     def _build_service_ingresses(
         self, context: GlobalContext, release_reference: str, namespace: str
     ) -> list[dict[str, Any]]:
@@ -233,8 +271,15 @@ class IngressUtility(Utility):
         if not buildable:
             return []
 
-        settings = build_ingress_settings(context, release_reference)
         config = context.instance.config
+        overrides = context.deployment.config.services or {}
+        # The shared settings need a resolved FQDN suffix and raise without one. Build them
+        # unless every Ingress has an override, so an override suffix alone is enough then.
+        settings = (
+            None
+            if all(self._active_override(overrides, s) for s in buildable)
+            else build_ingress_settings(context, release_reference)
+        )
         primary_fqdn = compute_primary_fqdn(
             context.app.name, context.instance.deployment_id, config.fqdn_suffix
         )
@@ -242,6 +287,7 @@ class IngressUtility(Utility):
 
         ingresses: list[dict[str, Any]] = []
         for service in buildable:
+            override = self._active_override(overrides, service)
             hosts = [
                 compute_human_readable_fqdn(
                     service["resolved_name"],
@@ -249,7 +295,9 @@ class IngressUtility(Utility):
                     service["fqdn_suffix"],
                 )
             ]
-            if service is first_declared:
+            # The application address uses the resolved suffix, so an overridden Ingress
+            # never holds it (research D-003).
+            if service is first_declared and override is None:
                 hosts.append(primary_fqdn)
             unique_hosts = list(dict.fromkeys(host for host in hosts if host))
             if not unique_hosts:
@@ -276,8 +324,17 @@ class IngressUtility(Utility):
                     for host in unique_hosts
                 ]
             }
-            if settings.class_name:
-                spec["ingressClassName"] = settings.class_name
+            if override is not None:
+                # FR-004: an overridden Ingress carries the class and nothing else
+                # (no entry-point, external-dns, Cloudflare or allow-list annotation).
+                annotations, class_name, _ = _override_class_rules(config, override)
+            else:
+                # ``settings`` is built whenever a service without an override exists.
+                settings = settings or build_ingress_settings(context, release_reference)
+                annotations = dict(settings.annotations)
+                class_name = settings.class_name
+            if class_name:
+                spec["ingressClassName"] = class_name
             ingresses.append(
                 {
                     "apiVersion": "networking.k8s.io/v1",
@@ -286,7 +343,7 @@ class IngressUtility(Utility):
                         "name": f"{SERVICE_INGRESS_NAME_PREFIX}{service['driver_service_name']}",
                         "namespace": namespace,
                         "labels": {SERVICE_NAME_LABEL: service["driver_service_name"]},
-                        "annotations": dict(settings.annotations),
+                        "annotations": annotations,
                     },
                     "spec": spec,
                 }
