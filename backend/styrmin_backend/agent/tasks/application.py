@@ -19,6 +19,10 @@ from styrmin_backend.agent.tasks.shared import (
 )
 
 
+# Kinds whose apply error was always skipped before the Ingress was added. Left as it was (review F2).
+_SKIPPED_ON_ANY_ERROR = frozenset({"NetworkPolicy"})
+
+
 @flow(flow_run_name="Update Helm release: {namespace} {reference}")
 async def update_helm_release(
     namespace: str,
@@ -63,11 +67,23 @@ async def apply_utility_resources(
     for resource in crd_resources:
         try:
             await apply_kubernetes_resource(resource=resource, namespace=namespace)
-        except ApiException:
+        except ApiException as exc:
+            kind = resource.get("kind")
+            name = resource.get("metadata", {}).get("name")
+            # An Ingress is the one object that makes a service reachable: a refusal (403, 422, an
+            # admission webhook) must fail the flow, not end it as a success with no Ingress.
+            if kind == "Ingress":
+                raise
+            # A NetworkPolicy has always been skipped here whatever the error: kept as it was.
+            # Any other kind is a custom resource; only status 404 (the kind is not installed yet) is skipped.
+            if kind not in _SKIPPED_ON_ANY_ERROR and exc.status != 404:
+                raise
             logger.warning(
-                "Failed to apply CRD resource {}/{} — the CRD type may not be installed yet",
-                resource.get("kind"),
-                resource.get("metadata", {}).get("name"),
+                "Failed to apply {}/{} (status {}, reason {}): skipped, the kind may not be installed yet",
+                kind,
+                name,
+                exc.status,
+                exc.reason,
             )
 
 
