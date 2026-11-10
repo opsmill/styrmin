@@ -267,7 +267,7 @@ driver declares and that Styrmin creates as a Kubernetes `Service`.
 both, that a deployment sets for one external service of its application
 driver version. It replaces the resolved class and suffix for that
 service only. You set it in a manifest (`spec.config.services`), through
-the API, or in the Configuration tab and the deploy form. Styrmin refuses
+the API, or in the Settings tab and the deploy form. Styrmin refuses
 an override on a service that is not `scope: external`. See [Service
 ingress overrides](./service-ingress-overrides.md).
 

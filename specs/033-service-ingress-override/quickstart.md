@@ -40,16 +40,18 @@ Expected:
 - The `infrahub` Ingress is identical in `before.yaml` and `after.yaml` (SC-002).
 - Reading the service through GraphQL gives the new host and `ingressClassOverridden: true`.
 - Clearing the override gives the cluster class and suffix again.
+- The `task-manager` Ingress has the labels `styrmin/environment_id` and `styrmin/deployment_id`, like the chart Ingress. On a cluster with a dedicated ingress controller, the controller serves only an Ingress with `styrmin/environment_id`.
+- Traffic, on a cluster with a dedicated ingress controller: a request to the controller with `Host: task-manager-lab.example.com` answers HTTP 200 before the override and after it is cleared. With the override class `tailscale`, the same host and the overridden host answer HTTP 404 through that controller, because the Ingress has another class. Whether a Tailscale controller serves the overridden host is not covered.
 
 ## 3. User story 2: no override
 
-Deploy `generic-app`. Expected: exactly one Ingress for the `app` service (SC-006), with the resolved class, the annotations that the chart Ingress carried before, and both the application address and the readable host. Delete the deployment: the Ingress is gone.
+Deploy `generic-app`. Expected: exactly one Ingress for the `app` service (SC-006), with the resolved class, the annotations that the chart Ingress carried before, and both the application address and the readable host. With a dedicated ingress controller, both hosts answer HTTP 200 through it. Delete the deployment: the Ingress is gone.
 
 Deploy a driver with two external services. Expected: exactly one Ingress carries the application address (FR-002 as changed by research D-003).
 
 ## 4. User story 3: UI
 
-Open the deployment, Configuration, Service overrides. Only external services are listed. Set both fields for `task-manager`, save. Expected: the deployment redeploys, and the Networking summary lists `task-manager` at the new host under class `tailscale`, marked as overridden; `infrahub` is marked as inherited. The same fields exist on the deploy form.
+Open the deployment, then the Settings tab, and edit the settings. In the section Services, the drawer offers the fields "Ingress class for <service>" and "FQDN suffix for <service>" for each external service only, and the button "Clear ingress override for <service>". Set both fields for `task-manager` and use Review & apply. Expected: the deployment redeploys, and the Networking card of the Settings tab lists `task-manager` at the new host under class `tailscale`, marked Overridden. The same fields exist in the group "Service ingress overrides" of the deploy form.
 
 ## 5. User story 4: refused requests
 
@@ -58,7 +60,7 @@ Open the deployment, Configuration, Service overrides. Only external services ar
 
 ## 6. Environment with a dedicated ingress controller (FR-008)
 
-Turn on `dedicated_ingress` for the environment and override one service. Expected: the other Ingresses have no `spec.ingressClassName` and the annotation set to the controller implementation; the overridden one has the override class.
+Turn on `dedicated_ingress` for the environment and override one service. Expected: the other Ingresses have no `spec.ingressClassName` and the annotation set to the controller implementation; the overridden one has the override class. Send a request through the controller with the `Host` header of a service without an override: HTTP 200. The end-to-end fixtures have a dedicated Traefik, so the tests of steps 2 and 3 do this.
 
 ## 7. Existing Infrahub deployment (not known in the PRD)
 
@@ -68,9 +70,9 @@ Upgrade a running `infrahub` deployment from the previous driver version (`infra
 2. Load the new driver version. Start a loop that lists the Ingresses of the namespace every second, and a loop that sends one request per second to `/api/health` through the environment's ingress controller with the header `Host: task-manager-<environment name>.<fqdn suffix>`.
 3. Change the deployment to the new driver version with `update_version` (the SDK) or the upgrade dialog, and keep both loops running until the deployment is running and the Ingress list has not changed for a minute.
 
-Record: whether the chart's Ingress `styrmin-task-manager` is removed, when `styrmin-svc-task-manager` appears, whether the task manager address stops answering, and for how long. Do this with the operator interval of the end-to-end fixtures (5 seconds) and with the default (60 seconds). Expected: the address answers HTTP 200 before and after, and the record states any interval in which it does not.
+Record: whether the chart's Ingress `styrmin-task-manager` is removed, when `styrmin-svc-task-manager` appears, whether the task manager address stops answering, and for how long. Do this with the operator interval of the end-to-end fixtures (5 seconds) and with the default (60 seconds). Expected: the address answers HTTP 200 before and after, and the record states any interval in which it does not. Measured on a local vCluster with the label on the Ingress: no interval at the 5-second pass (two runs), about 12 and about 7 seconds of HTTP 404 at the 60-second pass (two runs).
 
-The result is in `e2e-evidence.md`, section "T062". The throwaway script that ran these steps is not in the repository.
+The results are in `e2e-evidence.md`, sections "T062" (without the label) and "T062 repeated with the label". The throwaway script that ran these steps is not in the repository.
 
 ## Evidence
 

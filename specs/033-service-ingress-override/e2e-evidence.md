@@ -591,7 +591,7 @@ Task T062, quickstart step 7, spec SC-005 and the edge case on existing Infrahub
 
 ## Result
 
-- The measurement found a defect in the Ingress that Styrmin builds. In an environment with a dedicated ingress controller, the controller does not serve it, so the host of the Prefect UI answers HTTP 404 through the controller as soon as the chart's Ingress is gone, and keeps doing so. It is not fixed in this chunk. The cause is proven by a live label change (section "Cause").
+- The measurement found a defect in the Ingress that Styrmin builds. In an environment with a dedicated ingress controller, the controller does not serve it, so the host of the Prefect UI answers HTTP 404 through the controller as soon as the chart's Ingress is gone, and keeps doing so. It was not fixed in this chunk; commit `4b87a6f9` fixes it (see the last section of this file, "The label defect: fix, traffic checks and the upgrade measurement repeated"). The cause is proven by a live label change (section "Cause").
 - With the label added by hand at the moment the Ingress appears (an emulation of a fix, not a fix), the host answered 404 for 9 seconds while the operator timer ran at its default of 60 seconds.
 - The tailnet access is not verified: no Tailscale operator and no tailnet exist in the fixtures.
 
@@ -735,4 +735,147 @@ Commit under test: `772256e64697d29fd587e6c9f6f2904403f5023f`. Started 2026-11-1
 | 7. Existing Infrahub deployment | yes, twice (T062 above) | "T062" above |
 
 - Quickstart text changed: step 1 (the extra commands and the separate CLI and SDK test runs) and step 7 (the steps of the measurement).
-- Step 7 found a defect in the product, not in the text: the Ingress that Styrmin builds lacks the label `styrmin/environment_id`, which the dedicated Traefik requires, so the task manager host answers 404 through it. Steps 2, 3 and 6 pass because they check objects, not traffic. T065 is not marked done: the product has to be fixed first, and the walk-through repeated for step 7 (and for a request through the controller in steps 2, 3 and 6).
+- Step 7 found a defect in the product, not in the text: the Ingress that Styrmin builds lacks the label `styrmin/environment_id`, which the dedicated Traefik requires, so the task manager host answers 404 through it. Steps 2, 3 and 6 pass because they check objects, not traffic. T065 is not marked done: the product has to be fixed first, and the walk-through repeated for step 7 (and for a request through the controller in steps 2, 3 and 6). (Done later: see the last section.)
+
+
+---
+
+# The label defect: fix, traffic checks and the upgrade measurement repeated (#598)
+
+This section follows "T062" and "T063, T064 and T065". It supersedes the lines there that say the defect is "not fixed" and that T065 is "not marked done". Times are UTC. `<scratchpad>` is `/private/tmp/claude-503/-Users-Simon-styrmin-598-spec/2ab6e2fa-7180-493d-8211-590f003133bd/scratchpad`.
+
+## Cause, with the evidence
+
+Proven (read in the source of commit `3c5fb844`, before the fix):
+
+- The dedicated Traefik starts with `--providers.kubernetesingress.labelselector=styrmin/environment_id={{ labels.environment_id }}` (`backend/styrmin_backend/services/ingress_controller/templates/chart_values.j2.yaml:14`). `driver/examples/generic-app/values.j2.yml:101,123` uses `styrmin/environment_id` in the `namespaceSelector` of the generic-app network policies, not as a label of an Ingress: it shows that the label is a namespace-level and object-level identity, not that the chart Ingress had it from that file. The chart Ingress gets the label from the post-render patch below.
+- The chart Ingresses get their labels from the post-render patch: `ApplicationHelmReleaseBuilder.build` calls `build_target_for_label_patches(labels=self.context.labels, label_prefix=self.label_prefix)` (`builders/application.py:474-475`, patch built at `:287`), and `label_prefix` is `"styrmin"` in both callers (`agent/tasks/core.py:22`, `operator/pipeline.py:207`, default of the class). Every key of `context.labels` becomes `styrmin/<key>` on every object of the chart.
+- `context.labels` has exactly two keys, `environment_id` and `deployment_id` (`backend/styrmin_backend/services/context.py:217-220`). Both are record ids (UUIDs).
+- The builder of the Ingress set only `{SERVICE_NAME_LABEL: ...}` (`utilities/ingress.py:350` before the fix), and `UtilityResourceBuilder.build` adds three ownership labels (`managed-by`, `utility-kind`, `release-reference`; `builders/utility.py:38-44`). Nothing added `styrmin/environment_id`.
+- The utility objects that `UtilityResourceBuilder` builds (NetworkPolicy, Secret, Middleware, Service) have only the three ownership labels, not the two deployment labels. They are not selected by label by any controller, so this was not changed. Only Ingresses are selected by the controller's label selector.
+
+Observed (section "T062" above): the Prefect UI host answered 404 for the rest of the run after the upgrade; adding the label by hand changed the answer to 200 within one second.
+
+What would have shown the theory wrong, and what I checked: a Traefik that selects on something else (the Traefik log in the T062 run says `ingress label selector is: "styrmin/environment_id=..."`); a label that the chart Ingress has and the built one needs besides `environment_id` (the chart gets exactly the two keys of `context.labels`, so the set is the same two); a class problem (`kubernetes.io/ingress.class: traefik` is on both Ingresses).
+
+## The fix and the choice of labels
+
+- Commit `4b87a6f9`. `utilities/ingress.py` has a new function `_deployment_labels(context)`. It returns `build_namespace_labels(context.labels)` without the entries whose value is `None` or `""`, and the Ingress metadata is `{**_deployment_labels(context), SERVICE_NAME_LABEL: <driver service name>}`.
+- Labels set: `styrmin/environment_id` and `styrmin/deployment_id`. `styrmin/environment_id` is the one the controller needs. `styrmin/deployment_id` is the other label that every chart object has, so a built Ingress has the same identity labels as the chart Ingress next to it. The function that adds the prefix is the one that builds the namespace labels (`context/namespace_labels.py:12`), whose prefix is `styrmin`, the same prefix as the post-render patch.
+- Every built Ingress gets them, an overridden one too. An Ingress with the class `tailscale` stays unserved by Traefik because of its class annotation (new end-to-end assertion below), not because it lacks the label.
+- Values: UUID strings, so they are valid Kubernetes label values (36 characters, letters, digits and hyphens). A `None` or empty value in `context.labels` would give the text `None` or an empty label; the function leaves such entries out (unit tests `test_an_empty_context_label_gives_no_label[None]` and `[]`). A context with no labels builds the Ingress with its own label only.
+- Operator path: `compute_diff` compares only `kind`, name, namespace and `spec` (`operator/reconciler.py`, `_normalize_for_comparison`). A change of labels or annotations alone does not update an Ingress that already exists. This matters only for an Ingress that an earlier version built without the labels. No release contains such an Ingress: `git describe --tags --abbrev=0 origin/develop` is `v0.1.57`, `git tag --contains <first commit of the branch>` prints nothing, and `git grep "styrmin-svc-" origin/develop -- backend` finds nothing. So no towncrier fragment is added for the fix, and `598.added.md` and `598.changed.md` do not mention labels. Not run: whether the operator would write the labels onto an existing Ingress (by the code it would not).
+- The two operator timers and the Prefect flows all build the Ingress through `UtilityResourceBuilder` and `IngressUtility.build_resources`, so they write the same labels (unit test `test_the_operator_builds_the_labels_next_to_the_ownership_labels`).
+
+## Unit test: fails before, passes after
+
+New file `backend/tests/unit/agent/test_service_ingress_labels.py` (8 tests). It reads the selector from the controller's chart values template, rendered with `GlobalContext.model_dump(exclude_none=True)` as the Jinja context, as production does, and compares it with the labels of the built Ingress. It also compares the built labels with the labels that the post-render patch of `ApplicationHelmReleaseBuilder` gives every chart object. If the template or the builder changes without the other, the test fails.
+
+Before the fix (`<scratchpad>/labels-unit-before-fix.txt`):
+
+```text
+E  AssertionError: The dedicated controller selects styrmin/environment_id=00000000-0000-0000-0000-0000000000e1; the Ingress has {'styrmin.io/service-name': 'web'}
+...
+6 failed, 2 passed in 0.12s
+```
+
+The two that pass check the premise (the selector is the environment id) and the context without labels. After the fix (`<scratchpad>/labels-unit-after-fix.txt`): `8 passed in 0.06s`. The 505 unit tests selected by `-k "ingress or utility or label"` pass after the fix.
+
+## The end-to-end tests now send traffic (commit `343e4072`)
+
+The earlier tests read Kubernetes objects only, so none could see that the host answered 404. Changes:
+
+- `test_service_ingress_override_moves_only_the_overridden_service`: asserts that the built Ingress has `styrmin/environment_id`; waits until the dedicated Traefik answers 200 for `task-manager-test-environment.styrmin.com` (path `/api/health`, header `Host`) before the override and again after it is cleared; with the override (class `tailscale`) waits until the Traefik stops answering 200 for the default host, which shows that it read the change, and then asserts that the overridden host `task-manager-test-environment.tailnet.example.ts.net` answers 404 through it. It uses the helper `traefik_service` of `tests/e2e/helpers/ingress.py`, `_portforward` and `_wait_for_http`, as `test_infrahub_services.py` does.
+- `test_deploy_generic_app`: asserts the label, then that both hosts of the Ingress (`primary_fqdn`, `human_readable_fqdn`) answer 200 on `/health` through the dedicated Traefik of `scenario_environment_id`. The session cluster has `dedicated_ingress` (`conftest.py`, `styrmin_resources`), so the environment has a Traefik.
+- Covered: a built Ingress without an override is served by the dedicated Traefik; an Ingress with class `tailscale` is not.
+- Not covered: the overridden host through a Tailscale controller (none in the fixtures; Tailscale is not verified); the `infrahub` host through the controller (unchanged by this work); traffic on the `[ui-chromium]` variant is the same code as the API variant.
+
+Control run: the test fails without the fix. On the committed test with two temporary edits (the line `**_deployment_labels(context)` removed from `ingress.py`, and the new label assertion in the test commented out so the traffic step is reached), started 2026-11-10T15:49:59Z, vCluster `pytest-39f24b3f-77ec-40e3-ad91-46f411d0810e`, kubeconfig `.../pytest-of-Simon/pytest-1456/vcluster0/kubeconfig`: `FAILED` at `test_service_ingress_override.py:449` through `_wait_until_traefik_serves` (`:349`):
+
+```text
+E       TimeoutError: http://localhost:24877/api/health did not return 200 after 120.0s
+backend/tests/e2e/conftest.py:389: TimeoutError
+```
+
+`kubectl get ingress -A` at the pause showed `styrmin-svc-task-manager` with the labels `app.kubernetes.io/managed-by`, `styrmin.io/release-reference`, `styrmin.io/service-name` and `styrmin.io/utility-kind` only (`<scratchpad>/runs2/control-ingress-labels.txt`). Both edits were reverted, the vCluster deleted with `vcluster delete ... --driver docker`.
+
+## End-to-end runs on the final code
+
+Commit under test: `343e4072ec3dc746433f72f185ef83952ccffe68`, `git status --short` empty at the start of each run (`<scratchpad>/runs3/<name>/status` is empty). The commits after it change documents only (this file, the three pages, the quickstart, tasks, the glossary, a news fragment word). Each run: `uv run pytest <node id> [-k <variant>] -v -s --pdb` with the standard input of pytest held open by `sleep 86400` (macOS: `sleep infinity` exits at once), from the repository root, one run after the other. The kubeconfig of each run is `/private/var/folders/h8/b5b4gccj4h5c0sjlqjymm1y40000gq/T/pytest-of-Simon/pytest-<N>/vcluster0/kubeconfig`; the directory numbers 1457 to 1461 are in the order of the runs (inferred from the sequence of directories and times; the success logs do not print the path) and the directories are deleted by pytest.
+
+| Node id | Command argument | Started | vCluster | Dir | Result line |
+|---|---|---|---|---|---|
+| `backend/tests/e2e/test_infrahub_services.py` (whole file; the test is `api_only`, so `[ui-chromium]` is skipped) | the file | 2026-11-10T15:57:14Z | `pytest-2e5b2014-6543-4120-8c5f-931ddc3e96be` | 1457 | `PASSED` and `============= 1 passed, 1 skipped, 4 warnings in 283.70s (0:04:43) =============` |
+| `backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_moves_only_the_overridden_service[api-chromium]` | `-k api-chromium` | 2026-11-10T16:16:04Z | `pytest-9c10003c-0c09-455e-90f5-58380a31c89a` | 1458 | `PASSED17:20:50 info Removing vCluster container ...` and `=========== 1 passed, 1 deselected, 4 warnings in 291.59s (0:04:51) ============` |
+| same, `[ui-chromium]` | `-k ui-chromium` | 2026-11-10T16:21:00Z | `pytest-fed2db8d-e89c-4cc6-a6a9-583d26f3cb50` | 1459 | `PASSED17:25:48 info Removing vCluster container ...` and `=========== 1 passed, 1 deselected, 4 warnings in 292.27s (0:04:52) ============` |
+| `backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_refusals_name_the_service[api-chromium]` | `-k api-chromium` | 2026-11-10T16:25:56Z | `pytest-7bf54357-1c23-4a38-aa40-7ee82f0e5bf4` | 1460 | `PASSED17:30:36 info Removing vCluster container ...` and `=========== 1 passed, 1 deselected, 4 warnings in 284.08s (0:04:44) ============` |
+| `backend/tests/e2e/test_deploy_generic_app.py::test_deploy_generic_app[api-chromium]` | `-k api-chromium` | 2026-11-10T16:30:47Z | `pytest-567dff25-b7c4-4f18-bf30-7a791f44a02d` | 1461 | `PASSED17:33:34 info Removing vCluster container ...` and `=========== 1 passed, 1 deselected, 4 warnings in 169.70s (0:02:49) ============` |
+
+Logs: `<scratchpad>/runs3/<name>/pdb.log`. The log times are local (UTC+1). No run reached a pdb prompt; every test passed on its first run on this commit. The first launch of this series used a runner whose exit detection hung after `test_infrahub_services.py` had already passed; that run is the one in the table, and the other four were started by a corrected runner. `test_infrahub_services.py` failed on the previous commit at the same Traefik check (section "T062", run 3) and passes now.
+
+## The upgrade of a running Infrahub deployment, repeated with the fix (quickstart step 7)
+
+Same throwaway test as in "T062" (`<scratchpad>/test_zz_throwaway_upgrade.py`, copied into `backend/tests/e2e/` for each run and deleted afterwards, so it is not in the repository), without the `LABELER` emulation: the label comes from the product. It deploys `infrahub-enterprise` 1.6.0 on driver version 4, loads driver version 5 (current `master`), calls `deployments.update_version`, and writes a timeline: the Ingresses every second, one request per second to `/api/health` through the dedicated Traefik with `Host: task-manager-test-environment.styrmin.com`, the deployment status every 2 seconds. The operator pass is `STYRMIN_OPERATOR_RECONCILE_INTERVAL` in `backend/tests/e2e/fixtures/styrmin-values.yaml` (`"5"` in the repository, set to `"60"`, the default of `SETTINGS.operator.reconcile_interval`, for the 60-second runs, and restored with `git checkout`). Commit `343e4072`, tree clean except the throwaway file and that value. Command, from the repository root (`<scratchpad>/run_up.sh` runs the four in order):
+
+```bash
+REPO_ROOT=$PWD TIMELINE_FILE=<scratchpad>/up/<run>/timeline.txt HOLD_FILE=<scratchpad>/up/<run>/hold \
+  uv run pytest backend/tests/e2e/test_zz_throwaway_upgrade.py -k api-chromium -v -s < <(sleep 86400)
+```
+
+| Run | Pass | vCluster kubeconfig dir | Upgrade started | Probes | Probes without HTTP 200 | Time without HTTP 200 | Built Ingress first seen | Chart Ingress `styrmin-task-manager` gone |
+|---|---|---|---|---|---|---|---|---|
+| 5-1 | 5 s | `pytest-1462` | 16:38:28.1 | 112 | 0 | none | +5.9 s | first listing without it at +42.4 s |
+| 60-1 | 60 s | `pytest-1463` | 16:45:07.5 | 126 | 12 (all HTTP 404) | 12 s (16:45:50.6 to 16:46:02.6) | +55.8 s (HTTP 200 again at +55.1 s) | +43.0 s |
+| 5-2 | 5 s | `pytest-1464` | 16:51:31.6 | 118 | 0 | none | +7.3 s | first listing without it at +41.5 s |
+| 60-2 | 60 s | `pytest-1465` | 16:57:49.5 | 120 | 7 (all HTTP 404) | 7 s (16:58:33.6 to 16:58:40.6) | +50.8 s (HTTP 200 again at +51.1 s) | +44.1 s |
+
+Each run ended `1 passed, 1 deselected, 4 warnings` (371.31 s, 407.97 s, 370.53 s, 373.73 s); the test asserts nothing about the answers. The numbers are measured samples on one machine (macOS, Docker, one local vCluster), not guarantees. The time resolution is one second (one probe per second). "Built Ingress first seen" is the time of the first Ingress listing that has `styrmin-svc-task-manager`, taken once per second.
+
+- At the 5-second pass, the operator built `styrmin-svc-task-manager` about 6 to 7 seconds after the update started, while the chart's Ingress still existed. Both Ingresses had the same host for about 30 seconds (16:38:39 to 16:39:10 in run 5-1, 16:51:43 to 16:52:13 in run 5-2), and no request failed in 230 probes. The first listing without the chart's Ingress is at 16:39:10.5 (+42.4 s) and 16:52:13.1 (+41.5 s); the listing before it, in each run, still had it. The listings are written when the set changes, taken once per second.
+- At the 60-second pass, Helm removed the chart's Ingress at +43 s and +44 s, and the operator built the new one at +51 s and +55 s, which is the gap. This matches the earlier hand-labelled sample of "T062" (9 s). The length of the gap depends on when the next operator pass falls after the Helm upgrade, so it can be shorter or longer, up to about 60 seconds. Two samples do not give a distribution.
+- Unexplained: in both 5-second runs, `styrmin-svc-task-manager` was built, deleted about 2 to 3 seconds later (the `uid` changed: `19e11248` to `9b464046` in run 5-1, `6309edcf` to `842f9028` in run 5-2) and built again about 3 seconds after that (16:38:33.9, 16:38:37.2, 16:38:39.4 and 16:51:38.8, 16:51:40.9, 16:51:43.9). It was not in the 60-second runs. No request failed, because the chart's Ingress still served the host. The cause is not known and was not investigated. The same sequence was seen in "T062", run 1.
+- The `infrahub` Ingress `styrmin-infrahub-ingress` kept its `uid` in all four runs (`421e6e08`, `7abadf3b`, `4544769a`, `aaeed29a`, listed before and after). Its host was not probed.
+- Not verified: the Prefect UI behaviour with a Tailscale class (no operator, no tailnet); the same measurement with `infrahub` driver version 5 to 6 (community driver, same service, not run); other intervals, clusters or machines.
+
+## 5 Whys
+
+1. Why did the Prefect UI host answer HTTP 404 after the Infrahub upgrade? Because the dedicated Traefik of the environment did not serve `styrmin-svc-task-manager`, and the chart's Ingress for the same host was gone (proven: probes in "T062" run 1, 64 of 115 requests; the Traefik answered 200 within one second of adding the label by hand).
+2. Why did Traefik not serve it? Because it starts with `--providers.kubernetesingress.labelselector=styrmin/environment_id=<id>` and the built Ingress had no `styrmin/environment_id` label (proven: `chart_values.j2.yaml:14`, the Traefik log line, `kubectl get ingress -o jsonpath` in both the T062 run and the control run of this section).
+3. Why did the Ingress have no such label? Because the builder set only `styrmin.io/service-name`, and the Styrmin labels of the other objects come from a separate post-render patch of the chart that the built Ingress never passes through (proven: `utilities/ingress.py` before the fix, `builders/application.py:474-475`, `builders/utility.py:38-44`).
+4. Why did the builder not copy those labels? Because the Ingress was first made equal to the chart Ingress in its annotations and class, with a shared function (`build_ingress_settings`), and the labels were not part of that list. The labels were not in the spec or the research either (proven for the files: `grep -rn environment_id specs/033-service-ingress-override/*.md` finds nothing outside this file and the quickstart text added with the fix; the reasoning behind the first design is not known).
+5. Why did the first version pass its tests? Because the controller's label selector is outside the unit under test and no test read it: the unit tests asserted the labels that the builder set, and the end-to-end tests asserted Kubernetes objects. The one existing test that sends traffic through the controller, `test_infrahub_services.py`, was not run in the chunks that changed the Ingress (proven: "Not verified" in the T033 section; it failed on commit `772256e6` and passes on `343e4072`).
+6. Why was it not detected earlier? Because the only check that could see it is a request through the controller, and the feature's own end-to-end tests did not send one. A measurement of the upgrade (T062) did. The fix adds a unit test that reads the selector from the template, and traffic checks to the override and generic-app end-to-end tests.
+
+## T065: the quickstart walk-through
+
+Commit `343e4072` for the runs; the text changes are in the documentation commit.
+
+| Step | Run | Where |
+|---|---|---|
+| Prerequisites | yes (`vcluster`, `docker`, `uv`, `pnpm` on the PATH; the runs above created their own vClusters) | this section |
+| 1. Unit and contract checks | yes, by hand: see "Final checks" below | this section |
+| 2. One service moves, the other stays | not by hand. The end-to-end test `test_service_ingress_override_moves_only_the_overridden_service` runs it (API and UI variants), with the traffic check added. `ingressClassOverridden: true` is read by the functional test `test_service_ingress_propagation.py`, not by the end-to-end test | table above |
+| 3. No override (`generic-app`) | not by hand. `test_deploy_generic_app` runs the generic-app part, with the traffic check added. The case of two external services (one Ingress carries the application address) is covered by unit tests only (`test_ingress_utility_service_ingress.py`), not run on a cluster | table above |
+| 4. UI | not by hand. The `[ui-chromium]` variant runs it. The text of the step said "Configuration, Service overrides"; the UI is the Settings tab, the edit drawer, section Services, and Review & apply. The step now says so. The same wording was wrong in the news fragment `598.added.md`, the glossary, `spec.md` and `tasks.md`, and was changed there | table above |
+| 5. Refused requests | not by hand. `test_service_ingress_override_refusals_name_the_service` runs it | table above |
+| 6. Dedicated ingress controller | not by hand. Scenario 3 of the override test runs it, now with requests through the controller | table above |
+| 7. Existing Infrahub deployment | yes, by hand, six times in total (two before the fix, four after) | previous section |
+
+The product matched the text in steps 2, 3, 5 and 6 except for what the traffic check added; step 7 found and closed the label defect. Steps 2 to 6 were not walked by a person at the UI or the CLI: Playwright MCP is not available, and the end-to-end tests drive the same steps.
+
+## Final checks (T064 again, after the fix)
+
+Run on the working tree that holds commit `343e4072` plus the documentation changes of this section (no source change after `343e4072`).
+
+| Command | Result |
+|---|---|
+| `uv run invoke format lint` | exit 0; `All checks passed!`, `283/283 .graphql files passed validation.` |
+| `uv run invoke test` | exit 1; `FAILED tests/unit/services/telemetry/test_sender.py::test_send_report_returns_false_when_the_connection_is_refused - assert 7.858845833921805 < 2` and `1 failed, 6076 passed, 8 skipped, 41 warnings in 254.74s (0:04:14)`. This is the one failure known on the base commit; it is the only failure. |
+| `cd frontend && pnpm test` | exit 0; `Test Files  104 passed (104)`, `Tests  1255 passed (1255)` |
+| `pnpm lint` | exit 0; `All matched files use Prettier code style!` |
+| `pnpm exec tsc -b` | exit 0, no output |
+| `uv run styrmin export graphql-schema schema.graphql`, `uv run invoke generate`, `uv run invoke validate-graphql` | exit 0; `283/283 .graphql files passed validation.`; no file changed |
+| `uv run rumdl check` | `Success: No issues found in 81 files` |
+| `cd docs && pnpm build` | exit 0; `[SUCCESS] Generated static files in "build".` |
+
+`cli/tests` and `python_sdk/tests` were not run again: no file of theirs or of the SDK changed.

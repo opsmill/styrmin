@@ -73,10 +73,14 @@ the same objects (research D-001).
 ### 2. The Ingress is named and labeled by the driver service name
 
 The name is `styrmin-svc-<driver service name>`. The labels are `styrmin.io/service-name` (the
-driver service name) and the three labels that `UtilityResourceBuilder` adds to every utility
-resource: `app.kubernetes.io/managed-by`, `styrmin.io/utility-kind` and
-`styrmin.io/release-reference` (research D-005, test `test_name_namespace_and_labels` and
-`test_the_ownership_labels_are_added_by_the_utility_builder`). The id of the `DeployedService` row
+driver service name), the three labels that `UtilityResourceBuilder` adds to every utility
+resource (`app.kubernetes.io/managed-by`, `styrmin.io/utility-kind` and
+`styrmin.io/release-reference`; research D-005, test `test_name_namespace_and_labels` and
+`test_the_ownership_labels_are_added_by_the_utility_builder`), and the labels that the post-render
+patch gives every object of a chart, `styrmin/environment_id` and `styrmin/deployment_id`, built from
+`context.labels` (test file `test_service_ingress_labels.py`). A dedicated ingress controller starts
+with `--providers.kubernetesingress.labelselector=styrmin/environment_id=<environment id>`, so it
+serves an Ingress only with the first of them. The id of the `DeployedService` row
 is not used, because the row is deleted and created again on a driver version change and on a
 service name override ([Relation to ADR-073](#relation-to-adr-073)).
 
@@ -263,15 +267,29 @@ Ingress. ADR-071 is marked "superseded in part" and points here.
 - An override that Styrmin cannot honor fails with an error that names the service, and a driver
   version change that would drop an override fails the same way, so nothing changes in the cluster.
 - Not verified:
-  - Traffic. The tests read Kubernetes objects. No ingress controller of class `tailscale` runs in
-    the test cluster, so nothing shows that an overridden host answers.
+  - Traffic through a controller of the override class. No ingress controller of class `tailscale`
+    runs in the test cluster, so nothing shows that an overridden host answers through it. The
+    end-to-end tests do send requests through the dedicated Traefik: the default host of
+    `task-manager` answers 200 without an override and after it is cleared, the overridden host
+    answers 404 through it, and the hosts of the `generic-app` Ingress answer 200.
   - Whether the Tailscale operator needs `spec.tls` or ignores the host in the rules. Not known.
-  - The upgrade of a running Infrahub deployment from the chart Prefect Ingress to the built one,
-    and the length of any interruption on the same host (research D-013). Not known.
+  - The upgrade of a running Infrahub deployment from the chart Prefect Ingress to the built one
+    (research D-013). Measured on a local vCluster with a dedicated Traefik, by upgrading
+    `infrahub-enterprise` from driver version 4 to 5 and sending one request per second to the
+    Prefect UI host through the controller. With the operator pass every 5 seconds (two runs), no
+    request failed (0 of 112 and 0 of 118). With the default pass of 60 seconds (two runs), the host
+    answered HTTP 404 for about 12 seconds (12 of 126 requests) and about 7 seconds (7 of 120). These
+    are four samples on one machine, not limits: the length depends on when the operator's pass
+    falls after Helm removes the chart Ingress ([e2e-evidence.md](../../specs/033-service-ingress-override/e2e-evidence.md),
+    "T062 repeated with the label").
   - The first creation of the Ingress on a default install. The operator creates it through the
     HelmRelease timer, whose default interval is 60 seconds
-    (`SETTINGS.operator.reconcile_interval`); the end-to-end runs used 5 seconds. The delay at the
-    default was not measured.
+    (`SETTINGS.operator.reconcile_interval`). In the upgrade runs at that interval, the host
+    answered again 51 and 55 seconds after the upgrade started. The creation delay without an
+    upgrade was not measured.
+  - In both runs with the 5-second pass, the operator deleted `styrmin-svc-task-manager` a few
+    seconds after it built it and built it again. The chart Ingress still served the host, so no
+    request failed. The cause was not investigated.
   - Backup, restore and environment clone of an environment that has built Ingresses. Not known.
   - The CI matrix. The tests ran on one machine.
 
@@ -294,6 +312,20 @@ Ingress. ADR-071 is marked "superseded in part" and points here.
 ## Open points
 
 Each point has its source. None blocks this decision.
+
+- The first version of the builder gave the Ingress only the label `styrmin.io/service-name` (and
+  the ownership labels). A dedicated ingress controller selects Ingresses by `styrmin/environment_id`,
+  so it did not serve the Ingress, and the Prefect UI host answered HTTP 404 after an upgrade of a
+  running Infrahub deployment, until the label was added. A traffic measurement found it
+  ([e2e-evidence.md](../../specs/033-service-ingress-override/e2e-evidence.md), "T062"). The tests
+  written before then read Kubernetes objects only, so they passed: no test sent a request through
+  the controller. The builder now sets `styrmin/environment_id` and `styrmin/deployment_id`, a unit
+  test reads the selector from the controller's chart values template, and the end-to-end tests send
+  requests through the dedicated Traefik. No release contains the first version of the builder.
+- `compute_diff` compares `spec` only (`_normalize_for_comparison` in
+  [reconciler.py](../../backend/styrmin_backend/operator/reconciler.py)), so a change of a label or an
+  annotation alone does not update an Ingress that already exists. A later change to the labels of
+  the built Ingress needs a change of `spec`, or the operator will not write it. Read from the code, not run.
 
 - The operator creates the built Ingress through the HelmRelease timer, not through the services
   phase. `_is_service_or_middleware` and `execute_phase_services`

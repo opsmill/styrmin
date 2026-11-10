@@ -54,7 +54,7 @@ An operator deploys a driver version that declares a service `scope: external`, 
 
 ### User Story 3 - Set, view and clear the override in the UI (Priority: P3)
 
-An operator opens the deployment's Configuration tab and sets the ingress class and the FQDN suffix of one service, without reading a manifest. The Networking summary shows what is published where.
+An operator opens the deployment's Settings tab and sets the ingress class and the FQDN suffix of one service, without reading a manifest. The Networking summary shows what is published where.
 
 **Why this priority**: The API and manifest paths (User Story 1) already let an operator use the feature. The UI makes it usable without them.
 
@@ -114,7 +114,7 @@ An operator who sets an override that Styrmin cannot honour, or who changes a dr
 - **FR-012**: The `generic-app` example driver MUST be updated in the same release so that it stops rendering its own Ingress, because it declares its service `external` today. Test: an end-to-end deploy of `generic-app` yields exactly one Ingress.
 - **FR-013**: The first new driver version of `infrahub` and `infrahub-enterprise` MUST declare `task-manager` as `scope: external` and turn off the chart's Prefect Ingress. The `infrahub` service MUST stay `internal` and keep its chart Ingress. Test: the User Story 1 journey as an end-to-end test; the server Ingress is identical before and after.
 - **FR-014**: A driver version that declares a service `scope: external` and also renders its own Ingress for it gets two Ingresses with the same host after the upgrade. This is a breaking change and MUST be documented in a migration guide, as the beta policy requires for driver-format changes. The guide and the changelog entry MUST say that the effect starts when a deployment runs a Styrmin release with this feature, and not only at a driver version change (see Edge Cases). Test: documentation review; the guide names the steps to take.
-- **FR-015**: An operator MUST be able to set, view and clear a service's ingress override in a manifest's `spec.config`, through the API, and in the UI (the deployment's Configuration tab and the deploy form). Clearing the override restores the resolved class and suffix. Test: each of the three paths sets, reads back and clears an override.
+- **FR-015**: An operator MUST be able to set, view and clear a service's ingress override in a manifest's `spec.config`, through the API, and in the UI (the deployment's Settings tab and the deploy form). Clearing the override restores the resolved class and suffix. Test: each of the three paths sets, reads back and clears an override.
 - **FR-016**: The UI MUST show, for each service, the effective ingress class and host, and MUST mark each value as overridden or inherited. Test: a UI test on the Networking summary with and without an override.
 
 ### Key Entities

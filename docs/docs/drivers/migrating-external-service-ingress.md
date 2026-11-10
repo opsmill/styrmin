@@ -123,12 +123,44 @@ deployment to them:
 - The Prefect UI calls the address that `prefectUiApiUrl` in `values.j2.yml`
   builds from the host of `task-manager`. It follows an override.
 
-What was not verified: an upgrade of a running Infrahub deployment. The
-end-to-end tests deploy the new driver version on a new deployment. So it is not
-known whether the Prefect UI stops answering while Helm removes the chart's
-Ingress and the operator builds the new one, or for how long. The order of the
-Helm upgrade and the operator's pass decides it, and the operator's pass runs
-every 60 seconds by default. That delay was not measured.
+#### What was measured when a running Infrahub deployment moves to the new driver version
+
+The measurement ran on a local vCluster with a dedicated Traefik ingress
+controller. It upgraded a running `infrahub-enterprise` deployment from driver
+version 4 to version 5 with the SDK, and sent one request per second to
+`/api/health` through the controller, with the host of the Prefect UI as the
+`Host` header. It ran twice with the operator's pass every 5 seconds, the value
+of the end-to-end fixtures, and twice with the default of 60 seconds.
+
+| Operator pass | Runs | Requests that did not answer HTTP 200 | Time without HTTP 200 |
+|---|---|---|---|
+| Every 5 seconds | 2 | 0 of 112, and 0 of 118 | none |
+| Every 60 seconds (default) | 2 | 12 of 126, and 7 of 120 (HTTP 404) | about 12 seconds, and about 7 seconds |
+
+- With the 5-second pass, the operator built `styrmin-svc-task-manager` 6 and
+  7 seconds after the upgrade started, while the chart's Ingress still existed.
+  The two Ingresses had the same host for about 30 seconds, so the host kept
+  answering.
+- With the 60-second pass, Helm removed the chart's Ingress about 43 and 44
+  seconds after the upgrade started, and the host answered again 55 and 51
+  seconds after it started, once the operator had built the new Ingress. It
+  answered HTTP 404 in between.
+- The two runs at each interval are samples, not limits. The time without an
+  answer depends on when the operator's next pass falls after Helm removes the
+  chart's Ingress, so at the default pass it can be shorter or longer, up to
+  about 60 seconds. It is a measurement on one machine and says nothing about
+  other clusters.
+- The Prefect UI is not the Infrahub server address. The host of the `infrahub`
+  service was not probed: its Ingress stays as the chart renders it, and it kept
+  the same Kubernetes object in all four runs.
+
+An Ingress that Styrmin builds has the labels `styrmin/environment_id` and
+`styrmin/deployment_id`, like the objects that a chart renders. An environment
+with a dedicated ingress controller serves only an Ingress with
+`styrmin/environment_id`. The first version of the Ingress that Styrmin builds
+did not have this label, and the host of the Prefect UI answered HTTP 404 and
+kept doing so after the upgrade. Styrmin sets the labels; a driver author does
+not.
 
 ### Moving back to a driver version that renders its own Ingress
 
@@ -156,14 +188,19 @@ release without this feature is not known. It was not tested.
 
 - How many drivers outside this repository declare `scope: external` and
   render their own Ingress.
-- Whether the Prefect UI of a running Infrahub deployment is interrupted when
-  the deployment moves to the new driver version, and for how long.
+- How the Prefect UI of a running Infrahub deployment behaves when it moves to
+  the new driver version on other clusters, other operator intervals or
+  another ingress controller. The measurement above covers four runs on one
+  local vCluster with Traefik.
+- Why the operator deleted `styrmin-svc-task-manager` a few seconds after it
+  built it, and built it again, in both runs with the 5-second pass. The
+  chart's Ingress still served the host then, so no request failed. The cause
+  was not investigated.
 - What an ingress controller does with two Ingresses on the same host.
 - How a backup and a restore of an environment behave when its deployments
   have Styrmin-built Ingresses.
-- How long the operator takes to build an Ingress at its default interval of 60
-  seconds. It was measured at about one second in a test setup whose interval is
-  5 seconds.
+- Whether the Tailscale operator serves an Ingress that Styrmin builds with a
+  `tailscale` class. No Tailscale operator and no tailnet were available.
 
 ### Next steps
 

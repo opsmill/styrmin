@@ -274,7 +274,7 @@ All resources created from a StyrminDeployment carry:
 - NetworkPolicies per deployment, from the ingress utility: default-deny-egress, default-deny-ingress, allow-traefik-ingress, allow-egress-to-environment (when the context has an environment id), traefik-netpolicy-egress, prefect-netpolicy-egress, infrahub-netpolicy-egress
 - NetworkPolicies per deployment, from the service-discovery utility: `allow-environment-to-<component>`, one for each component that serves a declared service; it admits the namespaces of the environment on the services' ports (#557)
 - Plus the policies that the application's chart creates
-- Ingresses that Styrmin builds: `styrmin-svc-<driver service name>`, labeled `styrmin.io/service-name=<driver service name>`. The name does not use a record id: see [ADR-090](../../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md#relation-to-adr-073)
+- Ingresses that Styrmin builds: `styrmin-svc-<driver service name>`, labeled `styrmin.io/service-name=<driver service name>`, `styrmin/environment_id` and `styrmin/deployment_id` (the dedicated controller selects Ingresses by `styrmin/environment_id`: see [ADR-090](../../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md#2-the-ingress-is-named-and-labeled-by-the-driver-service-name)). The name does not use a record id: see [ADR-090](../../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md#relation-to-adr-073)
 
 ### Apply semantics
 

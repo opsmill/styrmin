@@ -325,7 +325,13 @@ The Ingress has these properties:
   deletes the old one.
 - **Labels.** It carries `app.kubernetes.io/managed-by`,
   `styrmin.io/utility-kind: ingress`, `styrmin.io/release-reference` and
-  `styrmin.io/service-name`, which holds the driver service name.
+  `styrmin.io/service-name`, which holds the driver service name. It also
+  carries `styrmin/environment_id` and `styrmin/deployment_id`, the labels
+  that Styrmin puts on every object that a chart renders. A dedicated ingress
+  controller serves only the Ingresses that have `styrmin/environment_id` with
+  the id of its environment, so an Ingress without it is not served by that
+  controller, and its host answers HTTP 404. Styrmin sets both labels. A driver
+  author does not set them.
 - **Backend.** One rule for each host, with the path `/` and path type
   `Prefix`. The backend is the ClusterIP Service that Styrmin creates for
   the service, on the declared port.

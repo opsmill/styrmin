@@ -108,10 +108,14 @@ The rules in detail:
 
 ### What is not verified
 
-- **Traffic.** The tests check Kubernetes objects: the Ingress, its class, its
-  hosts, its annotations and its backend. No test sends a request through an
-  overridden Ingress, so nothing shows that the overridden host answers or that
-  the original host stops answering.
+- **Traffic through a controller of the override class.** No request is sent to
+  the overridden host through such a controller, so nothing shows that it
+  serves the host. What the end-to-end test does send goes through the
+  environment's dedicated Traefik. Without an override, the host of the Prefect
+  UI answers HTTP 200, before the override and after it is cleared. With the
+  override class `tailscale`, the dedicated Traefik stops serving the default
+  host, and the overridden host answers HTTP 404 through it, because the
+  Ingress has another class.
 - **Tailscale.** No Tailscale controller runs in the test fixtures. Whether the
   Tailscale operator needs a `spec.tls` section on an Ingress, and whether it
   ignores the host in the rules, is not known: the Tailscale documentation does
@@ -119,8 +123,14 @@ The rules in detail:
   settles it, and the override gets an optional field for the TLS hosts only
   if that test shows that it is needed.
 - **The delay of a change.** The operator applies Ingress changes in its
-  periodic pass. The default interval is 60 seconds. The delay at that
-  interval was not measured.
+  periodic pass, every 60 seconds by default. The measurement of an upgrade of
+  a running Infrahub deployment is in
+  [Migrate a driver whose external service renders its own Ingress](../drivers/migrating-external-service-ingress.md#what-was-measured-when-a-running-infrahub-deployment-moves-to-the-new-driver-version):
+  with the default pass, the Prefect UI host answered HTTP 404 for about 12
+  seconds in one run and about 7 seconds in another, and with a 5-second pass it
+  did not stop answering in two runs. These are samples from one local vCluster,
+  not limits. The delay of a change that an override makes was not measured
+  separately.
 - **Backup and restore.** The behavior of a backup and a restore of an
   environment whose deployments have Styrmin-built Ingresses is not known.
 
