@@ -668,7 +668,9 @@ uv run styrminctl deployments create infrahub 1.6.0 my-env \
 ```
 
 The pinned version must belong to the deployment's driver, and its
-`supported_versions` must include the requested application version:
+`supported_versions` must include the requested application version. A
+prerelease is included when its numbers fit the range: see
+[Prereleases in `supported_versions`](./creating-a-driver.md#prereleases-in-supported_versions).
 Styrmin rejects a move to another driver. The **Upgrade** dialog in the
 UI offers the same choice with a driver version picker, set to
 **Latest (auto)** by default. The pin applies to that call only: a later

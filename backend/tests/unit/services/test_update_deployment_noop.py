@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from packaging.version import InvalidVersion
 
 from styrmin_backend.domain.models import (
     Deployment,
@@ -73,6 +74,7 @@ async def _seed_steady_state_deployment(
     config: dict | None = None,
     supported_versions: str = ">=1.0.0,<2.0.0",
     extra_versions: list[tuple[str, str]] | None = None,
+    application_version: str = "1.0.0",
 ) -> Deployment:
     """Seed a deployment that has already reached a steady state.
 
@@ -144,7 +146,7 @@ async def _seed_steady_state_deployment(
     await uow.application_drivers.create(app_driver)
 
     deployment = Deployment.create(
-        application_version="1.0.0",
+        application_version=application_version,
         application_driver_version_id=adv.id,
         environment_id=environment_id,
         created_by_user_id=uuid4(),
@@ -327,6 +329,140 @@ async def test_update_deployment_version_new_version_dispatches_reconcile(
     assert mock_apply_state.call_count == 1, (
         "A version change must dispatch exactly one reconcile"
     )
+
+
+# ---------------------------------------------------------------------------
+# update_deployment_version: prerelease versions (#591)
+# ---------------------------------------------------------------------------
+
+#: Names no prerelease; a prerelease whose numbers fit must still be accepted.
+STANDARD_RANGE = ">=1.5,<2.0"
+
+
+@pytest.mark.asyncio
+@patch("styrmin_backend.services.deployment.apply_state", new_callable=AsyncMock)
+async def test_upgrade_to_a_prerelease_without_a_pin_dispatches_a_reconcile(
+    mock_apply_state: AsyncMock,
+) -> None:
+    uow = _make_uow()
+    deployment_id = uuid4()
+    mock_apply_state.side_effect = _fake_apply_state
+    await _seed_steady_state_deployment(
+        uow=uow,
+        deployment_id=deployment_id,
+        environment_id=uuid4(),
+        supported_versions=STANDARD_RANGE,
+        application_version="1.11.9",
+    )
+
+    async with uow:
+        result = await update_deployment_version(
+            deployment_id=deployment_id, version="1.12.0b0", uow=uow
+        )
+
+    assert result is not None
+    assert mock_apply_state.call_count == 1
+    async with uow:
+        after = await uow.deployments.find(id=deployment_id)
+    assert after is not None
+    assert after.application_version == "1.12.0b0"
+
+
+@pytest.mark.asyncio
+@patch("styrmin_backend.services.deployment.apply_state", new_callable=AsyncMock)
+async def test_upgrade_to_a_prerelease_with_a_pin_that_fits_dispatches_a_reconcile(
+    mock_apply_state: AsyncMock,
+) -> None:
+    uow = _make_uow()
+    deployment_id = uuid4()
+    mock_apply_state.side_effect = _fake_apply_state
+    deployment = await _seed_steady_state_deployment(
+        uow=uow,
+        deployment_id=deployment_id,
+        environment_id=uuid4(),
+        supported_versions=STANDARD_RANGE,
+        application_version="1.11.9",
+    )
+
+    async with uow:
+        result = await update_deployment_version(
+            deployment_id=deployment_id,
+            version="1.12.0-beta.1",
+            uow=uow,
+            driver_version_id=deployment.application_driver_version_id,
+        )
+
+    assert result is not None
+    assert mock_apply_state.call_count == 1
+    async with uow:
+        after = await uow.deployments.find(id=deployment_id)
+    assert after is not None
+    # The version is stored as typed, not in its canonical form (FR-003).
+    assert after.application_version == "1.12.0-beta.1"
+
+
+@pytest.mark.asyncio
+@patch("styrmin_backend.services.deployment.apply_state", new_callable=AsyncMock)
+async def test_upgrade_from_a_prerelease_to_its_release_dispatches_a_reconcile(
+    mock_apply_state: AsyncMock,
+) -> None:
+    uow = _make_uow()
+    deployment_id = uuid4()
+    mock_apply_state.side_effect = _fake_apply_state
+    await _seed_steady_state_deployment(
+        uow=uow,
+        deployment_id=deployment_id,
+        environment_id=uuid4(),
+        supported_versions=STANDARD_RANGE,
+        application_version="1.12.0b0",
+    )
+
+    async with uow:
+        result = await update_deployment_version(
+            deployment_id=deployment_id, version="1.12.0", uow=uow
+        )
+
+    assert result is not None
+    assert mock_apply_state.call_count == 1
+    async with uow:
+        after = await uow.deployments.find(id=deployment_id)
+    assert after is not None
+    assert after.application_version == "1.12.0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pinned", [False, True])
+@patch("styrmin_backend.services.deployment.apply_state", new_callable=AsyncMock)
+async def test_upgrade_to_a_version_that_is_not_pep_440_raises_invalid_version(
+    mock_apply_state: AsyncMock, pinned: bool
+) -> None:
+    """FR-006 of #591: ``latest`` raises ``InvalidVersion`` from the service, as before.
+
+    Observed on the code at the head of the branch (``uow`` fakes, ``packaging``
+    25.0), with and without a pin. Nothing is dispatched.
+    """
+    uow = _make_uow()
+    deployment_id = uuid4()
+    mock_apply_state.side_effect = _fake_apply_state
+    deployment = await _seed_steady_state_deployment(
+        uow=uow,
+        deployment_id=deployment_id,
+        environment_id=uuid4(),
+        supported_versions=STANDARD_RANGE,
+        application_version="1.11.9",
+    )
+    driver_version_id = deployment.application_driver_version_id if pinned else None
+
+    with pytest.raises(InvalidVersion, match="Invalid version: 'latest'"):
+        async with uow:
+            await update_deployment_version(
+                deployment_id=deployment_id,
+                version="latest",
+                uow=uow,
+                driver_version_id=driver_version_id,
+            )
+
+    mock_apply_state.assert_not_called()
 
 
 class _Steps:

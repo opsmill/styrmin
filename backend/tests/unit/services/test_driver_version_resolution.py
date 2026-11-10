@@ -13,11 +13,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
+from packaging.version import InvalidVersion
+
 from styrmin_backend.db.models import ApplicationDriver, ApplicationDriverVersion
 from styrmin_backend.services.deployment import (
     _driver_version_sort_key,
+    _ensure_pin_supports_version,
     _resolve_latest_matching_version,
 )
+from styrmin_backend.services.exceptions import InvalidVersionError, ServiceError
 
 
 def _adv(
@@ -112,3 +117,124 @@ class TestResolveLatestMatchingVersion:
         second_build = _adv("1", supported=">=0.1,<1.0", created_on=_T2)
         driver = _driver([first_build, second_build])
         assert _resolve_latest_matching_version(driver, "0.5.0") is second_build
+
+    @pytest.mark.parametrize(
+        "application_version", ["1.12.0b0", "1.12.0-beta.1", "1.12.0.b0"]
+    )
+    def test_prerelease_fitting_the_numbers_of_the_range_resolves(
+        self, application_version: str
+    ) -> None:
+        """#591: a range that names no prerelease still accepts one that fits."""
+        driver_version = _adv("1", supported=">=1.5,<2.0")
+        driver = _driver([driver_version])
+
+        assert _resolve_latest_matching_version(driver, application_version) is (
+            driver_version
+        )
+
+    def test_prerelease_of_the_excluded_upper_bound_does_not_resolve(self) -> None:
+        driver = _driver([_adv("1", supported=">=1.5,<2.0")])
+
+        assert _resolve_latest_matching_version(driver, "2.0.0b1") is None
+
+    def test_prerelease_below_the_lower_bound_does_not_resolve(self) -> None:
+        driver = _driver([_adv("1", supported=">=1.12.0,<1.13")])
+
+        assert _resolve_latest_matching_version(driver, "1.12.0b0") is None
+
+    @pytest.mark.parametrize("insertion_order", ["older-first", "newer-first"])
+    def test_latest_wins_when_an_older_range_names_the_prerelease_and_a_newer_one_does_not(
+        self, insertion_order: str
+    ) -> None:
+        """#591: both ranges fit ``1.12.0b0``, so the newest driver version binds.
+
+        On the code before #591 only the older driver version fit, because its
+        range names a prerelease and the other range does not. The old rule
+        (``Version(...) in SpecifierSet(range)``) returns False for
+        ``>=1.5,<2.0`` and True for ``>=1.12.0b0,<1.13``, so it picked the older
+        build. This test fails on that code.
+        """
+        older_naming_a_prerelease = _adv(
+            "1", supported=">=1.12.0b0,<1.13", created_on=_T1
+        )
+        newer_naming_none = _adv("2", supported=">=1.5,<2.0", created_on=_T1)
+        versions = [older_naming_a_prerelease, newer_naming_none]
+        if insertion_order == "newer-first":
+            versions.reverse()
+        driver = _driver(versions)
+
+        assert _resolve_latest_matching_version(driver, "1.12.0b0") is (
+            newer_naming_none
+        )
+
+
+class TestEnsurePinSupportsVersion:
+    """#591: a pinned driver version applies the same rule as the picker."""
+
+    @pytest.mark.parametrize(
+        "application_version", ["1.12.0b0", "1.12.0-beta.1", "1.12.0"]
+    )
+    def test_accepts_a_prerelease_whose_numbers_fit_the_range(
+        self, application_version: str
+    ) -> None:
+        pinned = _adv("1", supported=">=1.5,<2.0")
+        _ensure_pin_supports_version(pinned, _driver([pinned]), application_version)
+
+    def test_refuses_a_prerelease_of_the_excluded_upper_bound(self) -> None:
+        pinned = _adv("1", supported=">=1.5,<2.0")
+
+        with pytest.raises(InvalidVersionError, match="2.0.0b1"):
+            _ensure_pin_supports_version(pinned, _driver([pinned]), "2.0.0b1")
+
+    def test_refuses_a_prerelease_below_the_lower_bound(self) -> None:
+        pinned = _adv("1", supported=">=1.12.0,<1.13")
+
+        with pytest.raises(InvalidVersionError, match="1.12.0b0"):
+            _ensure_pin_supports_version(pinned, _driver([pinned]), "1.12.0b0")
+
+
+class TestNonPep440VersionBehaviour:
+    """Characterization test for FR-006 of #591: a version that is not PEP 440.
+
+    ``latest`` and ``develop`` are not PEP 440 versions. Both service functions
+    parse the requested version with ``packaging.version.Version`` before they
+    look at any range, so both raise ``packaging.version.InvalidVersion`` from
+    the service function itself. This was observed on the code before #591
+    changed anything (``uv run python``, ``packaging`` 25.0): the same
+    exception type and the message ``Invalid version: '<text>'``, with and
+    without driver versions on the driver.
+
+    How the GraphQL layer reports it (read in ``api/errors.py``, not run through
+    a GraphQL request): ``InvalidVersion`` is a ``ValueError``, not a
+    ``ServiceError``, and the mutations ``deployApplication`` and
+    ``updateDeploymentVersion`` in ``api/schema/mutation.py`` do not catch it.
+    ``StructuredErrorExtension`` therefore masks it as the message
+    ``An internal error occurred`` with ``extensions.code`` ``INTERNAL_ERROR``.
+
+    This outcome must not change with #591. The test must pass before and
+    after the change.
+    """
+
+    @pytest.mark.parametrize("version", ["latest", "develop"])
+    def test_resolver_raises_invalid_version_from_the_service_function(
+        self, version: str
+    ) -> None:
+        driver = _driver([_adv("1")])
+
+        with pytest.raises(InvalidVersion, match=f"Invalid version: '{version}'"):
+            _resolve_latest_matching_version(driver, version)
+
+    @pytest.mark.parametrize("version", ["latest", "develop"])
+    def test_pin_check_raises_invalid_version_from_the_service_function(
+        self, version: str
+    ) -> None:
+        pinned = _adv("1")
+        driver = _driver([pinned])
+
+        with pytest.raises(InvalidVersion, match=f"Invalid version: '{version}'"):
+            _ensure_pin_supports_version(pinned, driver, version)
+
+    def test_the_exception_is_not_a_service_error(self) -> None:
+        # This is why the GraphQL layer masks it as INTERNAL_ERROR.
+        assert issubclass(InvalidVersion, ValueError)
+        assert not issubclass(InvalidVersion, ServiceError)
