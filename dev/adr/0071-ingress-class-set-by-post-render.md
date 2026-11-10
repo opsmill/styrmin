@@ -1,6 +1,6 @@
 # ADR-071: Ingress Class Set by Post-Render
 
-**Status**: Accepted
+**Status**: Accepted — superseded in part by [ADR-090](0090-styrmin-builds-the-ingress-of-an-external-service.md)
 **Date**: 2026-10-15
 **Source**: specs/archive/024-ingress-class-post-render/ (spec, plan, research D-001 to D-007, contracts);
 [issue #471](https://github.com/opsmill/styrmin/issues/471)
@@ -8,6 +8,16 @@
 [ADR-069](0069-container-command-args-by-post-render.md) (container `command` and `args` applied by
 post-render), [ADR-066](0066-cluster-config-fanout.md) (the cluster config fan-out, which moves
 applications onto and off a dedicated ingress controller)
+
+> **Superseded in part by [ADR-090](0090-styrmin-builds-the-ingress-of-an-external-service.md)**
+> (2026-11-10, #598). The statements that the ingress utility sets the class "on every Ingress",
+> that the removal patch "applies to every Ingress of the release", and that driver templates do
+> not need to set the Ingress class assume that a chart renders every Ingress of an application.
+> For a service that its driver declares `scope: external`, Styrmin builds the Ingress and the
+> driver renders none, so this part no longer holds for it. The built Ingress follows the class
+> rules of decisions 1 to 3, except that a service ingress override replaces the dedicated ingress
+> controller rule. Decisions 1 to 3 still apply to every Ingress that a chart renders. The text
+> below is kept as the record of the decision.
 
 ## Context
 

@@ -1,6 +1,6 @@
 # ADR-005: Ordered Phase-Based Deployment via Kopf Sub-Handlers
 
-**Status**: Accepted
+**Status**: Accepted — amended 2026-11-10 (#598): the teardown step that deletes the Services also deletes the Ingresses that Styrmin builds, Ingresses first ([ADR-090](0090-styrmin-builds-the-ingress-of-an-external-service.md))
 **Date**: 2026-04-06
 **Source**: specs/archive/001-deployment-crd/research.md (R3, R4)
 
