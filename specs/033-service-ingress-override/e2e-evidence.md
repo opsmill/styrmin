@@ -4,8 +4,11 @@ Task T033 (Constitution V). Test: T025, `backend/tests/e2e/test_service_ingress_
 
 ## Result
 
-- API variant: passed (run 4 below, on commit `55c002b32038b33ce330fffd283fce083a6b08c4`).
-- UI variant: passed in T048, on commit `7bcc9576441aba62b3e6f96604e46bb32cb9762f` (see the last section of this file, "T048: UI variant").
+This block is the current result. The runs below it are history and keep the commits they ran on.
+
+- All five end-to-end runs of the review fixes passed on commit `3923471c8a5868d171cd7b12eeff73f6a59f2e3f`, with an empty `git status --short`: see the last section, "Review fixes". They cover the API and UI variants of `test_service_ingress_override_moves_only_the_overridden_service`, the refusals test, `test_deploy_generic_app` and `test_infrahub_services.py`.
+- Before the review fixes, on commit `343e4072` (the commit that added the traffic checks): the same five runs passed, see "End-to-end runs on the final code".
+- Run 4 of the API variant, on commit `55c002b32038b33ce330fffd283fce083a6b08c4`, and the UI variant of T048, on commit `7bcc9576441aba62b3e6f96604e46bb32cb9762f`, are the first passes of that test. Both ran before the traffic checks existed; they are superseded by the runs above.
 
 ## Final passing run (run 4)
 
@@ -879,3 +882,121 @@ Run on the working tree that holds commit `343e4072` plus the documentation chan
 | `cd docs && pnpm build` | exit 0; `[SUCCESS] Generated static files in "build".` |
 
 `cli/tests` and `python_sdk/tests` were not run again: no file of theirs or of the SDK changed.
+
+# Review fixes (#598)
+
+Six reviewers (code, tests, comments, errors, types, simplify) reported findings on `git diff 5de4af5d..HEAD` at commit `6050cf69`. Each finding was checked again before a fix: every one reproduced, so no finding was rejected. Times are UTC. `<scratchpad>` is `/private/tmp/claude-503/-Users-Simon-styrmin-598-spec/2ab6e2fa-7180-493d-8211-590f003133bd/scratchpad`. The kubeconfig files are deleted with each session.
+
+## Tests that fail before a fix and pass after it
+
+| Finding | Test (new) | Line that fails on the old code | After the fix |
+|---|---|---|---|
+| F1 | `test_ingress_utility_service_ingress.py::TestContextStoredBeforeThisRelease` (3 tests) | `KeyError: 'scope'` (three times) | pass |
+| F1 | `test_ingress_operator_reconcile.py::...::test_the_deployment_timer_reconciles_a_context_stored_before_this_release` | `assert ['Failed to b...y-deployment'] == []` (the timer logged "Failed to build desired resources for drift check") | pass |
+| F1 | the three tests of the timer logs in the same file | `assert 0 == 1` (no `logger.exception`), and `assert False` for the reconciliation errors in both timers | pass |
+| F2 | `test_apply_utility_resources.py` (6 tests) | `Failed: DID NOT RAISE <class 'kubernetes_asyncio.client.exceptions.ApiException'>` for an Ingress with status 403, 422 and 500 and for a custom kind with 422; `assert '404' in '... the CRD type may not be installed yet'` | 6 passed |
+| F3 | `TestDeploymentWithoutAnyFqdnSuffix::test_a_class_only_override_without_any_suffix_raises` | `Failed: DID NOT RAISE <class 'ValueError'>` (the builder returned no Ingress) | pass; the two other cases (every service overridden with a suffix: no error; one overridden and one not: error) pass before and after |
+| F4 | `test_service_ingress_validation.py` (`tcp_or_udp` tests, 8 cases) | `assert 'errors' in {'data': {'updateDeployment': {'id': ...}}}` (the write was accepted) | pass |
+| F4 | frontend: `ServiceOverridesSection.test.tsx`, `DeployFormPage.test.tsx`, `NetworkingSummary.test.tsx` | `expected <input ...> to be null`, `expected <div role="group" ...> to be null` (3 tests) | pass |
+| F5 | `python_sdk/tests/test_deployments.py` (`service_row` tests) | `StopIteration` (the mutation was sent) and `Regex pattern did not match` (the Pydantic error text) | 384 passed |
+| M1 | `test_service_ingress_propagation.py::test_a_stored_services_key_with_no_block_reads_as_no_override[null]` | `'errors': [{'extensions': {'code': 'INTERNAL_ERROR'}, ... 'path': ['deployment', 'deployedServices']}]` | pass |
+| M2 | `test_the_context_and_the_graphql_read_agree_on_which_service_an_override_applies_to` (`external-tcp`, `external-udp`, `internal-http`) | `assert True is False` (three times) | pass |
+| M3 | `UpgradeErrorAlert.test.tsx` (4 tests) | `Unable to find an element by: [data-testid="upgrade-dropped-ingress-override"]` | 8 passed |
+| M4 | `TestKopfRegistrationOfTheIngressHandlers`, `TestAChartsIngressIsLeftAlone` | see the mutation checks below | pass on the unmutated code |
+
+M5 is a test that pins the behavior of the first release (`test_no_application_address_when_the_first_declared_service_is_external_tcp_or_udp`). It passes on the old code by design.
+
+## Mutation checks of M4
+
+Run in a throwaway git worktree under `<scratchpad>/mut1`, with the modified test file copied in; the worktree was removed afterwards and the repository was never mutated.
+
+| Mutation | Result |
+|---|---|
+| `labels={LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE}` removed from both Ingress drift handlers | `2 failed, 30 passed`: `assert None == {'app.kubernetes.io/managed-by': 'styrmin'}` for `kopf_on_ingress_update` and `kopf_on_ingress_delete` |
+| `plural="ingresses"` changed to `plural="ingress"` on the update handler | `1 failed, 31 passed`: `At index 2 diff: 'ingress' != 'ingresses'` |
+| `label_selector = ""` in `list_managed_resources` (the selector matches every object) | 4 failed, among them `TestAChartsIngressIsLeftAlone`: `assert ['my-chart-in...in-svc-stale'] == ['styrmin-svc-stale']` (the chart Ingress is listed, and would be deleted) |
+| the release-reference part removed from the selector | `2 failed, 30 passed` (`test_returns_the_ingresses_of_the_deployment`, `test_a_helm_ingress_is_not_listed_for_the_deployment`, both existing tests) |
+
+The Ingress of a chart in these tests has the labels that Helm sets (`app.kubernetes.io/managed-by: Helm`, `helm.sh/chart`) and none of the Styrmin ownership labels. The fake Kubernetes API applies the label selector that the real `list_managed_resources` builds, so the selector is under test. The existing in-memory cluster of `test_ingress_release_reference_label.py` re-implements the selector in the fake, so a mutation of the real selector would not fail there; the new tests are in `test_ingress_operator_reconcile.py` for that reason.
+
+## Checks on the final commit
+
+Commit `3923471c8a5868d171cd7b12eeff73f6a59f2e3f`.
+
+| Check | Result |
+|---|---|
+| `uv run invoke format lint` | exit 0, `283/283 .graphql files passed validation`, generated types up to date (`git status --short` empty) |
+| `uv run invoke test` | `1 failed, 6131 passed, 8 skipped, 41 warnings in 365.91s (0:06:05)`. The one failure is the known one: `tests/unit/services/telemetry/test_sender.py::test_send_report_returns_false_when_the_connection_is_refused - assert 7.847563917050138 < 2` |
+| `cd frontend && pnpm test` | `Test Files 105 passed (105)`, `Tests 1269 passed (1269)` |
+| `pnpm lint`, `pnpm exec tsc -b`, `pnpm build` | 0 errors (35 warnings; one of them, `react-refresh/only-export-components` in `ServiceOverridesSection.tsx` line 55, is in a file that this review changed; the export is `serviceOverridesSchema`, which exists at the base commit `5de4af5d` (line 50); the other 34 warnings were not compared with the base commit); `tsc` exit 0; build succeeded |
+| `uv run pytest python_sdk/tests -q` | `384 passed` |
+| `uv run pytest cli/tests -q` | `416 passed` |
+| `cd docs && pnpm build`, `rumdl check .` | `[SUCCESS] Generated static files in "build".`, `Success: No issues found in 81 files` |
+| `uv run styrmin export graphql-schema schema.graphql`, `uv run invoke generate` | no diff |
+| `uv run towncrier build --draft --version x` | builds; three fragments |
+
+## End-to-end runs on commit `3923471c8a5868d171cd7b12eeff73f6a59f2e3f`
+
+`git status --short` was empty at the start of each run. The runs ran one after the other by `<scratchpad>/run_all.sh` (`<scratchpad>/run_one.sh`). Each used this command from the repository root, with `<node id>` and `<expr>` from the table (the first run has no `-k`):
+
+```bash
+sleep 86400 | uv run pytest "<node id>" -k "<expr>" -v -s --pdb > <scratchpad>/review-runs/<name>/pdb.log 2>&1
+```
+
+| Name | Node id, `-k` | Started (UTC) | vCluster | Kubeconfig |
+|---|---|---|---|---|
+| infrahub-services | `backend/tests/e2e/test_infrahub_services.py` (whole file; the `ui-chromium` variant is skipped, the test is `api_only`) | 2026-11-10T17:50:16Z | `pytest-b3710848-06fc-43a3-8dff-002acdbf5e1b` | `/private/var/folders/h8/b5b4gccj4h5c0sjlqjymm1y40000gq/T/pytest-of-Simon/pytest-1484/vcluster0/kubeconfig` |
+| override-api | `backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_moves_only_the_overridden_service`, `api-chromium` | 2026-11-10T17:56:18Z | `pytest-d5325d9a-027b-43d8-88bc-10029855a443` | `.../pytest-of-Simon/pytest-1485/vcluster0/kubeconfig` |
+| override-ui | same, `ui-chromium` | 2026-11-10T18:03:01Z | `pytest-a90d92a6-2d32-46e4-9b95-ca39a3283bed` | `.../pytest-1486/vcluster0/kubeconfig` |
+| refusals | `backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_refusals_name_the_service`, `api-chromium` | 2026-11-10T18:08:13Z | `pytest-02b7e762-b0f9-4b05-b6f9-2377821decf0` | `.../pytest-1487/vcluster0/kubeconfig` |
+| generic | `backend/tests/e2e/test_deploy_generic_app.py::test_deploy_generic_app`, `api-chromium` | 2026-11-10T18:12:54Z | `pytest-ae3e2f62-a77c-4e78-b05f-5b3a7b852db8` | `.../pytest-1488/vcluster0/kubeconfig` |
+
+Verbatim result lines (ANSI colors removed; `-s` puts the vCluster log in front of the result line; the local time in those lines is UTC+1):
+
+```text
+infrahub-services  PASSED   (the line after `PASSED` is the next test, SKIPPED: `...[ui-chromium] SKIPPED18:55:56 info Removing vCluster container vcluster.cp.pytest-b3710848-06fc-43a3-8dff-002acdbf5e1b...`)
+                   ============= 1 passed, 1 skipped, 4 warnings in 351.47s (0:05:51) =============
+override-api       PASSED19:02:39 info Removing vCluster container vcluster.cp.pytest-d5325d9a-027b-43d8-88bc-10029855a443...
+                   =========== 1 passed, 1 deselected, 4 warnings in 390.30s (0:06:30) ============
+override-ui        PASSED19:08:00 info Removing vCluster container vcluster.cp.pytest-a90d92a6-2d32-46e4-9b95-ca39a3283bed...
+                   =========== 1 passed, 1 deselected, 4 warnings in 303.28s (0:05:03) ============
+refusals           PASSED19:12:38 info Removing vCluster container vcluster.cp.pytest-02b7e762-b0f9-4b05-b6f9-2377821decf0...
+                   =========== 1 passed, 1 deselected, 4 warnings in 270.35s (0:04:30) ============
+generic            PASSED19:15:39 info Removing vCluster container vcluster.cp.pytest-ae3e2f62-a77c-4e78-b05f-5b3a7b852db8...
+                   =========== 1 passed, 1 deselected, 4 warnings in 166.41s (0:02:46) ============
+```
+
+Every test passed on its first run on this commit; no pdb prompt was reached. After the runs, no vCluster, container of a vCluster or `sleep 86400` process of this session remained (`vcluster list --driver docker` is empty).
+
+What these runs do not show: the assertion that no Ingress is left after the deletion was removed from `test_deploy_generic_app` (M6), so no end-to-end test shows that the operator deletes an Ingress on its own. The Tailscale controller is still not verified. The tests ran on one machine (macOS, Docker); the CI matrix was not run. The three fixes in the Ingress builder and the apply task (F1 to F3) were not run against a deployment that has a context stored before this release; that case is covered by unit tests only.
+
+## Findings and decisions
+
+Reviewer: code (C), tests (T), comments (K), errors (E), types (Y), simplify (S).
+
+| Finding (reviewer, severity, location) | Decision | Commit or reason |
+|---|---|---|
+| F1 `KeyError: 'scope'` in the builder for a stored context (C, E, Y; critical; `ingress.py` 269-371) | fixed: `.get`; an entry without `scope` or `driver_service_name` is not external; timer logs `logger.exception` and the reconciliation errors | `ad2ed03d` |
+| F2 `apply_utility_resources` swallows every `ApiException` (E; critical; `agent/tasks/application.py` 58-71) | fixed for Ingress (raises) and custom kinds (404 only, status and reason logged); NetworkPolicy still skipped on any error, status and reason logged | `7eb7434e`; NetworkPolicy left open (ADR open points) |
+| F3 `if not unique_hosts: continue` skips an Ingress silently (E; high; `ingress.py` 324) | fixed: same `ValueError` text for both callers, naming the deployment and the service | `ad2ed03d` |
+| F4 validator ignores `kind` (E; high; `validator.py` 81, `deployment.py` 419) | fixed: `DeclaredService(scope, kind)`; one rule `service_gets_ingress`; `reason` is a `Literal`; frontend excludes tcp and udp | `d0bb6e17` |
+| F5 SDK ignores a misspelled `services` key (E; high; `deployments.py` 251-281) | fixed: `check_service_rows` raises `ManifestValidationError`; `apply` reports it as a failed outcome | `f03a0cea` |
+| F6 reference page lists four labels (K; high; `styrmindeployment.md` 57-59) | fixed: six labels, and the dedicated controller rule | `7256c1a7` |
+| M1 three readers of `config["services"]` (C, Y, E) | fixed: `parse_service_overrides`; a stored null raised `INTERNAL_ERROR` | `d9f4c8c0` |
+| M2 context and resolver apply an override to different services (Y, C) | fixed: one rule `service_gets_ingress` in the context, the resolver and the builder | `d9f4c8c0` |
+| M3 Upgrade dialog cannot clear an override (frontend, S, Y, E) | fixed: alert with the steps (Settings, Update Settings, Services, Clear, Review and apply) | `3cdfe562` |
+| M4 kopf registration and chart Ingress untested (T 1, 8) | fixed: tests, with mutation checks above | `4ad7280e` |
+| M5 first declared service is external tcp (T 4) | pinned; the spec is silent (FR-002 and research D-006 do not cover it); behavior not changed | `029dafde` |
+| M6 (a) deletion assertion cannot fail (T 3) | fixed: assertion and claims removed | `029dafde` |
+| M6 (b) 404 through Traefik does not isolate the class (T 5) | fixed: docstring and comment say what the 404 shows | `029dafde` |
+| M6 (c) evidence contradicts itself; wrong section titles in the ADR, quickstart, tasks (T 6) | fixed: older lines marked superseded, top block rewritten, titles corrected | `029dafde`, `c01438b9`, this section |
+| M7 false or unsupported statements, glossary terms, writing rules (K) | fixed: changelog fragment, three claims in `service-ingress-overrides.md`, bold lead-ins, idioms, labels in CONTEXT and the data model, the Services section name, the application address rule, handler docstring; terms "readable host" and "application address" added | `c01438b9`, `3923471c` |
+| Code, medium: class-only override on the first service removes the application address | recorded (research D-003); effect stated in the docs | `c3014f26` |
+| Code, medium: `_service_overrides_by_deployment` reads every peer deployment on each context generation | recorded; not measured | `c3014f26` |
+| Code, low: default IngressClass may add `spec.ingressClassName` with `dedicated_ingress` | recorded; plausible, not verified | `c3014f26` |
+| Errors, medium: `list_managed_resources` returns no Ingress when the list fails; drift handlers return without a log when the label is missing | recorded | `c3014f26` |
+| Errors, low: `_deployment_labels` drops a label with no value silently | recorded | `c3014f26` |
+| Simplify: unread `ingress_class` key, unreachable fallback, `importlib` and "planned symbol" comments, duplicated fixtures, history comments, twin helpers, names, unused constants | recorded; the optional comment cleanups were not done | `c3014f26` |
+| Types, medium: suffix and class rules in two languages without shared cases; untyped `deployed_services` | recorded | `c3014f26` |
+| Tests: kopf details beyond M4, join test of `compute_service_address` and the builder, FR-005, FR-011 and FR-014 (documentation only), SC-005, no test reads an override back through the CLI | recorded | `c3014f26` |
+| Errors: `apply_utility_resources` swallow for NetworkPolicy; the `ValueError` for a missing suffix reaches Prefect as a plain exception | recorded (the text improved) | `c3014f26` |
