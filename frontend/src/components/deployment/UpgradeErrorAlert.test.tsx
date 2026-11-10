@@ -45,6 +45,48 @@ describe("UpgradeErrorAlert", () => {
     );
   });
 
+  // Regression tests (#598, US4, T053): a version change that would drop a service
+  // ingress override is refused with a typed error. The generic alert shows its
+  // message, which names the service, the versions and the reason.
+  it.each([
+    [
+      "internal",
+      "Service 'task-manager' has an ingress override, and driver version 1.8.0 declares that service with scope 'internal', and Styrmin does not build an Ingress for an internal service. Changing the driver version from 1.7.3 to 1.8.0 would drop the override. Clear the override of 'task-manager' in the same request, or keep a driver version that declares it external.",
+    ],
+    [
+      "removed",
+      "Service 'task-manager' has an ingress override, and driver version 1.8.0 does not declare that service. Changing the driver version from 1.7.3 to 1.8.0 would drop the override. Clear the override of 'task-manager' in the same request, or keep a driver version that declares it external.",
+    ],
+  ])(
+    "shows the message of a dropped service ingress override (reason %s) and names the service",
+    (reason, message) => {
+      render(
+        <UpgradeErrorAlert
+          error={
+            new GraphQLOperationError(
+              "SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED",
+              message,
+              {
+                code: "SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED",
+                service_name: "task-manager",
+                current_version: "1.7.3",
+                target_version: "1.8.0",
+                reason,
+              },
+            )
+          }
+          componentNames={["server"]}
+          onOpenSettings={() => {}}
+        />,
+      );
+
+      const alert = screen.getByTestId("upgrade-error");
+      expect(alert).toHaveTextContent(message);
+      expect(alert).toHaveTextContent("'task-manager'");
+      expect(screen.queryByTestId("upgrade-retired-parameter")).toBeNull();
+    },
+  );
+
   it("gives the steps for a retired parameter and names its component", () => {
     render(
       <UpgradeErrorAlert

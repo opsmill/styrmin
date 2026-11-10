@@ -31,6 +31,8 @@ type CapturedRequest = {
 interface StubOptions {
   /** Snapshot of `deployment` to return from any GetDeployment fetch. */
   refetchDeployment: Deployment;
+  /** When set, `UpdateDeployment` answers with this GraphQL error, as the backend does for a typed error. */
+  updateError?: { message: string; extensions: Record<string, unknown> };
 }
 
 function stubFetch(options: StubOptions): {
@@ -51,6 +53,21 @@ function stubFetch(options: StubOptions): {
       );
     }
     if (parsed.query.includes("mutation UpdateDeployment")) {
+      if (options.updateError) {
+        return new Response(
+          JSON.stringify({
+            data: null,
+            errors: [
+              {
+                message: options.updateError.message,
+                path: ["updateDeployment"],
+                extensions: options.updateError.extensions,
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
       return new Response(
         JSON.stringify({
           data: {
@@ -298,6 +315,82 @@ describe("ConfigDiffDialog", () => {
     expect(
       (mutation?.variables.input as UpdateDeploymentInput).components,
     ).toEqual([{ name: "server", envVars: [], image: null }]);
+  });
+
+  // A refused service ingress override (#598, US4, FR-009): the backend answers
+  // with a typed error whose message names the service. The dialog stays open and
+  // shows that message, not a generic failure. These are regression tests: the
+  // dialog already shows `error.message` of the failed mutation.
+  describe("refused service ingress override (#598, US4: T053)", () => {
+    const REFUSALS = [
+      {
+        code: "SERVICE_INGRESS_NOT_BUILT",
+        service: "infrahub",
+        message:
+          "Service 'infrahub' has scope 'internal' in driver infrahub version 1.7.3, so Styrmin does not build its Ingress and an ingress override has no effect. Only a service with scope 'external' can have an ingress override.",
+        extensions: {
+          code: "SERVICE_INGRESS_NOT_BUILT",
+          service_name: "infrahub",
+          scope: "internal",
+          checked_against: "driver infrahub version 1.7.3",
+        },
+      },
+      {
+        code: "UNKNOWN_SERVICE_INGRESS_OVERRIDE",
+        service: "web",
+        message:
+          "Ingress override targets service 'web', which driver demo version 1.0.0 does not declare. Known services: [infrahub, task-manager].",
+        extensions: {
+          code: "UNKNOWN_SERVICE_INGRESS_OVERRIDE",
+          service_name: "web",
+          known_services: ["infrahub", "task-manager"],
+          checked_against: "driver demo version 1.0.0",
+        },
+      },
+    ];
+
+    it.each(REFUSALS)(
+      "shows the $code message, which names $service, and keeps the dialog open",
+      async ({ code, service, message, extensions }) => {
+        const deployment = buildDeployment();
+        stubFetch({
+          refetchDeployment: deployment,
+          updateError: { message, extensions },
+        });
+        const onApplySuccess = vi.fn();
+        const onOpenChange = vi.fn();
+
+        await render(
+          <ConfigDiffDialog
+            open
+            onOpenChange={onOpenChange}
+            deployment={deployment}
+            initialValues={INITIAL}
+            frozenInitialValues={INITIAL}
+            currentValues={{
+              ...INITIAL,
+              services: [{ name: service, ingressClass: "tailscale" }],
+            }}
+            driverSchema={[]}
+            onApplySuccess={onApplySuccess}
+            onBackToEdit={vi.fn()}
+            onReloadBaseline={vi.fn()}
+          />,
+        );
+
+        const user = userEvent.setup();
+        await user.click(screen.getByTestId("diff-dialog-apply-button"));
+
+        const alert = await screen.findByTestId("diff-dialog-error");
+        // The whole backend message, so the service and the reason are visible.
+        expect(alert).toHaveTextContent(message);
+        expect(alert).toHaveTextContent(`'${service}'`);
+        expect(alert).not.toHaveTextContent(/unknown error/i);
+        expect(code).toBe(extensions.code);
+        expect(onApplySuccess).not.toHaveBeenCalled();
+        expect(screen.getByTestId("config-diff-dialog")).toBeInTheDocument();
+      },
+    );
   });
 
   describe("service ingress overrides (#598, US3: T046)", () => {

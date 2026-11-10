@@ -25,6 +25,7 @@ import {
   type CurrentUser,
 } from "@/auth/AuthProvider";
 import { ThemeProvider } from "@/hooks/use-theme";
+import { GraphQLOperationError } from "@/lib/graphql-fetcher";
 import DeployFormPage from "@/pages/deployments/DeployFormPage";
 import type { ListApplicationDriversQuery } from "@/generated/graphql";
 
@@ -706,6 +707,46 @@ describe("DeployFormPage service ingress overrides (#598)", () => {
       "Fix the FQDN suffix of task-manager before deploying.",
     );
   });
+
+  // Regression tests (#598, US4, T053): the form already shows the message of a
+  // failed deploy, and a typed refusal of a service ingress override carries the
+  // service name in that message.
+  it.each([
+    [
+      "UNKNOWN_SERVICE_INGRESS_OVERRIDE",
+      "Ingress override targets service 'web', which driver demo version 1.0.0 does not declare. Known services: [task-manager].",
+      "'web'",
+    ],
+    [
+      "SERVICE_INGRESS_NOT_BUILT",
+      "Service 'infrahub' has scope 'internal' in driver demo version 1.0.0, so Styrmin does not build its Ingress and an ingress override has no effect. Only a service with scope 'external' can have an ingress override.",
+      "'infrahub'",
+    ],
+    [
+      "DUPLICATE_SERVICE_NAME",
+      "Service name 'task-manager' appears more than once in the services list; remove the duplicate before submitting.",
+      "'task-manager'",
+    ],
+  ])(
+    "shows the message of the %s refusal, which names the service",
+    async (code, message, quotedService) => {
+      noopMutationResult.mutateAsync.mockRejectedValueOnce(
+        new GraphQLOperationError(code, message, { code }),
+      );
+      await renderPage();
+      await selectVersion();
+      await user().type(screen.getByLabelText("Deployment Name"), "my-app");
+
+      await user().click(screen.getByRole("button", { name: "Deploy" }));
+
+      const alert = await screen.findByText("Deployment failed");
+      const description = alert.parentElement as HTMLElement;
+      expect(description).toHaveTextContent(message);
+      expect(description).toHaveTextContent(quotedService);
+      // The form stays on the page: no "Deployment Submitted" result.
+      expect(screen.queryByText("Deployment Submitted")).toBeNull();
+    },
+  );
 
   it("disables Deploy and names the service while the ingress class is not a Kubernetes object name", async () => {
     await renderPage();
