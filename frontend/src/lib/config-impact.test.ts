@@ -325,6 +325,24 @@ const ruleCases: RuleCase[] = [
     }),
   },
   {
+    matcher: "services[*].ingressClass",
+    positive: diffEntry("services[task-manager].ingressClass", {
+      section: "serviceOverrides",
+    }),
+    negative: diffEntry("services[task-manager].fqdnSuffix", {
+      section: "serviceOverrides",
+    }),
+  },
+  {
+    matcher: "services[*].fqdnSuffix",
+    positive: diffEntry("services[task-manager].fqdnSuffix", {
+      section: "serviceOverrides",
+    }),
+    negative: diffEntry("services[task-manager].ingressClass", {
+      section: "serviceOverrides",
+    }),
+  },
+  {
     matcher: "components[*].resources.**",
     positive: diffEntry("components[web].resources.requests.cpu", {
       section: "componentOverrides",
@@ -514,5 +532,72 @@ describe("impact-rules.ts: replica changes (023)", () => {
       "server: 3 → 1 pod",
       "worker: the chart's count → 2 pods",
     ]);
+  });
+});
+
+describe("impact-rules.ts: service ingress overrides (#598)", () => {
+  const before = {
+    services: [
+      {
+        name: "task-manager",
+        ingressClass: "traefik",
+        fqdnSuffix: "styrmin.com",
+      },
+    ],
+  };
+  const after = {
+    services: [
+      {
+        name: "task-manager",
+        ingressClass: "tailscale",
+        fqdnSuffix: "tailnet.example.ts.net",
+      },
+    ],
+  };
+
+  it("attaches a consequence to the real diff entries of a service override", () => {
+    // Drive the full pipeline (real `diff()` output through the shipped rule
+    // table), as the backupTtl case above does: a diff row without a
+    // consequence shows the operator an empty impact list.
+    const result = diff(before, after, []);
+    expect(result.entries.map((e) => e.path)).toEqual([
+      "services[task-manager].ingressClass",
+      "services[task-manager].fqdnSuffix",
+    ]);
+
+    const summary = evaluateImpact(result, impactRules);
+
+    expect(summary.entries.flatMap((e) => e.triggeringPaths).sort()).toEqual([
+      "services[task-manager].fqdnSuffix",
+      "services[task-manager].ingressClass",
+    ]);
+    for (const entry of summary.entries) {
+      expect(entry.consequence).not.toBe("");
+    }
+  });
+
+  it("is a warning: the Ingress and the DNS records of that service are reconfigured, as for the deployment-wide class and suffix", () => {
+    const summary = evaluateImpact(diff(before, after, []), impactRules);
+
+    expect(summary.topSeverity).toBe("warning");
+    for (const matcher of [
+      "services[*].ingressClass",
+      "services[*].fqdnSuffix",
+    ]) {
+      expect(impactRules.find((r) => r.matcher === matcher)?.severity).toBe(
+        "warning",
+      );
+    }
+  });
+
+  it("names the service-level change, not the deployment-wide one", () => {
+    // The deployment-wide consequence says every Ingress is reconfigured; the
+    // service-level one must not claim that.
+    const wide = impactRules.find((r) => r.matcher === "ingressClass");
+    const narrow = impactRules.find(
+      (r) => r.matcher === "services[*].ingressClass",
+    );
+    expect(narrow).toBeDefined();
+    expect(narrow!.consequence).not.toBe(wide!.consequence);
   });
 });

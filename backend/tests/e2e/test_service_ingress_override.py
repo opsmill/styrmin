@@ -31,10 +31,25 @@ Variants
 --------
 The test runs under both variants. The deployment is changed through
 ``scenario_driver.update_deployment(config={"services": ...})``. The API driver sends the
-typed input. The UI driver rejects the ``services`` key until T042 of the task list adds
-the steps for the Service overrides section of the configuration drawer, so the
-``[ui-chromium]`` variant fails at the first change until then. Everything else (the
-baseline, the assertions on the objects, the restore) is the same in both variants.
+typed input. The UI driver fills the ingress class and FQDN suffix fields of the Services
+section in the Settings edit drawer and applies through Review & apply
+(``DeploymentDetailPage.set_service_ingress_overrides``). Everything else (the baseline,
+the assertions on the objects, the restore) is the same in both variants.
+
+Two steps exist only in the ``[ui-chromium]`` variant (T042):
+
+* the deploy form offers the ingress override fields for ``task-manager`` and not for
+  ``infrahub`` (``DeployFormPage.read_service_ingress_fields``; the form is not submitted,
+  so no second stack boots);
+* the Networking summary of the Settings tab lists the class and host of ``task-manager``
+  marked overridden or inherited, before the override, with it and after it is cleared
+  (``DeploymentDetailPage.read_service_ingress_summary``; FR-016).
+
+The UI steps and the page-object methods they call were written before the frontend that
+they drive (T043 to T047). The UI variant has not been run; T048 runs it. The labels and
+roles that the page objects assume are listed in the comment above
+``DeploymentDetailPage.set_service_ingress_overrides`` and in the docstring of
+``DeployFormPage.read_service_ingress_fields``.
 """
 
 from __future__ import annotations
@@ -51,6 +66,8 @@ from styrmin_sdk import StyrminClient
 
 from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.drivers.api_driver import ApiScenarioDriver
+from tests.e2e.pages.deploy_form import DeployFormPage
+from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 
 pytestmark = [
     pytest.mark.shard_infrahub,
@@ -61,6 +78,7 @@ _ENVIRONMENT_NAME = "test-environment"
 _CLUSTER_SUFFIX = "styrmin.com"
 _EXTERNAL_URL_SCHEME = "http"
 _EXTERNAL_URL_PORT = 8080
+_CLUSTER_INGRESS_CLASS = "traefik"
 _DEDICATED_IMPLEMENTATION = "traefik"
 
 _OVERRIDE_CLASS = "tailscale"
@@ -91,6 +109,33 @@ RECONCILE_TIMEOUT_SECONDS = 480.0
 
 def _readable_host(service_name: str, suffix: str) -> str:
     return f"{service_name}-{_ENVIRONMENT_NAME}.{suffix}"
+
+
+# Marks of the Networking summary (FR-016).
+_OVERRIDDEN = "Overridden"
+_INHERITED = "Inherited"
+
+
+def _summary_row(ingress_class: str, host: str, mark: str) -> dict[str, str]:
+    """What the Networking summary shows for ``task-manager``: both values carry ``mark``."""
+    return {
+        "ingress_class": ingress_class,
+        "ingress_class_mark": mark,
+        "host": host,
+        "host_mark": mark,
+    }
+
+
+async def _task_manager_summary(
+    page: Any, *, environment_id: str, deployment_id: str
+) -> dict[str, str]:
+    """Open the deployment's Settings tab and read the ``task-manager`` group of the
+    Networking summary (UI variant only)."""
+    detail = DeploymentDetailPage(page)
+    await detail.goto(environment_id=environment_id, deployment_id=deployment_id)
+    summary = await detail.read_service_ingress_summary()
+    assert "task-manager" in summary, sorted(summary)
+    return summary["task-manager"]
 
 
 def _prefect_ui_api_url(host: str) -> str:
@@ -255,19 +300,28 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
     styrmin_resources: dict,
     scenario_driver: ScenarioDriver,
     vcluster: dict,
+    driver_mode: str,
+    session_ui_page: Any,
 ) -> None:
     """Set and clear an override on ``task-manager``; the ``infrahub`` Ingress never changes."""
     deployment_id = deployed_infrahub_enterprise_app["deployment_id"]
+    environment_id = styrmin_resources["environment_id"]
     namespace = deployed_infrahub_enterprise_app["namespace"]
     client: StyrminClient = styrmin_resources["client"]
     kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
     # The fixture created the deployment through the session driver, so the driver of
     # this test needs the environment (the UI driver navigates with it).
-    scenario_driver.attach_to_deployment(
-        environment_id=styrmin_resources["environment_id"]
-    )
+    scenario_driver.attach_to_deployment(environment_id=environment_id)
 
     try:
+        if driver_mode == "ui":
+            # The deploy form offers the override fields for the external service
+            # only (spec User Story 3, scenario 2; FR-009 is prevented in the UI).
+            # The form is not submitted.
+            assert await DeployFormPage(session_ui_page).read_service_ingress_fields(
+                driver="infrahub-enterprise"
+            ) == ["task-manager"]
+
         # --- Before: no override ------------------------------------------------
         before = await _ingresses(kr8s_api, namespace)
         task_manager_before, infrahub_before = _split(before)
@@ -296,6 +350,22 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
         assert await _prefect_ui_api_urls(kr8s_api, namespace) == {
             _prefect_ui_api_url(_readable_host("task-manager", _CLUSTER_SUFFIX))
         }
+        inherited_summary = _summary_row(
+            _CLUSTER_INGRESS_CLASS,
+            _readable_host("task-manager", _CLUSTER_SUFFIX),
+            _INHERITED,
+        )
+        if driver_mode == "ui":
+            # Spec User Story 3, scenario 3: no override, so class and host are shown
+            # and marked inherited.
+            assert (
+                await _task_manager_summary(
+                    session_ui_page,
+                    environment_id=environment_id,
+                    deployment_id=deployment_id,
+                )
+                == inherited_summary
+            )
 
         # --- Scenario 1 and 3: set the override ----------------------------------
         await _change_services(scenario_driver, client, deployment_id, _OVERRIDE)
@@ -330,6 +400,14 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
         assert await _prefect_ui_api_urls(kr8s_api, namespace) == {
             _prefect_ui_api_url(overridden_host)
         }
+        if driver_mode == "ui":
+            # Spec User Story 3, scenario 1: the Networking summary lists task-manager
+            # at the new host under the new class, marked overridden (FR-016).
+            assert await _task_manager_summary(
+                session_ui_page,
+                environment_id=environment_id,
+                deployment_id=deployment_id,
+            ) == _summary_row(_OVERRIDE_CLASS, overridden_host, _OVERRIDDEN)
 
         # --- Scenario 2: clear the override --------------------------------------
         await _change_services(scenario_driver, client, deployment_id, {})
@@ -345,6 +423,15 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
         assert await _prefect_ui_api_urls(kr8s_api, namespace) == {
             _prefect_ui_api_url(_readable_host("task-manager", _CLUSTER_SUFFIX))
         }
+        if driver_mode == "ui":
+            assert (
+                await _task_manager_summary(
+                    session_ui_page,
+                    environment_id=environment_id,
+                    deployment_id=deployment_id,
+                )
+                == inherited_summary
+            )
     finally:
         # The deployment is shared with the other Infrahub tests of the shard.
         deployment = await client.deployments.get(deployment_id)

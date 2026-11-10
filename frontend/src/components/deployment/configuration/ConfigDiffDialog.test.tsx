@@ -300,6 +300,171 @@ describe("ConfigDiffDialog", () => {
     ).toEqual([{ name: "server", envVars: [], image: null }]);
   });
 
+  describe("service ingress overrides (#598, US3: T046)", () => {
+    const TASK_MANAGER = {
+      name: "task-manager",
+      ingressClass: "tailscale",
+      fqdnSuffix: "tailnet.example.ts.net",
+    };
+    const STORED_TASK_MANAGER = {
+      "task-manager": {
+        ingress_class: "tailscale",
+        fqdn_suffix: "tailnet.example.ts.net",
+      },
+    };
+
+    /** Open the dialog on `current`, press Apply, return the `input` of the mutation. */
+    async function applyAndReadInput(
+      deployment: Deployment,
+      initial: UpdateDeploymentInput,
+      current: UpdateDeploymentInput,
+    ): Promise<UpdateDeploymentInput> {
+      const { getCalls } = stubFetch({ refetchDeployment: deployment });
+      const onApplySuccess = vi.fn();
+      await render(
+        <ConfigDiffDialog
+          open
+          onOpenChange={vi.fn()}
+          deployment={deployment}
+          initialValues={initial}
+          frozenInitialValues={initial}
+          currentValues={current}
+          driverSchema={[]}
+          onApplySuccess={onApplySuccess}
+          onBackToEdit={vi.fn()}
+          onReloadBaseline={vi.fn()}
+        />,
+      );
+      // Apply is disabled while the diff has no change, so this fails first,
+      // and says so, when `diff()` does not see `services`.
+      expect(screen.getByTestId("diff-dialog-apply-button")).toBeEnabled();
+      const user = userEvent.setup();
+      await user.click(screen.getByTestId("diff-dialog-apply-button"));
+      await waitFor(() => expect(onApplySuccess).toHaveBeenCalledTimes(1));
+      const mutation = getCalls().find((c) =>
+        c.query.includes("mutation UpdateDeployment"),
+      );
+      expect(mutation).toBeDefined();
+      return mutation!.variables.input as UpdateDeploymentInput;
+    }
+
+    it("lists a new override in the diff and sends it as services in the update input", async () => {
+      const deployment = buildDeployment();
+      const current: UpdateDeploymentInput = {
+        ...INITIAL,
+        services: [TASK_MANAGER],
+      };
+
+      const input = await applyAndReadInput(deployment, INITIAL, current);
+
+      expect(input.services).toEqual([TASK_MANAGER]);
+    });
+
+    it("shows the new override as one added row for the class and one for the suffix", async () => {
+      const deployment = buildDeployment();
+      stubFetch({ refetchDeployment: deployment });
+
+      await render(
+        <ConfigDiffDialog
+          open
+          onOpenChange={vi.fn()}
+          deployment={deployment}
+          initialValues={INITIAL}
+          frozenInitialValues={INITIAL}
+          currentValues={{ ...INITIAL, services: [TASK_MANAGER] }}
+          driverSchema={[]}
+          onApplySuccess={vi.fn()}
+          onBackToEdit={vi.fn()}
+          onReloadBaseline={vi.fn()}
+        />,
+      );
+
+      const rows = screen.getAllByTestId("diff-entry-row");
+      expect(rows.map((row) => row.getAttribute("data-path"))).toEqual([
+        "services[task-manager].ingressClass",
+        "services[task-manager].fqdnSuffix",
+      ]);
+      expect(rows.map((row) => row.getAttribute("data-kind"))).toEqual([
+        "add",
+        "add",
+      ]);
+    });
+
+    it("omits an emptied field from the sent rows: the backend rejects an empty class or suffix", async () => {
+      const deployment = buildDeployment({
+        config: { services: STORED_TASK_MANAGER },
+      });
+      const initial: UpdateDeploymentInput = {
+        ...INITIAL,
+        services: [TASK_MANAGER],
+      };
+      const current: UpdateDeploymentInput = {
+        ...INITIAL,
+        services: [{ ...TASK_MANAGER, ingressClass: "" }],
+      };
+
+      const input = await applyAndReadInput(deployment, initial, current);
+
+      expect(input.services).toEqual([
+        { name: "task-manager", fqdnSuffix: "tailnet.example.ts.net" },
+      ]);
+      expect(input.services?.[0]).not.toHaveProperty("ingressClass");
+    });
+
+    it("sends no row for a service whose override the operator cleared", async () => {
+      const deployment = buildDeployment({
+        config: { services: STORED_TASK_MANAGER },
+      });
+      const initial: UpdateDeploymentInput = {
+        ...INITIAL,
+        services: [TASK_MANAGER],
+      };
+
+      const input = await applyAndReadInput(deployment, initial, {
+        ...INITIAL,
+        services: [],
+      });
+
+      // Full replacement: an empty list and an omitted field both clear it.
+      expect(input.services ?? []).toEqual([]);
+    });
+
+    it("sends the stored overrides again when the operator edited another field", async () => {
+      // `updateDeployment` replaces the whole stored config, so a save that
+      // does not carry `services` clears every stored override (T030a). The
+      // operator renames the deployment; the overrides must reach the mutation.
+      const deployment = buildDeployment({
+        config: { services: STORED_TASK_MANAGER },
+      });
+      const initial: UpdateDeploymentInput = {
+        ...INITIAL,
+        services: [TASK_MANAGER],
+      };
+      const current: UpdateDeploymentInput = {
+        ...initial,
+        name: "billing-api-renamed",
+      };
+
+      const input = await applyAndReadInput(deployment, initial, current);
+
+      expect(input.name).toBe("billing-api-renamed");
+      expect(input.services).toEqual([TASK_MANAGER]);
+    });
+
+    it("keeps an override stored by another client when the operator did not touch services", async () => {
+      // The merge in `handleApply` takes an untouched field from the refreshed
+      // deployment, so the stored `services` must survive `deploymentConfigToInput`.
+      const deployment = buildDeployment({
+        config: { services: STORED_TASK_MANAGER },
+      });
+
+      const input = await applyAndReadInput(deployment, INITIAL, EDITED);
+
+      expect(input.name).toBe("billing-api-renamed");
+      expect(input.services).toEqual([TASK_MANAGER]);
+    });
+  });
+
   it("opens to a clean state with diff visible when triggered", async () => {
     const deployment = buildDeployment();
     stubFetch({ refetchDeployment: deployment });

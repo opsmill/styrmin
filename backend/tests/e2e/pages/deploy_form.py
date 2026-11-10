@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, TYPE_CHECKING
+
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from tests.e2e.drivers.errors import ScenarioActionError
 from tests.e2e.drivers.refs import DeploymentRef
@@ -46,14 +49,7 @@ class DeployFormPage:
             keystroke_delay_ms=self._keystroke_delay_ms,
         )
 
-        # Base UI SelectTrigger has no id, so get_by_label doesn't match it —
-        # target by its data-testid.
-        trigger = self._page.locator("[data-testid=driver-version-select]")
-        await trigger.click()
-        # After the trigger opens, options render (possibly in a portal).
-        # Each option renders as `"<driverName> v<driverVersionVersion>"`.
-        option = self._page.get_by_role("option").filter(has_text=f"{driver} v").first
-        await option.click()
+        await self._select_driver(driver)
 
         # Application version input — explicitly set so we do not rely on a
         # driver-provided default.
@@ -92,6 +88,43 @@ class DeployFormPage:
                     override_name,
                     keystroke_delay_ms=self._keystroke_delay_ms,
                 )
+
+    async def _select_driver(self, driver: str) -> None:
+        # Base UI SelectTrigger has no id, so get_by_label doesn't match it —
+        # target by its data-testid.
+        trigger = self._page.locator("[data-testid=driver-version-select]")
+        await trigger.click()
+        # After the trigger opens, options render (possibly in a portal).
+        # Each option renders as `"<driverName> v<driverVersionVersion>"`.
+        option = self._page.get_by_role("option").filter(has_text=f"{driver} v").first
+        await option.click()
+
+    async def read_service_ingress_fields(self, *, driver: str) -> list[str]:
+        """Select ``driver`` and return the driver service names that the form
+        offers ingress override fields for (#598, T042). Does not submit.
+
+        NOT RUN: written before the form field (T047). It assumes that, once a driver
+        version is selected, the form shows a ``group`` named "Service ingress
+        overrides" with a text input labelled "Ingress class for <driver service
+        name>" and one labelled "FQDN suffix for <driver service name>" for each
+        external service of that version, and none for an internal service.
+        Raises ``ScenarioActionError`` when the group does not appear.
+        """
+        await self._select_driver(driver)
+        group = self._page.get_by_role("group", name="Service ingress overrides")
+        try:
+            await group.wait_for(timeout=10_000)
+        except PlaywrightTimeoutError as exc:
+            raise ScenarioActionError(
+                f"the deploy form shows no 'Service ingress overrides' group for {driver!r}"
+            ) from exc
+        labels = await group.get_by_label(
+            re.compile(r"^Ingress class for ")
+        ).evaluate_all(
+            """els => els.map(el =>
+              (el.getAttribute('aria-label') ?? el.labels?.[0]?.textContent ?? '').trim())"""
+        )
+        return [label.removeprefix("Ingress class for ") for label in labels]
 
     async def read_selected_driver_label(self) -> str:
         """Return the text currently displayed inside the driver-version trigger.

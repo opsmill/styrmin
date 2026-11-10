@@ -299,15 +299,32 @@ class UiScenarioDriver:
         self, *, deployment_id: str, config: dict[str, Any]
     ) -> None:
         # ``config`` is the test-friendly dict shape (see protocol docstring).
-        # The Edit Scheduling dialog only surfaces the ``scheduling`` sub-tree
-        # today — mirroring the frontend form's scope. Scenarios that need to
-        # mutate other config keys via UI must grow the dialog first.
+        # The Edit Scheduling dialog only surfaces the ``scheduling`` sub-tree,
+        # and the Services section of the Settings edit drawer the ``services``
+        # sub-tree (#598) — mirroring the frontend form's scope. Scenarios that
+        # need to mutate other config keys via UI must grow the UI first.
+        services = config.get("services")
+        if set(config) == {"services"} and isinstance(services, dict):
+            environment_id = self._require_environment_context(
+                deployment_id=deployment_id
+            )
+            self._deployment_id = deployment_id
+            async with _ui_errors(
+                f"updating service ingress overrides of deployment {deployment_id}"
+            ):
+                await self._deployment_detail.goto(
+                    environment_id=environment_id, deployment_id=deployment_id
+                )
+                await self._deployment_detail.set_service_ingress_overrides(
+                    services=services
+                )
+            return
         scheduling = config.get("scheduling")
         if not isinstance(scheduling, dict):
             raise ScenarioActionError(
                 "UI driver only supports update_deployment with a "
-                "``config['scheduling']`` sub-tree; other keys are not "
-                "editable through the frontend yet"
+                "``config['scheduling']`` sub-tree or a ``config['services']`` "
+                "dict alone; other keys are not editable through the frontend yet"
             )
         unsupported = set(config.keys()) - {"scheduling"}
         if unsupported:

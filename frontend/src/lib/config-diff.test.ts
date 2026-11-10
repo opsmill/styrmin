@@ -615,3 +615,149 @@ describe("config-diff: diff()", () => {
     expect(ratio).toBeLessThan(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Service ingress overrides (#598, US3). Written before the diff learns the
+// `services` field (T046): until then `diff()` ignores it and reports nothing.
+// ---------------------------------------------------------------------------
+
+describe("config-diff: service ingress overrides", () => {
+  const taskManager = {
+    name: "task-manager",
+    ingressClass: "tailscale",
+    fqdnSuffix: "tailnet.example.ts.net",
+  };
+
+  it("reports a new override as one add entry for the class and one for the suffix, in the Services section", () => {
+    const result = diff({}, { services: [taskManager] }, emptySchema);
+
+    expect(result.entries).toEqual([
+      {
+        section: "serviceOverrides",
+        path: "services[task-manager].ingressClass",
+        label: 'Service "task-manager" ingress class',
+        before: "",
+        after: "tailscale",
+        kind: "add",
+      },
+      {
+        section: "serviceOverrides",
+        path: "services[task-manager].fqdnSuffix",
+        label: 'Service "task-manager" FQDN suffix',
+        before: "",
+        after: "tailnet.example.ts.net",
+        kind: "add",
+      },
+    ]);
+    expect(result.sectionsChanged).toEqual(["serviceOverrides"]);
+  });
+
+  it("reports a cleared override as remove entries", () => {
+    const result = diff(
+      { services: [taskManager] },
+      { services: [] },
+      emptySchema,
+    );
+
+    expect(
+      result.entries.map((e) => [e.path, e.kind, e.before, e.after]),
+    ).toEqual([
+      ["services[task-manager].ingressClass", "remove", "tailscale", ""],
+      [
+        "services[task-manager].fqdnSuffix",
+        "remove",
+        "tailnet.example.ts.net",
+        "",
+      ],
+    ]);
+  });
+
+  it("reports only the field that changed", () => {
+    const result = diff(
+      { services: [taskManager] },
+      { services: [{ ...taskManager, ingressClass: "traefik" }] },
+      emptySchema,
+    );
+
+    expect(result.entries).toEqual([
+      {
+        section: "serviceOverrides",
+        path: "services[task-manager].ingressClass",
+        label: 'Service "task-manager" ingress class',
+        before: "tailscale",
+        after: "traefik",
+        kind: "change",
+      },
+    ]);
+  });
+
+  it("keys the rows by service name, so a reorder is no change and each service has its own entries", () => {
+    const web = {
+      name: "web",
+      ingressClass: "traefik",
+      fqdnSuffix: "web.example.com",
+    };
+
+    expect(
+      diff(
+        { services: [taskManager, web] },
+        { services: [web, taskManager] },
+        emptySchema,
+      ).hasChanges,
+    ).toBe(false);
+
+    const result = diff(
+      { services: [taskManager, web] },
+      { services: [taskManager, { ...web, fqdnSuffix: "other.example.com" }] },
+      emptySchema,
+    );
+    expect(result.entries.map((e) => e.path)).toEqual([
+      "services[web].fqdnSuffix",
+    ]);
+  });
+
+  it.each([
+    ["no row", undefined],
+    ["a row with no value", { name: "task-manager" }],
+    [
+      "a row with null values",
+      { name: "task-manager", ingressClass: null, fqdnSuffix: null },
+    ],
+    [
+      "a row with empty strings, as an emptied field holds",
+      { name: "task-manager", ingressClass: "", fqdnSuffix: "" },
+    ],
+  ])("treats %s as no override", (_what, row) => {
+    const empty: UpdateDeploymentInput = row ? { services: [row] } : {};
+
+    expect(diff({}, empty, emptySchema).hasChanges).toBe(false);
+    expect(diff(empty, {}, emptySchema).hasChanges).toBe(false);
+    // An emptied field next to a stored override is a removal, not a change to "".
+    const emptied = diff(
+      { services: [taskManager] },
+      { services: [{ ...taskManager, ingressClass: "" }] },
+      emptySchema,
+    );
+    expect(emptied.entries.map((e) => [e.path, e.kind])).toEqual([
+      ["services[task-manager].ingressClass", "remove"],
+    ]);
+  });
+
+  it("does not report service name overrides when only ingress overrides change", () => {
+    const result = diff(
+      {
+        serviceNameOverrides: [{ driverServiceName: "api", overrideName: "x" }],
+      },
+      {
+        serviceNameOverrides: [{ driverServiceName: "api", overrideName: "x" }],
+        services: [taskManager],
+      },
+      emptySchema,
+    );
+
+    expect(result.entries.map((e) => e.path)).toEqual([
+      "services[task-manager].ingressClass",
+      "services[task-manager].fqdnSuffix",
+    ]);
+  });
+});

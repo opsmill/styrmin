@@ -118,10 +118,10 @@
 
 ### Tests first
 
-- [ ] T039 [P] [US3] Extend `frontend/src/components/deployment/configuration/sections/edit/ServiceOverridesSection.test.tsx`: only external services are offered, set and clear class and suffix, suffix validation, and the form sends `services` in the update input.
-- [ ] T040 [P] [US3] Add a Vitest test for `frontend/src/components/deployment/configuration/sections/read/NetworkingSummary.tsx` (new `NetworkingSummary.test.tsx` next to it): per-service class and host, marked overridden or inherited (FR-016).
-- [ ] T041 [P] [US3] Extend `frontend/src/lib/config-diff.test.ts` and `frontend/src/lib/config-impact.test.ts` for the new `services` config (the diff dialog and the impact rules).
-- [ ] T042 [US3] Add the UI variant steps of `backend/tests/e2e/test_service_ingress_override.py` (T025) using page objects `backend/tests/e2e/pages/deployment_detail.py` and `deploy_form.py`: Configuration, Service overrides, Networking summary, and the deploy form fields.
+- [X] T039 [P] [US3] Extend `frontend/src/components/deployment/configuration/sections/edit/ServiceOverridesSection.test.tsx`: only external services are offered, set and clear class and suffix, suffix validation, and the form sends `services` in the update input. Written first and failing: 25 of 29 tests in `ServiceOverridesSection.test.tsx` (the 4 that pass are the 3 existing schema tests and the stored-name-override test), 6 in `ConfigDiffDialog.test.tsx` and 6 in `lib/deployment-input.test.ts` (the form sends `services`, the emptied-field and stored-overrides cases). Assumed names are in the report of the chunk.
+- [X] T040 [P] [US3] Add a Vitest test for `frontend/src/components/deployment/configuration/sections/read/NetworkingSummary.tsx` (new `NetworkingSummary.test.tsx` next to it): per-service class and host, marked overridden or inherited (FR-016). `NetworkingSummary.test.tsx` added: 1 test passes (existing rows), 4 fail on the missing per-service groups.
+- [X] T041 [P] [US3] Extend `frontend/src/lib/config-diff.test.ts` and `frontend/src/lib/config-impact.test.ts` for the new `services` config (the diff dialog and the impact rules). 9 new tests in `config-diff.test.ts` and 7 in `config-impact.test.ts` fail until T046.
+- [X] T042 [US3] Add the UI variant steps of `backend/tests/e2e/test_service_ingress_override.py` (T025) using page objects `backend/tests/e2e/pages/deployment_detail.py` and `deploy_form.py`: Configuration, Service overrides, Networking summary, and the deploy form fields. Page-object methods `set_service_ingress_overrides` and `read_service_ingress_summary` (deployment_detail.py), `read_service_ingress_fields` (deploy_form.py) and the UI driver `update_deployment` for `services` written against the planned UI. Both variants collect. The UI variant has NOT been run; T048 runs it.
 
 ### Implementation
 

@@ -6,6 +6,7 @@ Route: ``/environments/$environmentId/deployments/$deploymentId``.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -67,6 +68,28 @@ _READ_STARTED_TASKS_JS = """
 items => items.map(item => ({ ...item.dataset }))
 """
 
+
+# The driver service names of the "Ingress class for <service>" inputs of a section
+# (#598). The name comes from the input's accessible label.
+_INGRESS_FIELD_OWNERS_JS = """els => els.map(el =>
+  (el.getAttribute('aria-label') ?? el.labels?.[0]?.textContent ?? '').trim())"""
+
+# One entry per service group of the Networking card (#598): the group's name and
+# its ``summary-row`` rows as ``{label, value, mark}``. The value is the text of the
+# row's ``dd``; the mark is the text "Overridden" or "Inherited" outside it.
+_READ_SERVICE_INGRESS_GROUPS_JS = """groups => groups.map(group => ({
+  name: (group.getAttribute('aria-label')
+    ?? document.getElementById(group.getAttribute('aria-labelledby') ?? '')?.textContent
+    ?? '').trim(),
+  rows: [...group.querySelectorAll('[data-testid=summary-row]')].map(row => ({
+    label: row.querySelector('dt')?.textContent?.trim() ?? '',
+    value: row.querySelector('dd')?.textContent?.trim() ?? '',
+    mark: [...row.querySelectorAll('*')]
+      .filter(el => el.children.length === 0 && !el.closest('dd'))
+      .map(el => el.textContent.trim())
+      .find(text => text === 'Overridden' || text === 'Inherited') ?? '',
+  })),
+}))"""
 
 _TIMELINE_EMPTY_TEXT = "No operations have been recorded for this deployment."
 _TIMELINE_POLL_SECONDS = 2.0
@@ -768,6 +791,148 @@ class DeploymentDetailPage:
             "row => row.scrollIntoView({block: 'center', behavior: 'smooth'})"
         )
         return await row.inner_text()
+
+    # --- Service ingress overrides (#598, T042) ---------------------------
+    #
+    # NOT RUN. These two methods are written before the frontend they drive
+    # (T043 and T045 build it; T048 runs the UI variant). They assume this UI.
+    # Change the frontend and these methods together if the UI differs.
+    #
+    # Settings edit drawer, section "Services" (``section-nav-serviceOverrides``):
+    #   - for each external service of the deployment, one text input labelled
+    #     "Ingress class for <driver service name>" and one labelled
+    #     "FQDN suffix for <driver service name>"; an internal service has none;
+    #   - for the same services, a button named
+    #     "Clear ingress override for <driver service name>" that empties both;
+    #   - an invalid suffix sets ``aria-invalid="true"`` on its input.
+    # Settings tab, Networking card (a ``region`` named "Networking"):
+    #   - one ``group`` per service, named by the driver service name, holding
+    #     two ``summary-row`` rows, "Ingress class" and "Host". Each row has a
+    #     ``dt`` label, a ``dd`` value, and the text "Overridden" or "Inherited"
+    #     outside the ``dd``.
+
+    async def set_service_ingress_overrides(
+        self, *, services: dict[str, dict[str, str]]
+    ) -> None:
+        """Make the ingress overrides in the Settings edit drawer equal ``services``,
+        then apply through the diff dialog.
+
+        ``services`` maps a driver service name to ``{"ingress_class": ...,
+        "fqdn_suffix": ...}``, like the stored ``Deployment.config["services"]``. A
+        service that the drawer offers and ``services`` does not list is cleared, so
+        ``{}`` clears every override (full replacement, as through the API). Closes
+        the drawer without submitting when the fields already match. Raises
+        ``ScenarioActionError`` for a service that the drawer does not offer (not
+        external) and for a suffix that the field rejects inline.
+        """
+        drawer = await self._open_config_drawer_section("serviceOverrides")
+        offered = await self._service_ingress_field_owners(drawer)
+        missing = sorted(set(services) - set(offered))
+        if missing:
+            await self._close_config_drawer(drawer)
+            raise ScenarioActionError(
+                f"the Services section offers no ingress fields for {missing}; "
+                f"it offers them for {offered}"
+            )
+
+        changed = False
+        for name in offered:
+            wanted = services.get(name, {})
+            fields = (
+                (
+                    drawer.get_by_label(f"Ingress class for {name}", exact=True),
+                    wanted.get("ingress_class") or "",
+                ),
+                (
+                    drawer.get_by_label(f"FQDN suffix for {name}", exact=True),
+                    wanted.get("fqdn_suffix") or "",
+                ),
+            )
+            have = [await field.input_value() for field, _ in fields]
+            want = [value for _, value in fields]
+            if have == want:
+                continue
+            changed = True
+            if not any(want):
+                await drawer.get_by_role(
+                    "button", name=f"Clear ingress override for {name}", exact=True
+                ).click()
+                for field, value in fields:
+                    await expect(field).to_have_value(value)
+                continue
+            for (field, value), current in zip(fields, have, strict=True):
+                if value == current:
+                    continue
+                await enter_text(
+                    field, value, keystroke_delay_ms=self._keystroke_delay_ms
+                )
+                await expect(field).to_have_value(value)
+                await field.press("Tab")
+            suffix_field = fields[1][0]
+            if await suffix_field.get_attribute("aria-invalid") == "true":
+                raise ScenarioActionError(
+                    f"FQDN suffix {want[1]!r} of {name!r} rejected inline"
+                )
+
+        if not changed:
+            await self._close_config_drawer(drawer)
+            return
+        await self._apply_config_drawer(drawer, what="service ingress override")
+
+    async def read_service_ingress_summary(self) -> dict[str, dict[str, str]]:
+        """Open the Settings tab and read the per-service rows of the Networking card.
+
+        Returns ``{service: {"ingress_class": ..., "ingress_class_mark": ...,
+        "host": ..., "host_mark": ...}}``, the marks being "Overridden" or
+        "Inherited". Raises ``ScenarioActionError`` when a service group lacks one of
+        the two rows or a mark.
+        """
+        await self._page.get_by_role("button", name="Settings", exact=True).click()
+        card = self._page.get_by_role("region", name="Networking", exact=True)
+        await expect(card).to_be_visible()
+        groups = card.get_by_role("group")
+        await expect(groups.first).to_be_visible()
+        raw = await groups.evaluate_all(_READ_SERVICE_INGRESS_GROUPS_JS)
+
+        summary: dict[str, dict[str, str]] = {}
+        for group in raw:
+            rows = {row["label"]: row for row in group["rows"]}
+            if set(rows) != {"Ingress class", "Host"}:
+                raise ScenarioActionError(
+                    f"service group {group['name']!r} of the Networking card has rows "
+                    f"{sorted(rows)}; expected 'Host' and 'Ingress class'"
+                )
+            for label, row in rows.items():
+                if not row["mark"]:
+                    raise ScenarioActionError(
+                        f"the {label!r} row of service {group['name']!r} shows no "
+                        "Overridden or Inherited mark"
+                    )
+            summary[group["name"]] = {
+                "ingress_class": rows["Ingress class"]["value"],
+                "ingress_class_mark": rows["Ingress class"]["mark"],
+                "host": rows["Host"]["value"],
+                "host_mark": rows["Host"]["mark"],
+            }
+        return summary
+
+    async def _open_config_drawer_section(self, section_id: str) -> Locator:
+        """Open the Settings edit drawer on ``section_id`` and return the drawer."""
+        page = self._page
+        await page.get_by_role("button", name="Settings", exact=True).click()
+        await page.locator("[data-testid=settings-update-button]").click()
+        drawer = page.locator("[role=dialog][aria-labelledby=config-edit-drawer-title]")
+        await expect(drawer).to_be_visible()
+        await page.locator(f"[data-testid=section-nav-{section_id}]").click()
+        await expect(drawer.locator(f"[data-section={section_id}]")).to_be_visible()
+        return drawer
+
+    async def _service_ingress_field_owners(self, drawer: Locator) -> list[str]:
+        """The driver service names that the open drawer offers ingress fields for."""
+        labels = await drawer.get_by_label(
+            re.compile(r"^Ingress class for ")
+        ).evaluate_all(_INGRESS_FIELD_OWNERS_JS)
+        return [label.removeprefix("Ingress class for ") for label in labels]
 
     async def set_component_container_override(
         self, *, component: str, command: list[str] | None, args: list[str] | None
