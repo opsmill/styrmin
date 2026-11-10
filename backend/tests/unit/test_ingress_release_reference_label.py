@@ -214,7 +214,7 @@ def cluster(mocker: Any) -> _FakeCluster:
     return fake
 
 
-async def _helmrelease_timer() -> None:
+async def _helmrelease_timer(logger: Any = None) -> None:
     """One pass of the HelmRelease timer on a HelmRelease that the StyrminDeployment pipeline created.
 
     That HelmRelease has the labels ``ApplicationHelmReleaseBuilder.build`` sets and no
@@ -232,7 +232,7 @@ async def _helmrelease_timer() -> None:
         },
         spec={},
         namespace=NAMESPACE,
-        logger=_Logger(),
+        logger=logger or _Logger(),
     )
 
 
@@ -369,3 +369,31 @@ class TestTheTimersAgree:
 
         assert cluster.ingress_label() == RELEASE_REF
         assert cluster.ingress_writes() == 2  # the seed and one relabelling
+
+
+class TestTheHelmReleaseTimerSurvivesAContextThatCannotBeBuilt:
+    """An external service with no FQDN suffix makes the builder raise ``ValueError`` (#598).
+
+    The StyrminDeployment timer catches it and logs it with the traceback. The HelmRelease timer
+    called the builder with no ``try``, so the error escaped the timer and the NetworkPolicy,
+    Service and Secret reconcile of that deployment was skipped with no log line of ours.
+    """
+
+    @pytest.mark.anyio
+    async def test_the_error_is_logged_with_its_traceback_and_does_not_escape(
+        self, cluster: _FakeCluster, mocker: Any
+    ) -> None:
+        context = _context()
+        context.instance.config.fqdn_suffix = None
+        context.cluster.config.fqdn_suffix = None
+
+        async def _fetch_context(_: str) -> GlobalContext:
+            return context
+
+        mocker.patch.object(helmrelease_module, "fetch_context", _fetch_context)
+        logger = mocker.MagicMock()
+
+        await _helmrelease_timer(logger=logger)
+
+        logger.exception.assert_called_once()
+        assert cluster.writes == []

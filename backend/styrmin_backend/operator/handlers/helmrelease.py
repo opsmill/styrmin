@@ -310,11 +310,21 @@ async def kopf_helmrelease_timer(  # noqa: ARG001
     # would do the same to the objects of this timer.
     release_reference = release_reference or context.instance.release_reference
 
-    desired_all = build_desired_resources(
-        context=context,
-        release_reference=release_reference,
-        namespace=ns,
-    )
+    try:
+        desired_all = build_desired_resources(
+            context=context,
+            release_reference=release_reference,
+            namespace=ns,
+        )
+    except Exception:
+        # The builder raises ``ValueError`` for an external service with no FQDN suffix. Log it with
+        # its traceback and skip this cycle, as the StyrminDeployment timer does.
+        logger.exception(
+            "Failed to build desired resources for periodic reconciliation of %s/%s",
+            ns,
+            helmrelease_name,
+        )
+        return
 
     # Reconcile NetworkPolicies (operator-managed)
     desired_netpols = filter_resources_by_kind(desired_all, "NetworkPolicy")
