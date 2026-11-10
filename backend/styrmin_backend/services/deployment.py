@@ -5,7 +5,6 @@ from uuid import UUID, uuid4
 
 from fast_depends import Depends, inject
 from loguru import logger
-from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 from prefect.states import format_exception
 
@@ -850,8 +849,7 @@ def _ensure_pin_supports_version(
     pinned: ApplicationDriverVersion, version: str
 ) -> None:
     """Reject a pin whose specifier does not cover the requested version."""
-    target = Version(version)
-    if target not in SpecifierSet(pinned.application_supported_versions):
+    if not version_fits_range(Version(version), pinned.application_supported_versions):
         raise InvalidVersionError(
             f"Version {version} is not supported by driver version {pinned.id} "
             f"(supports {pinned.application_supported_versions})."

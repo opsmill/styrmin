@@ -1,7 +1,9 @@
 import asyncio
 import contextlib
+import subprocess
 import time
 import warnings
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -10,7 +12,11 @@ import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
-from tests.e2e.conftest import _portforward, _wait_for_http
+from tests.e2e.conftest import (
+    _portforward,
+    _wait_for_http,
+    create_deployment_after_ingress_teardown,
+)
 from tests.e2e.drivers import ScenarioDriver, StepRef, TaskLinkRef, TimelineEntry
 from tests.e2e.pages.environments import EnvironmentDetailPage, EnvironmentsListPage
 
@@ -412,6 +418,86 @@ async def test_upgrade_simple_app(
                 f"Service still serving {last_version!r} after 120s; "
                 "rolling update to 0.2.0 did not complete"
             )
+
+
+#: A PEP 440 prerelease in a non-canonical spelling (the canonical one is
+#: ``0.2.0b1``), so that "stored as typed" is a real assertion (#591, FR-003).
+PRERELEASE_VERSION = "0.2.0-beta.1"
+
+
+@pytest.fixture(scope="module")
+def simple_app_prerelease_image(simple_app_image_v2: str) -> Iterator[str]:
+    """The 0.2.0 build under the tag of the prerelease; the vcluster nodes read the host daemon.
+
+    The simple-app values template uses the application version as the image
+    tag, so a deployment of ``0.2.0-beta.1`` needs this tag. Starts from the
+    0.2.0 image because a prerelease of 0.2.0 is the build that precedes it.
+    """
+    target = f"simple-app:{PRERELEASE_VERSION}"
+    subprocess.run(["docker", "tag", simple_app_image_v2, target], check=True)
+    yield target
+    # Removes only this tag: the session images keep theirs.
+    subprocess.run(["docker", "rmi", target], check=False, capture_output=True)
+
+
+@pytest.mark.ci
+async def test_deploy_prerelease_simple_app(
+    scenario_driver: ScenarioDriver,
+    deployed_simple_app: dict,  # noqa: ARG001 — keeps the environment's ingress controller
+    scenario_environment_id: str,
+    session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    simple_app_prerelease_image: str,  # noqa: ARG001 — tags the image of the prerelease
+) -> None:
+    """#591: a prerelease whose numbers fit the range of the driver version deploys.
+
+    The session ``simple-app`` driver supports ``>=0.1,<1.0``, which names no
+    prerelease. The version is stored as typed, not in its canonical form. The
+    deployment is then upgraded to the release, ``0.2.0``.
+    """
+    _, client = session_scenario_driver
+    deployment_id: str | None = None
+    try:
+        deployment = await create_deployment_after_ingress_teardown(
+            scenario_driver,
+            driver="simple-app",
+            version=PRERELEASE_VERSION,
+            environment_id=scenario_environment_id,
+            # The environment is shared: the session deployment holds the default name.
+            service_name_overrides=[
+                {"driverServiceName": "simple-app", "overrideName": "beta-app"}
+            ],
+        )
+        deployment_id = deployment.id
+        running = await scenario_driver.wait_for_deployment_running(
+            deployment_id=deployment_id
+        )
+        assert running.application_version == PRERELEASE_VERSION, running
+
+        stored = await client.deployments.get(deployment_id)
+        assert stored.status == "running", stored
+        assert stored.application_version == PRERELEASE_VERSION, stored
+
+        # Follow the prerelease to its release: ``0.2.0`` is above ``0.2.0-beta.1``
+        # and fits the same range, so the upgrade is accepted (FR-002).
+        await scenario_driver.upgrade_deployment(
+            deployment_id=deployment_id, version="0.2.0"
+        )
+        await _assert_upgrade_action_succeeded(scenario_driver, deployment_id, "0.2.0")
+        upgraded = await scenario_driver.wait_for_deployment_running(
+            deployment_id=deployment_id
+        )
+        assert upgraded.application_version == "0.2.0", upgraded
+
+        stored = await client.deployments.get(deployment_id)
+        assert stored.status == "running", stored
+        assert stored.application_version == "0.2.0", stored
+    finally:
+        # The environment is shared with the other tests of the file: do not leave
+        # an extra deployment behind. Best effort, so that a cleanup failure does
+        # not hide the failure of the test.
+        if deployment_id is not None:
+            with contextlib.suppress(Exception):
+                await client.deployments.delete(deployment_id)
 
 
 @pytest.mark.api_only(
