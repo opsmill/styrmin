@@ -42,6 +42,22 @@ rejected with `INVALID_CONTAINER_COMMAND` / `INVALID_CONTAINER_ARGS`. An
 override targeting a component the driver does not declare is rejected with
 `UNKNOWN_COMPONENT_CONTAINER_OVERRIDE` before any redeploy.
 
+### What `deployments apply` and `deployments update` replace
+
+`styrminctl deployments apply` and `deployments update` replace the whole
+stored deployment config, not one field of it. When `spec.config` of a manifest
+(or the `--config` payload) has at least one key, every config key that the
+stored config has and the manifest omits is cleared: the `components` blocks,
+the `services` ingress overrides, `env_vars` and the others. A manifest whose
+`spec.config` is omitted or empty keeps the stored config. `spec.parameters`
+(and the `parameters` of `--config`) merge on top of the stored parameters and
+are the exception.
+
+For example, a manifest whose `spec.config` has `components` and no `services`
+clears the stored service ingress overrides. To clear the last override when
+nothing else stays in `spec.config`, write `services: []`. See
+[Service ingress overrides](https://docs.styrmin.app/docs/concepts-and-architecture/service-ingress-overrides).
+
 ## Backups and restores
 
 The `backups` commands take a deployment: `create` and `list` by name or by

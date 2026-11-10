@@ -560,12 +560,15 @@ class DeploymentResource(BaseResource):
         """Update a deployment with a typed ``UpdateDeploymentInput``.
 
         ``input`` is the regenerated Pydantic model that mirrors the GraphQL
-        ``UpdateDeploymentInput`` input type. Top-level fields use
-        full-replacement semantics: any field omitted (``None``) leaves the
-        corresponding persisted state untouched; an empty list/dict explicitly
-        clears it. The single exception is ``parameters``, which uses merge
-        semantics — entries in the list merge on top of the persisted
-        parameters dict.
+        ``UpdateDeploymentInput`` input type. The config fields of ``input``
+        replace the whole stored deployment config: when at least one config
+        field is set, every stored config key that ``input`` leaves out
+        (``None``) is cleared, for example the ``components`` blocks or the
+        ``services`` ingress overrides. When no config field is set, the stored
+        config is kept. ``parameters`` and ``service_name_overrides`` are not
+        part of the config: ``parameters`` uses merge semantics — entries in the
+        list merge on top of the persisted parameters dict — and an omitted
+        ``service_name_overrides`` leaves the service name overrides as they are.
 
         Returns ``None`` when the backend detects a no-op (the submitted state
         resolves to the current instance): the resolver returns ``null`` and no

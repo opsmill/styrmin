@@ -470,15 +470,18 @@ async def apply(
     ``STYRMIN_ENVIRONMENT``, ``STYRMIN_CLUSTER``. ``--name`` cannot be
     combined with batch input (more than one manifest).
 
-    The ``spec.config`` block follows the typed ``UpdateDeploymentInput``
-    semantics on update: top-level fields use full-replacement (omitting a
-    field leaves the persisted state untouched, an empty list explicitly
-    clears it), while ``spec.parameters`` uses merge semantics (entries
-    merge on top of the persisted parameters dict).
+    On update, ``spec.config`` replaces the whole stored deployment config: a
+    config key that the stored config has and ``spec.config`` omits is cleared,
+    for example the ``components`` blocks or the ``services`` overrides. The
+    exception is an omitted or empty ``spec.config``, which keeps the stored
+    config. ``spec.parameters`` uses merge semantics (entries merge on top of the
+    persisted parameters dict).
 
     ``spec.config.services`` lists the ingress override of each external service
     (``name``, ``ingress_class``, ``fqdn_suffix``). A manifest with other
-    ``spec.config`` fields and no ``services`` clears the stored overrides.
+    ``spec.config`` keys and no ``services`` clears the stored overrides; write
+    ``services: []`` to clear the last one when nothing else stays in
+    ``spec.config``.
 
     When a manifest changes an existing deployment's application version, a
     ``warning:`` line on stderr names the components whose image override has
