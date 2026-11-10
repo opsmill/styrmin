@@ -63,9 +63,9 @@ class _Upgrade:
     new_version: str
 
 
-INFRAHUB = _Upgrade("infrahub", "infrahub-v4", "4", "5")
+INFRAHUB = _Upgrade("infrahub", "infrahub-v4", "4", "6")
 INFRAHUB_ENTERPRISE = _Upgrade(
-    "infrahub-enterprise", "infrahub-enterprise-v3", "3", "4"
+    "infrahub-enterprise", "infrahub-enterprise-v3", "3", "5"
 )
 
 

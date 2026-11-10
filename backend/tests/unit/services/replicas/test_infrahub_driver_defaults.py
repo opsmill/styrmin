@@ -39,8 +39,8 @@ class _Driver(NamedTuple):
 
 
 _DRIVERS = [
-    _Driver("infrahub", "infrahub-v4", "4", "5", ()),
-    _Driver("infrahub-enterprise", "infrahub-enterprise-v3", "3", "4", ("infrahub",)),
+    _Driver("infrahub", "infrahub-v4", "4", "6", ()),
+    _Driver("infrahub-enterprise", "infrahub-enterprise-v3", "3", "5", ("infrahub",)),
 ]
 
 

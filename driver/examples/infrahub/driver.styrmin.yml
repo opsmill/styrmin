@@ -4,7 +4,7 @@ kind: ApplicationDriver
 metadata:
   name: infrahub
 spec:
-  version: "5"
+  version: "6"
   supported_versions: ">=1.5,<2.0"
   info:
     icon: https://docs.infrahub.app/img/infrahub-logo.svg
@@ -103,10 +103,14 @@ spec:
       port: 8000
       component: server
 
-    # Prefect UI (and API at /api) served by the task-manager component.
+    # Prefect UI (and API at /api) served by the task-manager component. It is
+    # external: Styrmin builds its Ingress (and the optional service ingress
+    # override applies to it), so the chart's own Prefect Ingress is off in
+    # values.j2.yml. Keep `infrahub` first and internal: its chart Ingress keeps
+    # the application address.
     - name: task-manager
       kind: http
-      scope: internal
+      scope: external
       port: 4200
       component: task-manager
 
