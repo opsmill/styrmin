@@ -26,7 +26,7 @@ input DeploymentConfigInput {
 
 Semantics, as for `components`:
 
-- Full replacement: a service that is not in the list has no override after the write. `null` or an omitted `services` clears every override. This is how an operator clears one (user story 1, scenario 2).
+- Full replacement: a service that is not in the list has no override after the write. `null` or an omitted `services` clears every override when the write carries at least one other config field, because the whole stored config is replaced; a write with no config field at all keeps the stored config (research D-009). Sending the list without the service is how an operator clears one override (user story 1, scenario 2).
 - A row with both `ingressClass` and `fqdnSuffix` null is treated as no override.
 
 ## GraphQL output
@@ -55,20 +55,22 @@ All three are `ServiceError` subclasses with `extensions.code`, like `UNKNOWN_CO
 
 ## Manifest (`styrminctl deployments apply`)
 
-A block in `spec.config`, keyed by driver service name:
+A list in `spec.config`, one row for each service, as `components` is (verified in T003, see [research.md](../research.md) D-009):
 
 ```yaml
 spec:
   config:
     services:
-      task-manager:
+      - name: task-manager
         ingress_class: tailscale
         fqdn_suffix: tailnet.example.ts.net
 ```
 
 - `apply` writes the config together with the version (ADR-065), so the validation order of FR-010 applies to `apply` too.
-- A manifest without `services` clears the overrides, as it clears `components` overrides (full replacement). To be confirmed against the apply code in the first task.
-- A key that is not `ingress_class` or `fqdn_suffix` under a service is an error, not ignored (the `extra="forbid"` of the model). The separate bug, where `apply` ignores unknown component keys, is out of scope ([#598](https://github.com/opsmill/styrmin/issues/598)); the new block must not be dropped by it, and a test applies a manifest and reads the override back.
+- The SDK manifest model needs no hand-written change: `spec.config` is a free-form dict, validated against the generated `UpdateDeploymentInput` and `DeploymentConfigInput`. The `services` field appears in them after `uv run invoke generate`. Before that, the generated models ignore a `services` key without an error.
+- A manifest whose `spec.config` has at least one key and no `services` clears the overrides, as it clears `components` overrides (full replacement of the stored config). A manifest with an empty or absent `spec.config` keeps the stored config, overrides included.
+- A key that is not `name`, `ingress_class` or `fqdn_suffix` in a row is ignored by the generated SDK models, because they do not forbid extra fields. The separate bug, where `apply` ignores unknown component keys, is out of scope ([#598](https://github.com/opsmill/styrmin/issues/598)); the new block must not be dropped by it, and a test applies a manifest and reads the override back. The server stores the typed block with `extra="forbid"`, so an unknown key that reaches it is an error.
+- `DeploymentResource.scale` sends only `components` and the update replaces the whole config, so it would clear a stored `services` block. The plan must resend the stored `services` there, or document the limit (research D-009).
 
 ## Driver template data
 

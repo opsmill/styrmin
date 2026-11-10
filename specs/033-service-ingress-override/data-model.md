@@ -23,7 +23,12 @@ Rules:
 - The key is the driver service name. It is not the resolved name, because a service name override changes the resolved name.
 - A block with both fields `None` is not stored. Sending it is the same as clearing the override.
 - `ingress_class` is a non-empty string. An empty string is rejected, because `""` already means "no class" in the cluster-level setting, and an override must name a class. Open point for the critique: whether an operator may want an empty class on one service.
-- `fqdn_suffix` is a DNS name without a leading dot. The exact rule reuses the validation that the cluster and environment `fqdn_suffix` have today (to read in the first task).
+- `fqdn_suffix`: no rule exists today that the override can reuse (verified in T005, read at commit `5de4af5d`; this differs from the first version of this document, which assumed one).
+  - The cluster and environment config model declares `fqdn_suffix: str | None = None` with no validator ([config.py](../../backend/styrmin_backend/context/models/config.py) line 420; the file's validators are at lines 55, 71, 208, 235, 252, 299, 373, 437, 479, 512 and later, none of them on `fqdn_suffix`). `DeploymentConfig` inherits it (line 657).
+  - The GraphQL inputs declare it as a plain `str | None` for the cluster ([cluster/inputs.py](../../backend/styrmin_backend/api/definitions/cluster/inputs.py) line 35), the environment ([environment/inputs.py](../../backend/styrmin_backend/api/definitions/environment/inputs.py) line 74) and the deployment ([deployment/inputs.py](../../backend/styrmin_backend/api/definitions/deployment/inputs.py) line 224). The frontend schema is `z.string()` ([ClusterConfigFields.helpers.ts](../../frontend/src/components/cluster/ClusterConfigFields.helpers.ts) line 15). A search of `backend/styrmin_backend` for suffix validation (regular expression, pattern, validate) found none.
+  - The only check is in the FQDN functions: `compute_primary_fqdn` and `compute_human_readable_fqdn` return `None` when the suffix is empty or `None` ([fqdn.py](../../backend/styrmin_backend/context/fqdn.py) lines 70 and 92), and the Ingress patch raises `ValueError` when no suffix resolves (test `test_raises_without_fqdn_suffix`, [test_utility_resources.py](../../backend/tests/unit/agent/test_utility_resources.py) line 396). The suffix is appended after a dot without any normalisation, so a leading dot or an invalid character reaches the host.
+  - Consequence for the override: the first version of this model and task T007 say "an invalid suffix is rejected". With nothing to reuse, either the override accepts any non-empty string as the other levels do, or the feature adds a new check that applies to the override only. Decision needed, not made here. Proposed default: reject, for the override only, an empty string, a leading or trailing dot, and a value that is not a DNS name (lowercase letters, digits, hyphens and dots, labels of at most 63 characters, at most 253 characters in total), because the override is the one new input of this feature and a wrong value would produce a wrong host. Whether the Kubernetes API server rejects an Ingress with an invalid host is not verified.
+  - An empty string is the same as no suffix for the FQDN functions (`if not fqdn_suffix`), so an empty override would silently fall to "no host".
 - A config stored before this change has no `services` key and reads as `None`.
 - A model serializer leaves `services` out of a dump when it is `None`, so the stored config of every existing deployment is unchanged, and the no-op check of a deployment update does not see a difference (same rule as `replicas` in ADR-070).
 
@@ -61,8 +66,8 @@ One Ingress for each service of the deployment that is `scope: external`, of `ki
 | Part | Value |
 |---|---|
 | Namespace | The namespace of the deployment |
-| Name | `styrmin-svc-<deployed service id>` (research D-005) |
-| Labels | `app.kubernetes.io/managed-by`, `styrmin.io/utility-kind: ingress`, `styrmin.io/release-reference`, `styrmin.io/service-id` |
+| Name | `styrmin-svc-<driver service name>` (research D-005). The `DeployedService` id is not used, because it changes on a driver version change and on a service name override. |
+| Labels | `app.kubernetes.io/managed-by`, `styrmin.io/utility-kind: ingress`, `styrmin.io/release-reference`, `styrmin.io/service-name` (the driver service name) |
 | Backend | The ClusterIP Service named by the resolved name, on the declared port |
 | Rules | One rule per host, path `/`, `pathType: Prefix` |
 | Hosts | The readable host; the application address when this is the first declared service and it has no override |

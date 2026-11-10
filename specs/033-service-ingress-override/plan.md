@@ -114,7 +114,7 @@ dev/knowledge/, CONTEXT.md, changelog/           # updates and a towncrier fragm
 1. Build the Ingress in `IngressUtility.build_resources` (D-001); add `Ingress` to the operator's list, delete and reconcile loops (D-002).
 2. The application address goes to the first declared service when it is external (D-003). This changes FR-002 of the PRD.
 3. Store the override under `services.<driver service name>` with `ingress_class` and `fqdn_suffix` (D-004). No migration.
-4. Name the Ingress after the deployed service record's id (D-005).
+4. Name the Ingress after the driver service name, `styrmin-svc-<driver service name>` (D-005; the `DeployedService` id is not stable).
 5. One shared helper for the annotations and class, used by the existing chart patch and the new Ingress (D-006).
 6. One address function for template data and GraphQL (D-007).
 7. Validation in `services/service_ingress/`, three typed errors, refuse rather than drop on a version change (D-008).
@@ -147,7 +147,7 @@ Reuse before booting: extend `test_infrahub_services.py`, `test_deploy_generic_a
 
 - **D-003 (PRD conflict)**: the application address rule differs from the PRD wording. Confirmed by Simon AURA--SCUSSEL on 2026-11-10.
 - **R-1 (D-012)**: a Styrmin release makes existing external-declaring deployments render two Ingresses on one host on the next reconcile, before any driver upgrade. Accepted without a guard (decision of Simon AURA--SCUSSEL, 2026-11-10); the migration guide and the changelog state it.
-- **D-005**: stability of the `DeployedService` id across version changes is not verified. First task checks it.
+- **D-005**: the `DeployedService` id is not stable across version changes (verified in T001), so the Ingress is named after the driver service name.
 - **D-002**: operator RBAC for `ingresses`, and deletion with the namespace, are not verified.
 - **D-009**: whether the manifest model needs a hand-written change is not verified.
 - **Not known** (from the PRD): the Tailscale `tls` question, the number of external drivers outside this repository, the interruption during the Infrahub move, backup and restore of an environment with Styrmin-built Ingresses.
