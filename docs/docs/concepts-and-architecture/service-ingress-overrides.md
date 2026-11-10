@@ -8,7 +8,7 @@ description: Publish one external service of a deployment with another ingress c
 
 A deployment publishes all of its services with the ingress class and the
 FQDN suffix that Styrmin resolves for it: the deployment's value, else the
-environment's, else the cluster's. A **service ingress override** sets another
+environment's, else the cluster's. A service ingress override sets another
 ingress class, another FQDN suffix, or both, for one external service of one
 deployment. The other services of the deployment keep the resolved values.
 
@@ -51,10 +51,10 @@ was `tailscale` and the suffix was `tailnet.example.ts.net`:
 
 The rules in detail:
 
-- **Each field is optional.** A field that you leave empty uses the resolved
+- Each field is optional. A field that you leave empty uses the resolved
   value. An override with both fields empty is no override: Styrmin does not
   store it.
-- **The Ingress carries the class and no other Styrmin annotation.** It has
+- The Ingress carries the class and no other Styrmin annotation. It has
   `spec.ingressClassName` and the annotation `kubernetes.io/ingress.class`, both
   set to the override class. It has no Traefik entry-point annotation, no
   external-dns annotation, no Cloudflare annotation and no allow-list
@@ -62,67 +62,78 @@ The rules in detail:
   then an overridden Ingress, with the resolved class and no other annotation.
   This is read in the code that builds the Ingress. The end-to-end test
   overrides both fields.
-- **The override suffix applies to the readable host only.** The application
+- The override suffix applies to the readable host only. The application
   address `<driver name>-<deployment id>.<fqdn suffix>` keeps the resolved
   suffix. An overridden Ingress never has it, so the service that carries the
   application address keeps it only without an override.
-- **An override class replaces the rule for a dedicated ingress controller.**
+- An override class replaces the rule for a dedicated ingress controller.
   In an environment with a dedicated ingress controller, an Ingress without an
   override has no `spec.ingressClassName`, and its class annotation names the
   controller. An Ingress with an override class has the override class in both
   fields instead. The end-to-end test runs on such an environment: the other
   Ingresses kept their class and annotations, and the overridden one had the
   override class.
-- **A driver template reads the new host.** `services['<name>'].human_readable_fqdn`
+- A driver template reads the new host. `services['<name>'].human_readable_fqdn`
   has the override suffix. The `infrahub` drivers use it for the address that the
   Prefect UI calls, and the test checked that the address followed the
   override. See [The context](../drivers/context.md).
-- **Services that have no override do not change.** Overriding one service
+- Services that have no override do not change. Overriding one service
   leaves the other Ingresses of the deployment as they were.
+- An override on the first service that the driver declares removes the
+  application address (`primaryFqdn`) from the Ingress of that service. The
+  application address goes only to the Ingress of the first declared service
+  that has no override, so with an override on that service no Ingress that
+  Styrmin builds carries it. For `generic-app`, whose first and only service is
+  `app`, an override on `app` leaves the application address on no Ingress. The
+  specification records this as the decision of research item D-003, which the
+  owner of the feature can change.
 
 ### What an override does not do
 
-- **It does not apply `ip_whitelist`.** The allow list of a deployment is a
+- It does not apply `ip_whitelist`. The allow list of a deployment is a
   reference to a Traefik middleware in the annotations of an Ingress. An
   overridden Ingress has no such annotation, so `ip_whitelist` does not restrict
   the overridden service, whatever the class. Restrict access in the ingress
   controller that serves the override class, outside Styrmin.
-- **It does not write `spec.tls`.** Styrmin writes no `spec.tls` on an
+- It does not write `spec.tls`. Styrmin writes no `spec.tls` on an
   Ingress that it builds.
-- **It does not install or check the controller.** The controller that serves
+- It does not install or check the controller. The controller that serves
   the override class, for example the Tailscale operator, must already run in
   the cluster. Styrmin does not install it and does not check that it exists.
-- **It does not open the network path.** Network access for the pods of that
+- It does not open the network path. Network access for the pods of that
   controller to the service is arranged outside Styrmin, for example with a
-  network policy. This was verified for a shared Traefik on a local kind
-  cluster, and not for Tailscale proxy pods.
-- **It does not exist at the cluster or environment level.** An override is
+  network policy. This is not verified in this change. The specification of the
+  feature states that it was verified for a shared Traefik on a local kind
+  cluster, names no source for that statement, and says that it was not tested
+  for Tailscale proxy pods.
+- It does not exist at the cluster or environment level. An override is
   stored on one deployment, for one service. There is no rule that matches
   services by name across drivers.
-- **It does not add annotations.** An overridden Ingress carries no extra
+- It does not add annotations. An overridden Ingress carries no extra
   annotations, so it cannot point a service at a second Traefik
   ([#464](https://github.com/opsmill/styrmin/issues/464)).
-- **It does not change the URL scheme or the port** of the service.
-- **It does not apply to the Gateway API**
+- It does not change the URL scheme or the port of the service.
+- It does not apply to the Gateway API
   ([#465](https://github.com/opsmill/styrmin/issues/465)).
 
 ### What is not verified
 
-- **Traffic through a controller of the override class.** No request is sent to
+- Traffic through a controller of the override class. No request is sent to
   the overridden host through such a controller, so nothing shows that it
   serves the host. What the end-to-end test does send goes through the
   environment's dedicated Traefik. Without an override, the host of the Prefect
   UI answers HTTP 200, before the override and after it is cleared. With the
   override class `tailscale`, the dedicated Traefik stops serving the default
-  host, and the overridden host answers HTTP 404 through it, because the
-  Ingress has another class.
-- **Tailscale.** No Tailscale controller runs in the test fixtures. Whether the
+  host, and the overridden host answers HTTP 404 through it. The cause of the
+  404 was not isolated: Traefik also answers 404 for a host that it does not
+  serve for another reason.
+- Tailscale. No Tailscale controller runs in the test fixtures. Whether the
   Tailscale operator needs a `spec.tls` section on an Ingress, and whether it
   ignores the host in the rules, is not known: the Tailscale documentation does
   not say. The first release writes no `spec.tls`. A test on a real operator
-  settles it, and the override gets an optional field for the TLS hosts only
+  would show it, and the override gets an optional field for the TLS hosts only
   if that test shows that it is needed.
-- **The delay of a change.** The operator applies Ingress changes in its
+- The delay of a change. The operator applies Ingress changes in its
   periodic pass, every 60 seconds by default. The measurement of an upgrade of
   a running Infrahub deployment is in
   [Migrate a driver whose external service renders its own Ingress](../drivers/migrating-external-service-ingress.md#what-was-measured-when-a-running-infrahub-deployment-moves-to-the-new-driver-version):
@@ -131,7 +142,7 @@ The rules in detail:
   did not stop answering in two runs. These are samples from one local vCluster,
   not limits. The delay of a change that an override makes was not measured
   separately.
-- **Backup and restore.** The behavior of a backup and a restore of an
+- Backup and restore. The behavior of a backup and a restore of an
   environment whose deployments have Styrmin-built Ingresses is not known.
 
 ### Values that an override accepts
@@ -140,11 +151,11 @@ Styrmin checks both values when you write the override, before any task
 starts. The cluster, the environment and the deployment have no such check on
 their own `ingress_class` and `fqdn_suffix`; only the override does.
 
-- **`ingress_class`** is a Kubernetes object name (a DNS-1123 subdomain):
-  lowercase letters, digits, hyphens and dots, starting and ending with a
-  letter or a digit, at most 253 characters. Styrmin writes it to
-  `spec.ingressClassName` and to an annotation.
-- **`fqdn_suffix`** is a DNS name: labels separated by dots, each of 1 to 63
+- `ingress_class` is a Kubernetes object name (a DNS-1123 subdomain):
+  lowercase letters, digits, hyphens and dots, at most 253 characters. Each
+  dot-separated label starts and ends with a letter or a digit, so `a.-b` is
+  rejected. Styrmin writes it to `spec.ingressClassName` and to an annotation.
+- `fqdn_suffix` is a DNS name: labels separated by dots, each of 1 to 63
   lowercase letters, digits or hyphens that starts and ends with a letter or a
   digit, at most 253 characters in total. It has no leading dot, no trailing
   dot, no doubled dot and no whitespace.
@@ -163,7 +174,8 @@ To set or clear an override on an existing deployment:
 2. In the **Edit configuration** drawer, go to the **Services** section. Below
    the service name overrides, the group **Service ingress overrides** lists
    each external service with the fields **Ingress class** and **FQDN suffix**.
-   An internal service has no fields.
+   A service that Styrmin builds no Ingress for has no fields: an internal
+   service, and an external service of kind `tcp` or `udp`.
 3. Type the class, the suffix or both. An empty field shows the placeholder
    `inherited`: the resolved value applies. For an invalid value, the field
    shows the rule that it breaks.
@@ -342,7 +354,7 @@ changes the version. See [Set, view and clear an override](#set-view-and-clear-a
 
 The **Upgrade** dialog in the UI sends only the application version and the
 driver version. It sends no `services`, so it cannot clear an override in the
-same request. The dialog shows the server's message as it is. Do this instead:
+same request. The dialog lists the steps below, followed by the server's message:
 
 1. On the **Settings** tab, click **Update Settings**. In the **Services**
    section, click **Clear** next to the fields of the service, and click
@@ -365,10 +377,10 @@ back.
 
 ### Limits
 
-- **One class and one suffix for each service.** There is no list of hosts.
-- **Deployment level only.** There is no default at the environment or
+- One class and one suffix for each service. There is no list of hosts.
+- Deployment level only. There is no default at the environment or
   cluster level.
-- **External `http` and `https` services only.** Styrmin builds no Ingress for
+- External `http` and `https` services only. Styrmin builds no Ingress for
   an internal service, and none for a `tcp` or `udp` service.
 
 ### Next steps

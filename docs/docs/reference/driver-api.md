@@ -65,8 +65,10 @@ author for `spec.services`:
   [Migrate a driver whose external service renders its own Ingress](../drivers/migrating-external-service-ingress.md).
 - The Ingress has the readable host `<service name>-<environment name>.<fqdn suffix>`.
   The application address `<driver name>-<deployment id>.<fqdn suffix>` is on the
-  Ingress of the first service in `spec.services`, and only when that service is
-  `external`.
+  Ingress of the first service in `spec.services`, and only when Styrmin builds an
+  Ingress for that service: it is `external` and has kind `http` or `https`. When
+  the first service is external with kind `tcp` or `udp`, no Styrmin-built Ingress
+  has the application address.
 - A deployment can override the ingress class and the FQDN suffix of one
   external service: see
   [Service ingress overrides](../concepts-and-architecture/service-ingress-overrides.md).

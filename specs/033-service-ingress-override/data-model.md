@@ -67,7 +67,7 @@ One Ingress for each service of the deployment that is `scope: external`, of `ki
 |---|---|
 | Namespace | The namespace of the deployment |
 | Name | `styrmin-svc-<driver service name>` (research D-005). The `DeployedService` id is not used, because it changes on a driver version change and on a service name override. |
-| Labels | `app.kubernetes.io/managed-by`, `styrmin.io/utility-kind: ingress`, `styrmin.io/release-reference`, `styrmin.io/service-name` (the driver service name) |
+| Labels | `app.kubernetes.io/managed-by`, `styrmin.io/utility-kind: ingress`, `styrmin.io/release-reference`, `styrmin.io/service-name` (the driver service name), and `styrmin/environment_id` and `styrmin/deployment_id` (a dedicated ingress controller serves only an Ingress that has `styrmin/environment_id`; added in commit `4b87a6f9`) |
 | Backend | The ClusterIP Service named by the resolved name, on the declared port |
 | Rules | One rule per host, path `/`, `pathType: Prefix` |
 | Hosts | The readable host; the application address when this is the first declared service and it has no override |

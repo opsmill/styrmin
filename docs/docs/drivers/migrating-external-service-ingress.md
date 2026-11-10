@@ -32,7 +32,7 @@ Ingresses on one host depends on the controller. It was not tested.
 The effect does not wait for a driver version change. It starts when a
 deployment runs a Styrmin release that includes this feature: the operator
 builds the Ingress of each external service in its next periodic pass, whatever
-driver version the deployment is on. Styrmin cannot see whether a chart renders
+driver version the deployment is on. Styrmin cannot tell whether a chart renders
 an Ingress without rendering the chart, so the release has no guard that stops
 it. This is a known and accepted effect.
 
@@ -51,7 +51,7 @@ The table lists the drivers in this repository, read from their
 `driver.styrmin.yml` and `values.j2.yml`. Only `generic-app`, `infrahub` and
 `infrahub-enterprise` declare an external service. How many drivers outside
 this repository declare `scope: external` and render their own Ingress is not
-known. It sets the size of this breaking change.
+known. The answer determines how many drivers this breaking change affects.
 
 ### Steps for a driver author
 
@@ -107,7 +107,7 @@ An upgrade of a running `generic-app` deployment from version 1 to version 2 was
 not tested. The end-to-end test deploys version 2 on a new deployment and finds
 one Ingress, and deployed version 1 on the same Styrmin code and found two.
 
-### What you see when you move Infrahub to the new driver version
+### What you view when you move Infrahub to the new driver version
 
 `infrahub` version 6 and `infrahub-enterprise` version 5 declare `task-manager`
 `scope: external` and turn the chart's Prefect Ingress off. When you upgrade a
@@ -146,7 +146,7 @@ of the end-to-end fixtures, and twice with the default of 60 seconds.
   seconds after it started, once the operator had built the new Ingress. It
   answered HTTP 404 in between.
 - The two runs at each interval are samples, not limits. The time without an
-  answer depends on when the operator's next pass falls after Helm removes the
+  answer depends on when the operator's next pass happens after Helm removes the
   chart's Ingress, so at the default pass it can be shorter or longer, up to
   about 60 seconds. It is a measurement on one machine and says nothing about
   other clusters.

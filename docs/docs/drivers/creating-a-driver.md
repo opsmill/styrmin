@@ -500,7 +500,7 @@ See [The context](./context.md) for all available fields.
 ### Step 6: Declare services
 
 If the application accepts network connections, declare each service
-under `spec.services`. The `scope` of a service decides whether Styrmin
+under `spec.services`. The `scope` of a service determines whether Styrmin
 builds an Ingress for it:
 
 ```yaml
@@ -540,8 +540,10 @@ Notes:
   - The application address, `<driver name>-<deployment id>.<fqdn suffix>`.
     It is the same for every service of a deployment, so Styrmin puts it on
     one Ingress only: the Ingress of the first service in `spec.services`,
-    and only when that service is `external`. When the first service is
-    `internal`, no Styrmin-built Ingress has the application address, and an
+    and only when Styrmin builds an Ingress for that service: it is
+    `external` and has kind `http` or `https`. When the first service is
+    external with kind `tcp` or `udp`, no Styrmin-built Ingress has the
+    application address. When the first service is `internal`, no Styrmin-built Ingress has the application address, and an
     Ingress that the chart renders for that service can keep it, as the
     `infrahub` drivers do. Put the service that carries the application
     address first.

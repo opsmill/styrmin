@@ -154,7 +154,7 @@ The gap: Helm charts render the Ingresses of a deployment, and Styrmin cannot te
 
 ## D-012: Drivers outside this repository (open question 3 of the PRD)
 
-- **Not known**: how many drivers outside this repository declare `scope: external` and render their own Ingress. This sets the size of the breaking change in FR-014.
+- **Not known**: how many drivers outside this repository declare `scope: external` and render their own Ingress. The answer determines how many drivers the breaking change in FR-014 affects.
 - **Risk found in the code (R-1)**: the old driver versions already stored in a Styrmin instance include `generic-app` versions that declare `external` and render their own Ingress. After a Styrmin release that builds an Ingress for every external service, the next reconcile of such a deployment gives it two Ingresses on the same host, without any driver version change. The PRD words FR-014 as "after the upgrade" and does not say whether it means the Styrmin upgrade or the driver version upgrade. SC-003 and SC-006 cover only the drivers in this repository. The critique lists this as a question (P1). Decision by Simon AURA--SCUSSEL on 2026-11-10 in the preparation session (not yet written on issue #598): accepted, with no guard; the migration guide and the changelog state it. A mitigation inside Styrmin's own code is not found: Styrmin cannot see whether a chart renders an Ingress for a service without rendering the chart.
 
 ## D-013: Moving an existing Infrahub deployment to the new driver version

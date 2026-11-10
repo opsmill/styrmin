@@ -668,16 +668,16 @@ def validate_service_ingress_class(value: str) -> str:
 
     The class is written to ``spec.ingressClassName`` and to the ``kubernetes.io/ingress.class``
     annotation of the Ingress, so it must be a valid Kubernetes object name: a DNS-1123
-    subdomain of lowercase letters, digits, hyphens and dots that starts and ends with a letter
-    or a digit, at most 253 characters. A line break, other whitespace or a control character is
+    subdomain of lowercase letters, digits, hyphens and dots, at most 253 characters, where
+    each dot-separated label starts and ends with a letter or a digit (``a.-b`` is rejected). A line break, other whitespace or a control character is
     rejected. The cluster, environment and deployment ``ingress_class`` have no such check; the
     override is the one input that does.
     """
     if len(value) > _INGRESS_CLASS_MAX_LENGTH or not _INGRESS_CLASS_RE.fullmatch(value):
         raise ValueError(
             f"ingress_class {value!r} is not a valid Kubernetes object name: use lowercase "
-            "letters, digits, hyphens and dots, start and end with a letter or a digit, "
-            f"and use at most {_INGRESS_CLASS_MAX_LENGTH} characters."
+            "letters, digits, hyphens and dots, let each dot-separated label start and end "
+            f"with a letter or a digit, and use at most {_INGRESS_CLASS_MAX_LENGTH} characters."
         )
     return value
 

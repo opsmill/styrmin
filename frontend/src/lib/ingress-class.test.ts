@@ -48,6 +48,14 @@ describe("ingressClassError", () => {
   });
 });
 
+describe("ingressClassError message", () => {
+  it("says that each dot-separated label starts and ends with a letter or a digit", () => {
+    expect(ingressClassError("a.-b")).toMatch(
+      /each dot-separated label starts and ends with a letter or a digit/,
+    );
+  });
+});
+
 describe("servicesWithInvalidClass", () => {
   it("lists the services whose ingress class is invalid", () => {
     expect(

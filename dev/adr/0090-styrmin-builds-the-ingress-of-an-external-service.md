@@ -253,7 +253,7 @@ Ingress. ADR-071 is marked "superseded in part" and points here.
   - The effect starts when a deployment runs a Styrmin release with this change, not only at a
     driver version change. A deployment of the stored `generic-app` version 1 gets a second Ingress
     at its next reconcile. Simon AURA--SCUSSEL accepted this without a guard on 2026-11-10, because
-    Styrmin cannot see whether a chart renders an Ingress without rendering the chart (research
+    Styrmin cannot tell whether a chart renders an Ingress without rendering the chart (research
     D-012). A downgrade to such a driver version has the same effect.
   - The three drivers of this repository changed in the same release, so for them the Styrmin
     upgrade and the driver version upgrade come together. The end-to-end test of `generic-app`
@@ -306,7 +306,7 @@ Ingress. ADR-071 is marked "superseded in part" and points here.
   silent drop.
 - **Keep the override as an orphan, as ADR-070 does for replicas.** Rejected: the override would
   stop applying without notice.
-- **A guard against the second Ingress of an existing deployment.** Not built: Styrmin cannot see
+- **A guard against the second Ingress of an existing deployment.** Not built: Styrmin cannot tell
   the chart's Ingresses without rendering it (research D-012).
 
 ## Open points

@@ -22,8 +22,8 @@ const INGRESS_CLASS =
 
 const MESSAGE =
   "The ingress class must be a Kubernetes object name: lowercase letters, " +
-  "digits, hyphens and dots, starting and ending with a letter or a digit, " +
-  `at most ${INGRESS_CLASS_MAX_LENGTH} characters.`;
+  "digits, hyphens and dots, where each dot-separated label starts and ends " +
+  `with a letter or a digit, at most ${INGRESS_CLASS_MAX_LENGTH} characters.`;
 
 /** The message for an invalid ingress class, or `null` when it is valid or empty. */
 export function ingressClassError(

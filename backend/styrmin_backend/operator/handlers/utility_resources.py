@@ -1,7 +1,12 @@
 """Kopf handlers for utility resource drift detection.
 
 Watches for modifications and deletions of Styrmin-managed utility resources
-(NetworkPolicies, Services, Ingresses, Secrets, Middlewares) and triggers reconciliation.
+(NetworkPolicies, Services, Ingresses, Secrets, Middlewares). A handler reconciles the drifted
+resource only when it finds the parent HelmRelease by the label ``styrmin.io/release-reference``.
+A HelmRelease that the StyrminDeployment pipeline creates has no such label
+(``ApplicationHelmReleaseBuilder.build`` sets only ``managed-by`` and ``operator-managed``), so for
+those deployments a handler logs a warning and does nothing. The periodic timers of
+``helmrelease.py`` and ``styrmin_deployment.py`` then reconcile the resources.
 """
 
 from __future__ import annotations

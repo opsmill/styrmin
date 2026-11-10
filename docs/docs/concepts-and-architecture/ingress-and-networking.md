@@ -296,7 +296,7 @@ controller, so Styrmin does not redeploy a `FAILED` controller for it.
 ### The Ingress that Styrmin builds for an external service
 
 Each application driver declares the **services** it exposes: name, kind,
-port, and scope (internal or external). The scope decides who builds the
+port, and scope (internal or external). The scope determines who builds the
 Ingress:
 
 - For a service with `scope: external` and `kind` `http` or `https`,
@@ -374,8 +374,10 @@ The Ingress of a service has up to two hosts:
 - **The application address** has the name of the application driver and the
   id of the deployment. It is the same for every service of the
   deployment, so Styrmin puts it on one Ingress only: the Ingress of the
-  first service that the driver declares, and only when that service is
-  `external`. For a deployment of `generic-app`, whose only service `app` is
+  first service that the driver declares, and only when Styrmin builds an
+  Ingress for that service: it is `external` and has kind `http` or `https`.
+  When the first service is external with kind `tcp` or `udp`, no
+  Styrmin-built Ingress has the application address. For a deployment of `generic-app`, whose only service `app` is
   external, the Ingress has both hosts. For a deployment of `infrahub`,
   whose first service `infrahub` is internal, no Styrmin-built Ingress has
   the application address, and the Ingress that the chart renders for the

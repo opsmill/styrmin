@@ -58,11 +58,11 @@ An operator opens the deployment's Settings tab and sets the ingress class and t
 
 **Why this priority**: The API and manifest paths (User Story 1) already let an operator use the feature. The UI makes it usable without them.
 
-**Independent Test**: In the UI, open Configuration, then Service overrides, set both values for `task-manager`, save, and read the Networking summary.
+**Independent Test**: In the UI, open the Settings tab, click Update Settings, open the Services section of the Edit configuration drawer, set both values for `task-manager`, save, and read the Networking summary.
 
 **Acceptance Scenarios**:
 
-1. **Given** a running Infrahub deployment on the new driver version, **When** the operator opens Configuration, then Service overrides, sets `tailscale` and `tailnet.example.ts.net` for `task-manager` and saves, **Then** the deployment redeploys and the Networking summary lists `task-manager` at the new host under class `tailscale`, marked as overridden.
+1. **Given** a running Infrahub deployment on the new driver version, **When** the operator opens the Settings tab, clicks Update Settings, opens the Services section, sets `tailscale` and `tailnet.example.ts.net` for `task-manager` and saves, **Then** the deployment redeploys and the Networking summary lists `task-manager` at the new host under class `tailscale`, marked as overridden.
 2. **Given** the deploy form, **When** the operator creates a deployment, **Then** the same override fields are present on the form.
 3. **Given** a service without an override, **When** the operator views the Networking summary, **Then** its class and host are shown and marked as inherited.
 
@@ -119,7 +119,7 @@ An operator who sets an override that Styrmin cannot honour, or who changes a dr
 
 ### Key Entities
 
-- **Service** (existing): a service that a driver declares. Its `scope` now decides whether Styrmin builds an Ingress for it.
+- **Service** (existing): a service that a driver declares. Its `scope` now determines whether Styrmin builds an Ingress for it.
 - **Service ingress override** (new): a setting in a deployment's config for one service, with an ingress class and an FQDN suffix. It is stored in the deployment's JSON config. It applies only to a service declared `external`.
 - **Ingress class** and **FQDN suffix** (existing, resolved from the deployment, else the environment, else the cluster): the override replaces both for one service.
 - **Service name override** (existing): unchanged. It is stored as the resolved name of the service, not in the deployment's config.
@@ -146,7 +146,7 @@ An operator who sets an override that Styrmin cannot honour, or who changes a dr
 - No database schema change is needed, because the override lives in the deployment's existing JSON config and Styrmin builds the Ingress at reconcile time. To be confirmed in the plan.
 - Whether the Tailscale operator requires a `tls` section on an Ingress, and whether it ignores the host in the rules, is not known: the Tailscale documentation does not say. The first release writes no `spec.tls` (FR-007). If a test on a real operator shows that it is required, the override gets an optional `tls` hosts field in a later change.
 - How the UI gets the driver's list of services for the override fields is not decided in the PRD. The Service overrides section does not receive it today. The plan decides it.
-- How many drivers outside this repository declare `scope: external` and render their own Ingress is not known. It sets the size of the breaking change in FR-014.
+- How many drivers outside this repository declare `scope: external` and render their own Ingress is not known. The answer determines how many drivers the breaking change in FR-014 affects.
 
 ## Out of Scope
 
