@@ -91,6 +91,7 @@ from styrmin_backend.services.replicas.validator import (
     validate_replica_overrides,
 )
 from styrmin_backend.services.service_ingress.validator import (
+    DeclaredService,
     has_service_ingress_overrides,
     validate_service_ingress_overrides,
 )
@@ -417,7 +418,7 @@ def _validate_service_ingress_overrides(
     validate_service_ingress_overrides(
         config,
         services={
-            service.name: service.scope
+            service.name: DeclaredService(scope=service.scope, kind=service.kind)
             for service in parse_service_definitions(driver_version.services)
         },
         stored_config=stored_config,

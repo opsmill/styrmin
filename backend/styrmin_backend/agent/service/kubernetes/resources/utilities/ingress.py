@@ -20,6 +20,7 @@ from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_refere
 from styrmin_backend.context.fqdn import (
     compute_human_readable_fqdn,
     compute_primary_fqdn,
+    service_gets_ingress,
 )
 from styrmin_backend.context.models.config import ResolvedConfig, ServiceConfigBlock
 from styrmin_backend.context.models.contexts import GlobalContext
@@ -27,9 +28,6 @@ from styrmin_backend.context.namespace_labels import build_namespace_labels
 
 SERVICE_INGRESS_NAME_PREFIX = "styrmin-svc-"
 SERVICE_NAME_LABEL = "styrmin.io/service-name"
-
-# Only these kinds can sit behind an Ingress (research D-006).
-_INGRESS_SERVICE_KINDS = frozenset({"http", "https"})
 
 
 @dataclass(frozen=True)
@@ -307,9 +305,10 @@ class IngressUtility(Utility):
         buildable = [
             service
             for service in own_services
-            if service.get("scope") == "external"
-            and service.get("driver_service_name")
-            and service.get("kind") in _INGRESS_SERVICE_KINDS
+            if service.get("driver_service_name")
+            and service_gets_ingress(
+                str(service.get("scope")), str(service.get("kind"))
+            )
         ]
         if not buildable:
             return []

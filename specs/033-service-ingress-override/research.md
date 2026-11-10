@@ -112,8 +112,8 @@ The gap: Helm charts render the Ingresses of a deployment, and Styrmin cannot te
 
 - **Decision**: a new package `services/service_ingress/` with a validator and exceptions, mirroring `services/replicas/`. Three `ServiceError` codes:
   - `UNKNOWN_SERVICE_INGRESS_OVERRIDE`: the block names a service that the target driver version does not declare.
-  - `SERVICE_INGRESS_NOT_BUILT`: the service is not `scope: external` (FR-009). The message names the service and says Styrmin does not build its Ingress.
-  - `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`: a driver version change removes the service or makes it internal while an override is stored (FR-010). Raised before any pod changes.
+  - `SERVICE_INGRESS_NOT_BUILT`: the service is not `scope: external`, or is external with kind `tcp` or `udp` (FR-009; the kind check was added in the review fixes, because the builder builds an Ingress only for `http` and `https`, D-006). The message names the service and says Styrmin does not build its Ingress.
+  - `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`: a driver version change removes the service, makes it internal, or makes its kind `tcp` or `udp` while an override is stored (FR-010). Raised before any pod changes.
 - **Where it runs**: next to `_validate_replica_overrides` in [services/deployment.py](../../backend/styrmin_backend/services/deployment.py) (line 367 and its three call sites at 574, 908 and 1813 in the docstrings), in the same pre-check that runs before the target driver version is applied.
 - **Differs from ADR-070**: for replicas an unchanged stored override on a removed component is kept (orphaned). FR-010 asks for the opposite for ingress: refuse, because an orphaned override would be dropped without notice. The validator therefore rejects whenever a stored override targets a service that the target version removes or makes internal.
 - **Alternatives rejected**: drop the override on a version change with a warning (FR-010 forbids a silent drop); keep it orphaned like replicas (the operator would not know that the service is no longer published as set).

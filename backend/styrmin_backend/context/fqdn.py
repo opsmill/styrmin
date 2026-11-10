@@ -102,6 +102,21 @@ def compute_human_readable_fqdn(
     return f"{label}.{fqdn_suffix}"
 
 
+# Only these kinds can sit behind an Ingress (research D-006).
+INGRESS_SERVICE_KINDS = frozenset({"http", "https"})
+
+
+def service_gets_ingress(scope: str, kind: str) -> bool:
+    """Whether Styrmin builds an Ingress for a service: ``scope: external`` and kind ``http`` or ``https``.
+
+    The one rule that the Ingress builder, the write-time validation, the context and the
+    GraphQL read model share, so they cannot disagree on which service an ingress override
+    applies to. Pass the string values (``"external"``), not the enum members: the hash of
+    a ``str`` enum member is the hash of its name.
+    """
+    return scope == "external" and kind in INGRESS_SERVICE_KINDS
+
+
 @dataclass(frozen=True)
 class ServiceAddress:
     """The effective ingress class, suffix and hosts of one service.

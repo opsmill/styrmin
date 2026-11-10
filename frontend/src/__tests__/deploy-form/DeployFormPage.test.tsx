@@ -592,6 +592,7 @@ describe("DeployFormPage service ingress overrides (#598)", () => {
           services: [
             { name: "infrahub", scope: "internal", kind: "http" },
             { name: "task-manager", scope: "external", kind: "http" },
+            { name: "queue", scope: "external", kind: "tcp" },
           ],
         },
       ],
@@ -638,6 +639,19 @@ describe("DeployFormPage service ingress overrides (#598)", () => {
       within(section).getByLabelText("FQDN suffix for task-manager"),
     ).toBeInTheDocument();
     expect(within(section).queryByLabelText(/for infrahub$/)).toBeNull();
+  });
+
+  it("offers no field for an external service of kind tcp or udp", async () => {
+    await renderPage();
+    await selectVersion();
+
+    const section = screen.getByRole("group", {
+      name: "Service ingress overrides",
+    });
+    expect(
+      within(section).getByLabelText("Ingress class for task-manager"),
+    ).toBeInTheDocument();
+    expect(within(section).queryByLabelText(/for queue$/)).toBeNull();
   });
 
   it("sends the override in config.services next to the replica counts", async () => {
@@ -719,7 +733,7 @@ describe("DeployFormPage service ingress overrides (#598)", () => {
     ],
     [
       "SERVICE_INGRESS_NOT_BUILT",
-      "Service 'infrahub' has scope 'internal' in driver demo version 1.0.0, so Styrmin does not build its Ingress and an ingress override has no effect. Only a service with scope 'external' can have an ingress override.",
+      "Service 'infrahub' has scope 'internal' in driver demo version 1.0.0, so Styrmin does not build its Ingress and an ingress override has no effect. Only a service with scope 'external' and kind 'http' or 'https' can have an ingress override.",
       "'infrahub'",
     ],
     [

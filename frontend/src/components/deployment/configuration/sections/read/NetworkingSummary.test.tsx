@@ -24,6 +24,7 @@ interface ServiceRow {
   driverServiceName: string;
   resolvedName: string;
   scope: string;
+  kind: string;
   ingressClass: string | null;
   ingressClassOverridden: boolean;
   humanReadableFqdn: string | null;
@@ -36,6 +37,7 @@ const TASK_MANAGER_OVERRIDDEN: ServiceRow = {
   driverServiceName: "task-manager",
   resolvedName: "task-manager",
   scope: "external",
+  kind: "http",
   ingressClass: "tailscale",
   ingressClassOverridden: true,
   humanReadableFqdn: "task-manager-prod.tailnet.example.ts.net",
@@ -46,6 +48,7 @@ const WEB_INHERITED: ServiceRow = {
   driverServiceName: "web",
   resolvedName: "web",
   scope: "external",
+  kind: "https",
   ingressClass: "traefik",
   ingressClassOverridden: false,
   humanReadableFqdn: "web-prod.styrmin.com",
@@ -163,6 +166,20 @@ describe("NetworkingSummary: per-service class and host (FR-016)", () => {
     const group = serviceGroup("task-manager");
     expectRow(group, "Ingress class", "tailscale", "Overridden");
     expectRow(group, "Host", "task-manager-prod.styrmin.com", "Inherited");
+  });
+
+  it("lists no group for an external service of kind tcp or udp, and none for an internal one", async () => {
+    await renderSummary([
+      WEB_INHERITED,
+      { ...WEB_INHERITED, driverServiceName: "queue", kind: "tcp" },
+      { ...WEB_INHERITED, driverServiceName: "metrics", kind: "udp" },
+      { ...WEB_INHERITED, driverServiceName: "database", scope: "internal" },
+    ]);
+
+    expect(serviceGroup("web")).toBeInTheDocument();
+    for (const name of ["queue", "metrics", "database"]) {
+      expect(screen.queryByRole("group", { name })).toBeNull();
+    }
   });
 
   it("marks a service with no override at all as inherited, as the spec scenario 3 requires", async () => {

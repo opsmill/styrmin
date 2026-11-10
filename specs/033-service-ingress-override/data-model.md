@@ -37,11 +37,11 @@ Rules:
 | Event | Condition | Result |
 |---|---|---|
 | Set or change an override | Service not declared by the target driver version | `UNKNOWN_SERVICE_INGRESS_OVERRIDE` |
-| Set or change an override | Service declared with `scope: internal` | `SERVICE_INGRESS_NOT_BUILT` |
-| Set or change an override | Service declared `external` | Stored |
+| Set or change an override | Service declared with `scope: internal`, or declared `external` with kind `tcp` or `udp` | `SERVICE_INGRESS_NOT_BUILT` (metadata `scope` and `kind` say which) |
+| Set or change an override | Service declared `external` with kind `http` or `https` | Stored |
 | Clear an override | Always | Removed, even if the service no longer exists |
-| Change the driver version | An override is stored for a service that the target version removes, or declares `internal` | `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`, before any pod changes |
-| Change the driver version | Every stored override targets a service that stays `external` | Allowed |
+| Change the driver version | An override is stored for a service that the target version removes, declares `internal`, or declares with kind `tcp` or `udp` | `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`, before any pod changes (`reason`: `removed`, `internal` or `not_http_or_https`) |
+| Change the driver version | Every stored override targets a service that stays `external` with kind `http` or `https` | Allowed |
 
 ## Derived: effective address of a service (template data and GraphQL)
 

@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { SectionId } from "@/lib/configuration-types";
+import { getsIngress } from "@/lib/service-ingress";
 
 import { ChangedFieldFrame } from "../../ChangedFieldFrame";
 import { useDrawerDiff } from "../../DrawerDiffContext";
@@ -116,9 +117,9 @@ interface Props {
   driverServiceNames?: readonly string[];
   /**
    * The services of the deployment with their scope, from
-   * `deployment.deployedServices` (#598). Each `external` service gets an
-   * ingress class and an FQDN suffix field; the others get none, because
-   * Styrmin builds no Ingress for them (FR-009).
+   * `deployment.deployedServices` (#598). Each `external` service of kind
+   * `http` or `https` gets an ingress class and an FQDN suffix field; the
+   * others get none, because Styrmin builds no Ingress for them (FR-009).
    */
   services?: readonly IngressServiceRef[];
   anchorId: SectionId;
@@ -316,7 +317,7 @@ export function ServiceOverridesSection({
         }}
       </form.Field>
 
-      {services?.some((service) => service.scope === "external") ? (
+      {services?.some(getsIngress) ? (
         <div
           role="group"
           aria-labelledby={`${anchorId}-ingress-heading`}

@@ -38,6 +38,7 @@ import {
   withDriverDirectory,
 } from "@/lib/driverVersion";
 import { replicaFieldError, replicaParameterFor } from "@/lib/replicas";
+import { getsIngress } from "@/lib/service-ingress";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 
 const deployFormSchema = z.object({
@@ -475,9 +476,7 @@ export default function DeployFormPage() {
         )}
 
         {/* Ingress class and FQDN suffix of each external service (#598). */}
-        {selectedVersion?.services?.some(
-          (service) => service.scope === "external",
-        ) && (
+        {selectedVersion?.services?.some(getsIngress) && (
           <div
             role="group"
             aria-labelledby="service-ingress-heading"
@@ -495,6 +494,7 @@ export default function DeployFormPage() {
               services={selectedVersion.services.map((service) => ({
                 driverServiceName: service.name,
                 scope: service.scope,
+                kind: service.kind,
               }))}
               value={serviceIngress}
               onChange={setServiceIngress}

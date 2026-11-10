@@ -1,6 +1,7 @@
 import { useId } from "react";
 
 import { resolveConfigValue } from "@/lib/effective-config";
+import { getsIngress } from "@/lib/service-ingress";
 import { ConfigSummaryCard } from "../../ConfigSummaryCard";
 import { SummaryRow } from "./SummaryRow";
 
@@ -11,6 +12,7 @@ import { SummaryRow } from "./SummaryRow";
 export interface NetworkingService {
   driverServiceName: string;
   scope: string;
+  kind: string;
   ingressClass?: string | null;
   ingressClassOverridden: boolean;
   humanReadableFqdn?: string | null;
@@ -26,10 +28,11 @@ interface Props {
   clusterConfig: Record<string, unknown> | null | undefined;
   /**
    * The services of the deployment (#598, FR-016). Each service that Styrmin
-   * builds an Ingress for (`scope: external`) is listed with its effective
-   * ingress class and host, each marked Overridden or Inherited. An internal
-   * service is left out: Styrmin builds no Ingress for it, so it has no class
-   * or host of its own to report.
+   * builds an Ingress for (`scope: external`, kind `http` or `https`) is listed
+   * with its effective ingress class and host, each marked Overridden or
+   * Inherited. An internal service, and an external one of kind `tcp` or `udp`,
+   * is left out: Styrmin builds no Ingress for it, so it has no class or host
+   * of its own to report.
    */
   services?: readonly NetworkingService[] | null;
 }
@@ -48,9 +51,7 @@ export function NetworkingSummary({
   clusterConfig,
   services,
 }: Props) {
-  const externalServices = (services ?? []).filter(
-    (service) => service.scope === "external",
-  );
+  const externalServices = (services ?? []).filter(getsIngress);
   const resolve = <T,>(path: string) =>
     resolveConfigValue<T>(
       clusterConfig,

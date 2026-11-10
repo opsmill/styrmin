@@ -221,7 +221,8 @@ first release with the change.
   is not known yet. See
   [Migrate a driver whose external service renders its own Ingress](./drivers/migrating-external-service-ingress.md).
 - Clear a service ingress override before you change a deployment to a driver
-  version that removes the service or declares it `internal`. Styrmin refuses
+  version that removes the service, declares it `internal`, or gives it kind `tcp`
+  or `udp`. Styrmin refuses
   the change with `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` otherwise. See
   [Change a deployment's driver version](./drivers/changing-driver-versions.md#stored-service-ingress-overrides).
 

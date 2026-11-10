@@ -68,6 +68,28 @@ TASK_MANAGER_INTERNAL = [
     else declared
     for declared in DECLARED_SERVICES
 ]
+TASK_MANAGER_AS = {
+    kind: [
+        {**declared, "kind": kind} if declared["name"] == "task-manager" else declared
+        for declared in DECLARED_SERVICES
+    ]
+    for kind in ("tcp", "udp")
+}
+# An external service that Styrmin builds no Ingress for, because its kind is not http or https.
+QUEUE_INPUT = {"name": "queue", "ingressClass": OVERRIDE_CLASS}
+WITH_EXTERNAL_QUEUE = {
+    kind: [
+        *DECLARED_SERVICES,
+        {
+            "name": "queue",
+            "kind": kind,
+            "scope": "external",
+            "port": 5672,
+            "component": "server",
+        },
+    ]
+    for kind in ("tcp", "udp")
+}
 TASK_MANAGER_REMOVED = [
     declared for declared in DECLARED_SERVICES if declared["name"] != "task-manager"
 ]
@@ -345,6 +367,101 @@ async def test_update_deployment_version_refuses_to_drop_a_stored_override(
     assert extensions["target_version"] == "2.0.0"
     assert extensions["reason"] == reason
     assert "'task-manager'" in message
+    await _assert_refused_without_change(
+        session, prefect_manager_mock, deployment_id, before
+    )
+    assert (await _stored_row(session, deployment_id)).config == STORED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["tcp", "udp"])
+async def test_update_deployment_refuses_an_override_on_an_external_service_of_kind_tcp_or_udp(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock, kind: str
+) -> None:
+    """Styrmin builds an Ingress only for ``http`` and ``https``: an override on an external
+    ``tcp`` or ``udp`` service would build nothing, the failure ``SERVICE_INGRESS_NOT_BUILT`` exists
+    to prevent (review F4)."""
+    _arm_prefect(prefect_manager_mock)
+    deployment_id = await _seed_deployment(session, services=WITH_EXTERNAL_QUEUE[kind])
+    before = await _snapshot(session, deployment_id)
+
+    payload = await _post_update(client, deployment_id, {"services": [QUEUE_INPUT]})
+
+    extensions, message = _error(payload, "SERVICE_INGRESS_NOT_BUILT")
+    assert extensions["service_name"] == "queue"
+    assert extensions["scope"] == "external"
+    assert extensions["kind"] == kind
+    assert f"'{kind}'" in message
+    assert "'http' or 'https'" in message
+    await _assert_refused_without_change(
+        session, prefect_manager_mock, deployment_id, before
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["tcp", "udp"])
+async def test_deploy_refuses_an_override_on_an_external_service_of_kind_tcp_or_udp(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock, kind: str
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    driver_name, environment_id = await _seed_deploy_driver(
+        session, services=WITH_EXTERNAL_QUEUE[kind]
+    )
+
+    name, payload = await _post_deploy(
+        client, driver_name, environment_id, {"services": [QUEUE_INPUT]}
+    )
+
+    extensions, _message = _error(payload, "SERVICE_INGRESS_NOT_BUILT")
+    assert extensions["service_name"] == "queue"
+    assert extensions["kind"] == kind
+    await _assert_deploy_refused(session, prefect_manager_mock, name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["tcp", "udp"])
+@pytest.mark.parametrize(
+    "sends_input", [False, True], ids=["no-input", "input-sent-again"]
+)
+async def test_update_deployment_version_refuses_a_version_that_makes_the_service_tcp_or_udp(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    kind: str,
+    sends_input: bool,
+) -> None:
+    """The target version keeps ``task-manager`` external but declares it ``tcp`` or ``udp``:
+    the stored override would build no Ingress, so the change is refused (review F4)."""
+    _arm_prefect(prefect_manager_mock)
+    deployment_id = await _seed_deployment(session, config=STORED)
+    target_id, _ = await _seed_driver_version_2(
+        session, deployment_id, TASK_MANAGER_AS[kind]
+    )
+    before = await _snapshot(session, deployment_id)
+
+    if sends_input:
+        payload = await _post_update_version(
+            client,
+            deployment_id,
+            target_id,
+            {"services": [TASK_MANAGER_OVERRIDE_INPUT]},
+        )
+    else:
+        payload = await _post(
+            client,
+            "update_deployment_version",
+            {
+                "deploymentId": str(deployment_id),
+                "version": "1.0.0",
+                "driverVersionId": str(target_id),
+            },
+        )
+
+    extensions, message = _error(payload, "SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED")
+    assert extensions["service_name"] == "task-manager"
+    assert extensions["reason"] == "not_http_or_https"
+    assert extensions["target_kind"] == kind
+    assert f"'{kind}'" in message
     await _assert_refused_without_change(
         session, prefect_manager_mock, deployment_id, before
     )

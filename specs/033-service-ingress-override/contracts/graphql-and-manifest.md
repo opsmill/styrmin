@@ -48,8 +48,8 @@ On `DeployedService` (read by the Networking summary), new fields:
 | Code | When | Metadata |
 |---|---|---|
 | `UNKNOWN_SERVICE_INGRESS_OVERRIDE` | The override names a service that the target driver version does not declare. | `service_name`, `known_services`, `checked_against` |
-| `SERVICE_INGRESS_NOT_BUILT` (FR-009) | The override names a service that is not `scope: external`. The message names the service and says Styrmin does not build its Ingress. | `service_name`, `scope`, `checked_against` |
-| `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` (FR-010) | A driver version change removes the service or makes it internal while an override is stored. Raised before any pod changes. | `service_name`, `current_version`, `target_version`, `reason` (`removed` or `internal`) |
+| `SERVICE_INGRESS_NOT_BUILT` (FR-009) | The override names a service that Styrmin builds no Ingress for: a service that is not `scope: external`, or an external service of kind `tcp` or `udp`. The message names the service and says Styrmin does not build its Ingress. | `service_name`, `scope`, `kind`, `checked_against` |
+| `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` (FR-010) | A driver version change removes the service, makes it internal, or makes its kind `tcp` or `udp` while an override is stored. Raised before any pod changes. | `service_name`, `current_version`, `target_version`, `reason` (`removed`, `internal` or `not_http_or_https`), and `target_kind` when the reason is `not_http_or_https` |
 
 All three are `ServiceError` subclasses with `extensions.code`, like `UNKNOWN_COMPONENT_REPLICA_OVERRIDE`.
 

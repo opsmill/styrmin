@@ -139,8 +139,8 @@ any task, flow run or pod change. Every error is a `ServiceError` that names the
 | Code | When |
 |------|------|
 | `UNKNOWN_SERVICE_INGRESS_OVERRIDE` | An override that is added or changed names a service that the driver version does not declare. |
-| `SERVICE_INGRESS_NOT_BUILT` | An override that is added or changed names a service that is not `scope: external` (FR-009). |
-| `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` | A driver version change removes the service or makes it internal while an override is stored and not cleared in the same write (FR-010). |
+| `SERVICE_INGRESS_NOT_BUILT` | An override that is added or changed names a service that is not `scope: external`, or is external with kind `tcp` or `udp` (FR-009). |
+| `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` | A driver version change removes the service, makes it internal, or makes its kind `tcp` or `udp` while an override is stored and not cleared in the same write (FR-010). |
 | `DUPLICATE_SERVICE_NAME` | The `services` list of the input has the same name twice. It is raised when the list is flattened, before the validator runs. |
 
 This differs from ADR-070 on purpose. For a replica override on a component that the target version

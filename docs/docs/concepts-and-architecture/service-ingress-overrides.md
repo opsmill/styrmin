@@ -320,8 +320,8 @@ Each error below carries a code in `extensions.code` and names the service.
 | Code | When | What to do |
 |---|---|---|
 | `UNKNOWN_SERVICE_INGRESS_OVERRIDE` | The request adds or changes an override on a service that the driver version of the deployment does not declare. The message lists the services that the version declares. | Use a service name from the list. |
-| `SERVICE_INGRESS_NOT_BUILT` | The request adds or changes an override on a service that the driver version declares with `scope: internal`. The message says that Styrmin does not build its Ingress and the override has no effect. | Remove the override. An internal service cannot have one. |
-| `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` | A driver version change would leave a stored override on a service that the target version removes or declares `internal`. Styrmin refuses the change before any pod changes and keeps the override. | Clear the override, then change the driver version: see below. |
+| `SERVICE_INGRESS_NOT_BUILT` | The request adds or changes an override on a service that the driver version declares with `scope: internal`, or with `scope: external` and kind `tcp` or `udp`. The message says that Styrmin does not build its Ingress and the override has no effect. `scope` and `kind` in the error say which case applies. | Remove the override. Only an external service of kind `http` or `https` can have one. |
+| `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` | A driver version change would leave a stored override on a service that the target version removes, declares `internal`, or declares with kind `tcp` or `udp`. Styrmin refuses the change before any pod changes and keeps the override. | Clear the override, then change the driver version: see below. |
 | `DUPLICATE_SERVICE_NAME` | The `services` list has the same service name in two rows. | Keep one row for each service. |
 | `VALIDATION_ERROR` | A class or a suffix breaks the rules in [Values that an override accepts](#values-that-an-override-accepts). | Fix the value. |
 
@@ -330,16 +330,13 @@ after the write: the pinned version for `updateDeployment`, the target version
 for `updateDeploymentVersion`.
 
 Clearing an override is always accepted, even when the service no longer
-exists in the driver version. A service of `kind` `tcp` or `udp` that is
-`external` passes the check, because the check reads the scope only. Styrmin
-builds no Ingress for it, so its override has no effect. This is read in the
-code and was not run.
+exists in the driver version.
 
 #### Change the driver version of a deployment that has an override
 
 The message of `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` says: "Clear the
 override of '`<service>`' in the same request, or keep a driver version that
-declares it external." In the API, the SDK, `styrminctl` and a manifest, you
+declares it external with kind 'http' or 'https'." In the API, the SDK, `styrminctl` and a manifest, you
 clear the override by sending the config without it, in the request that
 changes the version. See [Set, view and clear an override](#set-view-and-clear-an-override).
 

@@ -790,10 +790,10 @@ last override when nothing else stays in `spec.config`. An ingress class must be
 a Kubernetes object name, and a suffix must be a DNS name; an invalid value
 fails with `VALIDATION_ERROR`. A service that the driver version does not
 declare fails with `UNKNOWN_SERVICE_INGRESS_OVERRIDE`, a service that it declares
-`internal` fails with `SERVICE_INGRESS_NOT_BUILT`, two rows for one service fail
+`internal`, or `external` with kind `tcp` or `udp`, fails with `SERVICE_INGRESS_NOT_BUILT`, two rows for one service fail
 with `DUPLICATE_SERVICE_NAME`, and a change to a driver version that removes the
-service or declares it `internal`, while the override is stored and the manifest
-keeps it, fails with `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`. A key in a
+service, declares it `internal`, or gives it kind `tcp` or `udp`, while the
+override is stored and the manifest keeps it, fails with `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`. A key in a
 row other than these three is ignored by the SDK before it sends the request, so
 check the spelling.
 

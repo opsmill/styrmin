@@ -18,13 +18,17 @@ from typing import Any
 
 import pytest
 
-from styrmin_backend.services.driver.models.resources.services import ServiceScope
+from styrmin_backend.services.driver.models.resources.services import (
+    ServiceKind,
+    ServiceScope,
+)
 from styrmin_backend.services.service_ingress.exceptions import (
     ServiceIngressNotBuiltError,
     ServiceIngressOverrideWouldBeDroppedError,
     UnknownServiceIngressOverrideError,
 )
 from styrmin_backend.services.service_ingress.validator import (
+    DeclaredService,
     has_service_ingress_overrides,
     validate_service_ingress_overrides,
 )
@@ -33,11 +37,18 @@ CHECKED_AGAINST = "driver infrahub version 2.0.0 (application version 1.9.0)"
 CURRENT_VERSION = "1.0.0"
 TARGET_VERSION = "2.0.0"
 
-# What the driver version declares: ``infrahub`` is internal, the others are external.
+
+def _declared(
+    scope: ServiceScope, kind: ServiceKind = ServiceKind.HTTP
+) -> DeclaredService:
+    return DeclaredService(scope=scope, kind=kind)
+
+
+# What the driver version declares: ``infrahub`` is internal, the others are external and http.
 SERVICES = {
-    "infrahub": ServiceScope.INTERNAL,
-    "task-manager": ServiceScope.EXTERNAL,
-    "api": ServiceScope.EXTERNAL,
+    "infrahub": _declared(ServiceScope.INTERNAL),
+    "task-manager": _declared(ServiceScope.EXTERNAL),
+    "api": _declared(ServiceScope.EXTERNAL, ServiceKind.HTTPS),
 }
 
 OVERRIDE = {"ingress_class": "tailscale", "fqdn_suffix": "tailnet.example.ts.net"}
@@ -54,7 +65,7 @@ def _validate(
     config: dict[str, Any] | None,
     *,
     stored: dict[str, Any] | None = None,
-    services: dict[str, ServiceScope] | None = None,
+    services: dict[str, DeclaredService] | None = None,
     version_change: bool = False,
 ) -> None:
     """Run the validator; ``version_change`` passes the current driver version label."""
@@ -109,12 +120,49 @@ def test_override_on_an_internal_service_is_rejected(
     assert excinfo.value.error_metadata == {
         "service_name": "infrahub",
         "scope": "internal",
+        "kind": "http",
         "checked_against": CHECKED_AGAINST,
     }
     message = str(excinfo.value)
     assert "'infrahub'" in message
     assert "does not build" in message
     assert "Ingress" in message
+
+
+@pytest.mark.parametrize("kind", [ServiceKind.TCP, ServiceKind.UDP])
+@pytest.mark.parametrize(
+    "stored",
+    [None, _config(queue=OVERRIDE)],
+    ids=["added", "same-stored"],
+)
+def test_override_on_an_external_tcp_or_udp_service_is_rejected(
+    kind: ServiceKind, stored: dict[str, Any] | None
+) -> None:
+    """Styrmin builds an Ingress only for ``http`` and ``https`` (review F4)."""
+    services = {**SERVICES, "queue": _declared(ServiceScope.EXTERNAL, kind)}
+
+    with pytest.raises(ServiceIngressNotBuiltError) as excinfo:
+        _validate(_config(queue=OVERRIDE), stored=stored, services=services)
+
+    assert excinfo.value.error_code == "SERVICE_INGRESS_NOT_BUILT"
+    assert excinfo.value.error_metadata == {
+        "service_name": "queue",
+        "scope": "external",
+        "kind": kind.value,
+        "checked_against": CHECKED_AGAINST,
+    }
+    message = str(excinfo.value)
+    assert f"'{kind.value}'" in message
+    assert "'http' or 'https'" in message
+
+
+@pytest.mark.parametrize("kind", [ServiceKind.HTTP, ServiceKind.HTTPS])
+def test_override_on_an_external_http_or_https_service_is_accepted(
+    kind: ServiceKind,
+) -> None:
+    services = {**SERVICES, "web": _declared(ServiceScope.EXTERNAL, kind)}
+
+    _validate(_config(web=OVERRIDE), services=services)
 
 
 def test_override_on_an_external_service_is_accepted() -> None:
@@ -229,7 +277,7 @@ def test_a_version_that_removes_the_service_is_refused() -> None:
 
 def test_a_version_that_makes_the_service_internal_is_refused() -> None:
     stored = _config(task_manager=OVERRIDE)
-    target_services = {**SERVICES, "task-manager": ServiceScope.INTERNAL}
+    target_services = {**SERVICES, "task-manager": _declared(ServiceScope.INTERNAL)}
 
     with pytest.raises(ServiceIngressOverrideWouldBeDroppedError) as excinfo:
         _validate(stored, stored=stored, services=target_services, version_change=True)
@@ -243,11 +291,45 @@ def test_a_version_that_makes_the_service_internal_is_refused() -> None:
     assert "'task-manager'" in str(excinfo.value)
 
 
+@pytest.mark.parametrize("kind", [ServiceKind.TCP, ServiceKind.UDP])
+def test_a_version_that_makes_the_service_tcp_or_udp_is_refused(
+    kind: ServiceKind,
+) -> None:
+    """The service stays external, but Styrmin builds no Ingress for it any more (review F4)."""
+    stored = _config(task_manager=OVERRIDE)
+    target_services = {
+        **SERVICES,
+        "task-manager": _declared(ServiceScope.EXTERNAL, kind),
+    }
+
+    with pytest.raises(ServiceIngressOverrideWouldBeDroppedError) as excinfo:
+        _validate(stored, stored=stored, services=target_services, version_change=True)
+
+    assert excinfo.value.error_metadata == {
+        "service_name": "task-manager",
+        "current_version": CURRENT_VERSION,
+        "target_version": TARGET_VERSION,
+        "reason": "not_http_or_https",
+        "target_kind": kind.value,
+    }
+    assert f"'{kind.value}'" in str(excinfo.value)
+
+
+def test_the_dropped_error_requires_the_kind_for_the_tcp_or_udp_reason() -> None:
+    with pytest.raises(ValueError, match="target_kind"):
+        ServiceIngressOverrideWouldBeDroppedError(
+            service_name="x",
+            current_version="1",
+            target_version="2",
+            reason="not_http_or_https",
+        )
+
+
 def test_a_stored_override_without_a_config_write_is_refused() -> None:
     """``updateDeploymentVersion`` without ``input`` checks the stored config itself."""
     stored = _config(task_manager=OVERRIDE)
     target_services = {
-        name: scope for name, scope in SERVICES.items() if name != "task-manager"
+        name: declared for name, declared in SERVICES.items() if name != "task-manager"
     }
 
     with pytest.raises(ServiceIngressOverrideWouldBeDroppedError) as excinfo:

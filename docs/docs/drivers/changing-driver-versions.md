@@ -88,13 +88,13 @@ for a service that its driver declares `scope: external`. Styrmin builds an
 Ingress only for an external service, so the override applies only while the
 driver version declares the service external.
 
-When the target driver version removes that service, or declares it
-`scope: internal`, Styrmin does not drop the override. It rejects the change
+When the target driver version removes that service, declares it
+`scope: internal`, or declares it with kind `tcp` or `udp`, Styrmin does not drop the override. It rejects the change
 with the error code `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` before any pod
 changes, and the deployment keeps its driver version and its override. The
 error names the service (`service_name`), the current and target driver versions
-(`current_version`, `target_version`) and the reason (`reason`: `removed` or
-`internal`).
+(`current_version`, `target_version`) and the reason (`reason`: `removed`,
+`internal` or `not_http_or_https`, with `target_kind` for the last one).
 
 This differs from an override on a component that the target driver version no
 longer declares, which stays stored and is not applied. The reason: a
@@ -121,9 +121,9 @@ again:
 Clearing an override is always accepted. If you want an override after the
 upgrade, set it on a service that the new driver version declares external.
 
-Adding or changing an override on a service that the target version removes or
-declares internal in the same request fails with `UNKNOWN_SERVICE_INGRESS_OVERRIDE`
-or `SERVICE_INGRESS_NOT_BUILT`.
+Adding or changing an override on a service that the target version removes,
+declares internal, or declares with kind `tcp` or `udp` in the same request fails
+with `UNKNOWN_SERVICE_INGRESS_OVERRIDE` or `SERVICE_INGRESS_NOT_BUILT`.
 
 ### Next steps
 

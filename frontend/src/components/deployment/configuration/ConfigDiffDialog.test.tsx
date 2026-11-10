@@ -327,11 +327,12 @@ describe("ConfigDiffDialog", () => {
         code: "SERVICE_INGRESS_NOT_BUILT",
         service: "infrahub",
         message:
-          "Service 'infrahub' has scope 'internal' in driver infrahub version 1.7.3, so Styrmin does not build its Ingress and an ingress override has no effect. Only a service with scope 'external' can have an ingress override.",
+          "Service 'infrahub' has scope 'internal' in driver infrahub version 1.7.3, so Styrmin does not build its Ingress and an ingress override has no effect. Only a service with scope 'external' and kind 'http' or 'https' can have an ingress override.",
         extensions: {
           code: "SERVICE_INGRESS_NOT_BUILT",
           service_name: "infrahub",
           scope: "internal",
+          kind: "http",
           checked_against: "driver infrahub version 1.7.3",
         },
       },

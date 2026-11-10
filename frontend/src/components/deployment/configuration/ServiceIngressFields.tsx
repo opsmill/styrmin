@@ -6,12 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { fqdnSuffixError } from "@/lib/fqdn-suffix";
 import { ingressClassError } from "@/lib/ingress-class";
+import { getsIngress } from "@/lib/service-ingress";
 
 /** A service of the deployment or of the selected driver version. */
 export interface IngressServiceRef {
   driverServiceName: string;
-  /** `external` services get an Ingress that Styrmin builds; others get no field. */
+  /** Only an `external` service of kind `http` or `https` gets an Ingress; others get no field. */
   scope: string;
+  kind: string;
 }
 
 interface Props {
@@ -40,12 +42,12 @@ function withField(
 }
 
 /**
- * Ingress class and FQDN suffix of each external service (#598, FR-015).
+ * Ingress class and FQDN suffix of each external `http` or `https` service (#598, FR-015).
  *
  * An override applies to one service only; an empty field means the value
  * resolved from the deployment, environment or cluster applies. A service that
- * is not external has no field, because Styrmin builds no Ingress for it
- * (FR-009). Shared by the Services section of the edit drawer and the deploy
+ * is not external, or is external with kind `tcp` or `udp`, has no field,
+ * because Styrmin builds no Ingress for it (FR-009). Shared by the Services section of the edit drawer and the deploy
  * form, so both offer the same fields with the same labels and validation.
  *
  * The ingress class ({@link ingressClassError}) and the FQDN suffix
@@ -55,7 +57,7 @@ function withField(
  */
 export function ServiceIngressFields({ services, value, onChange }: Props) {
   const idPrefix = useId();
-  const external = services.filter((service) => service.scope === "external");
+  const external = services.filter(getsIngress);
   if (external.length === 0) return null;
   const rows = value ?? [];
 

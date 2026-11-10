@@ -321,7 +321,7 @@ class ServiceConfigInput(BaseModel):
     """Per-service ingress override block for a deployment: the ingress class and the FQDN suffix of one service that the driver declares ``scope: external``."""
 
     name: str
-    "The driver service name. It must be declared by the driver version the deployment is bound to after the write, with scope ``external``. A service the version does not declare raises ``UNKNOWN_SERVICE_INGRESS_OVERRIDE``, and a service with scope ``internal`` raises ``SERVICE_INGRESS_NOT_BUILT``, because Styrmin does not build its Ingress."
+    "The driver service name. It must be declared by the driver version the deployment is bound to after the write, with scope ``external`` and kind ``http`` or ``https``. A service the version does not declare raises ``UNKNOWN_SERVICE_INGRESS_OVERRIDE``, and a service with scope ``internal``, or with kind ``tcp`` or ``udp``, raises ``SERVICE_INGRESS_NOT_BUILT``, because Styrmin does not build its Ingress."
     ingress_class: Optional[str] = Field(alias="ingressClass", default=None)
     "Ingress class for this service only. Null or omitted: the resolved class applies."
     fqdn_suffix: Optional[str] = Field(alias="fqdnSuffix", default=None)

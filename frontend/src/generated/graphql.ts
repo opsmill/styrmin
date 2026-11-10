@@ -1478,7 +1478,7 @@ export type ServiceConfigInput = {
   fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
   /** Ingress class for this service only. Null or omitted: the resolved class applies. */
   ingressClass?: InputMaybe<Scalars['String']['input']>;
-  /** The driver service name. It must be declared by the driver version the deployment is bound to after the write, with scope ``external``. A service the version does not declare raises ``UNKNOWN_SERVICE_INGRESS_OVERRIDE``, and a service with scope ``internal`` raises ``SERVICE_INGRESS_NOT_BUILT``, because Styrmin does not build its Ingress. */
+  /** The driver service name. It must be declared by the driver version the deployment is bound to after the write, with scope ``external`` and kind ``http`` or ``https``. A service the version does not declare raises ``UNKNOWN_SERVICE_INGRESS_OVERRIDE``, and a service with scope ``internal``, or with kind ``tcp`` or ``udp``, raises ``SERVICE_INGRESS_NOT_BUILT``, because Styrmin does not build its Ingress. */
   name: Scalars['String']['input'];
 };
 

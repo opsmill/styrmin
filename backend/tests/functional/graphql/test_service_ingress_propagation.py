@@ -113,17 +113,20 @@ async def _seed_environment(session: AsyncSession):
 
 
 async def _seed_deployment(
-    session: AsyncSession, config: dict[str, Any] | None = None
+    session: AsyncSession,
+    config: dict[str, Any] | None = None,
+    services: list[dict[str, Any]] | None = None,
 ) -> UUID:
-    """Seed a deployment whose driver version declares ``DECLARED_SERVICES``, with one
-    ``DeployedService`` row for each, as ``deploy`` creates them."""
+    """Seed a deployment whose driver version declares ``services`` (default ``DECLARED_SERVICES``),
+    with one ``DeployedService`` row for each, as ``deploy`` creates them."""
+    declared_services = DECLARED_SERVICES if services is None else services
     environment = await _seed_environment(session)
     adv = await seed_application_driver_version(session)
-    adv.services = DECLARED_SERVICES
+    adv.services = declared_services
     session.add(adv)
     await session.commit()
     deployment = await seed_deployment(session, environment=environment, adv=adv)
-    for declared in DECLARED_SERVICES:
+    for declared in declared_services:
         session.add(
             DeployedService(
                 driver_service_name=declared["name"],
@@ -143,12 +146,14 @@ async def _seed_deployment(
     return deployment.id
 
 
-async def _seed_deploy_driver(session: AsyncSession) -> tuple[str, UUID]:
-    """A driver version declaring ``DECLARED_SERVICES`` and an environment, for ``deploy``."""
+async def _seed_deploy_driver(
+    session: AsyncSession, services: list[dict[str, Any]] | None = None
+) -> tuple[str, UUID]:
+    """A driver version declaring ``services`` (default ``DECLARED_SERVICES``) and an environment, for ``deploy``."""
     environment = await _seed_environment(session)
     environment_id = environment.id
     adv = await seed_application_driver_version(session, version="1.0.0")
-    adv.services = DECLARED_SERVICES
+    adv.services = DECLARED_SERVICES if services is None else services
     session.add(adv)
     await session.commit()
     driver = await session.get(ApplicationDriver, adv.application_driver_id)

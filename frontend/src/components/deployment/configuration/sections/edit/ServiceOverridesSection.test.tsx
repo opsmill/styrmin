@@ -52,9 +52,12 @@ describe("serviceOverridesSchema", () => {
  * Styrmin builds no Ingress for it and it must not get override fields.
  */
 const SERVICES = [
-  { driverServiceName: "infrahub", scope: "internal" },
-  { driverServiceName: "task-manager", scope: "external" },
-  { driverServiceName: "web", scope: "external" },
+  { driverServiceName: "infrahub", scope: "internal", kind: "http" },
+  { driverServiceName: "task-manager", scope: "external", kind: "http" },
+  { driverServiceName: "web", scope: "external", kind: "https" },
+  // External, but Styrmin builds an Ingress only for http and https (review F4).
+  { driverServiceName: "queue", scope: "external", kind: "tcp" },
+  { driverServiceName: "metrics", scope: "external", kind: "udp" },
 ];
 
 /**
@@ -166,6 +169,18 @@ describe("ServiceOverridesSection: ingress override fields", () => {
     expect(classField("task-manager")).toBeInTheDocument();
     expect(screen.queryByLabelText("Ingress class for infrahub")).toBeNull();
     expect(screen.queryByLabelText("FQDN suffix for infrahub")).toBeNull();
+  });
+
+  it("offers no ingress field for an external tcp or udp service", () => {
+    renderSection();
+
+    expect(classField("task-manager")).toBeInTheDocument();
+    for (const service of ["queue", "metrics"]) {
+      expect(
+        screen.queryByLabelText(`Ingress class for ${service}`),
+      ).toBeNull();
+      expect(screen.queryByLabelText(`FQDN suffix for ${service}`)).toBeNull();
+    }
   });
 
   it("shows the stored override of each service in its own fields", () => {
