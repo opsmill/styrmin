@@ -127,7 +127,7 @@ description: "Task list for accepting prerelease application versions that fit a
 - [X] T024 [P] [US4] In `docs/docs/drivers/loading-drivers.md`, change the sentence that #594 added about a pin (a prerelease "is included only if the range names a prerelease") to state that a prerelease is accepted when its numbers fit the range, and keep the link to the section of T023.
 - [X] T025 [P] [US4] In `CONTEXT.md`, rewrite the glossary entry **Prerelease** (added by #594) to say that a driver version's range accepts a prerelease when its numbers fit, and extend **Application version** to say that the typed text is stored unchanged and a prerelease may be requested. Use the terms of the glossary (driver version, application version, deployment). Do not describe how the check is built.
 - [X] T026 [P] [US4] Rewrite `changelog/591.changed.md` (brought in by T001): one line that says a prerelease application version such as `1.12.0b0` is now accepted when its numbers fit a driver version's range, and that the error for an unsupported version now lists the supported ranges. Follow `dev/guidelines/changelog.md`. Do not edit `CHANGELOG.md`.
-- [ ] T027 [US4] Run `cd docs && pnpm build` and confirm that it passes and that the anchor of T023 exists.
+- [X] T027 [US4] Run `cd docs && pnpm build` and confirm that it passes and that the anchor of T023 exists.
 
 **Checkpoint**: documentation, glossary and changelog match the new behaviour.
 
@@ -135,12 +135,12 @@ description: "Task list for accepting prerelease application versions that fit a
 
 ## Phase 7: Polish and cross-cutting checks
 
-- [ ] T028 Remove the pieces of #594 that the new rule makes unnecessary: delete `backend/tests/e2e/test_prerelease_version.py`, and delete the helper `publish_simple_app_driver_build` from `backend/tests/e2e/helpers/drivers.py` if `grep -rn publish_simple_app_driver_build backend/tests` finds no other user. Confirm that `backend/tests/e2e/helpers/drivers.py` still imports cleanly.
-- [ ] T029 Check once how `styrminctl` and the UI show a refusal, as in [quickstart.md](quickstart.md) step 6: request `2.0.0b1` with `styrminctl deployments create` and in the Deploy form (use the Playwright MCP server for the form, as `AGENTS.md` asks for UI work). Record what each shows in the final report. A rendering defect is a separate issue, not part of this change.
-- [ ] T030 Search for stale statements about the old rule: `grep -rn "names a prerelease\|only if one of its clauses" docs dev CONTEXT.md backend changelog` must return nothing outside the files of this specification.
-- [ ] T031 Run `uv run invoke format lint` and fix every finding it reports.
-- [ ] T032 Run the whole backend suite with `uv run invoke test` and compare with the baseline of T002. Then record the E2E evidence required by constitution principle V in `specs/032-prerelease-version-range/e2e-evidence.md`: the pytest node id, the exact command, the ISO 8601 time of the passing run, the cluster identifier (the `vcluster` fixture id and the kubeconfig path under `/tmp/pytest-of-*/pytest-*/`) and the verbatim `PASSED` line. If the node is dual-entrypoint, record both variants. If the evidence cannot be produced, do not mark the work done; report it.
-- [ ] T033 Walk through [quickstart.md](quickstart.md) steps 1 to 6 once and tick each expected result. Step 4 (a real `infrahub` driver at `1.12.0b0`) is optional: if it is not run, say in the final report that it was not verified.
+- [X] T028 Remove the pieces of #594 that the new rule makes unnecessary: delete `backend/tests/e2e/test_prerelease_version.py`, and delete the helper `publish_simple_app_driver_build` from `backend/tests/e2e/helpers/drivers.py` if `grep -rn publish_simple_app_driver_build backend/tests` finds no other user. Confirm that `backend/tests/e2e/helpers/drivers.py` still imports cleanly.
+- [X] T029 Check once how `styrminctl` and the UI show a refusal, as in [quickstart.md](quickstart.md) step 6: request `2.0.0b1` with `styrminctl deployments create` and in the Deploy form (use the Playwright MCP server for the form, as `AGENTS.md` asks for UI work). Record what each shows in the final report. A rendering defect is a separate issue, not part of this change.
+- [X] T030 Search for stale statements about the old rule: `grep -rn "names a prerelease\|only if one of its clauses" docs dev CONTEXT.md backend changelog` must return nothing outside the files of this specification.
+- [X] T031 Run `uv run invoke format lint` and fix every finding it reports.
+- [X] T032 Run the whole backend suite with `uv run invoke test` and compare with the baseline of T002. Then record the E2E evidence required by constitution principle V in `specs/032-prerelease-version-range/e2e-evidence.md`: the pytest node id, the exact command, the ISO 8601 time of the passing run, the cluster identifier (the `vcluster` fixture id and the kubeconfig path under `/tmp/pytest-of-*/pytest-*/`) and the verbatim `PASSED` line. If the node is dual-entrypoint, record both variants. If the evidence cannot be produced, do not mark the work done; report it.
+- [X] T033 Walk through [quickstart.md](quickstart.md) steps 1 to 6 once and tick each expected result. Step 4 (a real `infrahub` driver at `1.12.0b0`) is optional: if it is not run, say in the final report that it was not verified.
 
 ---
 
