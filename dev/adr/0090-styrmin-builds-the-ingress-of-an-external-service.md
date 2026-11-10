@@ -380,6 +380,15 @@ Each point has its source. None blocks this decision.
   override. The overridden Ingress has no allow-list annotation, so the allow-list is not applied to
   that service (FR-004, FR-005). The help text of the override fields and the entry in the Review
   dialog state that. A write-time warning or refusal is a candidate for a later change.
+- An override class takes a service off the dedicated ingress controller of the environment (FR-008).
+  The `deploy`, `updateDeployment`, `updateDeploymentVersion` and `apply` operations need the
+  READ_WRITE role, while only an ADMIN sets `dedicated_ingress` on a cluster or an environment. A user
+  with READ_WRITE can therefore send a service to any controller class that exists in the cluster, and
+  the controller of that class can then serve the host. Nothing restricts which classes an override may
+  name, and the Ingress has no allow-list annotation (FR-004). The security review of this change graded
+  this Medium. It is plausible and not verified end to end, because it needs a second controller class
+  in the cluster. FR-008 states the replacement as intended, so it is kept. A list of allowed override
+  classes that an ADMIN sets on the cluster or the environment is a candidate for a later change.
 - `_service_overrides_by_deployment` in `services/context.py` reads every peer deployment with
   `uow.deployments.find` on each context generation, so the cost grows with the number of
   deployments. It was not measured.

@@ -184,3 +184,59 @@ Open points for the owner, not decided in this run:
 3. Decide whether to squash, because of decision 2.
 4. Decide whether to update AGENTS.md for macOS (decision 17).
 5. Show the commit message, the file list and the review sections for approval before any push or pull request, as the global rules require.
+
+## 8. Pre-PR gates
+
+The two gates of `~/.claude/CLAUDE.md` ran after the implement run, each in a separate agent that did not write the change. Nothing was pushed and no pull request was opened.
+
+### Code review
+
+| Item | Value |
+|---|---|
+| Skill and level | `code-review`, level `high`, output to the terminal |
+| Checkout | branch `sas-598-service-ingress-spec`, commit `0e19b30f`, base `origin/develop`, merge base `5abe5647`, 141 files, 15,480 insertions, 224 deletions |
+| Who ran it | A different agent from the author. It started three sub-agents (Product Manager, User, Senior Engineer), each told to review only. |
+| Findings | Critical 0, Important 9, Minor 15 |
+
+Important findings and what happened:
+
+| Finding | Decision | Commit |
+|---|---|---|
+| The impact-rule text promised an external DNS record republish that an overridden Ingress does not have | Fixed | `47b454f3` |
+| An override drops the IP allow-list, the external DNS record and the application address without a write-time warning | Fixed in the help text of the override fields and the Review dialog. A write-time warning is an open point in ADR-090. | `47b454f3` |
+| `apply` cleared the stored overrides with no `warning:` line | Fixed: the SDK outcome carries the dropped services and the CLI prints a warning | `630cd948` |
+| The HelmRelease timer let the new `ValueError` escape and skipped its reconcile | Fixed, with a test that failed first | `5b7a644e` |
+| Custom kinds other than Ingress now failed the flow on 403, 422 or 500, which changed existing behaviour | Fixed: only an Ingress error raises, other kinds are logged with status and reason and skipped | `57bf1060` |
+| The changelog did not name the affected drivers, the measured 404 window or the failure mode | Fixed | `2e67cbac` |
+| The fragment for the timer fix ended with an internal sentence | Fixed. Whether the timer fix goes into its own pull request stays the owner's decision. | `2e67cbac` |
+| SC-005 (the sandbox use case) is verified for the public half only | Kept. The pull request description has to say "partially verified": no Tailscale operator was available. | none |
+| FR-002 differs from the PRD and the confirmation is not written on issue #598 | Kept. Writing on the issue needs the owner's request. | none |
+
+Minor findings left as they are: stale "planned symbol" comments in two test files, `ingress_class` shown for an external tcp or udp service that gets no Ingress, the cost of the peer-deployment lookup (not measured), the redundant settings fallback, no validation of the cluster, environment and deployment `ingress_class`, no shared test cases for the Python and TypeScript rules, the placeholder `inherited` hides the inherited value, the suffix message is generic for a leading dot or uppercase, the error text has no `aria-live`, the override group is hidden without a word when no external http or https service exists, the heading "Service ingress overrides" resembles the service name override rows, the Upgrade refusal names only the first service, a driver version change resets typed ingress rows, the long sentence in `598.added.md`, and the commits that are not each green.
+
+After the fixes the full backend run gave `1 failed, 6134 passed, 8 skipped` (the known telemetry test), the frontend `1271 passed`, the SDK `389 passed` and the CLI `420 passed`. The two end-to-end tests that touch the changed operator and apply code passed on commit `2e67cbac`: the override test `[api-chromium]` (`1 passed, 1 deselected, 4 warnings in 366.73s`) and `test_deploy_generic_app[api-chromium]` (`1 passed, 1 deselected, 4 warnings in 174.70s`). The vCluster identifiers and kubeconfig paths are in `e2e-evidence.md`, section "Code-review gate fixes".
+
+One test, `DeployFormPage.test.tsx` "shows the same formatted label on the trigger when a version is selected", fails when its file runs alone and passes in the full run. It also failed without the gate fixes. The cause was not investigated.
+
+### Security review
+
+| Item | Value |
+|---|---|
+| Skill | built-in `security-review` |
+| Checkout | branch `sas-598-service-ingress-spec`, commit `084726a3`, `origin/HEAD` is `origin/develop`, merge base `5abe5647`, 143 files, 15,891 insertions, 229 deletions, working tree empty |
+| Who ran it | A different agent from the author. It did the identification and the false-positive filtering in one context and did not start the skill's sub-tasks. |
+| Findings | High 0, Medium 1, Low 3 |
+
+Medium finding and what happened:
+
+| Finding | Decision |
+|---|---|
+| A user with the READ_WRITE role can set an override class and so take a service off the dedicated ingress controller that an ADMIN set for the environment (`ingress.py` `_override_class_rules`). The Ingress then has no allow-list annotation. Plausible, not verified end to end: it needs a second controller class in the cluster. | Kept. FR-008 states that an overridden Ingress gets the override class instead of the dedicated controller rule. The effect is recorded as an open point in ADR-090. A list of allowed override classes that an ADMIN sets is a candidate for a later change. |
+
+Low findings left as they are: the overridden Ingress has no allow-list annotation (recorded, and a deployer can already widen `ip_whitelist`), the create-or-replace on 409 in the agent replaces an object that has the Ingress name without an ownership check (the name comes from the driver author, so no privilege is gained), and the context lists the override of peer deployments in the same environment (intended by FR-006, not a cross-environment read).
+
+The reviewer found no issue in these surfaces: injection through the override class and suffix (16 hostile values rejected on both fields), the service name key, host construction, label forging for a dedicated controller, operator scope (label selectors, namespace, chart Ingresses carry `managed-by=Helm`), operator RBAC (no chart changed, no resource limits), authorisation (no new mutation), typed error messages, the stored `null` and non-list shapes, frontend rendering (no raw HTML), the driver templates, and secrets in the added files.
+
+### Dependency scan
+
+Not applicable. No manifest or lock file changed.
