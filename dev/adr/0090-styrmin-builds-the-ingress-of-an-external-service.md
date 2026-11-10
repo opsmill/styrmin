@@ -255,6 +255,10 @@ Ingress. ADR-071 is marked "superseded in part" and points here.
     at its next reconcile. Simon AURA--SCUSSEL accepted this without a guard on 2026-11-10, because
     Styrmin cannot tell whether a chart renders an Ingress without rendering the chart (research
     D-012). A downgrade to such a driver version has the same effect.
+  - An apply error on an Ingress now fails the deploy flow. An ingress controller that rejects an
+    Ingress with a host and path that another Ingress already has could therefore fail the deploy
+    flow of a deployment that gets the second Ingress. This is plausible and not verified: no
+    controller that rejects a duplicate was tested.
   - The three drivers of this repository changed in the same release, so for them the Styrmin
     upgrade and the driver version upgrade come together. The end-to-end test of `generic-app`
     version 2 found one Ingress, `styrmin-svc-app`. A run of the same test before the driver change
