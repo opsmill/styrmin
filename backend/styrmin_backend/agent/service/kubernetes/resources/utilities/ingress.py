@@ -23,6 +23,7 @@ from styrmin_backend.context.fqdn import (
 )
 from styrmin_backend.context.models.config import ResolvedConfig, ServiceConfigBlock
 from styrmin_backend.context.models.contexts import GlobalContext
+from styrmin_backend.context.namespace_labels import build_namespace_labels
 
 SERVICE_INGRESS_NAME_PREFIX = "styrmin-svc-"
 SERVICE_NAME_LABEL = "styrmin.io/service-name"
@@ -123,6 +124,24 @@ def _override_class_rules(
             False,
         )
     return _resolved_class_rules(config)
+
+
+def _deployment_labels(context: GlobalContext) -> dict[str, str]:
+    """Return the labels that the post-render patch gives every object of the chart.
+
+    ``styrmin/environment_id`` is the one that matters here: a dedicated ingress controller
+    starts with ``--providers.kubernetesingress.labelselector=styrmin/environment_id=<id>``
+    (``services/ingress_controller/templates/chart_values.j2.yaml``) and ignores an Ingress
+    without it. ``styrmin/deployment_id`` is the other label that every chart object has.
+    A context label with no value is left out, so no label has an empty value or the text ``None``.
+    """
+    return build_namespace_labels(
+        {
+            key: value
+            for key, value in context.labels.items()
+            if value is not None and value != ""
+        }
+    )
 
 
 class IngressUtility(Utility):
@@ -347,7 +366,10 @@ class IngressUtility(Utility):
                     "metadata": {
                         "name": f"{SERVICE_INGRESS_NAME_PREFIX}{service['driver_service_name']}",
                         "namespace": namespace,
-                        "labels": {SERVICE_NAME_LABEL: service["driver_service_name"]},
+                        "labels": {
+                            **_deployment_labels(context),
+                            SERVICE_NAME_LABEL: service["driver_service_name"],
+                        },
                         "annotations": annotations,
                     },
                     "spec": spec,
