@@ -51,20 +51,49 @@ objects use are listed in the comment above
 ``DeploymentDetailPage.set_service_ingress_overrides`` and in the docstring of
 ``DeployFormPage.read_service_ingress_fields``. The deploy form step opens the form
 (``DeployFormPage.goto``) before it selects the driver version.
+
+Refused changes (user story 4)
+------------------------------
+``test_service_ingress_override_refusals_name_the_service`` is ``api_only``: every action goes
+through the SDK and the Kubernetes API, and the UI shows the same typed errors in the same
+form (T053). It uses the same ``deployed_infrahub_enterprise_app`` stack and boots nothing:
+
+1. An override on ``infrahub`` (``scope: internal``) returns ``SERVICE_INGRESS_NOT_BUILT``
+   (FR-009). Nothing is stored and no task starts.
+2. With an override stored on ``task-manager``, a version change to a second build of the
+   ``infrahub-enterprise`` driver that declares ``task-manager`` internal returns
+   ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` (FR-010), both without ``input`` and with
+   the ``input`` that ``styrminctl deployments apply`` sends (ADR-065). No task starts, no
+   pod is replaced, the deployment stays on its driver version and the override is still
+   stored.
+
+The second build is pushed to the in-cluster git server as a branch and supports only
+application versions ``>=1.7.0,<1.8``, so no other test resolves to it by mistake. The
+refusal comes before any rollout, so no ``1.7.0`` image is pulled. The upgrade that this
+refusal prevents, and the one that a clearing request allows, run in the functional tests
+(``test_service_ingress_validation.py``), because an Infrahub upgrade takes too long here.
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 from typing import Any
 
 import kr8s.asyncio
 import pytest
+import yaml
+from dulwich import porcelain
 from kr8s.asyncio.objects import Deployment as AsyncDeployment
 from kr8s.asyncio.objects import Ingress as AsyncIngress
+from kr8s.asyncio.objects import Pod as AsyncPod
+from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
+from styrmin_sdk.exceptions import OperationFailedError
+from styrmin_sdk.models import ServiceConfigInput, UpdateDeploymentInput
 
+from tests.e2e.conftest import _portforward
 from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.drivers.api_driver import ApiScenarioDriver
 from tests.e2e.pages.deploy_form import DeployFormPage
@@ -435,6 +464,193 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
                 )
                 == inherited_summary
             )
+    finally:
+        # The deployment is shared with the other Infrahub tests of the shard.
+        deployment = await client.deployments.get(deployment_id)
+        if (deployment.config or {}).get("services"):
+            await _change_services(ApiScenarioDriver(client), client, deployment_id, {})
+
+
+# ---------------------------------------------------------------------------
+# User story 4: refused changes name the service (FR-009, FR-010, SC-004)
+# ---------------------------------------------------------------------------
+
+_INTERNAL_BUILD_BRANCH = "task-manager-internal"
+# Only this application version resolves to the second build (see the module docstring).
+_INTERNAL_BUILD_SUPPORTED_VERSIONS = ">=1.7.0,<1.8"
+_INTERNAL_BUILD_APPLICATION_VERSION = "1.7.0"
+
+_TASK_MANAGER_OVERRIDE_INPUT = ServiceConfigInput(
+    name="task-manager", ingress_class=_OVERRIDE_CLASS, fqdn_suffix=_OVERRIDE_SUFFIX
+)
+
+
+async def _publish_task_manager_internal_build(
+    *, vcluster: dict, tmp_path: Path
+) -> str:
+    """Push a second build of the ``infrahub-enterprise`` driver that declares ``task-manager``
+    ``scope: internal``, as a branch of the in-cluster git server. Return the branch name.
+
+    Clones the repository that the session pushed, so the rest of the driver is identical.
+    ``spec.version`` is the next integer, and ``supported_versions`` is narrowed to
+    ``_INTERNAL_BUILD_SUPPORTED_VERSIONS`` so that no other test resolves to this build.
+    """
+    repo_dir = tmp_path / "infrahub-enterprise-internal"
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
+    git_svc = await AsyncService.get("git-server", namespace="default", api=kr8s_api)
+    async with _portforward(git_svc, remote_port=9418) as local_port:
+        local_url = f"git://localhost:{local_port}/infrahub-enterprise.git"
+        await asyncio.to_thread(porcelain.clone, local_url, str(repo_dir))
+
+        spec_path = repo_dir / "driver.styrmin.yml"
+        spec = yaml.safe_load(spec_path.read_text())
+        spec["spec"]["version"] = str(int(spec["spec"]["version"]) + 1)
+        spec["spec"]["supported_versions"] = _INTERNAL_BUILD_SUPPORTED_VERSIONS
+        (task_manager,) = [
+            s for s in spec["spec"]["services"] if s["name"] == "task-manager"
+        ]
+        assert task_manager["scope"] == "external", task_manager
+        task_manager["scope"] = "internal"
+        spec_path.write_text(yaml.dump(spec, default_flow_style=False))
+
+        await asyncio.to_thread(
+            porcelain.add, str(repo_dir), paths=["driver.styrmin.yml"]
+        )
+        await asyncio.to_thread(
+            porcelain.commit,
+            str(repo_dir),
+            message=b"declare task-manager internal",
+            author=b"test <test@test.com>",
+            committer=b"test <test@test.com>",
+        )
+        await asyncio.to_thread(
+            porcelain.push,
+            str(repo_dir),
+            remote_location=local_url,
+            refspecs=[f"HEAD:refs/heads/{_INTERNAL_BUILD_BRANCH}".encode()],
+        )
+    return _INTERNAL_BUILD_BRANCH
+
+
+async def _rollout_state(kr8s_api: Any, namespace: str) -> dict[str, Any]:
+    """What a pod change would alter: each pod's uid and restart counts, and the generation
+    of the ``task-manager`` workload, which changes when its pod template changes."""
+    pods = {
+        pod.name: (
+            pod.raw["metadata"]["uid"],
+            tuple(
+                status["restartCount"]
+                for status in pod.raw.get("status", {}).get("containerStatuses", [])
+            ),
+        )
+        async for pod in AsyncPod.list(namespace=namespace, api=kr8s_api)
+    }
+    workload = await AsyncDeployment.get(
+        _TASK_MANAGER_WORKLOAD, namespace=namespace, api=kr8s_api
+    )
+    return {
+        "pods": pods,
+        "task_manager_generation": workload.raw["metadata"]["generation"],
+    }
+
+
+@pytest.mark.ci
+@pytest.mark.api_only(
+    reason="Every action goes through the SDK and the Kubernetes API; the UI shows the "
+    "same typed errors (T053) and the dual-entrypoint scenario is the test above"
+)
+async def test_service_ingress_override_refusals_name_the_service(
+    deployed_infrahub_enterprise_app: dict,
+    styrmin_resources: dict,
+    git_server: dict[str, str],
+    vcluster: dict,
+    tmp_path: Path,
+) -> None:
+    """An override on an internal service, and a version change that would drop an override,
+    are refused with an error that names the service. Nothing changes in the cluster."""
+    deployment_id = deployed_infrahub_enterprise_app["deployment_id"]
+    namespace = deployed_infrahub_enterprise_app["namespace"]
+    client: StyrminClient = styrmin_resources["client"]
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
+
+    try:
+        config_before = (await client.deployments.get(deployment_id)).config
+        known = await _task_ids(client, deployment_id)
+        state_before = await _rollout_state(kr8s_api, namespace)
+
+        # --- Scenario 1 (FR-009): an override on the internal ``infrahub`` service ---
+        with pytest.raises(OperationFailedError) as not_built:
+            await client.deployments.update(
+                deployment_id,
+                input=UpdateDeploymentInput(
+                    services=[
+                        ServiceConfigInput(
+                            name="infrahub", ingress_class=_OVERRIDE_CLASS
+                        )
+                    ]
+                ),
+            )
+        assert not_built.value.typename == "SERVICE_INGRESS_NOT_BUILT", not_built.value
+        assert not_built.value.extensions["service_name"] == "infrahub"
+        assert not_built.value.extensions["scope"] == "internal"
+        assert "'infrahub'" in str(not_built.value)
+        assert "does not build" in str(not_built.value)
+        assert await _task_ids(client, deployment_id) == known
+        assert (await client.deployments.get(deployment_id)).config == config_before
+        assert await _rollout_state(kr8s_api, namespace) == state_before
+
+        # --- Scenario 2 (FR-010): a version change that makes task-manager internal ---
+        branch = await _publish_task_manager_internal_build(
+            vcluster=vcluster, tmp_path=tmp_path
+        )
+        internal_build = await client.drivers.load_version(
+            git_server["infrahub-enterprise"], branch
+        )
+        deployment = await client.deployments.get(deployment_id)
+        bound_driver_version = str(deployment.application_driver_version_id)
+        bound_version = deployment.application_driver_version.version
+        assert bound_driver_version != str(internal_build.id)
+
+        await _change_services(
+            ApiScenarioDriver(client), client, deployment_id, _OVERRIDE
+        )
+        stored_config = (await client.deployments.get(deployment_id)).config
+        assert stored_config["services"] == _OVERRIDE, stored_config
+        known = await _task_ids(client, deployment_id)
+        state_before = await _rollout_state(kr8s_api, namespace)
+
+        # Without ``input``, and with the ``input`` that ``apply`` sends (ADR-065).
+        for input_ in (
+            None,
+            UpdateDeploymentInput(services=[_TASK_MANAGER_OVERRIDE_INPUT]),
+        ):
+            with pytest.raises(OperationFailedError) as dropped:
+                await client.deployments.update_version(
+                    deployment_id,
+                    _INTERNAL_BUILD_APPLICATION_VERSION,
+                    driver_version_id=str(internal_build.id),
+                    input=input_,
+                )
+            error = dropped.value
+            assert error.typename == "SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED", error
+            assert error.extensions["service_name"] == "task-manager", error.extensions
+            assert error.extensions["reason"] == "internal", error.extensions
+            assert error.extensions["current_version"] == bound_version, (
+                error.extensions
+            )
+            assert error.extensions["target_version"] == internal_build.version, (
+                error.extensions
+            )
+            assert bound_version != internal_build.version
+            assert "'task-manager'" in str(error)
+
+            # No task, no pod change, same driver version, override still stored.
+            assert await _task_ids(client, deployment_id) == known
+            assert await _rollout_state(kr8s_api, namespace) == state_before
+            deployment = await client.deployments.get(deployment_id)
+            assert str(deployment.application_driver_version_id) == bound_driver_version
+            assert deployment.application_version == "1.6.0"
+            assert deployment.config == stored_config
     finally:
         # The deployment is shared with the other Infrahub tests of the shard.
         deployment = await client.deployments.get(deployment_id)
