@@ -1000,3 +1000,56 @@ Reviewer: code (C), tests (T), comments (K), errors (E), types (Y), simplify (S)
 | Types, medium: suffix and class rules in two languages without shared cases; untyped `deployed_services` | recorded | `c3014f26` |
 | Tests: kopf details beyond M4, join test of `compute_service_address` and the builder, FR-005, FR-011 and FR-014 (documentation only), SC-005, no test reads an override back through the CLI | recorded | `c3014f26` |
 | Errors: `apply_utility_resources` swallow for NetworkPolicy; the `ValueError` for a missing suffix reaches Prefect as a plain exception | recorded (the text improved) | `c3014f26` |
+
+# Code-review gate fixes (#598)
+
+The pre-PR code review of commit `0e19b30f` reported seven findings graded IMPORTANT (I1 to I7). Each was checked against the code before it was changed. Times are UTC. `<scratchpad>` is `/private/tmp/claude-503/-Users-Simon-styrmin-598-spec/2ab6e2fa-7180-493d-8211-590f003133bd/scratchpad`.
+
+| Finding | Decision | Commit |
+|---|---|---|
+| I1 The Review dialog text for `services[*].fqdnSuffix` says an external DNS record is republished, but an overridden Ingress has no external-dns annotation | Defect confirmed (`utilities/ingress.py` 373-376, FR-004). Text rewritten for both service rules; a Vitest assertion pins it | `47b454f3` |
+| I2 No warning that an override drops the allow-list, the external DNS record and the application address | Confirmed. One sentence in `ServiceIngressFields.tsx` (shared by the drawer and the deploy form), the Review dialog text of I1, a Vitest assertion, and an open point in ADR-090 (no write-time warning when `ip_whitelist` is set) | `47b454f3` |
+| I3 `apply` with config keys and no `services` clears the stored overrides without a warning | Confirmed. `ApplyOutcome.dropped_service_overrides` and a `warning:` line on stderr; SDK and CLI tests; docs updated | `630cd948` |
+| I4 The HelmRelease timer does not catch the `ValueError` of the builder | Confirmed by a test that failed with the escaping `ValueError`. The timer logs with `logger.exception` and returns | `5b7a644e` |
+| I5 `apply_utility_resources` now fails the flow for any custom kind refused with a status other than 404 | Confirmed against `origin/develop`, which logged and skipped every `ApiException`. Only an Ingress error raises; every other kind is skipped and logged with the status and reason. ADR-090, the implementation report and this file corrected | `57bf1060` |
+| I6 Changelog, beta status and ADR do not name the affected drivers, the HTTP 404 window or the failure mode | Fragments rewritten in short sentences; affected drivers read again from `driver/examples/*/driver.styrmin.yml` (only `generic-app`, `infrahub` and `infrahub-enterprise` declare `scope: external`; versions 2, 6 and 5). beta-status and ADR-090 follow | `2e67cbac` |
+| I7 The release-reference fragment ends with an internal sentence | Rewritten for release notes readers | `2e67cbac` |
+
+## Tests that fail before the fix and pass after it
+
+| Finding | Test | Before | After |
+|---|---|---|---|
+| I1 | `config-impact.test.ts` "states that an overridden Ingress carries only the ingress class" | `AssertionError: expected 'Ingress of this service will be recre…' to contain 'only the ingress class'` | passed |
+| I2 | `ServiceOverridesSection.test.tsx` "says that an overridden Ingress carries only the ingress class" | `Unable to find an element by: [data-testid="service-ingress-override-note"]` | passed |
+| I3 SDK | `python_sdk/tests/test_deployments.py` (5 new tests on `dropped_service_overrides`) | `AttributeError: 'ApplyOutcome' object has no attribute 'dropped_service_overrides'` (5 failed, 1 passed in the selection) | 142 passed |
+| I3 CLI | `cli/tests/test_deployments.py` (4 new tests) | `assert [] == ['warning: my...s to keep it']` | 420 passed |
+| I4 | `test_ingress_release_reference_label.py::TestTheHelmReleaseTimerSurvivesAContextThatCannotBeBuilt` | `ValueError: FQDN suffix is required to build the Ingress of deployment 00000000-0000-0000-0000-0000000000aa (application 'testapp'): ...` | 42 passed in the two operator test files |
+| I5 | `test_apply_utility_resources.py::test_a_custom_kind_other_than_ingress_is_skipped_whatever_the_status[403, 422, 500]` | `kubernetes_asyncio.client.exceptions.ApiException: (403)`, `(422)`, `(500)`; 3 failed, 5 passed | 8 passed |
+
+The Ingress cases (403, 422, 500 raise) and the 404 case (skipped, logged with status and reason) were already in the file and pass unchanged.
+
+## Checks on the final code commit `2e67cbac`
+
+- `uv run invoke format lint`: exit 0 (ruff, rumdl "No issues found in 81 files", `283/283 .graphql files passed validation`, generated types up to date).
+- `uv run invoke test`: `1 failed, 6134 passed, 8 skipped, 41 warnings in 268.44s (0:04:28)`. The one failure is the known one, `tests/unit/services/telemetry/test_sender.py::test_send_report_returns_false_when_the_connection_is_refused` (`assert 7.7986050840700045 < 2`).
+- `pnpm test`: `Test Files 105 passed (105)`, `Tests 1271 passed (1271)`. `pnpm lint`: 0 errors, 35 warnings. `pnpm exec tsc -b`: no output. `pnpm build`: built.
+- `python_sdk/tests`: 389 passed. `cli/tests`: 420 passed. `docs` build: `Generated static files in "build"`.
+- `uv run styrmin export graphql-schema schema.graphql` and `uv run invoke generate`: no diff. `uv run towncrier build --draft --version x`: renders the three fragments.
+- `src/__tests__/deploy-form/DeployFormPage.test.tsx` "shows the same formatted label on the trigger when a version is selected" failed in 5 of 5 runs of that file alone with this change and in 1 of 2 runs without it (`Unable to perform pointer interaction as the element has pointer-events: none`). The test selects a driver version with `services: []`, so the component of I2 renders nothing there. It passed in the full run. It is timing dependent and not caused by this change; the cause is not investigated.
+
+## End-to-end runs on `2e67cbac`
+
+Tree clean at the start of each run (`<scratchpad>/gate/<name>.status` is empty). Command, from the repository root, one run after the other (`sleep 86400` held standard input open through a process substitution, because a pipe waited for `sleep`; the runner is `<scratchpad>/gate/run_e2e.sh`):
+
+```bash
+uv run pytest "<node id>" -k api-chromium -v -s --pdb < <(sleep 86400) > <scratchpad>/gate/<name>.log 2>&1
+```
+
+| Node id | Started | vCluster | Kubeconfig | Result line |
+|---|---|---|---|---|
+| `backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_moves_only_the_overridden_service` | 2026-11-10T18:45:10Z | `pytest-fbf9db71-efce-40bc-a000-2eadb9e1a8cf` | `/private/var/folders/h8/b5b4gccj4h5c0sjlqjymm1y40000gq/T/pytest-of-Simon/pytest-1499/vcluster0/kubeconfig` | `PASSED19:51:12 info Removing vCluster container vcluster.cp.pytest-fbf9db71-efce-40bc-a000-2eadb9e1a8cf...` and `=========== 1 passed, 1 deselected, 4 warnings in 366.73s (0:06:06) ============` |
+| `backend/tests/e2e/test_deploy_generic_app.py::test_deploy_generic_app` | 2026-11-10T18:51:20Z | `pytest-e5f7c94e-5203-4106-9d89-1ff0473f7dc5` | `/private/var/folders/h8/b5b4gccj4h5c0sjlqjymm1y40000gq/T/pytest-of-Simon/pytest-1500/vcluster0/kubeconfig` | `PASSED19:54:13 info Removing vCluster container vcluster.cp.pytest-e5f7c94e-5203-4106-9d89-1ff0473f7dc5...` and `=========== 1 passed, 1 deselected, 4 warnings in 174.70s (0:02:54) ============` |
+
+The pytest directory of each run is inferred from the modification time of the kubeconfig files (19:45 and 19:51 local time, UTC+1); the logs do not print the path. Both runs ended at the first attempt, with no pause at `pdb`. Afterwards `pgrep` found no `sleep 86400`, `pytest` or `vcluster` process and `docker ps` listed no vCluster container.
+
+Not covered by these runs: the warning of I3 (a unit-level and CLI-level change, not run against a live server) and the log text of I5 (unit tests only).
