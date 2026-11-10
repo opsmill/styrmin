@@ -8,7 +8,7 @@
 
 Styrmin builds one Ingress for every service that its driver declares `scope: external`, in the existing `ingress` utility, instead of patching the Ingress that a chart renders. An operator can override the ingress class and the FQDN suffix of one such service in the deployment's config (a new `services` block next to `components`), in a manifest, through GraphQL and in the UI. A change to the driver version that would drop an override is refused before any pod changes. The `infrahub` and `infrahub-enterprise` drivers move the task manager to this model, and `generic-app` stops rendering its own Ingress.
 
-The research found one conflict in the PRD (D-003: the application address would be claimed twice in the `infrahub` driver) and one open risk (R-1 in D-012: existing external-declaring deployments get two Ingresses on the next reconcile). The critique ([critique-20261110-1000.md](critiques/critique-20261110-1000.md)) confirmed the first (finding E1), and the spec now carries the changed FR-002. The second stays a question for the PRD owner (finding P1), and the spec states it as an edge case.
+The research found one conflict in the PRD (D-003: the application address would be claimed twice in the `infrahub` driver) and one open risk (R-1 in D-012: existing external-declaring deployments get two Ingresses on the next reconcile). The critique ([critique-20261110-1000.md](critiques/critique-20261110-1000.md)) confirmed the first (finding E1), and the spec now carries the changed FR-002. The second (finding P1) is accepted without a guard, by decision of Simon AURA--SCUSSEL on 2026-11-10, and the spec states it as an edge case.
 
 ## Technical Context
 
@@ -145,8 +145,8 @@ Reuse before booting: extend `test_infrahub_services.py`, `test_deploy_generic_a
 
 ## Risks and open items
 
-- **D-003 (PRD conflict)**: the application address rule differs from the PRD wording. Needs the PRD owner's confirmation.
-- **R-1 (D-012)**: a Styrmin release makes existing external-declaring deployments render two Ingresses on one host on the next reconcile, before any driver upgrade. Needs the PRD owner's decision; the migration guide must say so either way.
+- **D-003 (PRD conflict)**: the application address rule differs from the PRD wording. Confirmed by Simon AURA--SCUSSEL on 2026-11-10.
+- **R-1 (D-012)**: a Styrmin release makes existing external-declaring deployments render two Ingresses on one host on the next reconcile, before any driver upgrade. Accepted without a guard (decision of Simon AURA--SCUSSEL, 2026-11-10); the migration guide and the changelog state it.
 - **D-005**: stability of the `DeployedService` id across version changes is not verified. First task checks it.
 - **D-002**: operator RBAC for `ingresses`, and deletion with the namespace, are not verified.
 - **D-009**: whether the manifest model needs a hand-written change is not verified.
