@@ -476,6 +476,10 @@ async def apply(
     clears it), while ``spec.parameters`` uses merge semantics (entries
     merge on top of the persisted parameters dict).
 
+    ``spec.config.services`` lists the ingress override of each external service
+    (``name``, ``ingress_class``, ``fqdn_suffix``). A manifest with other
+    ``spec.config`` fields and no ``services`` clears the stored overrides.
+
     When a manifest changes an existing deployment's application version, a
     ``warning:`` line on stderr names the components whose image override has
     no ``{{ app.version }}`` token (they stay pinned). The exit code is unchanged.

@@ -63,6 +63,7 @@ from styrmin_sdk.graphql._generated.input_types import (
     DeploymentConfigInput,
     EnvVarInput,
     ParameterValueInput,
+    ServiceConfigInput,
     ServiceNameOverride,
     UpdateDeploymentInput,
 )
@@ -231,6 +232,20 @@ def _stored_component_inputs(config: object) -> dict[str, ComponentConfigInput]:
             replicas=block.get("replicas"),
         )
     return blocks
+
+
+def _stored_service_inputs(config: object) -> list[ServiceConfigInput]:
+    """The stored ``config.services`` blocks as inputs that resend each ingress override unchanged."""
+    stored = config.get("services") if isinstance(config, dict) else None
+    return [
+        ServiceConfigInput(
+            name=name,
+            ingress_class=block.get("ingress_class"),
+            fqdn_suffix=block.get("fqdn_suffix"),
+        )
+        for name, block in (stored or {}).items()
+        if isinstance(block, dict)
+    ]
 
 
 def _build_update_input(manifest: ResolvedManifest) -> UpdateDeploymentInput:
@@ -577,8 +592,9 @@ class DeploymentResource(BaseResource):
 
         ``components`` replaces every stored block, so the other stored blocks and the
         component's other overrides (env vars, image, ``command``, ``args``) are resent
-        unchanged. A write between the read and the update is overwritten. Returns ``None``
-        when nothing changes, like :meth:`update`.
+        unchanged. The stored ``services`` ingress overrides are resent unchanged too,
+        because the update replaces the whole stored config. A write between the read and
+        the update is overwritten. Returns ``None`` when nothing changes, like :meth:`update`.
         """
         deployment = await self.get(deployment_id)
         blocks = _stored_component_inputs(deployment.config)
@@ -586,7 +602,11 @@ class DeploymentResource(BaseResource):
         target = target.model_copy(update={"replicas": replicas})
         if target.model_dump(exclude={"name"}, exclude_none=True):
             blocks[component] = target
-        return await self.update(deployment_id, input=UpdateDeploymentInput(components=list(blocks.values())))
+        services = _stored_service_inputs(deployment.config)
+        return await self.update(
+            deployment_id,
+            input=UpdateDeploymentInput(components=list(blocks.values()), services=services or None),
+        )
 
     async def delete(self, deployment_id: str | UUID) -> DeleteDeploymentDeleteDeployment:
         """Request deletion of a deployment.

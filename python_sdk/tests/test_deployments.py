@@ -947,6 +947,89 @@ async def test_apply_create_sends_component_replicas(client: StyrminClient, mock
     assert deploy_vars["config"] == {"components": [{"name": "task-worker", "replicas": 4}]}
 
 
+_SERVICES_MANIFEST = """\
+apiVersion: styrmin/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  driver: my-app
+  version: "1.0.0"
+  environment: prod
+  config:
+    services:
+      - name: task-manager
+        ingress_class: tailscale
+        fqdn_suffix: tailnet.example.ts.net
+      - name: api
+        ingressClass: other-class
+"""
+
+_SERVICES_INPUT = [
+    {"name": "task-manager", "ingressClass": "tailscale", "fqdnSuffix": "tailnet.example.ts.net"},
+    {"name": "api", "ingressClass": "other-class"},
+]
+
+
+async def test_apply_files_update_sends_the_service_ingress_overrides(
+    client: StyrminClient, mock_transport: AsyncMock, tmp_path: Path
+) -> None:
+    """``config.services`` in a YAML manifest reaches ``updateDeploymentVersion(input:)`` with both
+    spellings of a key, and is not dropped like an unknown key (#598)."""
+    manifest_path = tmp_path / "app.yaml"
+    manifest_path.write_text(_SERVICES_MANIFEST, encoding="utf-8")
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+    ]
+
+    [outcome] = await client.deployments.apply_files([manifest_path])
+
+    assert outcome.action == "updated"
+    version_vars = mock_transport.execute.call_args_list[2].args[1]
+    assert version_vars["input"] == {"services": _SERVICES_INPUT}
+
+
+async def test_apply_files_create_sends_the_service_ingress_overrides(
+    client: StyrminClient, mock_transport: AsyncMock, tmp_path: Path
+) -> None:
+    manifest_path = tmp_path / "app.yaml"
+    manifest_path.write_text(_SERVICES_MANIFEST, encoding="utf-8")
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _missing_deployment_response(),
+        _deploy_response(),
+    ]
+
+    [outcome] = await client.deployments.apply_files([manifest_path])
+
+    assert outcome.action == "created"
+    deploy_vars = mock_transport.execute.call_args_list[2].args[1]
+    assert deploy_vars["config"] == {"services": _SERVICES_INPUT}
+
+
+async def test_apply_files_sends_no_services_when_the_manifest_has_none(
+    client: StyrminClient, mock_transport: AsyncMock, tmp_path: Path
+) -> None:
+    """A manifest with other config fields and no ``services`` sends none, which clears the stored
+    overrides (full replacement)."""
+    manifest_path = tmp_path / "app.yaml"
+    manifest_path.write_text(
+        _SERVICES_MANIFEST.split("    services:", maxsplit=1)[0] + "    ip_whitelist: []\n", encoding="utf-8"
+    )
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+    ]
+
+    await client.deployments.apply_files([manifest_path])
+
+    version_vars = mock_transport.execute.call_args_list[2].args[1]
+    assert version_vars["input"] == {"ipWhitelist": []}
+
+
 _SEMAPHORE_EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "deployments" / "semaphore.yml"
 
 
@@ -2515,6 +2598,44 @@ async def _scale(
     await client.deployments.scale("dep-1", component, replicas)
     sent: UpdateDeploymentInput = update.call_args.kwargs["input"]
     return sent
+
+
+async def test_scale_resends_the_stored_service_ingress_overrides(
+    client: StyrminClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``updateDeployment`` replaces the whole stored config, so ``scale`` resends ``services`` (#598)."""
+    deployment = type(
+        "Deployment",
+        (),
+        {
+            "config": {
+                "components": _STORED_COMPONENTS,
+                "services": {
+                    "task-manager": {"ingress_class": "tailscale", "fqdn_suffix": "tailnet.example.ts.net"},
+                    "api": {"ingress_class": "other-class"},
+                },
+            }
+        },
+    )()
+    update = AsyncMock(return_value=None)
+    monkeypatch.setattr(client.deployments, "get", AsyncMock(return_value=deployment))
+    monkeypatch.setattr(client.deployments, "update", update)
+
+    await client.deployments.scale("dep-1", "server", 5)
+
+    sent: UpdateDeploymentInput = update.call_args.kwargs["input"]
+    assert sent.model_dump(by_alias=True, exclude_none=True)["services"] == [
+        {"name": "task-manager", "ingressClass": "tailscale", "fqdnSuffix": "tailnet.example.ts.net"},
+        {"name": "api", "ingressClass": "other-class"},
+    ]
+
+
+async def test_scale_sends_no_services_when_none_is_stored(
+    client: StyrminClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent = await _scale(client, monkeypatch, "server", 5)
+
+    assert sent.services is None
 
 
 async def test_scale_changes_only_the_count(client: StyrminClient, monkeypatch: pytest.MonkeyPatch) -> None:

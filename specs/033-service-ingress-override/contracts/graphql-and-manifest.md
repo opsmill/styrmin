@@ -31,7 +31,7 @@ Semantics, as for `components`:
 
 ## GraphQL output
 
-On the deployment config type (read back by the UI and the CLI): `services: [ServiceConfig!]` with `name`, `ingressClass`, `fqdnSuffix`.
+On `Deployment` (`Deployment.config` is untyped JSON, so the typed output has no other home): `serviceIngressOverrides: [ServiceIngressOverride!]!` with `name`, `ingressClass`, `fqdnSuffix`, sorted by service name. The stored block is also in `Deployment.config["services"]`, which the CLI reads. The final names are in `schema.graphql` (T028).
 
 On `DeployedService` (read by the Networking summary), new fields:
 
@@ -70,7 +70,7 @@ spec:
 - The SDK manifest model needs no hand-written change: `spec.config` is a free-form dict, validated against the generated `UpdateDeploymentInput` and `DeploymentConfigInput`. The `services` field appears in them after `uv run invoke generate`. Before that, the generated models ignore a `services` key without an error.
 - A manifest whose `spec.config` has at least one key and no `services` clears the overrides, as it clears `components` overrides (full replacement of the stored config). A manifest with an empty or absent `spec.config` keeps the stored config, overrides included.
 - A key that is not `name`, `ingress_class` or `fqdn_suffix` in a row is ignored by the generated SDK models, because they do not forbid extra fields. The separate bug, where `apply` ignores unknown component keys, is out of scope ([#598](https://github.com/opsmill/styrmin/issues/598)); the new block must not be dropped by it, and a test applies a manifest and reads the override back. The server stores the typed block with `extra="forbid"`, so an unknown key that reaches it is an error.
-- `DeploymentResource.scale` sends only `components` and the update replaces the whole config, so it would clear a stored `services` block. The plan must resend the stored `services` there, or document the limit (research D-009).
+- `DeploymentResource.scale` sent only `components` and the update replaces the whole config, so it cleared a stored `services` block (reproduced in T030a). It now resends the stored `services`. It still clears every other config key that is not `components` (for example `ip_whitelist`, `env_vars`): not changed by this feature.
 
 ## Driver template data
 
