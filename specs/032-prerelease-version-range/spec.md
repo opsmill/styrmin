@@ -100,7 +100,7 @@ PEP 440 still orders a prerelease below its final release. The table shows the r
 - **FR-001**: A prerelease application version MUST be accepted when its numbers fit a range of a driver version, at each of these places: creating a deployment, upgrading a deployment, pinning a driver version, and loading a driver (the check of its default version). The range does not need to name a prerelease. Check: one unit test at each place.
 - **FR-002**: The same application version and the same range MUST give the same verdict at all four places. Check: one table of boundary cases, run through one shared check.
 - **FR-003**: The application version MUST be stored as the person typed it. Check: create a deployment with `1.12.0-beta.1` and read the stored version.
-- **FR-004**: A refusal MUST name the requested version and list every supported range of the driver. Check: the message in User Story 3.
+- **FR-004**: A refused request to create, upgrade or pin a deployment MUST name the requested version and list every supported range of the driver. The error that a driver author sees when a driver is loaded keeps its own text. Check: the message in User Story 3, and the same check for a pin.
 - **FR-005**: A refusal message MUST NOT state that a range must name a prerelease. Check: a test on the message text.
 - **FR-006**: A version that is not valid under PEP 440, such as `latest`, MUST be refused as today. Check: a unit test with `latest`.
 - **FR-007**: Requests for stable versions MUST behave as before. Check: the existing test suite passes.
@@ -118,15 +118,16 @@ PEP 440 still orders a prerelease below its final release. The table shows the r
 
 - **SC-001**: With the unchanged standard driver range, `1.12.0b0` and `1.12.0-beta.1` each create a deployment that reaches running.
 - **SC-002**: The shared check and the four places (create, upgrade, pin, driver load) give 0 different verdicts across the boundary-case table.
-- **SC-003**: Every refused request lists all supported ranges of the driver.
+- **SC-003**: Every refused request to create, upgrade or pin a deployment lists all supported ranges of the driver.
 - **SC-004**: Requests for stable versions behave as before, and the existing test suite passes.
 
 ## Assumptions
 
 - A person types the exact application version to deploy. A prerelease is not chosen by accident. This is based on how the CLI and API take a version in the issue's reproduction. It was not checked for every client.
-- The version typed is the image tag spelling, and the person is responsible for it. How each driver's template uses the version was not checked.
+- The version typed is the image tag spelling, and the person is responsible for it. How each driver's template uses the version was not checked for every driver. Evidence for the standard drivers: in the control experiment of [issue #591](https://github.com/opsmill/styrmin/issues/591) ("Control and scope"), a lab driver with the unchanged Enterprise chart, values and actions and the range `>=1.12.0b0,<1.13` deployed `1.12.0b0` to running with all eight pods ready. That covers one chart, not every driver.
+- The Deploy form of the UI takes the application version as free text and sends the selected driver version as a pin (`frontend/src/pages/deployments/DeployFormPage.tsx`). A refusal in the UI is therefore the refusal of a pin, and a prerelease must fit the range of the selected driver version.
 - Creating a deployment and upgrading a deployment call the same driver version picker and the same pin check. The PRD states that this was checked in the repository code.
-- The CLI and the UI show the text of the refusal message as the API returns it. How they show a message that lists several ranges is not known (PRD open question). The plan phase checks it.
+- The CLI and the UI show the text of the refusal message as the API returns it. How they show a message that lists several ranges is not known (PRD open question). The implementation checks it once for each (quickstart step 6).
 - Whether the chart of the end-to-end test driver accepts a beta version string, and whether the UI variant of the end-to-end test can run User Story 1, is not known (PRD open question). The plan phase checks it.
 - Whether User Story 1 is added to an existing end-to-end test or to a new one is decided in the plan phase. The constitution prefers extending an existing one. [PR #594](https://github.com/opsmill/styrmin/pull/594) gave reasons for a new one.
 - No database schema, GraphQL schema, dependency, CI/CD or authentication change is needed. Only the text of an error changes on the API.

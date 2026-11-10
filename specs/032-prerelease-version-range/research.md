@@ -106,12 +106,13 @@ Checked: `git merge-tree --write-tree` of this branch and `origin/fix/591-prerel
 - **Alternative considered**: extend `test_upgrade_simple_app` (`0.1.0` to `0.2.0`) to pass through a beta. Rejected as the only change, because it covers upgrade but not creation of a prerelease, which is the P1 journey. The new node covers both.
 - **Open at plan time (resolves the PRD open questions)**:
   - *Does the chart accept a beta string?* The values template uses the version as an image tag, and the docker re-tag makes `0.2.0-beta.1` a valid image. A docker tag may contain letters, digits, `.`, `-` and `_`. The first implementation task confirms by running the node.
-  - *Can the UI variant run it?* Not verified. #594 states that "it is not known whether the Deploy form accepts a prerelease version". The task tries the `[ui-chromium]` variant with the dual-entrypoint `scenario_driver` methods. If the form refuses the string, the node is marked `api_only` with that reason. If the UI variant works, it stays dual-entrypoint, because it then exercises both entrypoints.
+  - *Can the UI variant run it?* Not verified. #594 states that "it is not known whether the Deploy form accepts a prerelease version". The form's source has no client-side check of the version string and pins the selected driver version (D7), so the pin check decides. The task tries the `[ui-chromium]` variant with the dual-entrypoint `scenario_driver` methods. If the form refuses the string, the node is marked `api_only` with that reason. If the UI variant works, it stays dual-entrypoint, because it then exercises both entrypoints.
   - The shard marker is the one already carried by `test_deploy_app.py` (the task reads the file's `pytestmark`).
 
 ### D7: the CLI, SDK and UI show the message as the API returns it
 
 - **Fact**: #594's E2E asserts the text through `StyrminAPIError` from the SDK (`str(refused.value)`), so the SDK carries the text. How `styrminctl` and the UI render a longer message was not verified.
+- **Fact (critique P4)**: the Deploy form takes the application version as free text (`applicationVersion: z.string().optional()`) and always sends the selected driver version as a pin (`driverVersionId: selectedVersion!.id`), in `frontend/src/pages/deployments/DeployFormPage.tsx` (read 2026-11-10). So the UI shows message 2 of the contract, the pin refusal, and not message 1. No client-side check of the version string was found there.
 - **Decision**: no code change is planned for either surface, as in the PRD. The implementation checks both once with a refused request and records what it sees in the quickstart results. A rendering defect found there becomes a separate issue, because the PRD limits this feature to the text of the error.
 
 ### D8: documentation and glossary

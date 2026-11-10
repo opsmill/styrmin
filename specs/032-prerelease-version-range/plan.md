@@ -132,6 +132,9 @@ The latest-wins ordering of driver versions, the stored range text and its finge
 - **A range now accepts more versions.** `>=1.5,<2.0` now accepts `1.9.0rc1`. This is the intended rule (spec, FR-001). The documentation says so (research D8).
 - **Latest-wins with overlapping ranges.** A driver version with `>=1.12.0b0,<1.13` and one with `>=1.5,<2.0` both fit `1.12.0b0`. The existing rule picks the highest driver `version`, so nothing new is needed.
 - **The UI Deploy form may reject a prerelease string.** Not verified (research D6). The E2E node is `api_only` with the reason if the form rejects it, and the form is then recorded as a separate issue.
+- **The tests cherry-picked from #594 encode the old rule.** `test_unsupported_version_message.py` (265 lines) and the additions to `test_driver_version_resolution.py` fail after the code change and need a rework, not a small edit. The tasks schedule that rework on its own.
+- **The outcome for a version that is not PEP 440 (`latest`) is not verified.** The first code task is a characterization test that records today's outcome before any code changes, and the same test must pass afterwards (research D4).
+- **The UI shows the pin refusal.** The Deploy form pins the selected driver version, so the message that a person sees in the UI is message 2 of the contract (research D7).
 - **The cherry-pick of #594 applies without conflict today** (checked with `git merge-tree`). It may stop applying if `develop` changes `deployment.py` or `CONTEXT.md` first.
 
 ## Complexity Tracking
