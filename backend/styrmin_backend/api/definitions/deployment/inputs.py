@@ -169,7 +169,10 @@ class ServiceConfigInput:
         description=(
             "The driver service name. It must be declared by the driver "
             "version the deployment is bound to after the write, with scope "
-            "``external``."
+            "``external``. A service the version does not declare raises "
+            "``UNKNOWN_SERVICE_INGRESS_OVERRIDE``, and a service with scope "
+            "``internal`` raises ``SERVICE_INGRESS_NOT_BUILT``, because Styrmin "
+            "does not build its Ingress."
         )
     )
     ingress_class: str | None = strawberry.field(
@@ -228,7 +231,11 @@ class DeploymentConfigInput:
             "names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in "
             "the list has no override after the write, and an empty list "
             "explicitly clears every override. A row with both ``ingressClass`` "
-            "and ``fqdnSuffix`` null is the same as no override."
+            "and ``fqdnSuffix`` null is the same as no override. When the write "
+            "changes the driver version, a stored override on a service that the "
+            "target version removes or declares ``internal`` raises "
+            "``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod "
+            "changes, unless the same write clears it."
         ),
     )
     env_vars: list[EnvVarInput] | None = strawberry.field(

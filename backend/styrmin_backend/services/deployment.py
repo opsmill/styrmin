@@ -90,6 +90,10 @@ from styrmin_backend.services.replicas.validator import (
     has_replica_overrides,
     validate_replica_overrides,
 )
+from styrmin_backend.services.service_ingress.validator import (
+    has_service_ingress_overrides,
+    validate_service_ingress_overrides,
+)
 from styrmin_backend.services.context import check_deployment_scheduling
 from styrmin_backend.services.scheduling.references import bind_deployment_references
 from deepdiff import DeepDiff
@@ -390,6 +394,43 @@ def _validate_replica_overrides(
     )
 
 
+def _validate_service_ingress_overrides(
+    config: dict | None,
+    *,
+    stored_config: dict | None,
+    driver_version: ApplicationDriverVersion,
+    checked_against: str,
+    current_driver_version: ApplicationDriverVersion | None = None,
+) -> None:
+    """Check ingress overrides against the services of ``driver_version`` (#598).
+
+    ``current_driver_version`` is the driver version the deployment is bound to before the
+    write. When it differs from ``driver_version``, a stored override that the target version
+    removes or declares internal is refused instead of dropped (FR-010).
+    """
+    if not has_service_ingress_overrides(config):
+        return
+    changes_version = (
+        current_driver_version is not None
+        and current_driver_version.id != driver_version.id
+    )
+    validate_service_ingress_overrides(
+        config,
+        services={
+            service.name: service.scope
+            for service in parse_service_definitions(driver_version.services)
+        },
+        stored_config=stored_config,
+        checked_against=checked_against,
+        current_version=(
+            current_driver_version.version
+            if changes_version and current_driver_version is not None
+            else None
+        ),
+        target_version=driver_version.version,
+    )
+
+
 def _validate_config_write(
     deployment_config: dict,
     *,
@@ -397,8 +438,13 @@ def _validate_config_write(
     driver_name: str,
     driver_version: ApplicationDriverVersion,
     application_version: str,
+    current_driver_version: ApplicationDriverVersion | None = None,
 ) -> None:
     """Validate a config write against the versions the deployment runs after it.
+
+    ``current_driver_version`` is the version the deployment is bound to before the write, passed
+    by ``updateDeploymentVersion`` so that a driver version change that would drop a stored
+    service ingress override is refused (#598).
 
     The typed checks run ahead of Pydantic validation so their error codes reach the
     GraphQL caller instead of collapsing into ``INVALID_CONTEXT`` (008, 014, 018).
@@ -426,6 +472,13 @@ def _validate_config_write(
         stored_config=stored_config,
         driver_version=driver_version,
         checked_against=checked_against,
+    )
+    _validate_service_ingress_overrides(
+        deployment_config,
+        stored_config=stored_config,
+        driver_version=driver_version,
+        checked_against=checked_against,
+        current_driver_version=current_driver_version,
     )
     _validate_component_container_targets(
         deployment_config,
@@ -574,6 +627,9 @@ async def update_deployment(
         InvalidReplicaCountError, UnknownComponentReplicaOverrideError,
         SingletonReplicaOverrideError: If a replica override is not an integer
             of 1 or more, or the pinned driver version cannot apply it.
+        UnknownServiceIngressOverrideError, ServiceIngressNotBuiltError: If a service
+            ingress override targets a service the pinned driver version does not
+            declare, or declares with a scope other than external (#598).
         DeploymentNameValidationError: If the provided name is invalid.
         DeploymentNameConflictError: If the provided name is already in use.
         UnresolvableAffinityReferenceError: If an affinity term of the deployment's
@@ -908,6 +964,12 @@ async def update_deployment_version(
         InvalidReplicaCountError, UnknownComponentReplicaOverrideError,
         SingletonReplicaOverrideError: If a submitted replica override is invalid,
             or a submitted or stored one breaks the target driver version's rules.
+        UnknownServiceIngressOverrideError, ServiceIngressNotBuiltError: If a submitted
+            service ingress override targets a service the target driver version does
+            not declare, or declares with a scope other than external (#598).
+        ServiceIngressOverrideWouldBeDroppedError: If the driver version changes and a
+            stored service ingress override targets a service the target driver version
+            removes or declares internal, and the request does not clear it (#598).
         RetiredParameterValueError: If the driver version changes and a parameter the
             target no longer declares holds a value other than its current default.
         DeploymentNameValidationError, DeploymentNameConflictError: If
@@ -1003,6 +1065,7 @@ async def update_deployment_version(
                 driver_name=application_driver.name,
                 driver_version=target_driver_version,
                 application_version=version,
+                current_driver_version=application_driver_version,
             )
             effective_config = deployment_config
         else:
@@ -1015,6 +1078,19 @@ async def update_deployment_version(
                     application_driver.name, target_driver_version, version
                 ),
             )
+            # Stored ingress overrides must hold in the target driver version: refused, never
+            # dropped silently, before any pod changes (#598, FR-010). A call that keeps the
+            # driver version writes no override, so it checks nothing.
+            if target_driver_version.id != application_driver_version.id:
+                _validate_service_ingress_overrides(
+                    deployment.config,
+                    stored_config=deployment.config,
+                    driver_version=target_driver_version,
+                    checked_against=_checked_against(
+                        application_driver.name, target_driver_version, version
+                    ),
+                    current_driver_version=application_driver_version,
+                )
         # Overrides applicable in the target driver version must still resolve at the
         # target application version (018 FR-009).
         _validate_image_overrides_for_version(
@@ -1813,6 +1889,9 @@ async def deploy_application(
         InvalidReplicaCountError, UnknownComponentReplicaOverrideError,
         SingletonReplicaOverrideError: If a replica override is not an integer
             of 1 or more, or the driver version cannot apply it.
+        UnknownServiceIngressOverrideError, ServiceIngressNotBuiltError: If a service
+            ingress override targets a service the driver version does not declare, or
+            declares with a scope other than external (#598).
         DeploymentNameValidationError: If the provided name is invalid.
         DeploymentNameConflictError: If the provided name is already in use.
         UnresolvableAffinityReferenceError: If an affinity term in the config, or
@@ -1942,6 +2021,14 @@ async def deploy_application(
             raise InvalidContextError(str(e)) from e
 
         _validate_replica_overrides(
+            deployment_config,
+            stored_config=None,
+            driver_version=application_driver_version,
+            checked_against=checked_against,
+        )
+
+        # A new deployment has no stored overrides: each one is an addition (#598).
+        _validate_service_ingress_overrides(
             deployment_config,
             stored_config=None,
             driver_version=application_driver_version,

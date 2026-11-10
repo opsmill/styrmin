@@ -106,7 +106,7 @@ class DeploymentConfigInput(BaseModel):
     components: Optional[list["ComponentConfigInput"]] = None
     "Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block."
     services: Optional[list["ServiceConfigInput"]] = None
-    "Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override."
+    "Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override. When the write changes the driver version, a stored override on a service that the target version removes or declares ``internal`` raises ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod changes, unless the same write clears it."
     env_vars: Optional[list["EnvVarInput"]] = Field(alias="envVars", default=None)
     'Deployment-scoped environment variables. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload.'
     ip_whitelist: Optional[list[str]] = Field(alias="ipWhitelist", default=None)
@@ -321,7 +321,7 @@ class ServiceConfigInput(BaseModel):
     """Per-service ingress override block for a deployment: the ingress class and the FQDN suffix of one service that the driver declares ``scope: external``."""
 
     name: str
-    "The driver service name. It must be declared by the driver version the deployment is bound to after the write, with scope ``external``."
+    "The driver service name. It must be declared by the driver version the deployment is bound to after the write, with scope ``external``. A service the version does not declare raises ``UNKNOWN_SERVICE_INGRESS_OVERRIDE``, and a service with scope ``internal`` raises ``SERVICE_INGRESS_NOT_BUILT``, because Styrmin does not build its Ingress."
     ingress_class: Optional[str] = Field(alias="ingressClass", default=None)
     "Ingress class for this service only. Null or omitted: the resolved class applies."
     fqdn_suffix: Optional[str] = Field(alias="fqdnSuffix", default=None)
@@ -399,7 +399,7 @@ class UpdateDeploymentInput(BaseModel):
     components: Optional[list["ComponentConfigInput"]] = None
     "Full-replacement list of per-component override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_COMPONENT_NAME``. An empty list explicitly clears every per-component block."
     services: Optional[list["ServiceConfigInput"]] = None
-    "Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override."
+    "Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override. When the write changes the driver version, a stored override on a service that the target version removes or declares ``internal`` raises ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod changes, unless the same write clears it."
     env_vars: Optional[list["EnvVarInput"]] = Field(alias="envVars", default=None)
     'Deployment-scoped environment variables. Submitted as a list of ``{name, value}`` rows; duplicates raise ``DUPLICATE_ENV_VAR_NAME`` with the ``"deployment"`` scope in the payload.'
     ip_whitelist: Optional[list[str]] = Field(alias="ipWhitelist", default=None)
