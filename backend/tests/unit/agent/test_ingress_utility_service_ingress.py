@@ -42,6 +42,7 @@ from styrmin_backend.context.models.config import (
     DeploymentConfig,
     EnvironmentConfig,
     ResolvedConfig,
+    ServiceConfigBlock,
 )
 from styrmin_backend.context.models.contexts import (
     ApplicationContext,
@@ -89,6 +90,19 @@ def _service(
     }
 
 
+def _with_override(
+    service: dict[str, Any], override: ServiceConfigBlock | None
+) -> dict[str, Any]:
+    """The entry the context builder writes: the override value, else the resolved value."""
+    if override is None:
+        return service
+    return {
+        **service,
+        "ingress_class": override.ingress_class or service["ingress_class"],
+        "fqdn_suffix": override.fqdn_suffix or service["fqdn_suffix"],
+    }
+
+
 def _context(
     services: list[dict[str, Any]],
     *,
@@ -97,7 +111,15 @@ def _context(
     fqdn_suffix: str | None = SUFFIX,
     ip_whitelist: list[str] | None = None,
     endpoints_type: Literal["NodeExternalIP", "ClusterIP"] | None = None,
+    overrides: dict[str, ServiceConfigBlock] | None = None,
 ) -> GlobalContext:
+    # An override is stored in ``DeploymentConfig.services`` under the driver service name, and the
+    # context builder (T015) writes the effective class and suffix into the ``deployed_services``
+    # entry. This helper does both, so the planned builder can read the override from either place.
+    overrides = overrides or {}
+    services = [
+        _with_override(s, overrides.get(s["driver_service_name"])) for s in services
+    ]
     context = GlobalContext(
         cluster=ClusterContext(
             config=ClusterConfig(
@@ -110,7 +132,9 @@ def _context(
             name=ENVIRONMENT_NAME,
             config=EnvironmentConfig(ip_whitelist=ip_whitelist),
         ),
-        deployment=DeploymentContext(config=DeploymentConfig()),
+        deployment=DeploymentContext(
+            config=DeploymentConfig(services=overrides or None)
+        ),
         instance=InstanceContext(
             config=ResolvedConfig(
                 ip_whitelist=ip_whitelist,
@@ -149,7 +173,8 @@ def _context(
                 s["resolved_name"], ENVIRONMENT_NAME, fqdn_suffix
             ),
             "ingress_class": s["ingress_class"],
-            "overridden": False,
+            "overridden": s["driver_service_name"] in overrides
+            and not overrides[s["driver_service_name"]].is_empty,
         }
         for s in services
     }
@@ -173,6 +198,9 @@ def _readable(resolved_name: str) -> str | None:
     return compute_human_readable_fqdn(resolved_name, ENVIRONMENT_NAME, SUFFIX)
 
 
+OVERRIDE_CLASS = "tailscale"
+OVERRIDE_SUFFIX = "tailnet.example.ts.net"
+OVERRIDE = ServiceConfigBlock(ingress_class=OVERRIDE_CLASS, fqdn_suffix=OVERRIDE_SUFFIX)
 _PRIMARY = compute_primary_fqdn(APP_NAME, DEPLOYMENT_ID, SUFFIX)
 
 
@@ -468,3 +496,232 @@ class TestAnnotationsAndClass:
         assert ingress["metadata"]["annotations"]["kubernetes.io/ingress.class"] == (
             "traefik"
         )
+
+
+def _overridden_readable(
+    resolved_name: str, suffix: str = OVERRIDE_SUFFIX
+) -> str | None:
+    return compute_human_readable_fqdn(resolved_name, ENVIRONMENT_NAME, suffix)
+
+
+class TestServiceOverride:
+    """A service with an override (user story 1, FR-004, FR-008, SC-002).
+
+    ``task-manager`` is the second declared service, as in the ``infrahub`` driver, so the
+    application address stays with ``web`` unless a test says otherwise.
+    """
+
+    def test_the_hosts_use_the_override_suffix(self) -> None:
+        context = _context(
+            [_service("web"), _service("task-manager", port=4200)],
+            overrides={"task-manager": OVERRIDE},
+        )
+
+        ingresses = _by_service(_build(context))
+
+        assert _hosts(ingresses["task-manager"]) == [
+            _overridden_readable("task-manager")
+        ]
+        assert sorted(_hosts(ingresses["web"])) == sorted([_readable("web"), _PRIMARY])
+
+    def test_the_readable_host_uses_the_resolved_service_name(self) -> None:
+        context = _context(
+            [_service("web"), _service("task-manager", resolved_name="tm-renamed")],
+            overrides={"task-manager": OVERRIDE},
+        )
+
+        ingress = _by_service(_build(context))["task-manager"]
+
+        assert _hosts(ingress) == [_overridden_readable("tm-renamed")]
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            {},
+            {"ip_whitelist": ["10.0.0.0/8"], "endpoints_type": "NodeExternalIP"},
+        ],
+        ids=["plain", "allow-list-and-endpoints-type"],
+    )
+    def test_only_the_class_annotation_and_the_class_name_are_set(
+        self, settings: dict[str, Any]
+    ) -> None:
+        """FR-004: no entry-point, external-dns, Cloudflare or allow-list annotation."""
+        context = _context(
+            [_service("web"), _service("task-manager", port=4200)],
+            overrides={"task-manager": OVERRIDE},
+            **settings,
+        )
+
+        ingress = _by_service(_build(context))["task-manager"]
+
+        assert ingress["spec"]["ingressClassName"] == OVERRIDE_CLASS
+        assert ingress["metadata"]["annotations"] == {
+            "kubernetes.io/ingress.class": OVERRIDE_CLASS
+        }
+
+    def test_a_suffix_only_override_keeps_the_resolved_class_and_drops_the_other_annotations(
+        self,
+    ) -> None:
+        context = _context(
+            [_service("web"), _service("task-manager", port=4200)],
+            overrides={"task-manager": ServiceConfigBlock(fqdn_suffix=OVERRIDE_SUFFIX)},
+            ip_whitelist=["10.0.0.0/8"],
+        )
+
+        ingress = _by_service(_build(context))["task-manager"]
+
+        assert _hosts(ingress) == [_overridden_readable("task-manager")]
+        assert ingress["spec"]["ingressClassName"] == "traefik"
+        assert ingress["metadata"]["annotations"] == {
+            "kubernetes.io/ingress.class": "traefik"
+        }
+
+    def test_a_class_only_override_keeps_the_resolved_suffix(self) -> None:
+        context = _context(
+            [_service("web"), _service("task-manager", port=4200)],
+            overrides={
+                "task-manager": ServiceConfigBlock(ingress_class=OVERRIDE_CLASS)
+            },
+        )
+
+        ingress = _by_service(_build(context))["task-manager"]
+
+        assert _hosts(ingress) == [_readable("task-manager")]
+        assert ingress["spec"]["ingressClassName"] == OVERRIDE_CLASS
+        assert ingress["metadata"]["annotations"] == {
+            "kubernetes.io/ingress.class": OVERRIDE_CLASS
+        }
+
+    def test_an_overridden_first_service_carries_no_application_address(self) -> None:
+        """research D-003: the application address uses the resolved suffix, so no overridden Ingress holds it."""
+        context = _context(
+            [_service("web"), _service("api", port=9000)],
+            overrides={"web": OVERRIDE},
+        )
+
+        ingresses = _by_service(_build(context))
+
+        assert _hosts(ingresses["web"]) == [_overridden_readable("web")]
+        assert _PRIMARY not in [h for i in ingresses.values() for h in _hosts(i)]
+
+    def test_the_backend_and_the_name_do_not_change_with_an_override(self) -> None:
+        context = _context(
+            [_service("web"), _service("task-manager", resolved_name="tm", port=4200)],
+            overrides={"task-manager": OVERRIDE},
+        )
+
+        ingress = _by_service(_build(context))["task-manager"]
+
+        assert ingress["metadata"]["name"] == "styrmin-svc-task-manager"
+        assert "tls" not in ingress["spec"]
+        (rule,) = ingress["spec"]["rules"]
+        backend = rule["http"]["paths"][0]["backend"]["service"]
+        assert backend["name"] == "tm"
+        assert backend["port"]["number"] == 4200
+
+    @pytest.mark.parametrize("override_class", [OVERRIDE_CLASS, None])
+    def test_the_override_class_replaces_the_dedicated_controller_rule_for_its_service(
+        self, override_class: str | None
+    ) -> None:
+        """FR-008: an overridden Ingress gets the override's class fields instead of the dedicated-controller ones.
+
+        With a suffix-only override (``override_class`` is ``None``) there is no override class, so the
+        dedicated-controller rule of the resolved configuration still applies.
+        """
+        dedicated = DedicatedIngressConfig(implementation="traefik")
+        context = _context(
+            [_service("web"), _service("task-manager", port=4200)],
+            ingress_class="cluster-traefik",
+            dedicated_ingress=dedicated,
+            overrides={
+                "task-manager": ServiceConfigBlock(
+                    ingress_class=override_class, fqdn_suffix=OVERRIDE_SUFFIX
+                )
+            },
+        )
+
+        ingress = _by_service(_build(context))["task-manager"]
+
+        if override_class is None:
+            assert ingress["spec"].get("ingressClassName") is None
+            assert ingress["metadata"]["annotations"] == {
+                "kubernetes.io/ingress.class": "traefik"
+            }
+        else:
+            assert ingress["spec"]["ingressClassName"] == override_class
+            assert ingress["metadata"]["annotations"] == {
+                "kubernetes.io/ingress.class": override_class
+            }
+
+    def test_with_a_dedicated_controller_the_other_service_keeps_the_dedicated_rule(
+        self,
+    ) -> None:
+        dedicated = DedicatedIngressConfig(implementation="traefik")
+        context = _context(
+            [_service("web"), _service("task-manager", port=4200)],
+            ingress_class="cluster-traefik",
+            dedicated_ingress=dedicated,
+            overrides={"task-manager": OVERRIDE},
+        )
+
+        web = _by_service(_build(context))["web"]
+
+        assert web["spec"].get("ingressClassName") is None
+        assert web["metadata"]["annotations"] == _chart_patch_annotations(context)
+        assert (
+            web["metadata"]["annotations"]["kubernetes.io/ingress.class"] == "traefik"
+        )
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            {},
+            {"ip_whitelist": ["10.0.0.0/8"], "endpoints_type": "ClusterIP"},
+            {
+                "ingress_class": "cluster-traefik",
+                "dedicated_ingress": DedicatedIngressConfig(implementation="traefik"),
+            },
+        ],
+        ids=["plain", "allow-list-and-endpoints-type", "dedicated"],
+    )
+    def test_the_other_services_ingresses_are_identical_with_and_without_the_override(
+        self, settings: dict[str, Any]
+    ) -> None:
+        """SC-002: an override changes the Ingress of its own service only."""
+
+        def services() -> list[dict[str, Any]]:
+            return [
+                _service("web"),
+                _service("task-manager", port=4200),
+                _service("api", resolved_name="api-renamed", port=9000),
+            ]
+
+        without = _by_service(_build(_context(services(), **settings)))
+        with_override = _by_service(
+            _build(
+                _context(services(), overrides={"task-manager": OVERRIDE}, **settings)
+            )
+        )
+
+        assert with_override["web"] == without["web"]
+        assert with_override["api"] == without["api"]
+        assert with_override["task-manager"] != without["task-manager"]
+
+    def test_a_block_with_no_field_set_is_no_override(self) -> None:
+        """data-model: a block with both fields ``None`` is the same as no override."""
+        services = [_service("web"), _service("task-manager", port=4200)]
+
+        with_empty_block = _build(
+            _context(services, overrides={"task-manager": ServiceConfigBlock()})
+        )
+
+        assert with_empty_block == _build(_context(services))
+
+    def test_an_override_on_an_internal_service_builds_no_ingress(self) -> None:
+        """The override validation refuses it (FR-009), and the builder must not publish an internal service."""
+        context = _context(
+            [_service("web"), _service("database", scope="internal", port=5432)],
+            overrides={"database": OVERRIDE},
+        )
+
+        assert set(_by_service(_build(context))) == {"web"}

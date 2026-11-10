@@ -133,9 +133,16 @@ class ScenarioDriver(Protocol):
         input=...)`` so each driver owns its own SDK<->dict adapter and
         callers don't have to import codegen types.
 
+        ``config['services']`` is a dict keyed by driver service name whose
+        values hold ``ingress_class`` and ``fqdn_suffix`` (service ingress
+        overrides, #598). An empty dict clears every override.
+
         The UI driver drives the Edit Scheduling dialog on the deployment
         detail page; today it only supports the ``config['scheduling']``
         sub-tree (other keys are rejected with ``ScenarioActionError``).
+        Support for ``config['services']`` through the Service overrides
+        section of the configuration drawer is added by T042 of
+        ``specs/033-service-ingress-override``.
 
         Both implementations block until the server has accepted the
         mutation — callers still need ``wait_for_deployment_running`` to
