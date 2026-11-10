@@ -43,6 +43,8 @@ from styrmin_backend.context.models.helm import ChartInfo, HelmInfo, RepositoryI
 from styrmin_backend.operator import reconciler as reconciler_module
 from styrmin_backend.operator.config import (
     ANNOTATION_DEPLOYMENT_ID,
+    LABEL_MANAGED_BY,
+    LABEL_MANAGED_BY_VALUE,
     LABEL_RELEASE_REFERENCE,
 )
 from styrmin_backend.operator.crd.schema import DeploymentPhase
@@ -802,3 +804,193 @@ class _NotStopped:
 
     async def wait(self, timeout: float) -> None:  # noqa: ARG002
         return None
+
+
+# ---------------------------------------------------------------------------
+# The drift handlers are registered for the right objects, and a chart's Ingress is left alone
+# (review M4)
+# ---------------------------------------------------------------------------
+
+HELM_INGRESS_NAME = "my-chart-ingress"
+
+
+def _helm_ingress() -> dict[str, Any]:
+    """An Ingress that Helm renders: Helm labels, and none of the Styrmin ownership labels."""
+    ingress = _ingress(HELM_INGRESS_NAME)
+    ingress["metadata"]["labels"] = {
+        "app.kubernetes.io/managed-by": "Helm",
+        "app.kubernetes.io/instance": RELEASE_REF,
+        "helm.sh/chart": "app-1.0.0",
+    }
+    return ingress
+
+
+def _matches_selector(labels: dict[str, str], selector: str | None) -> bool:
+    """The equality selector (``k=v,k2=v2``) that ``list_managed_resources`` builds."""
+    for requirement in (selector or "").split(","):
+        if not requirement:
+            continue
+        key, _, value = requirement.partition("=")
+        if labels.get(key) != value:
+            return False
+    return True
+
+
+class _SelectorAwareNetworkingApi:
+    """``NetworkingV1Api`` over a list of Ingresses: lists by label selector, records deletions."""
+
+    def __init__(self, ingresses: list[dict[str, Any]]) -> None:
+        self.ingresses = {i["metadata"]["name"]: i for i in ingresses}
+        self.deleted: list[str] = []
+
+    async def list_namespaced_ingress(
+        self, namespace: str, label_selector: str | None = None
+    ) -> SimpleNamespace:
+        del namespace
+        return SimpleNamespace(
+            items=[
+                i
+                for i in self.ingresses.values()
+                if _matches_selector(i["metadata"].get("labels", {}), label_selector)
+            ]
+        )
+
+    async def list_namespaced_network_policy(
+        self, namespace: str, label_selector: str | None = None
+    ) -> SimpleNamespace:
+        del namespace, label_selector
+        return SimpleNamespace(items=[])
+
+    async def delete_namespaced_ingress(self, name: str, namespace: str) -> None:
+        del namespace
+        self.deleted.append(name)
+        self.ingresses.pop(name, None)
+
+
+@pytest.fixture
+def cluster_with_a_chart_ingress(
+    mocker: Any, fake_client: Any, core_api: Any, custom_api: Any
+) -> _SelectorAwareNetworkingApi:
+    """A cluster with the Ingress of a chart and a stale Ingress that Styrmin built."""
+    api = _SelectorAwareNetworkingApi([_helm_ingress(), _ingress("styrmin-svc-stale")])
+    mocker.patch.object(
+        reconciler_module.kubeclient, "NetworkingV1Api", return_value=api
+    )
+    return api
+
+
+class TestKopfRegistrationOfTheIngressHandlers:
+    """The label filter and the plural decide which objects the handlers see. Nothing else tests them."""
+
+    @staticmethod
+    def _handlers() -> dict[str, Any]:
+        import kopf
+
+        from styrmin_backend.operator.handlers import utility_resources
+
+        by_name = {
+            handler.fn.__name__: handler
+            for handler in kopf.get_default_registry()._changing.get_all_handlers()
+            if handler.fn
+            in (
+                utility_resources.kopf_on_ingress_update,
+                utility_resources.kopf_on_ingress_delete,
+            )
+        }
+        assert set(by_name) == {"kopf_on_ingress_update", "kopf_on_ingress_delete"}
+        return by_name
+
+    @pytest.mark.parametrize(
+        ("name", "reason"),
+        [
+            ("kopf_on_ingress_update", "update"),
+            ("kopf_on_ingress_delete", "delete"),
+        ],
+    )
+    def test_the_handler_watches_the_ingresses_of_networking_v1(
+        self, name: str, reason: str
+    ) -> None:
+        handler = self._handlers()[name]
+
+        assert str(handler.reason) == reason
+        selector = handler.selector
+        assert (selector.group, selector.version, selector.plural) == (
+            "networking.k8s.io",
+            "v1",
+            "ingresses",
+        )
+
+    @pytest.mark.parametrize(
+        "name", ["kopf_on_ingress_update", "kopf_on_ingress_delete"]
+    )
+    def test_the_handler_sees_only_the_objects_that_styrmin_manages(
+        self, name: str
+    ) -> None:
+        """Without this filter the handler runs for the Ingress of every chart and every other tool."""
+        handler = self._handlers()[name]
+
+        assert handler.labels == {LABEL_MANAGED_BY: LABEL_MANAGED_BY_VALUE}
+        assert handler.annotations is None
+
+
+class TestAChartsIngressIsLeftAlone:
+    """Helm owns an Ingress that a chart renders. It has no Styrmin ownership labels, so the selector
+    of ``list_managed_resources`` does not return it and no reconcile or teardown deletes it."""
+
+    @pytest.mark.anyio
+    async def test_the_selector_does_not_return_the_chart_ingress(
+        self, cluster_with_a_chart_ingress: _SelectorAwareNetworkingApi
+    ) -> None:
+        resources = await list_managed_resources(
+            namespace=NAMESPACE, release_reference=RELEASE_REF, kind="Ingress"
+        )
+
+        assert [r["metadata"]["name"] for r in resources] == ["styrmin-svc-stale"]
+
+    @pytest.mark.anyio
+    async def test_the_deployment_timer_deletes_the_stale_ingress_and_not_the_chart_ingress(
+        self, mocker: Any, cluster_with_a_chart_ingress: _SelectorAwareNetworkingApi
+    ) -> None:
+        mocker.patch(
+            "styrmin_backend.operator.pipeline.build_desired_resources_from_crd",
+            lambda *_: [],
+        )
+        mocker.patch.object(
+            handlers_module,
+            "_fail_on_component_container_guard",
+            mocker.AsyncMock(return_value=False),
+        )
+
+        await handlers_module.kopf_styrmin_deployment_timer(
+            body={"metadata": {}},
+            spec={"releaseReference": RELEASE_REF},
+            status={"phase": DeploymentPhase.READY.value},
+            name="my-deployment",
+            namespace=NAMESPACE,
+            patch=SimpleNamespace(status={}),
+            logger=_Logger(),
+            stopped=_NotStopped(),
+        )
+
+        assert cluster_with_a_chart_ingress.deleted == ["styrmin-svc-stale"]
+        assert HELM_INGRESS_NAME in cluster_with_a_chart_ingress.ingresses
+
+    @pytest.mark.anyio
+    async def test_the_teardown_deletes_the_styrmin_ingress_and_not_the_chart_ingress(
+        self, mocker: Any, cluster_with_a_chart_ingress: _SelectorAwareNetworkingApi
+    ) -> None:
+        mocker.patch.object(
+            handlers_module, "_delete_service_aliases", mocker.AsyncMock()
+        )
+
+        await handlers_module._teardown_owned_resources(
+            namespace=NAMESPACE,
+            release_reference=RELEASE_REF,
+            deployment_id="deadbeef",
+            deletion_requested=True,
+            name="my-deployment",
+            logger=_Logger(),
+        )
+
+        assert cluster_with_a_chart_ingress.deleted == ["styrmin-svc-stale"]
+        assert HELM_INGRESS_NAME in cluster_with_a_chart_ingress.ingresses
