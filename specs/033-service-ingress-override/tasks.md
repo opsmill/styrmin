@@ -96,17 +96,17 @@
 
 ### Tests first
 
-- [ ] T034 [P] [US2] Extend `backend/tests/e2e/test_deploy_generic_app.py` (marker `shard_general`, already `api_only`): assert exactly one Ingress for the `app` service with the resolved class, the annotations of the former chart Ingress, and both the application address and the readable host; delete the deployment and assert the Ingress is gone (FR-001, FR-012, SC-006). The Ingress also covers the first-service rule on a real stack.
-- [ ] T035 [P] [US2] Add a unit test with a two-external-service driver fixture in `backend/tests/unit/agent/test_ingress_utility_service_ingress.py`, if T009 did not already cover it, asserting exactly one Ingress has the application address (FR-002).
+- [X] T034 [P] [US2] Extend `backend/tests/e2e/test_deploy_generic_app.py` (marker `shard_general`, already `api_only`): assert exactly one Ingress for the `app` service with the resolved class, the annotations of the former chart Ingress, and both the application address and the readable host; delete the deployment and assert the Ingress is gone (FR-001, FR-012, SC-006). The Ingress also covers the first-service rule on a real stack.
+- [X] T035 [P] [US2] Add a unit test with a two-external-service driver fixture in `backend/tests/unit/agent/test_ingress_utility_service_ingress.py`, if T009 did not already cover it, asserting exactly one Ingress has the application address (FR-002). T009 already covers it (`test_the_application_address_is_on_exactly_one_ingress` with three external services, `test_the_application_address_is_only_on_the_first_declared_service` with two); no test added.
 
 ### Implementation
 
-- [ ] T036 [US2] Remove the chart Ingress from `driver/examples/generic-app/values.j2.yml` (the `ingress:` block near line 83) and bump the driver version in `driver/examples/generic-app/driver.styrmin.yml`; update `docs/docs/drivers/generic-app.md` (FR-012).
-- [ ] T037 [US2] Run T034 to a pass and record the evidence in `specs/033-service-ingress-override/e2e-evidence.md`.
+- [X] T036 [US2] Remove the chart Ingress from `driver/examples/generic-app/values.j2.yml` (the `ingress:` block near line 83) and bump the driver version in `driver/examples/generic-app/driver.styrmin.yml`; update `docs/docs/drivers/generic-app.md` (FR-012).
+- [X] T037 [US2] Run T034 to a pass and record the evidence in `specs/033-service-ingress-override/e2e-evidence.md`.
 
 **Checkpoint**: stories 1 and 2 work. A deployment of a driver in this repository that declares no external service has no Ingress difference (SC-003): add the assertion to `backend/tests/e2e/test_deploy_app.py` or the existing `simple-app` test as a read of its Ingress objects.
 
-- [ ] T038 [P] [US2] Add the SC-003 read-only assertion to an existing end-to-end test that already deploys `simple-app` or `semaphore` (find it in `backend/tests/e2e/test_deploy_app.py` or `test_deploy_semaphore.py`), without booting a new stack.
+- [X] T038 [P] [US2] Add the SC-003 read-only assertion to an existing end-to-end test that already deploys `simple-app` or `semaphore` (find it in `backend/tests/e2e/test_deploy_app.py` or `test_deploy_semaphore.py`), without booting a new stack.
 
 ---
 

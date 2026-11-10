@@ -177,3 +177,102 @@ Question: does `_is_service_or_middleware` and `execute_phase_services` in `back
 - The label `styrmin.io/release-reference: ""` on the Ingress that the operator builds. It is empty because of the same missing HelmRelease label. The kopf drift handlers on utility resources read that label to find the HelmRelease. This is the existing behavior of every Styrmin-built utility resource, and was not changed.
 - The message "the CRD type may not be installed yet" in `apply_utility_resources` is also logged when an Ingress fails to apply, which hid the 403 of run 1. Not changed.
 - Other end-to-end tests with `AsyncIngress` (`test_ingress_controller.py`, `test_cluster_update.py`, `test_environment_update.py`, `test_deployments_apply.py`, `configuration/test_drawer_networking_edit.py`) were read for assertions on the Prefect Ingress of the chart and on Ingress counts. They use other drivers than Infrahub Enterprise, so no assertion changed; they were not run.
+
+# End-to-end evidence: generic-app has one Ingress (T034, T037) and simple-app has no Styrmin-built Ingress (T038)
+
+Tests (both API variant only):
+
+- T034 and T037: `backend/tests/e2e/test_deploy_generic_app.py::test_deploy_generic_app[api-chromium]`. The test is `@pytest.mark.api_only`, so `[ui-chromium]` is skipped by design.
+- T038: `backend/tests/e2e/test_deploy_app.py::test_deploy_simple_app[api-chromium]`. The assertion (SC-003) went into this existing test, which reads the session `deployed_simple_app` stack. That fixture has many active consumers (64 uses in `backend/tests/e2e`), so no stack was added. The test has no `api_only` or `ui_only` marker, so a `[ui-chromium]` variant exists. It was not run: the assertion reads Kubernetes objects through kr8s and is the same in both variants. This is a decision, not a verified result.
+
+## Failing run before the driver change (T034 fails for the right reason)
+
+- Started 2026-11-10T11:51:48Z (`run0.start`), tree at `7ebf1433304a98e56922f02dd884679c166644ca` plus the uncommitted test change; the driver was still version 1.
+- Command: `sleep 86400 | uv run pytest backend/tests/e2e/test_deploy_generic_app.py -k api-chromium -v -s --pdb`.
+- Result: failed at the new assertion:
+
+  ```text
+  AssertionError: Expected the Ingress that Styrmin builds for the app service and no chart Ingress: ['styrmin-app', 'styrmin-svc-app']
+  ```
+
+- `kubectl get ingress -A -o wide` at the pause (vCluster `pytest-270eba13-9cb8-4fd2-ba18-3d66398f4494`): two Ingresses on the same two hosts, `styrmin-app` (the chart Ingress of version 1) and `styrmin-svc-app` (built by Styrmin). This is the double Ingress of FR-012 and SC-006.
+- After `pkill -f pytest` the vCluster container stayed up. I removed it with `vcluster delete pytest-270eba13-9cb8-4fd2-ba18-3d66398f4494 --driver docker`.
+
+## Run on the final code (T037, T038)
+
+- Run 1 (11:56:10Z, uncommitted tree, driver version 2): `2 passed in 222.55s` (vCluster `pytest-6c8f317d-3169-4778-a028-332343f804d6`). Not the evidence: the tree was not committed, and the namespace is gone before a `kubectl` read.
+- Final run (run 2): commit `790198b99e3a16235a3d7f4b462b71cf4192187b`, tree clean, started 2026-11-10T12:05:25Z, ended about 2026-11-10T12:09:07Z.
+- Command, from the repository root:
+
+  ```bash
+  sleep 86400 | PYTHONPATH=<scratchpad>/plugins INGRESS_DUMP=<scratchpad>/ingress-dump2.txt \
+    uv run pytest -p generic_dump \
+    "backend/tests/e2e/test_deploy_app.py::test_deploy_simple_app[api-chromium]" \
+    "backend/tests/e2e/test_deploy_generic_app.py::test_deploy_generic_app[api-chromium]" \
+    -v -s --pdb 2>&1 | tee <scratchpad>/pdb2.log
+  ```
+
+  `-p generic_dump` is a throwaway plugin outside the repository. After the test reads the Ingress objects of the generic-app namespace, it runs read-only `kubectl get ingress -o wide` and `-o yaml` and appends the output to a file. It changes no assertion. `sleep 86400` replaces `sleep infinity` for the macOS reason in the T033 section.
+- vCluster: `pytest-c3d7beeb-b2c3-4e35-9497-865a0089af00`.
+- Kubeconfig: `/private/var/folders/h8/b5b4gccj4h5c0sjlqjymm1y40000gq/T/pytest-of-Simon/pytest-1420/vcluster0/kubeconfig` (the vCluster is deleted at the end of the session).
+- Verbatim pytest output (ANSI colors removed; `-s` interleaves the vCluster log with the result lines; the first `PASSED` line is cut off from its node id by the same interleaving):
+
+  ```text
+  backend/tests/e2e/test_deploy_app.py::test_deploy_simple_app[api-chromium] 13:05:28 warn There is a newer version of vcluster: v0.37.7. Run `vcluster upgrade` to upgrade to the newest version.
+  ...
+  PASSED
+  backend/tests/e2e/test_deploy_generic_app.py::test_deploy_generic_app[api-chromium] PASSED13:09:07 info Removing vCluster container vcluster.cp.pytest-c3d7beeb-b2c3-4e35-9497-865a0089af00...
+  ================== 2 passed, 6 warnings in 224.42s (0:03:44) ===================
+  ```
+
+  The times in these lines are local time (UTC+1).
+
+### Ingress of the generic-app deployment, before the deletion
+
+Output of `kubectl get ingress -n styrmin-32abb8c7-a9e1-4835-86db-279c1ce07b5c -o wide`, read at 2026-11-10T12:08:21Z:
+
+```text
+NAME              CLASS    HOSTS                                                                                                ADDRESS   PORTS   AGE
+styrmin-svc-app   <none>   app-scenario-env-4a0a96d1.styrmin.com,generic-app-32abb8c7-a9e1-4835-86db-279c1ce07b5c.styrmin.com             80      12s
+```
+
+Same Ingress as YAML (the `kopf.zalando.org/last-handled-configuration` annotation is left out; it repeats the spec):
+
+```yaml
+metadata:
+  annotations:
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    external-dns.alpha.kubernetes.io/endpoints-type: NodeExternalIP
+    external-dns.alpha.kubernetes.io/hostname: styrmin-32abb8c7-a9e1-4835-86db-279c1ce07b5c-generic-app.styrmin.com
+    kubernetes.io/ingress.class: traefik
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+  labels:
+    app.kubernetes.io/managed-by: styrmin
+    styrmin.io/release-reference: ""
+    styrmin.io/service-name: app
+    styrmin.io/utility-kind: ingress
+  name: styrmin-svc-app
+spec:
+  rules:
+  - host: app-scenario-env-4a0a96d1.styrmin.com      # readable host
+  - host: generic-app-32abb8c7-a9e1-4835-86db-279c1ce07b5c.styrmin.com   # application address
+    # both route / to service app, port 8080
+```
+
+The Ingress was created about 11 seconds before the read, by the operator's HelmRelease timer (see the T033 section), so the test polls for it (`_wait_for_service_ingress`).
+
+### What the tests assert
+
+- T034: the namespace holds only `styrmin-svc-app`; its two hosts are the `primary_fqdn` and `human_readable_fqdn` that the deployment reports; the backend is service `app` on port 8080; the annotation keys are the five that the chart patch set on the former chart Ingress; the class is the dedicated controller's (`kubernetes.io/ingress.class: traefik`, no `spec.ingressClassName`); the host name annotation starts with the release reference; no `spec.tls`. Then `deployments.delete` and `wait_for_deployment_status(..., "deleted")`; the namespace then holds no Ingress. The assertion that the Ingress is gone passes also because the namespace is deleted with the deployment; it does not show that the operator deletes an Ingress on its own.
+- T038: the namespace of `simple-app` holds exactly one Ingress, `styrmin-simple-app` (the chart Ingress), and it has no `styrmin.io/service-name` label.
+
+### Not verified
+
+- Traffic to the generic-app host through the Ingress. The test asserts the object, and the existing check of the application through a port-forward to the Service is unchanged.
+- The `[ui-chromium]` variant of `test_deploy_simple_app` (see above).
+- The T038 assertion was not run on a base commit to show that it would fail with a Styrmin-built Ingress for an internal service. The unit tests of T009 (`test_no_ingress_for_an_internal_service`) cover that case.
+- The unit test of T035 was not added: `test_the_application_address_is_on_exactly_one_ingress` and `test_the_application_address_is_only_on_the_first_declared_service` in `backend/tests/unit/agent/test_ingress_utility_service_ingress.py` (T009) already assert that exactly one Ingress has the application address with two and three external services.
+
+### Other example drivers with an external service and a chart Ingress
+
+Checked in `driver/examples/*/driver.styrmin.yml` and `values.j2.yml`: only `generic-app` and the two Infrahub drivers (done in T031 and T032) declare a service `scope: external`. `semaphore`, `simple-app`, `db-test` and `infrahub-mcp` declare `scope: internal`. `slurpit` declares no services. `semaphore`, `simple-app` and `slurpit` render a chart Ingress and keep it (SC-003).
