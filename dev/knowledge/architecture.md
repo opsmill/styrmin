@@ -27,7 +27,7 @@ turns recorded intent into running Kubernetes resources.
 | Process | What it is | What it owns |
 |---------|------------|--------------|
 | **Server** | FastAPI + GraphQL backend | The database, all GraphQL operations, task records, the SDK contract |
-| **Agent** | One container running a Prefect worker, a kopf operator, **and** a status reporter in a single async event loop | Everything inside the target Kubernetes cluster: CRDs, HelmReleases, NetworkPolicies, Secrets, Services, Middlewares; plus reporting observed cluster state back to the server |
+| **Agent** | One container running a Prefect worker, a kopf operator, **and** a status reporter in a single async event loop | Everything inside the target Kubernetes cluster: CRDs, HelmReleases, NetworkPolicies, Secrets, Services, Middlewares, and the Ingresses of external services; plus reporting observed cluster state back to the server |
 
 The Prefect worker and the kopf operator share one event loop via
 `asyncio.gather()`. Graceful shutdown is coordinated through an
@@ -99,6 +99,20 @@ The agent is a single process but fulfils several distinct functions:
   service discovery) are managed by the same builders that produce
   application resources.
   → details: [`agent/overview.md`](agent/overview.md)
+- **Ingress of an external service.** For each service that its driver
+  declares `scope: external`, Styrmin builds the Ingress itself in the
+  `ingress` utility, from the resolved context, and the driver's chart
+  renders none for it. A deployment can override the ingress class and the
+  FQDN suffix of one such service in `DeploymentConfig.services`, which has
+  no database column. The Ingress of a service that is `internal`, and the
+  Infrahub server Ingress, stay in the chart and receive their class from
+  the post-render patch. The operator reconciles the built Ingress like the
+  other utility resources and never touches a chart Ingress. A service
+  ingress override that Styrmin cannot build, or a driver version change
+  that would drop one, is refused with an error that names the service
+  ([ADR-090](../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md)).
+  → details: [`backend/services.md`](backend/services.md#service-ingress-overrides-servicesservice_ingress),
+  [`agent/operator.md`](agent/operator.md#ingresses-that-styrmin-builds)
 - **Status reporting.** A third coroutine in the shared event loop polls
   Kubernetes every ~5 s (configurable via
   `STYRMIN_AGENT_STATUS_POLL_INTERVAL`) for pod state and

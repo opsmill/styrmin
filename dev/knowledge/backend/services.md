@@ -92,6 +92,10 @@ styrmin_backend/services/
 │   ├── validator.py               # write-time checks: unknown component, singleton above 1, maximum count
 │   └── exceptions.py              # InvalidReplicaCountError, ReplicaCountAboveMaximumError, UnknownComponentReplicaOverrideError, SingletonReplicaOverrideError
 │
+├── service_ingress/               # Per-service ingress overrides (#598, ADR-090)
+│   ├── validator.py               # write-time checks: unknown service, service that is not external, override that a version change would drop
+│   └── exceptions.py              # DuplicateServiceNameError, UnknownServiceIngressOverrideError, ServiceIngressNotBuiltError, ServiceIngressOverrideWouldBeDroppedError
+│
 ├── parameters/                    # Driver parameter values
 │   ├── validator.py               # validate_parameter_values: defaults, kinds, unknown parameters
 │   ├── retired.py                 # drop_retired_parameters: the rule on a driver version change (023)
@@ -580,6 +584,32 @@ The count itself is checked by `ComponentConfigBlock` (`context/models/config.py
 `ReplicaDeclaration` (`context/models/components.py`), the base of both `ArbitrarySectionModel`
 classes; see [data-models.md](data-models.md#componentconfig).
 
+## Service ingress overrides (`services/service_ingress/`)
+
+<!-- Extracted from specs/033-service-ingress-override on 2026-11-10 -->
+
+Design rationale: [ADR-090](../../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md).
+
+A deployment stores the ingress class and the FQDN suffix of one external service in `DeploymentConfig.services`, a dict keyed by the driver service name whose values are `ServiceConfigBlock` (`context/models/config.py`, `extra="forbid"`). There is no database column and no Alembic revision. A block with both fields empty is dropped, and a config without the key dumps without it, so the stored config of a deployment without an override is unchanged. `ingress_class` must be a Kubernetes object name (`validate_service_ingress_class`) and `fqdn_suffix` must be a DNS name (`validate_service_fqdn_suffix`). The cluster, environment and deployment levels do not check these two settings.
+
+| Module | Contents |
+|--------|----------|
+| `validator.py` | `validate_service_ingress_overrides(config, services=, stored_config=, checked_against=, current_version=, target_version=)` on the raw config dict, and `has_service_ingress_overrides(config)`. `services` maps each driver service name of the target version to its `ServiceScope`. |
+| `exceptions.py` | The errors in the table below. All are `ServiceError` subclasses. |
+
+| Error | Code | Raised when |
+|-------|------|-------------|
+| `UnknownServiceIngressOverrideError` | `UNKNOWN_SERVICE_INGRESS_OVERRIDE` | An override that is added or changed names a service that the driver version bound after the write does not declare. Metadata: `service_name`, `known_services`, `checked_against`. |
+| `ServiceIngressNotBuiltError` | `SERVICE_INGRESS_NOT_BUILT` | An override that is added or changed names a service that is not `scope: external`. Metadata: `service_name`, `scope`, `checked_against`. |
+| `ServiceIngressOverrideWouldBeDroppedError` | `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` | The driver version changes, and a stored override that the request sends again, or that the request leaves in place, names a service that the target version removes or declares internal. Metadata: `service_name`, `current_version`, `target_version`, `reason` (`removed` or `internal`). |
+| `DuplicateServiceNameError` | `DUPLICATE_SERVICE_NAME` | The `services` list of the input has the same name twice. Raised when the input is flattened (`_flatten_services` in `api/definitions/deployment/inputs.py`), before the validator runs. Metadata: `name`. |
+
+The service layer calls the validator through `_validate_service_ingress_overrides` in `services/deployment.py`, from `_validate_config_write`, which `deploy_application`, `update_deployment` and `update_deployment_version` use, before any task, flow run or ingress dispatch. `update_deployment_version` passes the driver version that the deployment is bound to now, so a version change is detected. When that call carries no config, the stored config is checked against the target version. A request that clears the override, by leaving it out, is accepted even when the target version no longer declares the service. This differs from the replica validator, which keeps an override on a removed component as an orphan ([ADR-070](../../adr/0070-replica-overrides-and-retired-parameters.md)).
+
+`services/context.py` fills the template data. `services.<driver service name>` gains `ingress_class` and `overridden`, and `human_readable_fqdn` uses the override suffix. Each entry of `deployed_services` gains `driver_service_name`, `scope`, `ingress_class` and `fqdn_suffix`. A service uses the override of the deployment that owns it (`_service_overrides_by_deployment`), and the services of the deployment come last and in the order of the driver version (`_order_deployed_services`), because the Ingress builder gives the application address to the first declared service. `compute_service_address` in `context/fqdn.py` computes the class, suffix and hosts for the template data and for the `DeployedService` resolver, as [ADR-022](../../adr/0022-compute-service-fqdns-at-runtime.md) requires.
+
+The Ingress itself is built by `IngressUtility` (`agent/service/kubernetes/resources/utilities/ingress.py`), described in [Ingresses that Styrmin builds](../agent/operator.md#ingresses-that-styrmin-builds) and [the agent overview](../agent/overview.md#utilities).
+
 ## Retired parameters (`services/parameters/retired.py`)
 
 <!-- Extracted from specs/023-per-component-replicas on 2026-10-15 -->
@@ -792,6 +822,10 @@ ServiceError (base)
 ├── ReplicaCountAboveMaximumError          # services/replicas/exceptions.py; REPLICA_COUNT_ABOVE_MAXIMUM
 ├── UnknownComponentReplicaOverrideError    # UNKNOWN_COMPONENT_REPLICA_OVERRIDE
 ├── SingletonReplicaOverrideError           # SINGLETON_REPLICA_OVERRIDE
+├── DuplicateServiceNameError               # services/service_ingress/exceptions.py; DUPLICATE_SERVICE_NAME
+├── UnknownServiceIngressOverrideError      # UNKNOWN_SERVICE_INGRESS_OVERRIDE
+├── ServiceIngressNotBuiltError             # SERVICE_INGRESS_NOT_BUILT
+├── ServiceIngressOverrideWouldBeDroppedError  # SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED
 ├── RetiredParameterValueError              # services/parameters/exceptions.py; RETIRED_PARAMETER_VALUE
 └── RetiredTemplateFilterError              # services/exceptions.py; component_env_vars, component_command, component_args
 ```
@@ -879,6 +913,8 @@ The resolver hands the user-supplied list straight in; normalisation (dedup, ord
 | [services/driver/provider.py](backend/styrmin_backend/services/driver/provider.py) | Git-based driver loading |
 | [services/replicas/resolver.py](backend/styrmin_backend/services/replicas/resolver.py) | Order of precedence of a component's replica count |
 | [services/replicas/patch_builder.py](backend/styrmin_backend/services/replicas/patch_builder.py) | `spec.replicas` post-render patches, stopped state included |
+| [services/service_ingress/validator.py](backend/styrmin_backend/services/service_ingress/validator.py) | Write-time checks of the per-service ingress overrides |
+| [agent/service/kubernetes/resources/utilities/ingress.py](backend/styrmin_backend/agent/service/kubernetes/resources/utilities/ingress.py) | The chart post-render patch and the Ingress that Styrmin builds for an external service |
 | [services/parameters/retired.py](backend/styrmin_backend/services/parameters/retired.py) | Rule for parameters a target driver version no longer declares |
 | [services/telemetry/payload.py](backend/styrmin_backend/services/telemetry/payload.py) | Data of the daily telemetry report |
 | [api/auth/admin_guards.py](backend/styrmin_backend/api/auth/admin_guards.py) | Pure last-admin guard functions over `AdminSnapshot` |

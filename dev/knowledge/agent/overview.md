@@ -104,6 +104,8 @@ Modular building blocks compose into final resource manifests:
 
 `UtilityFactory` produces utility implementations (`IngressUtility`, `EnvironmentUtility`) for cluster-level infrastructure.
 
+`IngressUtility` also builds the Ingress of each service that the driver declares `scope: external` (`kind` `http` or `https`): `build_resources` returns it next to the NetworkPolicies, Secrets and Middleware of the utility. `build_ingress_settings` gives the annotations and the class rules to both the chart post-render patch and this Ingress, so the two cannot drift. See [ADR-090](../../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md) and [Ingresses that Styrmin builds](operator.md#ingresses-that-styrmin-builds).
+
 ### Post-render patches and the Helm hooks they reach
 
 <!-- Extracted from specs/025-helm-v4-defaults on 2026-10-16 -->

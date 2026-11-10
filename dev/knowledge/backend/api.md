@@ -573,6 +573,36 @@ submitted blocks is reported:
 isApplicable }`, and the SDK lists the kind `replicas` in `ApplyOutcome.inapplicable_overrides`.
 The SDK exports `ComponentReplicas` and `ReplicaSource` from `styrmin_sdk.models`.
 
+#### Service ingress override fields
+
+<!-- Extracted from specs/033-service-ingress-override on 2026-11-10 -->
+
+A service ingress override sets the ingress class and the FQDN suffix of one service that its driver declares `scope: external`. It is stored in `Deployment.config["services"]`, keyed by the driver service name, with no database column ([ADR-090](../../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md)):
+
+```graphql
+input ServiceConfigInput {       # DeploymentConfigInput.services, UpdateDeploymentInput.services
+  name: String!                  # driver service name
+  ingressClass: String           # null/omitted: the resolved class applies
+  fqdnSuffix: String             # null/omitted: the resolved suffix applies
+}
+type ServiceIngressOverride {    # Deployment.serviceIngressOverrides, sorted by name
+  name: String!
+  ingressClass: String
+  fqdnSuffix: String
+}
+type DeployedService {           # see DeployedService below
+  ingressClass: String           # null for a service that is not external
+  ingressClassOverridden: Boolean!
+  fqdnSuffixOverridden: Boolean!
+}
+```
+
+- `services` is a full-replacement list, like `components`. A service that is not in the list has no override after the write, and `services: []` clears every override. A row with both fields null is the same as no override.
+- The resolver flattens the list to a dict keyed by `name` (`_flatten_services`) and raises `DUPLICATE_SERVICE_NAME` for a repeated name.
+- A write raises `UNKNOWN_SERVICE_INGRESS_OVERRIDE` and `SERVICE_INGRESS_NOT_BUILT` for an override that the driver version bound after the write cannot apply, and `updateDeploymentVersion` raises `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` for a version change that would drop one. The metadata of each is in [Service ingress overrides](services.md#service-ingress-overrides-servicesservice_ingress).
+- `ingressClass` must be a Kubernetes object name and `fqdnSuffix` must be a DNS name. A value that fails the check is rejected when the config model validates. The deployment, environment and cluster settings of the same names have no such check.
+- `updateDeploymentVersion(input:)`, which `styrminctl apply` calls, writes `services` with the version ([ADR-065](../../adr/0065-apply-writes-config-with-the-version.md)). In a manifest the block is `spec.config.services`, a list of `name`, `ingress_class` and `fqdn_suffix` rows.
+
 #### Retired parameters on a driver version change
 
 <!-- Extracted from specs/023-per-component-replicas on 2026-10-15 -->
@@ -645,7 +675,7 @@ Errors:
 
 `updateDeployment(deploymentId: UUID!, input: UpdateDeploymentInput!)` is the single typed write surface for deployment configuration. The prior loose-argument shape (`name`, `config: JSON`, `parameters: JSON`, `serviceNameOverrides: [ServiceNameOverride!]`) is **gone** in the same release that ships the typed input — clean replace, no deprecation window (mirrors the 009 cutover precedent; see [ADR-012](../adr/0012-environment-config-fanout.md) §3 and [ADR-018](../adr/0018-typed-update-deployment-input.md)).
 
-`UpdateDeploymentInput` is **full-replacement** at the top level with **one deliberate exception**: `parameters` keeps merge semantics. Omitting any other top-level field (`envVars`, `ipWhitelist`, `dedicatedIngress`, `scheduling`, `fqdnSuffix`, `externalUrlScheme`, `externalUrlPort`, `externalDnsEndpointsType`, `ingressClass`, `dbSize`, `runtimeClass`, `standardStorage`, `components`, `serviceNameOverrides`, `name`) persists it as its unset state; omitting `parameters` leaves the persisted parameters dict alone. The asymmetry is documented on the GraphQL field description so introspection consumers see it without reading source. See [ADR-018](../adr/0018-typed-update-deployment-input.md) for the rationale (operators bumping one parameter value continue to work with a single-entry input; the unnamed keys survive).
+`UpdateDeploymentInput` replaces the whole stored deployment config when it sets at least one config field, with **one deliberate exception**: `parameters` keeps merge semantics. `split_update_deployment_input` takes `name`, `parameters` and `serviceNameOverrides` out of the input, and the other fields are the config. When the config has at least one field, `update_deployment` and `update_deployment_version` set `deployment.config` to it, so every config field that the input leaves out (`envVars`, `ipWhitelist`, `dedicatedIngress`, `scheduling`, `fqdnSuffix`, `externalUrlScheme`, `externalUrlPort`, `externalDnsEndpointsType`, `ingressClass`, `dbSize`, `runtimeClass`, `standardStorage`, `components`, `services`) is persisted as its unset state. When no config field is set, the config is `None` and the stored config stays. An omitted `parameters` leaves the persisted parameters dict alone, an omitted `serviceNameOverrides` leaves the service name overrides as they are, and an omitted `name` leaves the name. The GraphQL field description, the module docstring of `api/definitions/deployment/inputs.py` and [ADR-018](../../adr/0018-typed-update-deployment-input.md) say that an omitted field means "do not touch the corresponding persisted state". That is wrong for the config fields and is listed as an open point in [ADR-090](../../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md#open-points). See ADR-018 for the rationale of the `parameters` merge (operators bumping one parameter value continue to work with a single-entry input; the unnamed keys survive).
 
 Named-dict-typed config fields (`parameters`, `components`, top-level `envVars`, per-component `envVars`) travel as `list[{name, value, …}]` on the wire and are flattened to `dict` at the GraphQL-input boundary with typed duplicate detection. The flatten step raises:
 
@@ -655,7 +685,7 @@ Named-dict-typed config fields (`parameters`, `components`, top-level `envVars`,
 
 Detection at the flatten step is the only natural location — by the time the dict is built, duplicate keys silently collapse with last-wins semantics. Future typed inputs that mirror a Pydantic `dict[str, T]` field MUST use the same list-shape grammar; JSON-typed dict inputs are forbidden ([ADR-018](../adr/0018-typed-update-deployment-input.md)).
 
-Explicit empty list = full clear; omitted/null field = "do not touch". `components: []` clears every per-component block; `components: [{name: "web", envVars: null}]` keeps the `web` key but collapses its inner env-vars block to its absent state (recursive nested-omission rule inherited from the shared `_convert_value` helper in `api/definitions/config/inputs.py`).
+Explicit empty list = full clear. An omitted or null config field is cleared too when the same write sets at least one other config field, because the write replaces the whole stored config (`deployment.config = deployment_config` in `update_deployment`). Only a write with no config field at all keeps the stored config (the functional tests `test_service_ingress_propagation.py` and `test_sdk_scale_keeps_service_overrides.py` show both). `parameters` is the one exception above. `components: []` clears every per-component block; `components: [{name: "web", envVars: null}]` keeps the `web` key but collapses its inner env-vars block to its absent state (recursive nested-omission rule inherited from the shared `_convert_value` helper in `api/definitions/config/inputs.py`).
 
 The full per-scope env-var error matrix from 008 — `INVALID_ENV_VAR_NAME`, `ENV_VAR_SIZE_LIMIT_EXCEEDED`, `DUPLICATE_ENV_VAR_NAME`, `UNKNOWN_COMPONENT_ENV_VAR` — surfaces at the GraphQL boundary for **both** the top-level `envVars` field and every per-component `envVars` field, with the offending name and scope in the payload. Per-component `envVars` additionally raise `COMPONENT_CONTAINER_NOT_DECLARED` (metadata `component_name`, `components_with_container`, `override: "env_vars"`; image overrides raise it with `override: "image"`, container overrides with `override: "command"` or `"args"`) when they add or change a value on a component whose driver declares no component container (017, [ADR-057](../../adr/0057-post-render-component-overrides.md)). The wire layer (`EnvVarInput.value: String!`) rejects non-string values structurally — the legacy `INVALID_ENV_VAR_VALUE` error code is no longer reachable through `updateDeployment()` (it survives only on the JSON-config write path through `deploy()`).
 
@@ -904,11 +934,16 @@ type DeployedService {
   port: Int!
   component: String!
   primaryFqdn: String          # UUID-based FQDN; null when fqdn_suffix unresolved
-  humanReadableFqdn: String    # environment-name-based FQDN; null when fqdn_suffix unresolved
+  humanReadableFqdn: String    # environment-name-based FQDN, in the override suffix when the service has one; null when fqdn_suffix unresolved
+  ingressClass: String         # effective ingress class of the Ingress that Styrmin builds; null when the service is not external
+  ingressClassOverridden: Boolean!   # true when ingressClass comes from the service ingress override
+  fqdnSuffixOverridden: Boolean!     # true when the suffix of humanReadableFqdn comes from the override
 }
 ```
 
 Both FQDN fields are computed at runtime by the `Deployment.deployed_services()` resolver (single batched lookup of environment + cluster + resolved config, one pass over all services) and injected into the Strawberry instances. They are **not** persisted on `DeployedService` in the database — see [ADR-022](../adr/0022-compute-service-fqdns-at-runtime.md). The same `context/fqdn.py` helpers compute these values for driver-template context, guaranteeing UI ↔ driver consistency.
+
+`primaryFqdn` keeps the resolved suffix when the service has an override: the application address stays with the resolved configuration. The effective class and suffix come from `compute_service_address` in `context/fqdn.py`, the function that the template data uses.
 
 ### DeploymentStatusType
 
