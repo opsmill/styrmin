@@ -23,7 +23,9 @@ object assertion and still answers HTTP 404 (T062 in ``e2e-evidence.md``). The t
 * no override: the default host answers 200 through the Traefik, before and after the override
   is cleared;
 * an override with class ``tailscale``: once the Traefik no longer serves the default host,
-  the overridden host answers 404 through it, because the Ingress has another class.
+  the overridden host answers 404 through it. The 404 shows only that this Traefik does not serve
+  the host (Traefik also answers 404 for a host it does not know), so it does not show that the
+  class is the cause. The assertion on the Ingress object, beside it, shows the class.
 
 Not covered: the overridden host through a Tailscale ingress controller. No such controller and
 no tailnet exist in the fixtures, so no request is sent to the overridden Ingress by its own
@@ -511,10 +513,12 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
         assert await _prefect_ui_api_urls(kr8s_api, namespace) == {
             _prefect_ui_api_url(overridden_host)
         }
-        # Traffic: the Ingress now has class ``tailscale``, which the dedicated Traefik does not
-        # serve, so the default host stops answering 200 once the Traefik has read the change, and
-        # the overridden host is not served by it either. Whether a Tailscale controller serves
-        # the overridden host is not tested (no such controller in the fixtures).
+        # Traffic: the default host stops answering 200 once the dedicated Traefik has read the
+        # change. The 404 for the overridden host shows only that this Traefik does not serve that
+        # host: Traefik also answers 404 for any host it does not know, so the 404 does not isolate
+        # the class as the cause. The assertions on the Ingress object above show the class.
+        # Whether a Tailscale controller serves the overridden host is not tested (no such
+        # controller in the fixtures).
         await _wait_until_traefik_stops_serving(kr8s_api, environment_id, default_host)
         assert (
             await _status_through_traefik(kr8s_api, environment_id, overridden_host)

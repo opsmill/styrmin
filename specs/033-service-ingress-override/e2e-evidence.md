@@ -172,7 +172,7 @@ Question: does `_is_service_or_middleware` and `execute_phase_services` in `back
 
 ## Not verified
 
-- Traffic. The test asserts Kubernetes objects. No Tailscale ingress controller runs in the fixtures, so nothing proves that the overridden host answers. `test_infrahub_services.py` covers the Prefect UI through the dedicated Traefik; it was not run in this chunk. I read it: it looks for the host `task-manager-test-environment.styrmin.com` and sends traffic with that `Host` header through Traefik. The Ingress that Styrmin builds has that host, path `/`, and `kubernetes.io/ingress.class: traefik`, so the assertions look unchanged, but this is by reading.
+- Traffic. The test asserts Kubernetes objects. No Tailscale ingress controller runs in the fixtures, so nothing proves that the overridden host answers. `test_infrahub_services.py` covers the Prefect UI through the dedicated Traefik; it was not run in this chunk. I read it: it looks for the host `task-manager-test-environment.styrmin.com` and sends traffic with that `Host` header through Traefik. The Ingress that Styrmin builds has that host, path `/`, and `kubernetes.io/ingress.class: traefik`, so the assertions look unchanged, but this is by reading. (Superseded: from commit `343e4072` the end-to-end tests send traffic through the dedicated Traefik; see the section "The end-to-end tests now send traffic (commit `343e4072`)".)
 - The UI variant (deferred to T048).
 - The label `styrmin.io/release-reference: ""` on the Ingress that the operator builds. It is empty because of the same missing HelmRelease label. The kopf drift handlers on utility resources read that label to find the HelmRelease. This is the existing behavior of every Styrmin-built utility resource. It was a defect, fixed in commit `a0885121`; see the section "Release-reference label".
 - The message "the CRD type may not be installed yet" in `apply_utility_resources` is also logged when an Ingress fails to apply, which hid the 403 of run 1. Not changed.
@@ -263,12 +263,12 @@ The Ingress was created about 11 seconds before the read, by the operator's Helm
 
 ### What the tests assert
 
-- T034: the namespace holds only `styrmin-svc-app`; its two hosts are the `primary_fqdn` and `human_readable_fqdn` that the deployment reports; the backend is service `app` on port 8080; the annotation keys are the five that the chart patch set on the former chart Ingress; the class is the dedicated controller's (`kubernetes.io/ingress.class: traefik`, no `spec.ingressClassName`); the host name annotation starts with the release reference; no `spec.tls`. Then `deployments.delete` and `wait_for_deployment_status(..., "deleted")`; the namespace then holds no Ingress. The assertion that the Ingress is gone passes also because the namespace is deleted with the deployment; it does not show that the operator deletes an Ingress on its own.
+- T034: the namespace holds only `styrmin-svc-app`; its two hosts are the `primary_fqdn` and `human_readable_fqdn` that the deployment reports; the backend is service `app` on port 8080; the annotation keys are the five that the chart patch set on the former chart Ingress; the class is the dedicated controller's (`kubernetes.io/ingress.class: traefik`, no `spec.ingressClassName`); the host name annotation starts with the release reference; no `spec.tls`. Then `deployments.delete` and `wait_for_deployment_status(..., "deleted")`; the namespace then holds no Ingress. The assertion that the Ingress is gone passes also because the namespace is deleted with the deployment; it does not show that the operator deletes an Ingress on its own. (Review fix M6: the assertion that no Ingress is left after the deletion could not fail because of the way Styrmin deletes an Ingress, since the namespace goes with the deployment. It was removed from the test in the review fixes; the test still waits for the status `deleted`. The operator deletion of an Ingress is covered by unit tests, and not by this end-to-end test.)
 - T038: the namespace of `simple-app` holds exactly one Ingress, `styrmin-simple-app` (the chart Ingress), and it has no `styrmin.io/service-name` label.
 
 ### Not verified
 
-- Traffic to the generic-app host through the Ingress. The test asserts the object, and the existing check of the application through a port-forward to the Service is unchanged.
+- Traffic to the generic-app host through the Ingress. The test asserts the object, and the existing check of the application through a port-forward to the Service is unchanged. (Superseded: from commit `343e4072` the end-to-end tests send traffic through the dedicated Traefik; see the section "The end-to-end tests now send traffic (commit `343e4072`)".)
 - The `[ui-chromium]` variant of `test_deploy_simple_app` (see above).
 - The T038 assertion was not run on a base commit to show that it would fail with a Styrmin-built Ingress for an internal service. The unit tests of T009 (`test_no_ingress_for_an_internal_service`) cover that case.
 - The unit test of T035 was not added: `test_the_application_address_is_on_exactly_one_ingress` and `test_the_application_address_is_only_on_the_first_declared_service` in `backend/tests/unit/agent/test_ingress_utility_service_ingress.py` (T009) already assert that exactly one Ingress has the application address with two and three external services.
@@ -349,7 +349,7 @@ Steps that run only in `[ui-chromium]`, all against the real UI:
 
 - Deploy form: a deployment created with an override typed into the form is not covered. No test fills the fields and submits the form, because that needs a second Infrahub stack. Vitest covers the form (`__tests__/deploy-form/DeployFormPage.test.tsx`, 5 tests), not the end-to-end path from the form to the Ingress.
 - The deploy form step checks which fields exist, not that an invalid suffix blocks Deploy (covered in Vitest only). The end-to-end test does not type an invalid suffix in the drawer.
-- Traffic: the test reads objects on the vCluster; no ingress controller of class `tailscale` runs, and no request is sent to a host.
+- Traffic: the test reads objects on the vCluster; no ingress controller of class `tailscale` runs, and no request is sent to a host. (Superseded: from commit `343e4072` the end-to-end tests send traffic through the dedicated Traefik; see the section "The end-to-end tests now send traffic (commit `343e4072`)".)
 - UI visuals: selectors, labels, roles and text are checked; layout, colors and the position of the marks are not.
 - The test was run on one machine (macOS, Docker); the CI matrix was not run.
 
@@ -431,7 +431,7 @@ PASSED14:50:06 info Removing vCluster container vcluster.cp.pytest-1fedb299-5207
 
 ## Not verified (T054)
 
-- Traffic: the refusals are checked as GraphQL errors, cluster objects and task lists; no request was sent through an ingress controller.
+- Traffic: the refusals are checked as GraphQL errors, cluster objects and task lists; no request was sent through an ingress controller. (Superseded: from commit `343e4072` the end-to-end tests send traffic through the dedicated Traefik; see the section "The end-to-end tests now send traffic (commit `343e4072`)".)
 - UI for the refusals: covered by Vitest only (`ConfigDiffDialog.test.tsx`, `DeployFormPage.test.tsx`, `UpgradeErrorAlert.test.tsx`), not by an end-to-end UI run, because the test is `api_only`.
 - UI visuals (layout, colors) of the error alerts.
 - (Resolved, see the section "Release-reference label".) The cause of the release-reference label difference above.
@@ -650,7 +650,7 @@ Task T062, quickstart step 7, spec SC-005 and the edge case on existing Infrahub
 - So the dedicated Traefik ignores the Styrmin-built Ingress.
 - Proof on the vCluster of run 1, 2026-11-10T15:16:49Z, with a port-forward to the Traefik pod: the request with `Host: task-manager-test-environment.styrmin.com` answered `404`. After `kubectl label ingress styrmin-svc-task-manager styrmin/environment_id=48f36ebf-fa3e-4139-8552-21622a04cb93` it answered `200 200 200 200 200` in the next five seconds, and the label was still on the object two minutes later.
 - The builder is the same for every external service, so the same cause is expected for every external service of any driver in an environment with `dedicated_ingress`, including `generic-app`. This is inferred from the code and was not run.
-- Why the earlier end-to-end runs did not show it: `test_service_ingress_override.py` asserts Kubernetes objects and no traffic (the "Not verified" section above says so), and `test_infrahub_services.py`, which sends traffic through the dedicated Traefik, was not run in that chunk.
+- Why the earlier end-to-end runs did not show it: `test_service_ingress_override.py` asserts Kubernetes objects and no traffic (the "Not verified" section above says so), and `test_infrahub_services.py`, which sends traffic through the dedicated Traefik, was not run in that chunk. (Superseded: from commit `343e4072` the end-to-end tests send traffic through the dedicated Traefik; see the section "The end-to-end tests now send traffic (commit `343e4072`)".)
 - Run 3, to check this with the existing test: `backend/tests/e2e/test_infrahub_services.py -k api-chromium`, started 2026-11-10T15:36:49Z at commit `772256e6`, vCluster `pytest-52f69e56-477c-421a-bb8e-995e847ce162`. It failed at line 241, the request through Traefik:
 
   ```text
@@ -731,7 +731,7 @@ Commit under test: `772256e64697d29fd587e6c9f6f2904403f5023f`. Started 2026-11-1
 | 3. No override (`generic-app`, two external services) | not run by hand; the `generic-app` test and the unit tests run it | "End-to-end evidence: generic-app has one Ingress" above |
 | 4. UI | not run by hand; the `[ui-chromium]` variant runs it | "T048" above |
 | 5. Refused requests | not run by hand; `test_service_ingress_override_refusals_name_the_service` runs it | "T054" above |
-| 6. Dedicated ingress controller | not run by hand; scenario 3 of the same end-to-end test runs it (objects only, no traffic) | "Final passing run (run 4)" |
+| 6. Dedicated ingress controller | not run by hand; scenario 3 of the same end-to-end test runs it (objects only, no traffic) | "Final passing run (run 4)" (superseded: see "The end-to-end tests now send traffic (commit `343e4072`)") |
 | 7. Existing Infrahub deployment | yes, twice (T062 above) | "T062" above |
 
 - Quickstart text changed: step 1 (the extra commands and the separate CLI and SDK test runs) and step 7 (the steps of the measurement).

@@ -72,7 +72,7 @@ Upgrade a running `infrahub` deployment from the previous driver version (`infra
 
 Record: whether the chart's Ingress `styrmin-task-manager` is removed, when `styrmin-svc-task-manager` appears, whether the task manager address stops answering, and for how long. Do this with the operator interval of the end-to-end fixtures (5 seconds) and with the default (60 seconds). Expected: the address answers HTTP 200 before and after, and the record states any interval in which it does not. Measured on a local vCluster with the label on the Ingress: no interval at the 5-second pass (two runs), about 12 and about 7 seconds of HTTP 404 at the 60-second pass (two runs).
 
-The results are in `e2e-evidence.md`, sections "T062" (without the label) and "T062 repeated with the label". The throwaway script that ran these steps is not in the repository.
+The results are in `e2e-evidence.md`, sections "T062: upgrade of a running Infrahub deployment, Tailscale, and the default timer interval" (without the label) and "The label defect: fix, traffic checks and the upgrade measurement repeated" (with the label). The throwaway script that ran these steps is not in the repository.
 
 ## Evidence
 

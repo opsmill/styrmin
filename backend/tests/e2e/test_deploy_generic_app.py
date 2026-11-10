@@ -15,7 +15,9 @@ object assertions alone do not show that the Ingress that Styrmin builds is serv
 The driver declares its ``app`` service ``scope: external`` and renders no Ingress
 of its own (#598, FR-012), so the deployment has exactly one Ingress, the one that
 Styrmin builds for the service (SC-006). The test deletes the deployment at the end
-and asserts that the Ingress goes with it.
+and waits until its status is ``deleted``. It does not assert that the Ingress is gone:
+the deployment's namespace is deleted with it, so such a check cannot fail because of the
+way Styrmin deletes an Ingress. Unit tests cover the Ingress deletion by the operator.
 """
 
 from __future__ import annotations
@@ -230,14 +232,9 @@ async def test_deploy_generic_app(
                 headers={"Host": host},
             )
 
-    # Deleting the deployment deletes its namespace, and the Ingress with it.
+    # The deployment is deleted with its Ingress. The namespace goes with it, so nothing here shows
+    # that Styrmin deletes an Ingress on its own; the wait shows that the deletion completes.
     await client.deployments.delete(str(task.deployment_id))
     await wait_for_deployment_status(
         client, str(task.deployment_id), "deleted", timeout=DELETE_TIMEOUT_SECONDS
     )
-    remaining = [
-        ing.name
-        async for ing in AsyncIngress.list(namespace=namespace, api=kr8s_api)
-        if isinstance(ing, AsyncIngress)
-    ]
-    assert remaining == [], f"Ingress left after the deletion: {remaining}"

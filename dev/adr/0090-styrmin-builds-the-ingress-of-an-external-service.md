@@ -280,8 +280,8 @@ Ingress. ADR-071 is marked "superseded in part" and points here.
     request failed (0 of 112 and 0 of 118). With the default pass of 60 seconds (two runs), the host
     answered HTTP 404 for about 12 seconds (12 of 126 requests) and about 7 seconds (7 of 120). These
     are four samples on one machine, not limits: the length depends on when the operator's pass
-    falls after Helm removes the chart Ingress ([e2e-evidence.md](../../specs/033-service-ingress-override/e2e-evidence.md),
-    "T062 repeated with the label").
+    happens after Helm removes the chart Ingress ([e2e-evidence.md](../../specs/033-service-ingress-override/e2e-evidence.md),
+    "The label defect: fix, traffic checks and the upgrade measurement repeated").
   - The first creation of the Ingress on a default install. The operator creates it through the
     HelmRelease timer, whose default interval is 60 seconds
     (`SETTINGS.operator.reconcile_interval`). In the upgrade runs at that interval, the host

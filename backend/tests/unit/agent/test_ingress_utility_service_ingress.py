@@ -366,6 +366,29 @@ class TestHosts:
         assert ingress["metadata"]["labels"][SERVICE_NAME_LABEL] == "task-manager"
         assert _hosts(ingress) == [_readable("task-manager")]
 
+    @pytest.mark.parametrize("kind", ["tcp", "udp"])
+    def test_no_application_address_when_the_first_declared_service_is_external_tcp_or_udp(
+        self, kind: str
+    ) -> None:
+        """Pins the behaviour of the first release (review M5). The application address goes to the
+        first declared service, and only when Styrmin builds an Ingress for that service. A ``tcp`` or
+        ``udp`` service gets none, so no Ingress carries the address. ``spec.md`` FR-002 and research
+        D-003 do not cover this case: the spec is silent, and the owner has not decided it."""
+        context = _context(
+            [
+                _service("queue", kind=kind, port=5672),
+                _service("web"),
+                _service("api", port=9000),
+            ]
+        )
+
+        ingresses = _by_service(_build(context))
+
+        assert set(ingresses) == {"web", "api"}
+        assert _hosts(ingresses["web"]) == [_readable("web")]
+        assert _hosts(ingresses["api"]) == [_readable("api")]
+        assert _PRIMARY not in [h for i in ingresses.values() for h in _hosts(i)]
+
     def test_the_application_address_is_on_exactly_one_ingress(self) -> None:
         """FR-002: no two Ingresses claim one host."""
         context = _context(
