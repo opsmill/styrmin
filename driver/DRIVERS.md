@@ -36,7 +36,7 @@ metadata:
   name: <string>           # Unique driver name
 spec:
   version: <string>        # Driver version
-  supported_versions: <string>  # Semver specifier for supported app versions
+  supported_versions: <string>  # PEP 440 version specifier for supported app versions
   info:                    # Required block; every key is optional
     icon: <string>         # Absolute https URL of the logo image
     description: <string>  # Plain text that describes the application
@@ -87,7 +87,7 @@ spec:
 | `kind` | Must be `ApplicationDriver` |
 | `metadata.name` | Unique identifier for the driver |
 | `spec.version` | Version string for this driver |
-| `spec.supported_versions` | Semver specifier (e.g., `>=1.1.5,<=1.2.0`) |
+| `spec.supported_versions` | PEP 440 version specifier (e.g., `>=1.1.5,<=1.2.0`). A prerelease whose numbers fit the range is accepted; see "Prereleases in `supported_versions`" in `docs/docs/drivers/creating-a-driver.md` |
 | `spec.info` | Block that describes the application. It can be empty (`info: {}`); every key in it is optional |
 | `spec.helm.main.location` | Helm chart location (OCI or HTTP URL) |
 | `spec.helm.main.version` | Helm chart version |

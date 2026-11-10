@@ -1,10 +1,13 @@
-"""The three places that test a version against a range give one verdict (#591, FR-002, SC-002).
+"""Check that every place that tests a version against a range gives the same verdict (#591).
 
 The picker of a driver version (``_resolve_latest_matching_version``), the check
 of a pinned driver version (``_ensure_pin_supports_version``) and the check of a
-driver's ``default_version`` (the ``Specification`` model) must agree with the
-shared check ``version_fits_range`` on every row of ``BOUNDARY_CASES``, which is
-the boundary table of ``specs/032-prerelease-version-range/data-model.md``.
+driver's ``default_version`` (the ``Specification`` model) must each give the
+verdict of ``version_fits_range`` for every row of the same table
+(``BOUNDARY_CASES`` and ``STABLE_CASES``; the boundary table is also in
+``specs/032-prerelease-version-range/data-model.md``). This guards against one
+place keeping the old rule, which required a range to name a prerelease. The
+rule itself is tested in ``test_version_range.py``.
 """
 
 from __future__ import annotations

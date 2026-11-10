@@ -16,7 +16,7 @@ description: "Task list for accepting prerelease application versions that fit a
 
 - **[P]**: can run in parallel (different files, no dependency on an unfinished task)
 - **[Story]**: the user story of [spec.md](spec.md) (US1 to US4)
-- Paths are relative to the repository root `/Users/Simon/styrmin-591-spec`
+- Paths are relative to the repository root
 
 ## Notes for the implementer
 

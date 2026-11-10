@@ -65,7 +65,7 @@ The **application version** is the version of the deployed application
 itself (for example, Infrahub `1.6.0`). It is different from the
 application driver version, which is the specification that deploys the
 application. One application driver version usually supports a range of
-application versions, declared as a semver specifier.
+application versions, declared as a [PEP 440 version specifier](https://peps.python.org/pep-0440/#version-specifiers). A prerelease whose numbers fit the range is accepted: see [Prereleases in `supported_versions`](../drivers/creating-a-driver.md#prereleases-in-supported_versions).
 
 ### Where you deploy
 

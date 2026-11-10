@@ -2,7 +2,7 @@
 
 **Quickstart**: [quickstart.md](quickstart.md) | **E2E evidence**: [e2e-evidence.md](e2e-evidence.md)
 
-Each row is one step of the quickstart, run once from the repository root on branch `sas-591-prerelease-spec`. Logs are in `/private/tmp/claude-503/-Users-Simon-styrmin-591-spec/9fc71806-30c1-45e6-b772-cc2f82635b5e/scratchpad/`.
+Each row is one step of the quickstart, run once from the repository root on branch `sas-591-prerelease-spec`. Logs are in the scratchpad log directory (not committed).
 
 | Step | What it expects | Command run | Observed result |
 | --- | --- | --- | --- |
