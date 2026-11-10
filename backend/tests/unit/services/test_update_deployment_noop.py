@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from packaging.version import InvalidVersion
 
 from styrmin_backend.domain.models import (
     Deployment,
@@ -427,6 +428,41 @@ async def test_upgrade_from_a_prerelease_to_its_release_dispatches_a_reconcile(
         after = await uow.deployments.find(id=deployment_id)
     assert after is not None
     assert after.application_version == "1.12.0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pinned", [False, True])
+@patch("styrmin_backend.services.deployment.apply_state", new_callable=AsyncMock)
+async def test_upgrade_to_a_version_that_is_not_pep_440_raises_invalid_version(
+    mock_apply_state: AsyncMock, pinned: bool
+) -> None:
+    """FR-006 of #591: ``latest`` raises ``InvalidVersion`` from the service, as before.
+
+    Observed on the code at the head of the branch (``uow`` fakes, ``packaging``
+    25.0), with and without a pin. Nothing is dispatched.
+    """
+    uow = _make_uow()
+    deployment_id = uuid4()
+    mock_apply_state.side_effect = _fake_apply_state
+    deployment = await _seed_steady_state_deployment(
+        uow=uow,
+        deployment_id=deployment_id,
+        environment_id=uuid4(),
+        supported_versions=STANDARD_RANGE,
+        application_version="1.11.9",
+    )
+    driver_version_id = deployment.application_driver_version_id if pinned else None
+
+    with pytest.raises(InvalidVersion, match="Invalid version: 'latest'"):
+        async with uow:
+            await update_deployment_version(
+                deployment_id=deployment_id,
+                version="latest",
+                uow=uow,
+                driver_version_id=driver_version_id,
+            )
+
+    mock_apply_state.assert_not_called()
 
 
 class _Steps:

@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from uuid import UUID, uuid4
 
 import pytest
+from packaging.version import InvalidVersion
 
 from styrmin_backend.db.models import (
     ApplicationDriver,
@@ -95,7 +96,12 @@ def _uow_with_default(default_version: str | None) -> tuple[FakeUnitOfWork, UUID
     return uow, environment.id
 
 
-async def _deploy(uow: FakeUnitOfWork, environment_id: UUID, version: str | None):
+async def _deploy(
+    uow: FakeUnitOfWork,
+    environment_id: UUID,
+    version: str | None,
+    driver_version_id: UUID | None = None,
+):
     await deploy_application(
         driver_name=DRIVER_NAME,
         version=version,
@@ -103,6 +109,7 @@ async def _deploy(uow: FakeUnitOfWork, environment_id: UUID, version: str | None
         uow=uow,
         created_by_user_id=uuid4(),
         deployment_name="prerelease",
+        driver_version_id=driver_version_id,
     )
     stored = await uow.deployments.get_by_name("prerelease", environment_id)
     assert stored is not None
@@ -129,3 +136,50 @@ class TestDeployApplicationPrereleaseVersion:
         stored = await _deploy(uow, environment_id, None)
 
         assert stored.application_version == "1.12.0b0"
+
+    @pytest.mark.anyio
+    async def test_a_pinned_driver_version_accepts_a_prerelease_that_fits_its_range(
+        self,
+    ) -> None:
+        """The deployment binds the pinned driver version and keeps the typed text.
+
+        A wrong argument order at the ``_ensure_pin_supports_version`` call in
+        ``deploy_application`` would raise here instead of creating a deployment.
+        """
+        uow, environment_id = _uow_with_default(None)
+        pinned = uow.application_driver_versions.models[0]
+
+        stored = await _deploy(
+            uow, environment_id, "1.12.0-beta.1", driver_version_id=pinned.id
+        )
+
+        assert stored.application_driver_version_id == pinned.id
+        assert stored.application_version == "1.12.0-beta.1"
+
+
+class TestDeployApplicationNonPep440Version:
+    """FR-006 of #591: a version that is not PEP 440 behaves as before the change.
+
+    ``deploy_application`` raises ``packaging.version.InvalidVersion`` from the
+    service function, with and without a pin, and creates nothing. Observed on
+    the code at the head of the branch (``uv run pytest``, ``packaging`` 25.0)
+    and equal to the outcome of the helpers recorded in
+    ``test_driver_version_resolution.py::TestNonPep440VersionBehaviour``.
+    """
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("pinned", [False, True])
+    async def test_latest_raises_invalid_version_and_creates_nothing(
+        self, pinned: bool
+    ) -> None:
+        uow, environment_id = _uow_with_default(None)
+        driver_version_id = (
+            uow.application_driver_versions.models[0].id if pinned else None
+        )
+
+        with pytest.raises(InvalidVersion, match="Invalid version: 'latest'"):
+            await _deploy(
+                uow, environment_id, "latest", driver_version_id=driver_version_id
+            )
+
+        assert await uow.deployments.get_by_name("prerelease", environment_id) is None

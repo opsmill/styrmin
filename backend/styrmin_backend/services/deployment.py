@@ -788,8 +788,9 @@ def _resolve_latest_matching_version(
 ) -> ApplicationDriverVersion | None:
     """Return the latest driver version supporting ``app_version``, if any.
 
-    Among the driver's versions whose ``application_supported_versions``
-    specifier matches the requested application version, pick the latest by
+    Among the driver's versions whose ``application_supported_versions`` range
+    the requested application version fits (prereleases allowed, see
+    :func:`version_fits_range`), pick the latest by
     :func:`_driver_version_sort_key` — never the implicit DB insertion order.
     """
     target = Version(app_version)
@@ -855,7 +856,7 @@ def _ensure_pin_supports_version(
     application_driver: ApplicationDriver,
     version: str,
 ) -> None:
-    """Reject a pin whose specifier does not cover the requested version.
+    """Reject a pin whose range the requested version does not fit.
 
     The refusal names the pinned driver version and its range, then lists every
     supported range of the driver, like the refusal without a pin.
@@ -996,9 +997,10 @@ async def update_deployment_version(
 
         # Resolve the target driver version. With an explicit pin, validate
         # it; otherwise always re-resolve to the latest driver version (per
-        # _driver_version_sort_key) whose specifier matches the requested
-        # application version — even when the currently bound version still
-        # matches, so a newly loaded overlapping driver build is picked up.
+        # _driver_version_sort_key) whose range the requested application
+        # version fits (prereleases allowed, see ``version_fits_range``) — even
+        # when the currently bound version still fits, so a newly loaded
+        # overlapping driver build is picked up.
         application_driver = await uow.application_drivers.get(
             id=application_driver_version.application_driver_id
         )

@@ -19,7 +19,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from styrmin_backend.db.models import ApplicationDriver
 from styrmin_backend.services.deployment import (
+    _unsupported_version_error,
     deploy_application,
     update_deployment_version,
 )
@@ -149,7 +151,11 @@ class TestRefusalListsTheVersionAndTheRanges:
 
     @pytest.mark.anyio
     async def test_ranges_are_listed_newest_driver_version_first(self) -> None:
-        # Text order would put ">=1.10" before ">=1.9"; driver version order does not.
+        # The order is the driver version order, newest first: 10, 2, 1.0.0.
+        # Not the insertion order (1.0.0, 2, 10), and not a sort of the driver
+        # version strings, which would put "2" before "10". Ascending text order
+        # of the ranges would put ">=1.10" first too, so this does not tell
+        # those two apart.
         uow, _, environment_id = await _seed(
             extra_versions=[("2", ">=1.9,<1.10"), ("10", ">=1.10,<1.11")]
         )
@@ -251,6 +257,34 @@ class TestRefusalMessagesFollowTheContract:
         assert str(pin.id) in message
 
 
+class TestADriverWithNoDriverVersions:
+    """Message 1 has no parenthesis when the driver has no driver version."""
+
+    EXPECTED = f"Version 1.0.0 is not supported by the application driver {DRIVER}."
+
+    def test_the_message_has_no_list_of_ranges(self) -> None:
+        driver = ApplicationDriver(id=uuid4(), name=DRIVER)
+        driver.versions = []
+
+        error = _unsupported_version_error(driver, "1.0.0")
+
+        assert isinstance(error, InvalidVersionError)
+        assert str(error) == self.EXPECTED
+
+    @pytest.mark.anyio
+    async def test_creating_a_deployment_refuses_with_that_message(self) -> None:
+        uow = _make_uow()
+        driver = ApplicationDriver(id=uuid4(), name=DRIVER)
+        driver.versions = []
+        drivers = FakeApplicationDriverRepository()
+        drivers.models = [driver]
+        uow.application_drivers = drivers
+
+        message = await _refused_on_create(uow, uuid4(), "1.0.0")
+
+        assert message == self.EXPECTED
+
+
 def _snapshot(uow: FakeUnitOfWork) -> dict[str, list]:
     return {
         "deployments": [d.id for d in uow.deployments._deployments],
@@ -345,21 +379,16 @@ class TestNoMessageMentionsAPrerelease:
 
 
 class TestPrereleaseAcceptedWhenARangeNamesOne:
-    """A range that names a prerelease accepts it and binds that driver build."""
+    """A range that names a prerelease accepts it; the newest fitting build binds."""
 
     @pytest.mark.asyncio
     @patch(f"{MODULE}.apply_state", new_callable=AsyncMock)
-    async def test_a_range_that_names_a_prerelease_accepts_it_and_binds_that_build(
+    async def test_an_upgrade_to_a_prerelease_is_accepted_when_a_range_names_it(
         self, mock_apply_state: AsyncMock
     ) -> None:
         mock_apply_state.side_effect = _fake_apply_state
         uow, deployment_id, _ = await _seed(
             extra_versions=[("2.0.0", PRERELEASE_RANGE)]
-        )
-        beta_build = next(
-            driver_version
-            for driver_version in uow.application_driver_versions.models
-            if driver_version.application_supported_versions == PRERELEASE_RANGE
         )
 
         async with uow:
@@ -369,6 +398,36 @@ class TestPrereleaseAcceptedWhenARangeNamesOne:
 
         assert task is not None
         mock_apply_state.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch(f"{MODULE}.apply_state", new_callable=AsyncMock)
+    async def test_a_newer_build_whose_range_names_no_prerelease_binds_over_an_older_one_that_does(
+        self, mock_apply_state: AsyncMock
+    ) -> None:
+        """#591: both ranges fit ``1.5.0b0``, so the newest driver version binds.
+
+        On the code before #591 only the older build fit, because its range
+        names a prerelease (``Version("1.5.0b0") in SpecifierSet(">=1.5.0b0,<1.6")``
+        is True) and the range of the newer build does not (``in
+        SpecifierSet(">=1.0.0,<2.0.0")`` is False). It picked the older build.
+        This test fails on that code.
+        """
+        mock_apply_state.side_effect = _fake_apply_state
+        uow, deployment_id, _ = await _seed(
+            extra_versions=[("0.9.0", PRERELEASE_RANGE), ("2.0.0", STABLE_ONLY)]
+        )
+        newest_build = next(
+            driver_version
+            for driver_version in uow.application_driver_versions.models
+            if driver_version.version == "2.0.0"
+        )
+
+        async with uow:
+            task = await update_deployment_version(
+                deployment_id=deployment_id, version=PRERELEASE, uow=uow
+            )
+
+        assert task is not None
         deployment = await uow.deployments.find(id=deployment_id)
         assert deployment is not None
-        assert deployment.application_driver_version_id == beta_build.id
+        assert deployment.application_driver_version_id == newest_build.id

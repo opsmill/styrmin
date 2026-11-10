@@ -36,9 +36,10 @@ def _picker_verdict(supported: str, version: str) -> bool:
 
 
 def _pin_verdict(supported: str, version: str) -> bool:
+    pinned = _adv("1", supported=supported)
+    driver = _driver([pinned])
     try:
-        pinned = _adv("1", supported=supported)
-        _ensure_pin_supports_version(pinned, _driver([pinned]), version)
+        _ensure_pin_supports_version(pinned, driver, version)
     except InvalidVersionError:
         return False
     return True

@@ -142,19 +142,29 @@ class TestResolveLatestMatchingVersion:
 
         assert _resolve_latest_matching_version(driver, "1.12.0b0") is None
 
-    @pytest.mark.parametrize("insertion_order", ["lower-first", "higher-first"])
-    def test_latest_wins_among_overlapping_ranges_for_a_prerelease(
+    @pytest.mark.parametrize("insertion_order", ["older-first", "newer-first"])
+    def test_latest_wins_when_an_older_range_names_the_prerelease_and_a_newer_one_does_not(
         self, insertion_order: str
     ) -> None:
-        standard = _adv("1", supported=">=1.5,<2.0", created_on=_T1)
-        naming_a_prerelease = _adv("2", supported=">=1.12.0b0,<1.13", created_on=_T1)
-        versions = [standard, naming_a_prerelease]
-        if insertion_order == "higher-first":
+        """#591: both ranges fit ``1.12.0b0``, so the newest driver version binds.
+
+        On the code before #591 only the older driver version fit, because its
+        range names a prerelease and the other range does not. The old rule
+        (``Version(...) in SpecifierSet(range)``) returns False for
+        ``>=1.5,<2.0`` and True for ``>=1.12.0b0,<1.13``, so it picked the older
+        build. This test fails on that code.
+        """
+        older_naming_a_prerelease = _adv(
+            "1", supported=">=1.12.0b0,<1.13", created_on=_T1
+        )
+        newer_naming_none = _adv("2", supported=">=1.5,<2.0", created_on=_T1)
+        versions = [older_naming_a_prerelease, newer_naming_none]
+        if insertion_order == "newer-first":
             versions.reverse()
         driver = _driver(versions)
 
         assert _resolve_latest_matching_version(driver, "1.12.0b0") is (
-            naming_a_prerelease
+            newer_naming_none
         )
 
 
@@ -218,9 +228,11 @@ class TestNonPep440VersionBehaviour:
     def test_pin_check_raises_invalid_version_from_the_service_function(
         self, version: str
     ) -> None:
+        pinned = _adv("1")
+        driver = _driver([pinned])
+
         with pytest.raises(InvalidVersion, match=f"Invalid version: '{version}'"):
-            pinned = _adv("1")
-            _ensure_pin_supports_version(pinned, _driver([pinned]), version)
+            _ensure_pin_supports_version(pinned, driver, version)
 
     def test_the_exception_is_not_a_service_error(self) -> None:
         # This is why the GraphQL layer masks it as INTERNAL_ERROR.

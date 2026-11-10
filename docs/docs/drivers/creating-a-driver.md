@@ -199,7 +199,9 @@ Notes:
   specifier](https://semver.org/) of the application versions this
   driver supports. Styrmin refuses to deploy an application version
   outside this range, so a user cannot select a version that you have
-  not tested.
+  not tested. A range also accepts a prerelease whose numbers fit it,
+  such as `1.12.0b0` for `>=1.5,<2.0`: see
+  [Prereleases in `supported_versions`](#prereleases-in-supported_versions).
 - **`helm.main.location`** is a chart location that the Styrmin server
   can pass to Helm: an OCI URL (`oci://registry.example.com/charts/foo`),
   an HTTP repository URL, or a relative path in a chart directory of
@@ -251,18 +253,23 @@ against `supported_versions` the same way.
 | `>=1.12.0,<1.13` | `1.12.0b0`, `1.9.0rc1`, `1.12.0.dev3` | no, below the lower bound |
 | `>=1.12.0b0,<1.13` | `1.12.0b0`, `1.12.0` | yes |
 | `==1.12.0` | `1.12.0b0` | no |
+| `<2.0,!=1.12.*` | `1.12.0b1` | no, excluded by `!=` |
 | `!=1.12.0b0` | `1.12.0b1` | yes |
 
 To accept the prereleases of one release, such as `1.12.0`, write the first
 prerelease as the lower bound, for example `>=1.12.0b0,<1.13`. This range
 also accepts the stable release `1.12.0` and later `1.12.x` patch releases.
 When its driver version has the highest `spec.version` of the driver,
-Styrmin binds those deployments to it too, as the latest-wins rule does for
-any ranges that overlap.
+Styrmin binds a new deployment or an upgrade to it, as the latest-wins rule
+does for any ranges that overlap. An existing deployment stays on its
+current driver version until its next upgrade.
 
-A driver cannot forbid prereleases. A range that looks stable, such as
-`>=1.5,<2.0`, accepts every prerelease between its bounds. To keep a
-prerelease out, set the bounds so that its numbers fall outside the range.
+A range accepts every prerelease whose numbers fit it. A range that looks
+stable, such as `>=1.5,<2.0`, accepts every prerelease between its bounds.
+Only a `==` or `!=` clause, or bounds that put the numbers of a prerelease
+outside the range, can refuse one: `==1.12.0` refuses `1.12.0b0`, and
+`<2.0,!=1.12.*` refuses `1.12.0b1`. To keep a prerelease out, set the bounds
+so that its numbers fall outside the range.
 
 Styrmin stores the application version as the person typed it:
 `1.12.0-beta.1` stays `1.12.0-beta.1`.

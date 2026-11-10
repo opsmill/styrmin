@@ -9,7 +9,7 @@ table so that they cannot drift from it.
 from __future__ import annotations
 
 import pytest
-from packaging.specifiers import InvalidSpecifier
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import Version
 
 from styrmin_backend.services.version_range import version_fits_range
@@ -60,6 +60,60 @@ def test_stable_versions_keep_their_verdict(
     supported: str, version: str, fits: bool
 ) -> None:
     assert version_fits_range(Version(version), supported) is fits
+
+
+# Versions that are not prereleases: post releases, local versions, epochs and
+# plain releases. The old matching rule is ``Version(v) in SpecifierSet(range)``.
+NON_PRERELEASE_VERSIONS = [
+    "0.9",
+    "1.0",
+    "1.0.0",
+    "1.4.2",
+    "1.4.9",
+    "1.5",
+    "1.9.0",
+    "1.12",
+    "1.12.0",
+    "1.12.0.post1",
+    "1.12.0.post2",
+    "1.12.1",
+    "1.13",
+    "1.12.0+local",
+    "1.12.0.post1+local.7",
+    "2.0",
+    "2.0.0",
+    "2.0.0.post1",
+    "1!1.0",
+    "1!1.12.0",
+    "1!2.0.0",
+]
+
+RANGES = [
+    ">=1.5,<2.0",
+    ">1.0",
+    "<2.0",
+    "<=1.12",
+    ">=1.12.0,<1.13",
+    "==1.12.0",
+    "==1.12.*",
+    "!=1.12.0",
+    "!=1.12.*",
+    "~=1.4.2",
+    "===1.12.0",
+    ">=1.12.0.post1",
+    ">=1!1.0",
+]
+
+
+@pytest.mark.parametrize("supported", RANGES)
+@pytest.mark.parametrize("version", NON_PRERELEASE_VERSIONS)
+def test_a_version_that_is_not_a_prerelease_keeps_the_verdict_of_the_default_matching(
+    supported: str, version: str
+) -> None:
+    """FR-007: compare with the matching of ``packaging`` before #591."""
+    parsed = Version(version)
+    assert not parsed.is_prerelease
+    assert version_fits_range(parsed, supported) is (parsed in SpecifierSet(supported))
 
 
 def test_invalid_range_text_raises() -> None:
