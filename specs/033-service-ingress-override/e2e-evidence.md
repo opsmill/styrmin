@@ -352,3 +352,87 @@ Steps that run only in `[ui-chromium]`, all against the real UI:
 - Traffic: the test reads objects on the vCluster; no ingress controller of class `tailscale` runs, and no request is sent to a host.
 - UI visuals: selectors, labels, roles and text are checked; layout, colors and the position of the marks are not.
 - The test was run on one machine (macOS, Docker); the CI matrix was not run.
+
+## T054: refusals name the service (`api_only`)
+
+Node id: `backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_refusals_name_the_service[api-chromium]`. The test is `api_only`, so it has no `[ui-chromium]` variant.
+
+All runs below started on commit `f3f5668d8d92d41fe06c418b27bf94a66b6f270d` with an empty `git status --short`, except the control run, which carried one temporary edit (below). Times are UTC; the log times are local (UTC+1). `<scratchpad>` is `/private/tmp/claude-503/-Users-Simon-styrmin-598-spec/2ab6e2fa-7180-493d-8211-590f003133bd/scratchpad`. The kubeconfig of each run is under `/private/var/folders/h8/b5b4gccj4h5c0sjlqjymm1y40000gq/T/pytest-of-Simon/pytest-<N>/vcluster0/kubeconfig` and is deleted with the session.
+
+### Passing run (first run, no failed iteration)
+
+- Started 2026-11-10T13:21:54Z, ended about 2026-11-10T13:26:50Z.
+- Command, from the repository root (`sleep 86400` replaces `sleep infinity`, which exits at once on macOS):
+
+  ```bash
+  sleep 86400 | uv run pytest "backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_refusals_name_the_service" -k api-chromium -v -s --pdb > <scratchpad>/pdb-refusals.log 2>&1
+  ```
+
+- vCluster `pytest-7bea25d3-4cfa-47cd-b896-93fdd7a86559`; kubeconfig `.../pytest-of-Simon/pytest-1432/vcluster0/kubeconfig`.
+- Verbatim pytest output (ANSI colors removed; `-s` interleaves the vCluster log into the result line):
+
+  ```text
+  backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_refusals_name_the_service[api-chromium] 14:21:57 warn There is a newer version of vcluster: v0.37.7. Run `vcluster upgrade` to upgrade to the newest version.
+  ...
+  PASSED14:26:46 info Removing vCluster container vcluster.cp.pytest-7bea25d3-4cfa-47cd-b896-93fdd7a86559...
+  =========== 1 passed, 1 deselected, 4 warnings in 296.46s (0:04:56) ============
+  ```
+
+### What the test asserts on the real stack
+
+- Scenario 1 (FR-009): `updateDeployment` with an override on the internal service `infrahub` fails with `SERVICE_INGRESS_NOT_BUILT`; `extensions` carry `service_name` `infrahub` and `scope` `internal`; the message contains `'infrahub'` and `does not build`.
+- Scenario 2 (FR-010): a second driver build in which `task-manager` is internal. `updateDeploymentVersion` to it, once without `input` and once with the `input` that `apply` sends, fails with `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`; `extensions` carry `service_name` `task-manager`, `reason` `internal`, `current_version` and `target_version`; the message contains `'task-manager'`.
+- After each refusal: the list of task ids is unchanged (no task was started), the rollout state of the namespace is unchanged (the test compares the uid and the container restart counts of every pod, and the `generation` of the `task-manager` Deployment, which changes when its pod template changes; so no pod was replaced or restarted), the bound driver version and application version are unchanged, and the stored `config` is equal to the one before, so the override is still stored.
+- The `finally` block clears the override so that the shared Infrahub stack stays as the other tests expect.
+
+### Control run: the test fails when the source is wrong
+
+A passing run proves little if the test cannot fail. The check for the version change was disabled for one run (`if False and current_version is not None and stored.get(name) == block:` in `backend/styrmin_backend/services/service_ingress/validator.py`; the edit was reverted with `git checkout` and is not committed).
+
+- Started 2026-11-10T13:27:29Z; vCluster `pytest-572edbe9-6b57-4b7f-831d-89f5ff5518ad`; kubeconfig `.../pytest-1433/vcluster0/kubeconfig`.
+- Result: `FAILED`, at `test_service_ingress_override.py:635`:
+
+  ```text
+  E  AssertionError: OperationFailedError("Service 'task-manager' has scope 'internal' in driver infrahub-enterprise version 6 (application version 1.7.0), so Styrmin does not build its Ingress and an ingress override has no effect. ...")
+  E  assert 'SERVICE_INGRESS_NOT_BUILT' == 'SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED'
+  ```
+
+  Without the check, the request is refused for the wrong reason, and the test says so. The vCluster was removed with `vcluster delete pytest-572edbe9-6b57-4b7f-831d-89f5ff5518ad --driver docker` after `pkill -f pytest`.
+- Scenario 1 was not given a control run. The functional test `backend/tests/functional/graphql/test_service_ingress_validation.py` and the unit tests of the validator cover it.
+
+## Final-commit runs of `test_service_ingress_override_moves_only_the_overridden_service`
+
+Part A changed backend source (`context/models/config.py`), so both variants were run again on commit `f3f5668d8d92d41fe06c418b27bf94a66b6f270d` (clean tree). The command is the one of the T048 section with `-k api-chromium` or `-k ui-chromium`.
+
+| Variant | Started (UTC) | vCluster | Kubeconfig | Result |
+|---|---|---|---|---|
+| `[api-chromium]`, run 1 | 2026-11-10T13:32:56Z | `pytest-2e37ef5d-e736-48d4-8efc-ab5e26b88b5f` | `.../pytest-1434/vcluster0/kubeconfig` | FAILED (below) |
+| `[api-chromium]`, run 2 | 2026-11-10T13:40:15Z | `pytest-dc422148-34c6-43b7-89ed-e539eadd9e7e` | `.../pytest-1435/vcluster0/kubeconfig` | passed |
+| `[ui-chromium]` | 2026-11-10T13:45:33Z | `pytest-1fedb299-5207-46cd-b7bc-9918233cd675` | `.../pytest-1436/vcluster0/kubeconfig` | passed |
+
+Verbatim pytest output of the passing runs:
+
+```text
+PASSED14:45:18 info Removing vCluster container vcluster.cp.pytest-dc422148-34c6-43b7-89ed-e539eadd9e7e...
+=========== 1 passed, 1 deselected, 4 warnings in 307.61s (0:05:07) ============
+```
+
+```text
+PASSED14:50:06 info Removing vCluster container vcluster.cp.pytest-1fedb299-5207-46cd-b7bc-9918233cd675...
+=========== 1 passed, 1 deselected, 4 warnings in 278.84s (0:04:38) ============
+```
+
+### Failed run 1 of `[api-chromium]`: the release-reference label of the Ingress differs after the override is cleared
+
+- Failing line: `assert _comparable(task_manager_cleared) == _comparable(task_manager_before)` (step "clear the override"). The only difference is the label `styrmin.io/release-reference` of the Ingress `styrmin-svc-task-manager`: `'styrmin-57254668-cd66-4b0a-a759-f93e9179ec09'` before and `''` after clearing. The label was still `''` when the vCluster was inspected about four minutes later (`kubectl get ingress -A`, saved in `<scratchpad>/ingress-after-fail.yaml`); the Ingress `resourceVersion` kept changing about every 6 seconds while its `generation` stayed 7.
+- Not caused by this chunk: the commits since the last green run of this test (`7bcc9576`) change no operator, Ingress builder or label code (`git diff --stat 7bcc9576 HEAD -- backend/styrmin_backend` lists `inputs.py`, `config.py`, `deployment.py` and the new `service_ingress/` files only). The same node passed on run 2 and on the earlier runs of this evidence file.
+- Cause: not proven. Observed in the source: the Ingress label comes from the `release_reference` passed to the builder (`builders/utility.py:39`). The StyrminDeployment timer passes the CRD's `releaseReference` (`operator/handlers/styrmin_deployment.py`, around line 990), and the HelmRelease timer passes the value of a HelmRelease label that a CRD-managed HelmRelease does not have, so it passes `''` (`operator/handlers/helmrelease.py:171,280`; the comment at `utilities/ingress.py:85` says so). The hypothesis is that, depending on which reconciler wrote last, the label is the real reference or `''`. This was not tested; the operator logs were not read.
+- Nothing was changed for this failure: no assertion was weakened and no source was edited. It is open and listed as a risk for the final report. The run was repeated once on the same commit and passed.
+
+## Not verified (T054)
+
+- Traffic: the refusals are checked as GraphQL errors, cluster objects and task lists; no request was sent through an ingress controller.
+- UI for the refusals: covered by Vitest only (`ConfigDiffDialog.test.tsx`, `DeployFormPage.test.tsx`, `UpgradeErrorAlert.test.tsx`), not by an end-to-end UI run, because the test is `api_only`.
+- UI visuals (layout, colors) of the error alerts.
+- The cause of the release-reference label difference above.
+- The test ran on one machine (macOS, Docker); the CI matrix was not run.
