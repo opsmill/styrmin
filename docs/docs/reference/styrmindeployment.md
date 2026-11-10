@@ -47,6 +47,22 @@ when the page is generated.
   [Several changes in quick succession](../concepts-and-architecture/reconciliation.md#several-changes-in-quick-succession)
   for what you see and how to recover after an edit.
 
+### Ingress objects that the operator builds
+
+For each service in `spec` that has `scope: external` and `kind` `http` or
+`https`, the operator creates an Ingress named `styrmin-svc-<driver service name>`
+in the deployment's namespace. It is not part of the `HelmRelease`. The operator
+builds it from the resolved context in its periodic pass, as it does for the
+network policies, services and secrets that it builds, and deletes it when the
+context no longer requires it. It has the labels `app.kubernetes.io/managed-by`,
+`styrmin.io/utility-kind: ingress`, `styrmin.io/release-reference` and
+`styrmin.io/service-name`. No condition in `status` reports on these Ingresses:
+the condition types listed below have none for them.
+
+The default interval of the periodic pass is 60 seconds. See
+[The Ingress that Styrmin builds for an external service](../concepts-and-architecture/ingress-and-networking.md#the-ingress-that-styrmin-builds-for-an-external-service)
+and [Service ingress overrides](../concepts-and-architecture/service-ingress-overrides.md).
+
 ### Rollout fields in `status`
 
 These fields are documented here until the generated reference exists.

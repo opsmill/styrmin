@@ -47,6 +47,7 @@ const sidebars: SidebarsConfig = {
         'drivers/migrating-env-vars',
         'drivers/migrating-container-overrides',
         'drivers/migrating-replica-parameters',
+        'drivers/migrating-external-service-ingress',
       ],
     },
     {
@@ -73,6 +74,7 @@ const sidebars: SidebarsConfig = {
         'concepts-and-architecture/reconciliation',
         'concepts-and-architecture/operator-and-crds',
         'concepts-and-architecture/ingress-and-networking',
+        'concepts-and-architecture/service-ingress-overrides',
         'concepts-and-architecture/backups-and-restores',
         'concepts-and-architecture/image-overrides',
         'concepts-and-architecture/replica-overrides',

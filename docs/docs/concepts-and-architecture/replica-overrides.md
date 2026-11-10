@@ -227,8 +227,13 @@ uv run styrminctl deployments scale <deployment-id> task-worker --clear
 ```
 
 The command reads the stored component blocks and sends them back with
-only the count of that component changed. A change that another user
-writes between the read and the update is overwritten. The SDK method is
+only the count of that component changed. It also sends back the stored
+[service ingress overrides](./service-ingress-overrides.md), because an update
+replaces the whole stored config. The command sends no other config key, so an
+update that it makes also clears the other keys of the stored config, such as
+`env_vars` and `ip_whitelist`. This is read in the code of the SDK method and the
+update, and was not run for those keys. This feature did not change it. A change
+that another user writes between the read and the update is overwritten. The SDK method is
 `client.deployments.scale(deployment_id, component, replicas)`, with
 `replicas=None` to clear the override.
 

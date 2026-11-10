@@ -500,28 +500,60 @@ See [The context](./context.md) for all available fields.
 ### Step 6: Declare services
 
 If the application accepts network connections, declare each service
-under `spec.services`. Styrmin generates a hostname for each external
-service, and the ingress controller routes traffic to it:
+under `spec.services`. The `scope` of a service decides whether Styrmin
+builds an Ingress for it:
 
 ```yaml
 spec:
   services:
     - name: my-app
-      kind: http             # http | https | tcp
-      scope: internal        # internal | external
+      kind: http             # http | https | tcp | udp
+      scope: external        # internal | external
       port: 8000
       component: server      # which component this service belongs to
 ```
 
 Notes:
 
-- **`scope: external`** turns on hostname generation for the service,
-  and the application becomes reachable through the environment's
-  ingress. With `internal`, the service is reachable only inside the
-  cluster.
-- **The hostname** of an external service has the form
-  `<service-name>-<deployment-id>.<fqdn-suffix>`, and the template reads
-  it from `{{ services['<service-name>'].primary_fqdn }}`.
+- **`scope: external`** means that Styrmin builds the Ingress of the
+  service. For each service with this scope and `kind` `http` or `https`,
+  Styrmin builds one Ingress named `styrmin-svc-<service name>` in the
+  deployment's namespace. Its backend is the ClusterIP Service that Styrmin
+  creates for the service, on the declared port. A service with `kind`
+  `tcp` or `udp` gets no Ingress, because an Ingress cannot route it, even
+  when it declares `scope: external`.
+- **A chart must not render its own Ingress for an external service.**
+  Styrmin does not render the chart to check, so a chart Ingress for an
+  external service gives the service two Ingresses on the same host. Turn
+  the chart's Ingress off in `values.j2.yml`. To move an existing driver,
+  follow
+  [Migrate a driver whose external service renders its own Ingress](./migrating-external-service-ingress.md).
+- **`scope: internal`** means that Styrmin builds no Ingress for the
+  service. The service is reachable only inside the cluster. If the chart
+  renders an Ingress, the chart keeps it, and Styrmin sets its class and
+  annotations after the chart renders, as it does for every chart Ingress.
+- **Two hostnames.** A Styrmin-built Ingress has these hosts, both under the
+  resolved FQDN suffix:
+  - The readable host, `<service name>-<environment name>.<fqdn suffix>`.
+    The service name is the resolved name, so a service name override of the
+    deployment changes it. Every external service has this host.
+  - The application address, `<driver name>-<deployment id>.<fqdn suffix>`.
+    It is the same for every service of a deployment, so Styrmin puts it on
+    one Ingress only: the Ingress of the first service in `spec.services`,
+    and only when that service is `external`. When the first service is
+    `internal`, no Styrmin-built Ingress has the application address, and an
+    Ingress that the chart renders for that service can keep it, as the
+    `infrahub` drivers do. Put the service that carries the application
+    address first.
+- **Template data.** The template reads the addresses of a service from
+  `{{ services['<service name>'].primary_fqdn }}` (the application
+  address) and `{{ services['<service name>'].human_readable_fqdn }}` (the
+  readable host). When a deployment sets a
+  [service ingress override](../concepts-and-architecture/service-ingress-overrides.md)
+  for the service, `human_readable_fqdn` has the override's suffix, and
+  `primary_fqdn` does not change. `services['<service name>'].ingress_class`
+  is the effective ingress class and `services['<service name>'].overridden`
+  is `true` when the service has an override.
 - **The other applications of the environment** can connect to each
   declared service, internal or external, on its port. A component that
   serves no declared service is reachable from its own deployment only, so
@@ -704,7 +736,8 @@ Before you use the driver in production, check that:
 - [ ] Every stateful component has a `backup` block with the strategy
       that matches its storage.
 - [ ] Every externally reachable service is declared under
-      `spec.services` with `scope: external`.
+      `spec.services` with `scope: external`, and the chart renders no
+      Ingress for it.
 - [ ] The values template reads cluster, environment, and deployment
       settings from `{{ instance.config.X }}`, not from hardcoded values.
 - [ ] A deploy, a backup, a restore, and an upgrade on a test

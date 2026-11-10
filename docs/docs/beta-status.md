@@ -213,6 +213,17 @@ first release with the change.
 - Check the scripts and procedures that delete environments. Deleting an
   environment deletes its deployments and its environment backups (v0.1.46).
   Before, the request failed when the environment had deployments.
+- Find the deployments whose driver version declares a service `scope: external`
+  and renders its own Ingress for it, such as `generic-app` driver version 1.
+  Styrmin now builds an Ingress for each external service, so these deployments
+  have two Ingresses on the same host once they run a release that includes
+  this change, before any driver version change. The release's version number
+  is not known yet. See
+  [Migrate a driver whose external service renders its own Ingress](./drivers/migrating-external-service-ingress.md).
+- Clear a service ingress override before you change a deployment to a driver
+  version that removes the service or declares it `internal`. Styrmin refuses
+  the change with `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` otherwise. See
+  [Change a deployment's driver version](./drivers/changing-driver-versions.md#stored-service-ingress-overrides).
 
 ### If you write application drivers
 
@@ -259,6 +270,11 @@ first release with the change.
 - Read `backup.velero.storage_location` as the name of the Velero object,
   `styrmin-bsl-<location id>`. It held the backup storage location's name
   before (v0.1.50).
+- Turn off the chart's Ingress for each service that you declare
+  `scope: external`. Styrmin builds the Ingress of an external service, so a
+  chart Ingress for it gives two Ingresses on the same host. A service with
+  `scope: internal` keeps the chart's Ingress. See
+  [Migrate a driver whose external service renders its own Ingress](./drivers/migrating-external-service-ingress.md).
 
 ### If you write scripts that use the API, the Python SDK or styrminctl
 

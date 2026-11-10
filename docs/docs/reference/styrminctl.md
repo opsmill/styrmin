@@ -573,7 +573,12 @@ can run `apply` repeatedly, for example from a CI job. A run with at least
 one `failed` result exits with code 1.
 
 For an existing deployment, `apply` sends the manifest's config,
-parameters and version in one request. This needs a Styrmin server with
+parameters and version in one request. The config replaces the whole stored
+config: a key that the stored config has and the manifest's `spec.config` omits
+is cleared, for example the `services` overrides, when `spec.config` has other
+keys. An omitted or empty `spec.config` is the exception: it keeps the stored
+config. `spec.parameters` is merged on top of the stored parameters, not
+replaced. This needs a Styrmin server with
 [#388](https://github.com/opsmill/styrmin/issues/388): against an older
 server, every update fails with a message that says to upgrade the
 server. Upgrade the server before or together with `styrminctl` and the
@@ -773,6 +778,24 @@ driver that declares the same service name, such as
 needs an override when `apply` creates it. An entry that is not a
 `{driver_service_name, override_name}` pair fails before `apply` creates or updates
 anything.
+
+`services` lists the
+[service ingress override](../concepts-and-architecture/service-ingress-overrides.md)
+of each external service, as a list of `{name, ingress_class, fqdn_suffix}`
+rows, as `components` is a list. `name` is the service name that the driver
+declares. A row sets an ingress class, an FQDN suffix, or both, for that service
+only. Removing a row clears the override on the next apply, with the same
+`components: []` exception as for `image`: write `services: []` to clear the
+last override when nothing else stays in `spec.config`. An ingress class must be
+a Kubernetes object name, and a suffix must be a DNS name; an invalid value
+fails with `VALIDATION_ERROR`. A service that the driver version does not
+declare fails with `UNKNOWN_SERVICE_INGRESS_OVERRIDE`, a service that it declares
+`internal` fails with `SERVICE_INGRESS_NOT_BUILT`, two rows for one service fail
+with `DUPLICATE_SERVICE_NAME`, and a change to a driver version that removes the
+service or declares it `internal`, while the override is stored and the manifest
+keeps it, fails with `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`. A key in a
+row other than these three is ignored by the SDK before it sends the request, so
+check the spelling.
 
 `components[].image` is the component's
 [image override](../concepts-and-architecture/image-overrides.md): one full

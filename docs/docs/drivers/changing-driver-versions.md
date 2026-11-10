@@ -80,11 +80,58 @@ the manifest.
   rejects the change with `SINGLETON_REPLICA_OVERRIDE`, until the same request lowers the override
   to 1 or clears it. See [Replica overrides](../concepts-and-architecture/replica-overrides.md).
 
+### Stored service ingress overrides
+
+A deployment can store a
+[service ingress override](../concepts-and-architecture/service-ingress-overrides.md)
+for a service that its driver declares `scope: external`. Styrmin builds an
+Ingress only for an external service, so the override applies only while the
+driver version declares the service external.
+
+When the target driver version removes that service, or declares it
+`scope: internal`, Styrmin does not drop the override. It rejects the change
+with the error code `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` before any pod
+changes, and the deployment keeps its driver version and its override. The
+error names the service (`service_name`), the current and target driver versions
+(`current_version`, `target_version`) and the reason (`reason`: `removed` or
+`internal`).
+
+This differs from an override on a component that the target driver version no
+longer declares, which stays stored and is not applied. The reason: a
+replica override that is not applied leaves the component as the driver
+declares it, while an ingress override that is not applied would publish the
+service with another class and address than the one you set, without a message.
+
+To fix the rejected change, clear the override and change the driver version
+again:
+
+- **With the API, the SDK, `styrminctl` or a manifest**, send the config without
+  the override in the same request as the driver version change. In a manifest,
+  remove the row from `spec.config.services`. When that leaves `spec.config`
+  with no other key, write `services: []`, because an empty `spec.config` keeps
+  the stored config.
+- **In the UI**, the **Upgrade Deployment** dialog sends only the application
+  version and the driver version, so it cannot clear the override in the same
+  request. On the **Settings** tab, click **Update Settings**, go to the
+  **Services** section, click **Clear** next to the fields of the service in the
+  group **Service ingress overrides**, and click **Review & apply**. Then click
+  **Upgrade** again. The error message says "in the same request"; in the UI,
+  use these two steps.
+
+Clearing an override is always accepted. If you want an override after the
+upgrade, set it on a service that the new driver version declares external.
+
+Adding or changing an override on a service that the target version removes or
+declares internal in the same request fails with `UNKNOWN_SERVICE_INGRESS_OVERRIDE`
+or `SERVICE_INGRESS_NOT_BUILT`.
+
 ### Next steps
 
 - [Load a driver](./loading-drivers.md): load a driver version and choose the one a deployment
   binds to.
 - [Migrate the infrahub replica parameters](./migrating-replica-parameters.md): move the infrahub
   replica parameters to replica overrides.
+- [Migrate a driver whose external service renders its own Ingress](./migrating-external-service-ingress.md):
+  the breaking change for drivers that declare an external service.
 - [`styrminctl` reference](../reference/styrminctl.md): `deployments update-version` and
   `deployments apply`.
