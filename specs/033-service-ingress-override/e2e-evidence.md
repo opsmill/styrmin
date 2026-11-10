@@ -5,7 +5,7 @@ Task T033 (Constitution V). Test: T025, `backend/tests/e2e/test_service_ingress_
 ## Result
 
 - API variant: passed (run 4 below, on commit `55c002b32038b33ce330fffd283fce083a6b08c4`).
-- UI variant: not run, deferred to T048. The UI driver rejects `config["services"]` until T042 adds the steps, so `[ui-chromium]` cannot pass yet.
+- UI variant: passed in T048, on commit `7bcc9576441aba62b3e6f96604e46bb32cb9762f` (see the last section of this file, "T048: UI variant").
 
 ## Final passing run (run 4)
 
@@ -276,3 +276,79 @@ The Ingress was created about 11 seconds before the read, by the operator's Helm
 ### Other example drivers with an external service and a chart Ingress
 
 Checked in `driver/examples/*/driver.styrmin.yml` and `values.j2.yml`: only `generic-app` and the two Infrahub drivers (done in T031 and T032) declare a service `scope: external`. `semaphore`, `simple-app`, `db-test` and `infrahub-mcp` declare `scope: internal`. `slurpit` declares no services. `semaphore`, `simple-app` and `slurpit` render a chart Ingress and keep it (SC-003).
+
+
+# T048: UI variant of the service ingress override test (#598)
+
+Task T048 (Constitution V). Test: T025, `backend/tests/e2e/test_service_ingress_override.py`, variant `[ui-chromium]`. The Playwright MCP server was not available in this session (no such tool was listed), so no browser debugging session was needed or used; the one failure showed its cause in the pytest traceback.
+
+## Result
+
+- `[ui-chromium]`: passed on a clean working tree, commit `7bcc9576441aba62b3e6f96604e46bb32cb9762f`.
+- `[api-chromium]`: passed again on the same commit (backend source changed in this chunk: the FQDN suffix validator).
+- `cd frontend && pnpm test`: 103 files, 1198 tests passed (2026-11-10, after the commit above). `pnpm lint`: 0 errors, 35 warnings (not compared with the base commit). `pnpm exec tsc -b`: no errors.
+- `uv run invoke test`: 5970 passed, 8 skipped, 1 failed: `tests/unit/services/telemetry/test_sender.py::test_send_report_returns_false_when_the_connection_is_refused` (`assert 7.82 < 2`), the failure known before this chunk.
+
+## Failed iteration 1
+
+- Command: the one below, on commit `933ab8b05e0005f11d6aef59663a667b8b44f5eb` (clean tree), started 2026-11-10T12:30:24Z; vCluster `pytest-acb22a15-773a-425c-97d3-ee05f80f448e`, kubeconfig `/private/var/folders/h8/b5b4gccj4h5c0sjlqjymm1y40000gq/T/pytest-of-Simon/pytest-1421/vcluster0/kubeconfig`.
+- What failed: `DeployFormPage.read_service_ingress_fields` at `deploy_form.py:96` (`_select_driver`): `Locator.click: Timeout 30000ms exceeded ... waiting for locator("[data-testid=driver-version-select]")`.
+- Cause: a test bug, not a UI bug. The test called `read_service_ingress_fields` without opening the deploy form, so the page was not on the deploy form and had no driver select (which page it was on was not recorded). The method selects the driver but does not navigate.
+- Change: the test opens the form with `DeployFormPage.goto(environment_id=...)` before the call. The assertion (`== ["task-manager"]`) is unchanged. No assertion was weakened and no source file of the product changed.
+- After `pkill -f pytest`, the vCluster container stayed up; it was removed with `vcluster delete pytest-acb22a15-773a-425c-97d3-ee05f80f448e --driver docker`.
+
+## Run 2 (pass, tree not clean)
+
+- Started 2026-11-10T12:36:46Z (about; local 13:36:46 in the log), vCluster `pytest-67498153-1020-4938-b838-55ecfa803a5c`, kubeconfig `.../pytest-of-Simon/pytest-1422/vcluster0/kubeconfig`.
+- Passed in 310.04 s, with the test fix from iteration 1 not yet committed. It is repeated below on a clean tree.
+
+## Final passing run of the UI variant (run 3)
+
+- Node id: `backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_moves_only_the_overridden_service[ui-chromium]`
+- Commit: `7bcc9576441aba62b3e6f96604e46bb32cb9762f` (`git status --short` empty when the run started).
+- Started 2026-11-10T12:42:56Z; ended about 2026-11-10T12:48:03Z (vCluster deleted).
+- Command, from the repository root:
+
+  ```bash
+  sleep 86400 | uv run pytest "backend/tests/e2e/test_service_ingress_override.py" -k ui-chromium -v -s --pdb > <scratchpad>/pdb-ui-3.log 2>&1
+  ```
+
+  `sleep 86400` replaces `sleep infinity` because `sleep infinity` exits at once on macOS (see the T033 section).
+- vCluster: `pytest-ac8749e7-c2d0-4f11-a3ee-50422d7b6e9f`.
+- Kubeconfig: `/private/var/folders/h8/b5b4gccj4h5c0sjlqjymm1y40000gq/T/pytest-of-Simon/pytest-1423/vcluster0/kubeconfig` (the vCluster is deleted at the end of the session).
+- Verbatim pytest output (ANSI colors removed; `-s` interleaves the vCluster log into the result line; times are local, UTC+1):
+
+  ```text
+  backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_moves_only_the_overridden_service[ui-chromium] 13:42:58 warn There is a newer version of vcluster: v0.37.7. Run `vcluster upgrade` to upgrade to the newest version.
+  ...
+  PASSED13:47:57 info Removing vCluster container vcluster.cp.pytest-ac8749e7-c2d0-4f11-a3ee-50422d7b6e9f...
+  =========== 1 passed, 1 deselected, 4 warnings in 306.70s (0:05:06) ============
+  ```
+
+## Run of the API variant on the final commit
+
+- Node id: `backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_moves_only_the_overridden_service[api-chromium]`
+- Commit: `7bcc9576441aba62b3e6f96604e46bb32cb9762f`, clean tree. Started 2026-11-10T12:48:35Z, ended about 2026-11-10T12:54:03Z.
+- Command: the same as above with `-k api-chromium`, log `<scratchpad>/pdb-api.log`.
+- vCluster: `pytest-53b79d0c-9183-47a8-be7d-bea6a7ca39fc`; kubeconfig `/private/var/folders/h8/b5b4gccj4h5c0sjlqjymm1y40000gq/T/pytest-of-Simon/pytest-1424/vcluster0/kubeconfig`.
+
+  ```text
+  PASSED13:54:03 info Removing vCluster container vcluster.cp.pytest-53b79d0c-9183-47a8-be7d-bea6a7ca39fc...
+  =========== 1 passed, 1 deselected, 4 warnings in 333.56s (0:05:33) ============
+  ```
+
+## What the UI variant covers
+
+Steps that run only in `[ui-chromium]`, all against the real UI:
+
+- Deploy form: opens `/environments/<id>/deploy`, selects the `infrahub-enterprise` driver version, and reads the labels `Ingress class for <name>` inside the group `Service ingress overrides`. The test asserts that the list is exactly `["task-manager"]`: the form offers the fields for the external service and none for `infrahub`. The form is not submitted, so no second Infrahub stack is deployed.
+- Networking summary on the Settings tab: before the override, with it, and after it is cleared, the group `task-manager` shows the class and host with the marks Inherited, Overridden and Inherited.
+- Setting and clearing the override: both changes go through the Settings edit drawer (section Services: the two fields, the button `Clear ingress override for task-manager`) and Review & apply. The assertions on the Ingress objects, the reported addresses and the Prefect UI API address are the same as in the API variant.
+
+## Not verified
+
+- Deploy form: a deployment created with an override typed into the form is not covered. No test fills the fields and submits the form, because that needs a second Infrahub stack. Vitest covers the form (`__tests__/deploy-form/DeployFormPage.test.tsx`, 5 tests), not the end-to-end path from the form to the Ingress.
+- The deploy form step checks which fields exist, not that an invalid suffix blocks Deploy (covered in Vitest only). The end-to-end test does not type an invalid suffix in the drawer.
+- Traffic: the test reads objects on the vCluster; no ingress controller of class `tailscale` runs, and no request is sent to a host.
+- UI visuals: selectors, labels, roles and text are checked; layout, colors and the position of the marks are not.
+- The test was run on one machine (macOS, Docker); the CI matrix was not run.
