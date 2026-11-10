@@ -7,7 +7,10 @@ the deployment's environment variable reaches the component container, the
 driver's Service targets the right port, and the health check passes.
 
 Asserts on the resulting workload, network policies and Ingress, read back from
-the vcluster API server.
+the vcluster API server, and that both hosts of the Ingress answer 200 through the
+dedicated Traefik of the environment (the session cluster has ``dedicated_ingress``).
+The Traefik serves only an Ingress with the label ``styrmin/environment_id``, so the
+object assertions alone do not show that the Ingress that Styrmin builds is served.
 
 The driver declares its ``app`` service ``scope: external`` and renders no Ingress
 of its own (#598, FR-012), so the deployment has exactly one Ingress, the one that
@@ -38,7 +41,7 @@ from styrmin_sdk.models import (
 
 from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
-from tests.e2e.helpers.ingress import wait_for_deployment_status
+from tests.e2e.helpers.ingress import traefik_service, wait_for_deployment_status
 from tests.e2e.helpers.workloads import container_spec
 
 pytestmark = [
@@ -71,6 +74,8 @@ FORMER_CHART_INGRESS_ANNOTATION_KEYS = {
     "kubernetes.io/ingress.class",
 }
 
+# The ``web`` container port of Traefik (the Service port differs).
+TRAEFIK_WEB_PORT = 8000
 INGRESS_TIMEOUT_SECONDS = 120.0
 DELETE_TIMEOUT_SECONDS = 480.0
 
@@ -172,6 +177,11 @@ async def test_deploy_generic_app(
     )
     ingress = ingresses[SERVICE_INGRESS]
     assert ingress["metadata"]["labels"][SERVICE_NAME_LABEL] == "app"
+    # The dedicated Traefik of the environment selects Ingresses by this label.
+    assert (
+        ingress["metadata"]["labels"]["styrmin/environment_id"]
+        == scenario_environment_id
+    )
 
     # It carries the application address and the readable host (FR-001, FR-002), as
     # the deployment reports them.
@@ -207,6 +217,18 @@ async def test_deploy_generic_app(
         f".{CLUSTER_SUFFIX}"
     )
     assert "tls" not in ingress["spec"]
+
+    # Traffic: both hosts answer through the environment's dedicated Traefik, which routes
+    # by the ``Host`` header to the app service (the same path as ``test_infrahub_services.py``).
+    traefik = await traefik_service(kr8s_api, scenario_environment_id)
+    async with _portforward(traefik, remote_port=TRAEFIK_WEB_PORT) as local_port:
+        for host in (app_service.primary_fqdn, app_service.human_readable_fqdn):
+            await _wait_for_http(
+                f"http://localhost:{local_port}/health",
+                timeout=120.0,
+                interval=2.0,
+                headers={"Host": host},
+            )
 
     # Deleting the deployment deletes its namespace, and the Ingress with it.
     await client.deployments.delete(str(task.deployment_id))

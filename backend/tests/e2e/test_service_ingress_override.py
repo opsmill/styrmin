@@ -14,9 +14,20 @@ User story 1 of ``specs/033-service-ingress-override/spec.md``:
    the annotation set to the controller implementation), and the overridden one gets
    the override's class fields instead (FR-008).
 
-The test asserts objects on the vCluster, not traffic: no ingress controller of the
-override class (Tailscale) runs in the fixtures, and the Prefect UI path through the
-dedicated Traefik is covered by ``test_infrahub_services.py``.
+The test asserts objects on the vCluster and, for the Prefect UI host, traffic through the
+dedicated Traefik of the environment (the way ``test_infrahub_services.py`` does it: a port-forward
+to the Traefik Service and a request with the ``Host`` header). The dedicated Traefik serves only
+an Ingress with the label ``styrmin/environment_id``, so a built Ingress without it passes every
+object assertion and still answers HTTP 404 (T062 in ``e2e-evidence.md``). The traffic checks cover:
+
+* no override: the default host answers 200 through the Traefik, before and after the override
+  is cleared;
+* an override with class ``tailscale``: once the Traefik no longer serves the default host,
+  the overridden host answers 404 through it, because the Ingress has another class.
+
+Not covered: the overridden host through a Tailscale ingress controller. No such controller and
+no tailnet exist in the fixtures, so no request is sent to the overridden Ingress by its own
+controller.
 
 Deployment reuse
 ----------------
@@ -81,6 +92,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import httpx
 import kr8s.asyncio
 import pytest
 import yaml
@@ -93,9 +105,10 @@ from styrmin_sdk import StyrminClient
 from styrmin_sdk.exceptions import OperationFailedError
 from styrmin_sdk.models import ServiceConfigInput, UpdateDeploymentInput
 
-from tests.e2e.conftest import _portforward
+from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.drivers.api_driver import ApiScenarioDriver
+from tests.e2e.helpers.ingress import traefik_service
 from tests.e2e.pages.deploy_form import DeployFormPage
 from tests.e2e.pages.deployment_detail import DeploymentDetailPage
 
@@ -304,6 +317,63 @@ async def _prefect_ui_api_urls(kr8s_api: Any, namespace: str) -> set[str]:
     }
 
 
+# The Prefect API health path: any path that the Prefect UI service answers with 200.
+_PREFECT_HEALTH_PATH = "/api/health"
+_TRAEFIK_WEB_PORT = 8000
+_TRAEFIK_SYNC_TIMEOUT_SECONDS = 120.0
+
+
+async def _status_through_traefik(kr8s_api: Any, environment_id: str, host: str) -> int:
+    """Send one request to the dedicated Traefik of the environment, with ``Host: <host>``.
+
+    Same path as ``test_infrahub_services.py``: a port-forward to the Traefik Service (its
+    ``web`` container port) and a request with the ``Host`` header.
+    """
+    service = await traefik_service(kr8s_api, environment_id)
+    async with _portforward(service, remote_port=_TRAEFIK_WEB_PORT) as local_port:
+        async with httpx.AsyncClient() as http:
+            response = await http.get(
+                f"http://localhost:{local_port}{_PREFECT_HEALTH_PATH}",
+                headers={"Host": host},
+                timeout=10,
+            )
+    return response.status_code
+
+
+async def _wait_until_traefik_serves(
+    kr8s_api: Any, environment_id: str, host: str
+) -> None:
+    """Wait until the dedicated Traefik answers 200 for ``host`` (it needs a moment to read a new Ingress)."""
+    service = await traefik_service(kr8s_api, environment_id)
+    async with _portforward(service, remote_port=_TRAEFIK_WEB_PORT) as local_port:
+        await _wait_for_http(
+            f"http://localhost:{local_port}{_PREFECT_HEALTH_PATH}",
+            timeout=_TRAEFIK_SYNC_TIMEOUT_SECONDS,
+            interval=2.0,
+            headers={"Host": host},
+        )
+
+
+async def _wait_until_traefik_stops_serving(
+    kr8s_api: Any, environment_id: str, host: str
+) -> None:
+    """Wait until the dedicated Traefik no longer answers 200 for ``host``.
+
+    It proves that the Traefik has read the change of the Ingress, so a later answer for another
+    host does not come from a Traefik that has not read it yet.
+    """
+    deadline = time.monotonic() + _TRAEFIK_SYNC_TIMEOUT_SECONDS
+    while True:
+        status = await _status_through_traefik(kr8s_api, environment_id, host)
+        if status != 200:
+            return
+        assert time.monotonic() < deadline, (
+            f"The dedicated Traefik still answers 200 for {host} "
+            f"{_TRAEFIK_SYNC_TIMEOUT_SECONDS}s after the Ingress moved"
+        )
+        await asyncio.sleep(2)
+
+
 def _assert_default_task_manager_ingress(ingress: dict[str, Any]) -> None:
     """No override: the resolved suffix and the dedicated-controller rule (FR-003, FR-008)."""
     assert _hosts(ingress) == [_readable_host("task-manager", _CLUSTER_SUFFIX)]
@@ -372,6 +442,15 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
             _annotations(task_manager_before)[dns_hostname]
             == _annotations(infrahub_before)[dns_hostname]
         )
+        # The dedicated Traefik selects Ingresses by the label ``styrmin/environment_id``: the
+        # Ingress that Styrmin builds must carry it, or the host answers 404 (T062).
+        assert (
+            task_manager_before["metadata"]["labels"]["styrmin/environment_id"]
+            == environment_id
+        )
+        # Traffic: with no override, the Prefect UI host answers 200 through the Traefik.
+        default_host = _readable_host("task-manager", _CLUSTER_SUFFIX)
+        await _wait_until_traefik_serves(kr8s_api, environment_id, default_host)
         deployment = await client.deployments.get(deployment_id)
         services_before = {
             s.driver_service_name: s for s in deployment.deployed_services
@@ -432,6 +511,15 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
         assert await _prefect_ui_api_urls(kr8s_api, namespace) == {
             _prefect_ui_api_url(overridden_host)
         }
+        # Traffic: the Ingress now has class ``tailscale``, which the dedicated Traefik does not
+        # serve, so the default host stops answering 200 once the Traefik has read the change, and
+        # the overridden host is not served by it either. Whether a Tailscale controller serves
+        # the overridden host is not tested (no such controller in the fixtures).
+        await _wait_until_traefik_stops_serving(kr8s_api, environment_id, default_host)
+        assert (
+            await _status_through_traefik(kr8s_api, environment_id, overridden_host)
+            == 404
+        )
         if driver_mode == "ui":
             # Spec User Story 3, scenario 1: the Networking summary lists task-manager
             # at the new host under the new class, marked overridden (FR-016).
@@ -455,6 +543,8 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
         assert await _prefect_ui_api_urls(kr8s_api, namespace) == {
             _prefect_ui_api_url(_readable_host("task-manager", _CLUSTER_SUFFIX))
         }
+        # Traffic: the default host answers 200 through the Traefik again.
+        await _wait_until_traefik_serves(kr8s_api, environment_id, default_host)
         if driver_mode == "ui":
             assert (
                 await _task_manager_summary(
