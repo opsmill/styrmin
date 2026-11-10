@@ -11,6 +11,12 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [Styrmin - v0.1.58](https://github.com/opsmill/styrmin/tree/v0.1.58) - 2026-11-10
+
+### Fixed
+
+- Fixed the profile page showing again after Logout and Back when a current-user response arrived after Logout
+
 ## [Styrmin - v0.1.57](https://github.com/opsmill/styrmin/tree/v0.1.57) - 2026-11-06
 
 ### Fixed
