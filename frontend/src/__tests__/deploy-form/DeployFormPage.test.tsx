@@ -156,6 +156,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             sourceCommitSha: null,
             parameters: [],
             componentConfigs: [],
+            services: [],
           },
         ],
       },
@@ -173,6 +174,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             sourceCommitSha: "b".repeat(40),
             parameters: [],
             componentConfigs: [],
+            services: [],
           },
         ],
       },
@@ -210,6 +212,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             sourceCommitSha: null,
             parameters: [],
             componentConfigs: [],
+            services: [],
           },
         ],
       },
@@ -251,6 +254,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             sourceCommitSha: null,
             parameters: [],
             componentConfigs: [],
+            services: [],
           },
           {
             id: "v-nginx-new",
@@ -262,6 +266,7 @@ describe("DeployFormPage driver-version dropdown", () => {
             sourceCommitSha: null,
             parameters: [],
             componentConfigs: [],
+            services: [],
           },
         ],
       },
@@ -304,6 +309,7 @@ describe("DeployFormPage component replicas (023)", () => {
             { name: "worker", replicas: null, singleton: false },
             { name: "database", replicas: null, singleton: true },
           ],
+          services: [],
         },
       ],
     },
@@ -562,6 +568,142 @@ describe("DeployFormPage component replicas (023)", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("comp-replicas-server")).toHaveValue(null),
+    );
+  });
+});
+
+describe("DeployFormPage service ingress overrides (#598)", () => {
+  const drivers: DriversShape = [
+    {
+      id: "drv-infrahub",
+      name: "infrahub-enterprise",
+      versions: [
+        {
+          id: "v-infrahub-7",
+          version: "7",
+          supportedVersions: "*",
+          defaultVersion: "1.0.0",
+          createdOn: "2026-10-01T00:00:00Z",
+          contentHash: "f".repeat(64),
+          sourceCommitSha: null,
+          parameters: [],
+          componentConfigs: [{ name: "server", replicas: 2, singleton: false }],
+          services: [
+            { name: "infrahub", scope: "internal", kind: "http" },
+            { name: "task-manager", scope: "external", kind: "http" },
+          ],
+        },
+      ],
+    },
+  ] as DriversShape;
+
+  beforeEach(() => {
+    useListApplicationDriversQueryMock.mockReset();
+    useListApplicationDriversQueryMock.mockReturnValue(
+      makeQueryResult(drivers),
+    );
+    noopMutationResult.mutateAsync.mockClear();
+  });
+
+  async function selectVersion() {
+    await user().click(await screen.findByTestId("driver-version-select"));
+    await userEvent
+      .setup({ pointerEventsCheck: 0 })
+      .click(await screen.findByText("infrahub-enterprise v7@fffffff"));
+    await screen.findByRole("group", { name: "Service ingress overrides" });
+  }
+  const user = () => userEvent.setup({ pointerEventsCheck: 0 });
+
+  it("lists no section until a driver version is selected", async () => {
+    await renderPage();
+
+    await screen.findByTestId("driver-version-select");
+    expect(
+      screen.queryByRole("group", { name: "Service ingress overrides" }),
+    ).toBeNull();
+  });
+
+  it("offers the fields for an external service and none for an internal one", async () => {
+    await renderPage();
+    await selectVersion();
+
+    const section = screen.getByRole("group", {
+      name: "Service ingress overrides",
+    });
+    expect(
+      within(section).getByLabelText("Ingress class for task-manager"),
+    ).toBeInTheDocument();
+    expect(
+      within(section).getByLabelText("FQDN suffix for task-manager"),
+    ).toBeInTheDocument();
+    expect(within(section).queryByLabelText(/for infrahub$/)).toBeNull();
+  });
+
+  it("sends the override in config.services next to the replica counts", async () => {
+    await renderPage();
+    await selectVersion();
+
+    await user().type(screen.getByLabelText("Deployment Name"), "my-app");
+    await user().type(
+      screen.getByLabelText("Ingress class for task-manager"),
+      "tailscale",
+    );
+    await user().type(
+      screen.getByLabelText("FQDN suffix for task-manager"),
+      "tailnet.example.ts.net",
+    );
+    await user().type(screen.getByTestId("comp-replicas-server"), "3");
+    await user().click(screen.getByRole("button", { name: "Deploy" }));
+
+    await waitFor(() =>
+      expect(noopMutationResult.mutateAsync).toHaveBeenCalledTimes(1),
+    );
+    expect(noopMutationResult.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: {
+          components: [{ name: "server", replicas: 3 }],
+          services: [
+            {
+              name: "task-manager",
+              ingressClass: "tailscale",
+              fqdnSuffix: "tailnet.example.ts.net",
+            },
+          ],
+        },
+      }),
+    );
+  });
+
+  it("sends no config when the fields stay empty", async () => {
+    await renderPage();
+    await selectVersion();
+
+    await user().type(screen.getByLabelText("Deployment Name"), "my-app");
+    await user().click(screen.getByRole("button", { name: "Deploy" }));
+
+    await waitFor(() =>
+      expect(noopMutationResult.mutateAsync).toHaveBeenCalledTimes(1),
+    );
+    expect(noopMutationResult.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ config: null }),
+    );
+  });
+
+  it("disables Deploy and names the service while the suffix is not a DNS name", async () => {
+    await renderPage();
+    await selectVersion();
+
+    await user().type(
+      screen.getByLabelText("FQDN suffix for task-manager"),
+      "Bad_Suffix",
+    );
+
+    expect(
+      screen.getByLabelText("FQDN suffix for task-manager"),
+    ).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "Deploy" })).toBeDisabled();
+    expect(screen.getByTestId("deploy-blocked-reason")).toHaveTextContent(
+      "Fix the FQDN suffix of task-manager before deploying.",
     );
   });
 });

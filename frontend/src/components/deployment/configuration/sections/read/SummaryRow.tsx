@@ -12,6 +12,13 @@ interface Props {
   fromDeployment: boolean;
   /** When `true`, the value renders in the mono font (technical value). */
   mono?: boolean;
+  /**
+   * Optional text mark next to the value: `Overridden` when the value is set
+   * on this deployment for this row, `Inherited` when it is resolved from a
+   * wider scope. Used by the per-service rows (#598, FR-016), where the colour
+   * dot alone is not enough to say which of the two applies.
+   */
+  mark?: "Overridden" | "Inherited";
 }
 
 /**
@@ -24,7 +31,13 @@ interface Props {
  * label exposes the same information to screen readers (FR-028).
  * Inherited rows leave the marker slot empty.
  */
-export function SummaryRow({ label, value, fromDeployment, mono }: Props) {
+export function SummaryRow({
+  label,
+  value,
+  fromDeployment,
+  mono,
+  mark,
+}: Props) {
   return (
     <div className="flex items-baseline gap-2" data-testid="summary-row">
       <span
@@ -43,6 +56,11 @@ export function SummaryRow({ label, value, fromDeployment, mono }: Props) {
       <dt className="flex-1 text-xs uppercase tracking-wide text-muted-foreground">
         {label}
       </dt>
+      {mark ? (
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {mark}
+        </span>
+      ) : null}
       <dd className={cn("text-right", mono ? "font-mono text-xs" : "text-sm")}>
         {value}
       </dd>

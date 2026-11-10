@@ -173,6 +173,18 @@ export const impactRules: ImpactRule[] = [
     severity: "high",
   },
   {
+    matcher: "services[*].ingressClass",
+    consequence:
+      "Ingress of this service will be recreated under the new class; other services are not affected",
+    severity: "warning",
+  },
+  {
+    matcher: "services[*].fqdnSuffix",
+    consequence:
+      "External DNS record of this service will be republished under the new suffix; other services are not affected",
+    severity: "warning",
+  },
+  {
     matcher: "components[*].resources.**",
     consequence: "Affected component's pods will be recreated",
     severity: "warning",

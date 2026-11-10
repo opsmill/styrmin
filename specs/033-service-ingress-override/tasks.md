@@ -125,11 +125,11 @@
 
 ### Implementation
 
-- [ ] T043 [US3] Extend `frontend/src/components/deployment/configuration/sections/edit/ServiceOverridesSection.tsx`: per external service, fields for ingress class and FQDN suffix, with a clear action; keep the existing service name override rows.
-- [ ] T044 [P] [US3] Pass the services with their scope from `deployment.deployedServices` to the section in `frontend/src/components/deployment/configuration/ConfigEditDrawer.tsx` (line 136 and 275-280).
-- [ ] T045 [P] [US3] Show per-service class and host with overridden or inherited marks in `frontend/src/components/deployment/configuration/sections/read/NetworkingSummary.tsx`.
-- [ ] T046 [P] [US3] Carry `services` through `frontend/src/lib/deployment-input.ts`, `frontend/src/lib/config-diff.ts` and `frontend/src/lib/impact-rules.ts`.
-- [ ] T047 [US3] Add the same fields to the deploy form in `frontend/src/pages/deployments/DeployFormPage.tsx`, reading the services of the selected driver version (T004).
+- [X] T043 [US3] Extend `frontend/src/components/deployment/configuration/sections/edit/ServiceOverridesSection.tsx`: per external service, fields for ingress class and FQDN suffix, with a clear action; keep the existing service name override rows. Done in `ServiceOverridesSection.tsx` through the shared `ServiceIngressFields.tsx` (also used by T047) and `lib/fqdn-suffix.ts`; the footer blocks Review & apply while a suffix is invalid (new `services` key in `DrawerInvalidFields`).
+- [X] T044 [P] [US3] Pass the services with their scope from `deployment.deployedServices` to the section in `frontend/src/components/deployment/configuration/ConfigEditDrawer.tsx` (line 136 and 275-280). Done: `ConfigEditDrawer.tsx` passes `deployment.deployedServices` as `services`.
+- [X] T045 [P] [US3] Show per-service class and host with overridden or inherited marks in `frontend/src/components/deployment/configuration/sections/read/NetworkingSummary.tsx`. Done: `NetworkingSummary.tsx` lists each external service as a group with `Ingress class` and `Host` rows marked Overridden or Inherited; an internal service is left out (Styrmin builds no Ingress for it). `get_deployment.graphql` gained `scope`, `ingressClass`, `ingressClassOverridden`, `fqdnSuffixOverridden`; types regenerated with `pnpm codegen`.
+- [X] T046 [P] [US3] Carry `services` through `frontend/src/lib/deployment-input.ts`, `frontend/src/lib/config-diff.ts` and `frontend/src/lib/impact-rules.ts`. Done: `deploymentConfigToInput` keeps the stored `services` (fixes the UI save that cleared overrides), new `servicesFormToInput`, `diffServices` in `config-diff.ts`, two rules in `impact-rules.ts`.
+- [X] T047 [US3] Add the same fields to the deploy form in `frontend/src/pages/deployments/DeployFormPage.tsx`, reading the services of the selected driver version (T004). Done: `DeployFormPage.tsx` shows the group `Service ingress overrides` for the external services of the selected version (`list_application_drivers.graphql` selects `services { name scope kind }`) and sends `config.services`; Deploy is blocked while a suffix is invalid. 5 new tests in `__tests__/deploy-form/DeployFormPage.test.tsx`.
 - [ ] T048 [US3] Run the UI variant of T025 to a pass; record the evidence; run `cd frontend && pnpm test`.
 
 **Checkpoint**: stories 1, 2 and 3 work.

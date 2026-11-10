@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 import {
   useListApplicationDriversQuery,
   useDeployMutation,
+  type ServiceConfigInput,
 } from "@/generated/graphql";
 import { useQueryClient } from "@tanstack/react-query";
 import { PageLayout } from "@/components/PageLayout";
@@ -27,6 +28,9 @@ import { useState, useMemo, useEffect } from "react";
 import { IfRole } from "@/auth/IfRole";
 import { ParameterField } from "@/components/deployment/configuration/ParameterField";
 import { ReplicasField } from "@/components/deployment/configuration/ReplicasField";
+import { ServiceIngressFields } from "@/components/deployment/configuration/ServiceIngressFields";
+import { servicesFormToInput } from "@/lib/deployment-input";
+import { servicesWithInvalidSuffix } from "@/lib/fqdn-suffix";
 import {
   compareVersionsLatestFirst,
   formatDriverVersionLabel,
@@ -95,6 +99,16 @@ export default function DeployFormPage() {
         document.getElementById(`comp-${firstInvalid.name}-replicas`)?.focus();
         return;
       }
+      // Same for an FQDN suffix that is not a DNS name (#598).
+      const firstInvalidSuffix = servicesWithInvalidSuffix(serviceIngress)[0];
+      if (firstInvalidSuffix) {
+        document
+          .querySelector<HTMLInputElement>(
+            `[aria-label="FQDN suffix for ${CSS.escape(firstInvalidSuffix)}"]`,
+          )
+          ?.focus();
+        return;
+      }
       try {
         const overrides = serviceOverrides
           .map((o) => ({
@@ -102,6 +116,7 @@ export default function DeployFormPage() {
             overrideName: o.overrideName.trim(),
           }))
           .filter((o) => o.driverServiceName && o.overrideName);
+        const ingressRows = servicesFormToInput(serviceIngress) ?? [];
         const data = await deployMutation.mutateAsync({
           driver: selectedVersion!.driverName,
           // Pin the version the form shows, so its fields match the checks.
@@ -120,10 +135,16 @@ export default function DeployFormPage() {
                 }))
               : null,
           serviceNameOverrides: overrides.length > 0 ? overrides : null,
-          // Only components with a count; none means no config at all.
+          // Only components with a count and services with an ingress override;
+          // none of either means no config at all.
           config:
-            replicaComponents.length > 0
-              ? { components: replicaComponents }
+            replicaComponents.length > 0 || ingressRows.length > 0
+              ? {
+                  ...(replicaComponents.length > 0
+                    ? { components: replicaComponents }
+                    : {}),
+                  ...(ingressRows.length > 0 ? { services: ingressRows } : {}),
+                }
               : null,
         });
         queryClient.invalidateQueries({ queryKey: ["GetEnvironment"] });
@@ -185,9 +206,19 @@ export default function DeployFormPage() {
     .filter(([, replicas]) => replicaFieldError(replicas))
     .map(([name]) => name);
 
+  // Ingress class and FQDN suffix per external service of the selected
+  // driver version (#598).
+  const [serviceIngress, setServiceIngress] = useState<ServiceConfigInput[]>(
+    [],
+  );
+  const invalidSuffixServices = servicesWithInvalidSuffix(serviceIngress);
+
   const [serviceOverrides, setServiceOverrides] = useState<
     Array<{ driverServiceName: string; overrideName: string }>
   >([]);
+
+  const deployBlocked =
+    invalidReplicaComponents.length > 0 || invalidSuffixServices.length > 0;
 
   if (isLoading) return <LoadingState message="Loading drivers..." />;
 
@@ -311,6 +342,7 @@ export default function DeployFormPage() {
                   field.handleChange(value);
                   setDynamicParams({});
                   setComponentReplicas({});
+                  setServiceIngress([]);
                 }}
               >
                 <SelectTrigger data-testid="driver-version-select">
@@ -428,6 +460,34 @@ export default function DeployFormPage() {
           </div>
         )}
 
+        {/* Ingress class and FQDN suffix of each external service (#598). */}
+        {selectedVersion?.services?.some(
+          (service) => service.scope === "external",
+        ) && (
+          <div
+            role="group"
+            aria-labelledby="service-ingress-heading"
+            data-testid="service-ingress-section"
+            className="space-y-3"
+          >
+            <Label id="service-ingress-heading" className="text-base">
+              Service ingress overrides
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Optional. Set the ingress class or the FQDN suffix of one service.
+              An empty field uses the value of the environment or cluster.
+            </p>
+            <ServiceIngressFields
+              services={selectedVersion.services.map((service) => ({
+                driverServiceName: service.name,
+                scope: service.scope,
+              }))}
+              value={serviceIngress}
+              onChange={setServiceIngress}
+            />
+          </div>
+        )}
+
         {/* Service name overrides — optional per-driver-service renames. */}
         <div
           role="group"
@@ -515,14 +575,20 @@ export default function DeployFormPage() {
           </Button>
         </div>
 
-        {invalidReplicaComponents.length > 0 && (
+        {deployBlocked && (
           <p
             id="deploy-blocked-reason"
             data-testid="deploy-blocked-reason"
             className="text-sm text-destructive"
           >
-            Fix the replica count of {invalidReplicaComponents.join(", ")}{" "}
-            before deploying.
+            {[
+              invalidReplicaComponents.length > 0 &&
+                `Fix the replica count of ${invalidReplicaComponents.join(", ")} before deploying.`,
+              invalidSuffixServices.length > 0 &&
+                `Fix the FQDN suffix of ${invalidSuffixServices.join(", ")} before deploying.`,
+            ]
+              .filter(Boolean)
+              .join(" ")}
           </p>
         )}
 
@@ -530,11 +596,9 @@ export default function DeployFormPage() {
           <IfRole minimum="READ_WRITE">
             <Button
               type="submit"
-              disabled={isSubmitting || invalidReplicaComponents.length > 0}
+              disabled={isSubmitting || deployBlocked}
               aria-describedby={
-                invalidReplicaComponents.length > 0
-                  ? "deploy-blocked-reason"
-                  : undefined
+                deployBlocked ? "deploy-blocked-reason" : undefined
               }
             >
               {isSubmitting ? "Deploying..." : "Deploy"}

@@ -278,6 +278,7 @@ export function ConfigEditDrawer({
             initial={initialValues}
             environment={environmentValues}
             driverServiceNames={driverServiceNames}
+            services={deployment.deployedServices}
             anchorId={sectionId}
           />
         );

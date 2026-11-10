@@ -3,6 +3,7 @@ import type {
   EnvVarInput,
   ParameterValueInput,
   SchedulingInput,
+  ServiceConfigInput,
   ServiceNameOverride,
   TolerationInput,
   UpdateDeploymentInput,
@@ -173,6 +174,9 @@ export function diff(
     before.serviceNameOverrides ?? null,
     after.serviceNameOverrides ?? null,
   );
+
+  // Service ingress overrides (#598, keyed by service `name`)
+  diffServices(entries, before.services ?? null, after.services ?? null);
 
   // Component Overrides (keyed by `name`)
   diffComponents(entries, before.components ?? null, after.components ?? null);
@@ -528,6 +532,45 @@ function diffServiceOverrides(
       `Service "${key}" override`,
       beforeMap.get(key),
       afterMap.get(key),
+    );
+  }
+}
+
+/**
+ * Diff the per-service ingress overrides, one entry for the class and one for
+ * the suffix of each service. `null`, `undefined` and `""` all mean no
+ * override, so an emptied field next to a stored value is a removal.
+ */
+function diffServices(
+  entries: DiffEntry[],
+  before: readonly ServiceConfigInput[] | null,
+  after: readonly ServiceConfigInput[] | null,
+): void {
+  const beforeMap = new Map(
+    (before ?? []).filter(Boolean).map((s) => [s.name, s] as const),
+  );
+  const afterMap = new Map(
+    (after ?? []).filter(Boolean).map((s) => [s.name, s] as const),
+  );
+  const names = new Set([...beforeMap.keys(), ...afterMap.keys()]);
+  for (const name of names) {
+    const b = beforeMap.get(name);
+    const a = afterMap.get(name);
+    diffScalar(
+      entries,
+      "serviceOverrides",
+      `services[${name}].ingressClass`,
+      `Service "${name}" ingress class`,
+      b?.ingressClass || null,
+      a?.ingressClass || null,
+    );
+    diffScalar(
+      entries,
+      "serviceOverrides",
+      `services[${name}].fqdnSuffix`,
+      `Service "${name}" FQDN suffix`,
+      b?.fqdnSuffix || null,
+      a?.fqdnSuffix || null,
     );
   }
 }
