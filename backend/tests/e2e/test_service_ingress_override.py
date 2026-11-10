@@ -46,10 +46,11 @@ Two steps exist only in the ``[ui-chromium]`` variant (T042):
   (``DeploymentDetailPage.read_service_ingress_summary``; FR-016).
 
 The UI steps and the page-object methods they call were written before the frontend that
-they drive (T043 to T047). The UI variant has not been run; T048 runs it. The labels and
-roles that the page objects assume are listed in the comment above
+they drive (T043 to T047) and ran against it in T048. The labels and roles that the page
+objects use are listed in the comment above
 ``DeploymentDetailPage.set_service_ingress_overrides`` and in the docstring of
-``DeployFormPage.read_service_ingress_fields``.
+``DeployFormPage.read_service_ingress_fields``. The deploy form step opens the form
+(``DeployFormPage.goto``) before it selects the driver version.
 """
 
 from __future__ import annotations
@@ -318,7 +319,9 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
             # The deploy form offers the override fields for the external service
             # only (spec User Story 3, scenario 2; FR-009 is prevented in the UI).
             # The form is not submitted.
-            assert await DeployFormPage(session_ui_page).read_service_ingress_fields(
+            deploy_form = DeployFormPage(session_ui_page)
+            await deploy_form.goto(environment_id=environment_id)
+            assert await deploy_form.read_service_ingress_fields(
                 driver="infrahub-enterprise"
             ) == ["task-manager"]
 

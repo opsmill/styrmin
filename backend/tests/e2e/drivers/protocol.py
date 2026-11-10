@@ -144,8 +144,8 @@ class ScenarioDriver(Protocol):
         that ``services`` does not list is cleared, so ``{}`` clears every
         override). Other keys are rejected with ``ScenarioActionError``. The
         ``services`` steps were added by T042 of
-        ``specs/033-service-ingress-override`` before the UI they drive (T043)
-        and have not been run.
+        ``specs/033-service-ingress-override`` before the UI they drive (T043);
+        T048 ran them against that UI (``e2e-evidence.md``).
 
         Both implementations block until the server has accepted the
         mutation — callers still need ``wait_for_deployment_running`` to

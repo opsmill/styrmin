@@ -103,9 +103,9 @@ class DeployFormPage:
         """Select ``driver`` and return the driver service names that the form
         offers ingress override fields for (#598, T042). Does not submit.
 
-        NOT RUN: written before the form field (T047). It assumes that, once a driver
-        version is selected, the form shows a ``group`` named "Service ingress
-        overrides" with a text input labelled "Ingress class for <driver service
+        Written before the form field (T047) and run against it in T048. The form must
+        be open (``goto``) first. Once a driver version is selected, the form shows a
+        ``group`` named "Service ingress overrides" with a text input labelled "Ingress class for <driver service
         name>" and one labelled "FQDN suffix for <driver service name>" for each
         external service of that version, and none for an internal service.
         Raises ``ScenarioActionError`` when the group does not appear.

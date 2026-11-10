@@ -794,9 +794,9 @@ class DeploymentDetailPage:
 
     # --- Service ingress overrides (#598, T042) ---------------------------
     #
-    # NOT RUN. These two methods are written before the frontend they drive
-    # (T043 and T045 build it; T048 runs the UI variant). They assume this UI.
-    # Change the frontend and these methods together if the UI differs.
+    # These two methods were written before the frontend they drive (T043 and T045
+    # build it) and ran against it in T048. They rely on this UI. Change the frontend
+    # and these methods together if the UI differs.
     #
     # Settings edit drawer, section "Services" (``section-nav-serviceOverrides``):
     #   - for each external service of the deployment, one text input labelled
