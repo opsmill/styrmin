@@ -82,9 +82,12 @@ def build_ingress_settings(
     config = context.instance.config
     if not config.fqdn_suffix:
         raise ValueError("FQDN suffix is required to build the ingress patch.")
+    # The operator reads ``release_reference`` from a label that a HelmRelease managed through the
+    # StyrminDeployment CRD does not have, so it passes an empty value: use the instance's one.
+    reference = release_reference or context.instance.release_reference
     annotations = {
         "traefik.ingress.kubernetes.io/router.entrypoints": "web,websecure",
-        "external-dns.alpha.kubernetes.io/hostname": f"{release_reference}-{context.app.name}.{config.fqdn_suffix}",
+        "external-dns.alpha.kubernetes.io/hostname": f"{reference}-{context.app.name}.{config.fqdn_suffix}",
         "external-dns.alpha.kubernetes.io/cloudflare-proxied": "true",
     }
     if config.ip_whitelist:

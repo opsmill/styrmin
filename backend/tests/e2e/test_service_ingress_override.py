@@ -70,6 +70,7 @@ _OVERRIDE = {
 }
 
 _SERVICE_NAME_LABEL = "styrmin.io/service-name"
+_OPERATOR_BOOKKEEPING_PREFIX = "kopf.zalando.org/"
 _TASK_MANAGER_INGRESS = "styrmin-svc-task-manager"
 _TASK_MANAGER_WORKLOAD = "styrmin-task-manager"
 _TASK_MANAGER_CONTAINER = "prefect-server"
@@ -105,6 +106,20 @@ async def _ingresses(kr8s_api: Any, namespace: str) -> dict[str, dict[str, Any]]
     }
 
 
+def _annotations(ingress: dict[str, Any]) -> dict[str, str]:
+    """The annotations that Styrmin sets on an Ingress.
+
+    The operator watches the Ingress that Styrmin builds, so kopf adds its own bookkeeping
+    annotation (``kopf.zalando.org/last-handled-configuration``). It is not an annotation
+    that Styrmin's ingress rules set, so it is left out of every comparison below.
+    """
+    return {
+        key: value
+        for key, value in ingress["metadata"].get("annotations", {}).items()
+        if not key.startswith(_OPERATOR_BOOKKEEPING_PREFIX)
+    }
+
+
 def _hosts(ingress: dict[str, Any]) -> list[str]:
     return [rule["host"] for rule in ingress["spec"].get("rules", []) if "host" in rule]
 
@@ -113,12 +128,13 @@ def _comparable(ingress: dict[str, Any]) -> dict[str, Any]:
     """What an operator sees of an Ingress: labels, annotations and spec.
 
     Leaves out the fields that the API server and the controllers change on their own
-    (resource version, generation, managed fields, status).
+    (resource version, generation, managed fields, status) and the operator's own
+    bookkeeping annotation.
     """
     metadata = ingress["metadata"]
     return {
         "labels": metadata.get("labels", {}),
-        "annotations": metadata.get("annotations", {}),
+        "annotations": _annotations(ingress),
         "spec": ingress["spec"],
     }
 
@@ -217,7 +233,7 @@ def _assert_default_task_manager_ingress(ingress: dict[str, Any]) -> None:
     """No override: the resolved suffix and the dedicated-controller rule (FR-003, FR-008)."""
     assert _hosts(ingress) == [_readable_host("task-manager", _CLUSTER_SUFFIX)]
     assert ingress["spec"].get("ingressClassName") is None
-    annotations = ingress["metadata"]["annotations"]
+    annotations = _annotations(ingress)
     assert set(annotations) == _DEFAULT_ANNOTATION_KEYS, annotations
     assert annotations["kubernetes.io/ingress.class"] == _DEDICATED_IMPLEMENTATION
     assert "tls" not in ingress["spec"]
@@ -227,9 +243,7 @@ def _assert_overridden_task_manager_ingress(ingress: dict[str, Any]) -> None:
     """Override: its class and suffix, and nothing else (FR-004, FR-008)."""
     assert _hosts(ingress) == [_readable_host("task-manager", _OVERRIDE_SUFFIX)]
     assert ingress["spec"]["ingressClassName"] == _OVERRIDE_CLASS
-    assert ingress["metadata"]["annotations"] == {
-        "kubernetes.io/ingress.class": _OVERRIDE_CLASS
-    }, (
+    assert _annotations(ingress) == {"kubernetes.io/ingress.class": _OVERRIDE_CLASS}, (
         "An overridden Ingress carries no entry-point, external-dns, Cloudflare or allow-list annotation"
     )
     assert "tls" not in ingress["spec"]
@@ -261,8 +275,16 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
         # The chart Ingress keeps the dedicated-controller rule as well (scenario 3).
         assert infrahub_before["spec"].get("ingressClassName") is None
         assert (
-            infrahub_before["metadata"]["annotations"]["kubernetes.io/ingress.class"]
+            _annotations(infrahub_before)["kubernetes.io/ingress.class"]
             == _DEDICATED_IMPLEMENTATION
+        )
+        # The same rules feed both Ingresses (FR-003): the external-dns host name of the
+        # Ingress that Styrmin builds is the one that the chart patch sets, release
+        # reference included.
+        dns_hostname = "external-dns.alpha.kubernetes.io/hostname"
+        assert (
+            _annotations(task_manager_before)[dns_hostname]
+            == _annotations(infrahub_before)[dns_hostname]
         )
         deployment = await client.deployments.get(deployment_id)
         services_before = {

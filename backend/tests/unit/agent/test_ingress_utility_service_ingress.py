@@ -429,6 +429,27 @@ class TestAnnotationsAndClass:
             "kubernetes.io/ingress.class": "traefik",
         }
 
+    def test_the_operator_without_a_release_reference_label_gets_the_context_one(
+        self,
+    ) -> None:
+        """A HelmRelease managed through the StyrminDeployment CRD has no release-reference label.
+
+        The operator's periodic reconciliation then builds the Ingress with an empty release
+        reference. The external-dns host name must still start with the release reference of
+        the instance, as the chart patch does, not with a bare ``-``.
+        """
+        context = _context([_service("web")])
+
+        resources = IngressUtility().build_resources(context, "", NAMESPACE)
+        (ingress,) = [r for r in resources if r["kind"] == "Ingress"]
+
+        assert (
+            ingress["metadata"]["annotations"][
+                "external-dns.alpha.kubernetes.io/hostname"
+            ]
+            == f"{RELEASE_REF}-{APP_NAME}.{SUFFIX}"
+        )
+
     def test_ip_whitelist_adds_the_acl_middleware_annotation(self) -> None:
         (ingress,) = _build(_context([_service("web")], ip_whitelist=["10.0.0.0/8"]))
 
