@@ -134,6 +134,10 @@ _Avoid_: "driver hash" alone (ambiguous across source types), "version hash" (co
 The user-facing version of the deployed application (e.g. `infrahub` `1.6.0`), distinct from the **driver version** that knows how to deploy it. A **driver version** declares a semver specifier (`application_supported_versions`) describing which **application versions** it can deploy.
 _Avoid_: "app version" (in code is fine, in prose write it out), conflating with **driver version**.
 
+**Prerelease** (application version):
+An **application version** that PEP 440 treats as a prerelease: a beta (`1.12.0b0`), a release candidate (`1.12.0rc1`) or a development build (`1.12.0.dev1`). A **driver version**'s `application_supported_versions` range matches a prerelease only if one of its clauses names a prerelease (a `!=` clause does not count), so `>=1.5,<2.0` refuses `1.12.0b0` and `>=1.12.0b0,<1.13` accepts it. When a request for a prerelease is refused for that reason, the error says so and lists the supported ranges. See [issue #591](https://github.com/opsmill/styrmin/issues/591).
+_Avoid_: "beta" as the general term, since a beta is one kind of prerelease.
+
 **Latest-wins driver-version resolution**:
 The deterministic rule that picks which **application driver version** a **deployment** binds to when several support the requested **application version**: highest parseable `version` string first (unparseable strings rank below all parseable ones), ties broken by `created_on` descending (most recently loaded), final tie-break on row id. Applies on initial deploy and on every upgrade — an upgrade always re-resolves the binding unless the caller pins one explicitly via `driverVersionId` (the **driver-version pin**, valid only within the deployment's own driver). Implemented by `_driver_version_sort_key` / `_resolve_latest_matching_version` in `backend/styrmin_backend/services/deployment.py`.
 _Avoid_: "newest version" (ambiguous between the two orderings), "first match" (the pre-rule behavior), "default driver version" (conflates with `default_version`).
