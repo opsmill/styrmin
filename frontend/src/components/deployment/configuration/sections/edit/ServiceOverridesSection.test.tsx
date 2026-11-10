@@ -346,3 +346,76 @@ describe("ServiceOverridesSection: FQDN suffix validation", () => {
     expect(applyButton()).toBeEnabled();
   });
 });
+
+// The ingress class is written to an Ingress (`ingressClassName` and an
+// annotation), so the backend accepts only a Kubernetes object name (#598).
+describe("ServiceOverridesSection: ingress class validation", () => {
+  it.each([
+    // A line break cannot reach a text input (the browser and jsdom strip it); the
+    // rule that rejects one is covered in `lib/ingress-class.test.ts`.
+    ["a space", "my class"],
+    ["a tab", "tra\tefik"],
+    ["an uppercase letter", "Traefik"],
+    ["an underscore", "my_class"],
+    ["a slash", "a/b"],
+    ["a leading hyphen", "-traefik"],
+    ["a trailing dot", "traefik."],
+    [
+      "254 characters in total",
+      `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(62)}`,
+    ],
+  ])("rejects a class with %s", async (_why, value) => {
+    renderSection();
+
+    fireEvent.change(classField("task-manager"), { target: { value } });
+
+    await waitFor(() =>
+      expect(classField("task-manager")).toHaveAttribute(
+        "aria-invalid",
+        "true",
+      ),
+    );
+    expect(classField("task-manager")).toHaveAccessibleDescription(
+      /Kubernetes object name/i,
+    );
+    // Only the class field is flagged, and Review & apply stays blocked with a hint that names the service.
+    expect(suffixField("task-manager")).not.toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(applyButton()).toBeDisabled();
+    expect(screen.getByTestId("drawer-invalid-hint")).toHaveTextContent(
+      "Fix the invalid ingress class on task-manager before applying.",
+    );
+  });
+
+  it.each([["traefik"], ["prod-nginx"], ["k8s.io-ingress-nginx"], ["1class"]])(
+    "accepts the class %s",
+    async (value) => {
+      renderSection();
+
+      fireEvent.change(classField("task-manager"), { target: { value } });
+
+      await waitFor(() => expect(applyButton()).toBeEnabled());
+      expect(classField("task-manager")).not.toHaveAttribute(
+        "aria-invalid",
+        "true",
+      );
+    },
+  );
+
+  it("unblocks Review & apply when the invalid class is fixed", async () => {
+    renderSection();
+
+    fireEvent.change(classField("task-manager"), {
+      target: { value: "Bad Class" },
+    });
+    await waitFor(() => expect(applyButton()).toBeDisabled());
+
+    fireEvent.change(classField("task-manager"), {
+      target: { value: "traefik" },
+    });
+
+    await waitFor(() => expect(applyButton()).toBeEnabled());
+  });
+});

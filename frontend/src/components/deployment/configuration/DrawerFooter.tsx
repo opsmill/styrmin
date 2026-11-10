@@ -17,8 +17,8 @@ interface Props {
  *
  * Both action buttons are disabled when there are no pending changes
  * (FR-013). Review & apply is also disabled while an image override (018) or
- * a replica count (023) or an FQDN suffix of a service ingress override
- * (#598) is invalid, with a hint naming the components.
+ * a replica count (023) or an ingress class or FQDN suffix of a service
+ * ingress override (#598) is invalid, with a hint naming the components.
  */
 export function DrawerFooter({ onDiscard, onReviewApply }: Props) {
   const pendingCount = useDrawerDiff().entries.length;
@@ -29,6 +29,8 @@ export function DrawerFooter({ onDiscard, onReviewApply }: Props) {
       `Fix the invalid image reference on ${invalid.images.join(", ")} before applying.`,
     invalid.replicas.length > 0 &&
       `Fix the invalid replica count on ${invalid.replicas.join(", ")} before applying.`,
+    invalid.serviceClasses.length > 0 &&
+      `Fix the invalid ingress class on ${invalid.serviceClasses.join(", ")} before applying.`,
     invalid.services.length > 0 &&
       `Fix the invalid FQDN suffix on ${invalid.services.join(", ")} before applying.`,
   ].filter(Boolean);

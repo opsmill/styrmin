@@ -83,6 +83,46 @@ _INVALID_SUFFIXES = {
     "null-byte": "example.com\x00",
     "non-breaking-space": "example\u00a0.com",
 }
+# The class is written to ``spec.ingressClassName`` and to the annotation
+# ``kubernetes.io/ingress.class`` of the Ingress, so it must be a valid Kubernetes object name
+# (a DNS-1123 subdomain: lowercase letters, digits, ``-`` and ``.``, starting and ending with a
+# letter or a digit, at most 253 characters). Class names that the repository uses today.
+_VALID_INGRESS_CLASSES = [
+    "traefik",
+    "nginx",
+    "tailscale",
+    "prod-nginx",
+    "cluster-traefik",
+    "ts",
+    "a",
+    "k8s.io-ingress-nginx",
+    "a" * 63,
+    ".".join(["a" * 63, "b" * 63, "c" * 63, "d" * 61]),
+]
+_INVALID_INGRESS_CLASSES = {
+    "trailing-newline": "traefik\n",
+    "leading-newline": "\ntraefik",
+    "newline-inside": "tra\nefik",
+    "carriage-return": "traefik\r",
+    "tab": "tra\tefik",
+    "space": "my class",
+    "trailing-space": "traefik ",
+    "leading-space": " traefik",
+    "null-byte": "traefik\x00",
+    "non-breaking-space": "tra\u00a0efik",
+    "uppercase": "Traefik",
+    "underscore": "my_class",
+    "slash": "a/b",
+    "colon": "a:b",
+    "quote": 'a"b',
+    "leading-hyphen": "-traefik",
+    "trailing-hyphen": "traefik-",
+    "leading-dot": ".traefik",
+    "trailing-dot": "traefik.",
+    "doubled-dot": "a..b",
+    "hyphen-next-to-dot": "a-.b",
+    "total-over-253": ".".join(["a" * 63, "b" * 63, "c" * 63, "d" * 62]),
+}
 _VALID_SUFFIXES = [
     _GOOD_SUFFIX,
     "example.com",
@@ -136,6 +176,36 @@ class TestServiceConfigBlockFields:
 
         with pytest.raises(_REJECTED) as exc_info:
             _deployment_config({"task-manager": {"ingress_class": ""}})
+
+        assert "ingress_class" in str(exc_info.value)
+
+    @pytest.mark.parametrize("ingress_class", _VALID_INGRESS_CLASSES)
+    def test_valid_ingress_class_is_accepted(self, ingress_class: str) -> None:
+        block = _block_class()(ingress_class=ingress_class)
+
+        assert block.ingress_class == ingress_class
+
+    @pytest.mark.parametrize(
+        "ingress_class",
+        list(_INVALID_INGRESS_CLASSES.values()),
+        ids=list(_INVALID_INGRESS_CLASSES),
+    )
+    def test_invalid_ingress_class_is_rejected(self, ingress_class: str) -> None:
+        block_cls = _block_class()
+        assert block_cls(ingress_class="traefik").ingress_class == "traefik"
+
+        with pytest.raises(_REJECTED) as exc_info:
+            block_cls(ingress_class=ingress_class)
+
+        assert "ingress_class" in str(exc_info.value)
+
+    def test_invalid_ingress_class_is_rejected_in_a_deployment_config(self) -> None:
+        _block_class()
+        config = _deployment_config({"task-manager": {"ingress_class": "traefik"}})
+        assert config.services is not None
+
+        with pytest.raises(_REJECTED) as exc_info:
+            _deployment_config({"task-manager": {"ingress_class": "traefik\n"}})
 
         assert "ingress_class" in str(exc_info.value)
 

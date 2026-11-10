@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { fqdnSuffixError } from "@/lib/fqdn-suffix";
+import { ingressClassError } from "@/lib/ingress-class";
 
 /** A service of the deployment or of the selected driver version. */
 export interface IngressServiceRef {
@@ -47,9 +48,10 @@ function withField(
  * (FR-009). Shared by the Services section of the edit drawer and the deploy
  * form, so both offer the same fields with the same labels and validation.
  *
- * The FQDN suffix is checked as the backend checks it
- * ({@link fqdnSuffixError}); an invalid value sets `aria-invalid` on its input
- * and names the rule in the message the input is described by.
+ * The ingress class ({@link ingressClassError}) and the FQDN suffix
+ * ({@link fqdnSuffixError}) are checked as the backend checks them; an invalid
+ * value sets `aria-invalid` on its input and names the rule in the message the
+ * input is described by.
  */
 export function ServiceIngressFields({ services, value, onChange }: Props) {
   const idPrefix = useId();
@@ -63,8 +65,10 @@ export function ServiceIngressFields({ services, value, onChange }: Props) {
         const row = rows.find((candidate) => candidate?.name === name);
         const ingressClass = row?.ingressClass ?? "";
         const fqdnSuffix = row?.fqdnSuffix ?? "";
+        const classError = ingressClassError(ingressClass);
         const suffixError = fqdnSuffixError(fqdnSuffix);
         const base = `${idPrefix}-${name}`;
+        const classErrorId = `${base}-class-error`;
         const errorId = `${base}-suffix-error`;
         return (
           <div
@@ -81,6 +85,8 @@ export function ServiceIngressFields({ services, value, onChange }: Props) {
                 <Input
                   id={`${base}-class`}
                   aria-label={`Ingress class for ${name}`}
+                  aria-invalid={classError ? true : undefined}
+                  aria-describedby={classError ? classErrorId : undefined}
                   value={ingressClass}
                   onChange={(e) =>
                     onChange(
@@ -90,6 +96,11 @@ export function ServiceIngressFields({ services, value, onChange }: Props) {
                   placeholder="inherited"
                   autoComplete="off"
                 />
+                {classError ? (
+                  <p id={classErrorId} className="text-xs text-destructive">
+                    {classError}
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-1">
                 <Label htmlFor={`${base}-suffix`} className="text-xs">

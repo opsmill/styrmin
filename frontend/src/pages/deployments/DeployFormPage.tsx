@@ -31,6 +31,7 @@ import { ReplicasField } from "@/components/deployment/configuration/ReplicasFie
 import { ServiceIngressFields } from "@/components/deployment/configuration/ServiceIngressFields";
 import { servicesFormToInput } from "@/lib/deployment-input";
 import { servicesWithInvalidSuffix } from "@/lib/fqdn-suffix";
+import { servicesWithInvalidClass } from "@/lib/ingress-class";
 import {
   compareVersionsLatestFirst,
   formatDriverVersionLabel,
@@ -99,7 +100,17 @@ export default function DeployFormPage() {
         document.getElementById(`comp-${firstInvalid.name}-replicas`)?.focus();
         return;
       }
-      // Same for an FQDN suffix that is not a DNS name (#598).
+      // Same for an ingress class that is not a Kubernetes object name and an
+      // FQDN suffix that is not a DNS name (#598).
+      const firstInvalidClass = servicesWithInvalidClass(serviceIngress)[0];
+      if (firstInvalidClass) {
+        document
+          .querySelector<HTMLInputElement>(
+            `[aria-label="Ingress class for ${CSS.escape(firstInvalidClass)}"]`,
+          )
+          ?.focus();
+        return;
+      }
       const firstInvalidSuffix = servicesWithInvalidSuffix(serviceIngress)[0];
       if (firstInvalidSuffix) {
         document
@@ -212,13 +223,16 @@ export default function DeployFormPage() {
     [],
   );
   const invalidSuffixServices = servicesWithInvalidSuffix(serviceIngress);
+  const invalidClassServices = servicesWithInvalidClass(serviceIngress);
 
   const [serviceOverrides, setServiceOverrides] = useState<
     Array<{ driverServiceName: string; overrideName: string }>
   >([]);
 
   const deployBlocked =
-    invalidReplicaComponents.length > 0 || invalidSuffixServices.length > 0;
+    invalidReplicaComponents.length > 0 ||
+    invalidClassServices.length > 0 ||
+    invalidSuffixServices.length > 0;
 
   if (isLoading) return <LoadingState message="Loading drivers..." />;
 
@@ -584,6 +598,8 @@ export default function DeployFormPage() {
             {[
               invalidReplicaComponents.length > 0 &&
                 `Fix the replica count of ${invalidReplicaComponents.join(", ")} before deploying.`,
+              invalidClassServices.length > 0 &&
+                `Fix the ingress class of ${invalidClassServices.join(", ")} before deploying.`,
               invalidSuffixServices.length > 0 &&
                 `Fix the FQDN suffix of ${invalidSuffixServices.join(", ")} before deploying.`,
             ]

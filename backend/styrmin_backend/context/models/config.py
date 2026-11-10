@@ -654,6 +654,33 @@ class ComponentConfigBlock(BaseModel):
         return data
 
 
+_INGRESS_CLASS_MAX_LENGTH = 253
+# A DNS-1123 subdomain, the rule for the name of a Kubernetes IngressClass. Matched with
+# ``fullmatch``: ``re.match`` with ``$`` accepts a trailing newline.
+_INGRESS_CLASS_RE = re.compile(
+    r"[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*"
+)
+
+
+def validate_service_ingress_class(value: str) -> str:
+    """Validate the ingress class of a service ingress override.
+
+    The class is written to ``spec.ingressClassName`` and to the ``kubernetes.io/ingress.class``
+    annotation of the Ingress, so it must be a valid Kubernetes object name: a DNS-1123
+    subdomain of lowercase letters, digits, hyphens and dots that starts and ends with a letter
+    or a digit, at most 253 characters. A line break, other whitespace or a control character is
+    rejected. The cluster, environment and deployment ``ingress_class`` have no such check; the
+    override is the one input that does.
+    """
+    if len(value) > _INGRESS_CLASS_MAX_LENGTH or not _INGRESS_CLASS_RE.fullmatch(value):
+        raise ValueError(
+            f"ingress_class {value!r} is not a valid Kubernetes object name: use lowercase "
+            "letters, digits, hyphens and dots, start and end with a letter or a digit, "
+            f"and use at most {_INGRESS_CLASS_MAX_LENGTH} characters."
+        )
+    return value
+
+
 _FQDN_SUFFIX_MAX_LENGTH = 253
 # Matched with ``fullmatch``: ``re.match`` with ``$`` accepts a trailing newline.
 _FQDN_SUFFIX_LABEL_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
@@ -692,7 +719,8 @@ class ServiceConfigBlock(BaseModel):
     both fields ``None`` is not stored.
 
     Attributes:
-        ingress_class (str | None): Ingress class of this service. A non-empty string.
+        ingress_class (str | None): Ingress class of this service. A Kubernetes object name
+            (a DNS-1123 subdomain).
         fqdn_suffix (str | None): FQDN suffix of this service, used in its readable host.
     """
 
@@ -700,6 +728,13 @@ class ServiceConfigBlock(BaseModel):
 
     ingress_class: str | None = Field(default=None, min_length=1)
     fqdn_suffix: str | None = None
+
+    @field_validator("ingress_class")
+    @classmethod
+    def _validate_ingress_class(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return validate_service_ingress_class(v)
 
     @field_validator("fqdn_suffix")
     @classmethod

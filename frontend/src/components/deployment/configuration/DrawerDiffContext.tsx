@@ -9,6 +9,7 @@ import type {
 } from "@/lib/configuration-types";
 import { validateImageReference } from "@/lib/image-reference";
 import { servicesWithInvalidSuffix } from "@/lib/fqdn-suffix";
+import { servicesWithInvalidClass } from "@/lib/ingress-class";
 import { replicaFieldError } from "@/lib/replicas";
 
 /** Components whose override fails validation, per field. */
@@ -17,12 +18,15 @@ export interface DrawerInvalidFields {
   replicas: readonly string[];
   /** Services whose ingress override has an FQDN suffix that is not a DNS name (#598). */
   services: readonly string[];
+  /** Services whose ingress override has an ingress class that is not a Kubernetes object name (#598). */
+  serviceClasses: readonly string[];
 }
 
 const NO_INVALID_FIELDS: DrawerInvalidFields = {
   images: [],
   replicas: [],
   services: [],
+  serviceClasses: [],
 };
 
 const DrawerDiffContextValue = createContext<ConfigurationDiff | null>(null);
@@ -87,6 +91,7 @@ export function DrawerDiffProvider({
         .filter((block) => replicaFieldError(block.replicas))
         .map((block) => block.name),
       services: servicesWithInvalidSuffix(currentValues.services),
+      serviceClasses: servicesWithInvalidClass(currentValues.services),
     };
   }, [currentValues.components, currentValues.services]);
 

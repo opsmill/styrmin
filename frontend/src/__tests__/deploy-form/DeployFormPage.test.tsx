@@ -706,4 +706,22 @@ describe("DeployFormPage service ingress overrides (#598)", () => {
       "Fix the FQDN suffix of task-manager before deploying.",
     );
   });
+
+  it("disables Deploy and names the service while the ingress class is not a Kubernetes object name", async () => {
+    await renderPage();
+    await selectVersion();
+
+    await user().type(
+      screen.getByLabelText("Ingress class for task-manager"),
+      "Bad Class",
+    );
+
+    expect(
+      screen.getByLabelText("Ingress class for task-manager"),
+    ).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "Deploy" })).toBeDisabled();
+    expect(screen.getByTestId("deploy-blocked-reason")).toHaveTextContent(
+      "Fix the ingress class of task-manager before deploying.",
+    );
+  });
 });
