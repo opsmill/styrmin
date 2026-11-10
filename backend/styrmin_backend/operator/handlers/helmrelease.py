@@ -302,6 +302,14 @@ async def kopf_helmrelease_timer(  # noqa: ARG001
         )
         return
 
+    # The StyrminDeployment pipeline creates the HelmRelease with no release-reference label
+    # (``ApplicationHelmReleaseBuilder.build``), so the label read above is empty. The release
+    # reference of the instance is the value that the StyrminDeployment timer and the Prefect
+    # flows give the builder and select by. With an empty value, this timer would list no object
+    # that they wrote, create each one again and replace its label with an empty one, and they
+    # would do the same to the objects of this timer.
+    release_reference = release_reference or context.instance.release_reference
+
     desired_all = build_desired_resources(
         context=context,
         release_reference=release_reference,
