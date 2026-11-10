@@ -822,35 +822,13 @@ async def _load_pinned_driver_version(
     return pinned
 
 
-def _prerelease_explanation(version: Version, ranges: Iterable[str]) -> str:
-    """Explain why a prerelease is refused, or return an empty string.
-
-    A range matches a prerelease only if one of its clauses names a prerelease,
-    and a ``!=`` clause does not count (PEP 440). The explanation is given only
-    when it is the reason: the
-    version is a prerelease and some range would accept it if prereleases were
-    allowed. A prerelease that no range accepts anyway gets no explanation,
-    because naming a prerelease in a range would not help.
-    """
-    if not version.is_prerelease or not any(
-        SpecifierSet(supported).contains(version, prereleases=True)
-        for supported in ranges
-    ):
-        return ""
-    return (
-        f" Version {version} is a prerelease, and a range matches a prerelease "
-        f"only if one of its clauses names a prerelease (a != clause does not count)."
-    )
-
-
 def _unsupported_version_error(
     application_driver: ApplicationDriver, version: str
 ) -> InvalidVersionError:
     """The refusal of ``version`` when no driver version of the driver supports it.
 
     Lists every supported range once, newest driver version first, so the
-    person can see what the driver accepts, and explains the prerelease rule
-    when it is the reason.
+    person can see what the driver accepts.
     """
     ranges = list(
         dict.fromkeys(
@@ -864,7 +842,6 @@ def _unsupported_version_error(
     return InvalidVersionError(
         f"Version {version} is not supported by the application driver "
         f"{application_driver.name}{listed}."
-        f"{_prerelease_explanation(Version(version), ranges)}"
     )
 
 
@@ -877,7 +854,6 @@ def _ensure_pin_supports_version(
         raise InvalidVersionError(
             f"Version {version} is not supported by driver version {pinned.id} "
             f"(supports {pinned.application_supported_versions})."
-            f"{_prerelease_explanation(target, [pinned.application_supported_versions])}"
         )
 
 

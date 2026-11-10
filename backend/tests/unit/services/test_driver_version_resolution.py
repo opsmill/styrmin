@@ -14,12 +14,15 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+from packaging.version import InvalidVersion
 
 from styrmin_backend.db.models import ApplicationDriver, ApplicationDriverVersion
 from styrmin_backend.services.deployment import (
     _driver_version_sort_key,
+    _ensure_pin_supports_version,
     _resolve_latest_matching_version,
 )
+from styrmin_backend.services.exceptions import ServiceError
 
 
 def _adv(
@@ -151,3 +154,47 @@ class TestPrereleaseMatching:
         resolved = _resolve_latest_matching_version(driver, application_version)
 
         assert (resolved is not None) is matches
+
+
+class TestNonPep440VersionBehaviour:
+    """Characterization test for FR-006 of #591: a version that is not PEP 440.
+
+    ``latest`` and ``develop`` are not PEP 440 versions. Both service functions
+    parse the requested version with ``packaging.version.Version`` before they
+    look at any range, so both raise ``packaging.version.InvalidVersion`` from
+    the service function itself. This was observed on the code before #591
+    changed anything (``uv run python``, ``packaging`` 25.0): the same
+    exception type and the message ``Invalid version: '<text>'``, with and
+    without driver versions on the driver.
+
+    How the GraphQL layer reports it (read in ``api/errors.py``, not run through
+    a GraphQL request): ``InvalidVersion`` is a ``ValueError``, not a
+    ``ServiceError``, and the mutations ``deployApplication`` and
+    ``updateDeploymentVersion`` in ``api/schema/mutation.py`` do not catch it.
+    ``StructuredErrorExtension`` therefore masks it as the message
+    ``An internal error occurred`` with ``extensions.code`` ``INTERNAL_ERROR``.
+
+    This outcome must not change with #591. The test must pass before and
+    after the change.
+    """
+
+    @pytest.mark.parametrize("version", ["latest", "develop"])
+    def test_resolver_raises_invalid_version_from_the_service_function(
+        self, version: str
+    ) -> None:
+        driver = _driver([_adv("1")])
+
+        with pytest.raises(InvalidVersion, match=f"Invalid version: '{version}'"):
+            _resolve_latest_matching_version(driver, version)
+
+    @pytest.mark.parametrize("version", ["latest", "develop"])
+    def test_pin_check_raises_invalid_version_from_the_service_function(
+        self, version: str
+    ) -> None:
+        with pytest.raises(InvalidVersion, match=f"Invalid version: '{version}'"):
+            _ensure_pin_supports_version(_adv("1"), version)
+
+    def test_the_exception_is_not_a_service_error(self) -> None:
+        # This is why the GraphQL layer masks it as INTERNAL_ERROR.
+        assert issubclass(InvalidVersion, ValueError)
+        assert not issubclass(InvalidVersion, ServiceError)

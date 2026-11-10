@@ -1,16 +1,14 @@
-"""The refusal of an unsupported application version says why and lists the ranges (#591).
-
-A driver version's ``application_supported_versions`` range matches a
-prerelease (``1.12.0b0``) only if the range itself names a prerelease. Styrmin
-refused such a request with "Version 1.12.0b0 is not supported by the
-application driver infrahub", which names neither the reason nor the ranges.
+"""The refusal of an unsupported application version names the version and lists the ranges (#591).
 
 Three places refuse a version: creating a deployment, upgrading a deployment
-and pinning a driver version. They share one message:
+and pinning a driver version.
 
-* a prerelease that some range would accept if prereleases were allowed gets
-  the prerelease explanation and the supported ranges;
-* any other refusal gets the supported ranges and no prerelease explanation.
+* Creating and upgrading without a pin refuse with the version and every
+  supported range of the driver, listed once, newest driver version first.
+* Pinning a driver version refuses with the version and the range of the
+  pinned driver version.
+* No message explains a prerelease rule or contains the word "prerelease"
+  (FR-005), because a prerelease whose numbers fit a range is accepted.
 """
 
 from __future__ import annotations
@@ -37,10 +35,8 @@ DRIVER = "test-app"
 STABLE_ONLY = ">=1.0.0,<2.0.0"
 PRERELEASE_RANGE = ">=1.5.0b0,<1.6"
 PRERELEASE = "1.5.0b0"
-EXPLANATION = (
-    "a range matches a prerelease only if one of its clauses names a prerelease "
-    "(a != clause does not count)"
-)
+# Outside ``STABLE_ONLY``, so refused whatever the rule for prereleases is.
+PRERELEASE_ABOVE_THE_RANGE = "2.0.0b1"
 
 
 async def _seed(
@@ -104,52 +100,35 @@ async def _refused_on_pin(
     return str(raised.value)
 
 
-class TestPrereleaseRefusedBecauseNoRangeNamesOne:
-    """A prerelease that the range would accept if prereleases were allowed."""
-
+class TestRefusalListsTheVersionAndTheRanges:
     @pytest.mark.anyio
-    async def test_create_explains_the_prerelease_rule_and_lists_the_range(
-        self,
-    ) -> None:
+    async def test_create_names_the_version_and_lists_the_range(self) -> None:
         uow, _, environment_id = await _seed()
 
-        message = await _refused_on_create(uow, environment_id, "1.5.0b0")
+        message = await _refused_on_create(uow, environment_id, "3.0.0")
 
-        assert f"Version {PRERELEASE} is not supported by the application driver" in (
-            message
-        )
+        assert "Version 3.0.0 is not supported by the application driver" in message
         assert DRIVER in message
         assert f"supported ranges: {STABLE_ONLY}" in message
-        assert EXPLANATION in message
 
     @pytest.mark.anyio
-    async def test_upgrade_explains_the_prerelease_rule_and_lists_the_range(
-        self,
-    ) -> None:
+    async def test_upgrade_names_the_version_and_lists_the_range(self) -> None:
         uow, deployment_id, _ = await _seed()
 
-        message = await _refused_on_upgrade(uow, deployment_id, "1.5.0b0")
+        message = await _refused_on_upgrade(uow, deployment_id, "3.0.0")
 
-        assert f"Version {PRERELEASE} is not supported by the application driver" in (
-            message
-        )
+        assert "Version 3.0.0 is not supported by the application driver" in message
         assert f"supported ranges: {STABLE_ONLY}" in message
-        assert EXPLANATION in message
 
     @pytest.mark.anyio
-    async def test_pin_explains_the_prerelease_rule_and_keeps_the_pinned_range(
-        self,
-    ) -> None:
+    async def test_pin_names_the_version_and_keeps_the_pinned_range(self) -> None:
         uow, _, environment_id = await _seed()
         pin = uow.application_driver_versions.models[0]
 
-        message = await _refused_on_pin(uow, environment_id, "1.5.0b0")
+        message = await _refused_on_pin(uow, environment_id, "3.0.0")
 
-        assert f"Version {PRERELEASE} is not supported by driver version {pin.id}" in (
-            message
-        )
+        assert f"Version 3.0.0 is not supported by driver version {pin.id}" in message
         assert f"(supports {STABLE_ONLY})" in message
-        assert EXPLANATION in message
 
     @pytest.mark.anyio
     async def test_every_range_of_the_driver_is_listed_once(self) -> None:
@@ -157,11 +136,10 @@ class TestPrereleaseRefusedBecauseNoRangeNamesOne:
             extra_versions=[("2.0.0", STABLE_ONLY), ("3.0.0", ">=2.0.0,<3.0.0")]
         )
 
-        message = await _refused_on_create(uow, environment_id, "1.5.0b0")
+        message = await _refused_on_create(uow, environment_id, "4.0.0")
 
         assert message.count(STABLE_ONLY) == 1
         assert ">=2.0.0,<3.0.0" in message
-        assert EXPLANATION in message
 
     @pytest.mark.anyio
     async def test_ranges_are_listed_newest_driver_version_first(self) -> None:
@@ -170,73 +148,65 @@ class TestPrereleaseRefusedBecauseNoRangeNamesOne:
             extra_versions=[("2", ">=1.9,<1.10"), ("10", ">=1.10,<1.11")]
         )
 
-        message = await _refused_on_create(uow, environment_id, "1.5.0b0")
+        message = await _refused_on_create(uow, environment_id, "4.0.0")
 
         assert (
             f"supported ranges: >=1.10,<1.11, >=1.9,<1.10, {STABLE_ONLY}"
         ) in message
 
+
+class TestNoMessageMentionsAPrerelease:
+    """FR-005: a refused prerelease gets the same message as a refused stable version."""
+
     @pytest.mark.anyio
-    async def test_a_not_equal_clause_that_names_a_prerelease_does_not_count(
-        self,
-    ) -> None:
-        uow, _, environment_id = await _seed(
-            extra_versions=[("2", ">=1.0.0,!=1.5.0b0,<2.0.0")]
+    async def test_create_refusal_of_a_prerelease_lists_the_ranges_only(self) -> None:
+        uow, _, environment_id = await _seed()
+
+        message = await _refused_on_create(
+            uow, environment_id, PRERELEASE_ABOVE_THE_RANGE
         )
 
-        message = await _refused_on_create(uow, environment_id, "1.5.0b1")
-
-        assert "!=1.5.0b0" in message
-        assert EXPLANATION in message
-
-
-class TestRefusalWithoutAPrereleaseExplanation:
-    """Any refusal for which naming a prerelease in the range would not help."""
+        assert (
+            f"Version {PRERELEASE_ABOVE_THE_RANGE} is not supported by the "
+            "application driver"
+        ) in message
+        assert f"supported ranges: {STABLE_ONLY}" in message
+        assert "prerelease" not in message.lower()
 
     @pytest.mark.anyio
-    async def test_stable_version_outside_every_range_lists_the_ranges_only(
+    async def test_upgrade_refusal_of_a_prerelease_lists_the_ranges_only(self) -> None:
+        uow, deployment_id, _ = await _seed()
+
+        message = await _refused_on_upgrade(
+            uow, deployment_id, PRERELEASE_ABOVE_THE_RANGE
+        )
+
+        assert f"supported ranges: {STABLE_ONLY}" in message
+        assert "prerelease" not in message.lower()
+
+    @pytest.mark.anyio
+    async def test_pin_refusal_of_a_prerelease_keeps_the_pinned_range_only(
         self,
     ) -> None:
         uow, _, environment_id = await _seed()
 
-        message = await _refused_on_create(uow, environment_id, "0.9.0")
+        message = await _refused_on_pin(uow, environment_id, PRERELEASE_ABOVE_THE_RANGE)
 
-        assert "Version 0.9.0 is not supported by the application driver" in message
-        assert f"supported ranges: {STABLE_ONLY}" in message
-        assert "prerelease" not in message
+        assert f"(supports {STABLE_ONLY})" in message
+        assert "prerelease" not in message.lower()
 
     @pytest.mark.anyio
-    async def test_prerelease_outside_every_range_even_when_prereleases_are_allowed(
-        self,
-    ) -> None:
+    async def test_prerelease_below_every_range_lists_the_ranges_only(self) -> None:
         uow, _, environment_id = await _seed()
 
         message = await _refused_on_create(uow, environment_id, "0.9.0b1")
 
         assert f"supported ranges: {STABLE_ONLY}" in message
-        assert "prerelease" not in message
-
-    @pytest.mark.anyio
-    async def test_upgrade_to_a_stable_version_outside_the_range(self) -> None:
-        uow, deployment_id, _ = await _seed()
-
-        message = await _refused_on_upgrade(uow, deployment_id, "3.0.0")
-
-        assert f"supported ranges: {STABLE_ONLY}" in message
-        assert "prerelease" not in message
-
-    @pytest.mark.anyio
-    async def test_pin_to_a_stable_version_outside_the_range(self) -> None:
-        uow, _, environment_id = await _seed()
-
-        message = await _refused_on_pin(uow, environment_id, "3.0.0")
-
-        assert f"(supports {STABLE_ONLY})" in message
-        assert "prerelease" not in message
+        assert "prerelease" not in message.lower()
 
 
 class TestPrereleaseAcceptedWhenARangeNamesOne:
-    """The matching rule is unchanged: the second driver build of the issue's control."""
+    """A range that names a prerelease accepts it and binds that driver build."""
 
     @pytest.mark.asyncio
     @patch(f"{MODULE}.apply_state", new_callable=AsyncMock)
