@@ -1,9 +1,9 @@
 """``apply_utility_resources`` applies the utility resources and reports the failures that matter (#598, review F2).
 
 An Ingress and a NetworkPolicy belong to ``networking.k8s.io/v1``, so the flow puts them with the
-custom resources, whose kind may not be installed yet. Only a refusal with status 404 (the kind is not
-installed) may be skipped. The error of an Ingress must fail the flow, as the Ingress is the only
-object that makes a service reachable.
+custom resources, whose kind may not be installed yet. The error of an Ingress must fail the flow, as the Ingress is the only
+object that makes a service reachable. Every other kind keeps the behaviour from before #598: its error is
+skipped and logged, now with the status and reason.
 """
 
 from __future__ import annotations
@@ -89,17 +89,24 @@ async def test_a_custom_kind_that_is_not_installed_is_skipped_and_logged_with_it
 
 
 @pytest.mark.anyio
-async def test_a_custom_kind_refused_for_another_reason_fails_the_flow(
-    mocker: Any,
+@pytest.mark.parametrize("status", [403, 422, 500])
+async def test_a_custom_kind_other_than_ingress_is_skipped_whatever_the_status(
+    mocker: Any, log_lines: list[str], status: int
 ) -> None:
-    _patch_apply(mocker, {"Middleware": ApiException(status=422, reason="Invalid")})
+    """Behaviour from before #598, kept: only the Ingress is stricter. The log gains the status and reason."""
+    apply = _patch_apply(
+        mocker, {"Middleware": ApiException(status=status, reason="refused")}
+    )
 
-    with pytest.raises(ApiException) as error:
-        await application_module.apply_utility_resources.fn(
-            namespace=NAMESPACE, resources=[MIDDLEWARE]
-        )
+    await application_module.apply_utility_resources.fn(
+        namespace=NAMESPACE, resources=[MIDDLEWARE, INGRESS]
+    )
 
-    assert error.value.status == 422
+    assert apply.await_count == 2
+    (line,) = log_lines
+    assert "Middleware/acl" in line
+    assert f"status {status}" in line
+    assert "reason refused" in line
 
 
 @pytest.mark.anyio

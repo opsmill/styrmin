@@ -19,10 +19,6 @@ from styrmin_backend.agent.tasks.shared import (
 )
 
 
-# Kinds whose apply error was always skipped before the Ingress was added. Left as it was (review F2).
-_SKIPPED_ON_ANY_ERROR = frozenset({"NetworkPolicy"})
-
-
 @flow(flow_run_name="Update Helm release: {namespace} {reference}")
 async def update_helm_release(
     namespace: str,
@@ -74,16 +70,15 @@ async def apply_utility_resources(
             # admission webhook) must fail the flow, not end it as a success with no Ingress.
             if kind == "Ingress":
                 raise
-            # A NetworkPolicy has always been skipped here whatever the error: kept as it was.
-            # Any other kind is a custom resource; only status 404 (the kind is not installed yet) is skipped.
-            if kind not in _SKIPPED_ON_ANY_ERROR and exc.status != 404:
-                raise
+            # Every other kind keeps the behaviour from before #598: the error is skipped. The log
+            # now carries the status and reason, which the old text hid behind "may not be installed".
             logger.warning(
-                "Failed to apply {}/{} (status {}, reason {}): skipped, the kind may not be installed yet",
+                "Failed to apply {}/{} (status {}, reason {}): skipped{}",
                 kind,
                 name,
                 exc.status,
                 exc.reason,
+                ", the kind may not be installed yet" if exc.status == 404 else "",
             )
 
 

@@ -349,10 +349,12 @@ Each point has its source. None blocks this decision.
   the real reference. The teardown deletes them by the real reference, and the runs left nothing
   behind. A HelmRelease deleted alone was not tested.
 - `apply_utility_resources` logged "the CRD type may not be installed yet" for every failed Ingress
-  apply, which hid the 403 of the first end-to-end run. The review fixes make an Ingress error fail
-  the flow, skip a custom kind only on status 404, and log the status and reason. A NetworkPolicy
-  is still skipped on any error, with the status and reason logged: the same pattern as before,
-  left open.
+  apply, which hid the 403 of the first end-to-end run. An Ingress error now fails the flow. Every
+  other kind keeps the behaviour from before this change: an error is logged and skipped, whatever
+  the status. The log now carries the status and the reason, and the hint that the kind may not be
+  installed only for status 404. A custom resource other than an Ingress, for example a Traefik
+  Middleware, that the cluster refuses with 403, 422 or 500 is therefore still skipped, and the
+  deployment reports success without it. That behaviour exists before this change and is left open.
 - `DeploymentResource.scale` sends `components` and, since this change, the stored `services`. It
   still clears every other stored config key (a probe showed `ip_whitelist` and `env_vars` cleared).
   That behavior exists before this change.
