@@ -167,21 +167,20 @@ class TestEnsurePinSupportsVersion:
     def test_accepts_a_prerelease_whose_numbers_fit_the_range(
         self, application_version: str
     ) -> None:
-        _ensure_pin_supports_version(
-            _adv("1", supported=">=1.5,<2.0"), application_version
-        )
+        pinned = _adv("1", supported=">=1.5,<2.0")
+        _ensure_pin_supports_version(pinned, _driver([pinned]), application_version)
 
     def test_refuses_a_prerelease_of_the_excluded_upper_bound(self) -> None:
         pinned = _adv("1", supported=">=1.5,<2.0")
 
         with pytest.raises(InvalidVersionError, match="2.0.0b1"):
-            _ensure_pin_supports_version(pinned, "2.0.0b1")
+            _ensure_pin_supports_version(pinned, _driver([pinned]), "2.0.0b1")
 
     def test_refuses_a_prerelease_below_the_lower_bound(self) -> None:
         pinned = _adv("1", supported=">=1.12.0,<1.13")
 
         with pytest.raises(InvalidVersionError, match="1.12.0b0"):
-            _ensure_pin_supports_version(pinned, "1.12.0b0")
+            _ensure_pin_supports_version(pinned, _driver([pinned]), "1.12.0b0")
 
 
 class TestNonPep440VersionBehaviour:
@@ -220,7 +219,8 @@ class TestNonPep440VersionBehaviour:
         self, version: str
     ) -> None:
         with pytest.raises(InvalidVersion, match=f"Invalid version: '{version}'"):
-            _ensure_pin_supports_version(_adv("1"), version)
+            pinned = _adv("1")
+            _ensure_pin_supports_version(pinned, _driver([pinned]), version)
 
     def test_the_exception_is_not_a_service_error(self) -> None:
         # This is why the GraphQL layer masks it as INTERNAL_ERROR.

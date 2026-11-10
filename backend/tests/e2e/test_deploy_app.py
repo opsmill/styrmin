@@ -12,6 +12,7 @@ import kr8s.asyncio
 import pytest
 from kr8s.asyncio.objects import Service as AsyncService
 from styrmin_sdk import StyrminClient
+from styrmin_sdk.exceptions import StyrminAPIError
 from tests.e2e.conftest import (
     _portforward,
     _wait_for_http,
@@ -446,13 +447,16 @@ async def test_deploy_prerelease_simple_app(
     deployed_simple_app: dict,  # noqa: ARG001 — keeps the environment's ingress controller
     scenario_environment_id: str,
     session_scenario_driver: tuple[ScenarioDriver, StyrminClient],
+    styrmin_resources: dict,
     simple_app_prerelease_image: str,  # noqa: ARG001 — tags the image of the prerelease
 ) -> None:
     """#591: a prerelease whose numbers fit the range of the driver version deploys.
 
     The session ``simple-app`` driver supports ``>=0.1,<1.0``, which names no
     prerelease. The version is stored as typed, not in its canonical form. The
-    deployment is then upgraded to the release, ``0.2.0``.
+    deployment is then upgraded to the release, ``0.2.0``. Last, a prerelease
+    of the excluded upper bound, ``1.0.0b1``, is refused with and without a pin
+    (FR-004): the message names the version and the range and creates nothing.
     """
     _, client = session_scenario_driver
     deployment_id: str | None = None
@@ -491,6 +495,32 @@ async def test_deploy_prerelease_simple_app(
         stored = await client.deployments.get(deployment_id)
         assert stored.status == "running", stored
         assert stored.application_version == "0.2.0", stored
+
+        # ``1.0.0b1`` precedes the excluded upper bound ``1.0``, so it is outside
+        # ``>=0.1,<1.0`` and both requests are refused with the same listing.
+        refused_version = "1.0.0b1"
+        deployments_before = sorted(
+            deployment.id
+            for deployment in await client.deployments.list(scenario_environment_id)
+        )
+        for pin in (None, styrmin_resources["driver_version_id"]):
+            with pytest.raises(StyrminAPIError) as refused:
+                await client.deployments.create(
+                    driver="simple-app",
+                    version=refused_version,
+                    environment_id=scenario_environment_id,
+                    name="refused-prerelease",
+                    driver_version_id=pin,
+                )
+            message = str(refused.value)
+            assert refused_version in message, message
+            assert ">=0.1,<1.0" in message, message
+            assert "prerelease" not in message.lower(), message
+            deployments_after = sorted(
+                deployment.id
+                for deployment in await client.deployments.list(scenario_environment_id)
+            )
+            assert deployments_after == deployments_before, (pin, message)
     finally:
         # The environment is shared with the other tests of the file: do not leave
         # an extra deployment behind. Best effort, so that a cleanup failure does

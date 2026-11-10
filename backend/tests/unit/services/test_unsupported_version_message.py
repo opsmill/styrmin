@@ -5,8 +5,9 @@ and pinning a driver version.
 
 * Creating and upgrading without a pin refuse with the version and every
   supported range of the driver, listed once, newest driver version first.
-* Pinning a driver version refuses with the version and the range of the
-  pinned driver version.
+* Pinning a driver version refuses with the version, the pinned driver
+  version and its range, then lists every supported range of the driver the
+  same way (FR-004, SC-003).
 * No message explains a prerelease rule or contains the word "prerelease"
   (FR-005), because a prerelease whose numbers fit a range is accepted.
 """
@@ -121,14 +122,19 @@ class TestRefusalListsTheVersionAndTheRanges:
         assert f"supported ranges: {STABLE_ONLY}" in message
 
     @pytest.mark.anyio
-    async def test_pin_names_the_version_and_keeps_the_pinned_range(self) -> None:
+    async def test_pin_names_the_version_the_pinned_range_and_the_driver_ranges(
+        self,
+    ) -> None:
         uow, _, environment_id = await _seed()
         pin = uow.application_driver_versions.models[0]
 
         message = await _refused_on_pin(uow, environment_id, "3.0.0")
 
         assert f"Version 3.0.0 is not supported by driver version {pin.id}" in message
-        assert f"(supports {STABLE_ONLY})" in message
+        assert f"(supports {STABLE_ONLY})." in message
+        assert (
+            f"Supported ranges of the application driver {DRIVER}: {STABLE_ONLY}."
+        ) in message
 
     @pytest.mark.anyio
     async def test_every_range_of_the_driver_is_listed_once(self) -> None:
@@ -153,6 +159,138 @@ class TestRefusalListsTheVersionAndTheRanges:
         assert (
             f"supported ranges: >=1.10,<1.11, >=1.9,<1.10, {STABLE_ONLY}"
         ) in message
+
+
+MANY_RANGES = [("2", ">=1.9,<1.10"), ("10", ">=1.10,<1.11")]
+LISTED_RANGES = f">=1.10,<1.11, >=1.9,<1.10, {STABLE_ONLY}"
+
+
+class TestRefusalMessagesFollowTheContract:
+    """The exact texts of messages 1 and 2 of contracts/refusal-messages.md."""
+
+    @pytest.mark.anyio
+    async def test_message_1_for_an_unpinned_request_of_a_prerelease(self) -> None:
+        uow, _, environment_id = await _seed(extra_versions=MANY_RANGES)
+
+        message = await _refused_on_create(
+            uow, environment_id, PRERELEASE_ABOVE_THE_RANGE
+        )
+
+        assert message == (
+            f"Version {PRERELEASE_ABOVE_THE_RANGE} is not supported by the "
+            f"application driver {DRIVER} (supported ranges: {LISTED_RANGES})."
+        )
+
+    @pytest.mark.anyio
+    async def test_message_1_lists_every_range_once_on_an_upgrade(self) -> None:
+        # Driver version "11" repeats the range of driver version "1.0.0".
+        uow, deployment_id, _ = await _seed(
+            extra_versions=[*MANY_RANGES, ("11", STABLE_ONLY)]
+        )
+
+        message = await _refused_on_upgrade(
+            uow, deployment_id, PRERELEASE_ABOVE_THE_RANGE
+        )
+
+        assert message == (
+            f"Version {PRERELEASE_ABOVE_THE_RANGE} is not supported by the "
+            f"application driver {DRIVER} (supported ranges: "
+            f"{STABLE_ONLY}, >=1.10,<1.11, >=1.9,<1.10)."
+        )
+        assert message.count(STABLE_ONLY) == 1
+
+    @pytest.mark.anyio
+    async def test_message_2_names_the_pin_and_lists_every_range_of_the_driver(
+        self,
+    ) -> None:
+        uow, _, environment_id = await _seed(extra_versions=MANY_RANGES)
+        pin = uow.application_driver_versions.models[0]
+
+        message = await _refused_on_pin(uow, environment_id, PRERELEASE_ABOVE_THE_RANGE)
+
+        assert message == (
+            f"Version {PRERELEASE_ABOVE_THE_RANGE} is not supported by driver "
+            f"version {pin.id} (supports {pin.application_supported_versions}). "
+            f"Supported ranges of the application driver {DRIVER}: {LISTED_RANGES}."
+        )
+
+    @pytest.mark.anyio
+    async def test_message_2_on_an_upgrade_lists_every_range_of_the_driver(
+        self,
+    ) -> None:
+        uow, deployment_id, _ = await _seed(extra_versions=MANY_RANGES)
+        pin = uow.application_driver_versions.models[0]
+
+        with pytest.raises(InvalidVersionError) as raised:
+            await update_deployment_version(
+                deployment_id=deployment_id,
+                version=PRERELEASE_ABOVE_THE_RANGE,
+                uow=uow,
+                driver_version_id=pin.id,
+            )
+
+        assert str(raised.value) == (
+            f"Version {PRERELEASE_ABOVE_THE_RANGE} is not supported by driver "
+            f"version {pin.id} (supports {pin.application_supported_versions}). "
+            f"Supported ranges of the application driver {DRIVER}: {LISTED_RANGES}."
+        )
+
+    @pytest.mark.anyio
+    async def test_message_2_lists_the_one_range_of_a_driver_with_one_range(
+        self,
+    ) -> None:
+        uow, _, environment_id = await _seed()
+        pin = uow.application_driver_versions.models[0]
+
+        message = await _refused_on_pin(uow, environment_id, PRERELEASE_ABOVE_THE_RANGE)
+
+        assert message.endswith(
+            f"(supports {STABLE_ONLY}). "
+            f"Supported ranges of the application driver {DRIVER}: {STABLE_ONLY}."
+        )
+        assert str(pin.id) in message
+
+
+def _snapshot(uow: FakeUnitOfWork) -> dict[str, list]:
+    return {
+        "deployments": [d.id for d in uow.deployments._deployments],
+        "instances": [i.id for i in uow.instances.models],
+        "tasks": [t.id for t in uow.tasks.models],
+    }
+
+
+class TestARefusalCreatesNothing:
+    """The error is raised before anything is dispatched or stored."""
+
+    @pytest.mark.anyio
+    @patch(f"{MODULE}.apply_state", new_callable=AsyncMock)
+    @pytest.mark.parametrize("pinned", [False, True])
+    async def test_create_creates_no_resource(
+        self, mock_apply_state: AsyncMock, pinned: bool
+    ) -> None:
+        uow, _, environment_id = await _seed(extra_versions=MANY_RANGES)
+        before = _snapshot(uow)
+
+        if pinned:
+            await _refused_on_pin(uow, environment_id, PRERELEASE_ABOVE_THE_RANGE)
+        else:
+            await _refused_on_create(uow, environment_id, PRERELEASE_ABOVE_THE_RANGE)
+
+        assert _snapshot(uow) == before
+        mock_apply_state.assert_not_called()
+
+    @pytest.mark.anyio
+    @patch(f"{MODULE}.apply_state", new_callable=AsyncMock)
+    async def test_upgrade_creates_no_resource(
+        self, mock_apply_state: AsyncMock
+    ) -> None:
+        uow, deployment_id, _ = await _seed(extra_versions=MANY_RANGES)
+        before = _snapshot(uow)
+
+        await _refused_on_upgrade(uow, deployment_id, PRERELEASE_ABOVE_THE_RANGE)
+
+        assert _snapshot(uow) == before
+        mock_apply_state.assert_not_called()
 
 
 class TestNoMessageMentionsAPrerelease:
@@ -185,14 +323,15 @@ class TestNoMessageMentionsAPrerelease:
         assert "prerelease" not in message.lower()
 
     @pytest.mark.anyio
-    async def test_pin_refusal_of_a_prerelease_keeps_the_pinned_range_only(
+    async def test_pin_refusal_of_a_prerelease_lists_the_ranges_only(
         self,
     ) -> None:
         uow, _, environment_id = await _seed()
 
         message = await _refused_on_pin(uow, environment_id, PRERELEASE_ABOVE_THE_RANGE)
 
-        assert f"(supports {STABLE_ONLY})" in message
+        assert f"(supports {STABLE_ONLY})." in message
+        assert f"Supported ranges of the application driver {DRIVER}:" in message
         assert "prerelease" not in message.lower()
 
     @pytest.mark.anyio

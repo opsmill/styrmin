@@ -822,6 +822,18 @@ async def _load_pinned_driver_version(
     return pinned
 
 
+def _supported_ranges(application_driver: ApplicationDriver) -> list[str]:
+    """Every supported range of the driver, once, newest driver version first."""
+    return list(
+        dict.fromkeys(
+            driver_version.application_supported_versions
+            for driver_version in sorted(
+                application_driver.versions, key=_driver_version_sort_key, reverse=True
+            )
+        )
+    )
+
+
 def _unsupported_version_error(
     application_driver: ApplicationDriver, version: str
 ) -> InvalidVersionError:
@@ -830,14 +842,7 @@ def _unsupported_version_error(
     Lists every supported range once, newest driver version first, so the
     person can see what the driver accepts.
     """
-    ranges = list(
-        dict.fromkeys(
-            driver_version.application_supported_versions
-            for driver_version in sorted(
-                application_driver.versions, key=_driver_version_sort_key, reverse=True
-            )
-        )
-    )
+    ranges = _supported_ranges(application_driver)
     listed = f" (supported ranges: {', '.join(ranges)})" if ranges else ""
     return InvalidVersionError(
         f"Version {version} is not supported by the application driver "
@@ -846,13 +851,22 @@ def _unsupported_version_error(
 
 
 def _ensure_pin_supports_version(
-    pinned: ApplicationDriverVersion, version: str
+    pinned: ApplicationDriverVersion,
+    application_driver: ApplicationDriver,
+    version: str,
 ) -> None:
-    """Reject a pin whose specifier does not cover the requested version."""
+    """Reject a pin whose specifier does not cover the requested version.
+
+    The refusal names the pinned driver version and its range, then lists every
+    supported range of the driver, like the refusal without a pin.
+    """
     if not version_fits_range(Version(version), pinned.application_supported_versions):
+        ranges = ", ".join(_supported_ranges(application_driver))
         raise InvalidVersionError(
             f"Version {version} is not supported by driver version {pinned.id} "
-            f"(supports {pinned.application_supported_versions})."
+            f"(supports {pinned.application_supported_versions}). "
+            f"Supported ranges of the application driver "
+            f"{application_driver.name}: {ranges}."
         )
 
 
@@ -996,7 +1010,9 @@ async def update_deployment_version(
                 application_driver=application_driver,
                 uow=uow,
             )
-            _ensure_pin_supports_version(target_driver_version, version)
+            _ensure_pin_supports_version(
+                target_driver_version, application_driver, version
+            )
             logger.info(
                 "Pinned driver version: id={} supports={}",
                 target_driver_version.id,
@@ -1885,7 +1901,7 @@ async def deploy_application(
                         f"No version specified and pinned driver version "
                         f"{pinned_driver_version.id} declares no default version"
                     )
-            _ensure_pin_supports_version(pinned_driver_version, version)
+            _ensure_pin_supports_version(pinned_driver_version, application, version)
 
         # If no version provided, resolve the default_version declared by the
         # latest driver version (per _driver_version_sort_key) that has one.
