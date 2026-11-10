@@ -54,10 +54,14 @@ For each service in `spec` that has `scope: external` and `kind` `http` or
 in the deployment's namespace. It is not part of the `HelmRelease`. The operator
 builds it from the resolved context in its periodic pass, as it does for the
 network policies, services and secrets that it builds, and deletes it when the
-context no longer requires it. It has the labels `app.kubernetes.io/managed-by`,
-`styrmin.io/utility-kind: ingress`, `styrmin.io/release-reference` and
-`styrmin.io/service-name`. No condition in `status` reports on these Ingresses:
-the condition types listed below have none for them.
+context no longer requires it. It has six labels:
+`app.kubernetes.io/managed-by`, `styrmin.io/utility-kind: ingress`,
+`styrmin.io/release-reference`, `styrmin.io/service-name`,
+`styrmin/environment_id` and `styrmin/deployment_id`. A dedicated ingress
+controller serves only the Ingresses that carry `styrmin/environment_id` with the
+id of its environment, so an Ingress without that label is not served and its
+host answers HTTP 404. No condition in `status` reports on these Ingresses: the
+condition types listed below have none for them.
 
 The default interval of the periodic pass is 60 seconds. See
 [The Ingress that Styrmin builds for an external service](../concepts-and-architecture/ingress-and-networking.md#the-ingress-that-styrmin-builds-for-an-external-service)
