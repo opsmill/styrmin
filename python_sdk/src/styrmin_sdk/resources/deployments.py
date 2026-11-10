@@ -215,6 +215,52 @@ def check_replica_counts(config: object, *, source: str) -> None:
             )
 
 
+#: Keys of a ``config.services`` row in a manifest, in both spellings the input accepts.
+_SERVICE_ROW_NAME_KEY = "name"
+_SERVICE_ROW_FIELD_KEYS = ("ingress_class", "ingressClass", "fqdn_suffix", "fqdnSuffix")
+
+
+def check_service_rows(config: object, *, source: str) -> None:
+    """Reject a ``services`` row that the server would read as no override.
+
+    The generated ``ServiceConfigInput`` ignores a key it does not know, so a row with
+    ``fqdn_sufix: x.io`` would become a row with no field, the server would drop it as
+    "no override", and ``apply`` would succeed with nothing stored. This check runs before
+    Pydantic, as :func:`check_replica_counts` does for replica counts.
+
+    Raises:
+        ManifestValidationError: ``services`` is not a list, a row is not a mapping or has no
+            name, a row has a key other than ``name``, ``ingress_class`` and ``fqdn_suffix``
+            (or their camelCase spellings), or a row sets neither field.
+    """
+    rows = config.get("services") if isinstance(config, Mapping) else None
+    if rows is None:
+        return
+    if not isinstance(rows, list):
+        raise ManifestValidationError(
+            f"{source}: services must be a list of rows with a name, and an ingress_class or an fqdn_suffix, "
+            f"got {type(rows).__name__}"
+        )
+    allowed = (_SERVICE_ROW_NAME_KEY, *_SERVICE_ROW_FIELD_KEYS)
+    for index, row in enumerate(rows):
+        if not isinstance(row, Mapping):
+            raise ManifestValidationError(f"{source}: services[{index}] must be a mapping, got {row!r}")
+        name = row.get(_SERVICE_ROW_NAME_KEY)
+        if not isinstance(name, str) or not name:
+            raise ManifestValidationError(f"{source}: services[{index}] has no name")
+        for key in row:
+            if key not in allowed:
+                raise ManifestValidationError(
+                    f"{source}: services[{name!r}] has an unknown key {key!r}; "
+                    "the keys are name, ingress_class and fqdn_suffix"
+                )
+        if all(row.get(key) is None for key in _SERVICE_ROW_FIELD_KEYS):
+            raise ManifestValidationError(
+                f"{source}: services[{name!r}] sets neither ingress_class nor fqdn_suffix; "
+                "remove the row to clear the override of the service"
+            )
+
+
 def _stored_component_inputs(config: object) -> dict[str, ComponentConfigInput]:
     """The stored ``config.components`` blocks as inputs that resend each override unchanged."""
     stored = config.get("components") if isinstance(config, dict) else None
@@ -267,6 +313,7 @@ def _build_update_input(manifest: ResolvedManifest) -> UpdateDeploymentInput:
     """
     config_payload: dict[str, Any] = dict(manifest.config)
     check_replica_counts(config_payload, source=f"manifest {manifest.source_path}: spec.config")
+    check_service_rows(config_payload, source=f"manifest {manifest.source_path}: spec.config")
     # Refuse a malformed override, or both spellings, as the create path does
     _build_service_name_overrides(manifest)
     if manifest.parameters:
@@ -424,6 +471,7 @@ def _build_config_input(manifest: ResolvedManifest) -> DeploymentConfigInput | N
     if not manifest.config:
         return None
     check_replica_counts(manifest.config, source=f"manifest {manifest.source_path}: spec.config")
+    check_service_rows(manifest.config, source=f"manifest {manifest.source_path}: spec.config")
     try:
         config = {key: value for key, value in manifest.config.items() if key not in _SERVICE_NAME_OVERRIDE_KEYS}
         return DeploymentConfigInput.model_validate(config) if config else None

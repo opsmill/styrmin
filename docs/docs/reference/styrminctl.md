@@ -793,9 +793,12 @@ declare fails with `UNKNOWN_SERVICE_INGRESS_OVERRIDE`, a service that it declare
 `internal`, or `external` with kind `tcp` or `udp`, fails with `SERVICE_INGRESS_NOT_BUILT`, two rows for one service fail
 with `DUPLICATE_SERVICE_NAME`, and a change to a driver version that removes the
 service, declares it `internal`, or gives it kind `tcp` or `udp`, while the
-override is stored and the manifest keeps it, fails with `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`. A key in a
-row other than these three is ignored by the SDK before it sends the request, so
-check the spelling.
+override is stored and the manifest keeps it, fails with `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`. `apply` checks each row before it sends the request. A key other than `name`,
+`ingress_class` and `fqdn_suffix` (or `ingressClass` and `fqdnSuffix`), a row
+without a name, a row that sets neither field, and a row that is not a mapping
+fail the manifest with an error that names the service and the key. In a
+`create` or `update` command, `--config` takes the GraphQL input, which the
+server checks.
 
 `components[].image` is the component's
 [image override](../concepts-and-architecture/image-overrides.md): one full

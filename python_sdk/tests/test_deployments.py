@@ -2576,6 +2576,104 @@ async def test_apply_rejects_a_replica_count_that_is_not_a_whole_number(
         )
 
 
+_BAD_SERVICE_ROWS = [
+    pytest.param(
+        [{"name": "task-manager", "fqdn_sufix": "x.io"}],
+        r"services\['task-manager'\] has an unknown key 'fqdn_sufix'",
+        id="misspelled-key",
+    ),
+    pytest.param(
+        [{"name": "task-manager", "ingress_class": "tailscale", "port": 80}],
+        r"services\['task-manager'\] has an unknown key 'port'",
+        id="unknown-key-beside-a-valid-one",
+    ),
+    pytest.param(
+        [{"name": "task-manager"}],
+        r"services\['task-manager'\] sets neither ingress_class nor fqdn_suffix",
+        id="name-only",
+    ),
+    pytest.param(
+        [{"name": "task-manager", "ingress_class": None, "fqdn_suffix": None}],
+        r"services\['task-manager'\] sets neither ingress_class nor fqdn_suffix",
+        id="both-null",
+    ),
+    pytest.param(["task-manager"], r"services\[0\] must be a mapping", id="row-is-not-a-mapping"),
+    pytest.param([{"ingress_class": "tailscale"}], r"services\[0\] has no name", id="no-name"),
+    pytest.param([{"name": "", "ingress_class": "tailscale"}], r"services\[0\] has no name", id="empty-name"),
+    pytest.param({"task-manager": {"ingress_class": "x"}}, r"services must be a list of rows", id="not-a-list"),
+]
+
+
+@pytest.mark.parametrize(("rows", "message"), _BAD_SERVICE_ROWS)
+async def test_apply_create_rejects_a_service_row_that_the_server_would_ignore(
+    client: StyrminClient, mock_transport: AsyncMock, rows: object, message: str
+) -> None:
+    """The generated input ignores an unknown key, so ``apply`` would succeed and store nothing (review F5)."""
+    mock_transport.execute.side_effect = [_list_environments_response(), _missing_deployment_response()]
+
+    with pytest.raises(ManifestValidationError, match=message):
+        await client.deployments.apply(_resolved_manifest(config={"services": rows}))
+
+    assert mock_transport.execute.await_count == 2  # no mutation was sent
+
+
+@pytest.mark.parametrize(("rows", "message"), _BAD_SERVICE_ROWS)
+async def test_apply_update_rejects_a_service_row_that_the_server_would_ignore(
+    client: StyrminClient, mock_transport: AsyncMock, rows: object, message: str
+) -> None:
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+    ]
+
+    with pytest.raises(ManifestValidationError, match=message):
+        await client.deployments.apply(_resolved_manifest(config={"services": rows}))
+
+    assert mock_transport.execute.await_count == 2  # no mutation was sent
+
+
+async def test_apply_files_reports_the_misspelled_service_key_as_a_failed_outcome(
+    client: StyrminClient, mock_transport: AsyncMock, tmp_path: Path
+) -> None:
+    """``styrminctl deployments apply`` prints the ``failure_reason`` of a failed outcome and exits 1."""
+    manifest_path = tmp_path / "app.yaml"
+    manifest_path.write_text(
+        _SERVICES_MANIFEST.split("    services:", maxsplit=1)[0]
+        + "    services:\n      - name: task-manager\n        fqdn_sufix: x.io\n",
+        encoding="utf-8",
+    )
+    mock_transport.execute.side_effect = [_list_environments_response(), _missing_deployment_response()]
+
+    [outcome] = await client.deployments.apply_files([manifest_path])
+
+    assert outcome.action == "failed"
+    assert outcome.failure_reason is not None
+    assert "services['task-manager'] has an unknown key 'fqdn_sufix'" in outcome.failure_reason
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"name": "web", "ingress_class": "tailscale"},
+        {"name": "web", "ingressClass": "tailscale"},
+        {"name": "web", "fqdn_suffix": "tailnet.example.ts.net"},
+        {"name": "web", "fqdnSuffix": "tailnet.example.ts.net", "ingress_class": "x"},
+    ],
+)
+async def test_apply_accepts_the_documented_service_row_keys(
+    client: StyrminClient, mock_transport: AsyncMock, row: dict[str, str]
+) -> None:
+    mock_transport.execute.side_effect = [
+        _list_environments_response(),
+        _existing_deployment_response(version="1.0.0"),
+        _update_version_response(),
+    ]
+
+    outcome = await client.deployments.apply(_resolved_manifest(config={"services": [row]}))
+
+    assert outcome.action == "updated"
+
+
 _STORED_COMPONENTS = {
     "server": {"env_vars": {"A": "1"}, "image": "registry.example/acme/app:1.0", "replicas": 2},
     "worker": {"command": ["run"], "args": ["--fast"]},
