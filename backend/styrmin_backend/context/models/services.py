@@ -16,6 +16,8 @@ class ServiceReference(BaseModel):
     kind: str
     primary_fqdn: str | None = None
     human_readable_fqdn: str | None = None
+    ingress_class: str | None = None
+    overridden: bool = False
 
     @computed_field  # type: ignore[prop-decorator]
     @property

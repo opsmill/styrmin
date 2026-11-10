@@ -147,9 +147,13 @@ async def test_generate_context_lists_the_services_of_a_deleting_peer() -> None:
 
     assert context.services["intent"]["host"] == "intent-renamed"
     assert {
+        "driver_service_name": "intent",
         "resolved_name": "intent-renamed",
         "port": 8080,
         "kind": "http",
+        "scope": "internal",
         "deployment_id": str(peer.id),
         "component": "server",
+        "ingress_class": None,
+        "fqdn_suffix": None,
     } in context.deployed_services

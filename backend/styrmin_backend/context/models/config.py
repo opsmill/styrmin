@@ -654,6 +654,64 @@ class ComponentConfigBlock(BaseModel):
         return data
 
 
+_FQDN_SUFFIX_MAX_LENGTH = 253
+_FQDN_SUFFIX_LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def validate_service_fqdn_suffix(value: str) -> str:
+    """Validate the FQDN suffix of a service ingress override.
+
+    The suffix must be a DNS name: dot-separated labels of lowercase letters, digits and
+    hyphens (a label starts and ends with a letter or a digit and has at most 63
+    characters), at most 253 characters in total, with no leading, trailing or doubled dot.
+    The cluster, environment and deployment ``fqdn_suffix`` have no such check; the
+    override is the one input that does (specs/033-service-ingress-override/data-model.md).
+    """
+    if not value:
+        raise ValueError("fqdn_suffix must not be empty; remove the field to clear it.")
+    if len(value) > _FQDN_SUFFIX_MAX_LENGTH:
+        raise ValueError(
+            f"fqdn_suffix {value!r} is longer than {_FQDN_SUFFIX_MAX_LENGTH} characters."
+        )
+    for label in value.split("."):
+        if not _FQDN_SUFFIX_LABEL_RE.match(label):
+            raise ValueError(
+                f"fqdn_suffix {value!r} is not a DNS name: each dot-separated label must "
+                "have 1 to 63 lowercase letters, digits or hyphens, and start and end "
+                "with a letter or a digit."
+            )
+    return value
+
+
+class ServiceConfigBlock(BaseModel):
+    """Ingress override of one service of a deployment (#598).
+
+    Stored in ``DeploymentConfig.services`` under the driver service name. A field left as
+    ``None`` means: use the resolved cluster, environment or deployment value. A block with
+    both fields ``None`` is not stored.
+
+    Attributes:
+        ingress_class (str | None): Ingress class of this service. A non-empty string.
+        fqdn_suffix (str | None): FQDN suffix of this service, used in its readable host.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ingress_class: str | None = Field(default=None, min_length=1)
+    fqdn_suffix: str | None = None
+
+    @field_validator("fqdn_suffix")
+    @classmethod
+    def _validate_fqdn_suffix(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return validate_service_fqdn_suffix(v)
+
+    @property
+    def is_empty(self) -> bool:
+        return self.ingress_class is None and self.fqdn_suffix is None
+
+
 class DeploymentConfig(ClusterConfig, EnvironmentConfig):
     """Deployment context.
 
@@ -679,11 +737,38 @@ class DeploymentConfig(ClusterConfig, EnvironmentConfig):
             FR-004), ``UnknownComponentImageOverrideError`` (image), or
             ``UnknownComponentReplicaOverrideError`` (an added or changed
             ``replicas``; an unchanged stored one is kept).
+        services (dict[str, ServiceConfigBlock] | None): Per-service ingress
+            override blocks keyed by driver service name (#598). A block with
+            both fields ``None`` is dropped, and ``services`` is ``None`` when
+            no block is left. The key is omitted from a dump when ``None``, so
+            the stored config of a deployment without an override is unchanged.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     components: dict[str, ComponentConfigBlock] | None = None
+    services: dict[str, ServiceConfigBlock] | None = None
+
+    @field_validator("services", mode="after")
+    @classmethod
+    def _drop_empty_service_blocks(
+        cls, v: dict[str, ServiceConfigBlock] | None
+    ) -> dict[str, ServiceConfigBlock] | None:
+        if v is None:
+            return v
+        kept = {name: block for name, block in v.items() if not block.is_empty}
+        return kept or None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_services(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        # A release before this key rejects it (``extra="forbid"``), and the no-op check of a
+        # deployment update must not see a difference for a deployment without an override.
+        data = handler(self)
+        if data.get("services", 0) is None:
+            del data["services"]
+        return data
 
     @field_validator("components", mode="before")
     @classmethod

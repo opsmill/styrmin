@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any
 
 import yaml
@@ -15,7 +16,80 @@ from styrmin_backend.agent.service.kubernetes.resources.utilities.environment im
     get_jinja_environment,
 )
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
+from styrmin_backend.context.fqdn import (
+    compute_human_readable_fqdn,
+    compute_primary_fqdn,
+)
 from styrmin_backend.context.models.contexts import GlobalContext
+
+SERVICE_INGRESS_NAME_PREFIX = "styrmin-svc-"
+SERVICE_NAME_LABEL = "styrmin.io/service-name"
+
+# Only these kinds can sit behind an Ingress (research D-006).
+_INGRESS_SERVICE_KINDS = frozenset({"http", "https"})
+
+
+@dataclass(frozen=True)
+class IngressSettings:
+    """The annotations and the class of an Ingress that Styrmin configures.
+
+    Attributes:
+        annotations: Annotations to set on the Ingress.
+        class_name: Value of ``spec.ingressClassName``, or ``None`` to set none.
+        remove_class_name: ``True`` when a dedicated ingress controller serves the
+            environment: it reads no IngressClass, so ``spec.ingressClassName`` must
+            be absent (ADR-071).
+    """
+
+    annotations: dict[str, str]
+    class_name: str | None
+    remove_class_name: bool
+
+
+def build_ingress_settings(
+    context: GlobalContext, release_reference: str
+) -> IngressSettings:
+    """Return the annotation and class rules shared by the chart patch and the built Ingress.
+
+    One function feeds both, so the chart Ingress and the Ingress that Styrmin builds for
+    a service cannot drift (research D-006, FR-003).
+
+    Raises:
+        ValueError: when no FQDN suffix resolves.
+    """
+    config = context.instance.config
+    if not config.fqdn_suffix:
+        raise ValueError("FQDN suffix is required to build the ingress patch.")
+    annotations = {
+        "traefik.ingress.kubernetes.io/router.entrypoints": "web,websecure",
+        "external-dns.alpha.kubernetes.io/hostname": f"{release_reference}-{context.app.name}.{config.fqdn_suffix}",
+        "external-dns.alpha.kubernetes.io/cloudflare-proxied": "true",
+    }
+    if config.ip_whitelist:
+        namespace = get_kubernetes_reference(context.instance.deployment_id)
+        annotations["traefik.ingress.kubernetes.io/router.middlewares"] = (
+            f"{namespace}-acl@kubernetescrd"
+        )
+    if config.external_dns_endpoints_type is not None:
+        annotations["external-dns.alpha.kubernetes.io/endpoints-type"] = (
+            config.external_dns_endpoints_type
+        )
+    class_name: str | None = None
+    remove_class_name = False
+    if config.dedicated_ingress is not None:
+        # The dedicated controller reads no IngressClass, so it ignores any Ingress that sets spec.ingressClassName.
+        annotations["kubernetes.io/ingress.class"] = (
+            config.dedicated_ingress.implementation
+        )
+        remove_class_name = True
+    elif config.ingress_class:
+        annotations["kubernetes.io/ingress.class"] = config.ingress_class
+        class_name = config.ingress_class
+    return IngressSettings(
+        annotations=annotations,
+        class_name=class_name,
+        remove_class_name=remove_class_name,
+    )
 
 
 class IngressUtility(Utility):
@@ -28,53 +102,27 @@ class IngressUtility(Utility):
     def build_app_post_rendering_patches(
         self, context: GlobalContext, release_reference: str
     ) -> list[TargetPatch]:
+        settings = build_ingress_settings(context, release_reference)
         patches = []
-        if not (context.instance.config.fqdn_suffix):
-            raise ValueError("FQDN suffix is required to build the ingress patch.")
-        annotations = {
-            "traefik.ingress.kubernetes.io/router.entrypoints": "web,websecure",
-            "external-dns.alpha.kubernetes.io/hostname": f"{release_reference}-{context.app.name}.{context.instance.config.fqdn_suffix}",
-            "external-dns.alpha.kubernetes.io/cloudflare-proxied": "true",
-        }
-        if context.instance.config.ip_whitelist:
-            namespace = get_kubernetes_reference(context.instance.deployment_id)
-            annotations["traefik.ingress.kubernetes.io/router.middlewares"] = (
-                f"{namespace}-acl@kubernetescrd"
-            )
-        if context.instance.config.external_dns_endpoints_type is not None:
-            annotations["external-dns.alpha.kubernetes.io/endpoints-type"] = (
-                context.instance.config.external_dns_endpoints_type
-            )
-        if context.instance.config.dedicated_ingress is not None:
-            # The dedicated controller reads no IngressClass, so it ignores any Ingress that sets spec.ingressClassName.
-            annotations["kubernetes.io/ingress.class"] = (
-                context.instance.config.dedicated_ingress.implementation
-            )
+        if settings.remove_class_name:
             patches.append(
                 TargetPatch(
                     target=Target(kind="Ingress"),
                     patch=IngressClassNameRemovalPatch(),
                 )
             )
-        elif context.instance.config.ingress_class:
-            annotations["kubernetes.io/ingress.class"] = (
-                context.instance.config.ingress_class
-            )
+        elif settings.class_name:
             patches.append(
                 TargetPatch(
                     target=Target(kind="Ingress"),
-                    patch=SpecPatch(
-                        specs={
-                            "ingressClassName": context.instance.config.ingress_class
-                        }
-                    ),
+                    patch=SpecPatch(specs={"ingressClassName": settings.class_name}),
                 )
             )
 
         patches.append(
             TargetPatch(
                 target=Target(kind="Ingress"),
-                patch=AnnotationPatch(annotations=annotations),
+                patch=AnnotationPatch(annotations=settings.annotations),
             )
         )
         return patches
@@ -155,4 +203,92 @@ class IngressUtility(Utility):
                     }
                 )
 
+        resources.extend(
+            self._build_service_ingresses(context, release_reference, namespace)
+        )
+
         return resources
+
+    def _build_service_ingresses(
+        self, context: GlobalContext, release_reference: str, namespace: str
+    ) -> list[dict[str, Any]]:
+        """Build one Ingress for each external ``http`` or ``https`` service of this deployment.
+
+        The application address (``<app name>-<deployment id>.<suffix>``) goes to the
+        first service that the driver declares, and only when that service gets an Ingress
+        (research D-003). ``deployed_services`` lists the services of this deployment in
+        driver declaration order.
+        """
+        own_services = [
+            service
+            for service in context.deployed_services
+            if service["deployment_id"] == str(context.instance.deployment_id)
+        ]
+        buildable = [
+            service
+            for service in own_services
+            if service["scope"] == "external"
+            and service["kind"] in _INGRESS_SERVICE_KINDS
+        ]
+        if not buildable:
+            return []
+
+        settings = build_ingress_settings(context, release_reference)
+        config = context.instance.config
+        primary_fqdn = compute_primary_fqdn(
+            context.app.name, context.instance.deployment_id, config.fqdn_suffix
+        )
+        first_declared = own_services[0]
+
+        ingresses: list[dict[str, Any]] = []
+        for service in buildable:
+            hosts = [
+                compute_human_readable_fqdn(
+                    service["resolved_name"],
+                    context.environment.name,
+                    service["fqdn_suffix"],
+                )
+            ]
+            if service is first_declared:
+                hosts.append(primary_fqdn)
+            unique_hosts = list(dict.fromkeys(host for host in hosts if host))
+            if not unique_hosts:
+                continue
+            spec: dict[str, Any] = {
+                "rules": [
+                    {
+                        "host": host,
+                        "http": {
+                            "paths": [
+                                {
+                                    "path": "/",
+                                    "pathType": "Prefix",
+                                    "backend": {
+                                        "service": {
+                                            "name": service["resolved_name"],
+                                            "port": {"number": service["port"]},
+                                        }
+                                    },
+                                }
+                            ]
+                        },
+                    }
+                    for host in unique_hosts
+                ]
+            }
+            if settings.class_name:
+                spec["ingressClassName"] = settings.class_name
+            ingresses.append(
+                {
+                    "apiVersion": "networking.k8s.io/v1",
+                    "kind": "Ingress",
+                    "metadata": {
+                        "name": f"{SERVICE_INGRESS_NAME_PREFIX}{service['driver_service_name']}",
+                        "namespace": namespace,
+                        "labels": {SERVICE_NAME_LABEL: service["driver_service_name"]},
+                        "annotations": dict(settings.annotations),
+                    },
+                    "spec": spec,
+                }
+            )
+        return ingresses
