@@ -16,10 +16,13 @@ This guide shows how to prove the feature end to end. It holds no implementation
 ```bash
 uv run invoke format lint
 uv run invoke test
-cd frontend && pnpm test
+uv run pytest cli/tests -q          # run the CLI and SDK tests one after the other:
+uv run pytest python_sdk/tests -q   # both folders have a tests/conftest.py, so one pytest run cannot load both
+cd frontend && pnpm test && pnpm lint && pnpm exec tsc -b && pnpm build && cd ..
 uv run styrmin export graphql-schema schema.graphql   # no diff expected after regeneration
 uv run invoke generate                                # no diff expected after regeneration
 uv run invoke validate-graphql
+git status --short                                    # no diff expected after the three commands above
 ```
 
 Expected: no failure, no uncommitted diff in `schema.graphql`, the SDK and the frontend types.
@@ -59,7 +62,15 @@ Turn on `dedicated_ingress` for the environment and override one service. Expect
 
 ## 7. Existing Infrahub deployment (not known in the PRD)
 
-Upgrade a running `infrahub` deployment to the new driver version. Record: whether the task manager address stops answering, and for how long. The result goes into the migration guide.
+Upgrade a running `infrahub` deployment from the previous driver version (`infrahub-enterprise` 4, or `infrahub` 5) to the new driver version (`infrahub-enterprise` 5, or `infrahub` 6). The previous version is in git history: `git show ad1e5673^:driver/examples/infrahub-enterprise/driver.styrmin.yml` and `values.j2.yml`.
+
+1. Load the previous driver version, deploy on it, and wait until the deployment is running.
+2. Load the new driver version. Start a loop that lists the Ingresses of the namespace every second, and a loop that sends one request per second to `/api/health` through the environment's ingress controller with the header `Host: task-manager-<environment name>.<fqdn suffix>`.
+3. Change the deployment to the new driver version with `update_version` (the SDK) or the upgrade dialog, and keep both loops running until the deployment is running and the Ingress list has not changed for a minute.
+
+Record: whether the chart's Ingress `styrmin-task-manager` is removed, when `styrmin-svc-task-manager` appears, whether the task manager address stops answering, and for how long. Do this with the operator interval of the end-to-end fixtures (5 seconds) and with the default (60 seconds). Expected: the address answers HTTP 200 before and after, and the record states any interval in which it does not.
+
+The result is in `e2e-evidence.md`, section "T062". The throwaway script that ran these steps is not in the repository.
 
 ## Evidence
 
