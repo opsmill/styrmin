@@ -45,27 +45,30 @@ describe("UpgradeErrorAlert", () => {
     );
   });
 
-  // Regression tests (#598, US4, T053): a version change that would drop a service
-  // ingress override is refused with a typed error. The generic alert shows its
-  // message, which names the service, the versions and the reason.
-  it.each([
-    [
-      "internal",
-      "Service 'task-manager' has an ingress override, and driver version 1.8.0 declares that service with scope 'internal', and Styrmin does not build an Ingress for an internal service. Changing the driver version from 1.7.3 to 1.8.0 would drop the override. Clear the override of 'task-manager' in the same request, or keep a driver version that declares it external.",
-    ],
-    [
-      "removed",
-      "Service 'task-manager' has an ingress override, and driver version 1.8.0 does not declare that service. Changing the driver version from 1.7.3 to 1.8.0 would drop the override. Clear the override of 'task-manager' in the same request, or keep a driver version that declares it external.",
-    ],
-  ])(
-    "shows the message of a dropped service ingress override (reason %s) and names the service",
-    (reason, message) => {
+  // A version change that would drop a service ingress override is refused with a
+  // typed error (#598, FR-010). The message says "clear the override in the same
+  // request", which the Upgrade dialog cannot do: it sends the version only. The
+  // alert gives the steps on the Settings tab instead.
+  describe("a dropped service ingress override", () => {
+    const MESSAGES = {
+      internal:
+        "Service 'task-manager' has an ingress override, and driver version 1.8.0 declares that service with scope 'internal', and Styrmin does not build an Ingress for an internal service. Changing the driver version from 1.7.3 to 1.8.0 would drop the override. Clear the override of 'task-manager' in the same request, or keep a driver version that declares it external with kind 'http' or 'https'.",
+      removed:
+        "Service 'task-manager' has an ingress override, and driver version 1.8.0 does not declare that service. Changing the driver version from 1.7.3 to 1.8.0 would drop the override. Clear the override of 'task-manager' in the same request, or keep a driver version that declares it external with kind 'http' or 'https'.",
+      not_http_or_https:
+        "Service 'task-manager' has an ingress override, and driver version 1.8.0 declares that service with kind 'tcp', and Styrmin builds an Ingress only for kind 'http' or 'https'. Changing the driver version from 1.7.3 to 1.8.0 would drop the override. Clear the override of 'task-manager' in the same request, or keep a driver version that declares it external with kind 'http' or 'https'.",
+    } as const;
+
+    function renderDropped(
+      reason: keyof typeof MESSAGES,
+      onOpenSettings: () => void = () => {},
+    ) {
       render(
         <UpgradeErrorAlert
           error={
             new GraphQLOperationError(
               "SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED",
-              message,
+              MESSAGES[reason],
               {
                 code: "SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED",
                 service_name: "task-manager",
@@ -76,16 +79,47 @@ describe("UpgradeErrorAlert", () => {
             )
           }
           componentNames={["server"]}
-          onOpenSettings={() => {}}
+          onOpenSettings={onOpenSettings}
         />,
       );
+    }
 
-      const alert = screen.getByTestId("upgrade-error");
-      expect(alert).toHaveTextContent(message);
-      expect(alert).toHaveTextContent("'task-manager'");
-      expect(screen.queryByTestId("upgrade-retired-parameter")).toBeNull();
-    },
-  );
+    it.each(["internal", "removed", "not_http_or_https"] as const)(
+      "names the service and the steps on the Settings tab (reason %s)",
+      (reason) => {
+        renderDropped(reason);
+
+        const alert = screen.getByTestId("upgrade-dropped-ingress-override");
+        expect(alert).toHaveTextContent(
+          "Clear the ingress override of task-manager before you upgrade",
+        );
+        expect(alert).toHaveTextContent("Nothing changed.");
+        const steps = screen
+          .getAllByRole("listitem")
+          .map((li) => li.textContent);
+        expect(steps).toEqual([
+          "On the Settings tab, click Update Settings.",
+          "In the Edit configuration drawer, open the Services section.",
+          "Under Service ingress overrides, click Clear for task-manager.",
+          "Click Review & apply, then upgrade again.",
+        ]);
+        // The server message stays visible, with the versions and the reason.
+        expect(alert).toHaveTextContent(MESSAGES[reason]);
+        expect(screen.queryByTestId("upgrade-retired-parameter")).toBeNull();
+      },
+    );
+
+    it("opens the Settings tab from the alert", async () => {
+      const onOpenSettings = vi.fn();
+      renderDropped("removed", onOpenSettings);
+
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: "Open the Settings tab" }));
+
+      expect(onOpenSettings).toHaveBeenCalledTimes(1);
+    });
+  });
 
   it("gives the steps for a retired parameter and names its component", () => {
     render(
