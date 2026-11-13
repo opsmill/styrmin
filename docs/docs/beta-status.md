@@ -105,6 +105,18 @@ links to the page that explains it.
   was loaded from. A push to the driver's branch does not change the actions
   of the deployments that use it.
 
+### Writing scripts with the Python SDK
+
+- Wait until a deployment change has finished with one call,
+  `deployments.wait_for_task()`. See
+  [Waiting for a change from a script](./concepts-and-architecture/status-reporting.md#waiting-for-a-change-from-a-script).
+- Read the pod statuses and the services of a whole environment, or the pod
+  statuses of a whole cluster, in one call. See
+  [Reading pod statuses from a script](./concepts-and-architecture/status-reporting.md#reading-pod-statuses-from-a-script).
+- Read the phase, message and conditions that the operator reported for a
+  deployment, with `deployments.get_crd_status()`. See
+  [Reading the operator's status from a script](./concepts-and-architecture/status-reporting.md#reading-the-operators-status-from-a-script).
+
 ### Running Styrmin
 
 - The agent installs the controllers of FluxCD v2.9 and runs helm-controller
@@ -468,15 +480,6 @@ Some already have a written design or an open pull request, as noted.
   [opsmill/styrmin#27](https://github.com/opsmill/styrmin/issues/27).
 - Change the config of an environment with `styrminctl`. Tracked in
   [opsmill/styrmin#425](https://github.com/opsmill/styrmin/issues/425).
-- Wait for a deployment change to finish with one SDK call. A pull request is
-  open. Tracked in
-  [opsmill/styrmin#545](https://github.com/opsmill/styrmin/issues/545).
-- Read the pod statuses and the services of a whole environment, or the pod
-  statuses of a whole cluster, in one SDK call. A pull request is open.
-  Tracked in [opsmill/styrmin#547](https://github.com/opsmill/styrmin/issues/547).
-- Read the phase, message and conditions that the operator reported for a
-  deployment with the SDK. A pull request is open. Tracked in
-  [opsmill/styrmin#548](https://github.com/opsmill/styrmin/issues/548).
 - Read the parameters, services and env vars that a driver version declares
   with the SDK. Tracked in
   [opsmill/styrmin#546](https://github.com/opsmill/styrmin/issues/546).

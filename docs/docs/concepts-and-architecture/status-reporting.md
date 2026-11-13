@@ -252,10 +252,12 @@ within about 15 seconds.
   the last known state, and a running operator-phase step shows "No
   report from the agent since" and the time of the last report after 60
   seconds without one.
-- The GraphQL API returns the same data in the `podStatuses` and
-  `deploymentStatuses` fields, so external dashboards can read it too.
-  The Python SDK reads the pod statuses as described in
-  [Reading pod statuses from a script](#reading-pod-statuses-from-a-script).
+- The GraphQL API returns the same data in the `Deployment.podStatuses`
+  and `Deployment.crdStatus` fields, so external dashboards can read it
+  too. The Python SDK reads them as described in
+  [Reading pod statuses from a script](#reading-pod-statuses-from-a-script)
+  and
+  [Reading the operator's status from a script](#reading-the-operators-status-from-a-script).
 
 ### Reading pod statuses from a script
 
@@ -339,6 +341,113 @@ Each item is a `PodStatus` from `styrmin_sdk.models`. Its `deployment_id`
 names the deployment of the pod, and its `phase` is a `PodPhase`.
 `deployments.get_pod_statuses()` returns the same fields, except
 `deployment_id`.
+
+### Reading the operator's status from a script
+
+`client.deployments.get_crd_status()` in the Python SDK returns a
+`DeploymentCrdStatus` from `styrmin_sdk.models`. In the GraphQL API, the
+same data is `Deployment.status` and `Deployment.crdStatus`.
+
+- `status` is the deployment state, as a lowercase string: `pending`,
+  `deploying`, `running`, `restoring`, `failed`, `deleting` or `deleted`.
+- `crd_status` is a `CrdStatus` with the status of the deployment's
+  `StyrminDeployment` resource as the agent last reported it. It is
+  `None` until the agent first reports the deployment.
+
+`crd_status` has these fields:
+
+- `phase`: the operator's phase: `Pending`, `CreatingPrerequisites`,
+  `CreatingHelmRelease`, `CreatingServices`, `Ready`, `Restoring`,
+  `Failed`, `Deleting` or `Deleted`.
+  [Steps from status reports](#steps-from-status-reports) describes the
+  phases of a rollout.
+- `message`: the operator's message, such as the reason for a failure.
+- `conditions`: one `CrdCondition` for each condition of the
+  `StyrminDeployment`, with `type_`, `status`, `reason`, `message` and
+  `last_transition_time`. `status` is the string `"True"`, `"False"` or
+  `"Unknown"`, so compare it with `"True"`: in an `if`, any of the three
+  strings is true. The condition types are listed under
+  [Rollout fields in `status`](../reference/styrmindeployment.md#rollout-fields-in-status).
+- `managed_resource_counts`: a `ManagedResourceCounts` with the number of
+  network policies, secrets, HelmReleases, services and middlewares that
+  the operator manages for the deployment.
+- `last_polled_at`: when the server received the report.
+
+Decide from `status` whether the deployment is running or has failed,
+and read `crd_status` to find out why. The server stores every report as
+`crd_status`, but changes `status` only as described in
+[Which instance a report is about](#which-instance-a-report-is-about)
+and [When a deployment becomes RUNNING](#when-a-deployment-becomes-running),
+so the two can describe different states:
+
+- Right after an update, `crd_status` can still show the previous
+  rollout, such as its `Ready` phase.
+- After the `Ready` phase, `status` stays `deploying` until the task that
+  rolled out the instance has finished.
+- During a restore, `status` stays `restoring`, and `crd_status` shows
+  what the `StyrminDeployment` reports, such as the phase from before the
+  restore or `Deleting`.
+
+A script that waits until `crd_status.phase` is `Ready` after an update
+can therefore stop before the update has finished. To wait for a change,
+use `wait_for_task()`, as described in
+[Waiting for a change from a script](#waiting-for-a-change-from-a-script).
+When the change fails in an operator-phase step, its `failure_reason`
+already contains the operator's message. `get_crd_status()` adds the
+conditions, the managed resource counts and the time of the report.
+
+When `last_polled_at` is more than 60 seconds old, the agent has stopped
+reporting the deployment, and `crd_status` and `status` can be out of
+date. The deployment page uses the same limit for its "No report from
+the agent since" notice, as described in
+[When the agent stops reporting](#when-the-agent-stops-reporting). The
+agent no longer reports a deleted deployment.
+
+`deployments.list()` does not return `crd_status`, so a script that reads
+it for every deployment of an environment calls `get_crd_status()` once
+for each deployment. An unknown ID raises `ResourceNotFoundError`, and so
+does the ID of an internal deployment, such as the ingress controller of
+a dedicated ingress.
+
+The following script prints why the deployment `my-app` of the
+environment `staging` failed:
+
+```python
+import asyncio
+from datetime import UTC, datetime, timedelta
+
+from styrmin_sdk import StyrminClient
+
+
+async def main() -> None:
+    # The client reads its token from STYRMIN_TOKEN, or takes token=... explicitly.
+    async with StyrminClient(server_address="https://styrmin.example") as client:
+        environment = await client.environments.get(
+            environment_name="staging", cluster_name="local"
+        )
+        deployment = await client.deployments.get_by_name(
+            "my-app", environment_id=environment.id
+        )
+        if deployment is None:
+            raise SystemExit("staging has no deployment named my-app")
+
+        read = await client.deployments.get_crd_status(deployment.id)
+        if read.status != "failed":
+            print(f"my-app is {read.status}")
+            return
+        crd_status = read.crd_status
+        if crd_status is None:
+            raise SystemExit("my-app failed, and the agent has not reported it yet")
+        polled_at = crd_status.last_polled_at
+        if polled_at is not None and datetime.now(UTC) - polled_at > timedelta(seconds=60):
+            print(f"no report from the agent since {polled_at}")
+        print(f"phase {crd_status.phase}: {crd_status.message}")
+        for condition in crd_status.conditions:
+            print(f"{condition.type_} is {condition.status} ({condition.reason}): {condition.message}")
+
+
+asyncio.run(main())
+```
 
 ### Next steps
 

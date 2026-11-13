@@ -1,11 +1,25 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 import strawberry
 
 from styrmin_backend.db.models import DeploymentStatus as DeploymentStatusModel
+
+
+def _parse_transition_time(value: object) -> datetime | None:
+    """Parse the ISO 8601 ``lastTransitionTime`` that ``reportDeploymentStatuses`` stores.
+
+    A missing or unparsable value gives ``None``; a time without an offset is UTC.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 @strawberry.type
@@ -60,7 +74,9 @@ class DeploymentStatusType:
                     status=cond.get("status", "Unknown"),
                     reason=cond.get("reason"),
                     message=cond.get("message"),
-                    last_transition_time=None,
+                    last_transition_time=_parse_transition_time(
+                        cond.get("lastTransitionTime")
+                    ),
                 )
             )
 

@@ -32,6 +32,7 @@ from styrmin_sdk.exceptions import (
     IncompatibleServerError,
     ManifestValidationError,
     ResourceAlreadyExistsError,
+    ResourceNotFoundError,
     StyrminAPIError,
     StyrminError,
 )
@@ -53,6 +54,10 @@ from styrmin_sdk.graphql._generated.get_deployment_override_applicability import
 from styrmin_sdk.graphql._generated.get_deployment_pod_statuses import (
     GetDeploymentPodStatuses,
     GetDeploymentPodStatusesDeploymentPodStatuses,
+)
+from styrmin_sdk.graphql._generated.get_deployment_status import (
+    GetDeploymentStatus,
+    GetDeploymentStatusDeployment,
 )
 from styrmin_sdk.graphql._generated.get_deployment_timeline import (
     GetDeploymentTimeline,
@@ -925,6 +930,36 @@ class DeploymentResource(BaseResource):
         self._check_graphql_errors(result)
         validated = GetDeploymentPodStatuses.model_validate(result["data"])
         return validated.deployment.pod_statuses if validated.deployment else []
+
+    async def get_crd_status(self, deployment_id: str | UUID) -> GetDeploymentStatusDeployment:
+        """Read the deployment state and the last reported status of the deployment's ``StyrminDeployment``.
+
+        ``status`` is the deployment state, such as ``running`` or ``failed``.
+        ``crd_status`` is the status of the deployment's ``StyrminDeployment`` as
+        the agent last reported it: the operator's phase and message, the
+        conditions, the count of each kind of managed resource, and the time the
+        server received the report. It is ``None`` until the agent first reports
+        the deployment.
+
+        Decide from ``status`` whether the deployment is running or has failed,
+        and read ``crd_status`` to find out why. The server stores every report,
+        including a report about the previous instance during a rollout and a
+        report sent during a restore, but changes ``status`` only for a report
+        about the active instance and keeps ``restoring`` until the restore ends.
+
+        Raises:
+            ResourceNotFoundError: no deployment has this id, or the deployment
+                is internal, such as the ingress controller of a dedicated ingress.
+        """
+        result = await self._transport.execute(
+            load_query("get_deployment_status"),
+            {"deploymentId": str(deployment_id)},
+        )
+        self._check_graphql_errors(result)
+        deployment = GetDeploymentStatus.model_validate(result["data"]).deployment
+        if deployment is None:
+            raise ResourceNotFoundError(f"Deployment {deployment_id} not found", "NOT_FOUND")
+        return deployment
 
     async def _resolve_environment_id(self, environment_name: str, cluster_name: str | None) -> UUID:
         """Resolve ``(environment_name, cluster_name)`` to a single ``environment_id``.

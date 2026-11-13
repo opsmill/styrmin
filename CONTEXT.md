@@ -349,7 +349,7 @@ The per-pod observed-state record (one row per `(deployment_id, pod_name)`), ups
 _Avoid_: "pod" alone (the Kubernetes object) — qualify when referring to the row.
 
 **DeploymentStatus** (record):
-The latest `StyrminDeployment` CRD `.status` snapshot per deployment (one row per deployment), upserted by `reportDeploymentStatuses`. Pass-through; not interpreted by the server. Distinct from `Deployment.status` (the **deployment state** enum), which is driven by the wire payload's `displayState`.
+The latest `StyrminDeployment` CRD `.status` snapshot per deployment (one row per deployment), upserted by `reportDeploymentStatuses`. Pass-through; not interpreted by the server. Distinct from `Deployment.status` (the **deployment state** enum), which is driven by the wire payload's `displayState`. GraphQL returns it as `Deployment.crdStatus`, and the Python SDK reads it with `deployments.get_crd_status()` together with `Deployment.status`.
 _Avoid_: confusing with the **deployment state** enum value.
 
 ### GraphQL boundary
