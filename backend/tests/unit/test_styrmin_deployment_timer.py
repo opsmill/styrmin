@@ -725,7 +725,8 @@ async def test_ready_deployment_ignores_non_matching_helmrelease(
     )
 
     assert patch.status == {}
-    assert list_resources.await_count == 3
+    # One listing for each of NetworkPolicy, Secret, Service and Ingress (#598).
+    assert list_resources.await_count == 4
 
 
 @pytest.mark.anyio

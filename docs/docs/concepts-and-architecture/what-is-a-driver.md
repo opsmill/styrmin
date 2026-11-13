@@ -32,7 +32,8 @@ A driver contains:
   enum) that the user sets when they create a deployment. The UI and the
   SDK show the parameters, and the Jinja2 values template reads them.
 - **Services.** Network endpoints that the driver declares (kind, scope,
-  port, component). Styrmin creates a Kubernetes `Service` for each one.
+  port, component). Styrmin creates a Kubernetes `Service` for each one, and
+  an Ingress for each one that has `scope: external`.
 - **Lifecycle actions.** Python functions that run inside a Prefect flow
   at a hook (`setup` or `upgrade`) and a mode (`pre`, `core`, or `post`).
   Use them for migrations, seeding, smoke tests, and any other step that

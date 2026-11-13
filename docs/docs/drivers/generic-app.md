@@ -131,9 +131,18 @@ pod does not have.
 
 ### Networking
 
-- **Public address.** The application is published at the address Styrmin
-  generates for its service, and at a readable one made of the service name and
-  the environment name.
+- **Public address.** The application is published at two hosts under the
+  FQDN suffix: the application address, `generic-app-<deployment id>`, and a
+  readable host made of the service name and the environment name, such as
+  `app-<environment name>`. The driver declares the `app` service
+  `scope: external` and renders no Ingress of its own, so Styrmin builds the one
+  Ingress of the deployment, named `styrmin-svc-app`, with both hosts, the
+  resolved ingress class and the annotations that Styrmin sets on every Ingress.
+  The end-to-end test of version 2 found exactly one Ingress for the deployment.
+  To publish the `app` service with another ingress class or FQDN suffix, set a
+  [service ingress override](../concepts-and-architecture/service-ingress-overrides.md).
+  An override replaces the readable host's suffix and the class, and the Ingress
+  then has no application address.
 - **Other applications of the environment.** An application can call the other
   applications of its environment, and they can call it, by service name. A
   name resolves only after the application it names has started and Styrmin has
@@ -157,6 +166,17 @@ Styrmin's policies allow outbound connections only for Traefik, Prefect and
 Infrahub pods and to the environment, so without its own policies the
 application could not reach DNS or the internet
 ([opsmill/styrmin#284](https://github.com/opsmill/styrmin/issues/284)).
+
+### Upgrading from driver version 1
+
+Driver version 1 rendered an Ingress in the chart. Styrmin also builds an Ingress
+for an `external` service, so a deployment that stays on version 1 has two
+Ingresses on the same hosts once Styrmin runs a release that builds it: the
+chart's `styrmin-app` and Styrmin's `styrmin-svc-app`. Version 2 renders no
+Ingress. To end with one Ingress, load version 2 of the driver and upgrade the
+deployment to it. An upgrade of a running deployment from version 1 to version 2
+was not tested. See
+[Migrate a driver whose external service renders its own Ingress](./migrating-external-service-ingress.md).
 
 ### Several deployments in one environment
 

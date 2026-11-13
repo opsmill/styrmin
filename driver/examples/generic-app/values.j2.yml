@@ -12,18 +12,6 @@
                 port: 8080
               {%- endif %}
 {%- endset %}
-{#- This deployment's own human-readable host. `services` holds every service of the environment,
-    keyed by driver service name, so two deployments of this driver would read each other's entry;
-    `deployed_services` records the owning deployment. Same rule as Styrmin's
-    compute_human_readable_fqdn: <resolved name>-<environment>, sanitized, prefix cut to fit 63. #}
-{%- set own = namespace(name="") %}
-{%- for s in deployed_services if s.deployment_id == (instance.deployment_id | string) and s.component == "app" %}
-{%- set own.name = s.resolved_name %}
-{%- endfor %}
-{%- set env_label = environment.name | to_fqdn_label %}
-{%- set room = 62 - (env_label | length) %}
-{%- set host_label = ((own.name | to_fqdn_label)[:room] | trim("-")) if room > 0 else "" %}
-{%- set readable_fqdn = (host_label ~ "-" ~ env_label ~ "." ~ instance.config.fqdn_suffix) if host_label and instance.config.fqdn_suffix else "" %}
 global:
   fullnameOverride: styrmin-app
 
@@ -79,20 +67,6 @@ service:
     ports:
       http:
         port: 8080
-
-ingress:
-  main:
-    # A host is emitted only when known: an empty host would make a catch-all rule.
-    hosts:
-{%- for host in [services['app'].primary_fqdn, readable_fqdn] if host %}
-      - host: "{{ host }}"
-        paths:
-          - path: /
-            pathType: Prefix
-            service:
-              identifier: main
-              port: http
-{%- endfor %}
 
 {%- if parameters.storage_size | int > 0 %}
 persistence:

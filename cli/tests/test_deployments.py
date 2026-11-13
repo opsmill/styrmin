@@ -1352,6 +1352,87 @@ def test_deployments_apply_wait_prints_pinned_warning_once_on_submit(
     ]
 
 
+# --------------------------------------------------------------------------
+# Dropped service ingress override warning (#598): stderr only, exit code unchanged.
+# --------------------------------------------------------------------------
+
+
+def _dropped_outcome(name: str, services: list[str]) -> ApplyOutcome:
+    return _outcome(name, "updated").model_copy(update={"dropped_service_overrides": services})
+
+
+def test_deployments_apply_warns_about_a_service_override_that_the_manifest_drops(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    mock_client.deployments.apply_files = AsyncMock(return_value=[_dropped_outcome("my-app", ["web"])])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest)])
+    assert exc.value.code == 0
+
+    captured = capsys.readouterr()
+    assert captured.err.splitlines() == [
+        "warning: my-app: the stored ingress override of service web is cleared: spec.config has keys "
+        "and no services. Add web to spec.config.services to keep it"
+    ]
+    assert captured.out.splitlines() == ["updated my-app", "0 created, 1 updated, 0 unchanged, 0 failed"]
+
+
+def test_deployments_apply_names_every_service_override_that_the_manifest_drops(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    mock_client.deployments.apply_files = AsyncMock(
+        return_value=[_dropped_outcome("my-app", ["task-manager", "web"]), _outcome("broken", "failed", reason="boom")]
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest)])
+    # The warning does not change the exit code: only the failed outcome does.
+    assert exc.value.code == 1
+
+    assert capsys.readouterr().err.splitlines() == [
+        "warning: my-app: the stored ingress overrides of services task-manager, web are cleared: spec.config "
+        "has keys and no services. Add them to spec.config.services to keep them"
+    ]
+
+
+def test_deployments_apply_prints_no_service_override_warning_when_none_is_dropped(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    mock_client.deployments.apply_files = AsyncMock(return_value=[_outcome("my-app", "updated")])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest)])
+    assert exc.value.code == 0
+
+    assert not capsys.readouterr().err
+
+
+def test_deployments_apply_wait_prints_the_service_override_warning_once_on_submit(
+    mock_client: MagicMock,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    manifest = _write_manifest(tmp_path, _VALID_MANIFEST)
+    dropped = _dropped_outcome("my-app", ["web"])
+    mock_client.deployments.apply_files = _wait_apply_files_stub([("submitted", dropped), ("terminal", dropped)])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["deployments", "apply", "-f", str(manifest), "--wait"])
+    assert exc.value.code == 0
+
+    assert len(capsys.readouterr().err.splitlines()) == 1
+
+
 def test_deployments_apply_warns_when_it_cannot_check_which_overrides_apply(
     mock_client: MagicMock,
     capsys: pytest.CaptureFixture[str],

@@ -143,6 +143,7 @@ export function ConfigurationTab({ deployment }: Props) {
         deploymentConfig={deployment.config}
         environmentConfig={deployment.environment.config}
         clusterConfig={deployment.environment.cluster.config}
+        services={deployment.deployedServices}
       />
       <StorageRuntimeSummary
         current={current}

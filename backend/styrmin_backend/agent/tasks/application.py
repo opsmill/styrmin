@@ -63,11 +63,22 @@ async def apply_utility_resources(
     for resource in crd_resources:
         try:
             await apply_kubernetes_resource(resource=resource, namespace=namespace)
-        except ApiException:
+        except ApiException as exc:
+            kind = resource.get("kind")
+            name = resource.get("metadata", {}).get("name")
+            # An Ingress is the one object that makes a service reachable: a refusal (403, 422, an
+            # admission webhook) must fail the flow, not end it as a success with no Ingress.
+            if kind == "Ingress":
+                raise
+            # Every other kind keeps the behaviour from before #598: the error is skipped. The log
+            # now carries the status and reason, which the old text hid behind "may not be installed".
             logger.warning(
-                "Failed to apply CRD resource {}/{} — the CRD type may not be installed yet",
-                resource.get("kind"),
-                resource.get("metadata", {}).get("name"),
+                "Failed to apply {}/{} (status {}, reason {}): skipped{}",
+                kind,
+                name,
+                exc.status,
+                exc.reason,
+                ", the kind may not be installed yet" if exc.status == 404 else "",
             )
 
 

@@ -528,6 +528,22 @@ class ApiScenarioDriver:
         elif components is not None:
             prepared["components"] = components
 
+        # Service ingress overrides (#598): the dict is keyed by driver service name,
+        # like the stored ``Deployment.config["services"]``. An empty dict is an
+        # empty list, which clears every override (full replacement).
+        services = prepared.pop("services", None)
+        if isinstance(services, dict):
+            prepared["services"] = [
+                {
+                    "name": name,
+                    "ingressClass": block.get("ingress_class"),
+                    "fqdnSuffix": block.get("fqdn_suffix"),
+                }
+                for name, block in services.items()
+            ]
+        elif services is not None:
+            prepared["services"] = services
+
         input_obj = UpdateDeploymentInput.model_validate(prepared)
 
         try:

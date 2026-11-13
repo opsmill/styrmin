@@ -5,6 +5,7 @@ and T022 (extensibility).
 """
 
 from typing import Any
+from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -15,6 +16,9 @@ from styrmin_backend.agent.service.kubernetes.resources.blocks.patches import (
     TargetPatch,
 )
 from styrmin_backend.agent.service.kubernetes.resources.blocks.spec import PostRenderers
+from styrmin_backend.agent.service.kubernetes.resources.builders.utility import (
+    UtilityResourceBuilder,
+)
 from styrmin_backend.agent.service.kubernetes.resources.utilities.base import Utility
 from styrmin_backend.agent.service.kubernetes.resources.utilities.ingress import (
     IngressUtility,
@@ -756,3 +760,249 @@ def _find_resource(resources: list[dict], kind: str, name: str) -> dict | None:
         if r["kind"] == kind and r["metadata"]["name"] == name:
             return r
     return None
+
+
+_EXTERNAL_SERVICE = {
+    "driver_service_name": "web",
+    "resolved_name": "web",
+    "port": 8080,
+    "kind": "http",
+    "scope": "external",
+    "deployment_id": "00000000-0000-0000-0000-000000000001",
+    "component": "server",
+}
+
+_ANNOTATION_OPS = (
+    "- op: add\n"
+    "  path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.entrypoints\n"
+    "  value: web,websecure\n"
+    "- op: add\n"
+    "  path: /metadata/annotations/external-dns.alpha.kubernetes.io~1hostname\n"
+    "  value: test-release-testapp.test.styrmin.com\n"
+    "- op: add\n"
+    "  path: /metadata/annotations/external-dns.alpha.kubernetes.io~1cloudflare-proxied\n"
+    "  value: true\n"
+    "- op: add\n"
+    "  path: /metadata/annotations/traefik.ingress.kubernetes.io~1router.middlewares\n"
+    "  value: styrmin-00000000-0000-0000-0000-000000000001-acl@kubernetescrd\n"
+)
+
+
+class TestChartIngressPatchesAreUnchanged:
+    """#598 T011 (ADR-071, SC-003): chart Ingresses get the class, the annotations and the
+    dedicated-controller removal patch exactly as before Styrmin builds an Ingress itself.
+
+    Moving the annotation rules into a helper shared with the built Ingress (T016) must not change a
+    rendered patch, because a change changes the HelmRelease of every deployment. These tests pass
+    before the implementation and must still pass after it.
+    """
+
+    @staticmethod
+    def _context(
+        *,
+        dedicated_ingress: DedicatedIngressConfig | None,
+        ingress_class: str | None,
+        with_external_service: bool = False,
+    ) -> GlobalContext:
+        ctx = _make_context(
+            dedicated_ingress=dedicated_ingress, ingress_class=ingress_class
+        )
+        ctx.instance.deployment_id = UUID("00000000-0000-0000-0000-000000000001")
+        if with_external_service:
+            ctx.deployed_services = [dict(_EXTERNAL_SERVICE)]
+        return ctx
+
+    def test_shared_controller_patches_are_exactly_as_before(
+        self, ingress_utility: IngressUtility
+    ) -> None:
+        ctx = self._context(dedicated_ingress=None, ingress_class="cluster-traefik")
+
+        patches = ingress_utility.build_app_post_rendering_patches(ctx, RELEASE_REF)
+
+        assert [tp.render_value() for tp in patches] == [
+            {
+                "target": {"kind": "Ingress"},
+                "patch": "- op: add\n  path: /spec/ingressClassName\n  value: cluster-traefik\n",
+            },
+            {
+                "target": {"kind": "Ingress"},
+                "patch": (
+                    _ANNOTATION_OPS
+                    + "- op: add\n"
+                    + "  path: /metadata/annotations/kubernetes.io~1ingress.class\n"
+                    + "  value: cluster-traefik\n"
+                ),
+            },
+        ]
+
+    def test_dedicated_controller_patches_are_exactly_as_before(
+        self, ingress_utility: IngressUtility
+    ) -> None:
+        """The class name is removed from the chart Ingress and the implementation annotation is set."""
+        ctx = self._context(
+            dedicated_ingress=DedicatedIngressConfig(implementation="traefik"),
+            ingress_class="cluster-traefik",
+        )
+
+        patches = ingress_utility.build_app_post_rendering_patches(ctx, RELEASE_REF)
+
+        rendered = [tp.render_value() for tp in patches]
+        assert [r["target"] for r in rendered] == [{"kind": "Ingress"}] * 2
+        assert yaml.safe_load(rendered[0]["patch"]) == {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "Ingress",
+            "metadata": {"name": "any"},
+            "spec": {"ingressClassName": None},
+        }
+        assert rendered[1]["patch"] == (
+            _ANNOTATION_OPS
+            + "- op: add\n"
+            + "  path: /metadata/annotations/kubernetes.io~1ingress.class\n"
+            + "  value: traefik\n"
+        )
+
+    def test_no_class_resolved_leaves_the_chart_class_and_sets_the_other_annotations(
+        self, ingress_utility: IngressUtility
+    ) -> None:
+        ctx = self._context(dedicated_ingress=None, ingress_class=None)
+
+        patches = ingress_utility.build_app_post_rendering_patches(ctx, RELEASE_REF)
+
+        assert [tp.render_value() for tp in patches] == [
+            {"target": {"kind": "Ingress"}, "patch": _ANNOTATION_OPS}
+        ]
+
+    @pytest.mark.parametrize(
+        ("dedicated_ingress", "ingress_class"),
+        [
+            (None, "cluster-traefik"),
+            (DedicatedIngressConfig(implementation="traefik"), "cluster-traefik"),
+            (None, None),
+        ],
+        ids=["shared", "dedicated", "no-class"],
+    )
+    def test_an_external_service_in_the_context_does_not_change_the_patches(
+        self,
+        ingress_utility: IngressUtility,
+        dedicated_ingress: DedicatedIngressConfig | None,
+        ingress_class: str | None,
+    ) -> None:
+        """A Styrmin-built Ingress is not in the Helm release, so the chart patch has nothing to exclude."""
+        without_service = self._context(
+            dedicated_ingress=dedicated_ingress, ingress_class=ingress_class
+        )
+        with_service = self._context(
+            dedicated_ingress=dedicated_ingress,
+            ingress_class=ingress_class,
+            with_external_service=True,
+        )
+
+        before = ingress_utility.build_app_post_rendering_patches(
+            without_service, RELEASE_REF
+        )
+        after = ingress_utility.build_app_post_rendering_patches(
+            with_service, RELEASE_REF
+        )
+
+        assert [tp.render_value() for tp in after] == [
+            tp.render_value() for tp in before
+        ]
+        assert after, "the chart patch must still be produced"
+
+    def test_the_patches_still_target_every_ingress_of_the_chart(
+        self, ingress_utility: IngressUtility
+    ) -> None:
+        """The patch targets the kind only: no name and no label selector (research, constrained dependencies)."""
+        ctx = self._context(dedicated_ingress=None, ingress_class="cluster-traefik")
+
+        patches = ingress_utility.build_app_post_rendering_patches(ctx, RELEASE_REF)
+
+        assert all(tp.target.render_value() == {"kind": "Ingress"} for tp in patches)
+
+
+class TestPrefectPathAppliesTheServiceIngress:
+    """#598 T021 (research D-002): the Prefect flow applies the Ingress that Styrmin builds.
+
+    Only ``NetworkPolicy`` is left to the operator when Prefect applies a utility. An Ingress must
+    reach the apply flow, and it must carry the ownership labels that the operator uses to list,
+    restore and delete it (``list_managed_resources`` selects on them).
+    """
+
+    @staticmethod
+    def _built_resources() -> list[dict[str, Any]]:
+        ctx = _make_context()
+        ctx.instance.deployment_id = UUID("00000000-0000-0000-0000-000000000001")
+        ctx.deployed_services = [
+            {**_EXTERNAL_SERVICE, "fqdn_suffix": "test.styrmin.com"}
+        ]
+        return UtilityResourceBuilder(context=ctx).build(
+            utility=IngressUtility(),
+            release_reference=RELEASE_REF,
+            namespace=NAMESPACE,
+        )
+
+    def test_the_filter_keeps_the_ingress_and_drops_only_network_policies(self) -> None:
+        from styrmin_backend.agent.tasks.extra import (
+            _filter_out_operator_managed_resources,
+        )
+
+        built = self._built_resources()
+        kept = _filter_out_operator_managed_resources(built)
+
+        assert {r["kind"] for r in built} >= {"Ingress", "NetworkPolicy"}
+        assert "NetworkPolicy" not in {r["kind"] for r in kept}
+        assert [r for r in kept if r["kind"] == "Ingress"] == [
+            r for r in built if r["kind"] == "Ingress"
+        ]
+
+    def test_the_built_ingress_carries_the_ownership_labels(self) -> None:
+        (ingress,) = [r for r in self._built_resources() if r["kind"] == "Ingress"]
+
+        labels = ingress["metadata"]["labels"]
+        assert labels["app.kubernetes.io/managed-by"] == "styrmin"
+        assert labels["styrmin.io/release-reference"] == RELEASE_REF
+        assert labels["styrmin.io/utility-kind"] == "ingress"
+        assert labels["styrmin.io/service-name"] == "web"
+
+    async def test_apply_utility_hands_the_ingress_to_the_apply_flow(self) -> None:
+        from styrmin_backend.agent.tasks.extra import _apply_utility
+        from styrmin_backend.context.models.contexts import UtilityContext, UtilityKind
+
+        ctx = _make_context()
+        ctx.instance.deployment_id = UUID("00000000-0000-0000-0000-000000000001")
+        ctx.deployed_services = [
+            {**_EXTERNAL_SERVICE, "fqdn_suffix": "test.styrmin.com"}
+        ]
+        apply_flow = uuid4()
+
+        async def _render(**kwargs: Any) -> list[dict[str, Any]]:
+            return UtilityResourceBuilder(context=kwargs["context"]).build(
+                utility=kwargs["utility"],
+                release_reference=kwargs["release_reference"],
+                namespace=kwargs["namespace"],
+            )
+
+        run = AsyncMock()
+        with (
+            patch(
+                "styrmin_backend.agent.tasks.extra.render_utility_resources", _render
+            ),
+            patch("styrmin_backend.agent.tasks.extra.arun_deployment", run),
+        ):
+            await _apply_utility(
+                utility=UtilityContext(kind=UtilityKind.INGRESS),
+                release_reference=RELEASE_REF,
+                context=ctx,
+                namespace=NAMESPACE,
+                apply_flow=apply_flow,
+                action="Install",
+            )
+
+        run.assert_awaited_once()
+        applied = run.await_args.kwargs["parameters"]["resources"]
+        (ingress,) = [r for r in applied if r["kind"] == "Ingress"]
+        assert ingress["metadata"]["name"] == "styrmin-svc-web"
+        assert (
+            ingress["metadata"]["labels"]["app.kubernetes.io/managed-by"] == "styrmin"
+        )
+        assert "NetworkPolicy" not in {r["kind"] for r in applied}

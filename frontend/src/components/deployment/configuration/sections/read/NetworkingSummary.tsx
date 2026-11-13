@@ -1,6 +1,23 @@
+import { useId } from "react";
+
 import { resolveConfigValue } from "@/lib/effective-config";
+import { getsIngress } from "@/lib/service-ingress";
 import { ConfigSummaryCard } from "../../ConfigSummaryCard";
 import { SummaryRow } from "./SummaryRow";
+
+/**
+ * One service of the deployment, as `GetDeployment.deployment.deployedServices`
+ * returns it. Only the fields the summary reads are listed.
+ */
+export interface NetworkingService {
+  driverServiceName: string;
+  scope: string;
+  kind: string;
+  ingressClass?: string | null;
+  ingressClassOverridden: boolean;
+  humanReadableFqdn?: string | null;
+  fqdnSuffixOverridden: boolean;
+}
 
 interface Props {
   /** Raw `Deployment.config` JSON blob (snake_case). */
@@ -9,6 +26,15 @@ interface Props {
   environmentConfig: Record<string, unknown> | null | undefined;
   /** Raw `Cluster.config` JSON blob (snake_case). */
   clusterConfig: Record<string, unknown> | null | undefined;
+  /**
+   * The services of the deployment (#598, FR-016). Each service that Styrmin
+   * builds an Ingress for (`scope: external`, kind `http` or `https`) is listed
+   * with its effective ingress class and host, each marked Overridden or
+   * Inherited. An internal service, and an external one of kind `tcp` or `udp`,
+   * is left out: Styrmin builds no Ingress for it, so it has no class or host
+   * of its own to report.
+   */
+  services?: readonly NetworkingService[] | null;
 }
 
 /**
@@ -23,7 +49,9 @@ export function NetworkingSummary({
   deploymentConfig,
   environmentConfig,
   clusterConfig,
+  services,
 }: Props) {
+  const externalServices = (services ?? []).filter(getsIngress);
   const resolve = <T,>(path: string) =>
     resolveConfigValue<T>(
       clusterConfig,
@@ -92,6 +120,44 @@ export function NetworkingSummary({
           fromDeployment={ipWhitelist.fromDeployment}
         />
       </dl>
+      {externalServices.length > 0 ? (
+        <div className="mt-4 space-y-3 border-t border-border pt-4">
+          {externalServices.map((service) => (
+            <ServiceIngressGroup
+              key={service.driverServiceName}
+              service={service}
+            />
+          ))}
+        </div>
+      ) : null}
     </ConfigSummaryCard>
+  );
+}
+
+/** Class and host of one service, named by its driver service name. */
+function ServiceIngressGroup({ service }: { service: NetworkingService }) {
+  const headingId = useId();
+  return (
+    <div role="group" aria-labelledby={headingId} className="space-y-2">
+      <p id={headingId} className="font-mono text-xs font-semibold">
+        {service.driverServiceName}
+      </p>
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+        <SummaryRow
+          label="Ingress class"
+          mono
+          value={service.ingressClass ?? "Not set"}
+          fromDeployment={service.ingressClassOverridden}
+          mark={service.ingressClassOverridden ? "Overridden" : "Inherited"}
+        />
+        <SummaryRow
+          label="Host"
+          mono
+          value={service.humanReadableFqdn ?? "Not set"}
+          fromDeployment={service.fqdnSuffixOverridden}
+          mark={service.fqdnSuffixOverridden ? "Overridden" : "Inherited"}
+        />
+      </dl>
+    </div>
   );
 }

@@ -25,13 +25,16 @@ from styrmin_backend.api.resolvers import resolve_related
 from styrmin_backend.api.scalars import JSON
 from styrmin_backend.context.fqdn import (
     compute_external_url,
-    compute_human_readable_fqdn,
     compute_primary_fqdn,
+    compute_service_address,
+    service_gets_ingress,
 )
 from styrmin_backend.context.models.config import (
     ComponentConfigBlock,
     DeploymentConfig,
     EnvironmentConfig,
+    ResolvedConfig,
+    parse_service_overrides,
 )
 from styrmin_backend.domain.models import Component as ComponentEntity
 from styrmin_backend.domain.models import (
@@ -267,6 +270,22 @@ class ComponentReplicas:
     )
 
 
+@strawberry.type(
+    description=(
+        "The stored ingress override of one service of a deployment, as set "
+        "through `services` on the deployment config input."
+    )
+)
+class ServiceIngressOverride:
+    name: str = strawberry.field(description="The driver service name.")
+    ingress_class: str | None = strawberry.field(
+        description="Ingress class for this service only. Null when not overridden."
+    )
+    fqdn_suffix: str | None = strawberry.field(
+        description="FQDN suffix for this service only. Null when not overridden."
+    )
+
+
 @strawberry.type
 class ResolvedComponentScheduling:
     """Per-component effective scheduling configuration plus provenance.
@@ -393,6 +412,7 @@ class Deployment:
             # Resolve config hierarchy to get fqdn_suffix and external URL settings
             environment = await uow.environments.get(self.instance.environment_id)
             fqdn_suffix: str | None = None
+            ingress_class: str | None = None
             external_url_scheme: str | None = None
             external_url_port: int | None = None
             environment_name: str = ""
@@ -408,6 +428,7 @@ class Deployment:
                     **(self.instance.config or {}),
                 }
                 fqdn_suffix = resolved.get("fqdn_suffix")
+                ingress_class = resolved.get("ingress_class")
                 external_url_scheme = resolved.get("external_url_scheme")
                 external_url_port = resolved.get("external_url_port")
                 environment_name = environment.name
@@ -423,11 +444,32 @@ class Deployment:
                 primary_fqdn, external_url_scheme, external_url_port
             )
 
+            # The address function reads only the resolved class and suffix.
+            resolved_config = ResolvedConfig(
+                ingress_class=ingress_class,
+                fqdn_suffix=fqdn_suffix,
+            )
+            stored_overrides = parse_service_overrides(self.instance.config)
+
             results: list[DeployedServiceType] = []
             for s in services:
-                human_readable_fqdn = compute_human_readable_fqdn(
-                    s.resolved_name, environment_name, fqdn_suffix
+                # An override applies only to a service whose Ingress Styrmin builds
+                # (the rule that the context and the Ingress builder use).
+                is_external = s.scope == "external"
+                override = (
+                    stored_overrides.get(s.driver_service_name)
+                    if service_gets_ingress(s.scope, s.kind)
+                    else None
                 )
+                address = compute_service_address(
+                    resolved_config,
+                    override,
+                    service_host=s.resolved_name,
+                    environment_name=environment_name,
+                    app_name=app_name,
+                    deployment_id=self.id,
+                )
+                human_readable_fqdn = address.human_readable_fqdn
                 results.append(
                     DeployedServiceType.from_instance(
                         s,
@@ -438,6 +480,13 @@ class Deployment:
                             human_readable_fqdn,
                             external_url_scheme,
                             external_url_port,
+                        ),
+                        ingress_class=address.ingress_class if is_external else None,
+                        ingress_class_overridden=(
+                            override is not None and override.ingress_class is not None
+                        ),
+                        fqdn_suffix_overridden=(
+                            override is not None and override.fqdn_suffix is not None
                         ),
                     )
                 )
@@ -859,6 +908,24 @@ class Deployment:
                 )
             )
         return rows
+
+    @strawberry.field(
+        description=(
+            "The stored ingress overrides of this deployment's services, sorted "
+            "by service name. Empty when none is stored. Read `deployedServices` "
+            "for the effective class and host of each service."
+        )
+    )
+    def service_ingress_overrides(self) -> list[ServiceIngressOverride]:
+        stored = parse_service_overrides(self.instance.config)
+        return [
+            ServiceIngressOverride(
+                name=name,
+                ingress_class=stored[name].ingress_class,
+                fqdn_suffix=stored[name].fqdn_suffix,
+            )
+            for name in sorted(stored)
+        ]
 
     @strawberry.field
     async def crd_status(self, info: strawberry.Info) -> DeploymentStatusType | None:

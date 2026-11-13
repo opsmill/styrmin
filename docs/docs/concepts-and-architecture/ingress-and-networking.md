@@ -98,6 +98,13 @@ of subcharts, so the driver's values template does not need to set it.
 Styrmin does not change other routing resources that a chart renders,
 such as a Traefik IngressRoute or a Gateway API HTTPRoute.
 
+The Ingress that Styrmin builds for an external service
+([below](#the-ingress-that-styrmin-builds-for-an-external-service)) is not
+part of the chart, so this step does not apply to it. It follows the same
+rules for the class, with one addition: a
+[service ingress override](./service-ingress-overrides.md) replaces them
+for one service.
+
 - With a dedicated ingress controller, Styrmin removes
   `spec.ingressClassName` and sets the `kubernetes.io/ingress.class`
   annotation to `traefik`, the controller implementation. The dedicated
@@ -286,31 +293,123 @@ the FQDN suffix, Styrmin redeploys the deployment immediately, whatever the
 state of the controller. The deployment does not wait for the
 controller, so Styrmin does not redeploy a `FAILED` controller for it.
 
-### How Styrmin assigns an application URL
+### The Ingress that Styrmin builds for an external service
 
-Each application driver declares the **services** it exposes: name,
-port, and scope (internal or external). When Styrmin deploys an
-application, it generates a hostname for every external service from the
-**fully qualified domain name (FQDN) suffix** that you configured on the
-cluster.
+Each application driver declares the **services** it exposes: name, kind,
+port, and scope (internal or external). The scope determines who builds the
+Ingress:
 
-The hostname has this form:
+- For a service with `scope: external` and `kind` `http` or `https`,
+  Styrmin builds one Ingress. The driver's chart must not render an Ingress
+  for that service.
+- For a service with `scope: internal`, Styrmin builds no Ingress. If the
+  chart renders an Ingress for it, the chart keeps it.
+- A service with `kind` `tcp` or `udp` gets no Ingress, because an Ingress
+  cannot route it, even when it is `external`.
+
+Before Styrmin built these Ingresses, no code read `scope`: a chart rendered
+every Ingress, and Styrmin patched its class and annotations afterwards. A
+driver that declares an external service and renders its own Ingress for it
+now gets two Ingresses on the same host: see
+[Migrate a driver whose external service renders its own Ingress](../drivers/migrating-external-service-ingress.md).
+
+The Ingress has these properties:
+
+- **Name and namespace.** It is named `styrmin-svc-<driver service name>`
+  and lives in the namespace of the deployment. The name uses the service
+  name that the driver declares, not the service name override and not the
+  id that Styrmin stores for the service. Both of those change in cases
+  where the Ingress must keep its identity: the id changes when you change
+  the driver version or write a service name override. A driver version that
+  renames a service therefore gets a new Ingress object, and the operator
+  deletes the old one.
+- **Labels.** It carries `app.kubernetes.io/managed-by`,
+  `styrmin.io/utility-kind: ingress`, `styrmin.io/release-reference` and
+  `styrmin.io/service-name`, which holds the driver service name. It also
+  carries `styrmin/environment_id` and `styrmin/deployment_id`, the labels
+  that Styrmin puts on every object that a chart renders. A dedicated ingress
+  controller serves only the Ingresses that have `styrmin/environment_id` with
+  the id of its environment, so an Ingress without it is not served by that
+  controller, and its host answers HTTP 404. Styrmin sets both labels. A driver
+  author does not set them.
+- **Backend.** One rule for each host, with the path `/` and path type
+  `Prefix`. The backend is the ClusterIP Service that Styrmin creates for
+  the service, on the declared port.
+- **No `spec.tls`.** Styrmin writes no `spec.tls` on an Ingress that it
+  builds.
+- **Class and annotations without an override.** The same as on a chart
+  Ingress: the resolved class (see
+  [Dedicated ingress controller or shared ingress class](#dedicated-ingress-controller-or-shared-ingress-class)),
+  the Traefik entry points, the external-dns host name and the Cloudflare
+  setting. When the deployment sets `ip_whitelist`, it also has the
+  allow-list middleware reference. The external-dns endpoints type is set
+  when the cluster, the environment or the deployment sets it.
+- **Class and annotations with an override.** See
+  [Service ingress overrides](./service-ingress-overrides.md).
+- **Without a resolved FQDN suffix**, building the Ingress fails with an
+  error, as the patch of a chart Ingress does. A service ingress override that
+  sets its own suffix does not remove the need for the resolved suffix on the
+  other services.
+
+#### How Styrmin chooses the hosts of a service
+
+Styrmin generates each host from the **fully qualified domain name (FQDN)
+suffix** that you configured on the cluster, the environment or the
+deployment. It sets each label to lowercase, replaces every character other
+than a letter, a digit or a hyphen with a hyphen, and cuts a label to 63
+characters.
+
+The Ingress of a service has up to two hosts:
 
 ```text
-<service-name>-<deployment-id>.<fqdn-suffix>
+<service name>-<environment name>.<fqdn suffix>
+<driver name>-<deployment id>.<fqdn suffix>
 ```
 
-For example, a deployment of `infrahub` on a cluster with the suffix
-`styrmin.io` is reachable at:
+- **The readable host** has the resolved name of the service, which is the
+  service name override of the deployment when there is one, and the name of
+  the environment. Every external service has one. For `task-manager` in the
+  environment `lab` with the suffix `example.com`, it is
+  `task-manager-lab.example.com`.
+- **The application address** has the name of the application driver and the
+  id of the deployment. It is the same for every service of the
+  deployment, so Styrmin puts it on one Ingress only: the Ingress of the
+  first service that the driver declares, and only when Styrmin builds an
+  Ingress for that service: it is `external` and has kind `http` or `https`.
+  When the first service is external with kind `tcp` or `udp`, no
+  Styrmin-built Ingress has the application address. For a deployment of `generic-app`, whose only service `app` is
+  external, the Ingress has both hosts. For a deployment of `infrahub`,
+  whose first service `infrahub` is internal, no Styrmin-built Ingress has
+  the application address, and the Ingress that the chart renders for the
+  `infrahub` service keeps it. If the first service has a service ingress
+  override, its Ingress has the readable host only.
 
-```text
-http://infrahub-<deployment-id>.styrmin.io
-```
-
-Styrmin generates the hostname from the configuration, so you do not
-register a hostname for each deployment. Add one **wildcard DNS record**
+Styrmin generates the hosts from the configuration, so you do not register a
+hostname for each deployment. Add one **wildcard DNS record**
 (`*.styrmin.io`) that points to the environment's ingress, and each
 deployment gets a URL.
+
+#### When Styrmin creates the Ingress
+
+The operator creates, updates and deletes these Ingresses in its periodic
+pass, as it does for the network policies, services and secrets that Styrmin
+builds. A deployment therefore has the Ingress soon after it is created, and
+not at the same moment as the Helm release:
+
+- In the end-to-end test setup, which runs the pass every 5 seconds, the
+  operator log of one run shows the `task-manager` Ingress created about one
+  second after the deployment was created.
+- The default interval is 60 seconds, so the Ingress can appear up to one
+  interval after the deployment is created. The delay with the default
+  interval was not measured.
+
+When a driver version or an override stops requiring an Ingress, the operator
+deletes it in the same way. Deleting the deployment removes its namespace,
+and with it the Ingress.
+
+The end-to-end tests check Kubernetes objects: the Ingress, its hosts, its
+class, its annotations and its backend. They send no request to a host, and
+no Tailscale operator runs in them.
 
 ### Networking between applications
 
@@ -321,7 +420,8 @@ cluster, so a cloned environment is self-contained: Infrahub in the clone
 connects to the PostgreSQL in the clone, not to production.
 
 The driver declares which services are internal and which are external.
-External services get an external hostname; internal services do not.
+Styrmin builds an Ingress for each external service, and builds none for an
+internal service.
 
 #### Which connections the network policies allow
 
@@ -459,10 +559,15 @@ deployment, in `deployed_services`.
   as load balancer IDs and IP allow lists. Styrmin stores them on the
   environment and passes them to the environment's dedicated Traefik
   instance.
-- **Per deployment:** nothing. Styrmin generates the hostname.
+- **Per deployment:** nothing is required. Styrmin generates the hostnames.
+  To publish one external service with another ingress class or another FQDN
+  suffix, set a
+  [service ingress override](./service-ingress-overrides.md).
 
 ### Next steps
 
+- [**Service ingress overrides**](./service-ingress-overrides.md): publish
+  one service with another ingress class or FQDN suffix.
 - [**Backups and restores**](./backups-and-restores.md): backups and
   restores of an environment.
 - [**The operator and `StyrminDeployment`**](./operator-and-crds.md): the

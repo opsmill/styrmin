@@ -82,11 +82,15 @@ query GetDeployment($deploymentId: UUID!) {
       driverServiceName
       resolvedName
       kind
+      scope
       port
       primaryFqdn
       humanReadableFqdn
       primaryUrl
       humanReadableUrl
+      ingressClass
+      ingressClassOverridden
+      fqdnSuffixOverridden
     }
   }
 }

@@ -505,7 +505,7 @@ def _patch_teardown_kubernetes(mocker) -> tuple[Any, Any]:
 async def test_teardown_deletes_service_aliases_before_the_deployment_services(
     mocker,
 ) -> None:
-    """Step 1 of the teardown runs before the deployment's own Services are listed."""
+    """Step 1 of the teardown runs before the deployment's own Ingresses and Services are listed."""
     deployment_id = str(uuid4())
     namespace = get_kubernetes_reference(UUID(deployment_id))
     logger = _Logger()
@@ -534,7 +534,7 @@ async def test_teardown_deletes_service_aliases_before_the_deployment_services(
             logger=logger,
         ),
         call.list_managed_resources(
-            namespace=namespace, release_reference="rel-1", kind="Service"
+            namespace=namespace, release_reference="rel-1", kind="Ingress"
         ),
     ]
     assert (

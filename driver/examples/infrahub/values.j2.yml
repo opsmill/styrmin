@@ -63,12 +63,6 @@ prefect-server:
       env:
         - name: PREFECT_SERVER_ANALYTICS_ENABLED
           value: "{{ parameters.enable_analytics }}"
-  # Expose the Prefect UI through the per-environment ingress
-  ingress:
-    enabled: true
-    host:
-      hostname: "{{ services['task-manager'].human_readable_fqdn }}"
-      path: /
   server:
     # The Prefect UI is a SPA whose browser-side code calls the API at
     # PREFECT_UI_API_URL (default http://localhost:4200/api). Point it at the

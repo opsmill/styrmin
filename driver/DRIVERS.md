@@ -65,8 +65,8 @@ spec:
       default: <any>
   services:                # Optional service definitions
     - name: <string>
-      kind: <string>
-      scope: <string>
+      kind: <string>       # http, https, tcp, udp
+      scope: <string>      # internal, or external: Styrmin builds the Ingress of the service
       port: <integer>
       component: <string>
   actions:                 # Optional action declarations
@@ -153,7 +153,7 @@ spec:
       component: server
     - name: task-manager
       kind: http
-      scope: internal
+      scope: external      # Styrmin builds its Ingress; the chart's Prefect Ingress is off
       port: 4200
       component: task-manager
   actions:
@@ -235,7 +235,9 @@ The template receives a context object with the following structure:
 | `instance.config.*` | various | Resolved configuration (merged from cluster, environment, deployment) |
 | `parameters.*` | various | User-provided parameter values (e.g., `parameters.docker_image`) |
 | `services['<name>'].primary_fqdn` | `str` | Primary FQDN for a named service |
-| `services['<name>'].human_readable_fqdn` | `str` | Human-readable FQDN for display |
+| `services['<name>'].human_readable_fqdn` | `str` | Human-readable FQDN for display. Has the suffix of the service ingress override when the deployment has one |
+| `services['<name>'].ingress_class` | `str` | Effective ingress class of the service (the override's class when there is one) |
+| `services['<name>'].overridden` | `bool` | `true` when the service has a service ingress override |
 
 Prefer `instance.config.*` over `cluster.config.*` and `environment.config.*`. When an
 administrator changes the cluster config, Styrmin redeploys only the deployments whose resolved

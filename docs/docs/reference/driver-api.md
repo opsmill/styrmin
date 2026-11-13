@@ -37,13 +37,49 @@ specification:
   template)
 - `spec.components`: component definitions (label selectors, defaults)
 - `spec.parameters`: typed inputs that users set
-- `spec.services`: declared network endpoints
+- `spec.services`: declared network endpoints. Each service has a `name`, a
+  `kind` (`http`, `https`, `tcp` or `udp`), a `scope` (`internal` or
+  `external`), a `port` and a `component`. See
+  [Services and Ingresses](#services-and-ingresses).
 - `spec.actions`: lifecycle action declarations (hook, mode, Python
   function, prompts)
 
 It will also document the **action primitives** that driver actions can
 call from Python (`stop_components`, `start_components`,
 `execute_commands`, `upgrade_deployment_version`, ...).
+
+### Services and Ingresses
+
+Until the generated reference exists, these rules apply to every driver
+author for `spec.services`:
+
+- `scope: external` means that Styrmin builds the Ingress of the service. For
+  each external service of `kind` `http` or `https`, Styrmin builds one Ingress
+  named `styrmin-svc-<service name>` in the deployment's namespace, with the
+  ClusterIP Service of the service as its backend. A service of `kind` `tcp` or
+  `udp` gets no Ingress.
+- `scope: internal` means that Styrmin builds no Ingress. The chart can render
+  one, and Styrmin sets its class and annotations after the chart renders.
+- The chart must not render an Ingress for an external service. If it does, the
+  service has two Ingresses on the same host. See
+  [Migrate a driver whose external service renders its own Ingress](../drivers/migrating-external-service-ingress.md).
+- The Ingress has the readable host `<service name>-<environment name>.<fqdn suffix>`.
+  The application address `<driver name>-<deployment id>.<fqdn suffix>` is on the
+  Ingress of the first service in `spec.services`, and only when Styrmin builds an
+  Ingress for that service: it is `external` and has kind `http` or `https`. When
+  the first service is external with kind `tcp` or `udp`, no Styrmin-built Ingress
+  has the application address.
+- A deployment can override the ingress class and the FQDN suffix of one
+  external service: see
+  [Service ingress overrides](../concepts-and-architecture/service-ingress-overrides.md).
+- A template reads `services['<name>'].primary_fqdn`,
+  `services['<name>'].human_readable_fqdn` (with the override suffix when there is
+  an override), `services['<name>'].ingress_class` and
+  `services['<name>'].overridden`. See [The context](../drivers/context.md).
+
+For the full explanation, see
+[Create a driver](../drivers/creating-a-driver.md#step-6-declare-services) and
+[Ingress and networking](../concepts-and-architecture/ingress-and-networking.md).
 
 ### Action primitives and the steps of a task
 

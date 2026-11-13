@@ -185,9 +185,10 @@ async def test_infrahub_task_manager_service_exposes_prefect_ui(
         assert response.status_code == 200
         assert "html" in response.headers.get("content-type", "")
 
-    # The prefect-server subchart ingress (enabled in values.j2.yml) routes
-    # the service-scoped human-readable FQDN to the Prefect UI through the
-    # per-environment ingress, mirroring the infrahub server ingress.
+    # The Ingress that Styrmin builds for the external ``task-manager`` service
+    # (``styrmin-svc-task-manager``, #598) routes the service-scoped
+    # human-readable FQDN to the Prefect UI through the per-environment ingress;
+    # the driver does not enable the chart's own Prefect Ingress.
     ingresses: list[AsyncIngress] = [
         ing
         async for ing in AsyncIngress.list(namespace=namespace, api=kr8s_api)
@@ -206,9 +207,9 @@ async def test_infrahub_task_manager_service_exposes_prefect_ui(
 
     # Finally, prove the Prefect UI is actually reachable *through the
     # per-environment ingress controller* — not merely that the Ingress object
-    # exists. Styrmin post-render-patches every `kind: Ingress` in the release
-    # with `kubernetes.io/ingress.class: traefik` (see IngressUtility), so the
-    # subchart's Prefect ingress is picked up by the dedicated Traefik. Route
+    # exists. Styrmin sets `kubernetes.io/ingress.class: traefik` on the
+    # Ingress it builds for `task-manager` (and post-render-patches the chart
+    # Ingresses the same way, see IngressUtility), so the dedicated Traefik picks it up. Route
     # an HTTP request through that Traefik with the Host header set to the
     # Prefect UI FQDN, mirroring test_traffic_routes_through_dedicated_ingress.
     #

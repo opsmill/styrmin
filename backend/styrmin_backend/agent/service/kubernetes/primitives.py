@@ -392,7 +392,8 @@ async def apply_kubernetes_resource(
 ) -> None:
     """Apply a Kubernetes resource using server-side-like upsert logic.
 
-    Handles both core API resources (Secret, NetworkPolicy) and custom resources (Middleware).
+    Handles built-in resources (Secret, NetworkPolicy, Ingress, Service) and custom
+    resources (Middleware).
     Creates the resource if it doesn't exist, patches it if it does.
     """
     api_version = resource["apiVersion"]
@@ -424,6 +425,24 @@ async def apply_kubernetes_resource(
         except ApiException as exc:
             if exc.status == status.HTTP_409_CONFLICT:
                 await networking_api.replace_namespaced_network_policy(
+                    name=name,
+                    namespace=namespace,
+                    body=resource,  # type: ignore[arg-type]
+                )
+            else:
+                raise
+    elif kind == "Ingress":
+        # A built-in kind of networking.k8s.io/v1, not a custom resource: the custom
+        # resource path below would build the plural "ingresss" and be refused.
+        networking_api = kubeclient.NetworkingV1Api(client)
+        try:
+            await networking_api.create_namespaced_ingress(
+                namespace=namespace,
+                body=resource,  # type: ignore[arg-type]
+            )
+        except ApiException as exc:
+            if exc.status == status.HTTP_409_CONFLICT:
+                await networking_api.replace_namespaced_ingress(
                     name=name,
                     namespace=namespace,
                     body=resource,  # type: ignore[arg-type]

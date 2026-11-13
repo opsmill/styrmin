@@ -1,0 +1,20 @@
+query GetDeploymentServiceIngress($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        id
+        serviceIngressOverrides {
+            name
+            ingressClass
+            fqdnSuffix
+        }
+        deployedServices {
+            driverServiceName
+            scope
+            ingressClass
+            ingressClassOverridden
+            fqdnSuffixOverridden
+            humanReadableFqdn
+            humanReadableUrl
+            primaryFqdn
+        }
+    }
+}

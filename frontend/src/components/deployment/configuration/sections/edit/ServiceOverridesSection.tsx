@@ -24,9 +24,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { SectionId } from "@/lib/configuration-types";
+import { getsIngress } from "@/lib/service-ingress";
 
 import { ChangedFieldFrame } from "../../ChangedFieldFrame";
 import { useDrawerDiff } from "../../DrawerDiffContext";
+import {
+  ServiceIngressFields,
+  type IngressServiceRef,
+} from "../../ServiceIngressFields";
 
 // RFC 1035 service name regex: starts with letter, ends with alphanumeric,
 // up to 63 chars. We keep the simpler form here; the backend re-validates.
@@ -110,6 +115,13 @@ interface Props {
    * input.
    */
   driverServiceNames?: readonly string[];
+  /**
+   * The services of the deployment with their scope, from
+   * `deployment.deployedServices` (#598). Each `external` service of kind
+   * `http` or `https` gets an ingress class and an FQDN suffix field; the
+   * others get none, because Styrmin builds no Ingress for them (FR-009).
+   */
+  services?: readonly IngressServiceRef[];
   anchorId: SectionId;
 }
 
@@ -120,6 +132,9 @@ interface Props {
  * Both fields are free-text inputs in v1 (see {@link serviceOverridesSchema}
  * docstring for the v2 driver-service select TODO).
  *
+ * Below it, the ingress class and FQDN suffix of each external service
+ * (`services: { name, ingressClass, fqdnSuffix }[]`, #598), with a clear action.
+ *
  * No environment inheritance: `serviceNameOverrides` lives only on the
  * deployment row, so the `environment` prop is unused here aside from
  * threading it through to `ChangedFieldFrame` for the contract.
@@ -129,6 +144,7 @@ export function ServiceOverridesSection({
   initial,
   environment,
   driverServiceNames,
+  services,
   anchorId,
 }: Props) {
   const initialRows = (initial.serviceNameOverrides ??
@@ -300,6 +316,35 @@ export function ServiceOverridesSection({
           );
         }}
       </form.Field>
+
+      {services?.some(getsIngress) ? (
+        <div
+          role="group"
+          aria-labelledby={`${anchorId}-ingress-heading`}
+          className="mt-6 space-y-3"
+        >
+          <h4
+            id={`${anchorId}-ingress-heading`}
+            className="text-sm font-medium text-foreground"
+          >
+            Service ingress overrides
+          </h4>
+          <p className="text-xs text-muted-foreground">
+            Optional. Set the ingress class or the FQDN suffix of one service.
+            An empty field uses the value of the deployment, environment or
+            cluster.
+          </p>
+          <form.Field name="services">
+            {(field: any) => (
+              <ServiceIngressFields
+                services={services}
+                value={field.state.value}
+                onChange={(rows) => field.handleChange(rows)}
+              />
+            )}
+          </form.Field>
+        </div>
+      ) : null}
     </section>
   );
 }

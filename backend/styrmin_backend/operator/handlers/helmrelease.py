@@ -302,11 +302,29 @@ async def kopf_helmrelease_timer(  # noqa: ARG001
         )
         return
 
-    desired_all = build_desired_resources(
-        context=context,
-        release_reference=release_reference,
-        namespace=ns,
-    )
+    # The StyrminDeployment pipeline creates the HelmRelease with no release-reference label
+    # (``ApplicationHelmReleaseBuilder.build``), so the label read above is empty. The release
+    # reference of the instance is the value that the StyrminDeployment timer and the Prefect
+    # flows give the builder and select by. With an empty value, this timer would list no object
+    # that they wrote, create each one again and replace its label with an empty one, and they
+    # would do the same to the objects of this timer.
+    release_reference = release_reference or context.instance.release_reference
+
+    try:
+        desired_all = build_desired_resources(
+            context=context,
+            release_reference=release_reference,
+            namespace=ns,
+        )
+    except Exception:
+        # The builder raises ``ValueError`` for an external service with no FQDN suffix. Log it with
+        # its traceback and skip this cycle, as the StyrminDeployment timer does.
+        logger.exception(
+            "Failed to build desired resources for periodic reconciliation of %s/%s",
+            ns,
+            helmrelease_name,
+        )
+        return
 
     # Reconcile NetworkPolicies (operator-managed)
     desired_netpols = filter_resources_by_kind(desired_all, "NetworkPolicy")
@@ -337,9 +355,17 @@ async def kopf_helmrelease_timer(  # noqa: ARG001
             result.deleted,
             len(result.errors),
         )
+        if result.has_errors:
+            logger.warning(
+                "Periodic reconciliation of NetworkPolicy in %s/%s had %d error(s): %s",
+                ns,
+                helmrelease_name,
+                len(result.errors),
+                "; ".join(result.errors),
+            )
 
     # Reconcile other utility resources (Prefect-created, operator-reconciled)
-    for kind in ("Service", "Secret"):
+    for kind in ("Service", "Secret", "Ingress"):
         desired_kind = filter_resources_by_kind(desired_all, kind)
         actual_kind = await list_managed_resources(
             namespace=ns,
@@ -361,3 +387,12 @@ async def kopf_helmrelease_timer(  # noqa: ARG001
                 result.deleted,
                 len(result.errors),
             )
+            if result.has_errors:
+                logger.warning(
+                    "Periodic reconciliation of %s in %s/%s had %d error(s): %s",
+                    kind,
+                    ns,
+                    helmrelease_name,
+                    len(result.errors),
+                    "; ".join(result.errors),
+                )

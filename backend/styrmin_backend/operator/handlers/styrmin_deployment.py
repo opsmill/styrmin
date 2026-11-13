@@ -981,14 +981,16 @@ async def kopf_styrmin_deployment_timer(
         try:
             desired_all = build_desired_resources_from_crd(crd_spec, ns)
         except Exception:
-            logger.warning(
+            # ``logger.exception`` keeps the traceback and the error text: with a warning only, a
+            # context that cannot be built switches the drift correction off with no trace.
+            logger.exception(
                 "Failed to build desired resources for drift check on %s/%s", ns, name
             )
             return
 
         release_ref = crd_spec.get("releaseReference", "")
 
-        for kind in ("NetworkPolicy", "Secret", "Service"):
+        for kind in ("NetworkPolicy", "Secret", "Service", "Ingress"):
             desired_kind = [r for r in desired_all if r.get("kind") == kind]
             actual_kind = await list_managed_resources(
                 namespace=ns,
@@ -1012,6 +1014,15 @@ async def kopf_styrmin_deployment_timer(
                     result.updated,
                     result.deleted,
                 )
+                if result.has_errors:
+                    logger.warning(
+                        "Drift reconciliation of %s in %s/%s had %d error(s): %s",
+                        kind,
+                        ns,
+                        name,
+                        len(result.errors),
+                        "; ".join(result.errors),
+                    )
 
 
 # --- Ordered deletion (US3 + spec 008) ---
@@ -1131,7 +1142,7 @@ async def _teardown_owned_resources(
 ) -> None:
     """Reverse-order teardown of resources owned by a StyrminDeployment.
 
-    Order: Service aliases in all namespaces -> Services/Middlewares -> HelmRelease ->
+    Order: Service aliases in all namespaces -> Ingresses/Services -> HelmRelease ->
     NetworkPolicies/Secrets.
     Errors are logged and swallowed — teardown is best-effort and
     finalisers / 404s should not block the lifecycle.
@@ -1157,9 +1168,9 @@ async def _teardown_owned_resources(
         logger=logger,
     )
 
-    # Step 2: Services and Middlewares.
-    logger.info("Teardown step 2: Services / Middlewares for %s/%s", namespace, name)
-    for kind in ("Service",):
+    # Step 2: Ingresses and Services.
+    logger.info("Teardown step 2: Ingresses / Services for %s/%s", namespace, name)
+    for kind in ("Ingress", "Service"):
         resources = await list_managed_resources(
             namespace=namespace, release_reference=release_reference, kind=kind
         )

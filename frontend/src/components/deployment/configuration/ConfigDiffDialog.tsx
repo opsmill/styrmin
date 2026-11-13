@@ -26,6 +26,7 @@ import {
   componentsFormToInput,
   deploymentConfigToInput,
   deploymentParametersToInput,
+  servicesFormToInput,
 } from "@/lib/deployment-input";
 import { cn } from "@/lib/utils";
 
@@ -241,6 +242,11 @@ export function ConfigDiffDialog({
       // becomes `null` (018). Both mean "clear" under full replacement.
       mergedInput.components = componentsFormToInput(
         mergedInput.components as UpdateDeploymentInput["components"],
+      );
+      // Same boundary for the service ingress rows (#598): an emptied field
+      // is omitted and a row with no value is dropped.
+      mergedInput.services = servicesFormToInput(
+        mergedInput.services as UpdateDeploymentInput["services"],
       );
 
       await updateMutation.mutateAsync({

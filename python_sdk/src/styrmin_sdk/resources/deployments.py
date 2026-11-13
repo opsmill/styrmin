@@ -63,6 +63,7 @@ from styrmin_sdk.graphql._generated.input_types import (
     DeploymentConfigInput,
     EnvVarInput,
     ParameterValueInput,
+    ServiceConfigInput,
     ServiceNameOverride,
     UpdateDeploymentInput,
 )
@@ -214,6 +215,52 @@ def check_replica_counts(config: object, *, source: str) -> None:
             )
 
 
+#: Keys of a ``config.services`` row in a manifest, in both spellings the input accepts.
+_SERVICE_ROW_NAME_KEY = "name"
+_SERVICE_ROW_FIELD_KEYS = ("ingress_class", "ingressClass", "fqdn_suffix", "fqdnSuffix")
+
+
+def check_service_rows(config: object, *, source: str) -> None:
+    """Reject a ``services`` row that the server would read as no override.
+
+    The generated ``ServiceConfigInput`` ignores a key it does not know, so a row with
+    ``fqdn_sufix: x.io`` would become a row with no field, the server would drop it as
+    "no override", and ``apply`` would succeed with nothing stored. This check runs before
+    Pydantic, as :func:`check_replica_counts` does for replica counts.
+
+    Raises:
+        ManifestValidationError: ``services`` is not a list, a row is not a mapping or has no
+            name, a row has a key other than ``name``, ``ingress_class`` and ``fqdn_suffix``
+            (or their camelCase spellings), or a row sets neither field.
+    """
+    rows = config.get("services") if isinstance(config, Mapping) else None
+    if rows is None:
+        return
+    if not isinstance(rows, list):
+        raise ManifestValidationError(
+            f"{source}: services must be a list of rows with a name, and an ingress_class or an fqdn_suffix, "
+            f"got {type(rows).__name__}"
+        )
+    allowed = (_SERVICE_ROW_NAME_KEY, *_SERVICE_ROW_FIELD_KEYS)
+    for index, row in enumerate(rows):
+        if not isinstance(row, Mapping):
+            raise ManifestValidationError(f"{source}: services[{index}] must be a mapping, got {row!r}")
+        name = row.get(_SERVICE_ROW_NAME_KEY)
+        if not isinstance(name, str) or not name:
+            raise ManifestValidationError(f"{source}: services[{index}] has no name")
+        for key in row:
+            if key not in allowed:
+                raise ManifestValidationError(
+                    f"{source}: services[{name!r}] has an unknown key {key!r}; "
+                    "the keys are name, ingress_class and fqdn_suffix"
+                )
+        if all(row.get(key) is None for key in _SERVICE_ROW_FIELD_KEYS):
+            raise ManifestValidationError(
+                f"{source}: services[{name!r}] sets neither ingress_class nor fqdn_suffix; "
+                "remove the row to clear the override of the service"
+            )
+
+
 def _stored_component_inputs(config: object) -> dict[str, ComponentConfigInput]:
     """The stored ``config.components`` blocks as inputs that resend each override unchanged."""
     stored = config.get("components") if isinstance(config, dict) else None
@@ -231,6 +278,20 @@ def _stored_component_inputs(config: object) -> dict[str, ComponentConfigInput]:
             replicas=block.get("replicas"),
         )
     return blocks
+
+
+def _stored_service_inputs(config: object) -> list[ServiceConfigInput]:
+    """The stored ``config.services`` blocks as inputs that resend each ingress override unchanged."""
+    stored = config.get("services") if isinstance(config, dict) else None
+    return [
+        ServiceConfigInput(
+            name=name,
+            ingress_class=block.get("ingress_class"),
+            fqdn_suffix=block.get("fqdn_suffix"),
+        )
+        for name, block in (stored or {}).items()
+        if isinstance(block, dict)
+    ]
 
 
 def _build_update_input(manifest: ResolvedManifest) -> UpdateDeploymentInput:
@@ -252,6 +313,7 @@ def _build_update_input(manifest: ResolvedManifest) -> UpdateDeploymentInput:
     """
     config_payload: dict[str, Any] = dict(manifest.config)
     check_replica_counts(config_payload, source=f"manifest {manifest.source_path}: spec.config")
+    check_service_rows(config_payload, source=f"manifest {manifest.source_path}: spec.config")
     # Refuse a malformed override, or both spellings, as the create path does
     _build_service_name_overrides(manifest)
     if manifest.parameters:
@@ -338,6 +400,35 @@ def _effective_image_overrides(update_input: UpdateDeploymentInput, stored_confi
     }
 
 
+#: Fields of ``UpdateDeploymentInput`` that the backend does not store in the deployment config
+#: (``split_update_deployment_input``): setting only these keeps the stored config.
+_NON_CONFIG_UPDATE_FIELDS = frozenset({"name", "parameters", "service_name_overrides"})
+
+
+def _dropped_service_overrides(update_input: UpdateDeploymentInput, stored_config: object) -> list[str]:
+    """Services whose stored ingress override the update clears, sorted (#598).
+
+    The backend replaces the whole stored config when the input sets at least one config field
+    other than ``name``, ``parameters`` and ``serviceNameOverrides``. When that input has no
+    ``services``, the stored overrides go with it. An explicit ``services`` list, even an empty
+    one, is the author's choice and is not reported. A stored block with neither an ingress
+    class nor an FQDN suffix is no override.
+    """
+    if update_input.services is not None:
+        return []
+    sets_config = any(field not in _NON_CONFIG_UPDATE_FIELDS for field in update_input.model_dump(exclude_none=True))
+    stored = stored_config.get("services") if isinstance(stored_config, dict) else None
+    if not sets_config or not isinstance(stored, dict):
+        return []
+    return sorted(
+        name
+        for name, block in stored.items()
+        if isinstance(name, str)
+        and isinstance(block, dict)
+        and (block.get("ingress_class") or block.get("fqdn_suffix"))
+    )
+
+
 def _override_kinds(block: ComponentConfigInput) -> list[OverrideKind]:
     """The override kinds a component block sets, in a fixed order."""
     kinds: list[OverrideKind] = []
@@ -409,6 +500,7 @@ def _build_config_input(manifest: ResolvedManifest) -> DeploymentConfigInput | N
     if not manifest.config:
         return None
     check_replica_counts(manifest.config, source=f"manifest {manifest.source_path}: spec.config")
+    check_service_rows(manifest.config, source=f"manifest {manifest.source_path}: spec.config")
     try:
         config = {key: value for key, value in manifest.config.items() if key not in _SERVICE_NAME_OVERRIDE_KEYS}
         return DeploymentConfigInput.model_validate(config) if config else None
@@ -545,12 +637,15 @@ class DeploymentResource(BaseResource):
         """Update a deployment with a typed ``UpdateDeploymentInput``.
 
         ``input`` is the regenerated Pydantic model that mirrors the GraphQL
-        ``UpdateDeploymentInput`` input type. Top-level fields use
-        full-replacement semantics: any field omitted (``None``) leaves the
-        corresponding persisted state untouched; an empty list/dict explicitly
-        clears it. The single exception is ``parameters``, which uses merge
-        semantics — entries in the list merge on top of the persisted
-        parameters dict.
+        ``UpdateDeploymentInput`` input type. The config fields of ``input``
+        replace the whole stored deployment config: when at least one config
+        field is set, every stored config key that ``input`` leaves out
+        (``None``) is cleared, for example the ``components`` blocks or the
+        ``services`` ingress overrides. When no config field is set, the stored
+        config is kept. ``parameters`` and ``service_name_overrides`` are not
+        part of the config: ``parameters`` uses merge semantics — entries in the
+        list merge on top of the persisted parameters dict — and an omitted
+        ``service_name_overrides`` leaves the service name overrides as they are.
 
         Returns ``None`` when the backend detects a no-op (the submitted state
         resolves to the current instance): the resolver returns ``null`` and no
@@ -577,8 +672,9 @@ class DeploymentResource(BaseResource):
 
         ``components`` replaces every stored block, so the other stored blocks and the
         component's other overrides (env vars, image, ``command``, ``args``) are resent
-        unchanged. A write between the read and the update is overwritten. Returns ``None``
-        when nothing changes, like :meth:`update`.
+        unchanged. The stored ``services`` ingress overrides are resent unchanged too,
+        because the update replaces the whole stored config. A write between the read and
+        the update is overwritten. Returns ``None`` when nothing changes, like :meth:`update`.
         """
         deployment = await self.get(deployment_id)
         blocks = _stored_component_inputs(deployment.config)
@@ -586,7 +682,11 @@ class DeploymentResource(BaseResource):
         target = target.model_copy(update={"replicas": replicas})
         if target.model_dump(exclude={"name"}, exclude_none=True):
             blocks[component] = target
-        return await self.update(deployment_id, input=UpdateDeploymentInput(components=list(blocks.values())))
+        services = _stored_service_inputs(deployment.config)
+        return await self.update(
+            deployment_id,
+            input=UpdateDeploymentInput(components=list(blocks.values()), services=services or None),
+        )
 
     async def delete(self, deployment_id: str | UUID) -> DeleteDeploymentDeleteDeployment:
         """Request deletion of a deployment.
@@ -1007,6 +1107,7 @@ class DeploymentResource(BaseResource):
             inapplicable_components=list(inapplicable),
             inapplicable_overrides=inapplicable,
             applicability_check_error=check_error,
+            dropped_service_overrides=_dropped_service_overrides(update_input, existing.config),
         )
 
     async def _inapplicable_overrides(

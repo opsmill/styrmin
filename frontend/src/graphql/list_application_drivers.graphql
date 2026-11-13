@@ -23,6 +23,11 @@ query ListApplicationDrivers {
         replicas
         singleton
       }
+      services {
+        name
+        scope
+        kind
+      }
     }
   }
 }

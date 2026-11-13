@@ -213,6 +213,33 @@ first release with the change.
 - Check the scripts and procedures that delete environments. Deleting an
   environment deletes its deployments and its environment backups (v0.1.46).
   Before, the request failed when the environment had deployments.
+- Find the deployments whose driver version declares a service `scope: external`
+  and renders its own Ingress for it. Of the drivers that OpsMill ships in
+  `driver/examples`, only `generic-app` driver version 1 does. Styrmin now
+  builds an Ingress for each external service, so these deployments have two
+  Ingresses on the same host once they run a release that includes this
+  change, before any driver version change. The number of the Styrmin release
+  that includes this change is not known yet. `generic-app` version 2,
+  `infrahub` version 6 and `infrahub-enterprise` version 5 declare an external
+  service and render no Ingress for it. An apply error on an Ingress now fails
+  the deploy flow, so an ingress controller that rejects a duplicate host and
+  path could fail the deploy flow of a deployment with two Ingresses. This is
+  plausible and not verified. See
+  [Migrate a driver whose external service renders its own Ingress](./drivers/migrating-external-service-ingress.md).
+- Expect a short interruption when you move a running Infrahub deployment to
+  `infrahub-enterprise` driver version 5 or `infrahub` version 6. The chart's
+  Prefect UI Ingress is removed and Styrmin builds its own. On a local vCluster
+  with the operator pass every 60 seconds, the Prefect UI host answered HTTP
+  404 for about 7 seconds and about 12 seconds (2 samples, `infrahub-enterprise`
+  from driver version 4 to 5). With the pass every 5 seconds, no request failed
+  (2 samples). The length depends on when the next operator pass falls, and it
+  was not measured on other systems or for `infrahub` version 6. See
+  [What was measured](./drivers/migrating-external-service-ingress.md#what-was-measured-when-a-running-infrahub-deployment-moves-to-the-new-driver-version).
+- Clear a service ingress override before you change a deployment to a driver
+  version that removes the service, declares it `internal`, or gives it kind `tcp`
+  or `udp`. Styrmin refuses
+  the change with `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` otherwise. See
+  [Change a deployment's driver version](./drivers/changing-driver-versions.md#stored-service-ingress-overrides).
 
 ### If you write application drivers
 
@@ -259,6 +286,11 @@ first release with the change.
 - Read `backup.velero.storage_location` as the name of the Velero object,
   `styrmin-bsl-<location id>`. It held the backup storage location's name
   before (v0.1.50).
+- Turn off the chart's Ingress for each service that you declare
+  `scope: external`. Styrmin builds the Ingress of an external service, so a
+  chart Ingress for it gives two Ingresses on the same host. A service with
+  `scope: internal` keeps the chart's Ingress. See
+  [Migrate a driver whose external service renders its own Ingress](./drivers/migrating-external-service-ingress.md).
 
 ### If you write scripts that use the API, the Python SDK or styrminctl
 

@@ -97,7 +97,7 @@ Sub-handlers provide automatic idempotency — completed phases are never re-exe
 
 Two paths exist:
 
-**Platform-driven (preferred)**: the backend's `deleteDeployment` mutation patches `spec.deletionRequested = true`. A `@kopf.on.update(field="spec.deletionRequested", new=True)` handler observes the flip and runs `_teardown_owned_resources` in reverse order (service aliases in all namespaces → Services/Middlewares → HelmRelease → NetworkPolicies/Secrets), then issues a namespace delete. The periodic timer advances `phase` to `Deleted` once the namespace returns 404. Because the StyrminDeployment CR lives inside the deployment's own namespace, the CR is garbage-collected with the namespace; the agent's status reporter detects "DB DELETING + CR absent" and synthesises a final `displayState: Deleted` report so the DB is tombstoned race-free. Kubernetes deletes the CR with the rest of the namespace's contents, before it removes the namespace itself, so the reporter sends no synthetic report while the namespace has a deletion timestamp, or while it cannot read the namespace.
+**Platform-driven (preferred)**: the backend's `deleteDeployment` mutation patches `spec.deletionRequested = true`. A `@kopf.on.update(field="spec.deletionRequested", new=True)` handler observes the flip and runs `_teardown_owned_resources` in reverse order (service aliases in all namespaces → Ingresses, then Services → HelmRelease → NetworkPolicies/Secrets), then issues a namespace delete. The periodic timer advances `phase` to `Deleted` once the namespace returns 404. Because the StyrminDeployment CR lives inside the deployment's own namespace, the CR is garbage-collected with the namespace; the agent's status reporter detects "DB DELETING + CR absent" and synthesises a final `displayState: Deleted` report so the DB is tombstoned race-free. Kubernetes deletes the CR with the rest of the namespace's contents, before it removes the namespace itself, so the reporter sends no synthetic report while the namespace has a deletion timestamp, or while it cannot read the namespace.
 
 The first step, `_delete_service_aliases`, deletes the deployment's service aliases in the namespaces of the other deployments ([#503](https://github.com/opsmill/styrmin/issues/503)). It lists the aliases in all namespaces with two label selectors that the API server applies: `styrmin.io/service-alias=true,styrmin.io/deployment-id=<spec.deploymentId>`, and `styrmin.io/service-alias=true,!styrmin.io/deployment-id` for the aliases written before the label existed. It deletes those that `is_alias_of_deployment` (`agent/service/kubernetes/service_alias_rules.py`) assigns to the deployment: an alias whose `styrmin.io/deployment-id` label holds `spec.deploymentId`, or, for an alias without that label, an alias whose `spec.externalName` points into the deployment's namespace. It deletes each alias with the `resourceVersion` of the listing, so it does not delete a Service that replaced the alias since, such as another deployment's `ClusterIP` Service with the same name. The step acts only when the CR's namespace is `styrmin-<spec.deploymentId>`; otherwise it logs a warning and deletes no alias, so a CR copied into another deployment's namespace cannot delete the aliases of the deployment it was copied from. The step is best-effort, like the rest of the teardown: a 404, or a 409 from the precondition, is logged and is no error, a failure of either listing or of a delete is logged, and the teardown continues to its next step. Both deletion paths run it, except for a CR annotated `styrmin.io/skip-teardown: "true"`, for which the delete handler skips the whole teardown and deletes no alias. On the `kubectl delete` path, when `spec.deletionRequested` is not set, it runs only while the namespace exists and is not `Terminating` (`teardown_deletes_aliases`, the rule that the alias flow's second read also uses), so a restore's namespace deletion, which deletes the StyrminDeployment with the namespace, deletes no alias of the restored deployment. When it cannot read the namespace on that path, it logs the error and deletes no alias.
 
@@ -142,6 +142,39 @@ A timer handler fires every 60s to compare desired vs actual state for all manag
 | `Failed` | Reconciliation failed (API error, permission denied) |
 
 In `CreatingHelmRelease` and, for non-internal deployments, `Ready`, the timer also reads the HelmRelease once per tick. When its current generation failed on the component-container guard (the guard key `styrmin.io~1component-container~1…` in a condition message, Ready not `True`), the CR goes to `Failed` / `Error` at once with `HelmReleaseReady=False` and `Ready=False`, reason `ComponentContainerNotFound`, and the typed `COMPONENT_CONTAINER_NOT_FOUND` message naming the component and container (spec 018, FR-007). During a rollout, the timer also follows FluxCD's state of the current generation, as described in the next section. Once the CR is `Ready`, the timer checks only the guard: a later HelmRelease failure without a spec change is not reflected in the CR status.
+
+### Ingresses that Styrmin builds
+
+<!-- Extracted from specs/033-service-ingress-override on 2026-11-10 -->
+
+For each service that the driver declares `scope: external` (kind `http` or `https`), `IngressUtility.build_resources` returns one Ingress, so the operator treats it as it treats the Services, Secrets and NetworkPolicies of the same builder ([ADR-090](../../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md)).
+
+- `list_managed_resources` and `delete_kubernetes_resource` (`operator/reconciler.py`) handle `Ingress`, and `apply_kubernetes_resource` (`agent/service/kubernetes/primitives.py`) creates it with the networking API and replaces it on a 409.
+- The periodic loop of the HelmRelease timer (`kopf_helmrelease_timer`) and the one of the StyrminDeployment timer (`kopf_styrmin_deployment_timer`) reconcile `Ingress` next to `Service` and `Secret`. An Ingress that is no longer in the desired set is deleted, for example when a driver version makes its service internal or removes the service.
+- `kopf_on_ingress_update` and `kopf_on_ingress_delete` (`operator/handlers/utility_resources.py`) are filtered on the label `app.kubernetes.io/managed-by=styrmin`. `list_managed_resources` selects on the same label and on the release reference. A chart Ingress carries neither, so the operator never lists, restores or deletes it.
+- The teardown deletes the Ingresses before the Services (`_teardown_owned_resources`, step 2).
+- The services phase (`execute_phase_services`, `_is_service_or_middleware` in `operator/pipeline.py`) does not include `Ingress`. The Ingress is created by the first run of the HelmRelease timer, which in the end-to-end test happened about one second after the deployment was created, with an interval of 5 seconds. The default interval is 60 seconds (`SETTINGS.operator.reconcile_interval`), so on a default install the first creation can take up to that long after the HelmRelease exists. That delay was not measured. This is the current behavior and it is an open point of [ADR-090](../../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md#open-points): the reason for leaving it, recorded in [e2e-evidence.md](../../../specs/033-service-ingress-override/e2e-evidence.md), was written before the two timers got one release reference and has not been checked again.
+
+### Release reference of the periodic reconciliation
+
+<!-- Extracted from specs/033-service-ingress-override on 2026-11-10 (commit a0885121) -->
+
+Every utility resource carries the label `styrmin.io/release-reference`, which `UtilityResourceBuilder.build` writes from the release reference that its caller passes, and `list_managed_resources` selects on the same label. The two timers, the Prefect flows and the pipeline phases must pass one value for the same objects. Otherwise each one lists none of the objects that the other wrote, creates them again, gets a 409, and replaces the object with a body that carries its own label (reproduced on the end-to-end stack: the label of the Ingress, Services, Secret and NetworkPolicy changed between the real reference and an empty value every 2 to 25 seconds).
+
+| Caller | Release reference it passes |
+|--------|-----------------------------|
+| Prefect flows `install_utility` and `update_utility` | `context.instance.release_reference` |
+| Pipeline phases 1 and 3 (`build_desired_resources_from_crd`) | `spec.releaseReference` of the StyrminDeployment |
+| StyrminDeployment timer | `spec.releaseReference` of the StyrminDeployment |
+| HelmRelease timer | The `styrmin.io/release-reference` label of the HelmRelease, and when that is empty, `context.instance.release_reference` |
+
+The HelmRelease that the StyrminDeployment pipeline creates has no `styrmin.io/release-reference` label: `ApplicationHelmReleaseBuilder.build` sets `app.kubernetes.io/managed-by` and `styrmin.io/operator-managed` only. The label read by the HelmRelease timer is therefore empty for every deployment that the pipeline manages, and the fallback to the instance's release reference is what makes the timers agree. `UtilityResourceBuilder.build` applies the same fallback, so no caller writes an empty label. For an ordinary deployment the reference is `styrmin-<deployment id>`. See [Name of the CR and the release reference](#name-of-the-cr-and-the-release-reference) for the counterpart of an environment clone.
+
+Known consequences, not changed (sources: the section "Release-reference label" of [e2e-evidence.md](../../../specs/033-service-ingress-override/e2e-evidence.md)):
+
+- The kopf drift handlers for Ingress, Service, Secret and NetworkPolicy read the label of the changed object and then select a HelmRelease by it. A HelmRelease has no such label, so the handlers find none, log "No HelmRelease found ... skipping reconciliation" and do nothing. The timers do the correction. The number of such log lines was not counted.
+- `on_helmrelease_delete` passes the empty label of the HelmRelease to `cleanup_operator_resources`, so it selects none of the operator-managed NetworkPolicies that carry the real reference. `_teardown_owned_resources` deletes them by the real reference. A HelmRelease deleted alone was not tested.
+- In the end-to-end runs after the fix, Services were still written about every 5 seconds with an unchanged label. The Ingress was not. The cause is not investigated.
 
 ## FluxCD controllers
 
@@ -221,6 +254,7 @@ The operator is the sole owner of all utility resources for CRD-managed deployme
 | Secret | `v1` | Operator |
 | HelmRelease | `helm.toolkit.fluxcd.io/v2` | Operator (reconciled by FluxCD) |
 | Service | `v1` | Operator |
+| Ingress | `networking.k8s.io/v1` | Operator, only for a service that the driver declares `scope: external` (see [Ingresses that Styrmin builds](#ingresses-that-styrmin-builds)); an Ingress that a chart renders belongs to Helm |
 | Middleware | `traefik.io/v1alpha1` | Operator |
 
 ### Labels
@@ -240,6 +274,7 @@ All resources created from a StyrminDeployment carry:
 - NetworkPolicies per deployment, from the ingress utility: default-deny-egress, default-deny-ingress, allow-traefik-ingress, allow-egress-to-environment (when the context has an environment id), traefik-netpolicy-egress, prefect-netpolicy-egress, infrahub-netpolicy-egress
 - NetworkPolicies per deployment, from the service-discovery utility: `allow-environment-to-<component>`, one for each component that serves a declared service; it admits the namespaces of the environment on the services' ports (#557)
 - Plus the policies that the application's chart creates
+- Ingresses that Styrmin builds: `styrmin-svc-<driver service name>`, labeled `styrmin.io/service-name=<driver service name>`, `styrmin/environment_id` and `styrmin/deployment_id` (the dedicated controller selects Ingresses by `styrmin/environment_id`: see [ADR-090](../../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md#2-the-ingress-is-named-and-labeled-by-the-driver-service-name)). The name does not use a record id: see [ADR-090](../../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md#relation-to-adr-073)
 
 ### Apply semantics
 

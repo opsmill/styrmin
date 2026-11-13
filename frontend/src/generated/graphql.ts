@@ -354,9 +354,15 @@ export type DeployedService = {
   component: Scalars['String']['output'];
   deploymentId: Scalars['UUID']['output'];
   driverServiceName: Scalars['String']['output'];
+  /** True when the suffix of `humanReadableFqdn` and `humanReadableUrl` comes from the service's ingress override. */
+  fqdnSuffixOverridden: Scalars['Boolean']['output'];
   humanReadableFqdn?: Maybe<Scalars['String']['output']>;
   humanReadableUrl?: Maybe<Scalars['String']['output']>;
   id: Scalars['UUID']['output'];
+  /** Effective ingress class of the Ingress that Styrmin builds for this service: the service's override, else the resolved class. Null for a service that is not external, and where the deployment is not read. */
+  ingressClass?: Maybe<Scalars['String']['output']>;
+  /** True when `ingressClass` comes from the service's ingress override. */
+  ingressClassOverridden: Scalars['Boolean']['output'];
   kind: Scalars['String']['output'];
   port: Scalars['Int']['output'];
   primaryFqdn?: Maybe<Scalars['String']['output']>;
@@ -397,6 +403,8 @@ export type Deployment = {
   parameters: Scalars['JSON']['output'];
   podStatuses: Array<PodStatus>;
   resolvedScheduling: Array<ResolvedComponentScheduling>;
+  /** The stored ingress overrides of this deployment's services, sorted by service name. Empty when none is stored. Read `deployedServices` for the effective class and host of each service. */
+  serviceIngressOverrides: Array<ServiceIngressOverride>;
   status: Scalars['String']['output'];
 };
 
@@ -430,6 +438,8 @@ export type DeploymentConfigInput = {
   runtimeClass?: InputMaybe<Scalars['String']['input']>;
   /** Hierarchical pod scheduling & resource configuration (affinities, tolerations, topology spread, resource requests/limits, runtime class, post-render injection opt-outs). */
   scheduling?: InputMaybe<SchedulingInput>;
+  /** Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override. When the write changes the driver version, a stored override on a service that the target version removes or declares ``internal`` raises ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod changes, unless the same write clears it. */
+  services?: InputMaybe<Array<ServiceConfigInput>>;
   /** Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment. */
   standardStorage?: InputMaybe<StandardStorageInput>;
 };
@@ -1462,6 +1472,16 @@ export type SchedulingInput = {
   topologySpreadConstraints?: InputMaybe<Array<TopologySpreadConstraintInput>>;
 };
 
+/** Per-service ingress override block for a deployment: the ingress class and the FQDN suffix of one service that the driver declares ``scope: external``. */
+export type ServiceConfigInput = {
+  /** FQDN suffix for this service only, used in its readable host. Null or omitted: the resolved suffix applies. */
+  fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
+  /** Ingress class for this service only. Null or omitted: the resolved class applies. */
+  ingressClass?: InputMaybe<Scalars['String']['input']>;
+  /** The driver service name. It must be declared by the driver version the deployment is bound to after the write, with scope ``external`` and kind ``http`` or ``https``. A service the version does not declare raises ``UNKNOWN_SERVICE_INGRESS_OVERRIDE``, and a service with scope ``internal``, or with kind ``tcp`` or ``udp``, raises ``SERVICE_INGRESS_NOT_BUILT``, because Styrmin does not build its Ingress. */
+  name: Scalars['String']['input'];
+};
+
 export type ServiceDefinition = {
   __typename?: 'ServiceDefinition';
   component: Scalars['String']['output'];
@@ -1469,6 +1489,17 @@ export type ServiceDefinition = {
   name: Scalars['String']['output'];
   port: Scalars['Int']['output'];
   scope: Scalars['String']['output'];
+};
+
+/** The stored ingress override of one service of a deployment, as set through `services` on the deployment config input. */
+export type ServiceIngressOverride = {
+  __typename?: 'ServiceIngressOverride';
+  /** FQDN suffix for this service only. Null when not overridden. */
+  fqdnSuffix?: Maybe<Scalars['String']['output']>;
+  /** Ingress class for this service only. Null when not overridden. */
+  ingressClass?: Maybe<Scalars['String']['output']>;
+  /** The driver service name. */
+  name: Scalars['String']['output'];
 };
 
 export type ServiceNameOverride = {
@@ -1711,6 +1742,8 @@ export type UpdateDeploymentInput = {
   scheduling?: InputMaybe<SchedulingInput>;
   /** Full-replacement list of service-name overrides applied at deploy time. Each entry maps a driver-declared service name to the operator-chosen override name. */
   serviceNameOverrides?: InputMaybe<Array<ServiceNameOverride>>;
+  /** Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override. When the write changes the driver version, a stored override on a service that the target version removes or declares ``internal`` raises ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod changes, unless the same write clears it. */
+  services?: InputMaybe<Array<ServiceConfigInput>>;
   /** Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment. */
   standardStorage?: InputMaybe<StandardStorageInput>;
 };
@@ -1939,7 +1972,7 @@ export type GetDeploymentQueryVariables = Exact<{
 }>;
 
 
-export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriver: { __typename?: 'ApplicationDriver', id: string, name: string }, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', name: string, replicas?: number | null }> }, environment: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown> } }, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean, container?: string | null }>, componentImageOverrides: Array<{ __typename?: 'ComponentImageOverride', component: string, reference: string, resolvedReference: string, isOrphaned: boolean, isApplicable: boolean }>, componentContainerOverrides: Array<{ __typename?: 'ComponentContainerOverrides', component: string, command?: Array<string> | null, args?: Array<string> | null, isOrphaned: boolean, isApplicable: boolean }>, componentReplicas: Array<{ __typename?: 'ComponentReplicas', component: string, count?: number | null, source: ReplicaSource, override?: number | null, singleton: boolean, isOrphaned: boolean, isApplicable: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null, primaryUrl?: string | null, humanReadableUrl?: string | null }> } | null };
+export type GetDeploymentQuery = { __typename?: 'Query', deployment?: { __typename?: 'Deployment', id: string, name: string, status: string, deletedAt?: any | null, config: Record<string, unknown>, parameters: Record<string, unknown>, applicationVersion: string, applicationDriverVersionId: string, environmentId: string, applicationDriverVersion: { __typename?: 'ApplicationDriverVersion', id: string, version: string, contentHash?: string | null, sourceCommitSha?: string | null, applicationDriver: { __typename?: 'ApplicationDriver', id: string, name: string }, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', name: string, replicas?: number | null }> }, environment: { __typename?: 'Environment', id: string, name: string, config: Record<string, unknown>, cluster: { __typename?: 'Cluster', id: string, name: string, config: Record<string, unknown> } }, applicationInstance?: { __typename?: 'ApplicationInstance', id: string, name: string, status: string, applicationVersion: string, applicationDriverVersionId: string, deploymentId: string } | null, components: Array<{ __typename?: 'Component', id: string, name: string, enabled: boolean, container?: string | null }>, componentImageOverrides: Array<{ __typename?: 'ComponentImageOverride', component: string, reference: string, resolvedReference: string, isOrphaned: boolean, isApplicable: boolean }>, componentContainerOverrides: Array<{ __typename?: 'ComponentContainerOverrides', component: string, command?: Array<string> | null, args?: Array<string> | null, isOrphaned: boolean, isApplicable: boolean }>, componentReplicas: Array<{ __typename?: 'ComponentReplicas', component: string, count?: number | null, source: ReplicaSource, override?: number | null, singleton: boolean, isOrphaned: boolean, isApplicable: boolean }>, deployedServices: Array<{ __typename?: 'DeployedService', id: string, driverServiceName: string, resolvedName: string, kind: string, scope: string, port: number, primaryFqdn?: string | null, humanReadableFqdn?: string | null, primaryUrl?: string | null, humanReadableUrl?: string | null, ingressClass?: string | null, ingressClassOverridden: boolean, fqdnSuffixOverridden: boolean }> } | null };
 
 export type GetDeploymentPodsQueryVariables = Exact<{
   deploymentId: Scalars['UUID']['input'];
@@ -2013,7 +2046,7 @@ export type GetTaskQuery = { __typename?: 'Query', task?: { __typename?: 'Task',
 export type ListApplicationDriversQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type ListApplicationDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, defaultVersion?: string | null, createdOn: any, contentHash?: string | null, sourceCommitSha?: string | null, driverDirectory?: string | null, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', name: string, replicas?: number | null, singleton: boolean }> }> }> };
+export type ListApplicationDriversQuery = { __typename?: 'Query', applicationDrivers: Array<{ __typename?: 'ApplicationDriver', id: string, name: string, versions: Array<{ __typename?: 'ApplicationDriverVersion', id: string, version: string, supportedVersions: string, defaultVersion?: string | null, createdOn: any, contentHash?: string | null, sourceCommitSha?: string | null, driverDirectory?: string | null, parameters: Array<{ __typename?: 'ParameterDefinition', name: string, label: string, kind: string, default?: Record<string, unknown> | null, values?: Array<string> | null }>, componentConfigs: Array<{ __typename?: 'ComponentConfig', name: string, replicas?: number | null, singleton: boolean }>, services: Array<{ __typename?: 'ServiceDefinition', name: string, scope: string, kind: string }> }> }> };
 
 export type ListBackupStorageLocationsQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2839,11 +2872,15 @@ export const GetDeploymentDocument = `
       driverServiceName
       resolvedName
       kind
+      scope
       port
       primaryFqdn
       humanReadableFqdn
       primaryUrl
       humanReadableUrl
+      ingressClass
+      ingressClassOverridden
+      fqdnSuffixOverridden
     }
   }
 }
@@ -3365,6 +3402,11 @@ export const ListApplicationDriversDocument = `
         name
         replicas
         singleton
+      }
+      services {
+        name
+        scope
+        kind
       }
     }
   }

@@ -229,6 +229,27 @@ deployed_services: # list of dicts — services as they exist in the cluster
 created in the cluster. Templates usually read `services`; actions
 sometimes read `deployed_services`.
 
+Each entry of `services`, keyed by service name, has these keys:
+
+- `host`, `port`, `kind` and `url`: how to connect to the service inside the
+  cluster.
+- `primary_fqdn`: the application address,
+  `<driver name>-<deployment id>.<fqdn suffix>`, or `None` without a suffix.
+  It is the same for every service of a deployment.
+- `human_readable_fqdn`: the readable host,
+  `<service name>-<environment name>.<fqdn suffix>`, or `None` without a
+  suffix. When the deployment has a
+  [service ingress override](../concepts-and-architecture/service-ingress-overrides.md)
+  for the service, the suffix is the override's suffix.
+- `ingress_class`: the effective ingress class of the service, the override's
+  class when there is one.
+- `overridden`: `true` when the service has an override with at least one field
+  set.
+
+Styrmin builds the Ingress of each external service, so a template does not
+render one for it. See
+[Declare services](./creating-a-driver.md#step-6-declare-services).
+
 #### `utilities` and `labels`
 
 ```text

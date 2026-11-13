@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from uuid import UUID
 
 from loguru import logger
@@ -17,6 +17,8 @@ from styrmin_backend.context.models.config import (
     DeploymentConfig,
     EnvironmentConfig,
     SchedulingConfig,
+    ServiceConfigBlock,
+    parse_service_overrides,
 )
 from styrmin_backend.context.models.contexts import (
     GlobalContext,
@@ -29,14 +31,15 @@ from styrmin_backend.context.models.input import (
     UtilityKindInput,
 )
 from styrmin_backend.context.fqdn import (
-    compute_human_readable_fqdn,
-    compute_primary_fqdn,
+    compute_service_address,
+    service_gets_ingress,
 )
 from styrmin_backend.context.models.services import ServiceReference
 from styrmin_backend.context.resolvers import (
     _resolve_scheduling_config,
     resolve_global_context,
 )
+from styrmin_backend.db.models import DeployedService
 from styrmin_backend.domain.models import Deployment
 from styrmin_backend.services.env_vars.exceptions import (
     EnvVarSizeLimitExceededError,
@@ -231,35 +234,65 @@ async def generate_context_from_deployment(
         context.environment.capabilities = environment.capabilities or {}
 
         # Build services context from deployed services in the environment
-        fqdn_suffix = context.instance.config.fqdn_suffix
         app_name = application_driver.name
         env_name = environment.name
 
         deployed_services = await uow.deployed_services.get_by_environment_id(
             deployment.environment_id
         )
+        service_overrides = await _service_overrides_by_deployment(
+            deployment=deployment,
+            own_overrides=context.deployment.config.services,
+            deployed_services=deployed_services,
+            uow=uow,
+        )
         services_dict: dict = {}
         deployed_services_list: list[dict] = []
-        for svc in deployed_services:
+        for svc in _order_deployed_services(
+            deployed_services,
+            deployment_id=deployment.id,
+            declared_names=[
+                declared["name"]
+                for declared in application_driver_version.services or []
+            ],
+        ):
+            # An override applies only to a service whose Ingress Styrmin builds.
+            override = (
+                service_overrides.get(svc.deployment_id, {}).get(
+                    svc.driver_service_name
+                )
+                if service_gets_ingress(svc.scope, svc.kind)
+                else None
+            )
+            address = compute_service_address(
+                context.instance.config,
+                override,
+                service_host=svc.resolved_name,
+                environment_name=env_name,
+                app_name=app_name,
+                deployment_id=deployment.id,
+            )
             ref = ServiceReference(
                 host=svc.resolved_name,
                 port=svc.port,
                 kind=svc.kind,
-                primary_fqdn=compute_primary_fqdn(
-                    app_name, str(deployment.id), fqdn_suffix
-                ),
-                human_readable_fqdn=compute_human_readable_fqdn(
-                    svc.resolved_name, env_name, fqdn_suffix
-                ),
+                primary_fqdn=address.primary_fqdn,
+                human_readable_fqdn=address.human_readable_fqdn,
+                ingress_class=address.ingress_class,
+                overridden=address.overridden,
             )
             services_dict[svc.driver_service_name] = ref.model_dump()
             deployed_services_list.append(
                 {
+                    "driver_service_name": svc.driver_service_name,
                     "resolved_name": svc.resolved_name,
                     "port": svc.port,
                     "kind": svc.kind,
+                    "scope": svc.scope,
                     "deployment_id": str(svc.deployment_id),
                     "component": svc.component,
+                    "ingress_class": address.ingress_class,
+                    "fqdn_suffix": address.fqdn_suffix,
                 }
             )
         context.services = services_dict
@@ -312,6 +345,59 @@ async def generate_context_from_deployment(
         )
 
         return context
+
+
+def _order_deployed_services(
+    deployed_services: Sequence[DeployedService],
+    *,
+    deployment_id: UUID,
+    declared_names: Sequence[str],
+) -> list[DeployedService]:
+    """Order the services of an environment deterministically.
+
+    The repository query has no ``ORDER BY``. The services of other deployments come first,
+    by deployment id and service name. The services of this deployment come last, in the
+    order in which its driver version declares them (the Ingress builder gives the
+    application address to the first one). Because the services of this deployment come
+    last, they win a ``services`` key that a peer shares with them. A service that the
+    driver version does not declare sorts after the declared ones, by name.
+    """
+    declared_index = {name: index for index, name in enumerate(declared_names)}
+
+    def sort_key(svc: DeployedService) -> tuple[int, str, int, str]:
+        if svc.deployment_id != deployment_id:
+            return (0, str(svc.deployment_id), 0, svc.driver_service_name)
+        return (
+            1,
+            "",
+            declared_index.get(svc.driver_service_name, len(declared_index)),
+            svc.driver_service_name,
+        )
+
+    return sorted(deployed_services, key=sort_key)
+
+
+async def _service_overrides_by_deployment(
+    *,
+    deployment: Deployment,
+    own_overrides: Mapping[str, ServiceConfigBlock] | None,
+    deployed_services: Sequence[DeployedService],
+    uow: UnitOfWork,
+) -> dict[UUID, Mapping[str, ServiceConfigBlock]]:
+    """Return the service ingress overrides of every deployment that owns a service.
+
+    A service uses the override of the deployment that owns it, never the override of the
+    deployment the context is built for (#598, FR-006).
+    """
+    overrides: dict[UUID, Mapping[str, ServiceConfigBlock]] = {
+        deployment.id: own_overrides or {}
+    }
+    for owner_id in {svc.deployment_id for svc in deployed_services} - {deployment.id}:
+        owner = await uow.deployments.find(owner_id)
+        overrides[owner_id] = parse_service_overrides(
+            owner.config if owner is not None else None
+        )
+    return overrides
 
 
 async def _populate_component_scheduling(

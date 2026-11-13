@@ -24,6 +24,11 @@ class UtilityResourceBuilder:
 
         Returns list of resource dicts ready for cluster application.
         """
+        # The label below is how each reconciler finds the object again, so it must be one value
+        # for the instance. An empty reference (the operator reads it from a label that a
+        # HelmRelease of the StyrminDeployment pipeline does not have) takes the one of the instance.
+        release_reference = release_reference or self.context.instance.release_reference
+
         resources = utility.build_resources(
             context=self.context,
             release_reference=release_reference,

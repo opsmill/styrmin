@@ -7,7 +7,10 @@ Single source of truth for FQDN assembly, used by both context generation
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from uuid import UUID
+
+from styrmin_backend.context.models.config import ResolvedConfig, ServiceConfigBlock
 
 _DNS_MAX_LABEL_LENGTH = 63
 
@@ -97,6 +100,68 @@ def compute_human_readable_fqdn(
     if not label:
         return None
     return f"{label}.{fqdn_suffix}"
+
+
+# Only these kinds can sit behind an Ingress (research D-006).
+INGRESS_SERVICE_KINDS = frozenset({"http", "https"})
+
+
+def service_gets_ingress(scope: str, kind: str) -> bool:
+    """Whether Styrmin builds an Ingress for a service: ``scope: external`` and kind ``http`` or ``https``.
+
+    The one rule that the Ingress builder, the write-time validation, the context and the
+    GraphQL read model share, so they cannot disagree on which service an ingress override
+    applies to. Pass the string values (``"external"``), not the enum members: the hash of
+    a ``str`` enum member is the hash of its name.
+    """
+    return scope == "external" and kind in INGRESS_SERVICE_KINDS
+
+
+@dataclass(frozen=True)
+class ServiceAddress:
+    """The effective ingress class, suffix and hosts of one service.
+
+    ``overridden`` is ``True`` when the deployment stores a service ingress override
+    with at least one field set for the service (#598).
+    """
+
+    ingress_class: str | None
+    fqdn_suffix: str | None
+    human_readable_fqdn: str | None
+    primary_fqdn: str | None
+    overridden: bool
+
+
+def compute_service_address(
+    config: ResolvedConfig,
+    override: ServiceConfigBlock | None,
+    *,
+    service_host: str,
+    environment_name: str,
+    app_name: str,
+    deployment_id: str | UUID,
+) -> ServiceAddress:
+    """Compute the effective address of a service, with or without an override.
+
+    The override class and suffix replace the resolved ones for this service only, and a
+    field left as ``None`` falls back to the resolved value. The primary FQDN always uses
+    the resolved suffix: the application address stays with the resolved configuration.
+    """
+    overridden = override is not None and not override.is_empty
+    ingress_class = config.ingress_class
+    fqdn_suffix = config.fqdn_suffix
+    if override is not None:
+        ingress_class = override.ingress_class or ingress_class
+        fqdn_suffix = override.fqdn_suffix or fqdn_suffix
+    return ServiceAddress(
+        ingress_class=ingress_class,
+        fqdn_suffix=fqdn_suffix,
+        human_readable_fqdn=compute_human_readable_fqdn(
+            service_host, environment_name, fqdn_suffix
+        ),
+        primary_fqdn=compute_primary_fqdn(app_name, deployment_id, config.fqdn_suffix),
+        overridden=overridden,
+    )
 
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}

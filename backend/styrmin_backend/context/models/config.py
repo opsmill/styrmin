@@ -1,4 +1,5 @@
 import re
+from collections.abc import Mapping
 from typing import Any, Literal
 from uuid import UUID
 
@@ -654,6 +655,114 @@ class ComponentConfigBlock(BaseModel):
         return data
 
 
+_INGRESS_CLASS_MAX_LENGTH = 253
+# A DNS-1123 subdomain, the rule for the name of a Kubernetes IngressClass. Matched with
+# ``fullmatch``: ``re.match`` with ``$`` accepts a trailing newline.
+_INGRESS_CLASS_RE = re.compile(
+    r"[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*"
+)
+
+
+def validate_service_ingress_class(value: str) -> str:
+    """Validate the ingress class of a service ingress override.
+
+    The class is written to ``spec.ingressClassName`` and to the ``kubernetes.io/ingress.class``
+    annotation of the Ingress, so it must be a valid Kubernetes object name: a DNS-1123
+    subdomain of lowercase letters, digits, hyphens and dots, at most 253 characters, where
+    each dot-separated label starts and ends with a letter or a digit (``a.-b`` is rejected). A line break, other whitespace or a control character is
+    rejected. The cluster, environment and deployment ``ingress_class`` have no such check; the
+    override is the one input that does.
+    """
+    if len(value) > _INGRESS_CLASS_MAX_LENGTH or not _INGRESS_CLASS_RE.fullmatch(value):
+        raise ValueError(
+            f"ingress_class {value!r} is not a valid Kubernetes object name: use lowercase "
+            "letters, digits, hyphens and dots, let each dot-separated label start and end "
+            f"with a letter or a digit, and use at most {_INGRESS_CLASS_MAX_LENGTH} characters."
+        )
+    return value
+
+
+_FQDN_SUFFIX_MAX_LENGTH = 253
+# Matched with ``fullmatch``: ``re.match`` with ``$`` accepts a trailing newline.
+_FQDN_SUFFIX_LABEL_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
+
+
+def validate_service_fqdn_suffix(value: str) -> str:
+    """Validate the FQDN suffix of a service ingress override.
+
+    The suffix must be a DNS name: dot-separated labels of lowercase letters, digits and
+    hyphens (a label starts and ends with a letter or a digit and has at most 63
+    characters), at most 253 characters in total, with no leading, trailing or doubled dot.
+    The cluster, environment and deployment ``fqdn_suffix`` have no such check; the
+    override is the one input that does (specs/033-service-ingress-override/data-model.md).
+    """
+    if not value:
+        raise ValueError("fqdn_suffix must not be empty; remove the field to clear it.")
+    if len(value) > _FQDN_SUFFIX_MAX_LENGTH:
+        raise ValueError(
+            f"fqdn_suffix {value!r} is longer than {_FQDN_SUFFIX_MAX_LENGTH} characters."
+        )
+    for label in value.split("."):
+        if not _FQDN_SUFFIX_LABEL_RE.fullmatch(label):
+            raise ValueError(
+                f"fqdn_suffix {value!r} is not a DNS name: each dot-separated label must "
+                "have 1 to 63 lowercase letters, digits or hyphens, and start and end "
+                "with a letter or a digit."
+            )
+    return value
+
+
+class ServiceConfigBlock(BaseModel):
+    """Ingress override of one service of a deployment (#598).
+
+    Stored in ``DeploymentConfig.services`` under the driver service name. A field left as
+    ``None`` means: use the resolved cluster, environment or deployment value. A block with
+    both fields ``None`` is not stored.
+
+    Attributes:
+        ingress_class (str | None): Ingress class of this service. A Kubernetes object name
+            (a DNS-1123 subdomain).
+        fqdn_suffix (str | None): FQDN suffix of this service, used in its readable host.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ingress_class: str | None = Field(default=None, min_length=1)
+    fqdn_suffix: str | None = None
+
+    @field_validator("ingress_class")
+    @classmethod
+    def _validate_ingress_class(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return validate_service_ingress_class(v)
+
+    @field_validator("fqdn_suffix")
+    @classmethod
+    def _validate_fqdn_suffix(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return validate_service_fqdn_suffix(v)
+
+    @property
+    def is_empty(self) -> bool:
+        return self.ingress_class is None and self.fqdn_suffix is None
+
+
+def parse_service_overrides(
+    config: Mapping[str, Any] | None,
+) -> dict[str, ServiceConfigBlock]:
+    """Return the service ingress overrides of a stored deployment config, keyed by driver service name.
+
+    The one reader of ``config["services"]`` outside the ``DeploymentConfig`` model: a config
+    that is ``None``, has no ``services`` key, or has ``"services": null`` holds no override.
+    """
+    stored = (config or {}).get("services") or {}
+    return {
+        name: ServiceConfigBlock.model_validate(block) for name, block in stored.items()
+    }
+
+
 class DeploymentConfig(ClusterConfig, EnvironmentConfig):
     """Deployment context.
 
@@ -679,11 +788,38 @@ class DeploymentConfig(ClusterConfig, EnvironmentConfig):
             FR-004), ``UnknownComponentImageOverrideError`` (image), or
             ``UnknownComponentReplicaOverrideError`` (an added or changed
             ``replicas``; an unchanged stored one is kept).
+        services (dict[str, ServiceConfigBlock] | None): Per-service ingress
+            override blocks keyed by driver service name (#598). A block with
+            both fields ``None`` is dropped, and ``services`` is ``None`` when
+            no block is left. The key is omitted from a dump when ``None``, so
+            the stored config of a deployment without an override is unchanged.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     components: dict[str, ComponentConfigBlock] | None = None
+    services: dict[str, ServiceConfigBlock] | None = None
+
+    @field_validator("services", mode="after")
+    @classmethod
+    def _drop_empty_service_blocks(
+        cls, v: dict[str, ServiceConfigBlock] | None
+    ) -> dict[str, ServiceConfigBlock] | None:
+        if v is None:
+            return v
+        kept = {name: block for name, block in v.items() if not block.is_empty}
+        return kept or None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_services(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        # A release before this key rejects it (``extra="forbid"``), and the no-op check of a
+        # deployment update must not see a difference for a deployment without an override.
+        data = handler(self)
+        if data.get("services", 0) is None:
+            del data["services"]
+        return data
 
     @field_validator("components", mode="before")
     @classmethod

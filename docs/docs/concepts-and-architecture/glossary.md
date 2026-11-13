@@ -263,6 +263,14 @@ the GraphQL API, and stores what should run.
 **Service (deployed service)**: A network endpoint that the application
 driver declares and that Styrmin creates as a Kubernetes `Service`.
 
+**Service ingress override**: The ingress class, the FQDN suffix, or
+both, that a deployment sets for one external service of its application
+driver version. It replaces the resolved class and suffix for that
+service only. You set it in a manifest (`spec.config.services`), through
+the API, or in the Settings tab and the deploy form. Styrmin refuses
+an override on a service that is not `scope: external`. See [Service
+ingress overrides](./service-ingress-overrides.md).
+
 **Singleton component**: A component that the application driver
 version marks `singleton: true`. Styrmin sets its replica count to 1 and
 rejects a **replica override** greater than 1
@@ -273,6 +281,13 @@ See [Replica overrides](./replica-overrides.md#singleton-components).
 **Status reporter**: The coroutine inside the agent that polls
 Kubernetes and sends `PodStatus` and `DeploymentStatus` snapshots to the
 server. See [Status reporting](./status-reporting.md).
+
+**Styrmin-built Ingress**: The Ingress that Styrmin builds for a service
+that its application driver declares `scope: external`. The driver's
+chart renders no Ingress for that service. Styrmin builds it from the
+resolved ingress class and FQDN suffix, or from a **service ingress
+override**. See [The Ingress that Styrmin builds for an external
+service](./ingress-and-networking.md#the-ingress-that-styrmin-builds-for-an-external-service).
 
 **Step**: One unit of work inside a task, a backup, or a restore,
 recorded so that users can view it: its name, status (`PENDING`,

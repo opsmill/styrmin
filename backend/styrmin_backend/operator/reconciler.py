@@ -165,6 +165,11 @@ async def delete_kubernetes_resource(
                 await networking_api.delete_namespaced_network_policy(
                     name=name, namespace=namespace
                 )
+            elif kind == "Ingress":
+                networking_api = kubeclient.NetworkingV1Api(client)
+                await networking_api.delete_namespaced_ingress(
+                    name=name, namespace=namespace
+                )
             elif kind == "Service":
                 core_api = kubeclient.CoreV1Api(client)
                 await core_api.delete_namespaced_service(name=name, namespace=namespace)
@@ -321,6 +326,23 @@ async def list_managed_resources(
                     )
             except Exception:
                 logger.exception("Failed to list NetworkPolicies in %s", namespace)
+
+        if kind is None or kind == "Ingress":
+            try:
+                networking_api = kubeclient.NetworkingV1Api(client)
+                result = await networking_api.list_namespaced_ingress(
+                    namespace=namespace, label_selector=label_selector
+                )
+                for item in result.items:
+                    resources.append(
+                        _ensure_resource_type_metadata(
+                            client.sanitize_for_serialization(item),
+                            kind="Ingress",
+                            api_version="networking.k8s.io/v1",
+                        )
+                    )
+            except Exception:
+                logger.exception("Failed to list Ingresses in %s", namespace)
 
         if kind is None or kind == "Service":
             try:

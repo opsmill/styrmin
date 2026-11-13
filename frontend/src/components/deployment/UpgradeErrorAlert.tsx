@@ -15,16 +15,75 @@ function asText(value: unknown): string {
   return JSON.stringify(value) ?? String(value);
 }
 
+function DroppedIngressOverrideAlert({
+  error,
+  onOpenSettings,
+}: {
+  error: GraphQLOperationError;
+  onOpenSettings: () => void;
+}) {
+  const service = String(error.extensions.service_name ?? "");
+  return (
+    <Alert variant="destructive" data-testid="upgrade-dropped-ingress-override">
+      <AlertTitle>
+        Clear the ingress override of {service} before you upgrade
+      </AlertTitle>
+      <AlertDescription className="space-y-2">
+        <p>
+          The new driver version does not build an Ingress for the service{" "}
+          <code className="font-mono">{service}</code>, so its ingress override
+          would stop applying. Nothing changed.
+        </p>
+        <ol className="list-decimal space-y-1 pl-5">
+          <li>On the Settings tab, click Update Settings.</li>
+          <li>In the Edit configuration drawer, open the Services section.</li>
+          <li>
+            Under Service ingress overrides, click Clear for{" "}
+            <code className="font-mono">{service}</code>.
+          </li>
+          <li>Click Review &amp; apply, then upgrade again.</li>
+        </ol>
+        <p className="text-xs">
+          <MessageWithLinks text={error.message} />
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onOpenSettings}
+        >
+          Open the Settings tab
+        </Button>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 /**
  * Error of the Upgrade dialog. Links in the server message are clickable. A
  * `RETIRED_PARAMETER_VALUE` rejection also lists the steps that fix it, which
- * happen on the Settings tab, not in this dialog (023).
+ * happen on the Settings tab, not in this dialog (023). So does a
+ * `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED` rejection (#598): the server message
+ * says to clear the override "in the same request", but this dialog sends only
+ * the version, so the alert gives the steps in the configuration drawer.
  */
 export function UpgradeErrorAlert({
   error,
   componentNames,
   onOpenSettings,
 }: Props) {
+  if (
+    error instanceof GraphQLOperationError &&
+    error.code === "SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED"
+  ) {
+    return (
+      <DroppedIngressOverrideAlert
+        error={error}
+        onOpenSettings={onOpenSettings}
+      />
+    );
+  }
+
   if (
     !(error instanceof GraphQLOperationError) ||
     error.code !== "RETIRED_PARAMETER_VALUE"

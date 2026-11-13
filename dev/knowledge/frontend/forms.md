@@ -194,6 +194,23 @@ left out would be removed by every save from the Edit dialog, so two checks repo
   the stored config does not set every `ClusterConfig` field. `lib/cluster-input.test.ts` fails
   when `clusterConfigToInput` does not convert the stored config to the input.
 
+### Service ingress fields (deploy form and configuration drawer)
+
+<!-- Extracted from specs/033-service-ingress-override on 2026-11-10 -->
+
+`ServiceIngressFields` (`components/deployment/configuration/ServiceIngressFields.tsx`) renders the ingress class and the FQDN suffix of each service that Styrmin builds an Ingress for (`scope` is `external` and `kind` is `http` or `https`, `getsIngress` in `lib/service-ingress.ts`), with a **Clear** button for each service. A service that is not external, or is external with kind `tcp` or `udp`, gets no field, because Styrmin builds no Ingress for it and the backend refuses an override on it (`SERVICE_INGRESS_NOT_BUILT`). The component returns `null` when no service gets an Ingress. Both forms use it, so they offer the same fields, labels (`Ingress class for <service>`, `FQDN suffix for <service>`) and validation ([ADR-090](../../adr/0090-styrmin-builds-the-ingress-of-an-external-service.md)).
+
+| Place | Where the services come from | State |
+|-------|------------------------------|-------|
+| Deploy form (`pages/deployments/DeployFormPage.tsx`), group `service-ingress-section` | `services { name scope kind }` of the selected driver version (the rows carry `kind` as well as `scope`), added to `list_application_drivers.graphql` | `serviceIngress` in `useState`, outside the form schema like the other dynamic fields. Reset when the driver version changes. |
+| Configuration drawer, section **Services** (`ServiceOverridesSection`, group **Service ingress overrides**) | `deployment.deployedServices` (with `scope` and `kind`), passed as the `services` prop by `ConfigEditDrawer` | TanStack Form field `services` of the drawer's form |
+
+- Validation mirrors the backend: `ingressClassError` in `lib/ingress-class.ts` (a Kubernetes object name, at most 253 characters) and `fqdnSuffixError` in `lib/fqdn-suffix.ts` (a DNS name, labels of 1 to 63 characters, at most 253 in total). An empty field is not an error: it means the resolved value applies. An invalid value sets `aria-invalid` on its input and names the rule in the message that the input is described by. Keep the two files in step with `validate_service_ingress_class` and `validate_service_fqdn_suffix` in `context/models/config.py`.
+- `DrawerInvalidFields` (`DrawerDiffContext.tsx`) has `services`, the services whose FQDN suffix is invalid, and `serviceClasses`, the services whose ingress class is invalid. While either is not empty, the footer disables **Review & apply** with a hint that names the services. The deploy form disables **Deploy** and shows `deploy-blocked-reason` for the same cases.
+- `servicesFormToInput` (`lib/deployment-input.ts`) maps the rows to `ServiceConfigInput` on submit. An emptied field holds `""`, which the backend rejects, so the function leaves the field out, and a row with no value is dropped. `deploymentConfigToInput` maps the stored `services` back to rows. `updateDeployment` replaces the whole stored config, so a projection that leaves `services` out would clear every stored override on the next save of any other field.
+- The review dialog lists each change as `Service "<name>" ingress class` or `Service "<name>" FQDN suffix` (`diffServices` in `lib/config-diff.ts`), with the impact rules in `lib/impact-rules.ts`.
+- The read-only **Networking** summary (`NetworkingSummary`) lists each external service with its effective class and host, marked **Overridden** or **Inherited**, from `ingressClass`, `ingressClassOverridden`, `humanReadableFqdn` and `fqdnSuffixOverridden` of `deployedServices`.
+
 <!-- Extracted from specs/021-cluster-config-update on 2026-10-13 -->
 
 ### Form Tests

@@ -122,6 +122,9 @@ class ApplyOutcome(BaseModel):
     inapplicable_overrides: dict[str, list[OverrideKind]] = Field(default_factory=dict)
     # Set when reading which overrides apply failed: `inapplicable_overrides` is then empty.
     applicability_check_error: str | None = None
+    # Services whose stored ingress override the update clears: the manifest sets config keys and
+    # no `services`, and the backend replaces the whole stored config (#598).
+    dropped_service_overrides: list[str] = Field(default_factory=list)
 
 
 class ApplyEvent(BaseModel):

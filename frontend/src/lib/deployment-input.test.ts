@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
+import type { ServiceConfigInput } from "@/generated/graphql";
 import {
   componentsFormToInput,
   deploymentConfigToInput,
 } from "./deployment-input";
+import * as deploymentInput from "./deployment-input";
 
 describe("deploymentConfigToInput", () => {
   it("converts an empty config into an input with every field undefined", () => {
@@ -532,5 +534,131 @@ describe("componentsFormToInput", () => {
     // Clearing the field in the drawer submits an explicit null.
     const cleared = form!.map((block) => ({ ...block, image: "" }));
     expect(componentsFormToInput(cleared)?.[0].image).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Service ingress overrides (#598, US3, T046). The stored config holds
+// `services` as a dict keyed by driver service name; `UpdateDeploymentInput`
+// takes a list of rows. `updateDeployment` replaces the whole stored config, so
+// a projection that leaves `services` out clears every stored override on the
+// next save of any other field (T030a reproduced this for the SDK `scale`).
+// ---------------------------------------------------------------------------
+
+describe("deploymentConfigToInput: services", () => {
+  it("leaves services undefined when the config stores none", () => {
+    expect(deploymentConfigToInput({}).services).toBeUndefined();
+  });
+
+  it("projects the stored dict onto a list of rows keyed by service name", () => {
+    const input = deploymentConfigToInput({
+      services: {
+        "task-manager": {
+          ingress_class: "tailscale",
+          fqdn_suffix: "tailnet.example.ts.net",
+        },
+        web: { ingress_class: "traefik", fqdn_suffix: null },
+      },
+    });
+
+    expect(input.services).toEqual([
+      {
+        name: "task-manager",
+        ingressClass: "tailscale",
+        fqdnSuffix: "tailnet.example.ts.net",
+      },
+      { name: "web", ingressClass: "traefik" },
+    ]);
+    // A stored null is no override: the row carries no key for it.
+    expect(input.services?.[1]).not.toHaveProperty("fqdnSuffix");
+  });
+});
+
+/**
+ * `servicesFormToInput` is the submit boundary for the service rows, as
+ * `componentsFormToInput` is for the component blocks. It is read from the
+ * module namespace so that this file type-checks before T046 adds the export;
+ * until then each test below fails with the error thrown here. T046 may switch
+ * to a named import.
+ */
+const servicesFormToInput: (
+  rows: readonly ServiceConfigInput[] | null | undefined,
+) => ServiceConfigInput[] | null | undefined =
+  (
+    deploymentInput as unknown as {
+      servicesFormToInput?: (
+        rows: readonly ServiceConfigInput[] | null | undefined,
+      ) => ServiceConfigInput[] | null | undefined;
+    }
+  ).servicesFormToInput ??
+  (() => {
+    throw new Error(
+      "servicesFormToInput is not exported by lib/deployment-input.ts (T046)",
+    );
+  });
+
+describe("servicesFormToInput", () => {
+  it("passes undefined and null through", () => {
+    expect(servicesFormToInput(undefined)).toBeUndefined();
+    expect(servicesFormToInput(null)).toBeNull();
+  });
+
+  it("keeps a row that sets both fields", () => {
+    const row = {
+      name: "task-manager",
+      ingressClass: "tailscale",
+      fqdnSuffix: "tailnet.example.ts.net",
+    };
+    expect(servicesFormToInput([row])).toEqual([row]);
+  });
+
+  it("omits an emptied field: the backend rejects an empty ingress class and an empty suffix", () => {
+    // An emptied input holds "". Under full replacement, omitting the field
+    // clears it (contract: null or omitted means the resolved value applies).
+    const out = servicesFormToInput([
+      {
+        name: "task-manager",
+        ingressClass: "",
+        fqdnSuffix: "tailnet.example.ts.net",
+      },
+      { name: "web", ingressClass: "traefik", fqdnSuffix: "" },
+    ]);
+
+    expect(out).toEqual([
+      { name: "task-manager", fqdnSuffix: "tailnet.example.ts.net" },
+      { name: "web", ingressClass: "traefik" },
+    ]);
+    expect(out?.[0]).not.toHaveProperty("ingressClass");
+    expect(out?.[1]).not.toHaveProperty("fqdnSuffix");
+  });
+
+  it("drops a row with no value: it is no override", () => {
+    expect(
+      servicesFormToInput([
+        { name: "task-manager", ingressClass: "", fqdnSuffix: "" },
+        { name: "web", ingressClass: null, fqdnSuffix: null },
+        { name: "worker" },
+        { name: "api", ingressClass: "traefik" },
+      ]),
+    ).toEqual([{ name: "api", ingressClass: "traefik" }]);
+  });
+
+  it("round-trips stored config -> form -> submitted rows", () => {
+    const form = deploymentConfigToInput({
+      services: {
+        "task-manager": {
+          ingress_class: "tailscale",
+          fqdn_suffix: "tailnet.example.ts.net",
+        },
+      },
+    }).services;
+
+    expect(servicesFormToInput(form)).toEqual([
+      {
+        name: "task-manager",
+        ingressClass: "tailscale",
+        fqdnSuffix: "tailnet.example.ts.net",
+      },
+    ]);
   });
 });

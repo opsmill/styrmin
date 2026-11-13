@@ -6,6 +6,7 @@ import type {
   ExternalUrlScheme,
   FastStorageInput,
   SchedulingInput,
+  ServiceConfigInput,
   StandardStorageInput,
   UpdateDeploymentInput,
 } from "@/generated/graphql";
@@ -45,6 +46,15 @@ type ReadComponentBlock = {
   replicas?: number | null;
 };
 
+/**
+ * Read-side per-service ingress override block (#598): `{ ingress_class,
+ * fqdn_suffix }`, each `str | null`, stored under the driver service name.
+ */
+type ReadServiceBlock = {
+  ingress_class?: string | null;
+  fqdn_suffix?: string | null;
+};
+
 function envVarsDictToList(
   dict: ReadEnvVars | null | undefined,
 ): EnvVarInput[] | undefined {
@@ -69,6 +79,40 @@ function componentsDictToList(
     // Replica override (023); absent means no override.
     replicas: block?.replicas ?? undefined,
   }));
+}
+
+function servicesDictToList(
+  dict: Record<string, ReadServiceBlock> | null | undefined,
+): ServiceConfigInput[] | undefined {
+  if (dict == null) return undefined;
+  return Object.entries(dict).map(([name, block]) => {
+    const row: ServiceConfigInput = { name };
+    // A stored null is no override: the row carries no key for it.
+    if (block?.ingress_class != null) row.ingressClass = block.ingress_class;
+    if (block?.fqdn_suffix != null) row.fqdnSuffix = block.fqdn_suffix;
+    return row;
+  });
+}
+
+/**
+ * Map the drawer's service ingress rows onto `ServiceConfigInput` for submit.
+ * An emptied field holds `""`, which the backend rejects for the class and the
+ * suffix; under full replacement omitting the field clears it. A row with no
+ * value is no override and is dropped.
+ */
+export function servicesFormToInput(
+  rows: readonly ServiceConfigInput[] | null | undefined,
+): ServiceConfigInput[] | null | undefined {
+  if (rows == null) return rows;
+  const out: ServiceConfigInput[] = [];
+  for (const row of rows) {
+    if (row == null || typeof row !== "object") continue;
+    const next: ServiceConfigInput = { name: row.name };
+    if (row.ingressClass) next.ingressClass = row.ingressClass;
+    if (row.fqdnSuffix) next.fqdnSuffix = row.fqdnSuffix;
+    if (next.ingressClass || next.fqdnSuffix) out.push(next);
+  }
+  return out;
 }
 
 /**
@@ -426,6 +470,12 @@ export function deploymentConfigToInput(
     envVars: envVarsDictToList(config.env_vars as ReadEnvVars | undefined),
     components: componentsDictToList(
       config.components as Record<string, ReadComponentBlock> | undefined,
+    ),
+    // Per-service ingress overrides (#598). `updateDeployment` replaces the
+    // whole stored config, so a projection that leaves `services` out clears
+    // every stored override on the next save of any other field.
+    services: servicesDictToList(
+      config.services as Record<string, ReadServiceBlock> | undefined,
     ),
     ipWhitelist: config.ip_whitelist as string[] | undefined,
     dedicatedIngress: config.dedicated_ingress as

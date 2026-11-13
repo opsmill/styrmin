@@ -424,8 +424,35 @@ def _print_applicability_check_warning(outcome: ApplyOutcome) -> None:
     )
 
 
+def _print_dropped_service_overrides_warning(outcome: ApplyOutcome) -> None:
+    """Warn on stderr that the update clears stored service ingress overrides (#598); never changes the exit code."""
+    services = outcome.dropped_service_overrides
+    if not services:
+        return
+    if len(services) == 1:
+        subject, verb, pronoun = (
+            f"override of service {services[0]}",
+            "is",
+            f"{services[0]} to spec.config.services to keep it",
+        )
+    else:
+        subject, verb, pronoun = (
+            f"overrides of services {', '.join(services)}",
+            "are",
+            "them to spec.config.services to keep them",
+        )
+    sys.stdout.flush()
+    print(
+        f"warning: {outcome.name}: the stored ingress {subject} {verb} cleared: spec.config has keys "
+        f"and no services. Add {pronoun}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def _print_warnings(outcome: ApplyOutcome) -> None:
     _print_pinned_image_warning(outcome)
+    _print_dropped_service_overrides_warning(outcome)
     _print_inapplicable_warning(outcome)
     _print_applicability_check_warning(outcome)
 
@@ -470,11 +497,19 @@ async def apply(
     ``STYRMIN_ENVIRONMENT``, ``STYRMIN_CLUSTER``. ``--name`` cannot be
     combined with batch input (more than one manifest).
 
-    The ``spec.config`` block follows the typed ``UpdateDeploymentInput``
-    semantics on update: top-level fields use full-replacement (omitting a
-    field leaves the persisted state untouched, an empty list explicitly
-    clears it), while ``spec.parameters`` uses merge semantics (entries
-    merge on top of the persisted parameters dict).
+    On update, ``spec.config`` replaces the whole stored deployment config: a
+    config key that the stored config has and ``spec.config`` omits is cleared,
+    for example the ``components`` blocks or the ``services`` overrides. The
+    exception is an omitted or empty ``spec.config``, which keeps the stored
+    config. ``spec.parameters`` uses merge semantics (entries merge on top of the
+    persisted parameters dict).
+
+    ``spec.config.services`` lists the ingress override of each external service
+    (``name``, ``ingress_class``, ``fqdn_suffix``). A manifest with other
+    ``spec.config`` keys and no ``services`` clears the stored overrides; write
+    ``services: []`` to clear the last one when nothing else stays in
+    ``spec.config``. A ``warning:`` line on stderr names the services whose stored
+    override such a manifest clears; the exit code is unchanged.
 
     When a manifest changes an existing deployment's application version, a
     ``warning:`` line on stderr names the components whose image override has
