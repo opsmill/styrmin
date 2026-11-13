@@ -139,6 +139,9 @@ _OVERRIDE = {
 _SERVICE_NAME_LABEL = "styrmin.io/service-name"
 _OPERATOR_BOOKKEEPING_PREFIX = "kopf.zalando.org/"
 _OPERATOR_MANAGED_ANNOTATION = "styrmin.io/kopf-managed"
+# Velero sets ``velero.io/backup-name`` and ``velero.io/restore-name`` on every object it
+# restores. See ``_labels``.
+_VELERO_LABEL_PREFIX = "velero.io/"
 _TASK_MANAGER_INGRESS = "styrmin-svc-task-manager"
 _TASK_MANAGER_WORKLOAD = "styrmin-task-manager"
 _TASK_MANAGER_CONTAINER = "prefect-server"
@@ -217,6 +220,25 @@ def _annotations(ingress: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _labels(ingress: dict[str, Any]) -> dict[str, str]:
+    """The labels that Styrmin and the chart set on an Ingress.
+
+    ``test_infrahub_enterprise_backup_and_restore_lifecycle`` runs before this test in the
+    ``shard_infrahub`` shard and restores the namespace of the shared deployment, so Velero
+    adds ``velero.io/backup-name`` and ``velero.io/restore-name`` to each Ingress it
+    restores. When the override is set or cleared, the operator replaces the Ingress that
+    Styrmin builds with the desired object, and these labels are removed. They record which
+    restore created the object and are not labels that Styrmin's ingress rules set, so
+    they are left out of every comparison below. Without them, the test gives the same
+    result whether or not the restore ran before it.
+    """
+    return {
+        key: value
+        for key, value in ingress["metadata"].get("labels", {}).items()
+        if not key.startswith(_VELERO_LABEL_PREFIX)
+    }
+
+
 def _hosts(ingress: dict[str, Any]) -> list[str]:
     return [rule["host"] for rule in ingress["spec"].get("rules", []) if "host" in rule]
 
@@ -225,12 +247,11 @@ def _comparable(ingress: dict[str, Any]) -> dict[str, Any]:
     """What an operator sees of an Ingress: labels, annotations and spec.
 
     Leaves out the fields that the API server and the controllers change on their own
-    (resource version, generation, managed fields, status) and the operator's own
-    bookkeeping annotation.
+    (resource version, generation, managed fields, status), the operator's own
+    bookkeeping annotations and the labels of a Velero restore.
     """
-    metadata = ingress["metadata"]
     return {
-        "labels": metadata.get("labels", {}),
+        "labels": _labels(ingress),
         "annotations": _annotations(ingress),
         "spec": ingress["spec"],
     }
