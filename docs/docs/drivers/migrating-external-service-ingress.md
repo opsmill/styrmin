@@ -43,7 +43,7 @@ Which deployments are affected:
 | `generic-app` version 1 | yes, `app` | yes | two Ingresses on the same hosts: `styrmin-app` from the chart and `styrmin-svc-app` from Styrmin. The end-to-end test showed this on the earlier driver version. |
 | `generic-app` version 2 | yes, `app` | no | one Ingress, `styrmin-svc-app` |
 | `infrahub` up to version 5, `infrahub-enterprise` up to version 4 | no: `task-manager` is internal | not applicable | none |
-| `infrahub` version 6, `infrahub-enterprise` version 5 | yes, `task-manager` | no: the chart's Prefect Ingress is off | one Ingress for `task-manager`, `styrmin-svc-task-manager` |
+| `infrahub` version 6, `infrahub-enterprise` version 5 | yes, `task-manager` | no: the driver does not enable the chart's Prefect Ingress, and the chart default is off | one Ingress for `task-manager`, `styrmin-svc-task-manager` |
 | `semaphore`, `simple-app`, `db-test`, `infrahub-mcp` | no | not applicable | none |
 | `slurpit` | declares no services | not applicable | none |
 
@@ -59,9 +59,14 @@ known. The answer determines how many drivers this breaking change affects.
 2. For each one, check whether the chart renders an Ingress for it, including an
    Ingress of a subchart. Run `helm template` with your values and look for
    `kind: Ingress`.
-3. Turn that Ingress off in `values.j2.yml`. The key depends on the chart. For
-   example, the `infrahub` drivers set `prefect-server.ingress.enabled: false`,
-   and `generic-app` no longer has an `ingress:` block.
+3. Make sure `values.j2.yml` does not enable that Ingress. The key depends on
+   the chart. Read the `values.yaml` of the chart: if the Ingress is off by
+   default, remove the setting that enables it. If it is on by default, set it
+   to off. For example, the Prefect chart inside the `infrahub` charts is off by
+   default (read on 2026-11-13 in `infrahub` 4.33.2 and `infrahub-enterprise`
+   4.19.2), so the `infrahub` drivers no longer set
+   `prefect-server.ingress.enabled`. `generic-app` no longer has an `ingress:`
+   block.
 4. Check which Ingress carries the application address,
    `<driver name>-<deployment id>.<fqdn suffix>`. Styrmin puts it on the Ingress
    of the first service in `spec.services`, and only when that service is
@@ -110,7 +115,7 @@ one Ingress, and deployed version 1 on the same Styrmin code and found two.
 ### What you view when you move Infrahub to the new driver version
 
 `infrahub` version 6 and `infrahub-enterprise` version 5 declare `task-manager`
-`scope: external` and turn the chart's Prefect Ingress off. When you upgrade a
+`scope: external` and no longer enable the chart's Prefect Ingress. When you upgrade a
 deployment to them:
 
 - The Prefect UI Ingress moves from the Helm chart to an Ingress that Styrmin

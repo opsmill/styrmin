@@ -188,7 +188,7 @@ async def test_infrahub_task_manager_service_exposes_prefect_ui(
     # The Ingress that Styrmin builds for the external ``task-manager`` service
     # (``styrmin-svc-task-manager``, #598) routes the service-scoped
     # human-readable FQDN to the Prefect UI through the per-environment ingress;
-    # the chart's own Prefect Ingress is off in the driver.
+    # the driver does not enable the chart's own Prefect Ingress.
     ingresses: list[AsyncIngress] = [
         ing
         async for ing in AsyncIngress.list(namespace=namespace, api=kr8s_api)

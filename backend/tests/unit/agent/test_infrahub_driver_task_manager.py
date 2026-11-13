@@ -4,7 +4,7 @@ Written before the driver change (T031, T032). Source: ``specs/033-service-ingre
 FR-013 and research D-003 and D-005.
 
 After the change, each driver declares ``task-manager`` as ``scope: external``, so Styrmin builds its
-Ingress and the chart's Prefect Ingress is off. ``infrahub`` stays ``scope: internal`` with the chart's
+Ingress and the driver does not enable the chart's Prefect Ingress. ``infrahub`` stays ``scope: internal`` with the chart's
 own Ingress, which keeps the application address as its host. The Prefect UI calls its API at the
 host of the Ingress that Styrmin builds, which is the override host when the service has an override
 (``services['task-manager'].human_readable_fqdn``, which the context builder fills with the override
@@ -134,11 +134,17 @@ def test_infrahub_is_still_the_first_declared_service(driver: str) -> None:
 
 
 @pytest.mark.parametrize("driver", _DRIVERS)
-def test_the_chart_prefect_ingress_is_off(driver: str) -> None:
-    """FR-013, FR-014: a driver that declares a service ``external`` must not render an Ingress for it."""
+def test_the_driver_does_not_enable_the_chart_prefect_ingress(driver: str) -> None:
+    """FR-013, FR-014: a driver that declares a service ``external`` must not render an Ingress for it.
+
+    The driver leaves ``prefect-server.ingress`` out, so the chart default applies. Read on 2026-11-13:
+    the ``prefect-server`` subchart of ``infrahub`` 4.33.2 and of ``infrahub-enterprise`` 4.19.2 sets
+    ``ingress.enabled: false`` and neither Infrahub chart overrides it. A chart version that changes the
+    default is not checked here: the end-to-end test of the override counts the chart Ingresses.
+    """
     prefect = _render(driver)["prefect-server"]
 
-    assert prefect["ingress"]["enabled"] is False
+    assert prefect.get("ingress", {}).get("enabled", False) is False
 
 
 @pytest.mark.parametrize("driver", _DRIVERS)

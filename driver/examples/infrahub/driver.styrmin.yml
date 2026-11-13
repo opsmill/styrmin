@@ -103,11 +103,7 @@ spec:
       port: 8000
       component: server
 
-    # Prefect UI (and API at /api) served by the task-manager component. It is
-    # external: Styrmin builds its Ingress (and the optional service ingress
-    # override applies to it), so the chart's own Prefect Ingress is off in
-    # values.j2.yml. Keep `infrahub` first and internal: its chart Ingress keeps
-    # the application address.
+    # Prefect UI (and API at /api) served by the task-manager component.
     - name: task-manager
       kind: http
       scope: external

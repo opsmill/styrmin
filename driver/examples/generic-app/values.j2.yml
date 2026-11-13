@@ -68,10 +68,6 @@ service:
       http:
         port: 8080
 
-# No `ingress:` block: the service is `scope: external` (driver.styrmin.yml), so Styrmin builds
-# its Ingress, with the application address and the readable host, and the service ingress
-# override applies to it. A chart Ingress here would give a second Ingress on the same hosts.
-
 {%- if parameters.storage_size | int > 0 %}
 persistence:
   data:

@@ -524,8 +524,9 @@ Notes:
   when it declares `scope: external`.
 - **A chart must not render its own Ingress for an external service.**
   Styrmin does not render the chart to check, so a chart Ingress for an
-  external service gives the service two Ingresses on the same host. Turn
-  the chart's Ingress off in `values.j2.yml`. To move an existing driver,
+  external service gives the service two Ingresses on the same host. Make
+  sure `values.j2.yml` does not enable the chart's Ingress, and set it to off
+  if the chart enables it by default. To move an existing driver,
   follow
   [Migrate a driver whose external service renders its own Ingress](./migrating-external-service-ingress.md).
 - **`scope: internal`** means that Styrmin builds no Ingress for the

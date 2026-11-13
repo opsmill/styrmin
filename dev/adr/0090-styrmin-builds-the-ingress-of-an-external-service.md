@@ -179,7 +179,7 @@ deployment that owns it, not of the deployment whose context is built
 ### 8. Three example drivers change in the same release
 
 `infrahub` (version 5 to 6) and `infrahub-enterprise` (version 4 to 5) declare `task-manager`
-`scope: external` and switch the chart's Prefect Ingress off. Their `infrahub` service stays
+`scope: external` and stop enabling the chart's Prefect Ingress, whose chart default is off. Their `infrahub` service stays
 `internal`, and its chart Ingress keeps the application address. `generic-app` (version 1 to 2)
 stops rendering its own Ingress (FR-012, FR-013).
 

@@ -242,7 +242,7 @@ def _split(
     }
     assert len(others) == 1, (
         "Expected exactly one other Ingress (the chart Ingress of the infrahub "
-        f"service, the Prefect chart Ingress is off): {sorted(others)}"
+        f"service; the driver does not enable the Prefect chart Ingress): {sorted(others)}"
     )
     (infrahub_chart,) = others.values()
     assert _SERVICE_NAME_LABEL not in infrahub_chart["metadata"].get("labels", {})

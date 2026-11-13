@@ -96,7 +96,7 @@ frontend/src/components/deployment/configuration/
 # plus the deploy form (location to find in the first frontend task)
 
 driver/examples/
-├── infrahub/ and infrahub-enterprise/           # task-manager external, prefect-server ingress off (FR-013)
+├── infrahub/ and infrahub-enterprise/           # task-manager external, prefect-server ingress not enabled (FR-013)
 └── generic-app/                                 # remove the chart Ingress (FR-012)
 
 python_sdk/ and cli/                             # regenerated types; manifest block (D-009)

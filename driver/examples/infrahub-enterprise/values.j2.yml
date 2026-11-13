@@ -64,11 +64,6 @@ infrahub:
         env:
           - name: PREFECT_SERVER_ANALYTICS_ENABLED
             value: "{{ parameters.enable_analytics }}"
-    # Off: task-manager is an external service, so Styrmin builds its Ingress (and
-    # applies a service ingress override to it). The prefectUiApiUrl below reads
-    # the host of that Ingress.
-    ingress:
-      enabled: false
     server:
       # The Prefect UI is a SPA whose browser-side code calls the API at
       # PREFECT_UI_API_URL (default http://localhost:4200/api). Point it at the
