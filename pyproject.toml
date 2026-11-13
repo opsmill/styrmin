@@ -368,5 +368,6 @@ markers = [
     "shard_configuration: CI shard for backend/tests/e2e/configuration/ (deployment-config drawer UI flows, all ui_only).",
     "shard_apply: CI shard for test_deployments_apply.py (manifest apply flows, all api_only; each test deploys fresh simple-apps).",
     "shard_task_steps: CI shard for test_task_steps.py (failed-step scenarios; the HelmRelease one waits out the operator's and FluxCD's timeouts).",
+    "shard_single_namespace: CI shard for test_single_namespace_vcluster.py (installs vCluster in one host namespace and a second Styrmin in it; all api_only).",
     "changes_cluster_config: the test changes the session cluster's config, which redeploys every deployment of the cluster; the e2e conftest runs these tests first in the session.",
 ]

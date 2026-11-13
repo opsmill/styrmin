@@ -1,0 +1,22 @@
+# Values of the vCluster chart that test_single_namespace_vcluster.py installs
+# in the tenant namespace, with the tenant's own credentials.
+
+# The tenant holds RoleBindings in its namespace only, so it cannot create a
+# ClusterRole. These options keep the chart from rendering one.
+rbac:
+  clusterRole:
+    enabled: false
+  # The host has no VolumeSnapshot API, and the tenant cannot grant these rules.
+  enableVolumeSnapshotRules:
+    enabled: false
+
+sync:
+  toHost:
+    # Styrmin's NetworkPolicies are copied to the tenant namespace, where the
+    # host's network plugin applies them.
+    networkPolicies:
+      enabled: true
+    # Ingresses stay in the virtual cluster: Styrmin creates Traefik Middlewares
+    # for them, and the Traefik CRDs exist only in the virtual cluster.
+    ingresses:
+      enabled: false
