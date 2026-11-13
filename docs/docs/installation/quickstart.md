@@ -55,13 +55,13 @@ uv run invoke build
 
 This task:
 
-1. Builds the `styrmin:latest` container image, which the server and
-   the agent both run.
+1. Builds the `registry.opsmill.io/opsmill/styrmin:latest` container
+   image, which the server and the agent both run.
 2. Resolves the Helm dependencies under `helm/agent/`.
 3. Resolves the Helm dependencies under `helm/styrmin/`.
 
-Run `build` again only when you change the server or agent code, their
-`Dockerfile`s, or their Helm chart dependencies.
+Run `build` again only when you change the server or agent code,
+`docker/Dockerfile`, or the Helm chart dependencies.
 
 ### 4. Start the demo cluster
 
@@ -71,8 +71,9 @@ uv run invoke start
 
 `start` runs these steps in order:
 
-1. Creates a vCluster named `styrmin-demo` in Docker.
-2. Connects to it and exports a kubeconfig under `.vcluster/`.
+1. Creates a vCluster named `styrmin` in Docker.
+2. Connects to it: adds the context `vcluster-docker_styrmin` to your
+   kubeconfig and makes it the current context.
 3. Installs the [Traefik](https://traefik.io/) ingress controller and
    [Garage](https://garagehq.deuxfleurs.fr/), the S3-compatible object
    store in the cluster that Velero writes backups to.
@@ -91,8 +92,8 @@ uv run invoke start
      [`driver/examples/semaphore`](https://github.com/opsmill/styrmin/tree/develop/driver/examples/semaphore))
 7. Prints a green summary panel with the URLs and the admin credentials.
 
-> If the `styrmin:latest` image exists, `start` uses it. To build it
-> again, pass `--build-image`:
+> If the `registry.opsmill.io/opsmill/styrmin:latest` image exists,
+> `start` uses it. To build it again, pass `--build-image`:
 >
 > ```bash
 > uv run invoke start --build-image
@@ -153,8 +154,9 @@ with no data.
 **Port 8080 is already in use.** Stop the process that listens on it.
 The demo always uses `8080`, because port `80` is a privileged port.
 
-**`docker image inspect styrmin:latest` returns nothing.** Run
-`uv run invoke build` first, or pass `--build-image` to `start`.
+**`docker image inspect registry.opsmill.io/opsmill/styrmin:latest`
+returns nothing.** Run `uv run invoke build` first, or pass
+`--build-image` to `start`.
 
 **The bootstrap step says "Cluster already exists".** A previous demo
 run created the cluster record. Run `uv run invoke reset` to start over,
