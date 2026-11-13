@@ -11,6 +11,12 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [Styrmin - v0.1.60](https://github.com/opsmill/styrmin/tree/v0.1.60) - 2026-11-13
+
+### Added
+
+- Added opt-in TLS hosts to service ingress overrides through the API, manifests and UI, with hostnames kept in sync when a service address changes.
+
 ## [Styrmin - v0.1.59](https://github.com/opsmill/styrmin/tree/v0.1.59) - 2026-11-13
 
 ### Added
