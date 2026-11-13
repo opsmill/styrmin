@@ -160,7 +160,7 @@ class ComponentConfigInput:
 @strawberry.input(
     description=(
         "Per-service ingress override block for a deployment: the ingress "
-        "class and the FQDN suffix of one service that the driver declares "
+        "class, FQDN suffix and optional TLS hosts of one service that the driver declares "
         "``scope: external``."
     )
 )
@@ -188,6 +188,14 @@ class ServiceConfigInput:
         description=(
             "FQDN suffix for this service only, used in its readable host. "
             "Null or omitted: the resolved suffix applies."
+        ),
+    )
+    tls: bool | None = strawberry.field(
+        default=None,
+        description=(
+            "Write spec.tls.hosts using this service's generated Ingress hosts. "
+            "False, null or omitted: no TLS section. Does not create a certificate "
+            "or change the backend protocol; the ingress controller handles TLS."
         ),
     )
 
@@ -231,8 +239,8 @@ class DeploymentConfigInput:
             "Flattened by the resolver to a dict keyed on ``name``; duplicate "
             "names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in "
             "the list has no override after the write, and an empty list "
-            "explicitly clears every override. A row with both ``ingressClass`` "
-            "and ``fqdnSuffix`` null is the same as no override. When the write "
+            "explicitly clears every override. A row with ``ingressClass``, "
+            "``fqdnSuffix`` and ``tls`` all null is the same as no override. When the write "
             "changes the driver version, a stored override on a service that the "
             "target version removes or declares ``internal`` raises "
             "``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod "
@@ -415,7 +423,7 @@ def update_deployment_input_to_dict(input: UpdateDeploymentInput) -> dict[str, A
       ``env_vars`` sub-list is flattened recursively with scope
       ``f"component:{name}"``; ``command``/``args``/``image``/``replicas``
       pass through verbatim.
-    * ``services`` — list of ``{name, ingress_class?, fqdn_suffix?}`` →
+    * ``services`` — list of ``{name, ingress_class?, fqdn_suffix?, tls?}`` →
       ``dict[str, dict]`` keyed on ``name`` with duplicate-name detection
       raising :class:`DuplicateServiceNameError` (#598).
     * ``service_name_overrides`` — list of

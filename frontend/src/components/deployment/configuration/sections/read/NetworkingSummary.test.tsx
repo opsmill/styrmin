@@ -133,6 +133,27 @@ describe("NetworkingSummary: deployment-wide rows (unchanged)", () => {
 });
 
 describe("NetworkingSummary: per-service class and host (FR-016)", () => {
+  it.each([
+    [true, "Enabled"],
+    [false, "Disabled"],
+  ])("shows explicit TLS %s in the service summary", async (tls, label) => {
+    await render(
+      <NetworkingSummary
+        deploymentConfig={{ services: { "task-manager": { tls } } }}
+        environmentConfig={{}}
+        clusterConfig={CLUSTER_CONFIG}
+        services={[TASK_MANAGER_OVERRIDDEN, WEB_INHERITED]}
+      />,
+    );
+
+    expect(
+      within(valueRow(serviceGroup("task-manager"), "TLS hosts")).getByRole(
+        "definition",
+      ),
+    ).toHaveTextContent(label);
+    expect(within(serviceGroup("web")).queryByText("TLS hosts")).toBeNull();
+  });
+
   it("shows an overridden service with its override class and host, both marked overridden", async () => {
     await renderSummary([TASK_MANAGER_OVERRIDDEN, WEB_INHERITED]);
 

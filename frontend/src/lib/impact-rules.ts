@@ -185,6 +185,12 @@ export const impactRules: ImpactRule[] = [
     severity: "warning",
   },
   {
+    matcher: "services[*].tls",
+    consequence:
+      "TLS hosts on this service's Ingress will change. The ingress controller must provide TLS; other services are not affected. A service override removes the IP allow-list, the external DNS record and the application address from this Ingress; clearing the last override restores the defaults",
+    severity: "warning",
+  },
+  {
     matcher: "components[*].resources.**",
     consequence: "Affected component's pods will be recreated",
     severity: "warning",

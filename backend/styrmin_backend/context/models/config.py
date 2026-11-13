@@ -717,18 +717,28 @@ class ServiceConfigBlock(BaseModel):
 
     Stored in ``DeploymentConfig.services`` under the driver service name. A field left as
     ``None`` means: use the resolved cluster, environment or deployment value. A block with
-    both fields ``None`` is not stored.
+    all fields ``None`` is not stored.
 
     Attributes:
         ingress_class (str | None): Ingress class of this service. A Kubernetes object name
             (a DNS-1123 subdomain).
         fqdn_suffix (str | None): FQDN suffix of this service, used in its readable host.
+        tls (bool | None): Write TLS hosts from this service's generated Ingress hosts.
+            Does not create a certificate or change the backend protocol.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     ingress_class: str | None = Field(default=None, min_length=1)
     fqdn_suffix: str | None = None
+    tls: bool | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_tls(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = handler(self)
+        if data.get("tls") is None:
+            data.pop("tls", None)
+        return data
 
     @field_validator("ingress_class")
     @classmethod
@@ -746,7 +756,9 @@ class ServiceConfigBlock(BaseModel):
 
     @property
     def is_empty(self) -> bool:
-        return self.ingress_class is None and self.fqdn_suffix is None
+        return (
+            self.ingress_class is None and self.fqdn_suffix is None and self.tls is None
+        )
 
 
 def parse_service_overrides(
@@ -790,7 +802,7 @@ class DeploymentConfig(ClusterConfig, EnvironmentConfig):
             ``replicas``; an unchanged stored one is kept).
         services (dict[str, ServiceConfigBlock] | None): Per-service ingress
             override blocks keyed by driver service name (#598). A block with
-            both fields ``None`` is dropped, and ``services`` is ``None`` when
+            all fields ``None`` is dropped, and ``services`` is ``None`` when
             no block is left. The key is omitted from a dump when ``None``, so
             the stored config of a deployment without an override is unchanged.
     """

@@ -812,7 +812,7 @@ class DeploymentDetailPage:
     #     outside the ``dd``.
 
     async def set_service_ingress_overrides(
-        self, *, services: dict[str, dict[str, str]]
+        self, *, services: dict[str, dict[str, Any]]
     ) -> None:
         """Make the ingress overrides in the Settings edit drawer equal ``services``,
         then apply through the diff dialog.
@@ -850,16 +850,23 @@ class DeploymentDetailPage:
             )
             have = [await field.input_value() for field, _ in fields]
             want = [value for _, value in fields]
-            if have == want:
+            tls_field = drawer.get_by_role(
+                "checkbox", name=f"TLS hosts for {name}", exact=True
+            )
+            wanted_tls = wanted.get("tls") is True
+            current_tls = await tls_field.is_checked()
+            if have == want and current_tls == wanted_tls:
                 continue
             changed = True
-            if not any(want):
+            if not any(want) and not wanted_tls:
                 await drawer.get_by_role(
                     "button", name=f"Clear ingress override for {name}", exact=True
                 ).click()
                 for field, value in fields:
                     await expect(field).to_have_value(value)
+                await expect(tls_field).not_to_be_checked()
                 continue
+            await tls_field.set_checked(wanted_tls)
             for (field, value), current in zip(fields, have, strict=True):
                 if value == current:
                     continue
@@ -897,12 +904,13 @@ class DeploymentDetailPage:
         summary: dict[str, dict[str, str]] = {}
         for group in raw:
             rows = {row["label"]: row for row in group["rows"]}
-            if set(rows) != {"Ingress class", "Host"}:
+            if not {"Ingress class", "Host"}.issubset(rows):
                 raise ScenarioActionError(
                     f"service group {group['name']!r} of the Networking card has rows "
                     f"{sorted(rows)}; expected 'Host' and 'Ingress class'"
                 )
-            for label, row in rows.items():
+            for label in ("Ingress class", "Host"):
+                row = rows[label]
                 if not row["mark"]:
                     raise ScenarioActionError(
                         f"the {label!r} row of service {group['name']!r} shows no "

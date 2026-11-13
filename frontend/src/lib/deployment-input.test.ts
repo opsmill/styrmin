@@ -662,3 +662,27 @@ describe("servicesFormToInput", () => {
     ]);
   });
 });
+
+describe("service ingress TLS", () => {
+  it.each([true, false])(
+    "preserves stored TLS %s through a full config edit",
+    (tls) => {
+      const input = deploymentConfigToInput({
+        services: { "task-manager": { ingress_class: "tailscale", tls } },
+      });
+      expect(input.services).toEqual([
+        { name: "task-manager", ingressClass: "tailscale", tls },
+      ]);
+      expect(deploymentInput.servicesFormToInput(input.services)).toEqual(
+        input.services,
+      );
+    },
+  );
+  it("keeps a TLS-only override", () => {
+    expect(
+      deploymentInput.servicesFormToInput([
+        { name: "task-manager", tls: true },
+      ]),
+    ).toEqual([{ name: "task-manager", tls: true }]);
+  });
+});

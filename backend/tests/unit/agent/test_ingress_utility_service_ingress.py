@@ -311,6 +311,67 @@ class TestIngressObject:
 
         assert "tls" not in ingress["spec"]
 
+    @pytest.mark.parametrize("tls", [None, False, True])
+    def test_tls_hosts_follow_the_service_address(self, tls: bool | None) -> None:
+        context = _context(
+            [_service("task-manager", resolved_name="prefect", port=4200)],
+            overrides={
+                "task-manager": ServiceConfigBlock(
+                    ingress_class="tailscale",
+                    fqdn_suffix="tailnet.example.ts.net",
+                    tls=tls,
+                )
+            },
+        )
+        (ingress,) = _build(context)
+        hosts = [rule["host"] for rule in ingress["spec"]["rules"]]
+        assert hosts == [f"prefect-{ENVIRONMENT_NAME}.tailnet.example.ts.net"]
+        if tls:
+            assert ingress["spec"]["tls"] == [{"hosts": hosts}]
+            assert "secretName" not in ingress["spec"]["tls"][0]
+        else:
+            assert "tls" not in ingress["spec"]
+
+    def test_tls_applies_to_only_the_selected_service(self) -> None:
+        ingresses = _build(
+            _context(
+                [_service("web"), _service("task-manager", port=4200)],
+                overrides={"task-manager": ServiceConfigBlock(tls=True)},
+            )
+        )
+        assert "tls" not in ingresses[0]["spec"]
+        assert ingresses[1]["spec"]["tls"] == [
+            {"hosts": [rule["host"] for rule in ingresses[1]["spec"]["rules"]]}
+        ]
+
+    @pytest.mark.parametrize("tls", [True, False])
+    def test_tls_only_override_uses_full_override_routing_rules(
+        self, tls: bool
+    ) -> None:
+        services = [_service("web"), _service("task-manager", port=4200)]
+        settings = {"ip_whitelist": ["10.0.0.0/8"]}
+        baseline = _by_service(_build(_context(services, **settings)))
+        overridden = _by_service(
+            _build(
+                _context(
+                    services,
+                    overrides={"web": ServiceConfigBlock(tls=tls)},
+                    **settings,
+                )
+            )
+        )
+
+        assert _PRIMARY in _hosts(baseline["web"])
+        assert (
+            "traefik.ingress.kubernetes.io/router.middlewares"
+            in baseline["web"]["metadata"]["annotations"]
+        )
+        assert _PRIMARY not in _hosts(overridden["web"])
+        assert overridden["web"]["metadata"]["annotations"] == {
+            "kubernetes.io/ingress.class": "traefik"
+        }
+        assert overridden["task-manager"] == baseline["task-manager"]
+
 
 class TestHosts:
     def test_every_external_service_has_its_readable_host(self) -> None:

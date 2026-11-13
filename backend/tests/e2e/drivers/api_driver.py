@@ -538,6 +538,7 @@ class ApiScenarioDriver:
                     "name": name,
                     "ingressClass": block.get("ingress_class"),
                     "fqdnSuffix": block.get("fqdn_suffix"),
+                    "tls": block.get("tls"),
                 }
                 for name, block in services.items()
             ]

@@ -383,6 +383,8 @@ class IngressUtility(Utility):
                 class_name = settings.class_name
             if class_name:
                 spec["ingressClassName"] = class_name
+            if override is not None and override.tls:
+                spec["tls"] = [{"hosts": unique_hosts}]
             ingresses.append(
                 {
                     "apiVersion": "networking.k8s.io/v1",

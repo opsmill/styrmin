@@ -9,8 +9,8 @@ description: Publish one external service of a deployment with another ingress c
 A deployment publishes all of its services with the ingress class and the
 FQDN suffix that Styrmin resolves for it: the deployment's value, else the
 environment's, else the cluster's. A service ingress override sets another
-ingress class, another FQDN suffix, or both, for one external service of one
-deployment. The other services of the deployment keep the resolved values.
+ingress class, another FQDN suffix, or TLS hosts for one external service of
+one deployment. The other services of the deployment keep the resolved values.
 
 An operator uses an override to publish the administration interface of an
 application differently from its web interface. The case that led to this
@@ -51,9 +51,12 @@ was `tailscale` and the suffix was `tailnet.example.ts.net`:
 
 The rules in detail:
 
-- Each field is optional. A field that you leave empty uses the resolved
-  value. An override with both fields empty is no override: Styrmin does not
-  store it.
+- Each field is optional. An empty class or suffix uses the resolved value.
+  TLS is off unless `tls` is true. An override with all fields null is no
+  override: Styrmin does not store it. Explicit `tls: false` remains an override.
+- With `tls: true`, Styrmin writes `spec.tls: [{hosts: [...]}]` from the
+  same generated hostnames as the Ingress rules. False, null or omitted writes
+  no TLS section.
 - The Ingress carries the class and no other Styrmin annotation. It has
   `spec.ingressClassName` and the annotation `kubernetes.io/ingress.class`, both
   set to the override class. It has no Traefik entry-point annotation, no
@@ -95,8 +98,8 @@ The rules in detail:
   overridden Ingress has no such annotation, so `ip_whitelist` does not restrict
   the overridden service, whatever the class. Restrict access in the ingress
   controller that serves the override class, outside Styrmin.
-- It does not write `spec.tls`. Styrmin writes no `spec.tls` on an
-  Ingress that it builds.
+- Styrmin creates no certificate or Secret and does not change the backend
+  protocol or the service URL scheme; the ingress controller handles TLS.
 - It does not install or check the controller. The controller that serves
   the override class, for example the Tailscale operator, must already run in
   the cluster. Styrmin does not install it and does not check that it exists.
@@ -127,12 +130,14 @@ The rules in detail:
   host, and the overridden host answers HTTP 404 through it. The cause of the
   404 was not isolated: Traefik also answers 404 for a host that it does not
   serve for another reason.
-- Tailscale. No Tailscale controller runs in the test fixtures. Whether the
-  Tailscale operator needs a `spec.tls` section on an Ingress, and whether it
-  ignores the host in the rules, is not known: the Tailscale documentation does
-  not say. The first release writes no `spec.tls`. A test on a real operator
-  would show it, and the override gets an optional field for the TLS hosts only
-  if that test shows that it is needed.
+- Tailscale operator 1.94.2 was tested separately with a disposable service on
+  the pre-prod IPv6 cluster. A non-empty rule host without a matching TLS host
+  was rejected (`InvalidIngressBackend`, then `NoValidBackends`). Matching
+  `spec.tls.hosts`, a permitted proxy tag and a network policy allowing the
+  proxy to the backend produced HTTPS 200 over tailnet IPv4 and IPv6, with
+  certificate validation. This tested a minimal HTTP service, not the Prefect
+  UI or access denial for other users. Styrmin does not configure proxy tags
+  or network policy; those remain controller and cluster configuration.
 - The delay of a change. The operator applies Ingress changes in its
   periodic pass, every 60 seconds by default. The measurement of an upgrade of
   a running Infrahub deployment is in
@@ -179,10 +184,11 @@ To set or clear an override on an existing deployment:
 3. Type the class, the suffix or both. An empty field shows the placeholder
    `inherited`: the resolved value applies. For an invalid value, the field
    shows the rule that it breaks.
-4. Click **Review & apply** and confirm.
+4. Enable **TLS hosts** if the ingress controller needs
+   TLS hosts, then click **Review & apply** and confirm.
 
 To clear the override of a service, click **Clear** next to its fields, or empty
-both fields, and apply.
+both address fields and disable TLS, then apply.
 
 To set an override when you create a deployment, use the group **Service
 ingress overrides** on the **Deploy** form. It lists the external services of
@@ -213,8 +219,12 @@ spec:
       - name: task-manager
         ingress_class: tailscale
         fqdn_suffix: tailnet.example.ts.net
+        tls: true
 ```
 
+- `tls: true` writes TLS hosts from the service's generated Ingress hosts.
+  Renaming the service or changing its suffix updates the TLS hosts too.
+  The setting applies to any ingress class; it contains no Tailscale-specific logic.
 - Each row names the service as the driver declares it: the driver service
   name, not a service name override.
 - `spec.config` replaces the whole stored config on every apply. A manifest
@@ -231,8 +241,8 @@ spec:
 
 #### With the API, the Python SDK and `styrminctl`
 
-The input is `ServiceConfigInput`, with the fields `name`, `ingressClass` and
-`fqdnSuffix`. It is a list of rows, not a map, in the `services` field of
+The input is `ServiceConfigInput`, with the fields `name`, `ingressClass`,
+`fqdnSuffix` and optional `tls`. It is a list of rows, not a map, in the `services` field of
 `DeploymentConfigInput`, which `deploy`, `updateDeployment` and
 `updateDeploymentVersion` (in `input`) accept:
 
@@ -246,6 +256,7 @@ mutation {
           name: "task-manager"
           ingressClass: "tailscale"
           fqdnSuffix: "tailnet.example.ts.net"
+          tls: true
         }
       ]
     }
@@ -274,6 +285,7 @@ async with StyrminClient(server_address="https://styrmin.example") as client:
                     name="task-manager",
                     ingress_class="tailscale",
                     fqdn_suffix="tailnet.example.ts.net",
+                    tls=True,
                 )
             ],
         ),
@@ -289,7 +301,8 @@ the same payload as JSON:
 uv run styrminctl deployments update <deployment-id> \
   --config '{"services": [{"name": "task-manager",
                            "ingress_class": "tailscale",
-                           "fqdn_suffix": "tailnet.example.ts.net"}]}'
+                           "fqdn_suffix": "tailnet.example.ts.net",
+                           "tls": true}]}'
 ```
 
 To read an override back, query the deployment:
@@ -301,6 +314,7 @@ query {
       name
       ingressClass
       fqdnSuffix
+      tls
     }
     deployedServices {
       driverServiceName

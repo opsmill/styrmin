@@ -53,6 +53,7 @@ type ReadComponentBlock = {
 type ReadServiceBlock = {
   ingress_class?: string | null;
   fqdn_suffix?: string | null;
+  tls?: boolean | null;
 };
 
 function envVarsDictToList(
@@ -90,6 +91,7 @@ function servicesDictToList(
     // A stored null is no override: the row carries no key for it.
     if (block?.ingress_class != null) row.ingressClass = block.ingress_class;
     if (block?.fqdn_suffix != null) row.fqdnSuffix = block.fqdn_suffix;
+    if (block?.tls != null) row.tls = block.tls;
     return row;
   });
 }
@@ -110,7 +112,9 @@ export function servicesFormToInput(
     const next: ServiceConfigInput = { name: row.name };
     if (row.ingressClass) next.ingressClass = row.ingressClass;
     if (row.fqdnSuffix) next.fqdnSuffix = row.fqdnSuffix;
-    if (next.ingressClass || next.fqdnSuffix) out.push(next);
+    if (row.tls != null) next.tls = row.tls;
+    if (next.ingressClass || next.fqdnSuffix || next.tls != null)
+      out.push(next);
   }
   return out;
 }

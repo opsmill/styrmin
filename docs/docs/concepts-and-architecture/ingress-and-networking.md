@@ -335,8 +335,10 @@ The Ingress has these properties:
 - **Backend.** One rule for each host, with the path `/` and path type
   `Prefix`. The backend is the ClusterIP Service that Styrmin creates for
   the service, on the declared port.
-- **No `spec.tls`.** Styrmin writes no `spec.tls` on an Ingress that it
-  builds.
+- **Optional TLS hosts.** A service ingress override with `tls: true` writes
+  `spec.tls.hosts` from the same hostnames as the Ingress rules. Without it,
+  Styrmin writes no TLS section. The ingress controller handles certificates;
+  the backend protocol and port are unchanged.
 - **Class and annotations without an override.** The same as on a chart
   Ingress: the resolved class (see
   [Dedicated ingress controller or shared ingress class](#dedicated-ingress-controller-or-shared-ingress-class)),

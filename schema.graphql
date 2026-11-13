@@ -534,7 +534,7 @@ input DeploymentConfigInput {
   components: [ComponentConfigInput!] = null
 
   """
-  Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override. When the write changes the driver version, a stored override on a service that the target version removes or declares ``internal`` raises ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod changes, unless the same write clears it.
+  Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with ``ingressClass``, ``fqdnSuffix`` and ``tls`` all null is the same as no override. When the write changes the driver version, a stored override on a service that the target version removes or declares ``internal`` raises ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod changes, unless the same write clears it.
   """
   services: [ServiceConfigInput!] = null
 
@@ -1348,7 +1348,7 @@ input SchedulingInput {
 }
 
 """
-Per-service ingress override block for a deployment: the ingress class and the FQDN suffix of one service that the driver declares ``scope: external``.
+Per-service ingress override block for a deployment: the ingress class, FQDN suffix and optional TLS hosts of one service that the driver declares ``scope: external``.
 """
 input ServiceConfigInput {
   """
@@ -1365,6 +1365,11 @@ input ServiceConfigInput {
   FQDN suffix for this service only, used in its readable host. Null or omitted: the resolved suffix applies.
   """
   fqdnSuffix: String = null
+
+  """
+  Write spec.tls.hosts using this service's generated Ingress hosts. False, null or omitted: no TLS section. Does not create a certificate or change the backend protocol; the ingress controller handles TLS.
+  """
+  tls: Boolean = null
 }
 
 type ServiceDefinition {
@@ -1387,6 +1392,9 @@ type ServiceIngressOverride {
 
   """FQDN suffix for this service only. Null when not overridden."""
   fqdnSuffix: String
+
+  """Whether TLS hosts are requested for this service. Null when not set."""
+  tls: Boolean
 }
 
 input ServiceNameOverride {
@@ -1653,7 +1661,7 @@ input UpdateDeploymentInput {
   components: [ComponentConfigInput!] = null
 
   """
-  Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override. When the write changes the driver version, a stored override on a service that the target version removes or declares ``internal`` raises ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod changes, unless the same write clears it.
+  Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with ``ingressClass``, ``fqdnSuffix`` and ``tls`` all null is the same as no override. When the write changes the driver version, a stored override on a service that the target version removes or declares ``internal`` raises ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod changes, unless the same write clears it.
   """
   services: [ServiceConfigInput!] = null
 
