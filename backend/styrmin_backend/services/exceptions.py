@@ -647,6 +647,32 @@ class BackupStorageLocationInUseError(ServiceError):
         return {"environment_names": self.environment_names}
 
 
+class BackupStorageLocationCleanupError(ServiceError):
+    """The removal of a backup storage location's cluster objects could not be submitted.
+
+    Deleting a location submits the Prefect flow that removes its Velero
+    object and credentials Secret from the cluster. When Prefect does not
+    accept the flow run, the delete is refused and the location is kept,
+    because once its row is gone nothing records that the cluster objects
+    exist. The cluster was not contacted.
+    """
+
+    error_code = "OPERATION_FAILED"
+
+    def __init__(self, name: str, message: str = "") -> None:
+        self.name = name
+        super().__init__(
+            message
+            or f"Could not submit the removal of backup storage location '{name}' "
+            "to Prefect; it was not deleted. Check that Prefect is running and "
+            "reachable, then try again."
+        )
+
+    @property
+    def error_metadata(self) -> dict[str, Any]:
+        return {"backup_storage_location_name": self.name}
+
+
 class InvalidSchedulingConfigError(ServiceError):
     """The scheduling configuration payload failed validation.
 

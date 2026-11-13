@@ -428,7 +428,7 @@ Every later step selects the objects by the `styrmin.io/bsl-id` label, not by na
 | Step | Flow or caller | What it does |
 |------|----------------|--------------|
 | Credentials update | `sync-bsl-update-credentials` | Patches every Secret with the label. A failed patch does not stop the others. Fails when there is no Secret, or when a patch failed. |
-| Unassign, or reassign to another location | `sync-bsl-delete` | Deletes every Velero BSL and every Secret with the label. An object that is already gone counts as removed, and a failure on the Velero object does not stop the Secret from being deleted. |
+| Unassign, reassign to another location, delete the last environment of the cluster that uses the location, or delete the location | `sync-bsl-delete` | Deletes every Velero BSL and every Secret with the label. An object that is already gone counts as removed, and a failure on the Velero object does not stop the Secret from being deleted. Deleting the location submits it every time, because the database does not record whether objects exist. Deleting an environment submits it after the row is gone, when a count query finds no other environment of the cluster with the location (`request_bsl_cluster_cleanup_if_unused`). |
 | Backup | `execute_velero_backup_flow` | Uses the name of the Velero BSL with the label as `spec.storageLocation`. Prefers `styrmin-bsl-<location id>` when there are several. Fails before it creates the Velero Backup when there is none. |
 
 Versions before #488 named both objects after the location's name (`styrmin-bsl-<name>`) with the
@@ -437,6 +437,10 @@ unassign removes them. Styrmin does not rename them, because a Velero restore ne
 `BackupStorageLocation` named in the backup's `spec.storageLocation`.
 
 The flows take the location's id (`bsl_id`) and never its name.
+
+The Prefect UI and API list a run under the workflow name from the catalogue (`sync_bsl_create`, `sync_bsl_delete`, `sync_bsl_update_credentials`), not under the `name` of the `@flow` decorator (`sync-bsl-delete`), because the deployment is created for the workflow name. A test that reads the runs filters by the workflow name.
+
+Velero deletes an expired backup only while the Velero object that the backup names in `spec.storageLocation` exists. Removing the location's object leaves its backups in the cluster and their data in the bucket (see "Backups that name a removed BSL" in the user documentation).
 
 The environment capability `backup.velero.storage_location` is the same id-based name,
 `styrmin-bsl-<location id>` (`compute_environment_capabilities` in `services/capabilities.py`), so

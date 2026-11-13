@@ -377,6 +377,91 @@ that those versions started, until Prefect deletes the runs. To make
 those keys unusable, rotate them in your object storage and update the
 BSL with the new keys.
 
+### When Styrmin removes a BSL's cluster objects
+
+Styrmin removes both objects, the Velero `BackupStorageLocation` and the
+`Secret`, when:
+
+- you unassign the BSL from its last environment, or reassign that
+  environment to a different BSL,
+- you delete the last environment of the cluster that uses the BSL, or
+- you delete the BSL.
+
+A BSL that another environment of the cluster still uses stays in the
+cluster. Styrmin deletes the Prefect Secret block of a BSL only when you
+delete the BSL.
+
+The removal is the Prefect flow `sync_bsl_delete`. Styrmin submits the
+flow and does not wait for it, so the response does not confirm that the
+objects are gone. A run that fails inside the cluster shows as a failed
+run of `sync_bsl_delete` in the Prefect UI. A removal that finds an
+object already gone counts it as removed and still deletes the other
+one. Deleting a BSL after its last environment, the usual order, finds
+nothing to delete and ends as a completed run.
+
+If Styrmin cannot submit the removal, the result depends on the action:
+
+- **Deleting an environment** still succeeds and reports success. The
+  server log has the warning `environment_delete_bsl_cleanup_failed`,
+  which names the BSL id. The objects stay until you delete the BSL, or
+  until you delete them by hand with the commands under
+  [Objects left by earlier versions](#objects-left-by-earlier-versions).
+- **Deleting a BSL** keeps the BSL and fails with the error code
+  `OPERATION_FAILED` and this message: `Could not submit the removal of
+  backup storage location '<name>' to Prefect; it was not deleted. Check
+  that Prefect is running and reachable, then try again.` Deleting a BSL
+  submits the removal every time, also for a BSL that was never assigned
+  to an environment, so you cannot delete any BSL while Prefect is
+  unreachable.
+
+If you assign the BSL to another environment of the cluster at the same
+moment as you delete or unassign the last environment that used it, the
+objects can be removed although an environment now uses the BSL. A
+backup of that environment then fails because no Velero object carries
+the BSL's id label. Assign the BSL to the environment again to create the
+objects. This was not reproduced.
+
+The `environment_deleted` log line of an environment delete ends with
+`bsl_cleanup=`, which is one of `no_location`, `location_still_used`,
+`requested` and `failed`.
+
+#### Objects left by earlier versions
+
+Every Styrmin release up to and including v0.1.56 did not remove these
+objects when you deleted an environment or a BSL. They stay in the
+cluster, and the Secret still holds the BSL's S3 keys. List the objects
+of every BSL and the ID of each BSL that Styrmin still lists:
+
+```bash
+kubectl get backupstoragelocations.velero.io,secrets -n styrmin \
+  -l styrmin.io/bsl-id --label-columns=styrmin.io/bsl-id
+styrminctl backup-locations list
+```
+
+Delete the objects whose `styrmin.io/bsl-id` is not in the list:
+
+```bash
+kubectl delete backupstoragelocations.velero.io,secrets -n styrmin \
+  -l styrmin.io/bsl-id=<BSL id>
+```
+
+Objects of a BSL that Styrmin still lists, but that no environment uses,
+are removed when you delete that BSL.
+
+#### Backups that name a removed BSL
+
+Each Velero backup records the name of its BSL. Styrmin does not delete
+a Velero backup when it deletes an environment or the backup's record:
+Velero deletes the backup when its TTL ends, and it needs the BSL for
+that. When the BSL's Velero object is gone, Velero does not delete the
+expired backup. It logs that the backup cannot be garbage-collected and
+sets the label `velero.io/gc-failure=BSLNotFound` on the backup. The
+backup stays in the cluster and Velero deletes none of its data from the
+bucket. Assigning the same BSL to an environment again creates the
+Velero object with the same name, and Velero then deletes the expired
+backup. For a BSL that you deleted in Styrmin, delete the leftover data
+in the bucket yourself.
+
 ### Retention: how long Velero keeps a backup
 
 Every Velero backup that Styrmin creates has a **TTL** (time to live):

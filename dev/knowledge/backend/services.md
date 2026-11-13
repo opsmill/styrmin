@@ -207,7 +207,7 @@ Manages environments within clusters.
 | `get_environment(environment_id, uow)` | Retrieve environment by ID |
 | `get_environments(uow)` | List all environments |
 | `update_environment(environment_id, uow, config, *, acting_user_id)` | Validate, bind the deployment references against the environment (a refused reference saves nothing), persist the env-config row, then fan out a redeploy Task to every live, non-internal deployment in the environment whose active instance is not already at the new config, and create or redeploy the environment's dedicated ingress controller for `acting_user_id`. See "Environment-config fanout" below + [ADR-012](../../adr/0012-environment-config-fanout.md). Raises `EnvironmentOperationInProgressError` while an environment clone occupies the environment (`guard_no_clone_occupying_environment`). Only the clone part of the environment-level guard applies: an environment backup or restore in progress does not block the update. The check runs before the `config is None` no-op path, so a no-op update is also refused while a clone occupies the environment. |
-| `delete_environment(environment_id, uow)` | Delete an environment and everything that depends on it, in four steps (see "Deleting an environment" below). |
+| `delete_environment(environment_id, uow)` | Delete an environment and everything that depends on it, in five steps (see "Deleting an environment" below). |
 
 <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 
@@ -215,7 +215,7 @@ Manages environments within clusters.
 
 <!-- Extracted from specs/010-environment-clone on 2026-10-13 -->
 
-`delete_environment` runs four steps, in this order:
+`delete_environment` runs five steps, in this order:
 
 1. It settles the environment clone records in which the environment appears, in one transaction:
    - as the created environment, with `detach_clones_from_created_environment`;
@@ -225,8 +225,16 @@ Manages environments within clusters.
 2. It deletes the environment backups of the environment, with the same cascade as `delete_environment_backup` (`delete_environment_backups_for_environment`).
 3. It asks the cluster to tear down every remaining deployment of the environment with `request_cluster_teardown`, then deletes the deployment rows with `uow.deployments.delete_all_for_environment`. The teardown request is best effort: the rows are deleted even when the cluster did not answer, and the failures are logged as `environment_delete_teardown_incomplete`.
 4. It deletes the environment row. When a concurrent delete already removed it, the call returns without an error.
+5. It asks for the removal of the environment's backup storage location from the cluster, after the row is gone. `request_bsl_cluster_cleanup_if_unused(bsl_id, cluster_id, uow)` counts, with `uow.environments.count_using_backup_storage_location`, the environments of the cluster that still use the location the environment had (read before anything changes). A count query is used because the location's `environments` list stays loaded after a commit (`expire_on_commit=False`) and still holds the deleted environment, and because the count sees an environment that was assigned or deleted while this delete ran. When the count is zero, it submits the `sync_bsl_delete` flow with `request_bsl_cluster_cleanup` and does not wait for it. A submission that fails is logged as `environment_delete_bsl_cleanup_failed` and does not undo the delete: the objects stay in the cluster until the location is deleted. `VeleroClient.delete_bsl` finds the objects by the id label and counts an object that is already gone as removed.
 
-The `environment_deleted` log line records the number of environment backups and deployments deleted, the teardown requests that succeeded and failed, and the clone records discarded, kept, deleted and failed.
+The `environment_deleted` log line records the number of environment backups and deployments deleted, the teardown requests that succeeded and failed, the clone records discarded, kept, deleted and failed, and `bsl_cleanup`: `no_location`, `location_still_used`, `requested` or `failed`.
+
+**Deliberate order in `delete_backup_storage_location`.** The service deletes the row and flushes it, then submits `sync_bsl_delete`, then commits. The order is on purpose: a database refusal shows before anything is submitted, and a submission that Prefect refuses rolls the row delete back, so the location is kept and the delete can be retried. Two failures remain:
+
+- The commit fails after the submission was accepted. The flow then removes the objects (the flow run does not depend on the transaction) and the location row stays with no objects in the cluster. Nothing breaks: the row has no environment, and assigning it to an environment creates the objects again, because the create flow makes them when none carries the location's id label (`create_velero_bsl_task`). Not reproduced; this follows from reading the code.
+- The Prefect call runs inside the open transaction, so a slow call keeps the transaction, and the flushed delete of the location row, open for as long as the call takes. How long a call to an unreachable Prefect server takes to fail is not measured.
+
+**Residual race between the count and an assignment (not fixed).** `delete_environment` and `unassign_backup_storage_location` decide with a count query after their commit. An environment assigned to the same location before the count is seen. An assignment that commits after the count is not seen, so the delete submits `sync_bsl_delete` while the assignment, which saw the environment already gone, submits `sync_bsl_create`. The order in which the two runs execute is not defined, so the objects can end up missing although an environment uses the location. Closing it needs the two paths to serialize on the location, for example with a lock on its row, which this change does not add. The unassign path had the same race before this change, because it decided before the unassign. Not reproduced. An operator sees it as a backup that fails because no Velero object carries the location's id label; assigning the location again creates the objects.
 
 #### Environment-config fanout
 
