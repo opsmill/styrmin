@@ -58,6 +58,15 @@ Releases are automated. The [release workflow](../../.github/workflows/release.y
 
 The same rendered section is the GitHub Release body — `gh release create` is deliberately called without `--generate-notes`, so the release notes are exactly what the fragments say rather than a commit dump. Scheduled releases that carry no fragments leave `CHANGELOG.md` untouched rather than adding an empty section.
 
+A scheduled run of the workflow bumps the patch version (`0.1.60` to `0.1.61`). To release a minor or major version, run the workflow manually and set its `bump` input to `minor` or `major`. Set `dry_run` first to read the computed version in the log without pushing anything:
+
+```bash
+gh workflow run release.yml --ref develop -f bump=minor -f dry_run=true
+gh workflow run release.yml --ref develop -f bump=minor
+```
+
+The workflow releases nothing when `develop` has no commit after the last `v*` tag.
+
 Unlike infrahub, `[tool.towncrier]` here sets no `package`: no importable module carries the released version, so `towncrier build` always needs an explicit `--version`. Both the workflow and `invoke release.draft` pass one.
 
 ## Relationship to the docs-site changelog
