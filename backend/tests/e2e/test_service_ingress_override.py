@@ -138,6 +138,7 @@ _OVERRIDE = {
 
 _SERVICE_NAME_LABEL = "styrmin.io/service-name"
 _OPERATOR_BOOKKEEPING_PREFIX = "kopf.zalando.org/"
+_OPERATOR_MANAGED_ANNOTATION = "styrmin.io/kopf-managed"
 _TASK_MANAGER_INGRESS = "styrmin-svc-task-manager"
 _TASK_MANAGER_WORKLOAD = "styrmin-task-manager"
 _TASK_MANAGER_CONTAINER = "prefect-server"
@@ -204,13 +205,15 @@ def _annotations(ingress: dict[str, Any]) -> dict[str, str]:
     """The annotations that Styrmin sets on an Ingress.
 
     The operator watches the Ingress that Styrmin builds, so kopf adds its own bookkeeping
-    annotation (``kopf.zalando.org/last-handled-configuration``). It is not an annotation
-    that Styrmin's ingress rules set, so it is left out of every comparison below.
+    annotations (``kopf.zalando.org/last-handled-configuration`` and
+    ``styrmin.io/kopf-managed``). They are not annotations that Styrmin's ingress rules
+    set, so they are left out of every comparison below.
     """
     return {
         key: value
         for key, value in ingress["metadata"].get("annotations", {}).items()
         if not key.startswith(_OPERATOR_BOOKKEEPING_PREFIX)
+        and key != _OPERATOR_MANAGED_ANNOTATION
     }
 
 
