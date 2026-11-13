@@ -105,4 +105,4 @@ When a runtime substitutes argument text, it replaces the literal string `$ARGUM
 
 ## Relationship to `.agents/commands/`
 
-The legacy `.agents/commands/` directory holds command-style prompt documents historically consumed by a single agent runtime. Core repo workflows have been migrated into this directory as portable skills. SpecKit (`speckit.*`) commands continue to live in `.agents/commands/` because SpecKit ships its own installation and distribution model; do not migrate them.
+The legacy `.agents/commands/` directory holds command-style prompt documents historically consumed by a single agent runtime. Core repo workflows have been migrated into this directory as portable skills. Spec Kit installs its own skills here (`speckit-*`), from its own installation and distribution model; do not edit them by hand, because the next Spec Kit upgrade regenerates them.
