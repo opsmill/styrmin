@@ -9,10 +9,10 @@ from dulwich.repo import Repo
 from loguru import logger
 
 from styrmin_backend import config
+from styrmin_backend.redaction import redact_user_info
 from styrmin_backend.services.driver.driver_directory import (
     normalise_driver_directory,
     quoted,
-    redact_user_info,
     resolve_inside,
 )
 from styrmin_backend.services.driver.exceptions import (

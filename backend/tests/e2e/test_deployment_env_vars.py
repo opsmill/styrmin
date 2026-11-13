@@ -25,18 +25,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import time
 import uuid
+from datetime import UTC, datetime
 from typing import Any, AsyncGenerator, Callable
 
 import kr8s.asyncio
 import pytest
-from kr8s.asyncio.objects import APIObject
+from kr8s.asyncio.objects import APIObject, Service as AsyncService
 from kubernetes_asyncio import client as kubeclient
+from prefect.client.orchestration import PrefectClient
+from prefect.client.schemas.filters import LogFilter, LogFilterTimestamp
 from styrmin_sdk import StyrminClient
 from styrmin_sdk._queries import load_query
 from styrmin_sdk.models import EnvVarInput, UpdateDeploymentInput
 
+from tests.e2e.conftest import _portforward, _wait_for_http
 from tests.e2e.drivers import ScenarioDriver
 from tests.e2e.drivers.api_driver import ApiScenarioDriver
 from tests.e2e.helpers.workloads import _wait_for_pod_template
@@ -344,6 +349,134 @@ async def test_us1_deployment_level_env_var(
         "post-render patch must merge by name (FR-014a). Observed env entries "
         f"on the simple-app container: {sorted(env)}"
     )
+
+
+async def _prefect_log_messages(vcluster: dict, since: datetime) -> list[str]:
+    """Every message that Prefect's log table holds from ``since``, all flow runs."""
+    kr8s_api = await kr8s.asyncio.api(kubeconfig=vcluster["kubeconfig_path"])
+    service = await AsyncService.get(
+        "prefect-server", namespace="styrmin", api=kr8s_api
+    )
+    messages: list[str] = []
+    async with _portforward(service, remote_port=4200) as port:
+        prefect_url = f"http://localhost:{port}/api"
+        await _wait_for_http(f"{prefect_url}/health", timeout=60.0)
+        async with PrefectClient(api=prefect_url) as prefect:
+            while True:
+                page = await prefect.read_logs(
+                    log_filter=LogFilter(timestamp=LogFilterTimestamp(after_=since)),
+                    limit=200,
+                    offset=len(messages),
+                )
+                messages.extend(log.message for log in page)
+                if len(page) < 200:
+                    return messages
+
+
+def _styrmin_pod_logs(kubeconfig: str, since: datetime) -> str:
+    """The logs of the server, the task worker and the agent from ``since``."""
+    pods = subprocess.run(
+        [
+            "kubectl",
+            "--kubeconfig",
+            kubeconfig,
+            "get",
+            "pods",
+            "-n",
+            "styrmin",
+            "-o",
+            "name",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    styrmin_pods = [
+        pod
+        for pod in pods
+        if pod.startswith("pod/styrmin-") and "postgresql" not in pod
+    ]
+    assert len(styrmin_pods) >= 3, pods
+    logs = []
+    for pod in styrmin_pods:
+        logs.append(
+            subprocess.run(
+                [
+                    "kubectl",
+                    "--kubeconfig",
+                    kubeconfig,
+                    "logs",
+                    pod,
+                    "-n",
+                    "styrmin",
+                    "--all-containers",
+                    f"--since-time={since.isoformat()}",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        )
+    return "\n".join(logs)
+
+
+@pytest.mark.api_only(
+    reason=(
+        "Sets a deployment-scope env var through the SDK, then reads Prefect's "
+        "log table and the pod logs; the UI driver's update_deployment only "
+        "accepts the 'scheduling' sub-tree."
+    )
+)
+@pytest.mark.ci
+async def test_env_var_values_stay_out_of_the_logs(
+    env_vars_environment: dict,
+    env_vars_deployment: dict,
+    vcluster: dict,
+    scenario_driver: ScenarioDriver,
+    _env_vars_driver_bound: None,
+) -> None:
+    """#573: an update logs which env var changed, never its value.
+
+    The task worker logged the whole diff report at INFO, with every env var
+    value, in its pod log and in Prefect's log table. The flow runs of the
+    update run in subprocesses of the task worker, so this also checks that
+    the redaction that ``styrmin_backend`` installs on import runs there.
+    """
+    deployment_id = env_vars_deployment["deployment_id"]
+    client: StyrminClient = env_vars_environment["client"]
+    stored = await client.deployments.get(deployment_id)
+    before = dict((stored.config or {}).get("env_vars") or {})
+    # A name that says nothing of a secret, so only code that leaves the
+    # value out keeps it out of the logs.
+    canary = f"e2e573-{uuid.uuid4().hex}"
+    since = datetime.now(UTC)
+
+    await scenario_driver.update_deployment(
+        deployment_id=deployment_id,
+        config={"env_vars": {**before, "E2E_LOG_CANARY": canary}},
+    )
+    try:
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+        )
+
+        messages = await _prefect_log_messages(vcluster, since)
+        reports = [m for m in messages if m.startswith("Flow-side diff report:")]
+        assert any(
+            f"deployment {deployment_id}" in m and "env_vars.E2E_LOG_CANARY" in m
+            for m in reports
+        ), reports
+        assert [m for m in messages if canary in m] == []
+        pod_logs = _styrmin_pod_logs(vcluster["kubeconfig_path"], since)
+        assert "Flow-side diff report:" in pod_logs
+        assert canary not in pod_logs
+    finally:
+        await scenario_driver.update_deployment(
+            deployment_id=deployment_id, config={"env_vars": before}
+        )
+        await scenario_driver.wait_for_deployment_running(
+            deployment_id=deployment_id, timeout=RECONCILE_TIMEOUT_SECONDS
+        )
 
 
 # ---------------------------------------------------------------------------

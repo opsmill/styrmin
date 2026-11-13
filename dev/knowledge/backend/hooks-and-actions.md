@@ -462,12 +462,14 @@ status, such as `Process exited with status code: 1.`. For a crashed flow run of
 `run_driver_action_or_fail` (`agent/tasks/utils.py`) reads the first log of level `ERROR` or higher
 of that flow run (`_first_error_log`: `read_logs` with a `LogFilter` on the flow run id and the
 level, sorted by timestamp, limit 1), cuts it to 4,000 characters (`FIRST_ERROR_LOG_MAX_LENGTH`),
-redacts it with `redact_secrets`, and raises
+redacts it with `redact_secrets` (`redaction.py`), and raises
 `RuntimeError("Deployment flow run <id> crashed: <first error log> (<state message>)")`.
 `redact_secrets` replaces with `<redacted>` the action token, the user info of every `scheme://`
 URL, the credential after `Bearer` or `Basic`, and the value after `=` or `:` of a key whose name
-contains `password`, `passwd`, `secret`, `token`, `api_key`, `private_key` or `credential`; other
-forms of a secret are kept. When the flow run has no such log, or the logs cannot be read, it logs a
+contains `password`, `passwd`, `passphrase`, `secret`, `token`, `api_key`, `private_key`,
+`credential` or `cookie`; other forms of a secret are kept. Every log record of a Styrmin process
+already went through the same function without the action token (see "Log redaction" in
+[overview.md](overview.md#log-redaction)). When the flow run has no such log, or the logs cannot be read, it logs a
 warning in the calling flow run (`log_in_run`) and raises with the state message alone. The other
 flows that `run_deployment_or_fail` starts, such as the orchestration flows and the remediations,
 keep `Deployment flow run <id> crashed: <state message>`: their logs are not copied into a task. A
@@ -634,7 +636,8 @@ If the new driver version declares no `upgrade`/`core` action, `_handle_upgrade`
 | [services/driver/hooks.py](../../../backend/styrmin_backend/services/driver/hooks.py) | `ActionRegistrationKey`, `resolve_setup_hooks`, `resolve_upgrade_hooks`, `load_command_for` |
 | [services/driver/exceptions.py](../../../backend/styrmin_backend/services/driver/exceptions.py) | `DriverFilesNotFoundError`, `DriverFingerprintMismatchError`, `ActionNotRegisteredError`, `describe_agent_pod` |
 | [workflows/local_driver.py](../../../backend/styrmin_backend/workflows/local_driver.py) | `check_local_driver` pull step, `check_local_driver_files` |
-| [agent/tasks/utils.py](../../../backend/styrmin_backend/agent/tasks/utils.py) | `run_driver_action_or_fail`, `redact_secrets`, `log_in_run` |
+| [agent/tasks/utils.py](../../../backend/styrmin_backend/agent/tasks/utils.py) | `run_driver_action_or_fail`, `log_in_run` |
+| [redaction.py](../../../backend/styrmin_backend/redaction.py) | `redact_secrets`, `install_log_redaction` |
 | [workflows/models.py](../../../backend/styrmin_backend/workflows/models.py) | `GitSourceWorkflowDefinition`, `LocalDriverActionWorkflowDefinition` |
 | [services/driver/hash.py](../../../backend/styrmin_backend/services/driver/hash.py) | `compute_driver_directory_fingerprint`, shared by the local loader and the check |
 | [services/deployment.py](../../../backend/styrmin_backend/services/deployment.py) | Request check of `update_deployment_version`, `_fail_upgrade_of_unregistered_action` |

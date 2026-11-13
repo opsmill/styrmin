@@ -6,7 +6,8 @@ import io
 
 from loguru import logger
 
-from styrmin_backend.server.logging import REDACTED, redact
+from styrmin_backend.redaction import REDACTED
+from styrmin_backend.redaction import redact_loguru_record as redact
 
 
 def _attach_capture_sink() -> tuple[io.StringIO, int]:
@@ -61,6 +62,18 @@ def test_unrelated_field_not_redacted() -> None:
     try:
         logger.bind(username="alice").info("hello")
         contents = sink.getvalue()
+        assert "alice" in contents
+    finally:
+        logger.remove(handler_id)
+
+
+def test_password_redacted_in_message() -> None:
+    sink, handler_id = _attach_capture_sink()
+    try:
+        secret = "FAKE573-literal-4444"
+        logger.info("login(username: alice, password: {})", secret)
+        contents = sink.getvalue()
+        assert secret not in contents
         assert "alice" in contents
     finally:
         logger.remove(handler_id)

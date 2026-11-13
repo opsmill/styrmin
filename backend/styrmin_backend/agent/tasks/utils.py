@@ -1,7 +1,5 @@
 import logging
 import os
-import re
-from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
@@ -20,7 +18,7 @@ from prefect.exceptions import MissingContextError
 
 from styrmin_backend import config
 from styrmin_backend.config import API_TOKEN_ENV
-from styrmin_backend.services.driver.driver_directory import redact_user_info
+from styrmin_backend.redaction import redact_secrets
 
 #: The parent of the steps a USER flow run records; exactly one is set (019 research D3).
 TASK_ID_ENV = "STYRMIN_TASK_ID"
@@ -30,15 +28,6 @@ RESTORE_ID_ENV = "STYRMIN_RESTORE_ID"
 STEP_ID_ENV = "STYRMIN_STEP_ID"
 #: The most characters of a crashed flow run's first error log that its error holds.
 FIRST_ERROR_LOG_MAX_LENGTH = 4000
-#: What replaces a secret in the first error log of a crashed driver action.
-REDACTED = "<redacted>"
-# ``Bearer <credential>`` or ``Basic <credential>``, as in an Authorization header.
-_AUTHORIZATION = re.compile(r"(?i)\b(bearer|basic)(\s+)[^\s\"',;]+")
-# A key whose name says it holds a secret, then ``=`` or ``:``, then its value.
-_SECRET_FIELD = re.compile(
-    r"(?i)\b([\w.-]*(?:password|passwd|secret|token|api[_-]?key|private[_-]?key"
-    r"|credential)[\w.-]*)([\"']?\s*[:=]\s*[\"']?)([^\s\"',;}]+)"
-)
 
 
 def action_job_variables(
@@ -73,31 +62,6 @@ def log_in_run(level: int, message: str) -> None:
         get_run_logger().log(level, "%s", message)
     except MissingContextError:
         logger.log(logging.getLevelName(level), message)
-
-
-def redact_secrets(text: str, secrets: Iterable[str] = ()) -> str:
-    """Return ``text`` with the secrets that it may hold replaced by ``REDACTED``.
-
-    Replaces each value of ``secrets``, such as the action token; the user
-    info of every ``scheme://`` URL; the credential after ``Bearer`` or
-    ``Basic``; and the value after ``=`` or ``:`` of a key whose name contains
-    ``password``, ``passwd``, ``secret``, ``token``, ``api_key``,
-    ``private_key`` or ``credential``. A secret written in any other form is
-    kept.
-
-    >>> redact_secrets("login failed: password=hunter2 for https://u:p@db/x", ["t0k"])
-    'login failed: password=<redacted> for https://db/x'
-    >>> redact_secrets("STYRMIN_TOKEN is t0k", ["t0k"])
-    'STYRMIN_TOKEN is <redacted>'
-    >>> redact_secrets('{"api_key": "abc"} Authorization: Bearer xyz')
-    '{"api_key": "<redacted>"} Authorization: Bearer <redacted>'
-    """
-    for secret in secrets:
-        if secret:
-            text = text.replace(secret, REDACTED)
-    text = redact_user_info(text)
-    text = _AUTHORIZATION.sub(rf"\1\2{REDACTED}", text)
-    return _SECRET_FIELD.sub(rf"\1\2{REDACTED}", text)
 
 
 async def _first_error_log(flow_run_id: UUID) -> str | None:

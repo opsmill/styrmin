@@ -408,6 +408,12 @@ its hook step, which every signed-in user who can read the task can read.
 Styrmin replaces the action's API token and some common forms of secrets
 in that line with `<redacted>`, but not every form (see
 [Logs of a crashed action are shown on its hook step](../docs/docs/drivers/loading-drivers.md#logs-of-a-crashed-action-are-shown-on-its-hook-step)).
+It replaces the same forms in every other log line too.
+
+Log ids and names, such as `context.instance.deployment_id`, not the values
+of the context: its values template, parameters and env vars can hold
+passwords. Printing the whole context shows only its ids and names (see
+[Logging in an action](../docs/docs/drivers/creating-a-driver.md#logging-in-an-action)).
 
 ```python
 from styrmin_backend.actions import stop_components, start_components, execute_commands, GlobalContext
