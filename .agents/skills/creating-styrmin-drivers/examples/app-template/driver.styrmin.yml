@@ -1,0 +1,40 @@
+---
+# Uptime Kuma on the bjw-s app-template chart: the route for a single-container application whose
+# own chart has no value that can add a NetworkPolicy (Styrmin denies all egress, so its pods could
+# not resolve DNS). app-template renders the Deployment, Service, Ingress, volume and NetworkPolicies
+# from values. (Uptime Kuma's own chart can enable its NetworkPolicy: this driver is the example.)
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: uptime-kuma
+spec:
+  version: "1"
+  supported_versions: ">=2,<3"
+  default_version: "2.5.8"   # the image tag: values.j2.yml uses app.version
+  info:
+    description: Uptime Kuma monitoring, one container with its SQLite database on a volume.
+    authors: [opsmill]
+    license: MIT
+  helm:
+    main:
+      location: oci://ghcr.io/bjw-s-labs/helm/app-template
+      version: 5.2.1
+
+  components:
+    server:
+      container: app
+      identifier:
+        label:
+          styrmin/component: server
+      singleton: true          # SQLite on a ReadWriteOnce volume: one pod only
+      backup:
+        enabled: true
+        kind: disk
+        volume: data
+
+  services:
+    - name: uptime-kuma
+      kind: http
+      scope: external
+      port: 3001               # the port the container listens on
+      component: server

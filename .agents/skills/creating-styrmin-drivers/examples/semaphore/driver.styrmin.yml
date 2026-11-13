@@ -1,0 +1,48 @@
+---
+# Worked example: Ansible Semaphore (one web server) + PostgreSQL (Bitnami subchart).
+# Deployed and reached through its URL on Styrmin 0.1.54 (kind, network policies enforced).
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: semaphore
+spec:
+  version: "1"                       # the driver's own version, a quoted string
+  supported_versions: ">=2.16,<2.17"  # application versions, PEP 440, no "v" prefix
+  default_version: "2.16.47"         # must be inside supported_versions
+  info:
+    icon: https://raw.githubusercontent.com/semaphoreui/semaphore/develop/web/public/favicon.svg
+    description: Modern UI and API for Ansible, Terraform and other DevOps tools
+    authors: [opsmill]
+    license: MIT
+    links:
+      - link: Documentation
+        url: https://docs.semaphoreui.com/
+  helm:
+    main:
+      # "<repository URL>/<chart name>": an HTTP repo here, `oci://registry/path/chart` for OCI.
+      location: https://semaphoreui.github.io/charts/semaphore
+      version: "16.0.11"
+
+  components:
+    server:
+      container: semaphore           # the app container's name in the rendered chart
+      identifier:
+        label:                       # on the Deployment's own labels AND its pod labels
+          app.kubernetes.io/name: semaphore
+    database:
+      container: postgresql
+      singleton: true                # one primary: a second pod would get its own data
+      identifier:
+        label:
+          app.kubernetes.io/name: postgresql
+      backup:
+        enabled: true
+        kind: postgres               # pg_dump to the `backup` volume at /backup, then snapshot
+        database_name: semaphore
+
+  services:
+    - name: semaphore
+      kind: http
+      scope: external                # Styrmin gives it a URL; the chart's Ingress must use it
+      port: 3000                     # the port the container listens on
+      component: server
