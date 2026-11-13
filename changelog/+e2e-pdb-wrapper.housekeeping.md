@@ -1,0 +1,1 @@
+Added `scripts/e2e-pdb.sh` to run an E2E test with `--pdb` from a non-interactive shell: it exits when pytest exits, and `kill <pid>` stops the run and lets the pytest teardown delete the test vcluster. Fixed the e2e-troubleshoot skill, which killed other sessions' E2E runs and deleted their vclusters.
