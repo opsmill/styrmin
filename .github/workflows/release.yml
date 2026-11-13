@@ -7,6 +7,14 @@ on:
     - cron: "33 0 */3 * *"
   workflow_dispatch:
     inputs:
+      bump:
+        type: choice
+        description: Version component to bump (scheduled runs bump patch)
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
       dry_run:
         type: boolean
         description: Run without pushing tags, images, or charts
@@ -62,13 +70,16 @@ jobs:
       - name: Compute next version
         id: version
         if: steps.changes.outputs.has_changes == 'true'
+        env:
+          # Scheduled runs have no inputs, so they bump the patch version.
+          BUMP: ${{ inputs.bump || 'patch' }}
         run: |
           CURRENT_VERSION=$(uv version --short)
           echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
 
-          NEW_VERSION=$(uv version --bump patch --dry-run --short)
+          NEW_VERSION=$(uv version --bump "$BUMP" --dry-run --short)
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Version: $CURRENT_VERSION -> $NEW_VERSION"
+          echo "Version: $CURRENT_VERSION -> $NEW_VERSION ($BUMP bump)"
 
           # Version regression guard
           LAST_TAG="${{ steps.changes.outputs.last_tag }}"
