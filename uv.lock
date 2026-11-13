@@ -2704,7 +2704,7 @@ requires-dist = [{ name = "alembic", specifier = ">=1.14.0" }]
 
 [[package]]
 name = "styrmin-mvp"
-version = "0.1.58"
+version = "0.1.59"
 source = { virtual = "." }
 dependencies = [
     { name = "aiosqlite" },

@@ -4,9 +4,9 @@ description: Helm chart for Styrmin deployment orchestration platform
 # Application chart for deploying Styrmin with all its components
 type: application
 # Chart version - increment on changes to chart/templates
-version: 0.1.58
+version: 0.1.59
 # Application version being deployed
-appVersion: "0.1.58"
+appVersion: "0.1.59"
 keywords:
   - styrmin
   - deployment
@@ -27,7 +27,7 @@ dependencies:
     repository: "https://prefecthq.github.io/prefect-helm"
     condition: prefect-server.enabled
   - name: styrmin-agent
-    version: "0.1.58"
+    version: "0.1.59"
     repository: "file://../agent"
     condition: agent.enabled
   - name: velero
