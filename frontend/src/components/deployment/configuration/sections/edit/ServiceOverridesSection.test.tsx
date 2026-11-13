@@ -161,13 +161,11 @@ describe("ServiceOverridesSection: ingress override fields", () => {
     }
   });
 
-  it("says that an overridden Ingress carries only the ingress class", () => {
+  it("explains which defaults do not apply to an overridden Ingress", () => {
     renderSection();
 
     const help = screen.getByTestId("service-ingress-override-note");
-    expect(help).toHaveTextContent(
-      "An overridden Ingress carries only the ingress class",
-    );
+    expect(help).toHaveTextContent("are not applied to an overridden Ingress");
     expect(help).toHaveTextContent("IP allow-list");
     expect(help).toHaveTextContent("external DNS record");
     expect(help).toHaveTextContent("application address");

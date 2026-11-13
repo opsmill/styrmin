@@ -545,6 +545,36 @@ describe("impact-rules.ts: replica changes (023)", () => {
 });
 
 describe("impact-rules.ts: service ingress overrides (#598)", () => {
+  it.each([
+    [true, false],
+    [false, false],
+    [true, true],
+    [false, true],
+  ])(
+    "warns about TLS-only %s side effects when clearing=%s",
+    (tls, clearing) => {
+      const plain = { services: [] };
+      const overridden = { services: [{ name: "task-manager", tls }] };
+      const result = clearing
+        ? diff(overridden, plain, [])
+        : diff(plain, overridden, []);
+      const summary = evaluateImpact(result, impactRules);
+
+      expect(summary.entries).toHaveLength(1);
+      expect(summary.entries[0].triggeringPaths).toEqual([
+        "services[task-manager].tls",
+      ]);
+      for (const effect of [
+        "IP allow-list",
+        "external DNS record",
+        "application address",
+        "clearing the last override restores the defaults",
+      ]) {
+        expect(summary.entries[0].consequence).toContain(effect);
+      }
+    },
+  );
+
   const before = {
     services: [
       {

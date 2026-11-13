@@ -344,6 +344,34 @@ class TestIngressObject:
             {"hosts": [rule["host"] for rule in ingresses[1]["spec"]["rules"]]}
         ]
 
+    @pytest.mark.parametrize("tls", [True, False])
+    def test_tls_only_override_uses_full_override_routing_rules(
+        self, tls: bool
+    ) -> None:
+        services = [_service("web"), _service("task-manager", port=4200)]
+        settings = {"ip_whitelist": ["10.0.0.0/8"]}
+        baseline = _by_service(_build(_context(services, **settings)))
+        overridden = _by_service(
+            _build(
+                _context(
+                    services,
+                    overrides={"web": ServiceConfigBlock(tls=tls)},
+                    **settings,
+                )
+            )
+        )
+
+        assert _PRIMARY in _hosts(baseline["web"])
+        assert (
+            "traefik.ingress.kubernetes.io/router.middlewares"
+            in baseline["web"]["metadata"]["annotations"]
+        )
+        assert _PRIMARY not in _hosts(overridden["web"])
+        assert overridden["web"]["metadata"]["annotations"] == {
+            "kubernetes.io/ingress.class": "traefik"
+        }
+        assert overridden["task-manager"] == baseline["task-manager"]
+
 
 class TestHosts:
     def test_every_external_service_has_its_readable_host(self) -> None:

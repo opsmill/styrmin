@@ -285,6 +285,7 @@ async with StyrminClient(server_address="https://styrmin.example") as client:
                     name="task-manager",
                     ingress_class="tailscale",
                     fqdn_suffix="tailnet.example.ts.net",
+                    tls=True,
                 )
             ],
         ),
@@ -300,7 +301,8 @@ the same payload as JSON:
 uv run styrminctl deployments update <deployment-id> \
   --config '{"services": [{"name": "task-manager",
                            "ingress_class": "tailscale",
-                           "fqdn_suffix": "tailnet.example.ts.net"}]}'
+                           "fqdn_suffix": "tailnet.example.ts.net",
+                           "tls": true}]}'
 ```
 
 To read an override back, query the deployment:
@@ -312,6 +314,7 @@ query {
       name
       ingressClass
       fqdnSuffix
+      tls
     }
     deployedServices {
       driverServiceName
