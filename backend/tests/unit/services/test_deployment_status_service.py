@@ -428,6 +428,32 @@ async def test_deleting_sets_deleting() -> None:
 
 
 @pytest.mark.anyio
+async def test_deleting_report_moves_a_failed_deployment_to_deleting() -> None:
+    """#371: the operator tears down a deployment whose create failed and
+    reports ``Deleting``. The row is ``FAILED`` until then; the report moves
+    it to ``DELETING``, from where the CR's absence tombstones it."""
+    dep = _make_deployment(status=DeploymentState.FAILED)
+    dep_repo = FakeDeploymentRepository()
+    await dep_repo.save(dep)
+    uow = _make_uow(deployments=dep_repo)
+
+    reports = [
+        {
+            "deployment_id": dep.id,
+            "phase": "Deleting",
+            "display_state": "Deleting",
+        }
+    ]
+    _, deployments_updated = await report_deployment_statuses(reports, uow)
+
+    assert deployments_updated == 1
+    found = await dep_repo.find(dep.id)
+    assert found is not None
+    assert found.status == DeploymentState.DELETING
+    assert found.deleted_at is None
+
+
+@pytest.mark.anyio
 async def test_deleted_sets_deleted_and_stamps_deleted_at() -> None:
     """displayState=Deleted projects to DeploymentState.DELETED and
     atomically stamps deleted_at — this is the SOLE writer of

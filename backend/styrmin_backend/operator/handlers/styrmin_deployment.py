@@ -223,6 +223,28 @@ async def on_styrmin_deployment_create(
     **_: Any,
 ) -> None:
     """Handle StyrminDeployment creation — start ordered deployment."""
+    # While this handler keeps raising TemporaryError, kopf retries the create
+    # cause and stores no last-handled state. A ``spec.deletionRequested`` flip
+    # in that time is part of the same pending create, so the field handler
+    # never fires for it (#371). Act on the request here instead of running
+    # the deploy pipeline again.
+    if spec.get("deletionRequested", False):
+        logger.info(
+            "StyrminDeployment %s/%s has deletionRequested=true before its create "
+            "succeeded — tearing it down instead of deploying",
+            namespace,
+            name,
+        )
+        await _run_requested_teardown(
+            spec=spec,
+            status=status,
+            name=name,
+            namespace=namespace,
+            patch=patch,
+            logger=logger,
+        )
+        return
+
     logger.info("StyrminDeployment created: %s/%s", namespace, name)
 
     patch.status["displayState"] = DisplayState.DEPLOYING.value
@@ -352,6 +374,19 @@ async def on_styrmin_deployment_resume(
     """
     phase = status.get("phase", DeploymentPhase.PENDING.value)
     conditions = status.get("conditions", [])
+
+    # Once deletion is requested, the create handler or the field handler tears
+    # the deployment down. Resuming the deploy pipeline beside it would
+    # recreate the HelmRelease of an internal deployment, or put the phase back
+    # to CreatingHelmRelease, while the namespace is being deleted (#371).
+    if spec.get("deletionRequested", False):
+        logger.info(
+            "Not resuming %s/%s from phase=%s: deletion was requested",
+            namespace,
+            name,
+            phase,
+        )
+        return
 
     logger.info("Resuming %s/%s from phase=%s", namespace, name, phase)
 
@@ -1292,6 +1327,48 @@ async def _advance_to_phase_deleted(
     return True
 
 
+async def _run_requested_teardown(
+    *,
+    spec: dict[str, Any],
+    status: dict[str, Any],
+    name: str,
+    namespace: str,
+    patch: Any,
+    logger: Any,
+) -> None:
+    """Act on ``spec.deletionRequested``: tear the deployment down and delete its namespace.
+
+    Sets phase and displayState to ``Deleting``. The namespace finaliser may
+    take time; the periodic timer (kopf_styrmin_deployment_timer) advances to
+    phase: Deleted once the API server reports 404 for the namespace.
+
+    Shared by the field handler, which handles the request of a deployment
+    whose create succeeded, and by the create handler, which handles the
+    request of one whose create has not (#371).
+    """
+    if status.get("phase") == DeploymentPhase.DELETED.value:
+        # Already terminal — nothing to do (defensive; CEL rule prevents
+        # un-setting the flag, so we should not see updates after Deleted).
+        return
+
+    logger.info(
+        "Deletion requested via spec for %s/%s — running teardown", namespace, name
+    )
+
+    set_phase(patch.status, DeploymentPhase.DELETING, _DELETING_MESSAGE)
+    patch.status["displayState"] = DisplayState.DELETING.value
+
+    await _teardown_owned_resources(
+        namespace=namespace,
+        release_reference=spec.get("releaseReference", ""),
+        deployment_id=spec.get("deploymentId", ""),
+        deletion_requested=bool(spec.get("deletionRequested", False)),
+        name=name,
+        logger=logger,
+    )
+    await _request_namespace_deletion(namespace=namespace, logger=logger)
+
+
 @kopf.on.update(
     CRD_GROUP,
     CRD_VERSION,
@@ -1312,33 +1389,14 @@ async def kopf_on_styrmin_deployment_deletion_requested(
     pipeline platform-side (no CR delete — the CR lingers until the
     janitor reaps it after ``DELETED_CR_TTL_HOURS``)."""
 
-    ns = namespace or ""
-    release_ref = spec.get("releaseReference", "")
-
-    current_phase = status.get("phase")
-    if current_phase == DeploymentPhase.DELETED.value:
-        # Already terminal — nothing to do (defensive; CEL rule prevents
-        # un-setting the flag, so we should not see updates after Deleted).
-        return
-
-    logger.info("Deletion requested via spec for %s/%s — running teardown", ns, name)
-
-    set_phase(patch.status, DeploymentPhase.DELETING, _DELETING_MESSAGE)
-    patch.status["displayState"] = DisplayState.DELETING.value
-
-    await _teardown_owned_resources(
-        namespace=ns,
-        release_reference=release_ref,
-        deployment_id=spec.get("deploymentId", ""),
-        deletion_requested=bool(spec.get("deletionRequested", False)),
+    await _run_requested_teardown(
+        spec=dict(spec),
+        status=dict(status),
         name=name,
+        namespace=namespace or "",
+        patch=patch,
         logger=logger,
     )
-    await _request_namespace_deletion(namespace=ns, logger=logger)
-
-    # The namespace finaliser may take time; the periodic timer
-    # (kopf_styrmin_deployment_timer) advances to phase: Deleted once
-    # the API server reports 404 for the namespace.
 
 
 @kopf.on.delete(CRD_GROUP, CRD_VERSION, CRD_PLURAL)

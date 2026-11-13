@@ -15,6 +15,8 @@ Covers three orthogonal pieces:
    CRs.
 4. The teardown step that deletes the deployment's service aliases in
    all namespaces (#503).
+5. The create and resume handlers' reaction to a deletion that was
+   requested before the create succeeded (#371).
 
 Kubernetes / kopf interactions are mocked at the helper boundary so the
 tests run in-process with no cluster.
@@ -50,8 +52,10 @@ from styrmin_backend.operator.handlers import styrmin_deployment as handlers_mod
 from styrmin_backend.operator.handlers.styrmin_deployment import (
     _delete_service_aliases,
     _teardown_owned_resources,
+    kopf_on_styrmin_deployment_create,
     kopf_on_styrmin_deployment_delete,
     kopf_on_styrmin_deployment_deletion_requested,
+    kopf_on_styrmin_deployment_resume,
     kopf_on_styrmin_deployment_update,
     kopf_styrmin_deployment_timer,
 )
@@ -213,6 +217,204 @@ async def test_deletion_requested_handler_short_circuits_when_already_deleted(
         logger=_Logger(),
     )
 
+    teardown_mock.assert_not_called()
+    delete_ns_mock.assert_not_called()
+    assert patch.status == {}
+
+
+# A deletion requested while the create handler keeps raising TemporaryError
+# is part of kopf's pending create cause, so the field handler never fires for
+# it (#371). The create handler acts on the request; the resume handler leaves
+# the deployment to it.
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("spec_extra", "phase"),
+    [
+        ({}, DeploymentPhase.FAILED.value),
+        ({}, DeploymentPhase.CREATING_PREREQUISITES.value),
+        ({"internal": True}, DeploymentPhase.FAILED.value),
+    ],
+    ids=["failed", "creating-prerequisites", "internal-failed"],
+)
+async def test_create_handler_tears_down_instead_of_deploying_when_deletion_requested(
+    mocker, spec_extra: dict[str, Any], phase: str
+) -> None:
+    """The retried create handler tears the deployment down, deletes its
+    namespace and reports ``Deleting``, instead of running the deploy
+    pipeline again and failing again."""
+
+    teardown_mock = mocker.patch.object(
+        handlers_module, "_teardown_owned_resources", autospec=True
+    )
+    delete_ns_mock = mocker.patch.object(
+        handlers_module, "_request_namespace_deletion", autospec=True
+    )
+    prereq_mock = mocker.patch.object(
+        handlers_module, "execute_phase_prerequisites", autospec=True
+    )
+    helmrelease_mock = mocker.patch.object(
+        handlers_module, "execute_phase_helmrelease", autospec=True
+    )
+
+    deployment_id = str(uuid4())
+    namespace = get_kubernetes_reference(UUID(deployment_id))
+    patch = _Patch()
+    await kopf_on_styrmin_deployment_create(
+        spec={
+            "releaseReference": "rel-1",
+            "deploymentId": deployment_id,
+            "deletionRequested": True,
+            **spec_extra,
+        },
+        status={"phase": phase, "displayState": DisplayState.ERROR.value},
+        name="dep-1",
+        namespace=namespace,
+        patch=patch,
+        logger=_Logger(),
+    )
+
+    prereq_mock.assert_not_called()
+    helmrelease_mock.assert_not_called()
+    teardown_mock.assert_awaited_once_with(
+        namespace=namespace,
+        release_reference="rel-1",
+        deployment_id=deployment_id,
+        deletion_requested=True,
+        name="dep-1",
+        logger=mocker.ANY,
+    )
+    delete_ns_mock.assert_awaited_once_with(namespace=namespace, logger=mocker.ANY)
+    assert patch.status == {
+        "phase": DeploymentPhase.DELETING.value,
+        "message": handlers_module._DELETING_MESSAGE,
+        "displayState": DisplayState.DELETING.value,
+    }
+
+
+@pytest.mark.anyio
+async def test_create_handler_does_not_tear_down_a_deleted_deployment_again(
+    mocker,
+) -> None:
+    """A CR already in phase ``Deleted`` is terminal: the create handler
+    neither tears down nor deploys it."""
+
+    teardown_mock = mocker.patch.object(
+        handlers_module, "_teardown_owned_resources", autospec=True
+    )
+    delete_ns_mock = mocker.patch.object(
+        handlers_module, "_request_namespace_deletion", autospec=True
+    )
+    prereq_mock = mocker.patch.object(
+        handlers_module, "execute_phase_prerequisites", autospec=True
+    )
+
+    patch = _Patch()
+    await kopf_on_styrmin_deployment_create(
+        spec={"releaseReference": "rel-1", "deletionRequested": True},
+        status={"phase": DeploymentPhase.DELETED.value},
+        name="dep-1",
+        namespace="styrmin-abc",
+        patch=patch,
+        logger=_Logger(),
+    )
+
+    teardown_mock.assert_not_called()
+    delete_ns_mock.assert_not_called()
+    prereq_mock.assert_not_called()
+    assert patch.status == {}
+
+
+@pytest.mark.anyio
+async def test_create_handler_still_deploys_when_no_deletion_was_requested(
+    mocker,
+) -> None:
+    """Guard: without a deletion request the create handler runs the
+    pipeline and does not tear anything down."""
+
+    teardown_mock = mocker.patch.object(
+        handlers_module, "_teardown_owned_resources", autospec=True
+    )
+    delete_ns_mock = mocker.patch.object(
+        handlers_module, "_request_namespace_deletion", autospec=True
+    )
+    prereq_mock = mocker.patch.object(
+        handlers_module,
+        "execute_phase_prerequisites",
+        autospec=True,
+        return_value=mocker.Mock(success=False, errors=["boom"], resource_details={}),
+    )
+
+    patch = _Patch()
+    with pytest.raises(kopf.TemporaryError):
+        await kopf_on_styrmin_deployment_create(
+            spec={"releaseReference": "rel-1"},
+            status={},
+            name="dep-1",
+            namespace="styrmin-abc",
+            patch=patch,
+            logger=_Logger(),
+        )
+
+    prereq_mock.assert_awaited_once()
+    teardown_mock.assert_not_called()
+    delete_ns_mock.assert_not_called()
+    assert patch.status["phase"] == DeploymentPhase.FAILED.value
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("internal", [False, True], ids=["external", "internal"])
+@pytest.mark.parametrize(
+    "phase",
+    [
+        DeploymentPhase.PENDING,
+        DeploymentPhase.CREATING_PREREQUISITES,
+        DeploymentPhase.CREATING_HELM_RELEASE,
+        DeploymentPhase.READY,
+        DeploymentPhase.FAILED,
+        DeploymentPhase.DELETING,
+        DeploymentPhase.DELETED,
+    ],
+)
+async def test_resume_handler_leaves_a_deployment_with_a_deletion_request_alone(
+    mocker, phase: DeploymentPhase, internal: bool
+) -> None:
+    """After an operator restart, resuming the deploy pipeline of a
+    deployment whose deletion was requested would recreate the HelmRelease
+    of an internal deployment and move the phase off ``Deleting`` while its
+    namespace is going away. The create handler or the field handler tears
+    the deployment down; resume neither deploys nor tears down."""
+
+    teardown_mock = mocker.patch.object(
+        handlers_module, "_teardown_owned_resources", autospec=True
+    )
+    delete_ns_mock = mocker.patch.object(
+        handlers_module, "_request_namespace_deletion", autospec=True
+    )
+    prereq_mock = mocker.patch.object(
+        handlers_module, "execute_phase_prerequisites", autospec=True
+    )
+    helmrelease_mock = mocker.patch.object(
+        handlers_module, "execute_phase_helmrelease", autospec=True
+    )
+
+    patch = _Patch()
+    await kopf_on_styrmin_deployment_resume(
+        spec={
+            "releaseReference": "rel-1",
+            "deletionRequested": True,
+            "internal": internal,
+        },
+        status={"phase": phase.value, "conditions": []},
+        name="dep-1",
+        namespace="styrmin-abc",
+        patch=patch,
+        logger=_Logger(),
+    )
+
+    prereq_mock.assert_not_called()
+    helmrelease_mock.assert_not_called()
     teardown_mock.assert_not_called()
     delete_ns_mock.assert_not_called()
     assert patch.status == {}
