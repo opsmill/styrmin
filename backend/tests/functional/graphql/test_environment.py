@@ -8,10 +8,12 @@ import pytest
 from httpx import AsyncClient
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from styrmin_backend.db.models import Environment
+from styrmin_backend.db.models import Environment, Role
+from styrmin_backend.services.auth.session import create_session
 
+from ._queries import load_query
 from .conftest import gql
-from .seeds import seed_cluster, seed_environment
+from .seeds import seed_cluster, seed_environment, seed_user
 
 VALID_ENV_CONFIG = {"ip_whitelist": ["10.0.0.0/24"]}
 
@@ -87,6 +89,40 @@ async def test_delete_environment_by_name_and_cluster_name_removes_row(
 
     session.expire_all()
     assert await session.get(Environment, env_id) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "role", [Role.READ_ONLY, Role.READ_WRITE], ids=["read_only", "read_write"]
+)
+async def test_delete_environment_refuses_non_admin_and_keeps_row(
+    unauth_client: AsyncClient, session: AsyncSession, role: Role
+) -> None:
+    """``deleteEnvironment`` is ADMIN-only (ADR-017): a caller with a lower
+    role gets ``FORBIDDEN`` and the environment row stays in the database.
+    """
+    env = await seed_environment(session, name="protected-env")
+    env_id = env.id
+    user = await seed_user(session, role=role)
+    _row, token = await create_session(session, user.id)
+
+    response = await unauth_client.post(
+        "/graphql",
+        json={
+            "query": load_query("delete_environment"),
+            "variables": {"environmentId": str(env_id)},
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    error = payload["errors"][0]
+    assert error["extensions"]["code"] == "FORBIDDEN", payload
+    assert error["path"] == ["deleteEnvironment"], payload
+    assert payload["data"] is None or payload["data"]["deleteEnvironment"] is None
+    session.expire_all()
+    assert await session.get(Environment, env_id) is not None
 
 
 @pytest.mark.asyncio
