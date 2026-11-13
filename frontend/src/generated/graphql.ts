@@ -438,7 +438,7 @@ export type DeploymentConfigInput = {
   runtimeClass?: InputMaybe<Scalars['String']['input']>;
   /** Hierarchical pod scheduling & resource configuration (affinities, tolerations, topology spread, resource requests/limits, runtime class, post-render injection opt-outs). */
   scheduling?: InputMaybe<SchedulingInput>;
-  /** Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override. When the write changes the driver version, a stored override on a service that the target version removes or declares ``internal`` raises ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod changes, unless the same write clears it. */
+  /** Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with ``ingressClass``, ``fqdnSuffix`` and ``tls`` all null is the same as no override. When the write changes the driver version, a stored override on a service that the target version removes or declares ``internal`` raises ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod changes, unless the same write clears it. */
   services?: InputMaybe<Array<ServiceConfigInput>>;
   /** Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment. */
   standardStorage?: InputMaybe<StandardStorageInput>;
@@ -1472,7 +1472,7 @@ export type SchedulingInput = {
   topologySpreadConstraints?: InputMaybe<Array<TopologySpreadConstraintInput>>;
 };
 
-/** Per-service ingress override block for a deployment: the ingress class and the FQDN suffix of one service that the driver declares ``scope: external``. */
+/** Per-service ingress override block for a deployment: the ingress class, FQDN suffix and optional TLS hosts of one service that the driver declares ``scope: external``. */
 export type ServiceConfigInput = {
   /** FQDN suffix for this service only, used in its readable host. Null or omitted: the resolved suffix applies. */
   fqdnSuffix?: InputMaybe<Scalars['String']['input']>;
@@ -1480,6 +1480,8 @@ export type ServiceConfigInput = {
   ingressClass?: InputMaybe<Scalars['String']['input']>;
   /** The driver service name. It must be declared by the driver version the deployment is bound to after the write, with scope ``external`` and kind ``http`` or ``https``. A service the version does not declare raises ``UNKNOWN_SERVICE_INGRESS_OVERRIDE``, and a service with scope ``internal``, or with kind ``tcp`` or ``udp``, raises ``SERVICE_INGRESS_NOT_BUILT``, because Styrmin does not build its Ingress. */
   name: Scalars['String']['input'];
+  /** Write spec.tls.hosts using this service's generated Ingress hosts. False, null or omitted: no TLS section. Does not create a certificate or change the backend protocol; the ingress controller handles TLS. */
+  tls?: InputMaybe<Scalars['Boolean']['input']>;
 };
 
 export type ServiceDefinition = {
@@ -1500,6 +1502,8 @@ export type ServiceIngressOverride = {
   ingressClass?: Maybe<Scalars['String']['output']>;
   /** The driver service name. */
   name: Scalars['String']['output'];
+  /** Whether TLS hosts are requested for this service. Null when not set. */
+  tls?: Maybe<Scalars['Boolean']['output']>;
 };
 
 export type ServiceNameOverride = {
@@ -1742,7 +1746,7 @@ export type UpdateDeploymentInput = {
   scheduling?: InputMaybe<SchedulingInput>;
   /** Full-replacement list of service-name overrides applied at deploy time. Each entry maps a driver-declared service name to the operator-chosen override name. */
   serviceNameOverrides?: InputMaybe<Array<ServiceNameOverride>>;
-  /** Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with both ``ingressClass`` and ``fqdnSuffix`` null is the same as no override. When the write changes the driver version, a stored override on a service that the target version removes or declares ``internal`` raises ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod changes, unless the same write clears it. */
+  /** Full-replacement list of per-service ingress override blocks. Flattened by the resolver to a dict keyed on ``name``; duplicate names raise ``DUPLICATE_SERVICE_NAME``. A service that is not in the list has no override after the write, and an empty list explicitly clears every override. A row with ``ingressClass``, ``fqdnSuffix`` and ``tls`` all null is the same as no override. When the write changes the driver version, a stored override on a service that the target version removes or declares ``internal`` raises ``SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`` before any pod changes, unless the same write clears it. */
   services?: InputMaybe<Array<ServiceConfigInput>>;
   /** Standard storage configuration (default Kubernetes ``StorageClass``) used by this deployment. */
   standardStorage?: InputMaybe<StandardStorageInput>;

@@ -284,6 +284,9 @@ class ServiceIngressOverride:
     fqdn_suffix: str | None = strawberry.field(
         description="FQDN suffix for this service only. Null when not overridden."
     )
+    tls: bool | None = strawberry.field(
+        description="Whether TLS hosts are requested for this service. Null when not set."
+    )
 
 
 @strawberry.type
@@ -923,6 +926,7 @@ class Deployment:
                 name=name,
                 ingress_class=stored[name].ingress_class,
                 fqdn_suffix=stored[name].fqdn_suffix,
+                tls=stored[name].tls,
             )
             for name in sorted(stored)
         ]

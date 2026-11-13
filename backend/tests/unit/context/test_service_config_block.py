@@ -237,7 +237,9 @@ class TestServiceConfigBlockFields:
 
         assert "fqdn_suffix" in str(exc_info.value)
 
-    @pytest.mark.parametrize("extra_key", ["name", "tls", "ingressClass", "replicas"])
+    @pytest.mark.parametrize(
+        "extra_key", ["name", "tls_hosts", "ingressClass", "replicas"]
+    )
     def test_other_keys_are_rejected(self, extra_key: str) -> None:
         block_cls = _block_class()
         assert block_cls(ingress_class="tailscale").ingress_class == "tailscale"
@@ -253,9 +255,11 @@ class TestServiceConfigBlockFields:
         assert _deployment_config({"task-manager": {"ingress_class": "a"}}).services
 
         with pytest.raises(ValidationError) as exc_info:
-            _deployment_config({"task-manager": {"ingress_class": "a", "tls": True}})
+            _deployment_config(
+                {"task-manager": {"ingress_class": "a", "tls_hosts": ["a.test"]}}
+            )
 
-        assert "tls" in str(exc_info.value)
+        assert "tls_hosts" in str(exc_info.value)
 
 
 class TestDeploymentConfigServices:
@@ -418,3 +422,20 @@ class TestConfigWithoutServicesIsUnchanged:
         for scope in ("deployment", "instance"):
             assert "services" in dumped_with[scope]["config"]
             assert "services" not in dumped_without[scope]["config"]
+
+
+@pytest.mark.parametrize("tls", [None, False, True])
+def test_service_tls_opt_in_preserves_existing_config_shape(tls: bool | None) -> None:
+    block = _block_class()(ingress_class="tailscale", tls=tls)
+    dumped = block.model_dump()
+    assert block.tls is tls
+    if tls is None:
+        assert "tls" not in dumped
+    else:
+        assert dumped["tls"] is tls
+    assert not block.is_empty
+
+
+def test_tls_only_service_override_is_kept() -> None:
+    config = DeploymentConfig(services={"task-manager": _block_class()(tls=True)})
+    assert config.model_dump()["services"]["task-manager"]["tls"] is True

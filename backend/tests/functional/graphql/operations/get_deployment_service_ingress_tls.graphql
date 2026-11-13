@@ -1,0 +1,8 @@
+query GetDeploymentServiceIngressTls($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        serviceIngressOverrides {
+            name
+            tls
+        }
+    }
+}

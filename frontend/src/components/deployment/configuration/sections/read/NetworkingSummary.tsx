@@ -126,6 +126,13 @@ export function NetworkingSummary({
             <ServiceIngressGroup
               key={service.driverServiceName}
               service={service}
+              tls={
+                (
+                  deploymentConfig?.services as
+                    | Record<string, { tls?: boolean | null }>
+                    | undefined
+                )?.[service.driverServiceName]?.tls
+              }
             />
           ))}
         </div>
@@ -135,7 +142,13 @@ export function NetworkingSummary({
 }
 
 /** Class and host of one service, named by its driver service name. */
-function ServiceIngressGroup({ service }: { service: NetworkingService }) {
+function ServiceIngressGroup({
+  service,
+  tls,
+}: {
+  service: NetworkingService;
+  tls?: boolean | null;
+}) {
   const headingId = useId();
   return (
     <div role="group" aria-labelledby={headingId} className="space-y-2">
@@ -157,6 +170,13 @@ function ServiceIngressGroup({ service }: { service: NetworkingService }) {
           fromDeployment={service.fqdnSuffixOverridden}
           mark={service.fqdnSuffixOverridden ? "Overridden" : "Inherited"}
         />
+        {tls != null ? (
+          <SummaryRow
+            label="TLS hosts"
+            value={tls ? "Enabled" : "Disabled"}
+            fromDeployment
+          />
+        ) : null}
       </dl>
     </div>
   );

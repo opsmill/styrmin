@@ -2681,12 +2681,12 @@ _BAD_SERVICE_ROWS = [
     ),
     pytest.param(
         [{"name": "task-manager"}],
-        r"services\['task-manager'\] sets neither ingress_class nor fqdn_suffix",
+        r"services\['task-manager'\] sets no ingress_class, fqdn_suffix or tls",
         id="name-only",
     ),
     pytest.param(
         [{"name": "task-manager", "ingress_class": None, "fqdn_suffix": None}],
-        r"services\['task-manager'\] sets neither ingress_class nor fqdn_suffix",
+        r"services\['task-manager'\] sets no ingress_class, fqdn_suffix or tls",
         id="both-null",
     ),
     pytest.param(["task-manager"], r"services\[0\] must be a mapping", id="row-is-not-a-mapping"),
@@ -2750,10 +2750,12 @@ async def test_apply_files_reports_the_misspelled_service_key_as_a_failed_outcom
         {"name": "web", "ingressClass": "tailscale"},
         {"name": "web", "fqdn_suffix": "tailnet.example.ts.net"},
         {"name": "web", "fqdnSuffix": "tailnet.example.ts.net", "ingress_class": "x"},
+        {"name": "web", "tls": True},
+        {"name": "web", "tls": False},
     ],
 )
 async def test_apply_accepts_the_documented_service_row_keys(
-    client: StyrminClient, mock_transport: AsyncMock, row: dict[str, str]
+    client: StyrminClient, mock_transport: AsyncMock, row: dict[str, Any]
 ) -> None:
     mock_transport.execute.side_effect = [
         _list_environments_response(),
@@ -2764,6 +2766,9 @@ async def test_apply_accepts_the_documented_service_row_keys(
     outcome = await client.deployments.apply(_resolved_manifest(config={"services": [row]}))
 
     assert outcome.action == "updated"
+    if "tls" in row:
+        sent_services = mock_transport.execute.call_args.args[1]["input"]["services"]
+        assert sent_services == [row]
 
 
 _STORED_COMPONENTS = {
@@ -2801,7 +2806,11 @@ async def test_scale_resends_the_stored_service_ingress_overrides(
             "config": {
                 "components": _STORED_COMPONENTS,
                 "services": {
-                    "task-manager": {"ingress_class": "tailscale", "fqdn_suffix": "tailnet.example.ts.net"},
+                    "task-manager": {
+                        "ingress_class": "tailscale",
+                        "fqdn_suffix": "tailnet.example.ts.net",
+                        "tls": True,
+                    },
                     "api": {"ingress_class": "other-class"},
                 },
             }
@@ -2815,7 +2824,7 @@ async def test_scale_resends_the_stored_service_ingress_overrides(
 
     sent: UpdateDeploymentInput = update.call_args.kwargs["input"]
     assert sent.model_dump(by_alias=True, exclude_none=True)["services"] == [
-        {"name": "task-manager", "ingressClass": "tailscale", "fqdnSuffix": "tailnet.example.ts.net"},
+        {"name": "task-manager", "ingressClass": "tailscale", "fqdnSuffix": "tailnet.example.ts.net", "tls": True},
         {"name": "api", "ingressClass": "other-class"},
     ]
 

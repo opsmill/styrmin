@@ -420,3 +420,20 @@ Each point has its source. None blocks this decision.
   still lists only "removes or declares `internal`" for `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`.
   It was not changed, because the description of `UpdateDeploymentInput` is not changed here. The
   description of `ServiceConfigInput.name` and the contract name the `tcp` and `udp` case.
+
+
+## Follow-up: opt-in TLS hosts
+
+A real Tailscale operator 1.94.2 test on 2026-11-13 rejected a non-empty
+Ingress rule host when `spec.tls.hosts` was absent. Adding the matching TLS
+hosts allowed HTTPS serving, after providing a permitted proxy tag and a
+network policy for the proxy-to-backend path. The test used a disposable HTTP
+service on the pre-prod IPv6 cluster; it did not test the Prefect UI.
+
+`ServiceConfigBlock.tls` and `ServiceConfigInput.tls` now opt a service into
+`spec.tls` with the same generated hosts as the Ingress rules. This supersedes
+the original FR-007 decision above when `tls` is true. Omitting the field
+keeps existing configuration and generated objects unchanged. The setting
+is independent of ingress class, creates no certificate or Secret and
+does not change the backend protocol. Proxy tags and network policy remain
+outside the service ingress override.

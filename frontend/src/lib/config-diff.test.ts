@@ -761,3 +761,16 @@ describe("config-diff: service ingress overrides", () => {
     ]);
   });
 });
+
+it("shows a TLS-only service ingress change for review", () => {
+  const entries = diff(
+    {},
+    { services: [{ name: "task-manager", tls: true }] },
+    emptySchema,
+  );
+  expect(
+    entries.entries.some(
+      (entry) => entry.path === "services[task-manager].tls",
+    ),
+  ).toBe(true);
+});

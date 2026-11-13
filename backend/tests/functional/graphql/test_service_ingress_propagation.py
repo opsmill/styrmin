@@ -746,3 +746,46 @@ async def test_deployed_service_ingress_class_is_null_for_an_internal_service(
     assert infrahub["ingressClass"] is None
     assert infrahub["ingressClassOverridden"] is False
     assert infrahub["fqdnSuffixOverridden"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tls", [True, False])
+@pytest.mark.parametrize("entrypoint", ["deploy", "update", "version"])
+async def test_service_tls_reaches_database_and_reads_back(
+    client: AsyncClient,
+    session: AsyncSession,
+    prefect_manager_mock,
+    tls: bool,
+    entrypoint: str,
+) -> None:
+    _arm_prefect(prefect_manager_mock)
+    config = {"services": [{**TASK_MANAGER_OVERRIDE_INPUT, "tls": tls}]}
+    if entrypoint == "deploy":
+        driver_name, environment_id = await _seed_deploy_driver(session)
+        name, payload = await _post_deploy(client, driver_name, environment_id, config)
+        assert "errors" not in payload, payload
+        session.expire_all()
+        row = (
+            await session.exec(select(Deployment).where(Deployment.name == name))
+        ).one()
+        deployment_id = row.id
+    else:
+        deployment_id = await _seed_deployment(session)
+        if entrypoint == "version":
+            target_id = await _seed_target_driver_version(session, deployment_id)
+            payload = await _post_update_version(
+                client, deployment_id, target_id, config
+            )
+        else:
+            payload = await _post_update(client, deployment_id, config)
+        assert "errors" not in payload, payload
+        row = await _stored_row(session, deployment_id)
+    assert row.config["services"]["task-manager"]["tls"] is tls
+    data = await gql(
+        client,
+        "get_deployment_service_ingress_tls",
+        {"deploymentId": str(deployment_id)},
+    )
+    assert data["deployment"]["serviceIngressOverrides"] == [
+        {"name": "task-manager", "tls": tls}
+    ]

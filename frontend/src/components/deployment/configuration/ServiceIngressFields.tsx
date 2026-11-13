@@ -2,6 +2,7 @@ import { useId } from "react";
 
 import type { ServiceConfigInput } from "@/generated/graphql";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { fqdnSuffixError } from "@/lib/fqdn-suffix";
@@ -67,9 +68,8 @@ export function ServiceIngressFields({ services, value, onChange }: Props) {
         data-testid="service-ingress-override-note"
         className="text-xs text-muted-foreground"
       >
-        An overridden Ingress carries only the ingress class. The IP allow-list,
-        the external DNS record and the application address are not applied to
-        it.
+        The IP allow-list, the external DNS record and the application address
+        are not applied to an overridden Ingress.
       </p>
       {external.map(({ driverServiceName: name }) => {
         const row = rows.find((candidate) => candidate?.name === name);
@@ -141,7 +141,7 @@ export function ServiceIngressFields({ services, value, onChange }: Props) {
                 variant="ghost"
                 size="sm"
                 aria-label={`Clear ingress override for ${name}`}
-                disabled={!ingressClass && !fqdnSuffix}
+                disabled={!ingressClass && !fqdnSuffix && row?.tls == null}
                 onClick={() =>
                   onChange(rows.filter((candidate) => candidate?.name !== name))
                 }
@@ -150,6 +150,29 @@ export function ServiceIngressFields({ services, value, onChange }: Props) {
                 Clear
               </Button>
             </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id={`${base}-tls`}
+                aria-label={`TLS hosts for ${name}`}
+                checked={row?.tls === true}
+                onCheckedChange={(checked) => {
+                  const otherRows = rows.filter(
+                    (candidate) => candidate?.name !== name,
+                  );
+                  onChange([
+                    ...otherRows,
+                    { ...row, name, tls: checked ? true : null },
+                  ]);
+                }}
+              />
+              <Label htmlFor={`${base}-tls`} className="text-xs">
+                TLS hosts <span className="sr-only">for {name}</span>
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Use the generated hostnames for TLS. The ingress controller
+              handles certificates. Backend protocol and port stay the same.
+            </p>
           </div>
         );
       })}

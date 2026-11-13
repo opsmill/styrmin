@@ -572,6 +572,14 @@ function diffServices(
       b?.fqdnSuffix || null,
       a?.fqdnSuffix || null,
     );
+    diffScalar(
+      entries,
+      "serviceOverrides",
+      `services[${name}].tls`,
+      `Service "${name}" TLS hosts`,
+      b?.tls ?? null,
+      a?.tls ?? null,
+    );
   }
 }
 

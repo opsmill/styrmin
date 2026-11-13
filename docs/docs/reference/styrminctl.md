@@ -781,10 +781,11 @@ anything.
 
 `services` lists the
 [service ingress override](../concepts-and-architecture/service-ingress-overrides.md)
-of each external service, as a list of `{name, ingress_class, fqdn_suffix}`
+of each external service, as a list of `{name, ingress_class, fqdn_suffix, tls}`
 rows, as `components` is a list. `name` is the service name that the driver
-declares. A row sets an ingress class, an FQDN suffix, or both, for that service
-only. Removing a row clears the override on the next apply, with the same
+declares. A row sets an ingress class, an FQDN suffix, or `tls: true` to write TLS
+hosts from that service's generated address. The ingress controller handles
+certificates; this does not change the backend protocol. Removing a row clears the override on the next apply, with the same
 `components: []` exception as for `image`: write `services: []` to clear the
 last override when nothing else stays in `spec.config`. An ingress class must be
 a Kubernetes object name, and a suffix must be a DNS name; an invalid value
@@ -794,8 +795,8 @@ declare fails with `UNKNOWN_SERVICE_INGRESS_OVERRIDE`, a service that it declare
 with `DUPLICATE_SERVICE_NAME`, and a change to a driver version that removes the
 service, declares it `internal`, or gives it kind `tcp` or `udp`, while the
 override is stored and the manifest keeps it, fails with `SERVICE_INGRESS_OVERRIDE_WOULD_BE_DROPPED`. `apply` checks each row before it sends the request. A key other than `name`,
-`ingress_class` and `fqdn_suffix` (or `ingressClass` and `fqdnSuffix`), a row
-without a name, a row that sets neither field, and a row that is not a mapping
+`ingress_class`, `fqdn_suffix` and `tls` (or `ingressClass` and `fqdnSuffix`), a row
+without a name, a row with no setting, and a row that is not a mapping
 fail the manifest with an error that names the service and the key. In a
 `create` or `update` command, `--config` takes the GraphQL input, which the
 server checks.

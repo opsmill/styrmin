@@ -129,7 +129,11 @@ _DEDICATED_IMPLEMENTATION = "traefik"
 _OVERRIDE_CLASS = "tailscale"
 _OVERRIDE_SUFFIX = "tailnet.example.ts.net"
 _OVERRIDE = {
-    "task-manager": {"ingress_class": _OVERRIDE_CLASS, "fqdn_suffix": _OVERRIDE_SUFFIX}
+    "task-manager": {
+        "ingress_class": _OVERRIDE_CLASS,
+        "fqdn_suffix": _OVERRIDE_SUFFIX,
+        "tls": True,
+    }
 }
 
 _SERVICE_NAME_LABEL = "styrmin.io/service-name"
@@ -287,7 +291,7 @@ async def _change_services(
     scenario_driver: ScenarioDriver,
     client: StyrminClient,
     deployment_id: str,
-    services: dict[str, dict[str, str]],
+    services: dict[str, dict[str, Any]],
 ) -> None:
     """Replace the service overrides of the deployment and wait for the update task."""
     known = await _task_ids(client, deployment_id)
@@ -393,7 +397,7 @@ def _assert_overridden_task_manager_ingress(ingress: dict[str, Any]) -> None:
     assert _annotations(ingress) == {"kubernetes.io/ingress.class": _OVERRIDE_CLASS}, (
         "An overridden Ingress carries no entry-point, external-dns, Cloudflare or allow-list annotation"
     )
-    assert "tls" not in ingress["spec"]
+    assert ingress["spec"]["tls"] == [{"hosts": _hosts(ingress)}]
 
 
 @pytest.mark.ci
@@ -575,7 +579,10 @@ _INTERNAL_BUILD_SUPPORTED_VERSIONS = ">=1.7.0,<1.8"
 _INTERNAL_BUILD_APPLICATION_VERSION = "1.7.0"
 
 _TASK_MANAGER_OVERRIDE_INPUT = ServiceConfigInput(
-    name="task-manager", ingress_class=_OVERRIDE_CLASS, fqdn_suffix=_OVERRIDE_SUFFIX
+    name="task-manager",
+    ingress_class=_OVERRIDE_CLASS,
+    fqdn_suffix=_OVERRIDE_SUFFIX,
+    tls=True,
 )
 
 

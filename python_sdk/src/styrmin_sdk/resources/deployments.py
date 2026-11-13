@@ -217,7 +217,7 @@ def check_replica_counts(config: object, *, source: str) -> None:
 
 #: Keys of a ``config.services`` row in a manifest, in both spellings the input accepts.
 _SERVICE_ROW_NAME_KEY = "name"
-_SERVICE_ROW_FIELD_KEYS = ("ingress_class", "ingressClass", "fqdn_suffix", "fqdnSuffix")
+_SERVICE_ROW_FIELD_KEYS = ("ingress_class", "ingressClass", "fqdn_suffix", "fqdnSuffix", "tls")
 
 
 def check_service_rows(config: object, *, source: str) -> None:
@@ -230,8 +230,8 @@ def check_service_rows(config: object, *, source: str) -> None:
 
     Raises:
         ManifestValidationError: ``services`` is not a list, a row is not a mapping or has no
-            name, a row has a key other than ``name``, ``ingress_class`` and ``fqdn_suffix``
-            (or their camelCase spellings), or a row sets neither field.
+            name, a row has a key other than ``name``, ``ingress_class``, ``fqdn_suffix`` or ``tls``
+            (or their camelCase spellings), or a row sets no field.
     """
     rows = config.get("services") if isinstance(config, Mapping) else None
     if rows is None:
@@ -252,11 +252,11 @@ def check_service_rows(config: object, *, source: str) -> None:
             if key not in allowed:
                 raise ManifestValidationError(
                     f"{source}: services[{name!r}] has an unknown key {key!r}; "
-                    "the keys are name, ingress_class and fqdn_suffix"
+                    "the keys are name, ingress_class, fqdn_suffix and tls"
                 )
         if all(row.get(key) is None for key in _SERVICE_ROW_FIELD_KEYS):
             raise ManifestValidationError(
-                f"{source}: services[{name!r}] sets neither ingress_class nor fqdn_suffix; "
+                f"{source}: services[{name!r}] sets no ingress_class, fqdn_suffix or tls; "
                 "remove the row to clear the override of the service"
             )
 
@@ -288,6 +288,7 @@ def _stored_service_inputs(config: object) -> list[ServiceConfigInput]:
             name=name,
             ingress_class=block.get("ingress_class"),
             fqdn_suffix=block.get("fqdn_suffix"),
+            tls=block.get("tls"),
         )
         for name, block in (stored or {}).items()
         if isinstance(block, dict)

@@ -343,6 +343,15 @@ const ruleCases: RuleCase[] = [
     }),
   },
   {
+    matcher: "services[*].tls",
+    positive: diffEntry("services[task-manager].tls", {
+      section: "serviceOverrides",
+    }),
+    negative: diffEntry("services[task-manager].ingressClass", {
+      section: "serviceOverrides",
+    }),
+  },
+  {
     matcher: "components[*].resources.**",
     positive: diffEntry("components[web].resources.requests.cpu", {
       section: "componentOverrides",

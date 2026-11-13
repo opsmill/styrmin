@@ -311,6 +311,39 @@ class TestIngressObject:
 
         assert "tls" not in ingress["spec"]
 
+    @pytest.mark.parametrize("tls", [None, False, True])
+    def test_tls_hosts_follow_the_service_address(self, tls: bool | None) -> None:
+        context = _context(
+            [_service("task-manager", resolved_name="prefect", port=4200)],
+            overrides={
+                "task-manager": ServiceConfigBlock(
+                    ingress_class="tailscale",
+                    fqdn_suffix="tailnet.example.ts.net",
+                    tls=tls,
+                )
+            },
+        )
+        (ingress,) = _build(context)
+        hosts = [rule["host"] for rule in ingress["spec"]["rules"]]
+        assert hosts == [f"prefect-{ENVIRONMENT_NAME}.tailnet.example.ts.net"]
+        if tls:
+            assert ingress["spec"]["tls"] == [{"hosts": hosts}]
+            assert "secretName" not in ingress["spec"]["tls"][0]
+        else:
+            assert "tls" not in ingress["spec"]
+
+    def test_tls_applies_to_only_the_selected_service(self) -> None:
+        ingresses = _build(
+            _context(
+                [_service("web"), _service("task-manager", port=4200)],
+                overrides={"task-manager": ServiceConfigBlock(tls=True)},
+            )
+        )
+        assert "tls" not in ingresses[0]["spec"]
+        assert ingresses[1]["spec"]["tls"] == [
+            {"hosts": [rule["host"] for rule in ingresses[1]["spec"]["rules"]]}
+        ]
+
 
 class TestHosts:
     def test_every_external_service_has_its_readable_host(self) -> None:
