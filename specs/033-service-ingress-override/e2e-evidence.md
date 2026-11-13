@@ -1053,3 +1053,61 @@ uv run pytest "<node id>" -k api-chromium -v -s --pdb < <(sleep 86400) > <scratc
 The pytest directory of each run is inferred from the modification time of the kubeconfig files (19:45 and 19:51 local time, UTC+1); the logs do not print the path. Both runs ended at the first attempt, with no pause at `pdb`. Afterwards `pgrep` found no `sleep 86400`, `pytest` or `vcluster` process and `docker ps` listed no vCluster container.
 
 Not covered by these runs: the warning of I3 (a unit-level and CLI-level change, not run against a live server) and the log text of I5 (unit tests only).
+
+## Review comments of Fatih on PR 602 (2026-11-13)
+
+Fatih approved the PR and left six inline comments. This section records what changed and how it was checked.
+
+### What changed
+
+| Comment | Change |
+|---|---|
+| `generic-app/values.j2.yml` line 26, a reaction on the removed host code | No change. It asks for nothing. |
+| `generic-app/values.j2.yml` line 71, "let's remove this comment" | The three-line comment about the missing `ingress:` block is removed. |
+| `infrahub/driver.styrmin.yml` and `infrahub-enterprise/driver.styrmin.yml` line 110, "Remove" | The five-line comment about the `task-manager` service is removed. The original one-line comment stays. |
+| `infrahub/values.j2.yml` line 70 and `infrahub-enterprise/values.j2.yml` line 72, "Remove" | The `prefect-server.ingress` block (`enabled: false`) and its comment are removed from both drivers. |
+
+The last row relies on the chart default. The `prefect-server` subchart of `infrahub` 4.33.2 and of `infrahub-enterprise` 4.19.2 sets `ingress.enabled: false` (`values.yaml` line 539, and the template renders an Ingress only when it is `true`). Neither Infrahub chart overrides it. Both charts were read on 2026-11-13 with `helm pull oci://registry.opsmill.io/opsmill/chart/<chart> --version <version>`. A later chart version that changes the default is not checked.
+
+Text that said the driver "turns the chart's Prefect Ingress off" was corrected in `migrating-external-service-ingress.md`, `creating-a-driver.md`, ADR-090, `spec.md` (FR-013), `plan.md`, `research.md`, `tasks.md` (T024 and T031) and in two end-to-end comments and one assertion message. The unit test `test_the_chart_prefect_ingress_is_off` became `test_the_driver_does_not_enable_the_chart_prefect_ingress`. It accepts a missing key or `false`, and fails when the driver sets `true`: re-adding `enabled: true` in a scratch change made it fail for `infrahub`, and the file was restored.
+
+### Rendered values before and after
+
+A script rendered `values.j2.yml` of each driver from commit `6496a07f` and from the working tree and compared the parsed results.
+
+- `infrahub` and `infrahub-enterprise`: the only difference is `- /prefect-server/ingress = {"enabled": false}`. The parsed `driver.styrmin.yml` is equal before and after.
+- `generic-app`: `values.j2.yml` is equal when comment lines and blank lines are ignored.
+
+### Checks
+
+| Check | Result |
+|---|---|
+| `uv run invoke lint` | exit 0 |
+| `uv run invoke test` | `1 failed, 6134 passed, 8 skipped in 663.97s`. The one failure is the known `services/telemetry/test_sender.py::test_send_report_returns_false_when_the_connection_is_refused`. |
+| `cd docs && pnpm build` | exit 0 |
+
+### End-to-end runs
+
+The runs started on the working tree that became the commit of this change. No tracked file changed after the first run started: only Helm chart archives that the fixture downloads, which git ignores. Base commit `6496a07f`. Command: `uv run pytest <node> [-k <variant>] -v -s --pdb` with its standard input held open by `sleep 86400`. On macOS this works with `< <(sleep 86400)`: a pipe from `sleep` made my wrapper wait for the 24-hour `sleep` after pytest had finished.
+
+| Node | Started (UTC) | vCluster | Kubeconfig directory (inferred from run order) | Result |
+|---|---|---|---|---|
+| `backend/tests/e2e/test_service_ingress_override.py::test_service_ingress_override_moves_only_the_overridden_service`, `-k api-chromium` | 2026-11-13T10:50:08Z | `pytest-95a28b5c-6834-4f3b-819b-924c071690f0` | `/private/var/folders/h8/b5b4gccj4h5c0sjlqjymm1y40000gq/T/pytest-of-Simon/pytest-1976/vcluster0/kubeconfig` | `1 passed, 1 deselected, 4 warnings in 387.83s (0:06:27)` |
+| `backend/tests/e2e/test_infrahub_services.py` (whole file) | 2026-11-13T11:15:41Z | `pytest-8e66f206-4a6e-4ea7-8433-b03a3821fad3` | `.../pytest-1977/vcluster0/kubeconfig` | `1 passed, 1 skipped, 4 warnings in 338.42s (0:05:38)` |
+
+The override test asserts that exactly one Ingress besides `styrmin-svc-task-manager` exists in the Infrahub namespace, and `test_infrahub_services.py` sends a request through the dedicated Traefik to the Prefect UI host. Both passed with the setting removed.
+
+### A first attempt that did not finish
+
+A first attempt, started at 2026-11-13T08:12Z (vCluster `pytest-4d90b261-e01e-41b9-bb54-eccb5f47da46`), paused at a failure in fixture setup: `StyrminTransportError: ReadTimeout: request to POST http://localhost:12277/graphql timed out after 30.0s`. It never reached the Ingress assertions, so it says nothing about this change.
+
+- What was seen on the paused cluster: the Styrmin server and the Infrahub pods were `Running`. Several pods showed restarts about 118 minutes before the check (infrahub server 7, helm-controller 6, source-controller 7). `localhost:12277` did not answer, with no answer after 10 seconds.
+- What the machine was doing: Docker's VM used about 320% CPU for containers of another project (`infrahubstorageencryption-*`), and the load average was 7 to 8.
+- Cause: not proven. Machine load is the likely cause and was not isolated. The re-runs above passed under a similar load of 6.8 to 7.4.
+- Evidence kept from that paused cluster, read with `kubectl` before it was deleted: in the namespace of the Infrahub Enterprise deployment there were exactly two Ingresses, `styrmin-infrahub-ingress` (hosts `infrahub-enterprise-232c58df-daf9-4f51-84d6-cb5231a847d4.styrmin.com` and `infrahub-enterprise-test-environment.styrmin.com`) and `styrmin-svc-task-manager` (host `task-manager-test-environment.styrmin.com`, label `styrmin.io/service-name: task-manager`). The HelmRelease values had no `prefect-server.ingress` key (`prefect-server` keys: `enabled`, `fullnameOverride`, `global`, `postgresql`, `server`). The cluster was deleted with `vcluster delete ... --driver docker`.
+
+### Not verified
+
+- The override and generic-app end-to-end tests with the UI variant, and `test_deploy_generic_app`, were not run again. The `generic-app` driver differs only in comments, which the comparison above shows.
+- An upgrade of a running deployment from the old driver version was not run again. The measurement in the earlier section used driver versions 4 to 5. With the key removed, the rendered values of the new version differ only by the removed `ingress` key.
+- No release check of other chart versions.

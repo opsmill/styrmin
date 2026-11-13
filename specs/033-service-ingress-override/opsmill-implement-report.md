@@ -240,3 +240,9 @@ The reviewer found no issue in these surfaces: injection through the override cl
 ### Dependency scan
 
 Not applicable. No manifest or lock file changed.
+
+## 9. Review comments of Fatih on PR 602
+
+Fatih approved the PR on 2026-11-12 and left six inline comments. They are addressed in the commit after `6496a07f`. The comment on `generic-app/values.j2.yml` line 26 is a reaction and asks for no change. The other five ask to remove the comment in `generic-app`, the five-line comment in both `driver.styrmin.yml` files, and the `prefect-server.ingress` block in both `values.j2.yml` files. The block is removed because the chart default is already off (read in `infrahub` 4.33.2 and `infrahub-enterprise` 4.19.2). Details, the rendered-values comparison and the two end-to-end runs that passed are in `e2e-evidence.md`, section "Review comments of Fatih on PR 602".
+
+The code review and the security review of sections 8 ran on earlier commits. This change touches driver files, one test, comments and text, and is not reviewed again by those skills, as the rules in `~/.claude/CLAUDE.md` say for commits pushed to an open PR.
