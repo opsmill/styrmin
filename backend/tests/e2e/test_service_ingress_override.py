@@ -347,6 +347,52 @@ async def _prefect_ui_api_urls(kr8s_api: Any, namespace: str) -> set[str]:
     }
 
 
+# The update task ends once Styrmin has written the StyrminDeployment. The cluster gets the
+# change after that, so a single read right after the task can still show the previous
+# state. In CI run 43836591522, the task ended at 09:51:12.400; the operator updated the
+# Ingress that Styrmin builds at 09:51:12.947, in its periodic pass; FluxCD started the
+# Helm upgrade that writes the new values into the pod template at 09:51:12.958, and
+# reported the release in sync at 09:51:20.498. The two helpers below wait for the change.
+
+
+async def _wait_for_task_manager_hosts(
+    kr8s_api: Any, namespace: str, hosts: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Return the Ingress objects of the namespace once the ``task-manager`` one has ``hosts``.
+
+    The operator writes the hosts, the class, the annotations and the TLS hosts of the
+    Ingress in one update, so the returned Ingress is the updated one as a whole.
+    """
+    deadline = time.monotonic() + RECONCILE_TIMEOUT_SECONDS
+    while True:
+        ingresses = await _ingresses(kr8s_api, namespace)
+        task_manager = ingresses.get(_TASK_MANAGER_INGRESS)
+        if task_manager is not None and _hosts(task_manager) == hosts:
+            return ingresses
+        assert time.monotonic() < deadline, (
+            f"The {_TASK_MANAGER_INGRESS} Ingress has the hosts "
+            f"{_hosts(task_manager) if task_manager else None}, not {hosts}, "
+            f"{RECONCILE_TIMEOUT_SECONDS}s after the update task ended"
+        )
+        await asyncio.sleep(2)
+
+
+async def _wait_for_prefect_ui_api_urls(
+    kr8s_api: Any, namespace: str, expected: set[str]
+) -> None:
+    """Wait until the Prefect UI API addresses of the pod template are ``expected``."""
+    deadline = time.monotonic() + RECONCILE_TIMEOUT_SECONDS
+    while True:
+        urls = await _prefect_ui_api_urls(kr8s_api, namespace)
+        if urls == expected:
+            return
+        assert time.monotonic() < deadline, (
+            f"The {_TASK_MANAGER_CONTAINER} container has the Prefect UI API addresses "
+            f"{urls}, not {expected}, {RECONCILE_TIMEOUT_SECONDS}s after the update task ended"
+        )
+        await asyncio.sleep(2)
+
+
 # The Prefect API health path: any path that the Prefect UI service answers with 200.
 _PREFECT_HEALTH_PATH = "/api/health"
 _TRAEFIK_WEB_PORT = 8000
@@ -511,7 +557,9 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
         # --- Scenario 1 and 3: set the override ----------------------------------
         await _change_services(scenario_driver, client, deployment_id, _OVERRIDE)
 
-        after = await _ingresses(kr8s_api, namespace)
+        after = await _wait_for_task_manager_hosts(
+            kr8s_api, namespace, [_readable_host("task-manager", _OVERRIDE_SUFFIX)]
+        )
         assert set(after) == set(before), (set(after), set(before))
         task_manager_after, infrahub_after = _split(after)
         _assert_overridden_task_manager_ingress(task_manager_after)
@@ -538,9 +586,9 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
                     == services_before[name].human_readable_fqdn
                 )
         # The driver reads the override host: the Prefect UI calls its API there.
-        assert await _prefect_ui_api_urls(kr8s_api, namespace) == {
-            _prefect_ui_api_url(overridden_host)
-        }
+        await _wait_for_prefect_ui_api_urls(
+            kr8s_api, namespace, {_prefect_ui_api_url(overridden_host)}
+        )
         # Traffic: the default host stops answering 200 once the dedicated Traefik has read the
         # change. The 404 for the overridden host shows only that this Traefik does not serve that
         # host: Traefik also answers 404 for any host it does not know, so the 404 does not isolate
@@ -564,7 +612,9 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
         # --- Scenario 2: clear the override --------------------------------------
         await _change_services(scenario_driver, client, deployment_id, {})
 
-        cleared = await _ingresses(kr8s_api, namespace)
+        cleared = await _wait_for_task_manager_hosts(
+            kr8s_api, namespace, [_readable_host("task-manager", _CLUSTER_SUFFIX)]
+        )
         assert set(cleared) == set(before)
         task_manager_cleared, infrahub_cleared = _split(cleared)
         _assert_default_task_manager_ingress(task_manager_cleared)
@@ -572,9 +622,11 @@ async def test_service_ingress_override_moves_only_the_overridden_service(
         assert _comparable(infrahub_cleared) == _comparable(infrahub_before)
         deployment = await client.deployments.get(deployment_id)
         assert not (deployment.config or {}).get("services")
-        assert await _prefect_ui_api_urls(kr8s_api, namespace) == {
-            _prefect_ui_api_url(_readable_host("task-manager", _CLUSTER_SUFFIX))
-        }
+        await _wait_for_prefect_ui_api_urls(
+            kr8s_api,
+            namespace,
+            {_prefect_ui_api_url(_readable_host("task-manager", _CLUSTER_SUFFIX))},
+        )
         # Traffic: the default host answers 200 through the Traefik again.
         await _wait_until_traefik_serves(kr8s_api, environment_id, default_host)
         if driver_mode == "ui":
