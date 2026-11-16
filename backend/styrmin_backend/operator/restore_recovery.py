@@ -132,6 +132,42 @@ async def _label_namespace(
     logger.info("Put the labels back on namespace {}: {}", namespace, sorted(labels))
 
 
+async def label_namespace_after_failed_restore(
+    api_client: ApiClient,
+    namespace: str,
+    name: str,
+    crd_spec: dict[str, Any] | None = None,
+) -> None:
+    """Put the deployment's labels back on the namespace of a restore that did not complete.
+
+    Velero creates the namespace without its labels, and ``reapply_and_finalize``
+    puts them back only after a restore that ended ``Completed``. A restore that
+    ended ``PartiallyFailed`` or ``Failed`` skipped that step, so its namespace
+    kept only ``kubernetes.io/metadata.name``. A policy that selects the
+    namespace by ``styrmin/environment_id`` (the cluster policy that lets the
+    shared ingress controller in is one) then no longer matches it, and the
+    application is unreachable from outside while its pods run.
+
+    The labels come from ``crd_spec``, or from the restored CR ``name`` when it
+    is not given. A cross-target restore passes the counterpart's spec, so a
+    clone gets its own labels, not the source's.
+
+    Best effort: it never raises, because the restore has already failed and the
+    caller records that failure. A CR that Velero did not restore, or a namespace
+    that does not exist, only leaves the namespace as it was.
+    """
+    try:
+        if crd_spec is None:
+            crd_spec = (await _read_crd(api_client, namespace, name)).get("spec", {})
+        await _label_namespace(api_client, namespace, crd_spec)
+    except Exception as exc:
+        logger.warning(
+            "Could not put the labels back on namespace {} after a restore that did not complete: {}",
+            namespace,
+            exc,
+        )
+
+
 async def mark_restoring(api_client: ApiClient, namespace: str, name: str) -> None:
     """Patch the CRD to indicate the styrmin restore flow is in control.
 

@@ -1,0 +1,74 @@
+fullnameOverride: styrmin-simple-app
+
+image:
+  repository: simple-app
+  tag: "{{ app.version }}"
+
+ingress:
+  enabled: true
+  className: "{{ instance.config.ingress_class }}"
+  hosts:
+    - host: "{{ services['postgres-blocker'].primary_fqdn }}"
+      paths:
+        - path: /
+          pathType: Prefix
+
+database:
+  host: styrmin-postgresql
+
+postgresql:
+  enabled: true
+  fullnameOverride: styrmin-postgresql
+  auth:
+    username: simple-app
+    password: simple-app-password
+    postgresPassword: e2e-postgres-password
+    database: simple_app
+  primary:
+    livenessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+    # Ready only when the init script has run to its end. The restore hook starts when the
+    # container is ready, and the bitnami image is ready while its init scripts still run, so
+    # without this the hook could start before the table of the init script exists: the restore
+    # would then complete.
+    readinessProbe:
+      enabled: false
+    customReadinessProbe:
+      exec:
+        command:
+          - sh
+          - -c
+          - PGPASSWORD=simple-app-password psql -U simple-app -d simple_app -tA -c "SELECT count(*) FROM e2e_parent" | grep -q 0
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+    # SIGTERM is a "smart" shutdown that waits for clients, and simple-app never
+    # closes its pool; preStop does a fast shutdown instead (disconnects clients,
+    # checkpoints). The grace period is only a backstop.
+    lifecycleHooks:
+      preStop:
+        exec:
+          command: ["/opt/bitnami/postgresql/bin/pg_ctl", "stop", "-m", "fast", "--no-wait"]
+    terminationGracePeriodSeconds: 10
+    # Runs as the postgres superuser, so the table belongs to it. The application's role can
+    # read it, which the backup needs, but cannot drop it, which the restore needs.
+    initdb:
+      user: postgres
+      password: e2e-postgres-password
+      scripts:
+        init.sql: |
+          CREATE TABLE e2e_parent (id integer PRIMARY KEY);
+          GRANT SELECT ON e2e_parent TO "simple-app";
+    persistence:
+      enabled: true
+      size: 1Gi
+    extraVolumes:
+      - name: backup
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: backup
+        mountPath: /backup
