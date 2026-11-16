@@ -152,19 +152,27 @@ async def label_namespace_after_failed_restore(
     is not given. A cross-target restore passes the counterpart's spec, so a
     clone gets its own labels, not the source's.
 
-    Best effort: it never raises, because the restore has already failed and the
-    caller records that failure. A CR that Velero did not restore, or a namespace
-    that does not exist, only leaves the namespace as it was.
+    Best effort: a refused or failed Kubernetes call only logs a warning, because the
+    restore has already failed and the caller records that failure. The usual causes are
+    a CR that Velero did not restore (the labels then cannot be read, and the namespace
+    keeps only its name label), a namespace that does not exist, or a refused patch. An
+    error that is not a Kubernetes API error is logged with its traceback and does not
+    stop the caller either: raising would skip the failure handling that comes after it.
     """
     try:
         if crd_spec is None:
             crd_spec = (await _read_crd(api_client, namespace, name)).get("spec", {})
         await _label_namespace(api_client, namespace, crd_spec)
-    except Exception as exc:
+    except k8s_client.ApiException as exc:
         logger.warning(
             "Could not put the labels back on namespace {} after a restore that did not complete: {}",
             namespace,
             exc,
+        )
+    except Exception:
+        logger.opt(exception=True).error(
+            "Unexpected error while putting the labels back on namespace {} after a restore that did not complete",
+            namespace,
         )
 
 

@@ -951,6 +951,31 @@ async def test_a_cr_that_velero_did_not_restore_leaves_the_namespace_alone() -> 
 
 @pytest.mark.anyio
 @pytest.mark.usefixtures("fake_k8s")
+async def test_an_error_that_is_not_an_api_error_does_not_fail_the_failed_restore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It is logged with its traceback, and the failure handling after it still runs."""
+    crd = restored_crd()
+    crd["spec"]["context"] = {"labels": {"environment_id": ENVIRONMENT_ID}}
+    api_client = FakeApiClient({RESTORED_NAME: crd})
+    api_client.namespaces[NAMESPACE] = dict(NAMESPACE_BEFORE)
+
+    async def _broken(*_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("broken label builder")
+
+    monkeypatch.setattr(restore_recovery, "_label_namespace", _broken)
+
+    await restore_recovery.label_namespace_after_failed_restore(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+    )
+
+    assert api_client.namespaces[NAMESPACE] == NAMESPACE_BEFORE
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
 async def test_a_namespace_that_does_not_exist_does_not_fail_the_failed_restore() -> (
     None
 ):

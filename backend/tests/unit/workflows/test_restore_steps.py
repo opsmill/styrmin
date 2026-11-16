@@ -420,6 +420,20 @@ async def test_a_restore_that_did_not_complete_still_fails_when_the_labels_canno
     assert events[-2:] == [("STARTED", "restore:velero"), ("FAILED", "restore:velero")]
 
 
+async def test_a_restore_that_did_not_complete_still_fails_when_the_label_step_breaks(
+    api: FakeStepApi,
+) -> None:
+    """An error that is not a Kubernetes API error must not skip the failure handling either."""
+    del api
+    async with _user_flow(restore=_velero_restore("PartiallyFailed")) as cluster:
+        cluster.recovery.label_namespace.side_effect = TypeError("broken label builder")
+        result = await _restore()
+
+    assert result["status"]["phase"] == "PartiallyFailed"
+    cluster.recovery.mark_failed.assert_awaited_once()
+    assert _stored_result(cluster.variable)["status"]["phase"] == "PartiallyFailed"
+
+
 async def test_a_completed_restore_leaves_the_labels_to_its_recovery(
     api: FakeStepApi,
 ) -> None:

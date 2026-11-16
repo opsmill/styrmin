@@ -501,6 +501,13 @@ async def execute_velero_restore_flow(
             failure_reason = velero_status.get("failureReason") or (
                 f"Velero restore phase: {velero_phase}"
             )
+            for name in failure_crd_names:
+                await mark_failed(
+                    api_client,
+                    target_namespace,
+                    name,
+                    f"Velero restore failed: {failure_reason}",
+                )
             # Velero created the namespace without its labels, and only the
             # recovery of a completed restore puts them back. Without them a
             # policy that selects the namespace by its labels no longer matches
@@ -512,13 +519,6 @@ async def execute_velero_restore_flow(
                 crd_name,
                 None if counterpart_crd_body is None else counterpart_crd_body["spec"],
             )
-            for name in failure_crd_names:
-                await mark_failed(
-                    api_client,
-                    target_namespace,
-                    name,
-                    f"Velero restore failed: {failure_reason}",
-                )
 
         # Store result for cross-worker retrieval via Prefect Variable
         await Variable.set(  # type: ignore[misc]

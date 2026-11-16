@@ -41,7 +41,7 @@ postgresql:
         command:
           - sh
           - -c
-          - PGPASSWORD=simple-app-password psql -U simple-app -d simple_app -tA -c "SELECT count(*) FROM e2e_parent" | grep -q 0
+          - PGPASSWORD=simple-app-password psql -U simple-app -d simple_app -tA -c "SELECT count(*) FROM e2e_parent" | grep -qx 0
       initialDelaySeconds: 1
       periodSeconds: 1
       timeoutSeconds: 1
