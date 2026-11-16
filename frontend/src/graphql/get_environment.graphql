@@ -31,6 +31,12 @@ query GetEnvironment($environmentId: UUID!, $includeDeleted: Boolean = false) {
         name
         enabled
       }
+      deployedServices {
+        id
+        driverServiceName
+        component
+        humanReadableUrl
+      }
       applicationInstance {
         id
         status

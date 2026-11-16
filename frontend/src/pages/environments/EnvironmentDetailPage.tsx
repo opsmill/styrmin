@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useParams, Link, useNavigate } from "@tanstack/react-router";
 import {
   useGetEnvironmentQuery,
@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Plus } from "lucide-react";
+import { ExternalLink, Plus } from "lucide-react";
 import { formatDriverVersionLabel } from "@/lib/driverVersion";
 import { deriveEnvHealth } from "@/lib/environment-health";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
@@ -388,6 +388,53 @@ function relativeTimeFromNow(iso: string): string {
   return `${days}d ago`;
 }
 
+interface ComponentPublicUrl {
+  serviceId: string;
+  component: string;
+  url: string;
+  componentEnabled: boolean;
+}
+
+// The public URL of each service of the deployment, with the component that
+// serves it. `humanReadableUrl` is the URL of the service's readable host: the
+// address that the deployment detail page labels PUBLIC.
+function componentPublicUrls(deployment: {
+  components: { name: string; enabled: boolean }[];
+  deployedServices: {
+    id: string;
+    component: string;
+    humanReadableUrl?: string | null;
+  }[];
+}): ComponentPublicUrl[] {
+  const enabledByName = new Map(
+    deployment.components.map((component) => [
+      component.name,
+      component.enabled,
+    ]),
+  );
+  return deployment.deployedServices.flatMap((service) =>
+    service.humanReadableUrl
+      ? [
+          {
+            serviceId: service.id,
+            component: service.component,
+            url: service.humanReadableUrl,
+            componentEnabled: enabledByName.get(service.component) ?? true,
+          },
+        ]
+      : [],
+  );
+}
+
+// A line break opportunity after each "/", "." and ":" of a URL, so that a
+// long URL wraps between its parts instead of inside a host label or the
+// port. <wbr> adds no character, so a copied URL stays the same.
+function urlWithBreaks(url: string): ReactNode[] {
+  return url
+    .split(/(?<=[/.:])/)
+    .flatMap((part, i) => (i === 0 ? [part] : [<wbr key={i} />, part]));
+}
+
 // Exported for component-level testing (see
 // frontend/src/__tests__/environment-detail/DeploymentRow.test.tsx). The row
 // is otherwise a private implementation detail of this page.
@@ -407,7 +454,12 @@ export function DeploymentRow({
       sourceCommitSha?: string | null;
       applicationDriver: { name: string };
     } | null;
-    components: { id: string }[];
+    components: { id: string; name: string; enabled: boolean }[];
+    deployedServices: {
+      id: string;
+      component: string;
+      humanReadableUrl?: string | null;
+    }[];
     deletedAt?: string | null;
   };
   environmentId: string;
@@ -425,32 +477,41 @@ export function DeploymentRow({
   // affordances. The detail page is still reachable by clicking the row
   // (US7 — direct id lookup is unfiltered).
   const isTombstoned = isDeleted;
+  // The cluster resources of a deployment that is being deleted, or is
+  // deleted, are torn down, so its URLs no longer answer.
+  const publicUrls =
+    isDeleting || isDeleted ? [] : componentPublicUrls(deployment);
 
+  // A link cannot contain another link, and the row holds links to public
+  // URLs. So the deployment name is the link to the deployment, and its
+  // ::after element covers the whole row (the nearest `relative` ancestor) to
+  // keep the whole row clickable. The public URL links sit above it.
   return (
-    <Link
-      to="/environments/$environmentId/deployments/$deploymentId"
-      params={{
-        environmentId,
-        deploymentId: deployment.id,
-      }}
+    <div
       data-testid="deployment-row"
       data-deployment-id={deployment.id}
       data-deployment-status={deployment.status}
     >
       <div
-        className={`flex items-center gap-4 rounded-lg border-l-[3px] px-4 py-3 transition-colors hover:bg-accent/50 ${
+        className={`relative flex items-center gap-4 rounded-lg border-l-[3px] px-4 py-3 transition-colors hover:bg-accent/50 ${
           isTombstoned ? "border-border opacity-50 grayscale" : dc.border
         } ${index % 2 === 0 ? "bg-surface" : ""}`}
       >
         <div className="flex w-[180px] items-center gap-2">
           <div className={`h-2 w-2 flex-shrink-0 rounded-full ${dc.dot}`} />
-          <span
-            className={`text-[13px] font-medium ${
+          <Link
+            to="/environments/$environmentId/deployments/$deploymentId"
+            params={{
+              environmentId,
+              deploymentId: deployment.id,
+            }}
+            data-testid="deployment-row-link"
+            className={`text-[13px] font-medium outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:ring-2 focus-visible:after:ring-ring ${
               isTombstoned ? "text-muted-foreground" : "text-foreground"
             }`}
           >
             {deployment.name}
-          </span>
+          </Link>
           {isDeleting && (
             <span
               className="rounded bg-amber-500/10 px-1.5 py-px text-[10px] font-medium uppercase tracking-wider text-amber-700 dark:text-amber-400"
@@ -485,21 +546,64 @@ export function DeploymentRow({
         <div className="w-[100px]">
           <StatusBadge status={deployment.status} />
         </div>
-        <span
-          className={`flex-1 text-[13px] ${isTombstoned ? "text-muted-foreground/70" : "text-muted-foreground"}`}
+        <div
+          className={`flex min-w-0 flex-1 flex-col gap-1 text-[13px] ${isTombstoned ? "text-muted-foreground/70" : "text-muted-foreground"}`}
+          data-testid="deployment-components-cell"
         >
           {isDeleted && deployment.deletedAt ? (
             <span data-testid="deleted-at-relative">
               Deleted {relativeTimeFromNow(deployment.deletedAt)}
             </span>
           ) : (
-            <>
+            <span>
               {deployment.components.length} component
               {deployment.components.length !== 1 ? "s" : ""}
-            </>
+            </span>
           )}
-        </span>
+          {publicUrls.length > 0 && (
+            <ul className="flex flex-col gap-0.5">
+              {publicUrls.map((entry) => (
+                <li
+                  key={entry.serviceId}
+                  className="flex min-w-0 items-baseline gap-1.5 text-[11px]"
+                  data-testid="component-public-url"
+                  data-component={entry.component}
+                >
+                  <span
+                    className={`flex-shrink-0 font-medium ${
+                      entry.componentEnabled
+                        ? "text-foreground"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {entry.component}
+                  </span>
+                  {/* The URL wraps instead of being cut, so that its port
+                      stays visible in a narrow column. */}
+                  <a
+                    href={entry.url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className={`relative z-10 min-w-0 font-mono [overflow-wrap:anywhere] hover:underline ${
+                      entry.componentEnabled
+                        ? "text-primary"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    <ExternalLink className="mr-1 inline h-3 w-3 align-[-2px]" />
+                    {urlWithBreaks(entry.url)}
+                  </a>
+                  {!entry.componentEnabled && (
+                    <span className="flex-shrink-0 text-muted-foreground">
+                      (disabled)
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
-    </Link>
+    </div>
   );
 }

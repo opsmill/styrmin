@@ -511,8 +511,9 @@ def _expected_environment_status(statuses: list[str]) -> str:
 @pytest.mark.ci
 @pytest.mark.ui_only(
     reason="Asserts what the environment list and detail pages render for an "
-    "environment with an internal ingress controller; the SDK has no "
-    "environment status or application count."
+    "environment with an internal ingress controller, and the public URL "
+    "links of the overview rows; the SDK has no environment status, "
+    "application count or overview row."
 )
 async def test_environment_views_hide_ingress_controller(
     deployed_simple_app: dict,
@@ -522,7 +523,11 @@ async def test_environment_views_hide_ingress_controller(
 ) -> None:
     """#253: the environment pages list, count and summarise only the
     applications users deployed, not the internal ingress controller that the
-    dedicated-ingress cluster adds to the environment."""
+    dedicated-ingress cluster adds to the environment.
+
+    #605: the overview row of a deployment links the public URL (the readable
+    host) of each service, next to the component that serves it, and opens it
+    in a new tab."""
     _, client = session_scenario_driver
 
     every_deployment = await client.deployments.list(
@@ -547,6 +552,23 @@ async def test_environment_views_hide_ingress_controller(
     assert await detail.read_application_count() == len(application_ids)
     assert await detail.read_environment_status() == expected_status
     assert await session_ui_page.get_by_text("Show internal").count() == 0
+
+    deployment = await client.deployments.get(deployed_simple_app["deployment_id"])
+    expected_urls = [
+        (svc.component, svc.human_readable_url, "_blank")
+        for svc in deployment.deployed_services
+        if svc.human_readable_url is not None
+    ]
+    assert expected_urls, (
+        "the session cluster sets an FQDN suffix, so a simple-app service "
+        "should have a readable host"
+    )
+    assert (
+        await detail.read_component_public_urls(
+            deployment_id=deployed_simple_app["deployment_id"]
+        )
+        == expected_urls
+    )
 
     environments = EnvironmentsListPage(session_ui_page)
     await environments.goto()
