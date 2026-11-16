@@ -3,8 +3,9 @@
  *
  * Asserts the environment-detail deployments-table row renders the new
  * Driver column: <driverName> on top, v<version>@<short> underneath
- * (font-mono). Each row is wrapped in a minimal TanStack Router context
- * because the row is a <Link>.
+ * (font-mono), and the public URL of each component in the Components
+ * column (#605). Each row is wrapped in a minimal TanStack Router context
+ * because the row holds a <Link> to the deployment.
  */
 import { describe, it, expect } from "vitest";
 import { render, screen, within, act, waitFor } from "@testing-library/react";
@@ -32,7 +33,8 @@ function makeDeployment(overrides: Partial<Deployment> = {}): Deployment {
       sourceCommitSha: null,
       applicationDriver: { name: "nginx" },
     },
-    components: [{ id: "c-1" }],
+    components: [{ id: "c-1", name: "server", enabled: true }],
+    deployedServices: [],
     deletedAt: null,
     ...overrides,
   };
@@ -113,4 +115,118 @@ describe("DeploymentRow Driver column", () => {
     expect(within(cell).queryByText("nginx")).not.toBeInTheDocument();
     expect(within(cell).queryByText(/^v\d/)).not.toBeInTheDocument();
   });
+});
+
+describe("DeploymentRow component public URLs (#605)", () => {
+  const services: Deployment["deployedServices"] = [
+    {
+      id: "svc-1",
+      component: "server",
+      humanReadableUrl: "https://web-prod.example.com",
+    },
+    {
+      id: "svc-2",
+      component: "task-manager",
+      humanReadableUrl: "https://task-manager-prod.example.com:8443",
+    },
+  ];
+  const components: Deployment["components"] = [
+    { id: "c-1", name: "server", enabled: true },
+    { id: "c-2", name: "task-manager", enabled: true },
+    { id: "c-3", name: "worker", enabled: true },
+  ];
+
+  it("lists each component's public URL as a link that opens in a new tab", async () => {
+    await renderRow(makeDeployment({ components, deployedServices: services }));
+
+    const cell = screen.getByTestId("deployment-components-cell");
+    expect(within(cell).getByText("3 components")).toBeInTheDocument();
+
+    const entries = within(cell).getAllByTestId("component-public-url");
+    expect(entries.map((entry) => entry.dataset.component)).toEqual([
+      "server",
+      "task-manager",
+    ]);
+
+    const serverLink = within(entries[0]).getByRole("link", {
+      name: /web-prod\.example\.com/,
+    });
+    expect(serverLink).toHaveAttribute("href", "https://web-prod.example.com");
+    expect(serverLink).toHaveAttribute("target", "_blank");
+    expect(serverLink).toHaveAttribute("rel", "noreferrer noopener");
+    // The line break opportunities add no character to the URL text.
+    expect(serverLink.textContent).toBe("https://web-prod.example.com");
+    expect(within(entries[0]).getByText("server")).toBeInTheDocument();
+
+    expect(
+      within(entries[1]).getByRole("link", {
+        name: /task-manager-prod\.example\.com:8443/,
+      }),
+    ).toHaveAttribute("href", "https://task-manager-prod.example.com:8443");
+  });
+
+  it("keeps the deployment name as the link to the deployment, and does not nest the URL links in it", async () => {
+    await renderRow(makeDeployment({ components, deployedServices: services }));
+
+    const rowLink = screen.getByTestId("deployment-row-link");
+    expect(rowLink).toHaveAttribute(
+      "href",
+      "/environments/env-1/deployments/dep-1",
+    );
+    expect(rowLink).toHaveTextContent("web");
+    for (const urlLink of within(
+      screen.getByTestId("deployment-components-cell"),
+    ).getAllByRole("link")) {
+      expect(urlLink.parentElement?.closest("a")).toBeNull();
+    }
+  });
+
+  it("leaves out a service that has no public URL", async () => {
+    await renderRow(
+      makeDeployment({
+        components,
+        deployedServices: [
+          { id: "svc-1", component: "server", humanReadableUrl: null },
+        ],
+      }),
+    );
+
+    expect(screen.queryAllByTestId("component-public-url")).toHaveLength(0);
+    expect(screen.getByText("3 components")).toBeInTheDocument();
+  });
+
+  it("marks the URL of a disabled component", async () => {
+    await renderRow(
+      makeDeployment({
+        components: [
+          { id: "c-1", name: "server", enabled: true },
+          { id: "c-2", name: "task-manager", enabled: false },
+        ],
+        deployedServices: services,
+      }),
+    );
+
+    const [server, taskManager] = screen.getAllByTestId("component-public-url");
+    expect(within(server).queryByText("(disabled)")).not.toBeInTheDocument();
+    expect(within(taskManager).getByText("(disabled)")).toBeInTheDocument();
+  });
+
+  it.each([
+    { status: "deleting", deletedAt: null },
+    { status: "deleted", deletedAt: "2026-11-16T10:00:00Z" },
+  ])(
+    "shows no public URL for a deployment whose status is $status",
+    async ({ status, deletedAt }) => {
+      await renderRow(
+        makeDeployment({
+          status,
+          deletedAt,
+          components,
+          deployedServices: services,
+        }),
+      );
+
+      expect(screen.queryAllByTestId("component-public-url")).toHaveLength(0);
+    },
+  );
 });

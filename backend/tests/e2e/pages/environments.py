@@ -287,6 +287,25 @@ class EnvironmentDetailPage:
             for i in range(await rows.count())
         }
 
+    async def read_component_public_urls(
+        self, *, deployment_id: str
+    ) -> list[tuple[str, str, str]]:
+        """Return ``(component, href, target)`` for each public URL link in the row's Components column (#605)."""
+        entries = self._row(deployment_id).locator("[data-testid=component-public-url]")
+        context = f"public URL of deployment row {deployment_id}"
+        result: list[tuple[str, str, str]] = []
+        for i in range(await entries.count()):
+            entry = entries.nth(i)
+            link = entry.get_by_role("link")
+            result.append(
+                (
+                    await _required_attr(entry, "data-component", context=context),
+                    await _required_attr(link, "href", context=context),
+                    await _required_attr(link, "target", context=context),
+                )
+            )
+        return result
+
     async def read_application_count(self) -> int:
         """Return the number in the "Applications" summary tile."""
         tile = self._page.locator("[data-testid=environment-application-count]").first

@@ -391,6 +391,20 @@ hostname for each deployment. Add one **wildcard DNS record**
 (`*.styrmin.io`) that points to the environment's ingress, and each
 deployment gets a URL.
 
+#### Where you view the URLs of a deployment
+
+- The **Overview** tab of the environment page lists, in the
+  **Components** column of each deployment, the URL of the readable host of
+  each service, next to the component that serves it. Select a URL to open
+  it in a new tab.
+- The **Overview** tab of the deployment page lists both hosts of each
+  service under **Endpoints**.
+
+Both pages list the readable host of every service, internal services
+included. The readable host of an internal service answers only when the
+chart of the driver renders an Ingress for that host, as the `infrahub` and
+`semaphore` drivers do for their first service.
+
 #### When Styrmin creates the Ingress
 
 The operator creates, updates and deletes these Ingresses in its periodic
