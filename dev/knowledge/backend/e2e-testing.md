@@ -442,7 +442,7 @@ A standard-library HTTP server that receives the daily telemetry report (spec 02
 
 Styrmin itself is deployed into the vCluster via its Helm chart, following the same path a real deployment would take.
 
-The styrmin Docker image is built via `docker compose build` in the test setup, and the chart is installed with values loaded from `tests/e2e/fixtures/styrmin-values.yaml`:
+The session fixture `styrmin_image` builds the styrmin Docker image with `docker compose build`, runs `helm dependency update` for `helm/agent` and `helm/styrmin`, and returns the `--set` arguments that point the chart at that image (`STYRMIN_IMAGE_VER` in CI). `styrmin_deployment` installs the chart with them and with values loaded from `tests/e2e/fixtures/styrmin-values.yaml`:
 
 ```bash
 helm upgrade --install styrmin \
@@ -453,6 +453,24 @@ helm upgrade --install styrmin \
 ```
 
 After installation, the fixture port-forwards the `styrmin-server` service and waits for its `/health` endpoint to return 200.
+
+### Styrmin in a vCluster of one host namespace
+
+`test_single_namespace_vcluster.py` (shard `single_namespace`) checks that Styrmin runs for a team that a platform team gives one namespace of a cluster. It does not use `styrmin_deployment`. The session vcluster is the host cluster, and the module fixtures build the rest:
+
+| Fixture | What it does |
+|---------|--------------|
+| `tenant` | Creates the host namespace `styrmin-tenant-<hex>` with Pod Security `baseline` enforced, and the objects of `fixtures/single-namespace/tenant-rbac.yaml`: a ServiceAccount bound to the built-in `admin` ClusterRole in that namespace, and a Role with the rules of vCluster's Role that `admin` lacks. Writes a kubeconfig with the ServiceAccount's token. The `styrmin` prefix makes the failure log dump include the namespace. |
+| `tenant_vcluster` | Installs the vCluster chart (`VCLUSTER_CHART_VERSION`) in that namespace with the tenant kubeconfig and `fixtures/single-namespace/vcluster.yaml`, which renders no ClusterRole and copies NetworkPolicies to the host. Port-forwards the vCluster API with kr8s and yields its kubeconfig. |
+| `tenant_styrmin` | Installs `helm/styrmin` in the vCluster with `styrmin-values.yaml`, without the Velero node agent, and yields an admin `StyrminClient`. |
+| `tenant_deployments` | Creates a cluster with a dedicated ingress controller of Service type `ClusterIP`, an environment, and the simple-apps `intent` and `executor`. |
+
+Points that are specific to this setup:
+
+- The vCluster's CoreDNS answers every `cluster.local` name itself, and its `fallbackHostCluster` option did not resolve host Services in our tests with vCluster 0.33.2. `tenant_styrmin` therefore writes a server block into the vCluster's `coredns-custom` ConfigMap that sends `git-server.default.svc.cluster.local` and `chart-server.default.svc.cluster.local` to the host's DNS server, then restarts CoreDNS. The vCluster's pods run in the host, so they reach the host Services.
+- The cluster config needs `dedicated_ingress`: Styrmin creates a Traefik `Middleware` for each deployment, and only the dedicated Traefik installs the Traefik CRDs in the vCluster.
+- The test sends `helm` to the port-forwarded vCluster API, so it runs `helm` with `asyncio.to_thread`: the port-forward serves connections on the event loop of the test.
+- The Velero node agent is not installed: `baseline` rejects its host path volumes, and in a vCluster the node's pod directories are named after the host pods' UIDs, which Velero cannot match to the virtual pods. Backups do not work in this setup and are not tested.
 
 ## Test Data Setup
 
@@ -523,7 +541,8 @@ vcluster ───────────────────────�
 | `chart_server` | session | `vcluster` | Cluster-internal chart server URL |
 | `git_server` | session | `vcluster`, `chart_server` | Cluster-internal git URL |
 | `telemetry_sink` | module | `vcluster` | Port-forwarded telemetry sink URL |
-| `styrmin_deployment` | session | `vcluster` | Port-forwarded Styrmin server URL |
+| `styrmin_image` | session | — | Built Styrmin image and chart dependencies; the image `--set` args for `helm/styrmin` |
+| `styrmin_deployment` | session | `vcluster`, `styrmin_image` | Port-forwarded Styrmin server URL |
 | `driver_mode` | session | — (parametrised) | "api" or "ui" |
 | `session_ui_page` | session | `driver_mode`, `styrmin_deployment` | Playwright Page (in ui mode), else None |
 | `session_scenario_driver` | session | `driver_mode`, `styrmin_deployment`, `session_ui_page` | `(ScenarioDriver, StyrminClient)` |

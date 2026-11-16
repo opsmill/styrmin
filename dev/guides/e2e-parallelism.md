@@ -2,11 +2,11 @@
 
 ## Overview
 
-E2E tests run in a 9-shard × 2-entrypoint CI matrix. Each cell is a
+E2E tests run in a 10-shard × 2-entrypoint CI matrix. Each cell is a
 GitHub Actions job that boots its own vcluster, installs styrmin via
 Helm, and runs only the tests carrying its shard marker.
 
-The nine shards:
+The ten shards:
 
 | Shard | Marker | Purpose | Sample tests |
 |---|---|---|---|
@@ -19,6 +19,7 @@ The nine shards:
 | `configuration` | `shard_configuration` | `backend/tests/e2e/configuration/` — unified config-drawer UI flows | `test_drawer_env_vars_edit`, `test_drawer_scheduling_edit` |
 | `apply` | `shard_apply` | `test_deployments_apply.py` — manifest `apply` / `apply_files` flows (all `api_only`, each test deploys fresh simple-apps; split out of `general`, where it was the bulk of the run) | `test_apply_creates_updates_then_noops`, `test_apply_files_batch_continues_past_failure` |
 | `task_steps` | `shard_task_steps` | `test_task_steps.py` — failed-step scenarios on one `failing-actions` deployment; the HelmRelease scenario waits out the operator's readiness timeout and FluxCD's rollback (split out of `general`, where it was ~40% of the run) | `test_prerequisite_failure_shows_attempts`, `test_helmrelease_failure_shows_fluxcd_reason` |
+| `single_namespace` | `shard_single_namespace` | `test_single_namespace_vcluster.py` — installs vCluster in one namespace of the session vcluster with a namespace-scoped account, then a second Styrmin in that vCluster (all `api_only`; the session Styrmin is not installed, so the cell does not run two Styrmin installs) | `test_service_alias_reaches_peer_deployment`, `test_deleting_deployment_removes_its_alias_and_pods` |
 
 The two entrypoints (`api`, `ui`) continue as before — each shard runs
 twice unless every test in it carries `@pytest.mark.api_only` or
@@ -40,7 +41,8 @@ the marker rules.
                                              # shard_backup, shard_env_backup,
                                              # shard_infrahub,
                                              # shard_configuration,
-                                             # shard_apply, shard_task_steps
+                                             # shard_apply, shard_task_steps,
+                                             # shard_single_namespace
    ]
    ```
 

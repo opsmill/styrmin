@@ -77,6 +77,7 @@ _VALID_SHARDS = frozenset(
         "shard_configuration",
         "shard_apply",
         "shard_task_steps",
+        "shard_single_namespace",
     }
 )
 
@@ -726,26 +727,21 @@ async def git_server(
 
 
 # ---------------------------------------------------------------------------
-# Fixture: styrmin_deployment
+# Fixture: styrmin_image
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
-async def styrmin_deployment(
-    vcluster: dict,
-) -> AsyncGenerator[str, None]:
-    kubeconfig_path = vcluster["kubeconfig_path"]
-    api: kubeclient.ApiClient = vcluster["api"]
+def styrmin_image() -> list[str]:
+    """Build the Styrmin image and the chart dependencies; return the image ``--set`` args.
 
+    The args make ``helm install`` of ``helm/styrmin`` use the image that this
+    fixture built.
+    """
     # Build styrmin image via docker compose
     subprocess.run(
         ["docker", "compose", "build"],
         cwd=str(PROJECT_ROOT),
         check=True,
     )
-
-    # Check for GITHUB_PAT
-    github_pat = os.environ.get("GITHUB_PAT", "default")
-    if not github_pat:
-        pytest.skip("GITHUB_PAT environment variable not set")
 
     # Build agent chart dependencies (prefect-worker) before installing styrmin
     subprocess.run(
@@ -760,6 +756,38 @@ async def styrmin_deployment(
         ["helm", "dependency", "update", str(PROJECT_ROOT / "helm" / "styrmin")],
         check=True,
     )
+
+    # In CI we tag the built image with a per-runner, per-commit value to
+    # avoid `:latest` collisions on shared self-hosted runners (see
+    # `.github/workflows/ci.yml` and `tasks/agent.py`). Propagate that
+    # tag to the chart and the agent subchart so the helm install
+    # references the same image `docker compose build` just produced.
+    image_ver = os.environ.get("STYRMIN_IMAGE_VER")
+    if not image_ver:
+        return []
+    return [
+        "--set",
+        f"image.tag={image_ver}",
+        "--set",
+        f"styrmin-agent.image.tag={image_ver}",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Fixture: styrmin_deployment
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="session")
+async def styrmin_deployment(
+    vcluster: dict,
+    styrmin_image: list[str],
+) -> AsyncGenerator[str, None]:
+    kubeconfig_path = vcluster["kubeconfig_path"]
+    api: kubeclient.ApiClient = vcluster["api"]
+
+    # Check for GITHUB_PAT
+    github_pat = os.environ.get("GITHUB_PAT", "default")
+    if not github_pat:
+        pytest.skip("GITHUB_PAT environment variable not set")
 
     # Deploy Garage for Velero backup storage (before Styrmin, since Velero
     # needs it). Same manifest the local demo uses.
@@ -806,20 +834,8 @@ async def styrmin_deployment(
         f"styrmin.driver.token={github_pat}",
         "--set",
         f"styrmin.agentSource.token={github_pat}",
+        *styrmin_image,
     ]
-    # In CI we tag the built image with a per-runner, per-commit value to
-    # avoid `:latest` collisions on shared self-hosted runners (see
-    # `.github/workflows/ci.yml` and `tasks/agent.py`). Propagate that
-    # tag to the chart and the agent subchart so the helm install
-    # references the same image `docker compose build` just produced.
-    image_ver = os.environ.get("STYRMIN_IMAGE_VER")
-    if image_ver:
-        helm_args += [
-            "--set",
-            f"image.tag={image_ver}",
-            "--set",
-            f"styrmin-agent.image.tag={image_ver}",
-        ]
     helm_args += [
         "--kubeconfig",
         kubeconfig_path,

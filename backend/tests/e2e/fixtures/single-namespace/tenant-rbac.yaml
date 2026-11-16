@@ -1,0 +1,49 @@
+# The access that a platform team gives the tenant of one namespace.
+# test_single_namespace_vcluster.py creates these objects in the tenant namespace.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tenant-admin
+---
+# The built-in "admin" ClusterRole, bound in the tenant namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tenant-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+  - kind: ServiceAccount
+    name: tenant-admin
+---
+# The rules of vCluster's Role that "admin" lacks. Without them Kubernetes
+# rejects the Role, because the tenant cannot grant rules that it does not hold.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vcluster-extra
+rules:
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["create", "delete", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods/status", "pods/ephemeralcontainers", "pods/resize"]
+    verbs: ["patch", "update"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["create", "delete", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vcluster-extra
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vcluster-extra
+subjects:
+  - kind: ServiceAccount
+    name: tenant-admin
