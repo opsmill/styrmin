@@ -40,7 +40,7 @@ postgresql:
         command:
           - sh
           - -c
-          - PGPASSWORD=simple-app-password psql -U simple-app -d simple_app -tA -c "SELECT 1 FROM e2e_ready" | grep -q 1
+          - PGPASSWORD=simple-app-password psql -U simple-app -d simple_app -tA -c "SELECT 1 FROM e2e_ready" | grep -qx 1
       initialDelaySeconds: 1
       periodSeconds: 1
       timeoutSeconds: 1

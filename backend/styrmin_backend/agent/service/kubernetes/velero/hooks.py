@@ -22,6 +22,13 @@ _PG_RESTORE_ATTEMPTS = 3
 # leftover object depends on. Every retry then fails the same way. So each
 # attempt first drops the tables of schema public that the hook's role owns, in
 # one transaction, and --clean --if-exists drops the rest of what the dump holds.
+# Limits of that drop:
+# - It leaves a table that belongs to an extension, which PostgreSQL refuses to
+#   drop on its own, and a table of another role or schema: --clean handles those
+#   as before. A type, sequence or function that the migration left stays too.
+# - It runs only after pg_restore has listed the dump, so a missing or unreadable
+#   dump changes nothing. If pg_restore then fails, the database has no tables of
+#   the application, like a database that no migration has run on yet.
 # Dropping the schema instead would lose its privileges, and the role does not own
 # schema public on PostgreSQL 14 and older images other than bitnami's.
 _POSTGRES_RESTORE_SCRIPT = """\
@@ -51,12 +58,13 @@ done &
 fence_pid=$!
 trap 'kill "$fence_pid" 2>/dev/null || true' EXIT INT TERM
 
-wipe_sql='DO $do$ DECLARE r record; BEGIN FOR r IN SELECT schemaname, tablename FROM pg_tables WHERE schemaname = $s$public$s$ AND tableowner = current_user LOOP EXECUTE format($f$DROP TABLE IF EXISTS %I.%I CASCADE$f$, r.schemaname, r.tablename); END LOOP; END $do$;'
+wipe_sql='DO $do$ DECLARE r record; BEGIN FOR r IN SELECT n.nspname AS schemaname, c.relname AS tablename FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $s$public$s$ AND c.relkind IN ($k$r$k$, $k$p$k$) AND c.relowner = (SELECT oid FROM pg_roles WHERE rolname = current_user) AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = $c$pg_class$c$::regclass AND d.objid = c.oid AND d.deptype = $e$e$e$) LOOP EXECUTE format($f$DROP TABLE IF EXISTS %I.%I CASCADE$f$, r.schemaname, r.tablename); END LOOP; END $do$;'
 
 attempt=0
 while :; do
   attempt=$((attempt + 1))
-  if psql -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -v ON_ERROR_STOP=1 --single-transaction -c "$wipe_sql" >/dev/null \\
+  if pg_restore -l {backup_mount_path}/pre-snapshot.dump >/dev/null \\
+    && psql -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -v ON_ERROR_STOP=1 --single-transaction -c "$wipe_sql" >/dev/null \\
     && pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" --no-owner --clean --if-exists --single-transaction {backup_mount_path}/pre-snapshot.dump; then
     break
   fi

@@ -51,11 +51,26 @@ esac
 exit 0
 """
 
-# Stand-in for pg_restore: a database that a migration left half done is not
-# clean, and --clean cannot drop what the dump does not hold.
+# Stand-in for pg_restore. `-l` lists the dump, which the hook does first: it fails
+# when the dump is missing. A restore fails on a database that a migration left half
+# done, because --clean cannot drop what the dump does not hold, unless the tables
+# were dropped first.
 FAKE_PG_RESTORE = f"""\
 #!/bin/sh
+case " $* " in
+  *" -l "*)
+    if [ -f "$STATE/no-dump" ]; then
+      echo "pg_restore: error: could not open input file" >&2
+      exit 1
+    fi
+    exit 0
+    ;;
+esac
 echo "$*" >> "$STATE/pg_restore.log"
+if [ -f "$STATE/pg_restore-always-fails" ]; then
+  echo "broken dump" >&2
+  exit 1
+fi
 if [ -f "$STATE/clean" ]; then
   exit 0
 fi
@@ -77,8 +92,13 @@ def _install(directory: Path, name: str, body: str) -> None:
 
 
 def _run_hook(
-    tmp_path: Path, *, fail_first_wipe: bool = False
+    tmp_path: Path,
+    *,
+    fail_first_wipe: bool = False,
+    dump_missing: bool = False,
+    pg_restore_always_fails: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[str], list[str]]:
+    """Run the rendered script; return the result, the pg_restore loads and the psql calls."""
     bin_dir = tmp_path / "bin"
     state = tmp_path / "state"
     bin_dir.mkdir()
@@ -86,8 +106,13 @@ def _run_hook(
     _install(bin_dir, "psql", FAKE_PSQL)
     _install(bin_dir, "pg_restore", FAKE_PG_RESTORE)
     _install(bin_dir, "sleep", FAKE_SLEEP)
-    if fail_first_wipe:
-        (state / "fail-first-wipe").touch()
+    for flag, name in (
+        (fail_first_wipe, "fail-first-wipe"),
+        (dump_missing, "no-dump"),
+        (pg_restore_always_fails, "pg_restore-always-fails"),
+    ):
+        if flag:
+            (state / name).touch()
     env = {
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
@@ -113,6 +138,10 @@ def _run_hook(
     )
 
 
+def _wipes(psql_calls: list[str]) -> list[str]:
+    return [call for call in psql_calls if "DROP TABLE IF EXISTS %I.%I CASCADE" in call]
+
+
 def test_a_database_left_half_migrated_by_the_application_is_restored(
     tmp_path: Path,
 ) -> None:
@@ -128,12 +157,11 @@ def test_every_attempt_drops_the_tables_before_pg_restore(tmp_path: Path) -> Non
     result, pg_restore_calls, psql_calls = _run_hook(tmp_path, fail_first_wipe=True)
 
     assert result.returncode == 0, result.stderr
-    wipes = [
-        call for call in psql_calls if "DROP TABLE IF EXISTS %I.%I CASCADE" in call
-    ]
-    assert len(wipes) == 2, "the first wipe failed, so the second attempt wipes again"
+    assert len(_wipes(psql_calls)) == 2, (
+        "the first wipe failed, so the second attempt wipes again"
+    )
     assert len(pg_restore_calls) == 1, (
-        "pg_restore never runs on a schema that was not emptied"
+        "pg_restore never runs on tables that were not dropped"
     )
     assert "pg_restore attempt 1 aborted; retrying" in result.stderr
 
@@ -144,14 +172,26 @@ def test_the_tables_are_dropped_in_one_transaction_without_dropping_the_schema(
     """Dropping schema public would lose its privileges, and the role may not own it."""
     _, _, psql_calls = _run_hook(tmp_path)
 
-    wipe = next(
-        call for call in psql_calls if "DROP TABLE IF EXISTS %I.%I CASCADE" in call
-    )
+    (wipe,) = _wipes(psql_calls)
     assert "--single-transaction" in wipe
     assert "ON_ERROR_STOP=1" in wipe
-    assert "tableowner = current_user" in wipe, "only the tables the role may drop"
-    assert "DROP SCHEMA" not in wipe
+    assert "c.relowner" in wipe and "current_user" in wipe, (
+        "only the tables the role may drop"
+    )
+    assert "pg_depend" in wipe and "deptype" in wipe, (
+        "a table of an extension is left alone: PostgreSQL refuses to drop it on its own"
+    )
     assert not any("DROP SCHEMA" in call for call in psql_calls)
+
+
+def test_a_missing_dump_changes_nothing(tmp_path: Path) -> None:
+    """The dump is listed before anything is dropped, so a failed restore leaves the tables."""
+    result, pg_restore_calls, psql_calls = _run_hook(tmp_path, dump_missing=True)
+
+    assert result.returncode == 1
+    assert "pg_restore failed after 3 attempt(s)" in result.stderr
+    assert _wipes(psql_calls) == [], "no table is dropped when the dump cannot be read"
+    assert pg_restore_calls == []
 
 
 def test_pg_restore_keeps_cleaning_what_the_dump_holds_in_other_schemas(
@@ -169,29 +209,10 @@ def test_a_restore_that_keeps_failing_still_fails_after_the_attempts(
     tmp_path: Path,
 ) -> None:
     """The retries stay bounded: a dump that cannot be replayed fails the hook."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    (tmp_path / "state").mkdir()
-    _install(bin_dir, "psql", FAKE_PSQL)
-    _install(bin_dir, "pg_restore", "#!/bin/sh\necho broken dump >&2\nexit 1\n")
-    _install(bin_dir, "sleep", FAKE_SLEEP)
-    result = subprocess.run(
-        ["sh", "-c", _postgres_restore_command("/backup")],
-        env={
-            **os.environ,
-            "PATH": f"{bin_dir}:{os.environ['PATH']}",
-            "STATE": str(tmp_path / "state"),
-            "POSTGRES_USER": "prefect",
-            "POSTGRES_DATABASE": "prefect",
-            "POSTGRES_PASSWORD": "test",
-        },
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
+    result, pg_restore_calls, _ = _run_hook(tmp_path, pg_restore_always_fails=True)
 
     assert result.returncode == 1
+    assert len(pg_restore_calls) == 3
     assert "pg_restore failed after 3 attempt(s)" in result.stderr
 
 

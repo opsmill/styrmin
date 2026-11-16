@@ -140,6 +140,16 @@ async def test_restore_loads_the_dump_over_a_table_that_the_application_created_
         assert await sql(deployment, "INSERT INTO e2e_parent VALUES (1), (2), (3)") == (
             "INSERT 0 3"
         )
+        # The hook drops only the tables that the application's role owns: the init script
+        # must create them as that role, whatever the version of the PostgreSQL chart.
+        assert (
+            await sql(
+                deployment,
+                "SELECT string_agg(DISTINCT tableowner, ',') FROM pg_tables "
+                "WHERE tablename IN ('e2e_parent', 'e2e_child')",
+            )
+            == "simple-app"
+        )
         # The dump must not hold the table that the init script creates again at the restore.
         await sql(deployment, "DROP TABLE e2e_child")
         backup = await back_up(client, deployment)
