@@ -14,7 +14,12 @@ async def upgrade(context: GlobalContext, target_version: str):
     logger = get_run_logger()
     logger.info("Executing upgrade user actions...")
     logger.info(type(context))
-    logger.info(f"Context: {context}")
+    # Names the deployment, not the context's values: they can hold passwords.
+    logger.info(
+        "Deployment %s, instance %s",
+        context.instance.deployment_id,
+        context.instance.id,
+    )
 
     await stop_components(components=["server", "task-worker"], context=context)
     await upgrade_deployment_version(target_version=target_version, context=context)
@@ -47,11 +52,21 @@ async def upgrade(context: GlobalContext, target_version: str):
 def pre_setup(context: GlobalContext):
     logger = get_run_logger()
     logger.info("Executing setup user actions before setup action...")
-    logger.info(f"Context: {context}")
+    # Names the deployment, not the context's values: they can hold passwords.
+    logger.info(
+        "Deployment %s, instance %s",
+        context.instance.deployment_id,
+        context.instance.id,
+    )
 
 
 @flow
 def post_setup(context: GlobalContext):
     logger = get_run_logger()
     logger.info("Executing setup user actions after setup action...")
-    logger.info(f"Context: {context}")
+    # Names the deployment, not the context's values: they can hold passwords.
+    logger.info(
+        "Deployment %s, instance %s",
+        context.instance.deployment_id,
+        context.instance.id,
+    )

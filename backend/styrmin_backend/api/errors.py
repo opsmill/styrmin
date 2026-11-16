@@ -26,6 +26,7 @@ from typing import Any, Iterator
 from graphql import ExecutionResult, GraphQLError
 from strawberry.extensions import SchemaExtension
 
+from styrmin_backend.api.logging.error_log import describe_error
 from styrmin_backend.services.exceptions import ServiceError
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,8 @@ class StructuredErrorExtension(SchemaExtension):
         )
 
     def _log_validation_error(self, error: GraphQLError) -> None:
-        logger.info("GraphQL validation error: %s", error.message)
+        # graphql-core's message can repeat a value of the request (#573).
+        logger.info("GraphQL validation error: %s", describe_error(error))
 
     def _log_unexpected_error(self, error: GraphQLError) -> None:
         logger.error(

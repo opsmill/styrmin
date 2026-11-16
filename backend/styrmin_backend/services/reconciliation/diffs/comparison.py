@@ -11,6 +11,14 @@ from styrmin_backend.services.reconciliation.diffs.diffs import (
 from styrmin_backend.services.reconciliation.diffs.serializer import DiffSerializer
 
 
+def _raw_diff_paths(raw_diffs: dict) -> list[str]:
+    """The paths that a DeepDiff ``to_dict()`` names, without their values."""
+    paths: list[str] = []
+    for changes in raw_diffs.values():
+        paths.extend(str(path) for path in changes)
+    return sorted(paths)
+
+
 class Comparator:
     def __init__(
         self, current_instance: Instance | None, new_instance: Instance | None
@@ -94,9 +102,11 @@ class Comparator:
         # diff entries (e.g. changes only in unhandled DeepDiff categories), treat
         # as no-op rather than generating an InstanceUpdate with empty diffs.
         if isinstance(report.diff, InstanceUpdate) and not report.diff.diffs:
+            # The paths only: the raw diffs hold the old and new values (#573).
             logger.warning(
-                "Raw diffs detected but no actionable diff entries produced. Raw diffs: {}",
-                raw_diffs,
+                "Raw diffs detected but no actionable diff entries produced. "
+                "Changed paths: {}",
+                _raw_diff_paths(raw_diffs),
             )
             return DiffReport(diff=None, raw=raw_diffs)
 

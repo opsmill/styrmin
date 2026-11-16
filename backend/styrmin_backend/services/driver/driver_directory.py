@@ -15,7 +15,6 @@ The helpers here are pure: the git driver provider calls them before the clone
 """
 
 import hashlib
-import re
 import unicodedata
 from pathlib import Path
 
@@ -25,9 +24,6 @@ _EXAMPLE = "drivers/infrahub"
 
 # Longest stored driver directory, in characters.
 MAX_DRIVER_DIRECTORY_LENGTH = 255
-
-# ``scheme://`` followed by the user info that ends at the last ``@`` before a ``/``.
-_USER_INFO = re.compile(r"\b([A-Za-z][A-Za-z0-9+.-]*://)[^/\s]*@")
 
 
 def quoted(value: str) -> str:
@@ -150,22 +146,3 @@ def driver_directory_digest(driver_directory: str) -> str:
     'c8dc0c0d9f46'
     """
     return hashlib.sha256(driver_directory.encode("utf-8")).hexdigest()[:12]
-
-
-def redact_user_info(text: str) -> str:
-    """Return ``text`` with the user info of every ``scheme://`` URL in it removed.
-
-    For messages and logs: a clone error can repeat the repository URL with
-    its user info. An scp-style address such as ``git@host:o/r.git`` has no
-    scheme and is kept.
-
-    >>> redact_user_info("https://user:token@host/x.git")
-    'https://host/x.git'
-    >>> redact_user_info("git@github.com:o/r.git")
-    'git@github.com:o/r.git'
-    >>> redact_user_info("https://user:token@[bad/x.git")
-    'https://[bad/x.git'
-    >>> redact_user_info("cannot reach https://u:t@h/x.git or ssh://git@h/y.git")
-    'cannot reach https://h/x.git or ssh://h/y.git'
-    """
-    return _USER_INFO.sub(r"\1", text)

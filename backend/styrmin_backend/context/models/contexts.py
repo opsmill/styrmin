@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from enum import Enum
 from typing import Any
 from uuid import UUID
@@ -132,6 +133,20 @@ class GlobalContext(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     services: dict[str, Any] = Field(default_factory=dict)
     deployed_services: list[dict[str, Any]] = Field(default_factory=list)
+
+    def __repr_args__(self) -> Iterator[tuple[str, Any]]:
+        """Print the ids and names of a context, not its values (#573).
+
+        ``str()`` and ``repr()``, as in ``f"Context: {context}"`` in a driver
+        action, show these fields only, because the values template, the
+        parameters and the env vars can hold passwords.
+        """
+        yield "deployment_id", self.instance.deployment_id
+        yield "instance_id", self.instance.id
+        yield "namespace", self.instance.namespace
+        yield "app", self.app.name
+        yield "version", self.app.version
+        yield "environment", self.environment.name
 
     @model_validator(mode="before")
     @classmethod

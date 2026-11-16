@@ -654,6 +654,32 @@ migration Job runs the user's build. The override comes from the
 deployment's new configuration, so this holds even when the user sets it
 in the same apply that changes the version.
 
+#### Logging in an action
+
+The logs of an action go to the agent's log and to Prefect's log table.
+Log the ids and the names that say what the action works on, never the
+values of the context:
+
+```python
+logger.info(
+    "Deployment %s, instance %s",
+    context.instance.deployment_id,
+    context.instance.id,
+)
+```
+
+The values template, the parameters and the env vars of the context can
+hold passwords. Printing the whole context, as in `f"Context: {context}"`,
+shows only the deployment id, the instance id, the namespace, the
+application name and version, and the environment name.
+
+Styrmin also replaces some common forms of secrets in every log line with
+`<redacted>`, such as the value after `password:` or `token=` (the full
+list is in
+[Logs of a crashed action are shown on its hook step](./loading-drivers.md#logs-of-a-crashed-action-are-shown-on-its-hook-step)).
+A secret in any other form, such as the value of an env var named
+`LICENSE_KEY`, stays in the log.
+
 See [Lifecycle hooks and actions](../concepts-and-architecture/hooks-and-actions.md)
 for hooks and modes.
 

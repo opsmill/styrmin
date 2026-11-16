@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
+from styrmin_backend.redaction import redact_user_info
 from styrmin_backend.services.driver.driver_directory import (
     MAX_DRIVER_DIRECTORY_LENGTH,
     driver_directory_digest,
     normalise_driver_directory,
-    redact_user_info,
     resolve_inside,
 )
 from styrmin_backend.services.driver.exceptions import DriverLoadingError

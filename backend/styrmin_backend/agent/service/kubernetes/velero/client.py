@@ -214,7 +214,8 @@ class VeleroClient:
             await core_api.create_namespaced_secret(
                 namespace=bsl.namespace, body=secret_body
             )
-            logger.info(f"Created BSL credential Secret: {bsl.credential_secret_name}")
+            # No ``:`` after "Secret": the log redaction would hide the name (#573).
+            logger.info("Created BSL credential Secret {}", bsl.credential_secret_name)
         except Exception as e:
             raise VeleroClientError(
                 f"Failed to create BSL credential Secret {bsl.credential_secret_name}: {e}"
@@ -394,7 +395,7 @@ class VeleroClient:
                 await core_api.patch_namespaced_secret(
                     name=secret_name, namespace=namespace, body=body
                 )
-                logger.info(f"Updated BSL credential Secret: {secret_name}")
+                logger.info("Updated BSL credential Secret {}", secret_name)
             except Exception as e:
                 failures.append(
                     f"Failed to update BSL credential Secret {secret_name}: {e}"

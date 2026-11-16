@@ -235,7 +235,7 @@ Startup sequence (`app_initialization`):
 <!-- Extracted from specs/020-backend-telemetry on 2026-10-10 -->
 
 1. Load the settings (`SETTINGS.initialize_and_exit()`)
-2. Configure logging with Loguru, with the redaction patcher installed before any sink
+2. Configure logging with Loguru: one `stderr` sink at the configured level with `diagnose=False`. The redaction patcher (`redaction.py::redact_loguru_record`) is already installed, because importing `styrmin_backend` installs it (see [Log redaction](#log-redaction))
 3. Log the telemetry state line at INFO (`services/telemetry/state.py::startup_message`), before the database wait, so it appears even when the database is down
 4. Wait for the database, then initialize it (SQLite or PostgreSQL; `create_all` only builds a fresh database, see [ADR-001](../../adr/0001-alembic-database-migrations.md))
 5. Create the default admin user when it does not exist ([ADR-016](../../adr/0016-authentication-and-sessions.md))
@@ -243,6 +243,20 @@ Startup sequence (`app_initialization`):
 7. Initialize the Prefect workflow manager, which registers the flow catalogue and its cron schedules
 8. Initialize infrastructure utilities
 9. Initialize the internal drivers (the ingress controller driver)
+
+### Log redaction
+
+Logging a credential is forbidden, and the rule is enforced where records are written, not at each call site ([ADR-016](../../adr/0016-authentication-and-sessions.md)). `styrmin_backend/__init__.py` runs before any other Styrmin code in a process, so the server, the agent, and the flow runs that the task worker and the agent start, including driver actions, all run it:
+
+- It sets `LOGURU_DIAGNOSE=NO` unless the environment sets it. Loguru reads the variable when it is first imported. With `diagnose` on, a traceback shows the value of each variable, such as the action token in `action_api_token`.
+- It calls `install_log_redaction()` (`redaction.py`). For the standard `logging` module, it wraps the record factory, so every record, including the records of Prefect's run loggers, goes through `redact_secrets` before any handler writes it to the process output or to Prefect's log table. A record keeps its `args`, which uvicorn's access log formatter reads: each argument is redacted on its own, and the record gets the flat redacted message only when a secret is split between the format string and an argument. A traceback is formatted and redacted into `exc_text`. For loguru, it sets `redact_loguru_record` as the patcher, which redacts the message text, replaces the values of the keys of `extra` named in `SENSITIVE_FIELD_NAMES` in a copy, and, when the traceback of the record holds a secret, puts the redacted traceback in the message instead, because a loguru sink formats the traceback after the patcher runs.
+
+`redact_secrets` finds a secret by its form: the user info of a URL, the credential after `Bearer` or `Basic`, and the value after `=` or `:` of a key whose name contains `password`, `passwd`, `passphrase`, `secret`, `token`, `api_key`, `private_key`, `credential` or `cookie` (a quoted value whole, an unquoted one up to the first space, quote, comma, semicolon or `}`). Each pattern takes a time linear in the length of the line, because a client chooses the request path that the access log prints. It keeps the value of an env var named `FOO`, so the code that logs keeps values out by itself:
+
+- `str()` and `repr()` of a `GlobalContext` show the deployment id, the instance id, the namespace, the application name and version, and the environment name only.
+- `ContextChange` and `DiffReport.raw` are left out of `repr()`. The task worker logs `DiffReport.describe()`: the kind of change, the ids, the application and driver versions, and the paths of the changed context keys (`changed_paths`). A key that only one side sets, or that goes from `None` to a dict, such as the first env var of a scope, is named down to its leaves (`deployment.config.env_vars.NAME`). The line names at most 50 paths (`MAX_DESCRIBED_PATHS`) and counts the rest.
+- The GraphQL request log at `DEBUG` masks every variable value except ids, names, booleans and nulls (`api/logging/mask.py`). The id of a credential, such as `accessKeyId`, is masked too.
+- `StyrminSchema.process_errors` (`api/logging/error_log.py`) logs one `ERROR` line per GraphQL error with the operation name, the path and the message, without the request document. For an error of parsing, validation or variable coercion, whose message can repeat a value of the request, it logs where the error is instead of the message; the client still receives the message.
 
 ### Settings loading
 
