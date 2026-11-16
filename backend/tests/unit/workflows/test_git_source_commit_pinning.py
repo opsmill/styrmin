@@ -125,6 +125,24 @@ async def test_pull_step_checks_out_the_pinned_commit_not_the_branch() -> None:
     )
 
 
+async def test_pull_step_without_a_token_clones_without_credentials(mocker) -> None:
+    """#610: without a driver token, the clone step references no credentials block.
+
+    Prefect refuses to clone, even a public repository, with a credentials
+    block whose token is empty.
+    """
+    load = mocker.patch.object(GitHubCredentials, "load", AsyncMock())
+
+    data = await _definition(commit_sha=REV2, token="").to_deployment()
+
+    (clone_step,) = data["pull_steps"]
+    git_clone = clone_step[GIT_CLONE_STEP]
+    assert "credentials" not in git_clone
+    assert git_clone["repository"] == REPOSITORY
+    assert git_clone["commit_sha"] == REV2
+    load.assert_not_awaited()
+
+
 async def test_pull_step_without_commit_tracks_the_branch() -> None:
     """Legacy definitions without a commit keep Prefect's branch clone."""
     data = await _definition(commit_sha=None).to_deployment()

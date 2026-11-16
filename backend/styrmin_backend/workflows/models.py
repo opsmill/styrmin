@@ -183,8 +183,13 @@ class GitSourceWorkflowDefinition(WorkflowDefinition):
     async def to_deployment(self) -> dict[str, Any]:
         data = await super().to_deployment()
         # note: Looked up from prefect source code `Flow.from_source` method
-        credentials = await GitHubCredentials.load(
-            name=f"{self.namespace}-github-token"
+        # Without a token, clone without credentials (#610): Prefect refuses
+        # to clone, even a public repository, with a credentials block whose
+        # token is empty.
+        credentials = (
+            await GitHubCredentials.load(name=f"{self.namespace}-github-token")
+            if self.token
+            else None
         )
         # Prefect refuses ``branch`` alongside ``commit_sha``.
         storage = GitRepository(

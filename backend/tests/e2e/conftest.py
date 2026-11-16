@@ -742,10 +742,12 @@ async def styrmin_deployment(
         check=True,
     )
 
-    # Check for GITHUB_PAT
-    github_pat = os.environ.get("GITHUB_PAT", "default")
-    if not github_pat:
-        pytest.skip("GITHUB_PAT environment variable not set")
+    # The driver repositories of the git-server fixture are public, so the
+    # suite needs no token. Without GITHUB_PAT, Styrmin runs with the chart's
+    # default, an empty token, which is what a default install runs with:
+    # every driver action then clones its repository without credentials
+    # (#610).
+    github_pat = os.environ.get("GITHUB_PAT", "")
 
     # Build agent chart dependencies (prefect-worker) before installing styrmin
     subprocess.run(
@@ -802,11 +804,14 @@ async def styrmin_deployment(
         str(PROJECT_ROOT / "helm" / "styrmin"),
         "-f",
         str(FIXTURES_DIR / "styrmin-values.yaml"),
-        "--set",
-        f"styrmin.driver.token={github_pat}",
-        "--set",
-        f"styrmin.agentSource.token={github_pat}",
     ]
+    if github_pat:
+        helm_args += [
+            "--set",
+            f"styrmin.driver.token={github_pat}",
+            "--set",
+            f"styrmin.agentSource.token={github_pat}",
+        ]
     # In CI we tag the built image with a per-runner, per-commit value to
     # avoid `:latest` collisions on shared self-hosted runners (see
     # `.github/workflows/ci.yml` and `tasks/agent.py`). Propagate that

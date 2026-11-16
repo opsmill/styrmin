@@ -97,6 +97,15 @@ class FakePrefectManager(PrefectManager):
             )
         )
 
+    async def user_action_clones_with_credentials(self, deployment_id: UUID) -> bool:
+        # ``GitSourceWorkflowDefinition.to_deployment`` adds credentials when the token is set.
+        workflow = next(
+            r.workflow for r in self.registrations if r.flow_id == deployment_id
+        )
+        return isinstance(workflow, GitSourceWorkflowDefinition) and bool(
+            workflow.token
+        )
+
     async def get_user_action_deployment_id(
         self,
         application: str,
@@ -161,7 +170,7 @@ def _copy_driver(name: str, destination: Path) -> Path:
 _COMMIT_SHA = "c" * 40
 
 
-def _as_git_driver(path: Path) -> ApplicationDriver:
+def _as_git_driver(path: Path, token: str = "git-token") -> ApplicationDriver:
     """Load the driver at ``path`` as if it came from the driver directory of a git repository."""
     local = get_local_driver_loader(path=str(path)).load_driver()
     return dataclasses.replace(
@@ -169,7 +178,7 @@ def _as_git_driver(path: Path) -> ApplicationDriver:
         source=GitSource(
             repository="https://example.com/drivers.git",
             branch="main",
-            token="git-token",
+            token=token,
             driver_directory="drivers/semaphore",
         ),
         content_hash=None,
@@ -240,6 +249,25 @@ async def test_new_git_version_registers_its_token_and_its_actions(
         assert registration.fingerprint == _COMMIT_SHA[:7]
         assert isinstance(registration.workflow, GitSourceWorkflowDefinition)
         assert registration.workflow.commit_sha == _COMMIT_SHA
+
+
+async def test_new_git_version_without_a_token_registers_its_actions_and_no_token(
+    tmp_path: Path,
+    uow: SqlModelUnitOfWork,
+    prefect_manager: FakePrefectManager,
+) -> None:
+    """#610: a public repository needs no token, and an empty token is not saved."""
+    path = _copy_driver("semaphore", tmp_path / "semaphore")
+
+    await load_application_driver_from_object(
+        driver_object=_as_git_driver(path, token=""), uow=uow
+    )
+
+    assert prefect_manager.tokens == []
+    assert _registered_actions(prefect_manager) == SEMAPHORE_ACTIONS
+    for registration in prefect_manager.registrations:
+        assert isinstance(registration.workflow, GitSourceWorkflowDefinition)
+        assert registration.workflow.token == ""
 
 
 async def test_local_path_with_a_brace_is_refused_for_a_driver_with_actions(

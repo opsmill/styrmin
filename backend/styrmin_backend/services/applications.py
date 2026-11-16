@@ -139,7 +139,7 @@ async def ensure_action_registrations(
     driver_object: ApplicationDriver,
     prefect_manager: PrefectManager,
 ) -> int:
-    """Register the declared actions whose hook and mode have no registered flow.
+    """Register the declared actions whose hook and mode have no usable registered flow.
 
     Spec 029 (FR-001, FR-002, FR-006). The actions of a driver version loaded
     from git or from a local directory are registered under the key that hook
@@ -149,6 +149,13 @@ async def ensure_action_registrations(
     driver declares is looked up first, and only the actions of the pairs
     without a registered flow are registered, so a load with nothing to
     register makes no Prefect write.
+
+    #610: an action of a driver version loaded from git clones the repository
+    with the driver token, or without credentials when the token is empty. A
+    registered flow whose clone step does not match the current token is
+    registered again, which replaces its deployment. Without this, a flow
+    registered while the token was empty would keep referencing a credentials
+    block without a token, which Prefect refuses to clone with.
 
     Returns:
         int: The number of actions registered.
@@ -192,23 +199,42 @@ async def ensure_action_registrations(
             for hook, mode in pairs
         )
     )
-    missing_pairs = {
+    pairs_to_register = {
         pair for pair, flow in zip(pairs, flows, strict=True) if flow is None
     }
-    missing = [
-        action for action in actions if (action.hook, action.mode) in missing_pairs
+    if isinstance(source, GitSource):
+        found = [
+            (pair, flow)
+            for pair, flow in zip(pairs, flows, strict=True)
+            if flow is not None
+        ]
+        clones_with_credentials = await asyncio.gather(
+            *(
+                prefect_manager.user_action_clones_with_credentials(flow)
+                for _, flow in found
+            )
+        )
+        pairs_to_register |= {
+            pair
+            for (pair, _), with_credentials in zip(
+                found, clones_with_credentials, strict=True
+            )
+            if with_credentials != bool(source.token)
+        }
+    to_register = [
+        action for action in actions if (action.hook, action.mode) in pairs_to_register
     ]
-    if not missing:
+    if not to_register:
         return 0
 
-    if isinstance(source, GitSource):
+    if isinstance(source, GitSource) and source.token:
         await prefect_manager.register_token(namespace="user", token=source.token)
     builder = ActionsWorkflowBuilder(
         source=source,
         commit_sha=driver_object.source_commit_sha,
         content_hash=driver_object.content_hash,
     )
-    for action in missing:
+    for action in to_register:
         workflow = builder.build_user_action_workflow_definition(action=action)
         logger.info(
             "Registering action {} of driver {} ({}): hook={} mode={} "
@@ -230,7 +256,7 @@ async def ensure_action_registrations(
             fingerprint=key.fingerprint,
             driver_directory=key.directory,
         )
-    return len(missing)
+    return len(to_register)
 
 
 @inject(cast_result=False)  # type: ignore[arg-type]

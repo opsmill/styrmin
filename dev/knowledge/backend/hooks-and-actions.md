@@ -172,9 +172,12 @@ ensure_action_registrations(driver_object, prefect_manager):
        directory = action_directory_of(source type, path or driver directory))
    d. For each declared (hook, mode) pair:
       PrefectManager.get_user_action_deployment_id(..., key)
-   e. Keep the actions of the pairs that the lookup does not find;
+   e. Keep the actions of the pairs that the lookup does not find, and,
+      for a GitSource, of the pairs whose found deployment's git_clone step
+      uses credentials when the token is empty or none when it is set
+      (PrefectManager.user_action_clones_with_credentials, #610);
       none ──> return 0 (no Prefect write)
-   f. GitSource ──> PrefectManager.register_token(namespace="user", token)
+   f. GitSource with a token ──> PrefectManager.register_token(namespace="user", token)
    g. For each kept action:
       ActionsWorkflowBuilder(source, commit_sha, content_hash)
         .build_user_action_workflow_definition(action)
@@ -200,7 +203,7 @@ ensure_action_registrations(driver_object, prefect_manager):
           - "directory/{driver_directory}"  (driver directory and local versions)
 ```
 
-`ensure_action_registrations` decides that a flow is missing with the lookup that hooks use, so a repeated load registers only what hooks cannot resolve and never replaces a deployment that hooks already find (FR-006). It refuses with `DriverLoadingError`, before any Prefect write:
+`ensure_action_registrations` decides that a flow is missing with the lookup that hooks use, so a repeated load registers what hooks cannot resolve (FR-006). The only deployment that hooks already find and that a load replaces is one of a driver version loaded from git whose clone step does not match the driver token (`STYRMIN_DRIVER_TOKEN`), see [Pull steps](#pull-steps). Prefect upserts a deployment on its flow and name, so the deployment keeps its id. It refuses with `DriverLoadingError`, before any Prefect write:
 
 - a driver, from git or from a local directory, that declares more than one action for one hook and mode, because the actions of a hook and mode share one registration key, so a second action would replace the first or be skipped (`_refuse_two_actions_for_one_hook_and_mode`);
 - for a driver loaded from a local directory that declares actions (`_refuse_local_actions_that_the_check_cannot_cover`): a path with `{` or `}`, because only such a driver gets the check pull step whose inputs Prefect templates (see [Pull steps](#pull-steps)); a relative path, because the agent's `ProcessWorker` runs the pull steps in a temporary folder, where a relative path does not lead to the driver; and an action whose `location` module is not the actions file, because the check hashes only that file of the driver's code. Modules that `actions.py` imports, such as a `helpers.py` next to it, are not checked: an edit of one at the path takes effect without a new driver version.
@@ -209,6 +212,8 @@ ensure_action_registrations(driver_object, prefect_manager):
 ### Pull steps
 
 A driver version loaded from the repository root has one pull step, `prefect.deployments.steps.git_clone`, which clones the repository at the recorded commit into `<repository name>-<short commit>` and leaves the working directory at the root of the clone.
+
+The `git_clone` step references the `user-github-token` credentials block only when the driver token (`STYRMIN_DRIVER_TOKEN`) is set. With an empty token, the default of the Helm chart, the step has no `credentials` and clones the repository without them, as the driver load does. Prefect refuses to clone with a credentials block whose token is empty, even a public repository, so a step that referenced the block while the token was empty failed every action of the driver version (#610). The token is a setting of the server, so `ensure_action_registrations` registers again, on the next load of the driver, each action whose step does not match it.
 
 A driver version loaded from a driver directory has a second pull step, `prefect.deployments.steps.set_working_directory`, with the relative path `<repository name>-<short commit>/<driver directory>` (`set_directory_pull_step` in `workflows/utils.py`). Prefect resolves the path against the folder that `git_clone` cloned into. That folder is not the agent's working directory: the agent's Prefect `ProcessWorker` creates a temporary folder for each flow run and runs the pull steps in it, so `git_clone` clones there (see [Work Pools](#work-pools)). The entrypoint stays `actions.py:<function>`, so Prefect's script loader puts only the driver directory on `sys.path`: `actions.py` imports modules from the driver directory and not from other folders of the repository ([ADR-079](../../adr/0079-driver-actions-import-only-from-their-driver-directory.md)). The loader puts the folder of the resolved script on `sys.path`, so the git load refuses an `actions.py`, `driver.styrmin.yml` or `values.j2.yml` that is a symlink to a path outside the driver directory (`GitDriverProvider._check_driver_directory` in `services/driver/provider.py`).
 

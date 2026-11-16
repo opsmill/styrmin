@@ -238,8 +238,12 @@ Each load of a driver that declares actions, from git or from a local
 directory, registers the actions whose hook and mode have no registered
 flow, even when the load returns an existing driver version. Styrmin
 finds missing flows with the same lookup that hooks use, and does not
-change a flow that hooks already find. A load with nothing to register
-makes no change in Prefect.
+change a flow that hooks already find, with one exception: for a driver
+loaded from git, the load registers again each action whose flow does
+not match the driver token, so that the action clones the repository with
+the token when one is set, and without credentials when none is set (see
+[Private repositories](#private-repositories)). A load with nothing to
+register makes no change in Prefect.
 
 #### When an action's check fails during an upgrade
 
@@ -524,6 +528,15 @@ usually set with Helm values (`styrmin.agentSource.repository` and
 
 Then `uv run styrminctl drivers load-version` works with the private
 repository without extra options, because the server holds the token.
+
+A public repository needs no token. When `STYRMIN_DRIVER_TOKEN` is empty,
+the default of the Helm chart, Styrmin loads the driver and the agent
+clones the repository for each driver action without credentials.
+
+When you set the token or remove it after a driver with actions was
+loaded, load that driver again. The load registers its actions again, so
+that they clone the repository with the token or without credentials.
+Until then, its actions clone the repository with the previous setting.
 
 ### After loading
 
