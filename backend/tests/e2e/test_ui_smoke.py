@@ -157,6 +157,20 @@ async def test_pods_tab_copy_logs_command(
         f"logs command. expected={expected!r}, got={clipboard_text!r}"
     )
 
+    # 5b. Copy the same command on a page without navigator.clipboard, which
+    # is what a browser gives a Styrmin served over plain HTTP from a host
+    # other than localhost (#603). The clipboard is reset first so the read
+    # shows that this click, not step 5, put the command there.
+    await pods_tab.write_clipboard("clipboard before the plain-HTTP copy")
+    async with pods_tab.without_clipboard_api():
+        await pods_tab.click_copy_logs()
+    clipboard_text = await pods_tab.read_clipboard()
+    assert clipboard_text == expected, (
+        f"the Copy button should copy the logs command when the page has no "
+        f"navigator.clipboard (plain HTTP). expected={expected!r}, "
+        f"got={clipboard_text!r}"
+    )
+
     # 6. The methods that the component overrides demo ends each chapter with
     # (backend/tests/e2e/demos/scenarios/component_overrides.py): open the
     # section of one declared component, wait for its running pods, and expand

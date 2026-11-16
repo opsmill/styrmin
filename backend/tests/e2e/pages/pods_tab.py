@@ -7,11 +7,14 @@ Backups / Timeline in ``frontend/src/pages/deployments/DeploymentDetailPage.tsx`
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from playwright.async_api import expect
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from playwright.async_api import Locator, Page
 
 
@@ -127,6 +130,31 @@ class PodsTabPage:
         before driving any Copy buttons.
         """
         return await self._page.evaluate("() => navigator.clipboard.readText()")
+
+    async def write_clipboard(self, text: str) -> None:
+        """Put ``text`` on the browser clipboard, so a later read shows whether a Copy button replaced it."""
+        await self._page.evaluate("text => navigator.clipboard.writeText(text)", text)
+
+    @asynccontextmanager
+    async def without_clipboard_api(self) -> AsyncIterator[None]:
+        """Remove ``navigator.clipboard`` from the page until the block exits.
+
+        Browsers provide ``navigator.clipboard`` only in a secure context. When
+        Styrmin is served over plain HTTP from a host other than localhost, the
+        page has no ``navigator.clipboard`` (#603). The E2E browser reaches
+        Styrmin through localhost, which is a secure context, so this removes
+        the property to give the frontend the same page it gets over plain
+        HTTP. The property is restored on exit because the page is shared by
+        the whole session.
+        """
+        await self._page.evaluate(
+            "() => Object.defineProperty(navigator, 'clipboard',"
+            " {value: undefined, configurable: true})"
+        )
+        try:
+            yield
+        finally:
+            await self._page.evaluate("() => { delete navigator.clipboard; }")
 
     async def grant_clipboard_permissions(self) -> None:
         """Grant clipboard-read/write to the page's browser context.

@@ -1,9 +1,9 @@
-import { useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Copy, ExternalLink, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -141,19 +141,8 @@ export function DeploymentContextDialog({
  * `max-h-[85vh]` container without juggling `h-full` percentage heights.
  */
 function ContextBody({ data, apiPath }: { data: unknown; apiPath: string }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
   const formatted = JSON.stringify(data, null, 2);
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(formatted);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // navigator.clipboard can fail in non-secure contexts — keep
-      // silent rather than disrupting the read flow.
-    }
-  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 px-6 py-4">
@@ -178,7 +167,7 @@ function ContextBody({ data, apiPath }: { data: unknown; apiPath: string }) {
           type="button"
           variant="outline"
           size="sm"
-          onClick={handleCopy}
+          onClick={() => copy(formatted)}
           data-testid="deployment-context-copy-button"
         >
           {copied ? (
