@@ -156,7 +156,7 @@ async def label_namespace_after_failed_restore(
     restore has already failed and the caller records that failure. The usual causes are
     a CR that Velero did not restore (the labels then cannot be read, and the namespace
     keeps only its name label), a namespace that does not exist, or a refused patch. An
-    error that is not a Kubernetes API error is logged with its traceback and does not
+    error that is not a Kubernetes API error is logged with its type and message and does not
     stop the caller either: raising would skip the failure handling that comes after it.
     """
     try:
@@ -169,10 +169,15 @@ async def label_namespace_after_failed_restore(
             namespace,
             exc,
         )
-    except Exception:
-        logger.opt(exception=True).error(
-            "Unexpected error while putting the labels back on namespace {} after a restore that did not complete",
+    except Exception as exc:
+        # The type and the message only, not the traceback: the log sink prints the
+        # values of the variables of each frame, and a frame of the Kubernetes client
+        # holds the authorization header of the agent's service account.
+        logger.error(
+            "Unexpected error while putting the labels back on namespace {} after a restore that did not complete: {}: {}",
             namespace,
+            type(exc).__name__,
+            exc,
         )
 
 

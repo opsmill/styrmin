@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from loguru import logger
 
 from styrmin_backend.operator import restore_recovery
 from styrmin_backend.operator.config import ANNOTATION_SKIP_TEARDOWN, CRD_PLURAL
@@ -954,7 +955,7 @@ async def test_a_cr_that_velero_did_not_restore_leaves_the_namespace_alone() -> 
 async def test_an_error_that_is_not_an_api_error_does_not_fail_the_failed_restore(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """It is logged with its traceback, and the failure handling after it still runs."""
+    """It is logged without its traceback, and the failure handling after it still runs."""
     crd = restored_crd()
     crd["spec"]["context"] = {"labels": {"environment_id": ENVIRONMENT_ID}}
     api_client = FakeApiClient({RESTORED_NAME: crd})
@@ -964,14 +965,24 @@ async def test_an_error_that_is_not_an_api_error_does_not_fail_the_failed_restor
         raise TypeError("broken label builder")
 
     monkeypatch.setattr(restore_recovery, "_label_namespace", _broken)
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record), level="ERROR")
 
-    await restore_recovery.label_namespace_after_failed_restore(
-        api_client,  # type: ignore[arg-type]
-        NAMESPACE,
-        RESTORED_NAME,
-    )
+    try:
+        await restore_recovery.label_namespace_after_failed_restore(
+            api_client,  # type: ignore[arg-type]
+            NAMESPACE,
+            RESTORED_NAME,
+        )
+    finally:
+        logger.remove(sink)
 
     assert api_client.namespaces[NAMESPACE] == NAMESPACE_BEFORE
+    (record,) = records
+    assert "TypeError: broken label builder" in record["message"]
+    # The sink prints the variables of each frame of a traceback, and a frame of the
+    # Kubernetes client holds the agent's authorization header.
+    assert record["exception"] is None
 
 
 @pytest.mark.anyio
