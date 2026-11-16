@@ -13,6 +13,7 @@ driver version again registers the actions whose deployments are gone.
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 from pathlib import Path
 from typing import Literal
@@ -46,7 +47,7 @@ from styrmin_backend.services.user import ActionsWorkflowBuilder
 from styrmin_backend.services.workflow.local import WorkflowLocalExecutor
 from styrmin_backend.workflows.catalogue import PrefectCatalogue
 from styrmin_backend.workflows.local_driver import CHECK_LOCAL_DRIVER_STEP
-from styrmin_backend.workflows.manager import PrefectManager
+from styrmin_backend.workflows.manager import GIT_CLONE_STEP, PrefectManager
 from styrmin_backend.workflows.models import PrefectWorkPool
 
 _EXAMPLES = Path(__file__).resolve().parents[3] / "driver" / "examples"
@@ -334,3 +335,76 @@ async def test_loading_a_local_driver_again_registers_its_deleted_actions_again(
         assert deployment.pull_steps == [_check_step(directory, driver.content_hash)]
     flows = await _lookup_local(manager, driver, directory)
     assert set(flows.values()) == {deployment.id for deployment in deployments}
+
+
+_GIT_COMMIT = "c" * 40
+
+
+def _git_driver(token: str) -> ApplicationDriver:
+    """The bundled semaphore driver, as if loaded from the root of a git repository with ``token``."""
+    local = get_local_driver_loader(path=str(_EXAMPLES / "semaphore")).load_driver()
+    return dataclasses.replace(
+        local,
+        source=GitSource(
+            repository="git://git-server/semaphore.git", branch="master", token=token
+        ),
+        content_hash=None,
+        source_commit_sha=_GIT_COMMIT,
+    )
+
+
+async def _git_deployments() -> list[DeploymentResponse]:
+    """The action deployments of the driver version that ``_git_driver`` loads."""
+    async with get_client() as client:
+        return await client.read_deployments(
+            deployment_filter=DeploymentFilter(
+                tags=DeploymentFilterTags(
+                    all_=["application/semaphore", f"fingerprint/{_GIT_COMMIT[:7]}"]
+                )
+            )
+        )
+
+
+def _clone_uses_credentials(deployment: DeploymentResponse) -> bool:
+    assert deployment.pull_steps is not None
+    (step,) = deployment.pull_steps
+    return "credentials" in step[GIT_CLONE_STEP]
+
+
+@pytest.mark.parametrize(
+    ("first_token", "second_token", "registered_again"),
+    [
+        pytest.param("default", "", 3, id="token-removed"),
+        pytest.param("", "default", 3, id="token-set"),
+        pytest.param("default", "default", 0, id="token-kept"),
+        pytest.param("", "", 0, id="no-token-kept"),
+    ],
+)
+async def test_loading_a_git_driver_again_matches_its_clone_steps_to_the_token(
+    manager: PrefectManager,
+    first_token: str,
+    second_token: str,
+    registered_again: int,
+) -> None:
+    """#610: an action clones with credentials only when the driver token is set.
+
+    A Prefect deployment registered while the token was empty referenced a
+    credentials block without a token, and Prefect refused to clone with it,
+    even a public repository. Loading the driver again replaces each
+    deployment whose clone step does not match the current token, and keeps
+    the others, so a repeated load with the same token makes no Prefect write.
+    """
+    assert await ensure_action_registrations(_git_driver(first_token), manager) == 3
+    first = await _git_deployments()
+    assert len(first) == 3
+    assert {_clone_uses_credentials(d) for d in first} == {bool(first_token)}
+
+    registered = await ensure_action_registrations(_git_driver(second_token), manager)
+
+    assert registered == registered_again
+    again = await _git_deployments()
+    # Prefect replaces a deployment of the same flow and name: hooks keep their flows.
+    assert {d.id for d in again} == {d.id for d in first}
+    assert {_clone_uses_credentials(d) for d in again} == {bool(second_token)}
+    flows = await _lookup(manager, "semaphore", ">=2.15,<2.17", _GIT_COMMIT[:7])
+    assert set(flows.values()) == {d.id for d in again}

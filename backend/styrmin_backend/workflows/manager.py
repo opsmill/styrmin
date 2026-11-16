@@ -37,6 +37,8 @@ from styrmin_backend.workflows.models import (
 
 # Tag of a user action's deployment whose driver version has a driver directory.
 DIRECTORY_TAG_PREFIX = "directory/"
+# Pull step that clones the repository of a driver version loaded from git.
+GIT_CLONE_STEP = "prefect.deployments.steps.git_clone"
 
 
 class PrefectManager:
@@ -186,6 +188,21 @@ class PrefectManager:
         if not deployments:
             return None
         return deployments[0].id
+
+    async def user_action_clones_with_credentials(self, deployment_id: UUID) -> bool:
+        """Whether the ``git_clone`` pull step of a user action's deployment uses credentials.
+
+        A deployment registered while the driver token was empty references a
+        credentials block without a token, and Prefect then refuses to clone
+        (#610). ``ensure_action_registrations`` compares the result with the
+        current token to register such an action again.
+        """
+        async with get_client() as client:
+            deployment = await client.read_deployment(deployment_id)
+        return any(
+            "credentials" in (step.get(GIT_CLONE_STEP) or {})
+            for step in deployment.pull_steps or []
+        )
 
     async def register_token(self, namespace: str, token: str) -> None:
         """Register a token in the Prefect catalogue."""
