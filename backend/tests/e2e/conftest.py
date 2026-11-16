@@ -668,6 +668,12 @@ async def git_server(
             "source": FIXTURES_DIR / "drivers" / "hook-job",
             "chart_name": "simple-app",
         },
+        # Test driver of test_restore_postgres_leftover.py: the simple-app chart whose PostgreSQL init
+        # script creates tables on every empty start, as an application migration does.
+        "postgres-leftover": {
+            "source": FIXTURES_DIR / "drivers" / "postgres-leftover",
+            "chart_name": "simple-app",
+        },
     }
 
     tmp_repo = tmp_path_factory.mktemp("driver-repo")
