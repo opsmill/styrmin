@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useCopyToClipboard } from "./use-copy-to-clipboard";
 
@@ -12,9 +12,26 @@ function stubClipboard() {
   return writeText;
 }
 
+// jsdom has no `document.execCommand`, the fallback that `copyText` uses when
+// `navigator.clipboard` is missing or refuses the write.
+function stubCopyCommand(result: boolean) {
+  const execCommand = vi.fn().mockReturnValue(result);
+  Object.defineProperty(document, "execCommand", {
+    value: execCommand,
+    configurable: true,
+  });
+  return execCommand;
+}
+
 describe("useCopyToClipboard", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Reflect.deleteProperty(navigator, "clipboard");
+    Reflect.deleteProperty(document, "execCommand");
   });
 
   it("writes the given string to the clipboard and flips copied to true", async () => {
@@ -49,7 +66,21 @@ describe("useCopyToClipboard", () => {
     expect(result.current.copied).toBe(false);
   });
 
-  it("returns false and keeps copied false when writeText rejects", async () => {
+  it("flips copied to true on a page served over plain HTTP, where navigator.clipboard is missing (#603)", async () => {
+    const execCommand = stubCopyCommand(true);
+    const { result } = renderHook(() => useCopyToClipboard());
+
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.copy("x");
+    });
+
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    expect(ok).toBe(true);
+    expect(result.current.copied).toBe(true);
+  });
+
+  it("returns false and keeps copied false when writeText rejects and the copy command fails", async () => {
     const writeText = vi
       .fn<(text: string) => Promise<void>>()
       .mockRejectedValue(new Error("denied"));
@@ -58,6 +89,7 @@ describe("useCopyToClipboard", () => {
       configurable: true,
       writable: true,
     });
+    stubCopyCommand(false);
 
     const { result } = renderHook(() => useCopyToClipboard());
     let ok: boolean | undefined;

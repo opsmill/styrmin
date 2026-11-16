@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { copyText } from "@/lib/clipboard";
 
 const RESET_AFTER_MS = 2_000;
 
@@ -16,19 +17,19 @@ export function useCopyToClipboard(): {
   }, []);
 
   const copy = useCallback(async (text: string): Promise<boolean> => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
-      timeoutRef.current = setTimeout(() => {
-        setCopied(false);
-        timeoutRef.current = null;
-      }, RESET_AFTER_MS);
-      return true;
-    } catch {
+    // Call `copyText` before any other `await`: its fallback for pages served
+    // over plain HTTP works only while the click is being handled.
+    if (!(await copyText(text))) {
       setCopied(false);
       return false;
     }
+    setCopied(true);
+    if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      setCopied(false);
+      timeoutRef.current = null;
+    }, RESET_AFTER_MS);
+    return true;
   }, []);
 
   return { copied, copy };

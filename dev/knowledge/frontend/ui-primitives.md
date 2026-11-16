@@ -83,12 +83,19 @@ All wrappers retain `forwardRef` and assign `displayName`. React 19 supports ref
 
 ### Clipboard hook
 
-`frontend/src/hooks/use-copy-to-clipboard.ts` is the shared wrapper around `navigator.clipboard.writeText`. It exposes:
+`frontend/src/hooks/use-copy-to-clipboard.ts` is the shared hook behind every Copy button. Use it rather than calling `navigator.clipboard` directly. It exposes:
 
-- `copy(text: string) → Promise<boolean>` — writes the string and returns `true` on success, `false` if the browser rejected the request (denied permission, insecure context, focus loss).
-- `copied: boolean` — flips to `true` on a successful write and resets to `false` after 2 s. A second copy inside that window resets the timer.
+- `copy(text: string) → Promise<boolean>` — copies the string and returns `true` on success, `false` when both copy methods below fail.
+- `copied: boolean` — flips to `true` on a successful copy and resets to `false` after 2 s. A second copy inside that window resets the timer.
 
 The hook clears its own timeout on unmount; callers never need to deal with `useEffect` cleanup for the toggle.
+
+The hook copies with `copyText` from `frontend/src/lib/clipboard.ts`, which tries two methods:
+
+1. `navigator.clipboard.writeText`. Browsers provide `navigator.clipboard` only in a secure context: a page served over HTTPS or from localhost.
+1. When `navigator.clipboard` is missing or refuses the write, `document.execCommand("copy")` on the text selected in a hidden element. This is the method that works when Styrmin is served over plain HTTP from any other host (#603). The text is selected with a `Range`, not by focusing a `<textarea>`, so focus stays on the button and a modal dialog's focus trap does not interfere.
+
+Browsers allow `execCommand("copy")` only while a user action is being handled, so call `copy` directly from the click handler, before any other `await`.
 
 ### Hand-rolled collapsible-section pattern
 

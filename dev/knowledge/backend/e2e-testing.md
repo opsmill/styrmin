@@ -650,6 +650,8 @@ Permissions are scoped to the context (not the page), so the grant survives acro
 
 The Copy button itself does not need the grant — `writeText` is allowed by default. The grant is only required to read the clipboard back for an assertion.
 
+The E2E browser reaches Styrmin through localhost, which browsers treat as a secure context, so the page always has `navigator.clipboard`. A Styrmin served over plain HTTP from another host has none, and the frontend then copies with `document.execCommand("copy")` instead (#603). To test that path, wrap the click in `PodsTabPage.without_clipboard_api()`, which removes `navigator.clipboard` from the page and restores it when the block exits, and reset the clipboard with `write_clipboard()` before the click so the read shows what the click copied. `test_pods_tab_copy_logs_command` in `test_ui_smoke.py` copies the logs command both ways.
+
 ## Filling and submitting dialogs
 
 Base UI moves focus to a dialog's first focusable element one animation frame after the dialog opens. Playwright's `fill()` focuses its target and then types in a second step, so a fill that runs across that frame types into the newly focused element and leaves its own field empty. The form then fails validation and the dialog never closes (#365). A `fill()` that follows any `click()` inside the dialog is safe, because `click()` waits for the element to be stable over two animation frames.
