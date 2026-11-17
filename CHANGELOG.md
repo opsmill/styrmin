@@ -11,6 +11,17 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [Styrmin - v0.2.2](https://github.com/opsmill/styrmin/tree/v0.2.2) - 2026-11-17
+
+### Added
+
+- Added the public URL of each component to the Components column of the Overview tab on the environment page, so an operator can open a component's URL from the list of deployed applications. The URL is the readable host of each service, and opens in a new tab. ([#605](https://github.com/opsmill/styrmin/issues/605))
+
+### Fixed
+
+- Fixed the Copy buttons on the Pods tab of a deployment, on the Overview tab of a driver and in the deployment context dialog: they did not copy anything when Styrmin was served over plain HTTP from a host other than localhost. ([#603](https://github.com/opsmill/styrmin/issues/603))
+- Fixed driver actions of a driver loaded from Git that failed when no driver token was set, which is the default of the Helm chart: the agent refused to clone the repository, even a public one, so the deployment failed with "Process exited with status code: 1". Without a token, each action now clones the repository without credentials. On an instance that already loaded such a driver, load the driver again so that Styrmin registers its actions again. ([#610](https://github.com/opsmill/styrmin/issues/610))
+
 ## [Styrmin - v0.1.60](https://github.com/opsmill/styrmin/tree/v0.1.60) - 2026-11-13
 
 ### Added
