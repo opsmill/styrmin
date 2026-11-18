@@ -14,7 +14,7 @@ from styrmin_backend.workflows.models import PrefectAction
 
 from ._queries import load_query
 from .conftest import gql
-from .seeds import seed_backup_storage_location, seed_environment
+from .seeds import seed_backup_storage_location, seed_cluster, seed_environment
 
 DEFAULT_VARS = {
     "name": "p-bsl",
@@ -149,7 +149,9 @@ async def test_update_bsl_credentials_dispatches_sync(
 async def test_delete_bsl_removes_row(
     client: AsyncClient, session: AsyncSession, prefect_manager_mock
 ) -> None:
-    bsl = await seed_backup_storage_location(session)
+    bsl = await seed_backup_storage_location(session, name="bsl-delete")
+    bsl_id = bsl.id
+    prefect_manager_mock.run_action = AsyncMock()
 
     await gql(
         client,
@@ -157,7 +159,47 @@ async def test_delete_bsl_removes_row(
         {"backupStorageLocationId": str(bsl.id)},
     )
 
-    assert await session.get(BackupStorageLocation, bsl.id) is None
+    assert await session.get(BackupStorageLocation, bsl_id) is None
+    # Issue #475: the location is also removed from the cluster.
+    prefect_manager_mock.run_action.assert_awaited_once_with(
+        action=PrefectAction.SYNC_BSL_DELETE,
+        parameters={"bsl_id": str(bsl_id), "namespace": "styrmin"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_bsl_is_refused_when_cleanup_cannot_be_submitted(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """Issue #475: without the cluster cleanup the location is kept.
+
+    Once the row is gone nothing records that the Velero object and credentials
+    Secret exist, so the delete is refused with a typed error and can be retried.
+    """
+    bsl = await seed_backup_storage_location(session, name="bsl-kept")
+    bsl_id = bsl.id
+    prefect_manager_mock.run_action = AsyncMock(side_effect=RuntimeError("down"))
+
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("delete_backup_storage_location"),
+            "variables": {"backupStorageLocationId": str(bsl_id)},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get("errors"), f"expected a typed error, got: {payload}"
+    extensions = payload["errors"][0].get("extensions") or {}
+    assert extensions.get("code") == "OPERATION_FAILED", extensions
+    assert extensions.get("backup_storage_location_name") == "bsl-kept", extensions
+    message = payload["errors"][0]["message"]
+    assert "Prefect" in message and "bsl-kept" in message, message
+
+    # The row delete was flushed before the submission and is rolled back.
+    session.expire_all()
+    assert await session.get(BackupStorageLocation, bsl_id) is not None
 
 
 @pytest.mark.asyncio
@@ -190,7 +232,7 @@ async def test_unassign_bsl_clears_link(
 ) -> None:
     bsl = await seed_backup_storage_location(session)
     env = await seed_environment(session, bsl=bsl)
-    env_id = env.id
+    env_id, bsl_id = env.id, bsl.id
     prefect_manager_mock.run_action = AsyncMock()
 
     await gql(
@@ -203,12 +245,41 @@ async def test_unassign_bsl_clears_link(
     refreshed = await session.get(Environment, env_id)
     assert refreshed is not None
     assert refreshed.backup_storage_location_id is None
+    # The last environment of the location: its cluster objects are removed.
+    prefect_manager_mock.run_action.assert_awaited_once_with(
+        action=PrefectAction.SYNC_BSL_DELETE,
+        parameters={"bsl_id": str(bsl_id), "namespace": "styrmin"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_unassign_bsl_keeps_cluster_objects_while_another_environment_uses_it(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    bsl = await seed_backup_storage_location(session)
+    cluster = await seed_cluster(session)
+    first = await seed_environment(session, cluster=cluster, bsl=bsl)
+    await seed_environment(session, cluster=cluster, bsl=bsl)
+    first_id = first.id
+    prefect_manager_mock.run_action = AsyncMock()
+
+    await gql(
+        client, "unassign_backup_storage_location", {"environmentId": str(first_id)}
+    )
+
+    prefect_manager_mock.run_action.assert_not_awaited()
 
 
 @pytest.fixture
-def workflow_manager(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """The manager the BSL mutations get from ``get_manager()``, which they call directly."""
-    manager = MagicMock()
+def workflow_manager(
+    monkeypatch: pytest.MonkeyPatch, prefect_manager_mock: MagicMock
+) -> MagicMock:
+    """The manager the BSL mutations get from ``get_manager()``, which they call directly.
+
+    It is also the manager the services get through the dependency provider, so
+    a removal that a service submits shows up in the same mock.
+    """
+    manager = prefect_manager_mock
     manager.run_action = AsyncMock()
     manager.save_bsl_credentials = AsyncMock()
     manager.delete_bsl_credentials = AsyncMock()
@@ -349,6 +420,26 @@ async def test_reassign_renamed_bsl_removes_old_cluster_objects_by_location_id(
 
 
 @pytest.mark.asyncio
+async def test_reassign_bsl_keeps_old_cluster_objects_while_another_environment_uses_it(
+    client: AsyncClient, session: AsyncSession, workflow_manager: MagicMock
+) -> None:
+    old_bsl = await seed_backup_storage_location(session)
+    new_bsl = await seed_backup_storage_location(session)
+    cluster = await seed_cluster(session)
+    env = await seed_environment(session, cluster=cluster, bsl=old_bsl)
+    await seed_environment(session, cluster=cluster, bsl=old_bsl)
+    env_id, new_bsl_id = env.id, new_bsl.id
+
+    await gql(
+        client,
+        "assign_backup_storage_location",
+        {"environmentId": str(env_id), "backupStorageLocationId": str(new_bsl_id)},
+    )
+
+    assert _dispatched(workflow_manager, PrefectAction.SYNC_BSL_DELETE) == []
+
+
+@pytest.mark.asyncio
 async def test_credentials_update_of_renamed_bsl_targets_location_id(
     client: AsyncClient, session: AsyncSession, workflow_manager: MagicMock
 ) -> None:
@@ -440,6 +531,82 @@ async def test_delete_bsl_deletes_its_saved_keys(
 
     workflow_manager.delete_bsl_credentials.assert_awaited_once_with(bsl_id)
     assert await session.get(BackupStorageLocation, bsl_id) is None
+
+
+@pytest.mark.asyncio
+async def test_delete_last_environment_of_bsl_dispatches_cluster_cleanup(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """Issue #475: deleting the last environment of a BSL removes it from the cluster.
+
+    Unassigning dispatches ``SYNC_BSL_DELETE`` when the environment was the last
+    one using the location; deleting that same environment must do the same, or
+    the Velero object and its credentials Secret stay in the cluster.
+    """
+    bsl = await seed_backup_storage_location(session, name="bsl-475")
+    env = await seed_environment(session, bsl=bsl)
+    bsl_id = bsl.id
+    prefect_manager_mock.run_action = AsyncMock()
+
+    await gql(client, "delete_environment", {"environmentId": str(env.id)})
+
+    prefect_manager_mock.run_action.assert_awaited_once_with(
+        action=PrefectAction.SYNC_BSL_DELETE,
+        parameters={"bsl_id": str(bsl_id), "namespace": "styrmin"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_environment_without_bsl_submits_no_cleanup(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    env = await seed_environment(session)
+    prefect_manager_mock.run_action = AsyncMock()
+
+    await gql(client, "delete_environment", {"environmentId": str(env.id)})
+
+    prefect_manager_mock.run_action.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_environment_keeps_bsl_while_another_environment_uses_it(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """A location shared on a cluster stays until its last environment goes."""
+    bsl = await seed_backup_storage_location(session, name="bsl-shared")
+    cluster = await seed_cluster(session)
+    first = await seed_environment(session, cluster=cluster, bsl=bsl)
+    second = await seed_environment(session, cluster=cluster, bsl=bsl)
+    first_id, second_id, bsl_id = first.id, second.id, bsl.id
+    prefect_manager_mock.run_action = AsyncMock()
+
+    await gql(client, "delete_environment", {"environmentId": str(first_id)})
+    prefect_manager_mock.run_action.assert_not_awaited()
+
+    # No ``session.expire_all()`` here, although the test shares one session
+    # across both requests: the decision is a count query, not the location's
+    # ``environments`` list, which still holds the first environment.
+    await gql(client, "delete_environment", {"environmentId": str(second_id)})
+    prefect_manager_mock.run_action.assert_awaited_once_with(
+        action=PrefectAction.SYNC_BSL_DELETE,
+        parameters={"bsl_id": str(bsl_id), "namespace": "styrmin"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_environment_succeeds_when_bsl_cleanup_cannot_be_submitted(
+    client: AsyncClient, session: AsyncSession, prefect_manager_mock
+) -> None:
+    """The cleanup is best-effort: it never blocks deleting the environment."""
+    bsl = await seed_backup_storage_location(session, name="bsl-best-effort")
+    env = await seed_environment(session, bsl=bsl)
+    env_id = env.id
+    prefect_manager_mock.run_action = AsyncMock(side_effect=RuntimeError("down"))
+
+    await gql(client, "delete_environment", {"environmentId": str(env_id)})
+
+    session.expire_all()
+    assert await session.get(Environment, env_id) is None
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,9 @@ from styrmin_backend.services.backup.environment import (
     delete_environment_backups_for_environment,
     guard_no_clone_occupying_environment,
 )
+from styrmin_backend.services.backup_storage_locations import (
+    request_bsl_cluster_cleanup_if_unused,
+)
 from styrmin_backend.services.capabilities import compute_environment_capabilities
 from styrmin_backend.services.cluster_config_fanout import fan_out_environment_config
 from styrmin_backend.services.clusters import resolve_cluster
@@ -436,7 +439,7 @@ async def update_environment(
 async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
     """Delete an environment, settling its clone records and snapshots first.
 
-    Four steps, and the order is load-bearing.
+    Five steps, and the order is load-bearing.
 
     1. **Clone records are settled before anything else** (010 research D9).
        An environment can appear on a clone record in two roles, and each has
@@ -484,6 +487,14 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
 
     4. **The environment row goes.**
 
+    5. **The backup storage location leaves the cluster.** After the row is
+       gone, a count query tells whether another environment of the cluster
+       still uses the location the environment had. When none does, the
+       workflow that removes the location's Velero object and credentials
+       Secret is submitted. It is best-effort, like the teardown in step 3: a
+       submission that fails is logged and does not undo the delete. Deleting
+       the location itself is the safety net.
+
     Raises:
         EnvironmentNotFoundError: When ``environment_id`` does not exist.
     """
@@ -501,6 +512,9 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
             raise EnvironmentNotFoundError(
                 f"Environment with id {environment_id} not found."
             )
+        # Kept for step 5, which runs after the row is gone.
+        bsl_id = environment.backup_storage_location_id
+        cluster_id = environment.cluster_id
 
         # Both clone roles are settled in one transaction, before the backup
         # cascade: the discard marker and the FK release have to land together,
@@ -559,11 +573,33 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
         await uow.environments.delete(environment)
         await uow.commit()
 
+    # Decided after the delete, with a fresh count of the database. An
+    # environment that was assigned to the location, or deleted, before this
+    # count is seen; one assigned after the count is not (see "Deleting an
+    # environment" in dev/knowledge/backend/services.md).
+    bsl_cleanup = "no_location"
+    if bsl_id is not None:
+        try:
+            requested = await request_bsl_cluster_cleanup_if_unused(
+                bsl_id, cluster_id, uow
+            )
+            bsl_cleanup = "requested" if requested else "location_still_used"
+        except Exception as exc:
+            bsl_cleanup = "failed"
+            logger.warning(
+                "environment_delete_bsl_cleanup_failed environment_id={} "
+                "bsl_id={} error={} the location's cluster objects may remain "
+                "until the location is deleted",
+                environment_id,
+                bsl_id,
+                exc,
+            )
+
     logger.info(
         "environment_deleted environment_id={} environment_backups_deleted={} "
         "deployments_deleted={} teardown_requested={} teardown_failed={} "
         "clones_discarded={} source_clones_kept={} source_clones_deleted={} "
-        "source_clones_failed={}",
+        "source_clones_failed={} bsl_cleanup={}",
         environment_id,
         cascaded,
         len(deleted_deployment_ids),
@@ -573,4 +609,5 @@ async def delete_environment(environment_id: UUID, uow: UnitOfWork) -> None:
         source_clones.kept,
         source_clones.deleted,
         source_clones.failed,
+        bsl_cleanup,
     )

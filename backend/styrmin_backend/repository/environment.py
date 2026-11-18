@@ -3,7 +3,7 @@ from typing import Any, Sequence
 from uuid import UUID
 
 from sqlalchemy.orm import selectinload
-from sqlmodel import select
+from sqlmodel import func, select
 
 from styrmin_backend.db.models import Deployment as DeploymentModel
 from styrmin_backend.db.models import Environment
@@ -22,6 +22,13 @@ class EnvironmentRepository(BaseRepository[Environment], ABC):
     async def get_by_name_in_cluster(
         self, name: str, cluster_id: UUID
     ) -> Environment | None:
+        raise NotImplementedError()
+
+    @abstractmethod
+    async def count_using_backup_storage_location(
+        self, backup_storage_location_id: UUID, cluster_id: UUID
+    ) -> int:
+        """Number of environments of the cluster that use the backup storage location."""
         raise NotImplementedError()
 
 
@@ -83,3 +90,23 @@ class SQLModelEnvironmentRepository(
         )
         result = await self.session.exec(statement)
         return result.first()
+
+    async def count_using_backup_storage_location(
+        self, backup_storage_location_id: UUID, cluster_id: UUID
+    ) -> int:
+        """Count the environments of a cluster that use a backup storage location.
+
+        A count query, so it reads the database and not a collection that the
+        session loaded earlier.
+        """
+        statement = (
+            select(func.count())
+            .select_from(self.model_class)
+            .where(
+                self.model_class.backup_storage_location_id
+                == backup_storage_location_id,
+                self.model_class.cluster_id == cluster_id,
+            )
+        )
+        result = await self.session.exec(statement)
+        return result.one()
