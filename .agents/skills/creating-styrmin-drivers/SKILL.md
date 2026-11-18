@@ -1,6 +1,6 @@
 ---
 name: creating-styrmin-drivers
-description: 'Writes a Styrmin application driver (driver.styrmin.yml, values.j2.yml, and actions.py only when needed) for an application that has a Helm chart, and checks it offline with a bundled script, and with Styrmin's own styrmin-driver command when it is available, until it passes. TRIGGER when: the user asks to make, create, write or package a Styrmin driver for an application ("make a styrmin driver for NetBox", "we need a driver to deploy X on Styrmin"). DO NOT TRIGGER when: deploying or upgrading an application with an existing driver, changing Styrmin itself, or writing a plain Helm chart.'
+description: 'Writes a Styrmin application driver (driver.styrmin.yml, values.j2.yml, and actions.py only when needed) for an application that has a Helm chart, and checks it offline with a bundled script, and with the styrmin-driver command of Styrmin when it is available, until it passes. TRIGGER when: the user asks to make, create, write or package a Styrmin driver for an application ("make a styrmin driver for NetBox", "we need a driver to deploy X on Styrmin"). DO NOT TRIGGER when: deploying or upgrading an application with an existing driver, changing Styrmin itself, or writing a plain Helm chart.'
 compatibility: Needs helm 3, Python 3.10+ with PyYAML, Jinja2 3.1.6 or later and packaging (or uv), and internet access to read the chart and the image registries. Targets Styrmin 0.1.59 and later (from 0.1.59 Styrmin builds the Ingress of an external service).
 metadata:
   version: '0.1.16'
@@ -163,7 +163,7 @@ the chart builds a host from the release name: follow it ([rule 17](references/r
 
 **B. Ingress.** Styrmin builds the Ingress of each service that is `scope: external` with kind `http` or
 `https` (named `styrmin-svc-<service>`, with the host `{{ services['<service>'].human_readable_fqdn }}` and,
-for the first service of the driver, `{{ services['<service>'].primary_fqdn }}`). So the chart's own Ingress
+for the first service of the driver when it has no ingress override, `{{ services['<service>'].primary_fqdn }}`). So the chart's own Ingress
 must stay off: a chart Ingress for that service gives it two Ingresses on one host. Read the chart's default
 `ingress` values: if it is off by default, write no `ingress:` block; if it is on, set it to off. Look for
 `kind: Ingress` in `/tmp/check/manifests.yaml`, including subcharts. Do not set the ingress class. The URL users open is
@@ -218,9 +218,12 @@ the Styrmin server uses. It needs Docker and a Styrmin image that has the comman
 driver, because the command renders `values.j2.yml` without a sandbox and a template can run code:
 
 ```bash
-docker run --rm --network none -v "<driver-dir>:/work/driver:ro" \
+docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
+  -v "<absolute-driver-dir>:/work/driver:ro" \
   registry.opsmill.io/opsmill/styrmin:<version> styrmin-driver check /work/driver
 ```
+
+Give the driver directory as an absolute path without `:` or `,`; Docker reads a relative one-word path as a volume name.
 
 Fix each error it prints (it gives the file and the line). When Docker or such an image is not available,
 skip this and write "styrmin-driver check not run" in the README and the final report. The reference page is

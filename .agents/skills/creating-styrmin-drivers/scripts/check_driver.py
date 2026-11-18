@@ -927,6 +927,23 @@ def egress_allowed(src_labels: dict, policies: list[dict], namespace: str, dst: 
     return False
 
 
+def backend_reaches_port(bsvc: dict | None, backend_port: dict, declared: Any, pods: list[dict]) -> bool:
+    """Whether an Ingress backend port of a Service leads to the container port `declared` of the pods.
+
+    True when the answer cannot be read from the manifests (no matching Service port, a named target
+    port that no container declares)."""
+    for sp in ((bsvc or {}).get("spec") or {}).get("ports") or []:
+        number, pname = backend_port.get("number"), backend_port.get("name")
+        if (number is not None and sp.get("port") == number) or (pname and sp.get("name") == pname):
+            target = sp.get("targetPort", sp.get("port"))
+            if isinstance(target, str):
+                named = {p.get("name"): p.get("containerPort") for w in pods for c in containers_of(pod_template(w))
+                         for p in c.get("ports") or []}
+                target = named.get(target)
+            return target is None or target == declared
+    return True
+
+
 def check_manifests(spec: dict, docs: list[dict]) -> None:
     s = "components"
     workloads = [d for d in docs if d.get("kind") in POD_KINDS]
@@ -1014,7 +1031,10 @@ def check_manifests(spec: dict, docs: list[dict]) -> None:
     services_by_name = {(d.get("metadata") or {}).get("name"): d for d in docs if d.get("kind") == "Service"}
     ingresses = [d for d in docs if d.get("kind") == "Ingress"]
     ingress_hosts: dict[str, list[dict]] = {}
+    ingress_backends: list[tuple[dict, dict]] = []  # (Ingress, backend) of every path and of defaultBackend
     for ing in ingresses:
+        if (ing.get("spec") or {}).get("defaultBackend"):
+            ingress_backends.append((ing, ing["spec"]["defaultBackend"]))
         for rule in (ing.get("spec") or {}).get("rules") or []:
             host = rule.get("host")
             if not host:
@@ -1037,6 +1057,7 @@ def check_manifests(spec: dict, docs: list[dict]) -> None:
                         "(spec.rules[].http.paths: Required value) and the install fails. Give each host "
                         "its paths in the chart's ingress format (read the chart's ingress template)")
             for path in ((rule.get("http") or {}).get("paths")) or []:
+                ingress_backends.append((ing, path.get("backend") or {}))
                 backend = (path.get("backend") or {}).get("service") or {}
                 bname = backend.get("name")
                 if bname and bname not in services_by_name:
@@ -1063,18 +1084,19 @@ def check_manifests(spec: dict, docs: list[dict]) -> None:
             entry = RENDERED["context"]["services"][name]
             first = name == (spec.get("services") or [{}])[0].get("name")
             hosts = {entry["human_readable_fqdn"]} | ({entry["primary_fqdn"]} if first else set())
-            clashes = sorted(h for h in hosts if h in ingress_hosts)
-            for ing in ingresses:
-                for rule in (ing.get("spec") or {}).get("rules") or []:
-                    for path in ((rule.get("http") or {}).get("paths")) or []:
-                        bsvc = services_by_name.get(((path.get("backend") or {}).get("service") or {}).get("name"))
-                        sel = ((bsvc or {}).get("spec") or {}).get("selector") or {}
-                        if sel and pods and all(labels_of(pod_template(w)).items() >= sel.items() for w in pods):
-                            clashes.append(f"the backend {name_of(bsvc)} of {name_of(ing)}")
+            clashes = [f"host {h}" for h in sorted(hosts) if h in ingress_hosts]
+            for ing, backend in ingress_backends:
+                bref = backend.get("service") or {}
+                bsvc = services_by_name.get(bref.get("name"))
+                sel = ((bsvc or {}).get("spec") or {}).get("selector") or {}
+                if (sel and pods and any(labels_of(pod_template(w)).items() >= sel.items() for w in pods)
+                        and backend_reaches_port(bsvc, bref.get("port") or {}, svc.get("port"), pods)):
+                    clashes.append(f"{name_of(ing)} sends traffic to {name_of(bsvc)}, which serves the pods of "
+                                   f"component {comp!r} on port {svc.get('port')}")
             if clashes:
                 fail(s, f"external service {name!r}: Styrmin builds its Ingress, and the chart renders one too "
-                        f"({'; '.join(dict.fromkeys(clashes))}). That gives the service two Ingresses on the same "
-                        "host. Turn off the chart's Ingress for it in values.j2.yml (read the chart's values.yaml; "
+                        f"({'; '.join(dict.fromkeys(clashes))}). That gives the service two Ingresses. "
+                        "Turn off the chart's Ingress for it in values.j2.yml (read the chart's values.yaml; "
                         "run helm template and look for kind: Ingress), or declare the service scope: internal")
             else:
                 ok(s, f"external service {name!r}: the chart renders no Ingress for it; Styrmin builds "
@@ -1464,7 +1486,7 @@ components each component's labels match a workload and its pods; its first labe
            other workload (Styrmin selects by the first label only); the container exists in every
            workload its first label selects; singleton data stores; workloads without a component
 services   the chart does not create a Service named like a driver service; the service port is a
-           container port; an external service has an Ingress with its primary_fqdn and paths
+           container port; the chart renders no Ingress for an external http or https service
 network    every pod can reach DNS under Styrmin's default-deny egress; pods can reach each
            other; no container calls the Kubernetes API
 backup     dump strategies have the `backup` volume at /backup and the credentials env;

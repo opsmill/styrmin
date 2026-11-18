@@ -9,7 +9,10 @@ fail the render.
 ## A real context
 
 This is the context of a deployment of a driver named `generic-app` with one external service
-`app`, in the environment `local`, on Styrmin 0.1.54 (template body and ids shortened):
+`app`, in the environment `local`. It comes from Styrmin 0.1.54. The keys that Styrmin 0.1.59 added to
+the services are added by hand from its source: `ingress_class` and `overridden` on a service, and
+`driver_service_name`, `scope`, `ingress_class` and `fqdn_suffix` on a deployed service. The template
+body and the ids are shortened:
 
 ```yaml
 app:
@@ -77,11 +80,7 @@ Keys that only exist when set: `instance.config.env_vars`, `components.<name>.en
 fullnameOverride: styrmin-myapp
 image:
   tag: "v{{ app.version }}"                                   # the registry's tag format
-ingress:
-  enabled: true
-  hosts:
-    - host: "{{ services['myapp'].primary_fqdn }}"
-    - host: "{{ services['myapp'].human_readable_fqdn }}"
+# no `ingress:` block for an external service: Styrmin builds its Ingress (rule 6 of rules.md)
 persistence:
   storageClass: "{{ instance.config.standard_storage.storage_class }}"
   size: "{{ parameters.storage_size }}Gi"

@@ -22,7 +22,8 @@ not skip one because the chart "probably" handles it.
    subcharts at `docker.io/bitnamilegacy/<image>` with an existing tag, or at another image.
 6. **One external service, one Ingress, built by Styrmin.** Declare the web UI or API as a service with
    `scope: external` and kind `http` or `https`. Styrmin builds its Ingress (`styrmin-svc-<service>`) with
-   `human_readable_fqdn`, and with `primary_fqdn` when it is the first service of the driver. Keep the
+   `human_readable_fqdn`, and with `primary_fqdn` when it is the first service of the driver and has no
+   ingress override. Keep the
    chart's Ingress off for it: a chart Ingress for the same service gives two Ingresses on one host. A
    `tcp` or `udp` service gets no Ingress. A chart Ingress that you keep belongs to an `internal` service,
    and if it uses `primary_fqdn`, that service stays first in `spec.services`.
