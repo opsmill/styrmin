@@ -1,0 +1,28 @@
+---
+# E2E test driver (backend/tests/e2e/test_deploy_app.py): it declares an action
+# whose function actions.py does not define, so a load refuses it with
+# VALIDATION_ERROR. The git-server fixture serves it from the broken-drivers
+# repository; no deployment uses it.
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: missing-action
+spec:
+  version: "1"
+  supported_versions: ">=0.1,<1.0"
+  default_version: "0.1.0"
+  info:
+    description: Test driver whose action function is missing
+    authors: [opsmill]
+    license: Apache-2.0
+  helm:
+    main:
+      location: simple-app
+      version: 0.1.0
+
+  actions:
+    - name: upgrade
+      hook: upgrade
+      mode: core
+      description: Upgrade
+      location: "actions.py::upgrade_missing"

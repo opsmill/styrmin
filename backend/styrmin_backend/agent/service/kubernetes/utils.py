@@ -1,11 +1,8 @@
 import json
-from uuid import UUID
 
-
-def get_kubernetes_reference(resource_id: UUID) -> str:
-    """Determine the kubernetes resource name based on its matching counterpart UUID in the database."""
-
-    return f"styrmin-{resource_id}"
+from styrmin_sdk.driver_format.context.naming import (  # noqa: F401  re-exported (ADR-0089)
+    get_kubernetes_reference,
+)
 
 
 def describe_api_answer(

@@ -1,10 +1,13 @@
-from enum import Enum
+"""Re-export of ``styrmin_sdk.driver_format.models.resources._shared``.
 
-from pydantic import ConfigDict
+The module moved to the SDK, which the server, the agent and styrmin-driver share
+(ADR-0089). This path keeps the backend's imports working.
+"""
 
+from styrmin_sdk.driver_format.models.resources._shared import (
+    Kind,
+)
 
-class Kind(str, Enum):
-    model_config = ConfigDict(extra="forbid")
-
-    ApplicationDriver = "ApplicationDriver"
-    ActionDefinition = "ActionDefinition"
+__all__ = [
+    "Kind",
+]
