@@ -132,6 +132,55 @@ async def _label_namespace(
     logger.info("Put the labels back on namespace {}: {}", namespace, sorted(labels))
 
 
+async def label_namespace_after_failed_restore(
+    api_client: ApiClient,
+    namespace: str,
+    name: str,
+    crd_spec: dict[str, Any] | None = None,
+) -> None:
+    """Put the deployment's labels back on the namespace of a restore that did not complete.
+
+    Velero creates the namespace without its labels, and ``reapply_and_finalize``
+    puts them back only after a restore that ended ``Completed``. A restore that
+    ended ``PartiallyFailed`` or ``Failed`` skipped that step, so its namespace
+    kept only ``kubernetes.io/metadata.name``. A policy that selects the
+    namespace by ``styrmin/environment_id`` (the cluster policy that lets the
+    shared ingress controller in is one) then no longer matches it, and the
+    application is unreachable from outside while its pods run.
+
+    The labels come from ``crd_spec``, or from the restored CR ``name`` when it
+    is not given. A cross-target restore passes the counterpart's spec, so a
+    clone gets its own labels, not the source's.
+
+    Best effort: a refused or failed Kubernetes call only logs a warning, because the
+    restore has already failed and the caller records that failure. The usual causes are
+    a CR that Velero did not restore (the labels then cannot be read, and the namespace
+    keeps only its name label), a namespace that does not exist, or a refused patch. An
+    error that is not a Kubernetes API error is logged with its type and message and does not
+    stop the caller either: raising would skip the failure handling that comes after it.
+    """
+    try:
+        if crd_spec is None:
+            crd_spec = (await _read_crd(api_client, namespace, name)).get("spec", {})
+        await _label_namespace(api_client, namespace, crd_spec)
+    except k8s_client.ApiException as exc:
+        logger.warning(
+            "Could not put the labels back on namespace {} after a restore that did not complete: {}",
+            namespace,
+            exc,
+        )
+    except Exception as exc:
+        # The type and the message only, not the traceback: the log sink prints the
+        # values of the variables of each frame, and a frame of the Kubernetes client
+        # holds the authorization header of the agent's service account.
+        logger.error(
+            "Unexpected error while putting the labels back on namespace {} after a restore that did not complete: {}: {}",
+            namespace,
+            type(exc).__name__,
+            exc,
+        )
+
+
 async def mark_restoring(api_client: ApiClient, namespace: str, name: str) -> None:
     """Patch the CRD to indicate the styrmin restore flow is in control.
 

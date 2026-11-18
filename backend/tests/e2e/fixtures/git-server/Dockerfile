@@ -11,6 +11,7 @@ RUN git init --bare /git/infrahub-enterprise.git
 RUN git init --bare /git/failing-actions.git
 RUN git init --bare /git/late-container.git
 RUN git init --bare /git/hook-job.git
+RUN git init --bare /git/postgres-blocker.git
 RUN git init --bare /git/driver-collection.git
 # Driver directories that a load refuses (backend/tests/e2e/test_deploy_app.py).
 RUN git init --bare /git/broken-drivers.git

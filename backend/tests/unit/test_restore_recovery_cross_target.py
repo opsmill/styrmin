@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from loguru import logger
 
 from styrmin_backend.operator import restore_recovery
 from styrmin_backend.operator.config import ANNOTATION_SKIP_TEARDOWN, CRD_PLURAL
@@ -872,6 +873,136 @@ async def test_cross_target_restore_labels_the_namespace_with_the_counterparts_i
         "styrmin/environment_id": CLONE_ENVIRONMENT_ID,
         "styrmin/deployment_id": COUNTERPART_ID,
     }
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
+async def test_a_restore_that_did_not_complete_gets_its_labels_from_the_restored_cr() -> (
+    None
+):
+    """Only a completed restore runs the recovery, which labels the namespace.
+
+    After a ``PartiallyFailed`` restore the namespace has only its name label, so
+    a policy that selects it by ``styrmin/environment_id`` no longer matches it.
+    """
+    crd = restored_crd()
+    crd["spec"]["context"] = {
+        "labels": {"environment_id": ENVIRONMENT_ID, "deployment_id": SOURCE_ID}
+    }
+    api_client = FakeApiClient({RESTORED_NAME: crd})
+    api_client.namespaces[NAMESPACE] = dict(NAMESPACE_BEFORE)
+
+    await restore_recovery.label_namespace_after_failed_restore(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+    )
+
+    assert api_client.namespaces[NAMESPACE] == {
+        **NAMESPACE_BEFORE,
+        "styrmin/environment_id": ENVIRONMENT_ID,
+        "styrmin/deployment_id": SOURCE_ID,
+    }
+    # Nothing else of the failed restore is touched: no status, no phase.
+    assert "status" not in api_client.objects[(NAMESPACE, RESTORED_NAME)]
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
+async def test_a_spec_that_is_given_labels_the_namespace_without_reading_the_cr() -> (
+    None
+):
+    """A clone is labelled from the counterpart's spec, not from the source's CR."""
+    body = await counterpart_body()
+    body["spec"]["context"]["labels"]["environment_id"] = CLONE_ENVIRONMENT_ID
+    api_client = FakeApiClient({RESTORED_NAME: restored_crd()})
+    api_client.namespaces[NAMESPACE] = dict(NAMESPACE_BEFORE)
+
+    await restore_recovery.label_namespace_after_failed_restore(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+        body["spec"],
+    )
+
+    assert api_client.namespaces[NAMESPACE] == {
+        **NAMESPACE_BEFORE,
+        "styrmin/environment_id": CLONE_ENVIRONMENT_ID,
+        "styrmin/deployment_id": COUNTERPART_ID,
+    }
+    assert ("get", RESTORED_NAME) not in api_client.calls
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
+async def test_a_cr_that_velero_did_not_restore_leaves_the_namespace_alone() -> None:
+    """A failed restore must not fail again here: the caller records the first failure."""
+    api_client = FakeApiClient({})
+    api_client.namespaces[NAMESPACE] = dict(NAMESPACE_BEFORE)
+
+    await restore_recovery.label_namespace_after_failed_restore(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+    )
+
+    assert api_client.namespaces[NAMESPACE] == NAMESPACE_BEFORE
+    assert ("patch_namespace", NAMESPACE) not in api_client.calls
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
+async def test_an_error_that_is_not_an_api_error_does_not_fail_the_failed_restore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It is logged without its traceback, and the failure handling after it still runs."""
+    crd = restored_crd()
+    crd["spec"]["context"] = {"labels": {"environment_id": ENVIRONMENT_ID}}
+    api_client = FakeApiClient({RESTORED_NAME: crd})
+    api_client.namespaces[NAMESPACE] = dict(NAMESPACE_BEFORE)
+
+    async def _broken(*_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("broken label builder")
+
+    monkeypatch.setattr(restore_recovery, "_label_namespace", _broken)
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record), level="ERROR")
+
+    try:
+        await restore_recovery.label_namespace_after_failed_restore(
+            api_client,  # type: ignore[arg-type]
+            NAMESPACE,
+            RESTORED_NAME,
+        )
+    finally:
+        logger.remove(sink)
+
+    assert api_client.namespaces[NAMESPACE] == NAMESPACE_BEFORE
+    (record,) = records
+    assert "TypeError: broken label builder" in record["message"]
+    # The sink prints the variables of each frame of a traceback, and a frame of the
+    # Kubernetes client holds the agent's authorization header.
+    assert record["exception"] is None
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("fake_k8s")
+async def test_a_namespace_that_does_not_exist_does_not_fail_the_failed_restore() -> (
+    None
+):
+    """A restore that failed validation never created the namespace."""
+    crd = restored_crd()
+    crd["spec"]["context"] = {"labels": {"environment_id": ENVIRONMENT_ID}}
+    api_client = FakeApiClient({RESTORED_NAME: crd})
+    api_client.namespaces.clear()
+
+    await restore_recovery.label_namespace_after_failed_restore(
+        api_client,  # type: ignore[arg-type]
+        NAMESPACE,
+        RESTORED_NAME,
+    )
+
+    assert api_client.namespaces == {}
 
 
 @pytest.mark.anyio

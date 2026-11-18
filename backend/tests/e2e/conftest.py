@@ -672,6 +672,12 @@ async def git_server(
             "source": FIXTURES_DIR / "drivers" / "hook-job",
             "chart_name": "simple-app",
         },
+        # Test driver of test_restore_labels_after_partially_failed.py: simple-app whose PostgreSQL
+        # init script creates a table that the restore hook cannot drop, so the restore always fails.
+        "postgres-blocker": {
+            "source": FIXTURES_DIR / "drivers" / "postgres-blocker",
+            "chart_name": "simple-app",
+        },
     }
 
     tmp_repo = tmp_path_factory.mktemp("driver-repo")

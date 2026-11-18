@@ -57,6 +57,10 @@ MODULE = "styrmin_backend.workflows.templates.backup"
 SERVICE_MODULE = "styrmin_backend.services.backup.service"
 RECOVERY_MODULE = "styrmin_backend.operator.restore_recovery"
 TARGET_NAMESPACE = "styrmin-app"
+#: The spec of the CR that Velero restored, with the labels of its context.
+RESTORED_CR_SPEC = {
+    "context": {"labels": {"environment_id": "env-1", "deployment_id": "dep-1"}}
+}
 #: The deployment an in-place restore of ``execute_restore_workflow`` lands in.
 DEPLOYMENT_ID = UUID("0d5a1c3e-7b2f-4e8a-9c61-2f4b8d7e3a10")
 
@@ -218,6 +222,10 @@ async def _user_flow(
             side_effect=counterpart_recovery_error
         ),
         mark_failed=AsyncMock(),
+        # What the recovery of a completed restore, and the new step of a restore
+        # that did not complete, use to label the namespace and to read the CR.
+        label_namespace=AsyncMock(),
+        read_crd=AsyncMock(return_value={"spec": RESTORED_CR_SPEC}),
     )
     variable = MagicMock()
     variable.set = AsyncMock()
@@ -239,12 +247,18 @@ async def _user_flow(
             recovery.reapply_with_counterpart_identity,
         ),
         patch(f"{RECOVERY_MODULE}.mark_failed", recovery.mark_failed),
+        patch(f"{RECOVERY_MODULE}._label_namespace", recovery.label_namespace),
+        patch(f"{RECOVERY_MODULE}._read_crd", recovery.read_crd),
         patch(f"{MODULE}.get_run_logger", return_value=MagicMock()),
         patch(f"{MODULE}.Variable", variable),
         patch(f"{MODULE}.flow_run_ctx", SimpleNamespace(id=uuid4())),
     ):
         yield SimpleNamespace(
-            core_api=core_api, velero=velero, recovery=recovery, variable=variable
+            api_client=api_client,
+            core_api=core_api,
+            velero=velero,
+            recovery=recovery,
+            variable=variable,
         )
 
 
@@ -368,6 +382,84 @@ async def test_a_failed_velero_restore_fails_the_velero_step_with_veleros_error(
         # The INTERNAL flow stores it as the restore's error message.
         "failureReason": error,
     }
+
+
+@pytest.mark.parametrize("phase", ["PartiallyFailed", "Failed", "FailedValidation"])
+async def test_a_restore_that_did_not_complete_puts_the_namespace_labels_back(
+    api: FakeStepApi, phase: str
+) -> None:
+    """Velero creates the namespace bare, and only a completed restore labels it.
+
+    Without its labels a policy that selects the namespace by
+    ``styrmin/environment_id`` no longer matches it: the pods that Velero
+    restored run, and nothing reaches them from outside.
+    """
+    del api
+    async with _user_flow(restore=_velero_restore(phase)) as cluster:
+        await _restore()
+
+    cluster.recovery.label_namespace.assert_awaited_once_with(
+        cluster.api_client, TARGET_NAMESPACE, RESTORED_CR_SPEC
+    )
+    cluster.recovery.mark_failed.assert_awaited_once()
+    cluster.recovery.reapply_and_finalize.assert_not_awaited()
+
+
+async def test_a_restore_that_did_not_complete_still_fails_when_the_labels_cannot_be_put_back(
+    api: FakeStepApi, events: list[Event]
+) -> None:
+    """The restore has already failed: a refused label patch must not replace that failure."""
+    del api
+    async with _user_flow(restore=_velero_restore("PartiallyFailed")) as cluster:
+        cluster.recovery.label_namespace.side_effect = ApiException(status=403)
+        result = await _restore()
+
+    assert result["status"]["phase"] == "PartiallyFailed"
+    cluster.recovery.mark_failed.assert_awaited_once()
+    assert _stored_result(cluster.variable)["status"]["phase"] == "PartiallyFailed"
+    assert events[-2:] == [("STARTED", "restore:velero"), ("FAILED", "restore:velero")]
+
+
+async def test_a_restore_that_did_not_complete_still_fails_when_the_label_step_breaks(
+    api: FakeStepApi,
+) -> None:
+    """An error that is not a Kubernetes API error must not skip the failure handling either."""
+    del api
+    async with _user_flow(restore=_velero_restore("PartiallyFailed")) as cluster:
+        cluster.recovery.label_namespace.side_effect = TypeError("broken label builder")
+        result = await _restore()
+
+    assert result["status"]["phase"] == "PartiallyFailed"
+    cluster.recovery.mark_failed.assert_awaited_once()
+    assert _stored_result(cluster.variable)["status"]["phase"] == "PartiallyFailed"
+
+
+async def test_a_completed_restore_leaves_the_labels_to_its_recovery(
+    api: FakeStepApi,
+) -> None:
+    del api
+    async with _user_flow() as cluster:
+        await _restore()
+
+    cluster.recovery.label_namespace.assert_not_awaited()
+    cluster.recovery.reapply_and_finalize.assert_awaited_once()
+
+
+async def test_a_cross_target_restore_that_did_not_complete_labels_the_clone_with_its_own_ids(
+    api: FakeStepApi,
+) -> None:
+    """A clone's namespace gets the counterpart's labels, never the source's."""
+    del api
+    cross_target = _cross_target(counterpart_context())
+    async with _user_flow(restore=_velero_restore("PartiallyFailed")) as cluster:
+        await _restore(**cross_target)
+
+    cluster.recovery.label_namespace.assert_awaited_once_with(
+        cluster.api_client,
+        TARGET_NAMESPACE,
+        cross_target["counterpart_crd_body"]["spec"],
+    )
+    cluster.recovery.read_crd.assert_not_awaited()
 
 
 async def test_a_completed_velero_restore_stores_no_failure_reason(

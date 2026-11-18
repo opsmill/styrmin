@@ -425,6 +425,7 @@ async def execute_velero_restore_flow(
         # would otherwise trip its 300 s readiness timeout — see
         # operator/restore_recovery.py for the contract.
         from styrmin_backend.operator.restore_recovery import (
+            label_namespace_after_failed_restore,
             mark_failed,
             mark_restoring,
             reapply_and_finalize,
@@ -507,6 +508,17 @@ async def execute_velero_restore_flow(
                     name,
                     f"Velero restore failed: {failure_reason}",
                 )
+            # Velero created the namespace without its labels, and only the
+            # recovery of a completed restore puts them back. Without them a
+            # policy that selects the namespace by its labels no longer matches
+            # it, and the pods that Velero restored are unreachable. A cross-target
+            # restore labels it from the counterpart's spec, not the source's.
+            await label_namespace_after_failed_restore(
+                api_client,
+                target_namespace,
+                crd_name,
+                None if counterpart_crd_body is None else counterpart_crd_body["spec"],
+            )
 
         # Store result for cross-worker retrieval via Prefect Variable
         await Variable.set(  # type: ignore[misc]
