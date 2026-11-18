@@ -1,9 +1,9 @@
 ---
 name: creating-styrmin-drivers
-description: 'Writes a Styrmin application driver (driver.styrmin.yml, values.j2.yml, and actions.py only when needed) for an application that has a Helm chart, and checks it offline with a bundled script until it passes. TRIGGER when: the user asks to make, create, write or package a Styrmin driver for an application ("make a styrmin driver for NetBox", "we need a driver to deploy X on Styrmin"). DO NOT TRIGGER when: deploying or upgrading an application with an existing driver, changing Styrmin itself, or writing a plain Helm chart.'
-compatibility: Needs helm 3, Python 3.10+ with PyYAML, Jinja2 3.1.6 or later and packaging (or uv), and internet access to read the chart and the image registries. Targets Styrmin 0.1.54.
+description: 'Writes a Styrmin application driver (driver.styrmin.yml, values.j2.yml, and actions.py only when needed) for an application that has a Helm chart, and checks it offline with a bundled script, and with Styrmin's own styrmin-driver command when it is available, until it passes. TRIGGER when: the user asks to make, create, write or package a Styrmin driver for an application ("make a styrmin driver for NetBox", "we need a driver to deploy X on Styrmin"). DO NOT TRIGGER when: deploying or upgrading an application with an existing driver, changing Styrmin itself, or writing a plain Helm chart.'
+compatibility: Needs helm 3, Python 3.10+ with PyYAML, Jinja2 3.1.6 or later and packaging (or uv), and internet access to read the chart and the image registries. Targets Styrmin 0.1.59 and later (from 0.1.59 Styrmin builds the Ingress of an external service).
 metadata:
-  version: '0.1.15'
+  version: '0.1.16'
   author: OpsMill
 ---
 
@@ -12,8 +12,8 @@ metadata:
 A Styrmin **driver** tells Styrmin how to deploy and operate one application on Kubernetes with an
 **existing Helm chart**. Styrmin renders the driver's values template with a **context** (the
 deployment's namespace, URLs, storage class, application version, parameters), installs the chart
-with FluxCD, patches the result (labels, env vars, replicas, ingress class), and runs the driver's
-optional lifecycle actions.
+with FluxCD, patches the result (labels, env vars, replicas, ingress class), builds the Ingress of each external
+web service, and runs the driver's optional lifecycle actions.
 
 A driver is a directory:
 
@@ -25,8 +25,9 @@ A driver is a directory:
 └── README.md            # how to load and deploy it, credentials, what was checked
 ```
 
-**Done means:** `scripts/check_driver.py <driver-dir> --check-images` reports **0 FAIL**, every WARN
-is fixed or explained in the README, and the final report states what is verified and what is not.
+**Done means:** `scripts/check_driver.py <driver-dir> --check-images` reports **0 FAIL**, `styrmin-driver check`
+(step 6) reports no errors or the final report says it did not run, every WARN is fixed or explained in the
+README, and the final report states what is verified and what is not.
 
 ## Start here
 
@@ -87,7 +88,8 @@ Copy this checklist into `NOTES.md` and tick each item:
 - [ ] 3. Draft the driver: scaffold_driver.py
 - [ ] 4. Check the draft: check_driver.py
 - [ ] 5. Resolve every TODO and every FAIL (sections A to F below)
-- [ ] 6. check_driver.py --check-images: 0 FAIL, every WARN fixed or explained, no TODO left
+- [ ] 6. check_driver.py --check-images: 0 FAIL, every WARN fixed or explained, no TODO left;
+       then styrmin-driver check in a container
 - [ ] 7. README.md
 - [ ] 8. Final report
 ```
@@ -159,14 +161,15 @@ allowed hosts or base URL from the two hosts in B. Keep every other chart defaul
 ([rule 21](references/rules.md)). A `TODO host` line means
 the chart builds a host from the release name: follow it ([rule 17](references/rules.md)).
 
-**B. Ingress.** Enable the chart's Ingress in the format of its `ingress` values, with the hosts
-`{{ services['<service>'].primary_fqdn }}` and `{{ services['<service>'].human_readable_fqdn }}`.
-Each host needs its paths in the chart's format (for example `paths: [/]` or a list of
-`{path, pathType}`); a second host that the chart adds by another value (an "extra host" or a
-"resource root URL") may get no path at all, so check every rule in `/tmp/check/manifests.yaml`: read the chart's default `ingress` values and its ingress template
-(`grep -n -B2 -A12 hosts /tmp/chart/pulled/<chart>/templates/ingress.yaml`). Do not set the
-ingress class. The URL users open is
-`{{ instance.config.external_url_scheme }}://<host>` (see [references/context.md](references/context.md)).
+**B. Ingress.** Styrmin builds the Ingress of each service that is `scope: external` with kind `http` or
+`https` (named `styrmin-svc-<service>`, with the host `{{ services['<service>'].human_readable_fqdn }}` and,
+for the first service of the driver, `{{ services['<service>'].primary_fqdn }}`). So the chart's own Ingress
+must stay off: a chart Ingress for that service gives it two Ingresses on one host. Read the chart's default
+`ingress` values: if it is off by default, write no `ingress:` block; if it is on, set it to off. Look for
+`kind: Ingress` in `/tmp/check/manifests.yaml`, including subcharts. Do not set the ingress class. The URL users open is
+`{{ instance.config.external_url_scheme }}://<host>` (see [references/context.md](references/context.md)). Give
+both hosts to the application when it checks its host name (allowed hosts, base URL). A service that
+is `scope: internal` gets no Ingress from Styrmin; a chart Ingress for it stays as it is.
 
 **C. Images.** Keep the image tag format of the registry (`v{{ app.version }}` when tags start
 with `v`). For Bitnami images, the scaffold's comments say whether the tag exists and give the
@@ -209,6 +212,20 @@ python3 <skill-dir>/scripts/check_driver.py <driver-dir> --check-images
 Done means 0 FAIL, every WARN fixed or explained in the README, and `grep -n TODO <driver-dir>/*`
 prints nothing. Use `--app-version` to render other versions of your range.
 
+Then run Styrmin's own `styrmin-driver check`, which applies the rules of a driver load with the code that
+the Styrmin server uses. It needs Docker and a Styrmin image that has the command: the first release after
+0.2.2 (0.2.2 and earlier do not have it). Run it in a container with no network, on a read-only copy of the
+driver, because the command renders `values.j2.yml` without a sandbox and a template can run code:
+
+```bash
+docker run --rm --network none -v "<driver-dir>:/work/driver:ro" \
+  registry.opsmill.io/opsmill/styrmin:<version> styrmin-driver check /work/driver
+```
+
+Fix each error it prints (it gives the file and the line). When Docker or such an image is not available,
+skip this and write "styrmin-driver check not run" in the README and the final report. The reference page is
+`docs/docs/reference/styrmin-driver.md` in the Styrmin repository.
+
 ### 7. README.md
 
 Complete the README the scaffold wrote: what the driver deploys (components, chart and version,
@@ -218,8 +235,8 @@ verify (for example "not deployed on a cluster").
 
 ### 8. Final report
 
-Report to the user: the files, the check result (FAIL and WARN counts), the decisions you made and
-why, and what is not verified. Never claim the driver was deployed if you only ran the checks.
+Report to the user: the files, the check result (FAIL and WARN counts, and the result of `styrmin-driver check`
+or that it did not run), the decisions you made and why, and what is not verified. Never claim the driver was deployed if you only ran the checks.
 
 ## The rules in short
 
@@ -227,7 +244,7 @@ The check script enforces most of these; [references/rules.md](references/rules.
 
 - Ship an egress NetworkPolicy: Styrmin denies all egress, even DNS, in every deployment namespace.
 - Fixed credentials, never generated ones; `fullnameOverride: styrmin-<name>` on the chart and every subchart.
-- The external service's Ingress uses `services['<name>'].primary_fqdn` and `human_readable_fqdn`, with paths.
+- Declare the web UI as an `external` service and keep the chart's Ingress off: Styrmin builds its Ingress.
 - Component labels are on the workload and its pods; the container name is exact.
 - Never pass env vars, replica counts or image overrides to the chart; quote every version.
 - Copy value paths from the chart's `values.yaml`: Helm ignores unknown keys without an error.

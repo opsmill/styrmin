@@ -51,10 +51,12 @@ services:                           # keyed by spec.services[].name
     kind: http
     port: 8080
     url: http://app:8080
+    ingress_class: traefik          # the class of this service's Ingress (a service override can change it)
+    overridden: false               # true when a service ingress override applies
     primary_fqdn: generic-app-a95868f8-1620-48b3-83af-03d9767fc359.apps.localhost
     human_readable_fqdn: app-local.apps.localhost
 deployed_services:                  # services that exist in the environment, with their owner
-  - {component: app, deployment_id: a95868f8-..., kind: http, port: 8080, resolved_name: app}
+  - {component: app, deployment_id: a95868f8-..., driver_service_name: app, kind: http, scope: external, port: 8080, resolved_name: app, ingress_class: traefik, fqdn_suffix: apps.localhost}
 components:                         # absent when the driver declares no components
   app:
     name: app

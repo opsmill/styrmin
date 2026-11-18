@@ -20,9 +20,12 @@ not skip one because the chart "probably" handles it.
    format (`v{{ app.version }}`, `{{ app.version }}-alpine`, ...) and let `--check-images` prove it
    exists. Bitnami stopped publishing versioned tags under `docker.io/bitnami` in 2025: point Bitnami
    subcharts at `docker.io/bitnamilegacy/<image>` with an existing tag, or at another image.
-6. **One external service, one URL.** Declare the web UI or API as a service with `scope: external`,
-   and enable the chart's Ingress with the host `{{ services['<service>'].primary_fqdn }}` (add
-   `human_readable_fqdn` as a second host). Do not set the ingress class: Styrmin sets it.
+6. **One external service, one Ingress, built by Styrmin.** Declare the web UI or API as a service with
+   `scope: external` and kind `http` or `https`. Styrmin builds its Ingress (`styrmin-svc-<service>`) with
+   `human_readable_fqdn`, and with `primary_fqdn` when it is the first service of the driver. Keep the
+   chart's Ingress off for it: a chart Ingress for the same service gives two Ingresses on one host. A
+   `tcp` or `udp` service gets no Ingress. A chart Ingress that you keep belongs to an `internal` service,
+   and if it uses `primary_fqdn`, that service stays first in `spec.services`.
 7. **Component labels must be on the workload and on its pods.** `identifier.label` must match the
    `metadata.labels` of the Deployment or StatefulSet *and* its pod template labels. Styrmin selects
    the workloads to stop, start, scale and patch by the **first** label only: put first a label that

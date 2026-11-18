@@ -9,8 +9,8 @@ Usage:
 It renders the chart with its default values and writes into <driver-dir>:
   driver.styrmin.yml  a component for each Deployment and StatefulSet (labels present on both the
                       workload and its pods, the most specific label first, the first container),
-                      an external service for the workload behind the chart's Ingress, backups for
-                      data stores
+                      an external service for the workload behind the chart's Ingress (Styrmin
+                      builds that Ingress, so the chart's own stays off), backups for data stores
   values.j2.yml       fullnameOverride for the chart and each subchart, storage classes from the
                       context, the image tag from {{ app.version }}, the egress NetworkPolicy in an
                       extra-objects value, and TODO lines for what only you can decide
@@ -124,85 +124,6 @@ def newest_legacy_tag(name: str) -> str | None:
         if not url:
             break
     return best[1] if best else None
-
-
-def discover_ingress(values: dict, base: list[str], driver_name: str) -> tuple[list[tuple[str, str]], str]:
-    """Finds how the chart sets its Ingress hosts when they are not a list of {host: ...} entries.
-
-    Switches each `<...>.ingress.enabled` value on, renders the chart, reads the Ingress hosts it
-    produces, and finds the values that hold those hosts (a string, or a list of strings). Returns
-    the settings to write (dotted path, YAML value) and a note for the values file."""
-    primary = f"{{{{ services['{driver_name}'].primary_fqdn }}}}"
-    readable = f"{{{{ services['{driver_name}'].human_readable_fqdn }}}}"
-    candidates = sorted(find_paths(values, lambda k, v: k == "ingress" and isinstance(v, dict) and "enabled" in v),
-                        key=lambda p: p.count("."))[:4]
-    for cand in candidates:
-        proc = subprocess.run(["helm", "template", "styrmin-test", *base, "--namespace", "test", "--skip-tests",
-                               "--set", f"{cand}.enabled=true"], capture_output=True, text=True, timeout=300)
-        if proc.returncode != 0:
-            continue
-        hosts = []
-        ingresses = 0
-        for d in yaml.safe_load_all(proc.stdout):
-            if isinstance(d, dict) and d.get("kind") == "Ingress":
-                ingresses += 1
-                hosts += [r.get("host") for r in (d.get("spec") or {}).get("rules") or [] if r.get("host")]
-        block = get_path(values, cand) or {}
-        if not hosts and isinstance(block.get("hosts"), list) and not block["hosts"]:
-            # An empty list of hosts: find whether it takes strings or {host, paths} entries.
-            probe = "probe.styrmin.invalid"
-            for fmt, value, yaml_value in (
-                    ("strings", f'["{probe}"]', f'["{primary}", "{readable}"]'),
-                    ("entries", f'[{{"host": "{probe}", "paths": [{{"path": "/", "pathType": "Prefix"}}]}}]',
-                     f'[{{host: "{primary}", paths: [{{path: /, pathType: Prefix}}]}}, '
-                     f'{{host: "{readable}", paths: [{{path: /, pathType: Prefix}}]}}]')):
-                probe_run = subprocess.run(["helm", "template", "styrmin-test", *base, "--namespace", "test",
-                                            "--skip-tests", "--set", f"{cand}.enabled=true",
-                                            "--set-json", f"{cand}.hosts={value}"],
-                                           capture_output=True, text=True, timeout=300)
-                if probe_run.returncode == 0 and re.search(rf"host:\s*[\"']?{re.escape(probe)}", probe_run.stdout):
-                    return ([(f"{cand}.enabled", "true"), (f"{cand}.hosts", yaml_value)],
-                            f"# Ingress: switched on with {cand}.enabled; its hosts are {cand}.hosts (a list of "
-                            f"{fmt}). Do not set the ingress class: Styrmin sets it.")
-        if ingresses and not hosts:
-            # The Ingress renders without a host: set the empty host value of this ingress block.
-            key = next((k for k in ("hostName", "hostname", "host") if k in block and isinstance(block[k], (str, type(None)))), None)
-            if key:
-                return ([(f"{cand}.enabled", "true"), (f"{cand}.{key}", f'"{primary}"')],
-                        f"# Ingress: switched on with {cand}.enabled; its host is {cand}.{key}. Do not set the ingress "
-                        "class: Styrmin sets it.\n# TODO ingress: this value takes one host. When the chart has a value for "
-                        f"extra hosts,\n# add \"{readable}\" there too.")
-        if not hosts:
-            continue
-        settings: list[tuple[str, str]] = [(f"{cand}.enabled", "true")]
-        placed = False
-        for h in dict.fromkeys(hosts):
-            scalar = find_paths(values, lambda k, v, h=h: v == h)
-            listed = find_paths(values, lambda k, v, h=h: isinstance(v, list) and h in v)
-            entries = find_paths(values, lambda k, v, h=h: isinstance(v, list)
-                                 and any(isinstance(e, dict) and e.get("host") == h for e in v))
-            if entries:
-                sample = next(e for e in get_path(values, entries[0]) if isinstance(e, dict) and e.get("host") == h)
-                both = [dict(sample, host=primary), dict(sample, host=readable)]
-                settings.append((entries[0], json.dumps(both)))
-                placed = True
-                break
-            if listed:
-                settings.append((listed[0], f'["{primary}", "{readable}"]'))
-                placed = True
-                break
-            if scalar:
-                settings.append((scalar[0], f'"{primary}"'))
-                placed = True
-                break
-        if placed:
-            note = (f"# Ingress: switched on with {cand}.enabled; the chart takes its host from "
-                    f"{settings[1][0]}. Do not set the ingress class: Styrmin sets it.")
-            if not settings[1][1].startswith("["):  # one host: a string value
-                note += ("\n# TODO ingress: this value takes one host. When the chart has a value for extra hosts,"
-                         f"\n# add \"{readable}\" there too.")
-            return settings, note
-    return [], ""
 
 
 def labels(obj: dict | None) -> dict:
@@ -616,14 +537,11 @@ def main() -> None:
         v.append(tag_line)
     if user_sets:
         main_settings += [(k, val) for k, val in user_sets if k.split(".")[0] not in sub_values]
-    ingress_values = values.get("ingress") if isinstance(values.get("ingress"), dict) else None
-    ingress_sample = (ingress_values or {}).get("hosts") or []
-    dict_hosts = bool(ingress_values is not None and "enabled" in ingress_values and ingress_sample
-                      and isinstance(ingress_sample[0], dict) and "host" in ingress_sample[0])
-    ingress_settings, ingress_note = ([], "") if dict_hosts else discover_ingress(values, base, a.driver_name)
-    main_settings += [(k, val) for k, val in ingress_settings if k.split(".")[0] not in sub_values]
-    if ingress_note:
-        v.append(ingress_note)
+    # Styrmin builds the Ingress of the external service, so the chart's own Ingress must be off.
+    ingress_on = [pth for pth in find_paths(values, lambda k, val: k == "ingress" and isinstance(val, dict)
+                                            and val.get("enabled") is True)
+                  if pth.split(".")[0] not in sub_values]
+    main_settings += [(f"{pth}.enabled", "false") for pth in ingress_on]
     def service_for(suffix: str) -> str:
         """The Service the driver's names give to what the chart calls `<release>-<suffix>`."""
         sub = next((k for k in sub_values if suffix == k or suffix.startswith(f"{k}-")), None)
@@ -674,34 +592,14 @@ def main() -> None:
           "# the chart's defaults answer it: read the documentation, and name the page in the README."]
     hosts_expr = [f"{{{{ services['{a.driver_name}'].primary_fqdn }}}}",
                   f"{{{{ services['{a.driver_name}'].human_readable_fqdn }}}}"]
-    ingress = values.get("ingress") if isinstance(values.get("ingress"), dict) else None
-    sample = (ingress or {}).get("hosts") or []
-    if dict_hosts:
-        import copy
-
-        class NoAliases(yaml.SafeDumper):
-            def ignore_aliases(self, data):  # noqa: ANN001, ANN201
-                return True
-
-        entries = []
-        for i, _ in enumerate(hosts_expr):
-            entry = copy.deepcopy(sample[0])
-            entry["host"] = f"__STYRMIN_HOST_{i}__"
-            entries.append(entry)
-        block = yaml.dump({"ingress": {"enabled": True, "hosts": entries}}, Dumper=NoAliases, sort_keys=False, width=1000)
-        for i, h in enumerate(hosts_expr):
-            block = block.replace(f"__STYRMIN_HOST_{i}__", f'"{h}"')
-        v += ["", "# Ingress: the chart's own host format, with the two hosts Styrmin gives the service.",
-              "# Do not set the ingress class: Styrmin sets it.", block.rstrip(),
-              "# TODO give these hosts to the application when it checks its host name (allowed hosts,",
-              "# CSRF trusted origins, base URL)."]
-    elif not ingress_settings:
-        v += ["",
-              "# TODO ingress: enable the chart's Ingress with these two hosts, in the format of the",
-              "# chart's `ingress` values (see values.yaml); each host needs its paths. Do not set the ingress class.",
-              *[f"#   \"{h}\"" for h in hosts_expr],
-              "# Also give these hosts to the application when it checks its host name (allowed hosts,",
-              "# CSRF trusted origins, base URL)."]
+    v += ["",
+          "# Ingress: Styrmin builds the Ingress of the external service, with the hosts",
+          *[f"#   {h}" for h in hosts_expr],
+          "# The chart's own Ingress must stay off: a chart Ingress for this service gives it two Ingresses on one host.",
+          *(["# This chart's Ingress is on by default: it is switched off above."] if ingress_on else []),
+          "# TODO check that no Ingress of this chart is rendered for the service (helm template, kind: Ingress),",
+          "# and give these hosts to the application when it checks its host name (allowed hosts,",
+          "# CSRF trusted origins, base URL)."]
     wait_switches = [path for path in find_paths(values, lambda k, val: "wait" in k.lower() and isinstance(val, dict)
                                                  and "enabled" in val)]
     for cname, comp in components.items():
@@ -850,7 +748,7 @@ TODO: one paragraph: what the driver deploys.
 - Credentials: TODO list the default users and passwords, and how to change them.
 - Parameters: TODO, or "none".
 - Decisions: TODO each choice you made and why.
-- Checked: TODO the result of check_driver.py.
+- Checked: TODO the result of check_driver.py and of `styrmin-driver check` (or "not run").
 - Not verified: TODO, for example "not deployed on a cluster".
 """
     (out / "README.md").write_text(readme)

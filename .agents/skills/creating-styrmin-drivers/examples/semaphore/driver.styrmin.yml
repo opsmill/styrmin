@@ -43,6 +43,6 @@ spec:
   services:
     - name: semaphore
       kind: http
-      scope: external                # Styrmin gives it a URL; the chart's Ingress must use it
+      scope: external                # Styrmin builds its Ingress; the chart's Ingress stays off
       port: 3000                     # the port the container listens on
       component: server

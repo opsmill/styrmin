@@ -103,7 +103,8 @@ allowed connections, so try it first and let `check_driver.py` say.)
   names (`styrmin-postgresql`, `styrmin-redis-master`, ...).
 - An external service gets two hosts: `primary_fqdn`
   (`<driver name>-<deployment id>.<fqdn suffix>`) and `human_readable_fqdn`
-  (`<service name>-<environment name>.<fqdn suffix>`). Put both on the chart's Ingress.
+  (`<service name>-<environment name>.<fqdn suffix>`). Styrmin builds the Ingress with these hosts: do not
+  put them on the chart's Ingress.
 - Users open `{{ instance.config.external_url_scheme }}://<host>` plus
   `:{{ instance.config.external_url_port }}` when the port is not 80 or 443. Applications that need
   their own URL (allowed hosts, base URL, CSRF trusted origins) take it from these values.

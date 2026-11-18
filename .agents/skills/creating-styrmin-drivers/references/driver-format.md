@@ -55,7 +55,7 @@ spec:
   services:                          # optional; if present, not empty
     - name: <dns label>              # unique in the driver AND in the environment at deploy time
       kind: http|https|tcp|udp
-      scope: internal|external       # external = gets a URL host
+      scope: internal|external       # external + http|https = Styrmin builds its Ingress
       port: <1..65535>               # the port the container listens on
       component: <declared component>
   actions:                           # optional; at most one per (hook, mode)

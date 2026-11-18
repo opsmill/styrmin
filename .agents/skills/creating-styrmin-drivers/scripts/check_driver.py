@@ -433,7 +433,7 @@ def to_fqdn_label(value: Any) -> str:
 
 
 def build_context(spec: dict, driver_name: str, app_version: str, overrides: dict) -> dict:
-    """A context shaped like the one Styrmin 0.1.54 embeds in a StyrminDeployment."""
+    """A context shaped like the one Styrmin 0.1.59 and later embeds in a StyrminDeployment."""
     location = spec["helm"]["main"]["location"].rstrip("/")
     parameters = {p["name"]: p.get("default") for p in spec.get("parameters") or [] if isinstance(p, dict)}
     parameters.update(overrides)
@@ -453,14 +453,18 @@ def build_context(spec: dict, driver_name: str, app_version: str, overrides: dic
         services[name] = {
             "host": name,
             "human_readable_fqdn": f"{to_fqdn_label(name)}-{ENVIRONMENT_NAME}.{FQDN_SUFFIX}",
+            "ingress_class": resolved_config["ingress_class"],
             "kind": svc.get("kind"),
+            "overridden": False,
             "port": svc.get("port"),
             # Styrmin builds it from the driver name and the deployment id, the same for every service.
             "primary_fqdn": f"{driver_name}-{DEPLOYMENT_ID}.{FQDN_SUFFIX}",
             "url": f"{svc.get('kind')}://{name}:{svc.get('port')}",
         }
         deployed.append({"component": svc.get("component"), "deployment_id": DEPLOYMENT_ID,
-                         "kind": svc.get("kind"), "port": svc.get("port"), "resolved_name": name})
+                         "driver_service_name": name, "fqdn_suffix": FQDN_SUFFIX,
+                         "ingress_class": resolved_config["ingress_class"], "kind": svc.get("kind"),
+                         "port": svc.get("port"), "resolved_name": name, "scope": svc.get("scope")})
     components = {
         name: {"config": comp, "enabled": True, "name": name}
         for name, comp in (spec.get("components") or {}).items()
@@ -1053,16 +1057,39 @@ def check_manifests(spec: dict, docs: list[dict]) -> None:
             warn(s, f"service {name!r}: port {svc.get('port')} is not a containerPort of component "
                     f"{comp!r} (container ports: {sorted(p for p in ports if p)}). Styrmin's service "
                     "sends traffic to this port on the pod: use the port the container listens on")
-        if svc.get("scope") == "external":
-            primary = RENDERED["context"]["services"][name]["primary_fqdn"]
-            if primary not in ingress_hosts:
-                fail(s, f"external service {name!r}: no Ingress has the host "
-                        f"{{{{ services['{name}'].primary_fqdn }}}} ({primary}); the application URL "
-                        "will not answer. Enable the chart's ingress with that host")
+        if svc.get("scope") == "external" and svc.get("kind") in ("http", "https"):
+            # Styrmin builds the Ingress of this service itself, named styrmin-svc-<name>, with its readable
+            # host, and with the application address when it is the first service the driver declares.
+            entry = RENDERED["context"]["services"][name]
+            first = name == (spec.get("services") or [{}])[0].get("name")
+            hosts = {entry["human_readable_fqdn"]} | ({entry["primary_fqdn"]} if first else set())
+            clashes = sorted(h for h in hosts if h in ingress_hosts)
+            for ing in ingresses:
+                for rule in (ing.get("spec") or {}).get("rules") or []:
+                    for path in ((rule.get("http") or {}).get("paths")) or []:
+                        bsvc = services_by_name.get(((path.get("backend") or {}).get("service") or {}).get("name"))
+                        sel = ((bsvc or {}).get("spec") or {}).get("selector") or {}
+                        if sel and pods and all(labels_of(pod_template(w)).items() >= sel.items() for w in pods):
+                            clashes.append(f"the backend {name_of(bsvc)} of {name_of(ing)}")
+            if clashes:
+                fail(s, f"external service {name!r}: Styrmin builds its Ingress, and the chart renders one too "
+                        f"({'; '.join(dict.fromkeys(clashes))}). That gives the service two Ingresses on the same "
+                        "host. Turn off the chart's Ingress for it in values.j2.yml (read the chart's values.yaml; "
+                        "run helm template and look for kind: Ingress), or declare the service scope: internal")
             else:
-                ok(s, f"external service {name!r} is served on its primary_fqdn")
-    if ingresses and not any(svc.get("scope") == "external" for svc in spec.get("services") or []):
-        warn(s, "the chart renders an Ingress but no service has scope: external")
+                ok(s, f"external service {name!r}: the chart renders no Ingress for it; Styrmin builds "
+                      f"styrmin-svc-{name} with the host {entry['human_readable_fqdn']}"
+                      + (f" and the application address {entry['primary_fqdn']}" if first else ""))
+                if not first and entry["primary_fqdn"] in ingress_hosts:
+                    info(s, f"the chart's Ingress serves the application address {entry['primary_fqdn']}; keep "
+                            "the service that Ingress belongs to first in spec.services, and internal")
+        elif svc.get("scope") == "external":
+            info(s, f"external service {name!r} has kind {svc.get('kind')}: Styrmin builds no Ingress for it")
+    if ingresses and not any(svc.get("scope") == "external" and svc.get("kind") in ("http", "https")
+                             for svc in spec.get("services") or []):
+        warn(s, "the chart renders an Ingress but no service is external with kind http or https: Styrmin builds "
+                "no Ingress, and the chart's Ingress serves only what it names. If users must open the "
+                "application, declare its service scope: external and turn off the chart's Ingress")
 
     bound = {}
     for d in docs:

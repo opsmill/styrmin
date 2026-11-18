@@ -23,17 +23,8 @@ admin:
   password: admin-password
   email: admin@example.com
 
-ingress:
-  enabled: true
-  hosts:
-    - host: "{{ services['semaphore'].primary_fqdn }}"
-      paths:
-        - path: /
-          pathType: Prefix
-    - host: "{{ services['semaphore'].human_readable_fqdn }}"
-      paths:
-        - path: /
-          pathType: Prefix
+# No `ingress:` block: the chart's Ingress is off by default, and Styrmin builds the Ingress of the
+# external service `semaphore` with its two hosts.
 
 # Semaphore keeps its data in PostgreSQL; its own volume only caches repository checkouts.
 persistence:

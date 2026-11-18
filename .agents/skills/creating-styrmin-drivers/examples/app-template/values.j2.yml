@@ -50,19 +50,8 @@ service:
       http:
         port: 3001
 
-ingress:
-  main:
-    className: "{{ instance.config.ingress_class }}"
-    hosts:
-{%- for host in [services['uptime-kuma'].primary_fqdn, services['uptime-kuma'].human_readable_fqdn] if host %}
-      - host: "{{ host }}"
-        paths:
-          - path: /
-            pathType: Prefix
-            service:
-              identifier: main
-              port: http
-{%- endfor %}
+# No `ingress:` block: the chart renders none by default, and Styrmin builds the Ingress of the
+# external service `uptime-kuma` with its two hosts.
 
 persistence:
   data:

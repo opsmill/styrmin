@@ -1,8 +1,8 @@
 ---
 # Uptime Kuma on the bjw-s app-template chart: the route for a single-container application whose
 # own chart has no value that can add a NetworkPolicy (Styrmin denies all egress, so its pods could
-# not resolve DNS). app-template renders the Deployment, Service, Ingress, volume and NetworkPolicies
-# from values. (Uptime Kuma's own chart can enable its NetworkPolicy: this driver is the example.)
+# not resolve DNS). app-template renders the Deployment, Service, volume and NetworkPolicies from values.
+# Styrmin builds the Ingress of the external service. (Uptime Kuma's own chart can enable its NetworkPolicy: this driver is the example.)
 apiVersion: "styrmin.io/v1"
 kind: ApplicationDriver
 metadata:

@@ -10,7 +10,8 @@ Each line: what you see, the usual cause, the fix.
 | `ImagePullBackOff`, `manifest unknown` | the tag does not exist (tag format, Bitnami tags removed from docker.io/bitnami) | fix the tag; run `check_driver.py --check-images` |
 | `exec format error` | the image has no build for the node's architecture | pick an image built for amd64 and arm64 |
 | PVC `Pending` | storage class does not exist | use `{{ instance.config.standard_storage.storage_class }}` |
-| URL answers 404 | the Ingress has no host equal to `primary_fqdn`, or the service is not `external` | set the hosts from `services['<name>']` |
+| URL answers 404 | the service is not `scope: external` with kind `http` or `https`, so Styrmin built no Ingress | declare it external; read `kubectl get ingress -n styrmin-<deployment id>` for `styrmin-svc-<name>` |
+| two Ingresses on one host | the chart renders an Ingress for an external service, and Styrmin builds one too | turn off the chart's Ingress in `values.j2.yml` |
 | URL answers 400 / "Bad Request" / CSRF error | the application rejects its host name | add both hosts to the application's allowed hosts / trusted origins |
 | application cannot connect to `styrmin-...` host | the hostname does not match the rendered Service name | read the Service names in the rendered manifests |
 | `COMPONENT_CONTAINER_NOT_FOUND` | `container` is not in the workload | use the container name from the rendered chart |
