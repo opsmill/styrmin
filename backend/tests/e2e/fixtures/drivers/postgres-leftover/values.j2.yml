@@ -1,0 +1,75 @@
+fullnameOverride: styrmin-simple-app
+
+image:
+  repository: simple-app
+  tag: "{{ app.version }}"
+
+ingress:
+  enabled: true
+  className: "{{ instance.config.ingress_class }}"
+  hosts:
+    - host: "{{ services['postgres-leftover'].primary_fqdn }}"
+      paths:
+        - path: /
+          pathType: Prefix
+
+database:
+  host: styrmin-postgresql
+
+postgresql:
+  enabled: true
+  fullnameOverride: styrmin-postgresql
+  auth:
+    username: simple-app
+    password: simple-app-password
+    database: simple_app
+  primary:
+    livenessProbe:
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+    # Ready only when the init script has run to its end. The restore hook starts when the
+    # container is ready, and the bitnami image is ready while its init scripts still run, so
+    # without this the hook could start before the tables of the init script exist: the scenario
+    # would then pass whatever the hook does.
+    readinessProbe:
+      enabled: false
+    customReadinessProbe:
+      exec:
+        command:
+          - sh
+          - -c
+          - PGPASSWORD=simple-app-password psql -U simple-app -d simple_app -tA -c "SELECT 1 FROM e2e_ready" | grep -qx 1
+      initialDelaySeconds: 1
+      periodSeconds: 1
+      timeoutSeconds: 1
+      failureThreshold: 60
+    # SIGTERM is a "smart" shutdown that waits for clients, and simple-app never
+    # closes its pool; preStop does a fast shutdown instead (disconnects clients,
+    # checkpoints). The grace period is only a backstop.
+    lifecycleHooks:
+      preStop:
+        exec:
+          command: ["/opt/bitnami/postgresql/bin/pg_ctl", "stop", "-m", "fast", "--no-wait"]
+    terminationGracePeriodSeconds: 10
+    # Runs when PostgreSQL starts on an empty data volume: at the first start and at every
+    # restore, which is what the application's own schema migration does. Run as the
+    # application's role, the tables belong to it, which is what lets the restore hook drop them.
+    initdb:
+      scripts:
+        init.sql: |
+          CREATE TABLE e2e_parent (id integer PRIMARY KEY);
+          CREATE TABLE e2e_child (parent_id integer REFERENCES e2e_parent (id));
+          -- Created last, and never dropped by the test: the readiness probe waits for it.
+          CREATE TABLE e2e_ready (id integer PRIMARY KEY);
+          INSERT INTO e2e_ready VALUES (1);
+    persistence:
+      enabled: true
+      size: 1Gi
+    extraVolumes:
+      - name: backup
+        emptyDir: {}
+    extraVolumeMounts:
+      - name: backup
+        mountPath: /backup

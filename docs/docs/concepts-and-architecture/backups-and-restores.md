@@ -218,7 +218,9 @@ component. The database that the application first connects to is empty,
 and an application that migrates its own schema at startup tries to do so
 before the restore has loaded the data. Styrmin's PostgreSQL restore hook
 prevents this: it blocks other clients from the database until the dump
-is loaded, and it loads the dump in one transaction, so the restore loads
+is loaded, it drops the tables of the `public` schema that its own database user
+owns, so that tables the application already created do not block the
+load, and it loads the dump in one transaction, so the restore loads
 all of the data or none of it. The application can log connection errors
 during the restore. An application that reconnects by itself recovers
 when the restore finishes.

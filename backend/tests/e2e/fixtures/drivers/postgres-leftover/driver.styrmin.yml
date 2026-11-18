@@ -1,0 +1,59 @@
+---
+# E2E test driver of test_restore_postgres_leftover.py: the simple-app chart whose
+# PostgreSQL init script creates two tables on every start on an empty volume. A
+# backup taken after the test dropped one of them does not hold it, and a restore
+# starts PostgreSQL on an empty volume, so the restore hook finds the table that the
+# application's own schema migration would have left behind. The git-server fixture
+# points `helm.main.location` at the in-cluster chart server.
+apiVersion: "styrmin.io/v1"
+kind: ApplicationDriver
+metadata:
+  name: postgres-leftover
+spec:
+  version: "1"
+  supported_versions: ">=0.1,<1.0"
+  info:
+    description: "Test driver: the simple-app chart whose PostgreSQL init script creates a table that a backup does not hold, as an application migration does"
+    authors: [opsmill]
+    license: Apache-2.0
+  helm:
+    main:
+      location: simple-app
+      version: 0.1.0
+
+  components:
+    server:
+      container: simple-app
+      identifier:
+        label:
+          app.kubernetes.io/name: simple-app
+
+    database:
+      container: postgresql
+      identifier:
+        label:
+          app.kubernetes.io/name: postgresql
+      backup:
+        enabled: true
+        kind: postgres
+        database_name: simple_app
+
+  env_vars:
+    - name: LOG_LEVEL
+      description: >-
+        Application log verbosity. Doc-only — actual value comes from
+        user-set deployment / environment env vars.
+      level: deployment
+    - name: DB_POOL_SIZE
+      description: >-
+        Connection pool size for the PostgreSQL database component.
+      level: component
+      components:
+        - database
+
+  services:
+    - name: postgres-leftover
+      kind: http
+      scope: internal
+      port: 8000
+      component: server
