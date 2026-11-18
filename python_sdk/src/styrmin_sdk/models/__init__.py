@@ -32,6 +32,18 @@ from styrmin_sdk.graphql._generated.get_deployment import (
 from styrmin_sdk.graphql._generated.get_deployment import (
     GetDeploymentDeploymentComponents as Component,
 )
+from styrmin_sdk.graphql._generated.get_deployment_status import (
+    GetDeploymentStatusDeployment as DeploymentCrdStatus,
+)
+from styrmin_sdk.graphql._generated.get_deployment_status import (
+    GetDeploymentStatusDeploymentCrdStatus as CrdStatus,
+)
+from styrmin_sdk.graphql._generated.get_deployment_status import (
+    GetDeploymentStatusDeploymentCrdStatusConditions as CrdCondition,
+)
+from styrmin_sdk.graphql._generated.get_deployment_status import (
+    GetDeploymentStatusDeploymentCrdStatusManagedResourceCounts as ManagedResourceCounts,
+)
 from styrmin_sdk.graphql._generated.get_environment import (
     GetEnvironmentEnvironment as Environment,
 )
@@ -126,9 +138,12 @@ __all__ = [
     "ComponentConfigInput",
     "ComponentReplicas",
     "Context",
+    "CrdCondition",
+    "CrdStatus",
     "DeployedService",
     "Deployment",
     "DeploymentConfigInput",
+    "DeploymentCrdStatus",
     "DeploymentManifest",
     "DeploymentSnapshot",
     "EnvVarInput",
@@ -145,6 +160,7 @@ __all__ = [
     "FailedStep",
     "HelmChart",
     "IngressControllerAction",
+    "ManagedResourceCounts",
     "ParameterValueInput",
     "PodPhase",
     "PodStatus",

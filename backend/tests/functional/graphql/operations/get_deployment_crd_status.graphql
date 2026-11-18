@@ -1,0 +1,12 @@
+query GetDeploymentCrdStatus($deploymentId: UUID!) {
+    deployment(deploymentId: $deploymentId) {
+        crdStatus {
+            phase
+            conditions {
+                type
+                status
+                lastTransitionTime
+            }
+        }
+    }
+}

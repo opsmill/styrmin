@@ -39,6 +39,19 @@ All notable changes to the Styrmin Python SDK will be documented in this file.
   - The services have no URL or FQDN; `deployments.get()` returns them.
   - `styrmin_sdk.models` exports the item types as `PodStatus`, with `PodPhase`, and
     `DeployedService`.
+- **`client.deployments.get_crd_status(deployment_id)`** returns the deployment state and,
+  as `crd_status`, the status of the deployment's `StyrminDeployment` as the agent last
+  reported it. Before, a program could read the deployment state, but not why a
+  deployment did not reach `running`. ([#548](https://github.com/opsmill/styrmin/issues/548))
+  - `crd_status` gives the operator's phase and message, the conditions, the managed
+    resource counts and the time the server received the report (`last_polled_at`). It
+    is `None` until the agent first reports the deployment.
+  - The server stores every report, including a report about the previous instance
+    during a rollout and a report sent during a restore. Decide from `status` whether
+    the deployment is running or has failed, and read `crd_status` to find out why.
+  - An unknown ID, or the ID of an internal deployment, raises `ResourceNotFoundError`.
+  - `styrmin_sdk.models` exports the returned types as `DeploymentCrdStatus`,
+    `CrdStatus`, `CrdCondition` and `ManagedResourceCounts`.
 
 ### Fixed
 
