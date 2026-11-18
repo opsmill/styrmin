@@ -23,6 +23,10 @@ EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_CANNOT_RUN = 2
 PROG = "styrmin-driver"
+RENDER_WARNING = (
+    f"{PROG}: warning: the template is rendered without a sandbox and can run code on this machine; "
+    "use it only on drivers you trust"
+)
 
 
 class _CannotRunError(Exception):
@@ -77,8 +81,10 @@ def _context_data(args: argparse.Namespace) -> object | None:
 
 def _run(args: argparse.Namespace, *, check_actions: bool) -> CheckReport:
     root = _driver_root(args.dir)
+    context_data = _context_data(args)
+    _print(RENDER_WARNING, sys.stderr)
     try:
-        return run_checks(root, display_root=args.dir, context_data=_context_data(args), check_actions=check_actions)
+        return run_checks(root, display_root=args.dir, context_data=context_data, check_actions=check_actions)
     except ContextFileError as err:
         lines = [f"{path}: {message}" if path else message for path, message in err.problems]
         raise _CannotRunError("\n".join(f"context file {args.context}: {line}" for line in lines)) from err

@@ -43,7 +43,8 @@ prints the version of the SDK package, not the Styrmin release.
 `styrmin-driver` renders `values.j2.yml` with Jinja as the agent does,
 without a sandbox, so a template can run Python code on the machine that
 runs the command. Run it on drivers you trust, or in an isolated job, for
-example for a pull request from a fork.
+example for a pull request from a fork. Each command prints a warning about
+this to standard error before it renders.
 
 ### Commands
 

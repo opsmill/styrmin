@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from styrmin_sdk.driver_format.cli import RENDER_WARNING
 from styrmin_sdk.driver_format.context.models.contexts import GlobalContext
 
 from .conftest import EXAMPLES, edit_spec
@@ -108,3 +109,26 @@ def test_an_unexpected_exception_exits_with_2_as_an_internal_error(monkeypatch: 
 
     assert result.code == 2
     assert "styrmin-driver: internal error: RuntimeError: boom" in result.err
+
+
+@pytest.mark.parametrize("command", ["check", "render", "context"])
+def test_a_command_that_renders_warns_once_that_the_template_is_not_sandboxed(command: str, run_cli) -> None:
+    result = run_cli(command, str(EXAMPLES / "simple-app"))
+
+    assert result.err.count(RENDER_WARNING) == 1
+
+
+def test_diff_warns_once_that_the_template_is_not_sandboxed(run_cli, tmp_path: Path) -> None:
+    base = tmp_path / "base.yml"
+    base.write_text("{}\n", encoding="utf-8")
+
+    result = run_cli("diff", str(EXAMPLES / "simple-app"), "--base", str(base))
+
+    assert result.err.count(RENDER_WARNING) == 1
+
+
+def test_no_warning_is_printed_when_nothing_is_rendered(run_cli, tmp_path: Path) -> None:
+    result = run_cli("check", str(tmp_path / "missing"))
+
+    assert result.code == 2
+    assert RENDER_WARNING not in result.err

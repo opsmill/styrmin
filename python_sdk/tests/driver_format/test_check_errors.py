@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import pytest
+from styrmin_sdk.driver_format.cli import RENDER_WARNING
 
 from .conftest import edit_spec
 
@@ -224,7 +225,7 @@ def test_a_template_that_is_not_utf8_is_an_error_with_its_line(example_copy, run
 
     assert f"{driver}/values.j2.yml:2: error: The file is not valid UTF-8:" in result.out
     assert result.code == 1
-    assert not result.err
+    assert result.err == f"{RENDER_WARNING}\n"
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads every file")
@@ -250,7 +251,7 @@ def test_a_render_failure_is_an_error_with_its_line_and_the_undefined_uses_befor
     assert f"{driver}/values.j2.yml:1: error: undefined variable 'parameters.typo'\n" in result.out
     assert f"{driver}/values.j2.yml:2: error: Chart values template rendering failed: TypeError:" in result.out
     assert result.code == 1
-    assert not result.err
+    assert result.err == f"{RENDER_WARNING}\n"
 
 
 def test_a_missing_action_function_names_its_own_line_when_another_action_is_invalid(example_copy, run_cli) -> None:
