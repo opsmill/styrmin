@@ -1089,7 +1089,8 @@ def check_manifests(spec: dict, docs: list[dict]) -> None:
                 bref = backend.get("service") or {}
                 bsvc = services_by_name.get(bref.get("name"))
                 sel = ((bsvc or {}).get("spec") or {}).get("selector") or {}
-                if (sel and pods and any(labels_of(pod_template(w)).items() >= sel.items() for w in pods)
+                if (bsvc is not None and sel and pods
+                        and any(labels_of(pod_template(w)).items() >= sel.items() for w in pods)
                         and backend_reaches_port(bsvc, bref.get("port") or {}, svc.get("port"), pods)):
                     clashes.append(f"{name_of(ing)} sends traffic to {name_of(bsvc)}, which serves the pods of "
                                    f"component {comp!r} on port {svc.get('port')}")
