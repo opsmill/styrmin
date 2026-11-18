@@ -11,6 +11,16 @@ This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the chang
 
 <!-- towncrier release notes start -->
 
+## [Styrmin - v0.2.3](https://github.com/opsmill/styrmin/tree/v0.2.3) - 2026-11-18
+
+### Added
+
+- Added `styrmin-driver`, a command installed with the SDK and present in the Styrmin image, that checks, renders and compares an application driver on the author's machine with no server, database or cluster. `check` can report more errors in one run than a load, which stops at the first, each with its file and, when it is known, its line. It also reports the undefined template variables that its render finds, with their line. The server renders such a variable as an empty string or another value with no message, or fails with a message that gives no line. ([#23](https://github.com/opsmill/styrmin/issues/23))
+
+### Housekeeping
+
+- Moved the code that reads, checks and renders an application driver, and the context model, from the backend to the SDK package. Styrmin's behaviour does not change. ([#23](https://github.com/opsmill/styrmin/issues/23))
+
 ## [Styrmin - v0.2.2](https://github.com/opsmill/styrmin/tree/v0.2.2) - 2026-11-17
 
 ### Added
