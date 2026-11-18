@@ -25,6 +25,7 @@ Styrmin is a **deployment orchestration platform** that manages application depl
 - `python_sdk/` – Async Python client SDK - see [python_sdk/AGENTS.md](python_sdk/AGENTS.md)
 - `docs/` – User-facing documentation site (Docusaurus)
 - `dev/` – Internal developer documentation - see [dev/README.md](dev/README.md)
+- `scripts/` – Developer scripts, such as `e2e-pdb.sh`, which runs an E2E test with `--pdb` from a non-interactive shell
 
 ## Commands
 
@@ -131,13 +132,20 @@ kubectl get pods -A
 kubectl logs -n styrmin-<deployment-id> <pod> --all-containers
 ```
 
-**When running via a non-interactive shell (background job, agent tool, CI), prefix the command with `sleep infinity |`** so pdb's stdin stays open instead of immediately hitting EOF and exiting (which tears the cluster down):
+**When running via a non-interactive shell (background job, agent tool)**, pdb's stdin hits EOF the moment the test fails, so pytest exits and the vcluster is torn down before you can look at it. Use the wrapper, from the repository root:
 
 ```bash
-sleep infinity | uv run pytest backend/tests/e2e/<node_id> -v -s --pdb 2>&1 | tee /tmp/pdb.log
+scripts/e2e-pdb.sh backend/tests/e2e/<node_id>
+scripts/e2e-pdb.sh "backend/tests/e2e/test_x.py::test_y[ui-chromium]" --tb=long
 ```
 
-Pytest stays paused indefinitely; pdb can't receive commands over the dummy stdin, so inspect with `kubectl` from a separate shell, then kill the process group (`pkill -f pytest` or kill the job) when done.
+The wrapper gives pytest a FIFO as stdin that stays open until the run ends, so pdb waits for input instead of reading end of input. When stdin is a terminal, it runs pytest in the foreground instead, so you can type pdb commands; stop that run with Ctrl-C and then `q` at the `(Pdb)` prompt. It passes your arguments to pytest followed by `-v -s --pdb`, writes a combined log, and exits with pytest's own status. Each run writes a new log file, `${TMPDIR:-/tmp}/e2e-pdb-log.XXXXXX`, so concurrent runs on one host do not overwrite each other's log; set `E2E_PDB_LOG` to choose the path yourself. When it starts, it prints its PID, the log path and the stop command on one line of stderr and writes the same line as the first line of the log, for example `e2e-pdb: pid=12345 log=/tmp/e2e-pdb-log.a1B2c3 (stop with: kill 12345)`. If no argument names an existing test file or directory, or if it cannot write the log, it exits with status 2 without starting pytest. When the run ends, it prints the exit status and the log path on stderr, for example `e2e-pdb: exit=1 log=/tmp/e2e-pdb-log.a1B2c3`.
+
+**Do not hand-roll `sleep infinity | uv run pytest …`.** It holds stdin open, but `sleep` never writes, so it never takes SIGPIPE when pytest exits and the shell waits on it forever — the command hangs after the run finishes, **including when the test passes**. A background job started that way never reports completion, and any consumer that buffers rather than streams (`tail`, a pager) discards the output when you finally kill it.
+
+On failure pytest stays paused in pdb. Inspect the cluster with `kubectl` from a second shell. To stop the run, use `kill <pid>` with the PID that the wrapper prints when it starts. pytest leaves pdb and runs its session teardown, which deletes the vcluster (unless you passed `--e2e-keep-cluster`), and the wrapper exits with status 143 and removes its FIFO. The same command stops a run whose test is still running. If the wrapper is killed with SIGKILL instead, the process that holds the FIFO open exits within about a second, pdb reads end of input and pytest starts its teardown; the teardown itself, which deletes the vcluster, can take longer.
+
+Do not kill pytest or `uv` directly: the run ends, but pytest skips its teardown and the vcluster keeps running, so you then have to delete it with `vcluster delete <name> --driver=docker`. Do not `pkill -f pytest`: the pattern matches every pytest on the host, and on a shared dev box or a multi-worktree checkout that kills other people's runs and leaves their vclusters running.
 
 Use `.agents/skills/e2e-troubleshoot/SKILL.md` for the structured multi-iteration variant of this `--pdb` workflow.
 
@@ -162,7 +170,7 @@ When diagnosing a failure in a `[ui-chromium]` scenario, **always** drive the in
 
 Typical loop:
 
-1. Start a styrmin deployment the test expects (use `uv run pytest ... --pdb` to pause at the exact state, or run the fixtures explicitly).
+1. Start a styrmin deployment the test expects: run the test with `--pdb` to pause at the exact state (through `scripts/e2e-pdb.sh` from a non-interactive shell), or run the fixtures explicitly.
 2. Point the Playwright MCP server at the port-forwarded styrmin URL and reproduce the failing step by step.
 3. Use MCP tools (`browser_snapshot`, `browser_evaluate`, `browser_click`, etc.) to inspect DOM, computed styles, `elementFromPoint`, console/network logs.
 4. Form a hypothesis, apply the fix in source, re-run the full pytest to validate.
