@@ -25,14 +25,17 @@ engine: claude
 timeout-minutes: 60
 max-ai-credits: 800
 # Since gh-aw v1.2.0, `defaults` covers only certificate, JSON-schema and Ubuntu
-# archive hosts. `github` is needed for `git fetch`; `python` and `node` are needed
-# for the profile's `setup` commands (`uv sync`, `pnpm install`).
+# archive hosts. `github` is needed for `git fetch`; `python`, `node` and
+# `playwright` are needed for the profile's `setup` commands (`uv sync`,
+# `pnpm install`, `pnpm exec playwright install`). Rule: every overlay shipped in
+# `.github/bug-pipeline/` has its ecosystem identifier listed here.
 network:
   allowed:
     - defaults
     - github
     - python
     - node
+    - playwright
 permissions:
   contents: read
   issues: read
@@ -66,7 +69,7 @@ safe-outputs:
     max: 2
   report-missing-tool:
 source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-test.md@chore/gh-aw-1.2.2
-source-sha: "b9a59335a2b9cecd934100ac3db22837835092ac"
+source-sha: "3a171d25bbcfb84d124f9b1da2a75657c7a398c0"
 ---
 
 # Bug test-writer agent

@@ -48,7 +48,7 @@ safe-outputs:
     max: 2
   report-missing-tool:
 source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-analyst.md@chore/gh-aw-1.2.2
-source-sha: "b9a59335a2b9cecd934100ac3db22837835092ac"
+source-sha: "3a171d25bbcfb84d124f9b1da2a75657c7a398c0"
 ---
 
 # Bug analyst agent
