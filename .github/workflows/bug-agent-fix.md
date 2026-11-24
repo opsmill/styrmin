@@ -33,6 +33,8 @@ permissions:
 concurrency:
   group: bug-fix-${{ github.event.inputs.pr_number }}
   cancel-in-progress: false
+  # One conclusion slot per dispatched run, not one shared by every run of this worker.
+  job-discriminator: ${{ github.event.inputs.pr_number }}
 tools:
   github:
     toolsets: [default]
@@ -55,7 +57,7 @@ safe-outputs:
     max: 2
   report-missing-tool:
 source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-fix.md@chore/gh-aw-1.2.2
-source-sha: "8e33a1daefc657ce520834a3b576b9499e493953"
+source-sha: "b9a59335a2b9cecd934100ac3db22837835092ac"
 ---
 
 # Bug fixer agent
