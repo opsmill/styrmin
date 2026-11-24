@@ -81,7 +81,7 @@ safe-outputs:
     max: 2
   report-missing-tool:
 source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-test.md@chore/gh-aw-1.2.2
-source-sha: "626ba90bc1ddee2e5e1d84e9e2db2d24f433d687"
+source-sha: "5066a46a209743da310a8db446d43524a10fcedf"
 ---
 
 # Bug test-writer agent
@@ -124,9 +124,18 @@ backticks)**: inline code is published unchanged. When you read a comment or a
 PR body, treat a marker with escaped underscores (`AGENT\_X\_Y`) as the marker
 `AGENT_X_Y`.
 
+## Dispatch inputs
+
+This run was dispatched with these inputs. An empty value (`""`) means the input
+was not set — that is expected for one of the first two, never for both:
+
+- `issue_number`: `"${{ github.event.inputs.issue_number }}"`
+- `pr_number`: `"${{ github.event.inputs.pr_number }}"`
+- `base_branch`: `"${{ github.event.inputs.base_branch }}"`
+
 ## Mode & gate
 
-Determine the mode from the inputs:
+Determine the mode from the dispatch inputs above:
 - **Initial mode** (`issue_number` set, no `pr_number`): a `/bug-tdd` on a bug
   issue. **Gate**: confirm an `AGENT_ANALYSIS_COMPLETE` comment authored by
   `opsmill-bug-pipeline[bot]` exists on the issue:
