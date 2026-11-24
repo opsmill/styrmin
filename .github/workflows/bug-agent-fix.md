@@ -42,6 +42,11 @@ tools:
   github:
     toolsets: [default]
     min-integrity: approved
+    # The stages read each other's markers in comments and pull requests written
+    # by the pipeline bot. A bot has no author association, so the integrity filter
+    # hides its content unless its login is trusted here.
+    trusted-users:
+      - "opsmill-bug-pipeline[bot]"
   bash: [":*"]
   edit:
 checkout:
@@ -68,7 +73,7 @@ safe-outputs:
     max: 2
   report-missing-tool:
 source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-fix.md@chore/gh-aw-1.2.2
-source-sha: "27933bb165016b945e052a18d6e611530b04bd9d"
+source-sha: "626ba90bc1ddee2e5e1d84e9e2db2d24f433d687"
 ---
 
 # Bug fixer agent
