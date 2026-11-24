@@ -15,7 +15,7 @@ This pipeline does **not** replace the general-purpose `@claude review` workflow
 | `.github/bug-pipeline/profile.yml` | styrmin's executable test profile (base branch, authoritative check, setup/test/format/lint commands). Consumed by the test/fix workers. | Yes — repo-specific values |
 | `.github/labels.yml` | Declares the four `state/*` pipeline labels (synced by the `Sync Labels` workflow). | Yes |
 
-The gh-aw toolchain version is pinned in `.github/aw/actions-lock.json` (currently v0.86.2).
+The gh-aw toolchain version is pinned in `.github/aw/actions-lock.json` (currently v1.2.2).
 
 ## The four stages at a glance
 

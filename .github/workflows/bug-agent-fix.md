@@ -17,7 +17,15 @@ run-name: "Bug fixer PR #${{ github.event.inputs.pr_number }}"
 engine: claude
 timeout-minutes: 60
 max-ai-credits: 800
-network: defaults
+# Since gh-aw v1.2.0, `defaults` covers only certificate, JSON-schema and Ubuntu
+# archive hosts. `github` is needed for `git` and `gh`; `python` and `node` are
+# needed for the profile's `setup` commands (`uv sync`, `pnpm install`).
+network:
+  allowed:
+    - defaults
+    - github
+    - python
+    - node
 permissions:
   contents: read
   issues: read
@@ -45,8 +53,9 @@ safe-outputs:
     max: 3
   add-labels:
     max: 2
-  missing-tool:
-source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-fix.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745
+  report-missing-tool:
+source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-fix.md@chore/gh-aw-1.2.2
+source-sha: "8e33a1daefc657ce520834a3b576b9499e493953"
 ---
 
 # Bug fixer agent

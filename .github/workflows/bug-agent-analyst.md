@@ -16,7 +16,12 @@ run-name: "Bug analyst #${{ github.event.inputs.issue_number }}"
 engine: claude
 timeout-minutes: 40
 max-ai-credits: 500
-network: defaults
+# Since gh-aw v1.2.0, `defaults` covers only certificate, JSON-schema and Ubuntu
+# archive hosts. `github` is needed for the `git` and `gh` calls the agent makes.
+network:
+  allowed:
+    - defaults
+    - github
 permissions:
   contents: read
   issues: read
@@ -39,8 +44,9 @@ safe-outputs:
     max: 3
   add-labels:
     max: 2
-  missing-tool:
-source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-analyst.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745
+  report-missing-tool:
+source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-analyst.md@chore/gh-aw-1.2.2
+source-sha: "8e33a1daefc657ce520834a3b576b9499e493953"
 ---
 
 # Bug analyst agent

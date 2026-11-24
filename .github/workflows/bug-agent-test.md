@@ -24,7 +24,15 @@ run-name: "Bug test-writer #${{ github.event.inputs.issue_number }}${{ github.ev
 engine: claude
 timeout-minutes: 60
 max-ai-credits: 800
-network: defaults
+# Since gh-aw v1.2.0, `defaults` covers only certificate, JSON-schema and Ubuntu
+# archive hosts. `github` is needed for `git fetch`; `python` and `node` are needed
+# for the profile's `setup` commands (`uv sync`, `pnpm install`).
+network:
+  allowed:
+    - defaults
+    - github
+    - python
+    - node
 permissions:
   contents: read
   issues: read
@@ -54,8 +62,9 @@ safe-outputs:
     max: 3
   add-labels:
     max: 2
-  missing-tool:
-source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-test.md@b376723a0cac214db01f3b8aa8e9750ac5dbe745
+  report-missing-tool:
+source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-test.md@chore/gh-aw-1.2.2
+source-sha: "8e33a1daefc657ce520834a3b576b9499e493953"
 ---
 
 # Bug test-writer agent
@@ -104,7 +113,18 @@ Determine the mode from the inputs:
   If `0`, post a comment explaining analysis must run first (`/bug-analyze`) and
   **STOP** — do not open a PR or emit a marker.
 - **Revision mode** (`pr_number` set): a `/bug-tdd` on an existing draft test PR
-  whose latest reviewer verdict is `TEST_CHANGES_REQUESTED`. Skip to "Revision".
+  whose latest reviewer verdict is `TEST_CHANGES_REQUESTED`. **Gate**: read the
+  most recent verdict the reviewer posted on that PR:
+
+  ```bash
+  gh api "repos/${{ github.repository }}/issues/${{ github.event.inputs.pr_number }}/comments" \
+    --paginate --jq '[.[] | select(.user.login=="opsmill-bug-pipeline[bot]") | .body | scan("AGENT_REVIEW_VERDICT:\\s*[A-Z_]+")] | last'
+  ```
+
+  If it is anything other than `AGENT_REVIEW_VERDICT: TEST_CHANGES_REQUESTED` —
+  including `null`, meaning the reviewer has not ruled on the current state yet —
+  post a comment saying so and **STOP**: do not check out the branch, do not
+  push, do not emit a marker. Otherwise skip to "Revision".
 
 For multi-line `gh` bodies, write to `.agent-tmp/gh-body.md` and pass `--body-file`.
 
