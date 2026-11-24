@@ -1,0 +1,33 @@
+.github/workflows/bug-agent-analyst.lock.yml
+  s_7f86cdd645f623::t_c229321b7a9b56 1
+.github/workflows/bug-agent-analyst.md
+  s_7f86cdd645f623::t_9b064ca4a96598 51
+.github/workflows/bug-agent-fix.lock.yml
+  s_7f86cdd645f623::t_e649527074b323 1,157,1236,1389,2429
+.github/workflows/bug-agent-fix.md
+  s_7f86cdd645f623::t_ae57a244f109c4 21-24,31,63
+.github/workflows/bug-agent-review.lock.yml
+  s_7f86cdd645f623::t_b3c17f578b196f 1
+.github/workflows/bug-agent-review.md
+  s_7f86cdd645f623::t_fe526c9aaef31f 50
+.github/workflows/bug-agent-test.lock.yml
+  s_7f86cdd645f623::t_07ee6aeb80db09 1,165,1267,1420,2462
+.github/workflows/bug-agent-test.md
+  s_7f86cdd645f623::t_471cb0d59b7ea7 28-31,38,72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "34270eadf59d837c56ca1de1a27ed7d5c3e936ff",
+  "prompts": {},
+  "sessions": {
+    "s_7f86cdd645f623": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9672402d-6cd7-4c09-87e8-40e1adffe5b9",
+        "model": "unknown"
+      },
+      "human_author": "Pol Michel <polmichel29@gmail.com>"
+    }
+  }
+}
