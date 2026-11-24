@@ -108,6 +108,59 @@ def test_deployments_create_with_driver_version_pin(mock_client: MagicMock) -> N
     )
 
 
+def test_deployments_create_with_config_against_real_sdk(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``deployments create --config`` must reach the real SDK ``create`` without crashing (#622).
+
+    ``DeploymentResource.create`` calls ``config.model_dump(...)`` on whatever
+    it receives as ``config``, so the CLI must validate the raw ``--config``
+    JSON into a ``DeploymentConfigInput`` before passing it on — exactly like
+    ``update``/``update-version`` already do with ``UpdateDeploymentInput``.
+    Without that conversion, a plain ``dict`` reaches ``.model_dump()`` and
+    raises ``AttributeError: 'dict' object has no attribute 'model_dump'``.
+    """
+    from styrmin_sdk import Transport
+    from styrmin_sdk.resources.deployments import DeploymentResource
+
+    async def execute(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:  # noqa: RUF029 — mirrors Transport.execute
+        assert variables is not None
+        assert variables["config"] == {"fqdnSuffix": "example.com"}
+        return {
+            "data": {
+                "deploy": {
+                    "id": TASK_UUID,
+                    "type": "create_instance",
+                    "status": "pending",
+                    "message": None,
+                    "deploymentId": DEPLOYMENT_UUID,
+                }
+            }
+        }
+
+    transport = AsyncMock(spec=Transport)
+    transport.execute.side_effect = execute
+    mock_client.deployments = DeploymentResource(transport)
+
+    with pytest.raises(SystemExit) as exc:
+        app(
+            [
+                "deployments",
+                "create",
+                "postgres",
+                "14.0",
+                "--id",
+                ENV_UUID,
+                "--config",
+                '{"fqdnSuffix": "example.com"}',
+            ]
+        )
+    assert exc.value.code == 0
+
+    output = capsys.readouterr().out
+    assert DEPLOYMENT_UUID in output
+
+
 def test_deployments_get(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
     mock_deployment = MagicMock(
         id=DEPLOYMENT_UUID,
