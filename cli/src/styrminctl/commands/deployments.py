@@ -9,7 +9,7 @@ from typing import Annotated
 from cyclopts import App, Parameter
 from rich.markup import escape
 from styrmin_sdk.exceptions import ApplyError, BatchNameConflictError, StyrminError
-from styrmin_sdk.models import ComponentReplicas, ReplicaSource, UpdateDeploymentInput
+from styrmin_sdk.models import ComponentReplicas, DeploymentConfigInput, ReplicaSource, UpdateDeploymentInput
 from styrmin_sdk.models.deployment_manifest import ApplyEvent, ApplyOutcome, ApplyOverrides
 from styrmin_sdk.resources.deployments import FAILED_TASK_STATUS, check_replica_counts, failed_task_reason
 
@@ -67,6 +67,7 @@ async def create(
             raise ValueError("Provide either --cluster or --cluster-id, not both")
 
         parsed_config = parse_json_argument(config)
+        config_input = DeploymentConfigInput.model_validate(parsed_config) if parsed_config is not None else None
         async with client.get_client() as sdk:
             task = await sdk.deployments.create(
                 driver=driver,
@@ -76,7 +77,7 @@ async def create(
                 cluster_id=cluster_id,
                 cluster_name=cluster if cluster_id is None and id is None else None,
                 name=name,
-                config=parsed_config,
+                config=config_input,
                 driver_version_id=driver_version_id,
             )
 

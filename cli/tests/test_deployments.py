@@ -9,7 +9,7 @@ from uuid import UUID
 
 import pytest
 from styrmin_sdk.exceptions import ApplyError, BatchNameConflictError, StyrminError
-from styrmin_sdk.models import UpdateDeploymentInput
+from styrmin_sdk.models import DeploymentConfigInput, UpdateDeploymentInput
 from styrmin_sdk.models.deployment_manifest import ApplyOutcome
 from styrminctl.cli import app
 
@@ -83,7 +83,7 @@ def test_deployments_create_with_options(mock_client: MagicMock) -> None:
         cluster_id=None,
         cluster_name=None,
         name="my-db",
-        config={"key": "val"},
+        config=DeploymentConfigInput.model_validate({"key": "val"}),
         driver_version_id=None,
     )
 
