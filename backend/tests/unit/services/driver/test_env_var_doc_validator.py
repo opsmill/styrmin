@@ -58,7 +58,12 @@ def _make_specification(
         version="1",
         supported_versions=">=0.1,<1.0",
         info=Info(),
-        helm=Helm(main=HelmSettings(location="oci://example", version="1.0.0")),
+        helm=Helm(
+            main=HelmSettings(
+                location="oci://registry.opsmill.io/opsmill/chart/example",
+                version="1.0.0",
+            )
+        ),
         components=Components(root=components),
         env_vars=env_vars,
     )
@@ -278,7 +283,12 @@ class TestRegistrationAbortsOnBadDoc:
                 "version": "1",
                 "supported_versions": ">=0.1,<1.0",
                 "info": {},
-                "helm": {"main": {"location": "oci://example", "version": "1.0.0"}},
+                "helm": {
+                    "main": {
+                        "location": "oci://registry.opsmill.io/opsmill/chart/example",
+                        "version": "1.0.0",
+                    }
+                },
                 "components": {
                     "server": {
                         "identifier": {"label": {"app.kubernetes.io/name": "demo"}},

@@ -37,7 +37,12 @@ def _driver_spec(server: dict[str, Any]) -> dict[str, Any]:
             "version": "0.1.0",
             "supported_versions": ">=0.1,<1.0",
             "info": {"description": "Replica fields fixture"},
-            "helm": {"main": {"location": "./src/helm", "version": "0.1.0"}},
+            "helm": {
+                "main": {
+                    "location": "oci://registry.opsmill.io/opsmill/chart/simple-app",
+                    "version": "0.1.0",
+                }
+            },
             "components": {
                 "server": server,
                 "database": {"identifier": {"label": _DATABASE_LABEL}},
