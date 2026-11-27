@@ -182,6 +182,18 @@ def test_invalid_icon_is_a_warning_and_the_exit_code_is_zero(example_copy, run_c
     assert result.code == 0
 
 
+def test_a_location_with_no_chart_name_is_an_error(example_copy, run_cli) -> None:
+    driver = example_copy("simple-app")
+    edit_spec(driver, lambda data: data["spec"]["helm"]["main"].update(location="oci://registry.opsmill.io"))
+
+    result = run_cli("check", str(driver))
+
+    assert (
+        f"{driver}/driver.styrmin.yml:{_spec_line(driver, 'location:')}: error: spec.helm.main.location:" in result.out
+    )
+    assert result.code == 1
+
+
 def test_directory_without_driver_spec_file_exits_with_1(tmp_path: Path, run_cli) -> None:
     result = run_cli("check", str(tmp_path))
 
