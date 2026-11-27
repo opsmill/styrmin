@@ -25,7 +25,7 @@ description: "Task list for 034-backup-rename-description"
 
 ## Phase 1: Setup
 
-- [ ] T001 Confirm the current Alembic head. The repository has no `alembic.ini`, so run `uv run python -c 'from alembic import command; from styrmin_backend.cli.db import _get_alembic_config; command.heads(_get_alembic_config())'`, as described in `dev/guides/database-migrations.md` ("Multi-head resolution"). Expected: `859c9d31dc11`. Use the head you find as `down_revision` in T003.
+- [X] T001 Confirm the current Alembic head. The repository has no `alembic.ini`, so run `uv run python -c 'from alembic import command; from styrmin_backend.cli.db import _get_alembic_config; command.heads(_get_alembic_config())'`, as described in `dev/guides/database-migrations.md` ("Multi-head resolution"). Expected: `859c9d31dc11`. Use the head you find as `down_revision` in T003.
 
 ---
 
