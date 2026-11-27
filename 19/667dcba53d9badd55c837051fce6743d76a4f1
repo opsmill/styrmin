@@ -1,0 +1,27 @@
+.github/workflows/bug-agent-test.md
+  s_343b56f8b88487::t_49afe26d88745d 78,90,93,97
+.github/workflows/bug-pipeline-relay.yml
+  s_343b56f8b88487::t_fa990d1a807151 99,119-135,142,156,171
+.github/workflows/bug-agent-fix.md
+  s_343b56f8b88487::t_49afe26d88745d 16-19,75,86,89,93,141-142,145-146
+.github/workflows/bug-agent-fix.lock.yml
+  s_343b56f8b88487::t_aea98ef375f186 1,70-73,764,778-779,986,2459
+.github/workflows/bug-agent-test.lock.yml
+  s_343b56f8b88487::t_1c9e578c3f4579 1,776,790-791,1013,2487
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "19667dcba53d9badd55c837051fce6743d76a4f1",
+  "prompts": {},
+  "sessions": {
+    "s_343b56f8b88487": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21d47-49c5-7462-8f4c-96a0b01a5674",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Pol Michel <polmichel29@gmail.com>"
+    }
+  }
+}
