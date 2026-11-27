@@ -2,7 +2,7 @@
  * Rename a backup and change its description (spec 034, US1 / FR-012).
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, act, within } from "@testing-library/react";
+import { render, screen, act, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -38,6 +38,9 @@ const noopMutationResult = {
 };
 
 let deploymentStatus = "active";
+let backupDescription: string | null = "Taken before the 2.6 upgrade";
+const DUPLICATE_MESSAGE =
+  'A backup named "taken" already exists for this deployment. Choose a different name.';
 
 const DEPLOYMENT = {
   id: "dep-1",
@@ -103,7 +106,7 @@ vi.mock("@/generated/graphql", async () => {
     }),
     useListBackupsQuery: () => ({
       ...noopQueryResult,
-      data: { backups: [BACKUP] },
+      data: { backups: [{ ...BACKUP, description: backupDescription }] },
       dataUpdatedAt: Date.now(),
     }),
     useListRestoresQuery: () => ({
@@ -195,6 +198,7 @@ function renderDialog(
 describe("BackupDetailsDialog", () => {
   beforeEach(() => {
     deploymentStatus = "active";
+    backupDescription = BACKUP.description ?? null;
     updateBackupMock.mockReset();
     updateBackupMock.mockResolvedValue({});
     createBackupMock.mockReset();
@@ -229,10 +233,7 @@ describe("BackupDetailsDialog", () => {
 
   it("shows a create error in the Create Backup dialog", async () => {
     createBackupMock.mockRejectedValue(
-      new GraphQLOperationError(
-        "ALREADY_EXISTS",
-        "A backup with that name already exists for this instance",
-      ),
+      new GraphQLOperationError("ALREADY_EXISTS", DUPLICATE_MESSAGE),
     );
     await renderBackupsTab();
 
@@ -247,7 +248,7 @@ describe("BackupDetailsDialog", () => {
       name: "taken",
     });
     expect(screen.getByTestId("backup-details-error")).toHaveTextContent(
-      "A backup with that name already exists for this instance",
+      DUPLICATE_MESSAGE,
     );
   });
 
@@ -262,6 +263,76 @@ describe("BackupDetailsDialog", () => {
     expect(description.textContent).toBe(BACKUP.description);
     expect(description.getAttribute("title")).toBe(BACKUP.description);
     expect(description.className).toContain("line-clamp-2");
+    // A short one-line description needs no toggle.
+    expect(
+      within(row).queryByTestId("backup-description-toggle"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("lets every user expand and collapse a long description", async () => {
+    backupDescription = "First line\nSecond line\nThird line";
+    await renderBackupsTab();
+
+    const row = screen.getByTestId("backup-row");
+    const description = within(row).getByTestId("backup-description");
+    const toggle = within(row).getByRole("button", { name: "Show more" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-controls", description.id);
+
+    toggle.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveTextContent("Show less");
+    expect(description.className).not.toContain("line-clamp-2");
+    // The text and the row attribute stay the full description.
+    expect(description.textContent).toBe(backupDescription);
+    expect(row.getAttribute("data-backup-description")).toBe(backupDescription);
+    expect(description.getAttribute("title")).toBe(backupDescription);
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(description.className).toContain("line-clamp-2");
+  });
+
+  it("shows the description in the Restore Backup dialog as plain text", async () => {
+    backupDescription = "Known good.\n<b>not bold</b>";
+    await renderBackupsTab();
+
+    await userEvent.click(
+      within(screen.getByTestId("backup-row")).getByRole("button", {
+        name: "Restore",
+      }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Restore Backup" });
+    const description = within(dialog).getByTestId(
+      "restore-backup-description",
+    );
+    expect(description.textContent).toBe(backupDescription);
+    expect(description.querySelector("b")).toBeNull();
+    expect(description.className).toContain("whitespace-pre-line");
+  });
+
+  it("shows no description in the Restore Backup dialog when the backup has none", async () => {
+    backupDescription = null;
+    await renderBackupsTab();
+
+    await userEvent.click(
+      within(screen.getByTestId("backup-row")).getByRole("button", {
+        name: "Restore",
+      }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Restore Backup" });
+    expect(
+      within(dialog).queryByTestId("restore-backup-description"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("names the backup in the Edit button's accessible name", async () => {
+    await renderBackupsTab();
+
+    expect(
+      screen.getByRole("button", { name: `Edit backup ${BACKUP.name}` }),
+    ).toBe(screen.getByTestId("backup-edit"));
   });
 
   it("keeps Edit enabled while the deployment is being deleted", async () => {
@@ -313,14 +384,132 @@ describe("BackupDetailsDialog", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("links each field's error to its input", async () => {
+    renderDialog();
+
+    const name = screen.getByTestId("backup-details-name");
+    expect(name).not.toHaveAttribute("aria-describedby");
+    fireEvent.change(name, { target: { value: "a\u0007b" } });
+    expect(name).toHaveAttribute("aria-invalid", "true");
+    expect(name).toHaveAttribute(
+      "aria-describedby",
+      "backup-details-name-error",
+    );
+    expect(
+      document.getElementById("backup-details-name-error"),
+    ).toHaveTextContent(
+      "The name cannot contain line breaks, tabs or other control characters",
+    );
+
+    const description = screen.getByTestId("backup-details-description");
+    fireEvent.change(description, { target: { value: "bad\u0000" } });
+    expect(description).toHaveAttribute("aria-invalid", "true");
+    expect(description).toHaveAttribute(
+      "aria-describedby",
+      "backup-details-description-error",
+    );
+    expect(
+      document.getElementById("backup-details-description-error"),
+    ).toHaveTextContent(
+      "The description cannot contain control characters other than line breaks and tabs",
+    );
+  });
+
+  it("validates as the server does: trimmed, counted in code points, no control characters", async () => {
+    const onSubmit = renderDialog();
+    const name = screen.getByTestId("backup-details-name");
+    const description = screen.getByTestId("backup-details-description");
+
+    // 255 emoji are 510 UTF-16 units but 255 characters; spaces around are trimmed.
+    fireEvent.change(name, { target: { value: `  ${"😀".repeat(255)}  ` } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.change(name, { target: { value: "😀".repeat(256) } });
+    expect(
+      screen.getByText("The name can have at most 255 characters"),
+    ).toBeInTheDocument();
+    fireEvent.change(name, { target: { value: "tab\there" } });
+    expect(
+      screen.getByText(
+        "The name cannot contain line breaks, tabs or other control characters",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.change(name, { target: { value: "renamed" } });
+
+    fireEvent.change(description, {
+      target: { value: `  ${"é".repeat(2000)}\n` },
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.change(description, { target: { value: "a".repeat(2001) } });
+    expect(
+      screen.getByText("The description can have at most 2,000 characters"),
+    ).toBeInTheDocument();
+    fireEvent.change(description, { target: { value: "one\ttwo\nthree" } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("backup-details-submit"));
+    expect(onSubmit).toHaveBeenCalledWith({
+      name: "renamed",
+      description: "one\ttwo\nthree",
+    });
+  });
+
+  it("shows a character counter near and over the description limit", () => {
+    renderDialog();
+    const description = screen.getByTestId("backup-details-description");
+
+    expect(
+      screen.queryByTestId("backup-details-description-counter"),
+    ).not.toBeInTheDocument();
+    fireEvent.change(description, { target: { value: "a".repeat(1950) } });
+    const counter = screen.getByTestId("backup-details-description-counter");
+    expect(counter).toHaveTextContent("1,950 / 2,000");
+    expect(description.getAttribute("aria-describedby")).toBe(counter.id);
+
+    fireEvent.change(description, { target: { value: "a".repeat(2001) } });
+    expect(
+      screen.getByTestId("backup-details-description-counter"),
+    ).toHaveTextContent("2,001 / 2,000");
+
+    fireEvent.change(description, { target: { value: "a".repeat(1799) } });
+    expect(
+      screen.queryByTestId("backup-details-description-counter"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the default name as the placeholder in create mode", () => {
+    renderDialog({
+      mode: "create",
+      initialName: undefined,
+      initialDescription: undefined,
+    });
+
+    expect(screen.getByTestId("backup-details-name")).toHaveAttribute(
+      "placeholder",
+      "Leave empty to use styrmin-<backup id>",
+    );
+  });
+
+  it("titles a server error other than ALREADY_EXISTS as Error", async () => {
+    const onSubmit = vi
+      .fn()
+      .mockRejectedValue(
+        new GraphQLOperationError("VALIDATION_ERROR", "Bad name"),
+      );
+    renderDialog({ onSubmit });
+
+    await userEvent.type(screen.getByTestId("backup-details-name"), "x");
+    await userEvent.click(screen.getByTestId("backup-details-submit"));
+
+    const box = screen.getByTestId("backup-details-error");
+    expect(within(box).getByText("Error")).toBeInTheDocument();
+    expect(box).toHaveTextContent("Bad name");
+  });
+
   it("shows a server ALREADY_EXISTS error", async () => {
     const onSubmit = vi
       .fn()
       .mockRejectedValue(
-        new GraphQLOperationError(
-          "ALREADY_EXISTS",
-          "A backup with that name already exists for this instance",
-        ),
+        new GraphQLOperationError("ALREADY_EXISTS", DUPLICATE_MESSAGE),
       );
     renderDialog({ onSubmit });
 
@@ -330,9 +519,9 @@ describe("BackupDetailsDialog", () => {
     await userEvent.click(screen.getByTestId("backup-details-submit"));
 
     expect(onSubmit).toHaveBeenCalledWith({ name: "taken" });
-    expect(screen.getByTestId("backup-details-error")).toHaveTextContent(
-      "A backup with that name already exists for this instance",
-    );
+    const box = screen.getByTestId("backup-details-error");
+    expect(within(box).getByText("Name already in use")).toBeInTheDocument();
+    expect(box).toHaveTextContent(DUPLICATE_MESSAGE);
   });
 
   it("focuses the submit button in create mode so Enter submits the empty form", async () => {

@@ -108,7 +108,9 @@ schema migration. Known good."
 
 - **UI**: on the deployment's Backups tab, click "Create Backup". The
   dialog has two optional fields, Name and Description. Leave Name empty
-  to use the default name.
+  to use the default name. The dialog checks the same rules as the server
+  (see below) before you submit, and shows a character count when the
+  description is within 200 characters of the limit.
 - **CLI**: `styrminctl backups create <deployment> --name <name>
   --description <text>`. Both options are optional.
 - **SDK**: `client.backups.create_backup(instance_id, name=...,
@@ -125,8 +127,12 @@ the `READ_WRITE` role, the same role as creating a backup.
 
 - **UI**: on the deployment's Backups tab, click "Edit" in the backup's
   row. The "Edit Backup" dialog shows the current name and description.
-  The row shows the description under the backup's name. On a deleted
-  deployment, the Edit action is disabled, as every action is.
+  The row shows the description under the backup's name, cut to two
+  lines. When the description has a line break or is longer than 80
+  characters, any user can click "Show more" to read all of it. The
+  "Restore Backup" dialog shows the description under the backup's name.
+  While a deployment is being deleted or after it is deleted, Edit stays
+  available, and Restore and Delete are disabled.
 - **CLI**: `styrminctl backups update <backup-id> --name <name>
   --description <text>`. Pass one option or both. `--description ""`
   clears the description. Without either option, the command prints an

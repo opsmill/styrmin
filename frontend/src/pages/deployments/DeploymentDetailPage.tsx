@@ -779,6 +779,14 @@ export default function DeploymentDetailPage() {
               <code className="font-mono">{selectedBackup?.name}</code>
             </DialogDescription>
           </DialogHeader>
+          {selectedBackup?.description && (
+            <p
+              className="whitespace-pre-line break-words text-sm text-muted-foreground"
+              data-testid="restore-backup-description"
+            >
+              {selectedBackup.description}
+            </p>
+          )}
           {selectedBackup && (
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
               <dt className="text-muted-foreground">
@@ -1144,6 +1152,12 @@ function ServiceAddressRow({
 
 type RestoreItem = ListRestoresQuery["restores"][number];
 
+// ponytail: a text heuristic, not a measured overflow (jsdom cannot measure);
+// it can offer "Show more" for text that already fits on a wide screen.
+function isLongDescription(description: string): boolean {
+  return description.includes("\n") || [...description].length > 80;
+}
+
 function BackupRow({
   backup,
   index,
@@ -1193,6 +1207,7 @@ function BackupRow({
   /** When the list was fetched, in ms since the epoch; expiry is judged against it. */
   listedAt: number;
 }) {
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const { data: restoresData } = useListRestoresQuery(
     { backupId: backup.id },
     {
@@ -1261,13 +1276,28 @@ function BackupRow({
               {backup.name}
             </span>
             {backup.description && (
-              <span
-                className="line-clamp-2 whitespace-pre-line break-words text-[12px] text-muted-foreground"
-                data-testid="backup-description"
-                title={backup.description}
-              >
-                {backup.description}
-              </span>
+              <>
+                <span
+                  id={`backup-description-${backup.id}`}
+                  className={`${descriptionExpanded ? "" : "line-clamp-2 "}whitespace-pre-line break-words text-[12px] text-muted-foreground`}
+                  data-testid="backup-description"
+                  title={backup.description}
+                >
+                  {backup.description}
+                </span>
+                {isLongDescription(backup.description) && (
+                  <button
+                    type="button"
+                    data-testid="backup-description-toggle"
+                    aria-expanded={descriptionExpanded}
+                    aria-controls={`backup-description-${backup.id}`}
+                    onClick={() => setDescriptionExpanded((v) => !v)}
+                    className="text-[12px] font-medium text-primary hover:underline"
+                  >
+                    {descriptionExpanded ? "Show less" : "Show more"}
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -1332,6 +1362,7 @@ function BackupRow({
             <span className="text-muted-foreground/30">|</span>
             <button
               data-testid="backup-edit"
+              aria-label={`Edit backup ${backup.name}`}
               onClick={() => onEdit(backup.id)}
               className="text-xs font-medium text-primary hover:underline"
             >
