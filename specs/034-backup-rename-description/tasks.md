@@ -211,8 +211,8 @@ description: "Task list for 034-backup-rename-description"
 
 **Independent Test**: A row that represents a backup created with a custom name before the upgrade can still be restored and renamed, and its restore names the original Velero object.
 
-- [ ] T033 [US3] In `backend/tests/unit/workflows/test_restore_steps.py` (or the restore-flow test module that T007 touched), add a test. Seed a backup with `name="pre-migration"` and `metadata_={"velero_backup_name": "pre-migration"}`, rename it to `golden` with `update_backup`, and run the restore flow with Kubernetes faked. The Velero `Restore` must have `backupName="pre-migration"`. Add the matching check for a default-named row: `styrmin-<id>` is used.
-- [ ] T034 [US3] Check that `update_backup` never writes `metadata_["velero_backup_name"]`. Add a unit assertion in `test_backup_service.py` that the key is unchanged after a rename.
+- [X] T033 [US3] In `backend/tests/unit/workflows/test_restore_steps.py` (or the restore-flow test module that T007 touched), add a test. Seed a backup with `name="pre-migration"` and `metadata_={"velero_backup_name": "pre-migration"}`, rename it to `golden` with `update_backup`, and run the restore flow with Kubernetes faked. The Velero `Restore` must have `backupName="pre-migration"`. Add the matching check for a default-named row: `styrmin-<id>` is used.
+- [X] T034 [US3] Check that `update_backup` never writes `metadata_["velero_backup_name"]`. Add a unit assertion in `test_backup_service.py` that the key is unchanged after a rename.
 
 **Checkpoint**: Old backups are covered by the migration test (T004) and by the flow and service tests (T033, T034).
 

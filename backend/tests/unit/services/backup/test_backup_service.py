@@ -386,6 +386,29 @@ class TestUpdateBackup:
         assert result.name == "before-upgrade"
 
     @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "metadata",
+        [
+            pytest.param({"velero_backup_name": "pre-migration"}, id="legacy"),
+            pytest.param({"timeout": 1800}, id="default"),
+        ],
+    )
+    async def test_rename_never_writes_the_velero_backup_name(
+        self, metadata: dict
+    ) -> None:
+        """A rename leaves the stored Velero name as it was, or absent (FR-009)."""
+        backup = self._backup(name="pre-migration")
+        backup.metadata_ = dict(metadata)
+        uow = make_uow(backups=[backup])
+
+        result = await update_backup(
+            backup.id, uow, name="golden", description="renamed"
+        )
+
+        assert result.name == "golden"
+        assert result.metadata_ == metadata
+
+    @pytest.mark.anyio
     async def test_in_progress_backup_can_be_renamed(self) -> None:
         backup = self._backup(status=BackupStatus.IN_PROGRESS)
         uow = make_uow(backups=[backup])

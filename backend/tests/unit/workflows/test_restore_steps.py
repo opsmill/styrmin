@@ -37,15 +37,17 @@ from styrmin_backend.agent.tasks.utils import (
     TASK_ID_ENV,
 )
 from styrmin_backend.context.models.contexts import GlobalContext
-from styrmin_backend.db.models import RestoreStatus
+from styrmin_backend.db.models import Backup, BackupStatus, RestoreStatus
 from styrmin_backend.domain.models import Deployment, StepParent
 from styrmin_backend.operator.crd.builder import build_styrmin_deployment_body
 from styrmin_backend.workflows.templates.backup import (
     execute_restore_workflow,
     execute_velero_restore_flow,
 )
+from styrmin_backend.services.backup.service import update_backup
 from tests.helpers.step_api import FakeStepApi
 from tests.helpers.unit_of_work import yield_unit_of_work
+from tests.unit.services.backup.test_backup_service import make_uow
 from tests.unit.counterpart_crd_fixtures import (
     COUNTERPART_NAMESPACE,
     SOURCE_RELEASE_REFERENCE,
@@ -668,20 +670,23 @@ async def _internal_restore_flow(
     counterpart: Deployment | None = None,
     deployment_id: UUID = DEPLOYMENT_ID,
     backup_metadata: dict[str, Any] | None = None,
+    backup: Backup | None = None,
 ) -> AsyncIterator[SimpleNamespace]:
     """Fake every boundary of ``execute_restore_workflow``.
 
     The restore row records the namespace of the deployment the restore
     lands in: the counterpart's when one is given, ``deployment_id``'s
     otherwise. Pass the same deployment to ``_run_restore_workflow``.
+    Pass ``backup`` to have the flow read that row instead of a mock.
     """
-    backup = MagicMock()
-    # Not the Velero name: the Velero object is named after the id (#39).
-    backup.name = "nightly"
-    backup.id = uuid4()
-    backup.metadata_ = backup_metadata
-    backup.instance_id = uuid4()
-    backup.component_statuses = None
+    if backup is None:
+        backup = MagicMock()
+        # Not the Velero name: the Velero object is named after the id (#39).
+        backup.name = "nightly"
+        backup.id = uuid4()
+        backup.metadata_ = backup_metadata
+        backup.instance_id = uuid4()
+        backup.component_statuses = None
     restore = MagicMock()
     restore.name = "styrmin-restore-1"
     restore.metadata_ = {"timeout": 1800}
@@ -809,13 +814,25 @@ async def test_restore_workflow_restores_the_velero_backup_named_after_the_id(
 async def test_restore_workflow_restores_a_legacy_backup_by_its_stored_name(
     events: list[Event],
 ) -> None:
-    """A backup created with a custom name before #39 keeps its Velero object name."""
-    async with _internal_restore_flow(
-        events, backup_metadata={"velero_backup_name": "before-upgrade"}
-    ) as flow:
+    """A backup created with a custom name before #39 keeps its Velero object name.
+
+    The row is renamed with ``update_backup`` first: the restore still names
+    the Velero object the backup was created as (FR-009). The default-named
+    case is ``test_restore_workflow_restores_the_velero_backup_named_after_the_id``.
+    """
+    backup = Backup(
+        name="pre-migration",
+        status=BackupStatus.COMPLETED,
+        instance_id=uuid4(),
+        metadata_={"velero_backup_name": "pre-migration"},
+    )
+    await update_backup(backup.id, make_uow(backups=[backup]), name="golden")
+    assert backup.name == "golden"
+
+    async with _internal_restore_flow(events, backup=backup) as flow:
         await _run_restore_workflow(uuid4())
 
-    assert flow.build_restore.call_args.kwargs["backup_name"] == "before-upgrade"
+    assert flow.build_restore.call_args.kwargs["backup_name"] == "pre-migration"
 
 
 @pytest.mark.parametrize(
