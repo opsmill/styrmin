@@ -5,6 +5,7 @@ const TYPE_STYLES: Record<string, string> = {
   integer: "bg-primary/10 text-primary",
   boolean: "bg-warning/10 text-warning-foreground",
   select: "bg-success/10 text-success",
+  object: "bg-muted text-muted-foreground",
 };
 
 interface Parameter {
@@ -42,7 +43,7 @@ export function ParameterCards({
       <div className="flex flex-wrap gap-3">
         {parameters.map((param) => {
           const typeStr = param.type ?? inferType(param.value);
-          const valueStr = String(param.value);
+          const valueStr = displayValue(param.value);
           const isBoolTrue = valueStr === "true";
 
           return (
@@ -65,7 +66,7 @@ export function ParameterCards({
               </div>
               <span
                 className={cn(
-                  "font-mono text-[13px]",
+                  "font-mono text-[13px] whitespace-pre-wrap break-words",
                   typeStr === "boolean" && isBoolTrue
                     ? "text-success"
                     : "text-foreground",
@@ -89,5 +90,15 @@ export function ParameterCards({
 function inferType(value: unknown): string {
   if (typeof value === "boolean") return "boolean";
   if (typeof value === "number") return "integer";
+  if (value !== null && typeof value === "object") return "object";
   return "string";
+}
+
+function displayValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
 }
