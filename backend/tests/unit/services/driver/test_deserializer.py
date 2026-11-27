@@ -121,7 +121,12 @@ def test_deserialize_driver_spec_without_actions():
             "version": "1",
             "supported_versions": ">=1.0,<2.0",
             "info": {"description": "Test driver"},
-            "helm": {"main": {"location": "test-chart", "version": "1.0.0"}},
+            "helm": {
+                "main": {
+                    "location": "oci://registry.opsmill.io/opsmill/chart/test-chart",
+                    "version": "1.0.0",
+                }
+            },
         },
     }
     deserializer = DriverSpecDeserializer()

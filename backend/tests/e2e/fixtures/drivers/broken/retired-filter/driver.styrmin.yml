@@ -17,5 +17,5 @@ spec:
     license: Apache-2.0
   helm:
     main:
-      location: simple-app
+      location: oci://registry.opsmill.io/opsmill/chart/simple-app
       version: 0.1.0

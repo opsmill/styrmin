@@ -70,6 +70,7 @@ from typing import Any, Literal, Self
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import Version
 from pydantic import (
+    AnyUrl,
     BaseModel,
     ConfigDict,
     Field,
@@ -100,11 +101,38 @@ class Metadata(BaseModel):
     name: str
 
 
+_CHART_LOCATION_SCHEMES = ("http", "https", "oci")
+_CHART_LOCATION_EXAMPLE = "oci://registry.opsmill.io/opsmill/chart/infrahub"
+_CHART_LOCATION_URL: TypeAdapter[AnyUrl] = TypeAdapter(AnyUrl)
+
+
+def _chart_location_problem(value: str) -> str | None:
+    """Why ``spec.helm.main.location`` cannot be stored, or None when it can."""
+    try:
+        url = _CHART_LOCATION_URL.validate_python(value)
+    except ValidationError:
+        url = None
+    if url is None or url.scheme not in _CHART_LOCATION_SCHEMES:
+        kind = ", ".join(_CHART_LOCATION_SCHEMES)
+        return f"must be an absolute {kind} URL, such as {_CHART_LOCATION_EXAMPLE}"
+    if not (url.path or "").strip("/"):
+        return f"must include a chart name after the host, such as {_CHART_LOCATION_EXAMPLE}"
+    return None
+
+
 class HelmSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     location: str
     version: str
+
+    @field_validator("location", mode="after")
+    @classmethod
+    def validate_location(cls, value: str) -> str:
+        problem = _chart_location_problem(value)
+        if problem:
+            raise ValueError(problem)
+        return value
 
 
 class Helm(BaseModel):
