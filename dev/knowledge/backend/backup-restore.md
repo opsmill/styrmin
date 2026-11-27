@@ -132,7 +132,8 @@ Both backups and restores follow the same lifecycle: `PENDING` -> `IN_PROGRESS` 
 
 ```python
 class Backup(StyrminModel, table=True):
-    name: str                     # Unique backup name
+    name: str                     # Unique per instance (index ix_backup_instance_id_name); default styrmin-<id>
+    description: str | None       # Optional, at most 2,000 characters
     status: BackupStatus          # PENDING, IN_PROGRESS, COMPLETED, FAILED
     instance_id: UUID             # FK to ApplicationInstance, indexed
     schedule_id: UUID | None      # FK to BackupSchedule (for scheduled backups)
@@ -165,6 +166,7 @@ pass `StrawberryConfig(scalar_map=SCALAR_MAP)`.
 | Key | Written by | Meaning |
 |-----|-----------|---------|
 | `timeout` | `create_backup` | Velero polling timeout in seconds (default 3600). |
+| `velero_backup_name` | migration `a2a102e37495`, once | Only on backups that an earlier version created with a custom name: the name of their existing Velero `Backup` object. `velero_backup_name(backup)` in `services/backup/metadata.py` returns it, or `styrmin-<backup id>` when it is absent; the backup and restore flows use that function, never `Backup.name` (#39, ADR-073). |
 | `ttl` | `execute_backup_workflow`, before the Velero object is built | The resolved retention applied to this backup, e.g. `"2160h"`. |
 | `ttl_source` | same | Which scope supplied it — `deployment`, `environment`, `cluster`, or `default`. |
 | `expires_at` | `execute_backup_workflow`, on a terminal Velero phase | Velero's own `status.expiration` ISO timestamp. Absent when Velero reported none. |
@@ -172,7 +174,7 @@ pass `StrawberryConfig(scalar_map=SCALAR_MAP)`.
 Because the column is plain `JSON` with no change tracking, writes MUST
 **reassign** the dict (`backup.metadata_ = {**(backup.metadata_ or {}), **updates}`)
 — in-place mutation is not flushed. `update_backup_status(metadata_updates=...)`
-is the only supported writer and merges this way, so pre-existing keys survive.
+is the only supported writer at runtime (the migration above writes `velero_backup_name` once) and merges this way, so pre-existing keys survive.
 
 ### Restore
 
@@ -225,6 +227,7 @@ class BackupSchedule(StyrminModel, table=True):
 |----------|-------------|
 | `resolve_backup_target(instance_id, uow)` | Walk instance → deployment (namespace) and instance → driver version → backup-enabled component configs, returning a `BackupTarget(deployment_id, target_namespace, component_configs)`. Best-effort: any failure degrades to `BackupTarget(None, "", None)` — a hookless backup — and logs a warning. Shared by the `createBackup` mutation and the environment fan-out so both build identical constituents (FR-014) |
 | `create_backup(instance_id, uow, ...)` | Create on-demand backup with component configs. `environment_backup_id` links it as an environment-backup constituent. The row id is generated up front so the unique auto-generated name is final before the `INSERT` |
+| `update_backup(backup_id, uow, name=None, description=None)` | Rename a backup or change its description, in any status. `None` leaves a field unchanged; an empty description clears it. Raises `BackupNameAlreadyExistsError` (`ALREADY_EXISTS`, `existing_backup_id`) when another backup of the same instance has the name. Touches no Kubernetes object |
 | `get_backup(backup_id, uow)` | Get backup by ID |
 | `get_backups(uow, *, deployment_id=None, instance_id=None, status=None)` | List backups, newest first (`created_on` descending, then `id` descending, so `restore --last` picks the same backup on a tie). Exactly one of `deployment_id` or `instance_id` is required; both or neither raise `AmbiguousIdentifierError` (`VALIDATION_ERROR`) before the unit of work opens. `deployment_id` returns the deployment's backup history: the backups of every instance the deployment has had, found by joining `Backup.instance_id` to `ApplicationInstance.deployment_id` (`BackupRepository.get_by_deployment_id`, which also joins `Deployment` and lists nothing for an internal deployment, as `deployment(deploymentId:)` hides it; an unknown id lists nothing), so backups stay listed after an upgrade, a config edit or an environment config change gives the deployment a new active instance, and after the deployment is deleted. `instance_id` returns that one instance's backups (`get_by_instance_id`). See [issue #304](https://github.com/opsmill/styrmin/issues/304) and [ADR-062](../../adr/0062-backup-history-derived-through-instances.md). The history query reads through indexes: the index of `uq_applicationinstance_deployment_sequence` leads with `applicationinstance.deployment_id`, which the query filters on, and `ix_backup_instance_id` serves the join to `backup` ([issue #427](https://github.com/opsmill/styrmin/issues/427)). <!-- Extracted from specs/011-deployment-backup-history on 2026-10-10 --> |
 | `delete_backup(backup_id, uow)` | Delete backup (cascades to restores) |

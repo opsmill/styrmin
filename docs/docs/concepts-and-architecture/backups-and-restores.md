@@ -73,11 +73,13 @@ server:
 3. For each component, Styrmin adds the steps of its strategy before and
    after the Velero snapshot. For a PostgreSQL component, the step before
    the snapshot runs `pg_dump`.
-4. The agent creates a Velero `Backup` object that lists what to back up
-   and which hooks to run.
+4. The agent creates a Velero `Backup` object named
+   `styrmin-<backup id>` that lists what to back up and which hooks to
+   run.
 5. Velero takes the snapshot and stores it in the BSL.
-6. Styrmin records the backup with the name of its Velero backup, so that
-   a restore can find it.
+6. A restore finds the Velero `Backup` object by the backup's id, not by
+   the backup's name. See
+   [Name and describe a backup](#name-and-describe-a-backup).
 
 #### Backup size
 
@@ -94,6 +96,81 @@ that each of Velero's `PodVolumeBackup` objects reports for the backup.
   no component declares a backup strategy, or a `disk` component names no
   volume), when the backup did not complete, or when Styrmin could not read
   the `PodVolumeBackup` objects.
+
+### Name and describe a backup
+
+Each backup has a name and an optional description, so that you can tell
+the backups of a deployment apart before you restore one. For example,
+name a backup `before-2.0-migration` and describe it as "Taken before the
+schema migration. Known good."
+
+#### Setting a name and a description when you create a backup
+
+- **UI**: on the deployment's Backups tab, click "Create Backup". The
+  dialog has two optional fields, Name and Description. Leave Name empty
+  to use the default name.
+- **CLI**: `styrminctl backups create <deployment> --name <name>
+  --description <text>`. Both options are optional.
+- **SDK**: `client.backups.create_backup(instance_id, name=...,
+  description=...)`.
+- **GraphQL**: `createBackup(instanceId:, name:, description:)`.
+
+Without a name, Styrmin names the backup `styrmin-<backup id>`.
+
+#### Renaming a backup or changing its description
+
+You can rename a backup or change its description in any status,
+including while the backup runs and after it has completed. Both require
+the `READ_WRITE` role, the same role as creating a backup.
+
+- **UI**: on the deployment's Backups tab, click "Edit" in the backup's
+  row. The "Edit Backup" dialog shows the current name and description.
+  The row shows the description under the backup's name. On a deleted
+  deployment, the Edit action is disabled, as every action is.
+- **CLI**: `styrminctl backups update <backup-id> --name <name>
+  --description <text>`. Pass one option or both. `--description ""`
+  clears the description. Without either option, the command prints an
+  error and exits with status 1.
+- **SDK**: `client.backups.update_backup(backup_id, name=...,
+  description=...)`. An argument you leave out keeps its value, and
+  `description=""` clears the description.
+- **GraphQL**: `updateBackup(backupId:, name:, description:)`. An
+  argument you do not send keeps its value, and an empty description
+  clears it.
+
+`styrminctl backups get` shows the full description. `styrminctl backups
+list` shows it in the `description` column, cut to 40 characters.
+
+#### Rules for names and descriptions
+
+- A name is unique among the backups of one application instance. Two
+  backups of different instances, for example of two deployments, can
+  have the same name. Creating or renaming a backup to a name that
+  another backup of the same instance has fails with the error code
+  `ALREADY_EXISTS`, and the error's `existing_backup_id` is the id of
+  that other backup.
+- Styrmin removes spaces at the start and end of a name. The name must
+  then be 1 to 255 characters long.
+- A description is at most 2,000 characters long. An empty description,
+  or one that contains only spaces, clears the description.
+- A name or description that breaks these rules fails with the error
+  code `VALIDATION_ERROR`. A backup id that does not exist fails with
+  `NOT_FOUND`.
+
+#### A rename does not change the Velero `Backup` object
+
+The name of a backup is a label that only Styrmin shows. The Velero
+`Backup` object of a backup is named `styrmin-<backup id>`, whatever name
+you give the backup, and Styrmin finds the object by the backup's id. A
+rename changes no object in the cluster, and a restore after a rename
+reads the same Velero `Backup` object as before.
+
+Versions of Styrmin before this change named the Velero `Backup` object
+after the backup's name. A backup that such a version created with a
+custom name keeps a Velero `Backup` object with that custom name, because
+Velero cannot rename an object. Styrmin recorded that name when you
+upgraded, and a restore of the backup reads that object, also after you
+rename the backup.
 
 ### Backup history of a deployment
 

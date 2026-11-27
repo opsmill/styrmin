@@ -220,19 +220,19 @@ description: "Task list for 034-backup-rename-description"
 
 ## Phase 6: Documentation, changelog and verification
 
-- [ ] T035 [P] In `docs/docs/concepts-and-architecture/backups-and-restores.md`, add a section "Name and describe a backup". It must cover:
+- [X] T035 [P] In `docs/docs/concepts-and-architecture/backups-and-restores.md`, add a section "Name and describe a backup". It must cover:
   - setting a name and a description at creation;
   - renaming and editing in the UI (Edit action), the CLI (`styrminctl backups update`), the SDK and GraphQL (`updateBackup`);
   - names are unique per application instance;
   - the default name is `styrmin-<backup id>`;
   - a rename does not change the Velero `Backup` object, which is always named `styrmin-<backup id>` (and keeps its original name for backups created with a custom name before this version).
-- [ ] T036 [P] In `docs/docs/reference/styrminctl.md`, add a `backups` section that documents `create` (including `--name` and `--description`) and `update`, in the format of the existing `env-backups` section (about line 269).
-- [ ] T037 [P] In `CONTEXT.md`, add a **Backup** entry next to "Backup storage location". It must say:
+- [X] T036 [P] In `docs/docs/reference/styrminctl.md`, add a `backups` section that documents `create` (including `--name` and `--description`) and `update`, in the format of the existing `env-backups` section (about line 269).
+- [X] T037 [P] In `CONTEXT.md`, add a **Backup** entry next to "Backup storage location". It must say:
   - a per-instance snapshot;
   - the name is a label only Styrmin shows, unique per application instance, default `styrmin-<backup id>`, and can be renamed;
   - the description is optional;
   - the Velero `Backup` object is named after the backup's id and is found by it (ADR-073), and backups created with a custom name before #39 keep their original Velero name.
-- [ ] T038 [P] Add the changelog fragment `changelog/39.added.md` with `uv run towncrier create -c "..." 39.added.md`. It states that backups can be given a description, renamed and re-described after creation, that names are unique per deployment instance, and that Velero objects are now always named after the backup's id.
+- [X] T038 [P] Add the changelog fragment `changelog/39.added.md` with `uv run towncrier create -c "..." 39.added.md`. It states that backups can be given a description, renamed and re-described after creation, that names are unique per deployment instance, and that Velero objects are now always named after the backup's id.
 - [ ] T039 Run the checks from quickstart.md:
   - `uv run invoke format lint`;
   - `uv run invoke validate-graphql`;
