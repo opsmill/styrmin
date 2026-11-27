@@ -1,0 +1,7 @@
+mutation UpdateBackup($backupId: UUID!, $name: String, $description: String) {
+    updateBackup(backupId: $backupId, name: $name, description: $description) {
+        id
+        name
+        description
+    }
+}

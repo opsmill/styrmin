@@ -534,10 +534,18 @@ class UiScenarioDriver:
             )
         return deployment_id
 
-    async def create_backup(self, *, instance_id: str) -> BackupRef:  # noqa: ARG002
+    async def create_backup(
+        self,
+        *,
+        instance_id: str,  # noqa: ARG002
+        name: str | None = None,
+        description: str | None = None,
+    ) -> BackupRef:
         async with _ui_errors("creating backup"):
             await self._ensure_deployment_detail()
-            return await self._deployment_detail.create_backup()
+            return await self._deployment_detail.create_backup(
+                name=name, description=description
+            )
 
     async def wait_for_backup(
         self, *, backup_id: str, max_wait: float = 300.0
@@ -588,6 +596,19 @@ class UiScenarioDriver:
                 f"backup {backup_id} is not listed on the deployment detail page"
             )
         return ref
+
+    async def update_backup(
+        self,
+        *,
+        backup_id: str,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> BackupRef:
+        async with _ui_errors(f"updating backup {backup_id}"):
+            await self._ensure_deployment_detail()
+            return await self._deployment_detail.update_backup(
+                backup_id=backup_id, name=name, description=description
+            )
 
     async def list_backups(self, *, deployment_id: str) -> tuple[BackupRef, ...]:
         self._deployment_id = deployment_id

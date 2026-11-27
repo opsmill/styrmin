@@ -11,7 +11,7 @@ from typing import Any
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
-from styrmin_sdk.exceptions import StyrminError
+from styrmin_sdk.exceptions import ResourceNotFoundError, StyrminError
 
 console = Console()
 
@@ -72,10 +72,15 @@ def print_warning(message: str) -> None:
 
 
 @contextmanager
-def styrmin_error_handler() -> Generator[None]:
-    """Catch StyrminError and ValueError, print a friendly message, and exit."""
+def styrmin_error_handler(not_found_hint: str = "") -> Generator[None]:
+    """Catch StyrminError and ValueError, print a friendly message, and exit.
+
+    ``not_found_hint`` is printed on its own line after a not-found error from the server.
+    """
     try:
         yield
     except (StyrminError, ValueError) as e:
         print_error(str(e))
+        if not_found_hint and isinstance(e, ResourceNotFoundError):
+            console.print(not_found_hint, markup=False)
         raise SystemExit(1) from e

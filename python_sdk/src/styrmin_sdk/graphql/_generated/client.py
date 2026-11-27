@@ -105,6 +105,7 @@ from .run_job import RunJob
 from .start_components import StartComponents
 from .stop_components import StopComponents
 from .unassign_backup_storage_location import UnassignBackupStorageLocation
+from .update_backup import UpdateBackup
 from .update_backup_schedule import UpdateBackupSchedule
 from .update_backup_storage_location import UpdateBackupStorageLocation
 from .update_cluster import UpdateCluster
@@ -248,13 +249,15 @@ class Client(AsyncBaseClient):
         self,
         instance_id: UUID,
         name: Union[Optional[str], UnsetType] = UNSET,
+        description: Union[Optional[str], UnsetType] = UNSET,
         **kwargs: Any,
     ) -> CreateBackup:
         query = gql("""
-            mutation CreateBackup($instanceId: UUID!, $name: String) {
-              createBackup(instanceId: $instanceId, name: $name) {
+            mutation CreateBackup($instanceId: UUID!, $name: String, $description: String) {
+              createBackup(instanceId: $instanceId, name: $name, description: $description) {
                 id
                 name
+                description
                 status
                 instanceId
                 errorMessage
@@ -268,7 +271,11 @@ class Client(AsyncBaseClient):
               }
             }
             """)
-        variables: dict[str, object] = {"instanceId": instance_id, "name": name}
+        variables: dict[str, object] = {
+            "instanceId": instance_id,
+            "name": name,
+            "description": description,
+        }
         response = await self.execute(
             query=query, operation_name="CreateBackup", variables=variables, **kwargs
         )
@@ -841,6 +848,7 @@ class Client(AsyncBaseClient):
               backup(backupId: $backupId) {
                 id
                 name
+                description
                 status
                 instanceId
                 instance {
@@ -1999,6 +2007,7 @@ class Client(AsyncBaseClient):
               backups(deploymentId: $deploymentId, instanceId: $instanceId, status: $status) {
                 id
                 name
+                description
                 status
                 instanceId
                 instance {
@@ -2785,6 +2794,43 @@ class Client(AsyncBaseClient):
         )
         data = self.get_data(response)
         return UnassignBackupStorageLocation.model_validate(data)
+
+    async def update_backup(
+        self,
+        backup_id: UUID,
+        name: Union[Optional[str], UnsetType] = UNSET,
+        description: Union[Optional[str], UnsetType] = UNSET,
+        **kwargs: Any,
+    ) -> UpdateBackup:
+        query = gql("""
+            mutation UpdateBackup($backupId: UUID!, $name: String, $description: String) {
+              updateBackup(backupId: $backupId, name: $name, description: $description) {
+                id
+                name
+                description
+                status
+                instanceId
+                errorMessage
+                startedAt
+                completedAt
+                sizeBytes
+                createdOn
+                updatedOn
+                ttl
+                expiresAt
+              }
+            }
+            """)
+        variables: dict[str, object] = {
+            "backupId": backup_id,
+            "name": name,
+            "description": description,
+        }
+        response = await self.execute(
+            query=query, operation_name="UpdateBackup", variables=variables, **kwargs
+        )
+        data = self.get_data(response)
+        return UpdateBackup.model_validate(data)
 
     async def update_backup_storage_location(
         self,

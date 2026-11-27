@@ -962,11 +962,23 @@ async def test_backup_and_restore_lifecycle(
                 )
                 pre_backup_count = resp.json()["counter"]  # 6
 
-        # 2. Create backup via scenario_driver, wait for completion
+        # 2. Create backup via scenario_driver with a name and a description
+        #    (spec 034 / US2), wait for completion. The uuid fragment keeps the
+        #    name unique per instance across reruns.
+        from uuid import uuid4
+
+        initial_backup_name = f"lifecycle-{uuid4().hex[:8]}"
+        initial_backup_description = "Counter state after five increments."
         created_backup = await scenario_driver.create_backup(
-            instance_id=backed_up_instance_id
+            instance_id=backed_up_instance_id,
+            name=initial_backup_name,
+            description=initial_backup_description,
         )
         assert created_backup.status in {"pending", "in_progress", "completed"}
+        assert (created_backup.name, created_backup.description) == (
+            initial_backup_name,
+            initial_backup_description,
+        ), f"create_backup should return the given values, got {created_backup!r}"
         backup = await scenario_driver.wait_for_backup(
             backup_id=created_backup.id, max_wait=180
         )
@@ -979,12 +991,12 @@ async def test_backup_and_restore_lifecycle(
         #     environment-scope retention (016 / FR-002).
         await assert_velero_backup_uses_bsl(
             kubeconfig_path=kubeconfig_path,
-            backup_name=backup.name,
+            backup_name=f"styrmin-{backup.id}",
             expected_bsl_id=str(styrmin_resources["bsl_id"]),
         )
         await assert_velero_backup_ttl(
             kubeconfig_path=kubeconfig_path,
-            backup_name=backup.name,
+            backup_name=f"styrmin-{backup.id}",
             expected_ttl=ENVIRONMENT_BACKUP_TTL,
         )
 
@@ -1002,12 +1014,43 @@ async def test_backup_and_restore_lifecycle(
         # 2c'. The size is the volume data Velero read, not an operation count (#136).
         await assert_backup_size_matches_pod_volume_backups(
             kubeconfig_path=kubeconfig_path,
-            backup_name=backup.name,
+            backup_name=f"styrmin-{backup.id}",
             recorded_size=recorded_backup.size_bytes,
         )
 
         # 2d. Velero can kopia-prune the repository the backup just wrote to.
         await assert_backup_repository_maintenance_succeeds(kubeconfig_path)
+
+        # 2d'. Rename the backup and set its description (spec 034 / US1). The
+        #      restore below then proves a renamed backup still restores (SC-002).
+        #      The new name includes part of the id so reruns cannot collide.
+        new_backup_name = f"renamed-{backup.id[:8]}"
+        new_backup_description = "Counter state before the config edit and upgrade."
+        updated_backup = await scenario_driver.update_backup(
+            backup_id=backup.id,
+            name=new_backup_name,
+            description=new_backup_description,
+        )
+        assert (updated_backup.name, updated_backup.description) == (
+            new_backup_name,
+            new_backup_description,
+        ), f"update_backup should return the new values, got {updated_backup!r}"
+        reread_backup = await scenario_driver.get_backup(backup_id=backup.id)
+        assert (reread_backup.name, reread_backup.description) == (
+            new_backup_name,
+            new_backup_description,
+        ), f"The re-read backup should carry the new values, got {reread_backup!r}"
+
+        # The Velero object keeps its id-based name and id label after the
+        # rename (ADR-073), so the restore below still finds it.
+        velero_backup = await read_velero_backup(
+            kubeconfig_path, f"styrmin-{backup.id}"
+        )
+        velero_labels = velero_backup["metadata"].get("labels") or {}
+        assert velero_labels.get("styrmin.io/backup-id") == backup.id, (
+            f"Velero Backup styrmin-{backup.id} should carry the label "
+            f"styrmin.io/backup-id={backup.id}, got {velero_labels!r}"
+        )
 
         # 2e. A config edit gives the deployment a new instance; the backup of
         #     the earlier one stays in the deployment's backup history (#304).
@@ -1999,7 +2042,7 @@ async def test_restore_of_removed_velero_backup_fails_velero_step(
         # Remove the Velero backup behind Styrmin's record, which stays completed.
         await remove_velero_backup(
             vcluster["kubeconfig_path"],
-            backup.name,
+            f"styrmin-{backup.id}",
             timeout=VELERO_BACKUP_REMOVAL_TIMEOUT_SECONDS,
         )
 
@@ -2037,7 +2080,7 @@ async def test_restore_of_removed_velero_backup_fails_velero_step(
             velero_step.error
         )
         # Velero's own error names the backup it cannot find.
-        assert backup.name in velero_step.error, velero_step.error
+        assert f"styrmin-{backup.id}" in velero_step.error, velero_step.error
         assert [(error.attempt, error.message) for error in velero_step.errors] == [
             (1, velero_step.error)
         ], velero_step.errors

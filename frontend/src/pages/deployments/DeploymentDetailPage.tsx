@@ -7,6 +7,7 @@ import {
   useGetDriverQuery,
   useCreateBackupMutation,
   useDeleteBackupMutation,
+  useUpdateBackupMutation,
   useDeleteDeploymentMutation,
   useListBackupsQuery,
   useCreateRestoreMutation,
@@ -52,6 +53,10 @@ import {
   Lock,
   RotateCcw,
 } from "lucide-react";
+import {
+  BackupDetailsDialog,
+  type BackupDetailsChanges,
+} from "./BackupDetailsDialog";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { BackupRestoreSteps } from "@/components/deployment/BackupRestoreSteps";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
@@ -105,7 +110,7 @@ export default function DeploymentDetailPage() {
 
   // Mutations
   const createBackupMutation = useCreateBackupMutation();
-  const [backupError, setBackupError] = useState<string | null>(null);
+  const [createBackupOpen, setCreateBackupOpen] = useState(false);
   const createRestoreMutation = useCreateRestoreMutation();
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [selectedBackupId, setSelectedBackupId] = useState<string | null>(null);
@@ -114,6 +119,8 @@ export default function DeploymentDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBackupId, setDeleteBackupId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const updateBackupMutation = useUpdateBackupMutation();
+  const [editBackupId, setEditBackupId] = useState<string | null>(null);
   const updateVersionMutation = useUpdateDeploymentVersionMutation();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [newVersion, setNewVersion] = useState("");
@@ -176,6 +183,7 @@ export default function DeploymentDetailPage() {
   const selectedBackup = backupsData?.backups?.find(
     (b) => b.id === selectedBackupId,
   );
+  const editBackup = backupsData?.backups?.find((b) => b.id === editBackupId);
   const deleteBackupName = backupsData?.backups?.find(
     (b) => b.id === deleteBackupId,
   )?.name;
@@ -183,19 +191,11 @@ export default function DeploymentDetailPage() {
   // its own deployment's namespace; the client never sends one (#532).
   const targetNamespace = deploymentId ? `styrmin-${deploymentId}` : "";
 
-  async function handleBackup() {
-    setBackupError(null);
-    if (!instanceId) {
-      setBackupError("Deployment has no instance yet");
-      return;
-    }
-    try {
-      await createBackupMutation.mutateAsync({ instanceId });
-      queryClient.invalidateQueries({ queryKey: ["ListBackups"] });
-    } catch (err) {
-      console.error("[create-backup] mutation failed", err);
-      setBackupError(err instanceof Error ? err.message : "Unknown error");
-    }
+  // Errors are thrown so the Create Backup dialog shows them.
+  async function handleBackup(changes: BackupDetailsChanges) {
+    if (!instanceId) throw new Error("Deployment has no instance yet");
+    await createBackupMutation.mutateAsync({ instanceId, ...changes });
+    queryClient.invalidateQueries({ queryKey: ["ListBackups"] });
   }
 
   async function handleRestore() {
@@ -433,12 +433,6 @@ export default function DeploymentDetailPage() {
         </Alert>
       )}
 
-      {backupError && (
-        <Alert variant="destructive">
-          <AlertDescription>{backupError}</AlertDescription>
-        </Alert>
-      )}
-
       {/* Tabs */}
       <Tabs
         tabs={DEPLOYMENT_TABS}
@@ -640,7 +634,7 @@ export default function DeploymentDetailPage() {
                   isRestoring ||
                   isTerminal
                 }
-                onClick={handleBackup}
+                onClick={() => setCreateBackupOpen(true)}
                 title={terminalTitle}
               >
                 <Archive className="h-4 w-4" />
@@ -692,7 +686,7 @@ export default function DeploymentDetailPage() {
                 <span className="w-[110px] shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Expires
                 </span>
-                <span className="w-[110px] shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <span className="w-[150px] shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Actions
                 </span>
               </div>
@@ -706,6 +700,7 @@ export default function DeploymentDetailPage() {
                     setRestoreError(null);
                     setRestoreOpen(true);
                   }}
+                  onEdit={setEditBackupId}
                   onDelete={(backupId) => {
                     setDeleteBackupId(backupId);
                     setDeleteError(null);
@@ -720,6 +715,32 @@ export default function DeploymentDetailPage() {
               ))}
             </>
           )}
+          <BackupDetailsDialog
+            open={createBackupOpen}
+            onOpenChange={setCreateBackupOpen}
+            mode="create"
+            onSubmit={handleBackup}
+          />
+          <BackupDetailsDialog
+            key={editBackup?.id}
+            open={editBackup !== undefined}
+            onOpenChange={(open) => {
+              if (!open) setEditBackupId(null);
+            }}
+            mode="edit"
+            initialName={editBackup?.name}
+            initialDescription={editBackup?.description}
+            onSubmit={async (changes) => {
+              if (!editBackup) return;
+              await updateBackupMutation.mutateAsync({
+                backupId: editBackup.id,
+                ...changes,
+              });
+              await queryClient.invalidateQueries({
+                queryKey: ["ListBackups"],
+              });
+            }}
+          />
         </div>
       </TabPanel>
 
@@ -758,6 +779,14 @@ export default function DeploymentDetailPage() {
               <code className="font-mono">{selectedBackup?.name}</code>
             </DialogDescription>
           </DialogHeader>
+          {selectedBackup?.description && (
+            <p
+              className="whitespace-pre-line break-words text-sm text-muted-foreground"
+              data-testid="restore-backup-description"
+            >
+              {selectedBackup.description}
+            </p>
+          )}
           {selectedBackup && (
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
               <dt className="text-muted-foreground">
@@ -1123,10 +1152,17 @@ function ServiceAddressRow({
 
 type RestoreItem = ListRestoresQuery["restores"][number];
 
+// ponytail: a text heuristic, not a measured overflow (jsdom cannot measure);
+// it can offer "Show more" for text that already fits on a wide screen.
+function isLongDescription(description: string): boolean {
+  return description.includes("\n") || [...description].length > 80;
+}
+
 function BackupRow({
   backup,
   index,
   onRestore,
+  onEdit,
   onDelete,
   autoRefreshEnabled,
   deploymentTerminal,
@@ -1137,6 +1173,8 @@ function BackupRow({
   backup: {
     id: string;
     name: string;
+    /** Free-text note; shown as plain text, never as Markdown or HTML. */
+    description?: string | null;
     status: string;
     createdOn: string;
     sizeBytes?: number | null;
@@ -1152,6 +1190,7 @@ function BackupRow({
   };
   index: number;
   onRestore: (backupId: string) => void;
+  onEdit: (backupId: string) => void;
   onDelete: (backupId: string) => void;
   autoRefreshEnabled: boolean;
   /**
@@ -1168,6 +1207,7 @@ function BackupRow({
   /** When the list was fetched, in ms since the epoch; expiry is judged against it. */
   listedAt: number;
 }) {
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const { data: restoresData } = useListRestoresQuery(
     { backupId: backup.id },
     {
@@ -1220,6 +1260,7 @@ function BackupRow({
       data-testid="backup-row"
       data-backup-id={backup.id}
       data-backup-name={backup.name}
+      data-backup-description={backup.description ?? ""}
       data-backup-status={backup.status}
       data-backup-application-version={backup.instance.applicationVersion}
     >
@@ -1230,9 +1271,35 @@ function BackupRow({
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <div className={`h-2 w-2 flex-shrink-0 rounded-full ${bc.dot}`} />
-          <span className="min-w-0 break-all text-[13px] font-medium text-foreground">
-            {backup.name}
-          </span>
+          <div className="min-w-0">
+            <span className="block break-all text-[13px] font-medium text-foreground">
+              {backup.name}
+            </span>
+            {backup.description && (
+              <>
+                <span
+                  id={`backup-description-${backup.id}`}
+                  className={`${descriptionExpanded ? "" : "line-clamp-2 "}whitespace-pre-line break-words text-[12px] text-muted-foreground`}
+                  data-testid="backup-description"
+                  title={backup.description}
+                >
+                  {backup.description}
+                </span>
+                {isLongDescription(backup.description) && (
+                  <button
+                    type="button"
+                    data-testid="backup-description-toggle"
+                    aria-expanded={descriptionExpanded}
+                    aria-controls={`backup-description-${backup.id}`}
+                    onClick={() => setDescriptionExpanded((v) => !v)}
+                    className="text-[12px] font-medium text-primary hover:underline"
+                  >
+                    {descriptionExpanded ? "Show less" : "Show more"}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </div>
         <div className="w-[100px] shrink-0" data-testid="backup-status">
           <StatusBadge status={backup.status} />
@@ -1282,7 +1349,7 @@ function BackupRow({
           )}
           {retentionHint && <span className="sr-only"> ({retentionHint})</span>}
         </span>
-        <div className="flex w-[110px] shrink-0 items-center gap-2">
+        <div className="flex w-[150px] shrink-0 items-center gap-2">
           <IfRole minimum="READ_WRITE">
             <button
               disabled={isRestoreDisabled}
@@ -1291,6 +1358,15 @@ function BackupRow({
               title={restoreTitle}
             >
               Restore
+            </button>
+            <span className="text-muted-foreground/30">|</span>
+            <button
+              data-testid="backup-edit"
+              aria-label={`Edit backup ${backup.name}`}
+              onClick={() => onEdit(backup.id)}
+              className="text-xs font-medium text-primary hover:underline"
+            >
+              Edit
             </button>
             <span className="text-muted-foreground/30">|</span>
             <button

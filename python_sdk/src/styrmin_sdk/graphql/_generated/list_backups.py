@@ -18,6 +18,7 @@ class ListBackups(BaseModel):
 class ListBackupsBackups(BaseModel):
     id: UUID
     name: str
+    description: Optional[str]
     status: str
     instance_id: UUID = Field(alias="instanceId")
     instance: "ListBackupsBackupsInstance"

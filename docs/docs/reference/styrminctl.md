@@ -266,6 +266,73 @@ redeploy. To recover, do one of the following:
   volumes with the new storage class. The data in the old volumes is
   not moved.
 
+### `backups` — back up and restore one deployment
+
+The `backups` group backs up one deployment, or one instance of a
+deployment, and restores its backups. See [Backups and
+restores](../concepts-and-architecture/backups-and-restores.md).
+
+| Command | What it does |
+|---------|--------------|
+| `backups create [DEPLOYMENT]` | Back up the active instance of a deployment, or the instance you pass with `--instance-id`. |
+| `backups get <BACKUP_ID>` | Show one backup, with its full description. |
+| `backups list [DEPLOYMENT]` | List the backup history of a deployment, newest first. The `description` column shows the first 40 characters of each description. |
+| `backups update <BACKUP_ID>` | Rename a backup or change its description. |
+| `backups delete <BACKUP_ID>` | Delete a backup and its restores. |
+| `backups restore [BACKUP_ID]` | Restore a backup into the deployment it was taken of. |
+| `backups restore-get <RESTORE_ID>` | Show one restore. |
+| `backups restore-list <BACKUP_ID>` | List the restores of a backup. |
+
+`create` and `list` take the deployment as a positional name, narrowed
+with `--environment`, or as a UUID with `--id`. `create --instance-id`
+and `list --instance-id` act on one instance.
+
+```bash
+styrminctl backups create my-app --name before-2.0-migration \
+  --description "Taken before the schema migration."
+styrminctl backups update <backup-id> --name golden
+styrminctl backups update <backup-id> --description ""
+```
+
+#### `backups create` options
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `--name` | generated | Name of the backup. Defaults to `styrmin-<backup id>`. Must be unique among the backups of the instance. |
+| `--description` | none | Description of the backup, at most 2,000 characters. |
+| `--wait` | off | Wait until the backup completes or fails. |
+| `--max-wait` | `300` | Seconds to wait, with `--wait`. |
+| `--interval` | `5` | Poll interval in seconds, with `--wait`. |
+
+#### `backups update` options
+
+`update` takes the backup id and at least one of these options. Without
+either option, the command prints an error and exits with status 1.
+
+| Option | Purpose |
+|--------|---------|
+| `--name` | New name of the backup, unique among the backups of its instance. |
+| `--description` | New description. `--description ""` clears it. |
+
+An option you leave out keeps its value. `update` works in any status of
+the backup. A rename does not change the backup's Velero `Backup` object,
+which is named after the backup's id. See [Name and describe a
+backup](../concepts-and-architecture/backups-and-restores.md#name-and-describe-a-backup).
+
+`create` and `update` fail with these error codes:
+
+- `ALREADY_EXISTS` when another backup of the same instance has the name;
+- `VALIDATION_ERROR` when the name is empty or longer than 255
+  characters after spaces at the start and end are removed, when the
+  name contains a line break, a tab or another control character, or
+  when the description is longer than 2,000 characters or contains a
+  control character other than a line break or a tab;
+- `NOT_FOUND` (`update` only) when the backup id does not exist.
+
+When `get`, `update`, `delete` or `restore` is given a backup id that
+does not exist, `styrminctl` prints the error and then the line
+"Run `styrminctl backups list` to find backup ids."
+
 ### `env-backups` — environment-level backup and restore
 
 The `env-backups` group backs up and restores a whole environment. One

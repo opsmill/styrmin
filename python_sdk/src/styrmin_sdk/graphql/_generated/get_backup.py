@@ -18,6 +18,7 @@ class GetBackup(BaseModel):
 class GetBackupBackup(BaseModel):
     id: UUID
     name: str
+    description: Optional[str]
     status: str
     instance_id: UUID = Field(alias="instanceId")
     instance: "GetBackupBackupInstance"

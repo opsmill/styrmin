@@ -30,6 +30,12 @@ class BackupRepository(BaseRepository[Backup], ABC):
         raise NotImplementedError()
 
     @abstractmethod
+    async def get_by_instance_and_name(
+        self, instance_id: UUID, name: str
+    ) -> Backup | None:
+        raise NotImplementedError()
+
+    @abstractmethod
     async def has_in_progress_backup(self, instance_id: UUID) -> Backup | None:
         raise NotImplementedError()
 
@@ -84,6 +90,17 @@ class SQLModelBackupRepository(BaseSQLModelRepository[Backup], BackupRepository)
         )
         result = await self.session.exec(statement)
         return result.all()
+
+    async def get_by_instance_and_name(
+        self, instance_id: UUID, name: str
+    ) -> Backup | None:
+        """Get the backup of an instance that has this name, if any."""
+        statement = select(self.model_class).where(
+            self.model_class.instance_id == instance_id,
+            self.model_class.name == name,
+        )
+        result = await self.session.exec(statement)
+        return result.first()
 
     async def has_in_progress_backup(self, instance_id: UUID) -> Backup | None:
         """Check if there is an in-progress backup for the given instance."""

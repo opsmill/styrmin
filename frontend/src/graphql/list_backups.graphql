@@ -2,6 +2,7 @@ query ListBackups($deploymentId: UUID!) {
   backups(deploymentId: $deploymentId) {
     id
     name
+    description
     status
     createdOn
     completedAt

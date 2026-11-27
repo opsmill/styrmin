@@ -32,6 +32,10 @@ class ComponentBackupStatus:
 class Backup:
     id: UUID
     name: str
+    description: str | None = strawberry.field(
+        default=None,
+        description="Optional free-text note about the backup. Null when not set.",
+    )
     status: str
     created_on: datetime
     updated_on: datetime | None = None
@@ -150,6 +154,7 @@ class Backup:
         return cls(
             id=instance.id,
             name=instance.name,
+            description=instance.description,
             status=instance.status.value,
             created_on=instance.created_on,  # type: ignore[arg-type]
             updated_on=instance.updated_on,

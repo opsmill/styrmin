@@ -114,6 +114,8 @@ export type Backup = {
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   componentStatuses?: Maybe<Array<ComponentBackupStatus>>;
   createdOn: Scalars['DateTime']['output'];
+  /** Optional free-text note about the backup. Null when not set. */
+  description?: Maybe<Scalars['String']['output']>;
   errorMessage?: Maybe<Scalars['String']['output']>;
   /** Expiration reported by Velero for this backup. Null when no expiration was recorded — a backup Velero stored nothing for, or a backup taken before expiry was recorded. A backup whose status is FAILED can still carry an expiration: Velero's PartiallyFailed phase is stored, does expire, and is reported as FAILED here. */
   expiresAt?: Maybe<Scalars['DateTime']['output']>;
@@ -810,6 +812,8 @@ export type Mutation = {
   startComponents?: Maybe<Task>;
   stopComponents?: Maybe<Task>;
   unassignBackupStorageLocation?: Maybe<Environment>;
+  /** Rename a backup or change its description. An argument that is not sent leaves its field unchanged; an empty description clears it. Does not change any Kubernetes object. */
+  updateBackup?: Maybe<Backup>;
   updateBackupSchedule?: Maybe<BackupSchedule>;
   updateBackupStorageLocation?: Maybe<BackupStorageLocation>;
   /** Replace a cluster's config and redeploy every deployment whose resolved config changes. Requires the ADMIN role. Identify the cluster by id or name. With dryRun, nothing is saved and the result lists what saving would do. */
@@ -855,6 +859,7 @@ export type MutationCloneEnvironmentArgs = {
 
 
 export type MutationCreateBackupArgs = {
+  description?: InputMaybe<Scalars['String']['input']>;
   instanceId: Scalars['UUID']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
 };
@@ -1046,6 +1051,13 @@ export type MutationStopComponentsArgs = {
 
 export type MutationUnassignBackupStorageLocationArgs = {
   environmentId: Scalars['UUID']['input'];
+};
+
+
+export type MutationUpdateBackupArgs = {
+  backupId: Scalars['UUID']['input'];
+  description?: InputMaybe<Scalars['String']['input']>;
+  name?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -1833,10 +1845,11 @@ export type CloneEnvironmentMutation = { __typename?: 'Mutation', cloneEnvironme
 export type CreateBackupMutationVariables = Exact<{
   instanceId: Scalars['UUID']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
+  description?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 
-export type CreateBackupMutation = { __typename?: 'Mutation', createBackup?: { __typename?: 'Backup', id: string, name: string, status: string, createdOn: any } | null };
+export type CreateBackupMutation = { __typename?: 'Mutation', createBackup?: { __typename?: 'Backup', id: string, name: string, description?: string | null, status: string, createdOn: any } | null };
 
 export type CreateBackupStorageLocationMutationVariables = Exact<{
   name: Scalars['String']['input'];
@@ -2062,7 +2075,7 @@ export type ListBackupsQueryVariables = Exact<{
 }>;
 
 
-export type ListBackupsQuery = { __typename?: 'Query', backups: Array<{ __typename?: 'Backup', id: string, name: string, status: string, createdOn: any, completedAt?: any | null, sizeBytes?: number | null, errorMessage?: string | null, ttl?: string | null, expiresAt?: any | null, instance: { __typename?: 'ApplicationInstance', id: string, applicationVersion: string }, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, errors: Array<{ __typename?: 'StepError', attempt: number, message: string, occurredAt: any }> }> }> };
+export type ListBackupsQuery = { __typename?: 'Query', backups: Array<{ __typename?: 'Backup', id: string, name: string, description?: string | null, status: string, createdOn: any, completedAt?: any | null, sizeBytes?: number | null, errorMessage?: string | null, ttl?: string | null, expiresAt?: any | null, instance: { __typename?: 'ApplicationInstance', id: string, applicationVersion: string }, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, errors: Array<{ __typename?: 'StepError', attempt: number, message: string, occurredAt: any }> }> }> };
 
 export type ListClustersQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2176,6 +2189,15 @@ export type UnassignBackupStorageLocationMutationVariables = Exact<{
 
 
 export type UnassignBackupStorageLocationMutation = { __typename?: 'Mutation', unassignBackupStorageLocation?: { __typename?: 'Environment', id: string, name: string, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null } | null };
+
+export type UpdateBackupMutationVariables = Exact<{
+  backupId: Scalars['UUID']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
+  description?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type UpdateBackupMutation = { __typename?: 'Mutation', updateBackup?: { __typename?: 'Backup', id: string, name: string, description?: string | null } | null };
 
 export type UpdateBackupStorageLocationMutationVariables = Exact<{
   backupStorageLocationId: Scalars['UUID']['input'];
@@ -2323,10 +2345,11 @@ export const useCloneEnvironmentMutation = <
     )};
 
 export const CreateBackupDocument = `
-    mutation CreateBackup($instanceId: UUID!, $name: String) {
-  createBackup(instanceId: $instanceId, name: $name) {
+    mutation CreateBackup($instanceId: UUID!, $name: String, $description: String) {
+  createBackup(instanceId: $instanceId, name: $name, description: $description) {
     id
     name
+    description
     status
     createdOn
   }
@@ -3479,6 +3502,7 @@ export const ListBackupsDocument = `
   backups(deploymentId: $deploymentId) {
     id
     name
+    description
     status
     createdOn
     completedAt
@@ -4062,6 +4086,29 @@ export const useUnassignBackupStorageLocationMutation = <
       {
     mutationKey: ['UnassignBackupStorageLocation'],
     mutationFn: (variables?: UnassignBackupStorageLocationMutationVariables) => graphqlFetcher<UnassignBackupStorageLocationMutation, UnassignBackupStorageLocationMutationVariables>(UnassignBackupStorageLocationDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const UpdateBackupDocument = `
+    mutation UpdateBackup($backupId: UUID!, $name: String, $description: String) {
+  updateBackup(backupId: $backupId, name: $name, description: $description) {
+    id
+    name
+    description
+  }
+}
+    `;
+
+export const useUpdateBackupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<UpdateBackupMutation, TError, UpdateBackupMutationVariables, TContext>) => {
+    
+    return useMutation<UpdateBackupMutation, TError, UpdateBackupMutationVariables, TContext>(
+      {
+    mutationKey: ['UpdateBackup'],
+    mutationFn: (variables?: UpdateBackupMutationVariables) => graphqlFetcher<UpdateBackupMutation, UpdateBackupMutationVariables>(UpdateBackupDocument, variables)(),
     ...options
   }
     )};

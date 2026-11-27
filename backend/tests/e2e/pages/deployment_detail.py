@@ -1227,8 +1227,14 @@ class DeploymentDetailPage:
     async def open_backups_tab(self) -> None:
         await self._page.get_by_role("button", name="Backups", exact=True).click()
 
-    async def create_backup(self) -> BackupRef:
-        """Click 'Create Backup' and return the newly-added row as a ref."""
+    async def create_backup(
+        self, *, name: str | None = None, description: str | None = None
+    ) -> BackupRef:
+        """Click 'Create Backup', fill the dialog, submit, and return the new row.
+
+        Only the given fields are filled; an empty dialog creates a backup
+        with the default name ``styrmin-<id>``.
+        """
         await self.open_backups_tab()
 
         existing_ids: set[str] = set()
@@ -1239,6 +1245,19 @@ class DeploymentDetailPage:
             )
 
         await self._page.get_by_role("button", name="Create Backup").click()
+        dialog = self._page.get_by_test_id("backup-details-dialog")
+        await wait_for_dialog_open(dialog)
+        for test_id, value in (
+            ("backup-details-name", name),
+            ("backup-details-description", description),
+        ):
+            if value is not None:
+                await enter_text(
+                    dialog.get_by_test_id(test_id),
+                    value,
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
+        await submit_dialog(dialog, button="Create backup")
 
         async def _first_new_row() -> BackupRef | None:
             rows = self._page.locator("[data-testid=backup-row]")
@@ -1257,6 +1276,8 @@ class DeploymentDetailPage:
                     status=await _required_attr(
                         row, "data-backup-status", context=f"backup row {row_id}"
                     ),
+                    description=await row.get_attribute("data-backup-description")
+                    or None,
                 )
             return None
 
@@ -1306,6 +1327,8 @@ class DeploymentDetailPage:
                         name=name,
                         status=status,
                         steps=await self._read_parent_steps("backup", backup_id),
+                        description=await row.get_attribute("data-backup-description")
+                        or None,
                     )
             await asyncio.sleep(2.0)
         raise ScenarioTimeout(
@@ -1325,6 +1348,7 @@ class DeploymentDetailPage:
             name=await _required_attr(row, "data-backup-name", context=context),
             status=await _required_attr(row, "data-backup-status", context=context),
             steps=await self._read_parent_steps("backup", backup_id),
+            description=await row.get_attribute("data-backup-description") or None,
         )
 
     async def read_backups(self) -> tuple[BackupRef, ...]:
@@ -1351,9 +1375,51 @@ class DeploymentDetailPage:
                     application_version=await _required_attr(
                         row, "data-backup-application-version", context=context
                     ),
+                    description=await row.get_attribute("data-backup-description")
+                    or None,
                 )
             )
         return tuple(refs)
+
+    async def update_backup(
+        self, *, backup_id: str, name: str | None, description: str | None
+    ) -> BackupRef:
+        """Click the row's Edit, fill the Edit Backup dialog, Save, and wait for the row.
+
+        Returns once the row's ``data-backup-name`` / ``data-backup-description``
+        show the new values (the dialog invalidates the backups query on success).
+        """
+        await self.open_backups_tab()
+        row = self._page.locator(
+            f"[data-testid=backup-row][data-backup-id='{backup_id}']"
+        ).first
+        await row.get_by_test_id("backup-edit").click()
+        dialog = self._page.get_by_test_id("backup-details-dialog")
+        await wait_for_dialog_open(dialog)
+        if name is not None:
+            await enter_text(
+                dialog.get_by_test_id("backup-details-name"),
+                name,
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
+        if description is not None:
+            await enter_text(
+                dialog.get_by_test_id("backup-details-description"),
+                description,
+                keystroke_delay_ms=self._keystroke_delay_ms,
+            )
+        await submit_dialog(dialog, button="Save")
+        if name is not None:
+            await expect(row).to_have_attribute("data-backup-name", name)
+        if description is not None:
+            await expect(row).to_have_attribute("data-backup-description", description)
+        context = f"backup row {backup_id}"
+        return BackupRef(
+            id=backup_id,
+            name=await _required_attr(row, "data-backup-name", context=context),
+            status=await _required_attr(row, "data-backup-status", context=context),
+            description=await row.get_attribute("data-backup-description") or None,
+        )
 
     async def delete_backup(self, *, backup_id: str) -> None:
         """Click the row's Delete, then confirm in the dialog."""

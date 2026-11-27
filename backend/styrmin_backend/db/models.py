@@ -670,7 +670,14 @@ class EnvironmentClone(StyrminModel, table=True):
 
 
 class Backup(StyrminModel, table=True):
-    name: str = Field(unique=True)
+    # Unique per instance, not across all backups (#39). The Velero object is
+    # named after the id, not this name: see ``velero_backup_name``.
+    __table_args__ = (
+        Index("ix_backup_instance_id_name", "instance_id", "name", unique=True),
+    )
+
+    name: str
+    description: str | None = Field(default=None, sa_type=Text)  # type: ignore[call-overload]
     status: BackupStatus = Field(sa_column=Column(SQLModelEnum(BackupStatus)))
 
     started_at: datetime | None = Field(sa_type=DateTime(timezone=True), default=None)  # type: ignore[call-overload]

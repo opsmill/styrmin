@@ -131,7 +131,10 @@ async def _run_restore_workflow(
     )
 
     backup = MagicMock()
-    backup.name = "styrmin-backup-1"
+    # Not the Velero name: the Velero object is named after the id (#39).
+    backup.name = "nightly"
+    backup.id = uuid4()
+    backup.metadata_ = None
     backup.instance_id = uuid4()
     backup.component_statuses = None
     run.backup_instance_id = backup.instance_id

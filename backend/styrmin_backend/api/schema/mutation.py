@@ -148,10 +148,12 @@ from styrmin_backend.services.backup.environment import (
     restore_environment_backup as restore_environment_backup_service,
 )
 from styrmin_backend.services.backup.service import (
+    MAX_BACKUP_NAME_LENGTH,
     create_backup as create_backup_service,
     create_restore as create_restore_service,
     delete_backup as delete_backup_service,
     resolve_backup_target,
+    update_backup as update_backup_service,
     settle_undispatched_restore,
 )
 from styrmin_backend.services.deployment import get_deployment
@@ -958,7 +960,20 @@ class Mutation:
         self,
         instance_id: UUID,
         info: strawberry.Info,
-        name: str | None = None,
+        name: Annotated[
+            str | None,
+            strawberry.argument(
+                description=(
+                    "Name of the backup, unique among the backups of the instance. "
+                    "Leading and trailing whitespace is removed. Null, empty or "
+                    "whitespace-only gives the default name `styrmin-<backup id>`; "
+                    "`updateBackup` refuses such a name instead. Refused when it "
+                    "contains a control character or is longer than "
+                    f"{MAX_BACKUP_NAME_LENGTH} characters."
+                )
+            ),
+        ] = None,
+        description: str | None = None,
     ) -> BackupType | None:
         """Create a new on-demand backup for an instance."""
         uow = info.context["uow"]
@@ -976,6 +991,7 @@ class Mutation:
         backup = await create_backup_service(
             instance_id=instance_id,
             name=name,
+            description=description,
             uow=uow,
             target_namespace=target_namespace,
             component_configs=component_configs,
@@ -999,6 +1015,30 @@ class Mutation:
                 exc_info=exc,
             )
 
+        return BackupType.from_instance(backup)
+
+    @strawberry.mutation(
+        extensions=[_requires(Role.READ_WRITE)],
+        description=(
+            "Rename a backup or change its description. An argument that is not "
+            "sent leaves its field unchanged; an empty description clears it. "
+            "Does not change any Kubernetes object."
+        ),
+    )
+    async def update_backup(
+        self,
+        backup_id: UUID,
+        info: strawberry.Info,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> BackupType | None:
+        """Rename a backup or change its description."""
+        backup = await update_backup_service(
+            backup_id=backup_id,
+            uow=info.context["uow"],
+            name=name,
+            description=description,
+        )
         return BackupType.from_instance(backup)
 
     @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])

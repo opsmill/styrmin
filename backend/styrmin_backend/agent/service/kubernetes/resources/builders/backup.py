@@ -43,6 +43,7 @@ def build_velero_backup(
     velero_namespace: str,
     target_namespace: str,
     instance_id: str,
+    backup_id: str,
     driver_name: str,
     ttl: str,
     hooks: list[VeleroBackupHook] | None = None,
@@ -59,6 +60,7 @@ def build_velero_backup(
         included_namespaces=[target_namespace],
         labels={
             "styrmin.io/instance": instance_id,
+            "styrmin.io/backup-id": backup_id,
             "styrmin.io/driver": driver_name,
         },
         hooks=hooks or [],

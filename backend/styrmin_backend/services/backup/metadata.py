@@ -26,9 +26,12 @@ valid, and so is one carrying all four keys.
 
 from __future__ import annotations
 
-from typing import Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from styrmin_backend.services.backup.ttl import BackupTtlSource
+
+if TYPE_CHECKING:
+    from styrmin_backend.db.models import Backup
 
 
 class BackupMetadata(TypedDict, total=False):
@@ -48,12 +51,18 @@ class BackupMetadata(TypedDict, total=False):
             8601 timestamp string (FR-006). Exposed as ``Backup.expiresAt``.
             Note the deliberate rename: Velero calls this ``expiration``, and
             that spelling is *not* a valid key here.
+        velero_backup_name: The name of the backup's Velero ``Backup`` object,
+            when it is not ``styrmin-<id>``. Written only by migration
+            ``a2a102e37495`` for rows created with a custom name before #39;
+            never written by a request. Read through
+            :func:`velero_backup_name`.
     """
 
     timeout: int
     ttl: str
     ttl_source: BackupTtlSource
     expires_at: str
+    velero_backup_name: str
 
 
 def read_backup_metadata(metadata: dict[str, Any] | None) -> BackupMetadata:
@@ -77,3 +86,16 @@ def read_backup_metadata(metadata: dict[str, Any] | None) -> BackupMetadata:
         The same mapping, typed — or an empty one when the column is unset.
     """
     return cast("BackupMetadata", metadata or {})
+
+
+def velero_backup_name(backup: Backup) -> str:
+    """Return the name of the backup's Velero ``Backup`` object (ADR-073).
+
+    New backups use ``styrmin-<id>``, so a rename does not change the object.
+    A backup that an earlier version created with a custom name keeps that
+    object name, which the migration stored in ``velero_backup_name``.
+    """
+    return (
+        read_backup_metadata(backup.metadata_).get("velero_backup_name")
+        or f"styrmin-{backup.id}"
+    )

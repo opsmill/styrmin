@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, NamedTuple, Sequence
+from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn, Sequence
 from uuid import UUID, uuid4
 
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.agent.service.kubernetes.velero.resources import VeleroBackupHook
@@ -30,17 +32,22 @@ from styrmin_backend.services.backup.strategies.postgres import PostgresBackupSt
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
     BackupAlreadyInProgressError,
+    BackupNameAlreadyExistsError,
     BackupNotFoundError,
     DeletedDeploymentRestoreError,
     DeploymentNotFoundError,
     InternalDeploymentError,
     RestoreAlreadyInProgressError,
     RestoreNotFoundError,
+    ValidationError,
 )
 
 if TYPE_CHECKING:
     from styrmin_backend.domain.models import Deployment as DeploymentEntity
     from styrmin_backend.services.unit_of_work import UnitOfWork
+
+MAX_BACKUP_NAME_LENGTH = 255
+MAX_BACKUP_DESCRIPTION_LENGTH = 2000
 
 # Default timeout values (seconds)
 DEFAULT_BACKUP_TIMEOUT: int = 3600  # 1 hour
@@ -139,21 +146,39 @@ async def create_backup(
     component_configs: dict[str, dict[str, Any]] | None = None,
     timeout: int = DEFAULT_BACKUP_TIMEOUT,
     environment_backup_id: UUID | None = None,
+    description: str | None = None,
 ) -> Backup:
     """Create a new on-demand backup for an application instance.
 
     Args:
+        name: The backup name, unique per instance. ``None`` or a
+            whitespace-only name gives the default ``styrmin-<id>``.
+        description: Free-text notes. Empty or whitespace-only stores none.
         environment_backup_id: Links the backup to an environment backup as
             one of its constituents. ``None`` (the default) for a standalone
             per-instance backup; the constituent's own lifecycle is otherwise
             identical (spec FR-014).
     """
+    cleaned_name = _clean_backup_name(name) if name and name.strip() else None
+    cleaned_description = (
+        _clean_backup_description(description) if description is not None else None
+    )
+
     async with uow:
         existing = await uow.backups.has_in_progress_backup(instance_id)
         if existing:
             raise BackupAlreadyInProgressError(
                 existing_backup_id=str(existing.id),
             )
+
+        if cleaned_name is not None:
+            same_name = await uow.backups.get_by_instance_and_name(
+                instance_id, cleaned_name
+            )
+            if same_name is not None:
+                raise BackupNameAlreadyExistsError(
+                    name=cleaned_name, existing_backup_id=str(same_name.id)
+                )
 
         hooks: list[VeleroBackupHook] = []
         component_statuses: dict[str, dict[str, str]] = {}
@@ -172,14 +197,15 @@ async def create_backup(
 
         metadata: BackupMetadata = {"timeout": timeout}
 
-        # The id is generated up front so the auto-generated name is final
-        # *before* the INSERT: ``Backup.name`` is unique, and writing a shared
-        # sentinel and renaming afterwards collides on that index as soon as two
-        # rows are created inside one transaction (the environment fan-out).
+        # The id is generated up front so the default name ``styrmin-<id>`` is
+        # final *before* the INSERT: ``Backup.name`` is unique per instance, and
+        # writing a shared sentinel and renaming afterwards would collide on that
+        # index. The Velero object is named after the id, not this name (#39).
         backup_id = uuid4()
         backup = Backup(
             id=backup_id,
-            name=name or f"styrmin-{backup_id}",
+            name=cleaned_name or f"styrmin-{backup_id}",
+            description=cleaned_description,
             status=BackupStatus.PENDING,
             instance_id=instance_id,
             component_statuses=component_statuses or None,
@@ -187,14 +213,121 @@ async def create_backup(
             environment_backup_id=environment_backup_id,
         )
 
-        backup = await uow.backups.create(backup)
-
-        await uow.commit()
+        # ``create`` flushes, so the unique index can fire there or at the commit.
+        try:
+            backup = await uow.backups.create(backup)
+            await uow.commit()
+        except IntegrityError as exc:
+            await _raise_name_conflict(uow, exc, instance_id, cleaned_name, backup_id)
         await uow.session.refresh(backup)  # Load server-generated fields
 
         logger.info(
             f"Created backup {backup.id} ({backup.name}) for instance {instance_id}"
         )
+        return backup
+
+
+async def _raise_name_conflict(
+    uow: UnitOfWork,
+    exc: IntegrityError,
+    instance_id: UUID,
+    name: str | None,
+    backup_id: UUID,
+) -> NoReturn:
+    """Turn a lost race on ``ix_backup_instance_id_name`` into ``ALREADY_EXISTS``.
+
+    Two writes of one name for one instance can both pass the check before the
+    write; the unique index rejects the second. After the rollback, the name is
+    looked up again: only when another backup holds it is the error translated,
+    so any other integrity error is raised unchanged.
+    """
+    await uow.rollback()
+    if name is not None:
+        existing = await uow.backups.get_by_instance_and_name(instance_id, name)
+        if existing is not None and existing.id != backup_id:
+            raise BackupNameAlreadyExistsError(
+                name=name, existing_backup_id=str(existing.id)
+            ) from exc
+    raise exc
+
+
+def _has_control_character(text: str, allowed: str = "") -> bool:
+    return any(
+        unicodedata.category(char) == "Cc" and char not in allowed for char in text
+    )
+
+
+def _clean_backup_name(name: str) -> str:
+    """Strip whitespace from a backup name and check its length and characters."""
+    cleaned = name.strip()
+    if not 1 <= len(cleaned) <= MAX_BACKUP_NAME_LENGTH:
+        raise ValidationError(
+            f"A backup name must be 1 to {MAX_BACKUP_NAME_LENGTH} characters after "
+            "leading and trailing whitespace is removed"
+        )
+    if _has_control_character(cleaned):
+        raise ValidationError(
+            "A backup name cannot contain line breaks, tabs or other control characters"
+        )
+    return cleaned
+
+
+def _clean_backup_description(description: str) -> str | None:
+    """Check a description's length and characters; empty or whitespace-only clears it."""
+    cleaned = description.strip()
+    if len(cleaned) > MAX_BACKUP_DESCRIPTION_LENGTH:
+        raise ValidationError(
+            f"A backup description must be at most {MAX_BACKUP_DESCRIPTION_LENGTH:,} "
+            "characters"
+        )
+    if _has_control_character(cleaned, allowed="\n\r\t"):
+        raise ValidationError(
+            "A backup description cannot contain control characters other than "
+            "line breaks and tabs"
+        )
+    return cleaned or None
+
+
+async def update_backup(
+    backup_id: UUID,
+    uow: UnitOfWork,
+    name: str | None = None,
+    description: str | None = None,
+) -> Backup:
+    """Rename a backup or change its description.
+
+    An argument that is ``None`` leaves its field unchanged; an empty
+    description clears it. Allowed in every status, and never touches a
+    Kubernetes object, because the Velero objects are named after the backup id.
+    """
+    async with uow:
+        backup = await uow.backups.get(backup_id)
+        if backup is None:
+            raise BackupNotFoundError(f"Backup {backup_id} not found")
+
+        if name is not None:
+            cleaned_name = _clean_backup_name(name)
+            if cleaned_name != backup.name:
+                existing = await uow.backups.get_by_instance_and_name(
+                    backup.instance_id, cleaned_name
+                )
+                if existing is not None and existing.id != backup.id:
+                    raise BackupNameAlreadyExistsError(
+                        name=cleaned_name, existing_backup_id=str(existing.id)
+                    )
+                backup.name = cleaned_name
+        if description is not None:
+            backup.description = _clean_backup_description(description)
+
+        # Read before the commit: a rollback expires ``backup``.
+        instance_id, new_name = backup.instance_id, backup.name
+        try:
+            await uow.commit()
+        except IntegrityError as exc:
+            await _raise_name_conflict(uow, exc, instance_id, new_name, backup_id)
+        await uow.session.refresh(backup)  # Load server-generated fields
+
+        logger.info(f"Updated backup {backup_id} ({backup.name})")
         return backup
 
 

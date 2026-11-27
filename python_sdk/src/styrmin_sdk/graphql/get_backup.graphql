@@ -2,6 +2,7 @@ query GetBackup($backupId: UUID!) {
     backup(backupId: $backupId) {
         id
         name
+        description
         status
         instanceId
         instance {
