@@ -119,6 +119,38 @@ The project's `code-review` skill ran three independent reviewers over `4200d107
 | low | PM | `EnvironmentBackupRow.tsx` | Environment backups have no name or description. | Deferred. Out of scope for #39. |
 | low | PM | – | No success metric is defined. A query for the share of backups with a non-default name or a description would need no tracking code. | Deferred. |
 
+### Deferred findings fixed after the first report
+
+The user asked to continue after reading the first version of this report, so most deferred findings were fixed in two more commits. No E2E test ran for these commits on the local machine, because it does not have enough memory; CI runs them on the draft pull request.
+
+- `d6f19907` (backend, SDK, CLI):
+  - Two writes of the same name at the same moment now return `ALREADY_EXISTS`. The service catches `IntegrityError`, rolls back, and looks the name up again.
+  - Names refuse control characters. Descriptions refuse control characters other than line feed, carriage return and tab.
+  - The duplicate-name message now reads `A backup named "<name>" already exists for this deployment. Choose a different name.`
+  - The `createBackup` `name` description states that an empty name falls back to `styrmin-<backup id>`.
+  - The CLI suggests `styrminctl backups list` after a not-found error.
+  - Evidence: `1327 passed` (backend services and GraphQL functional tests, 2026-11-27T16:47:34Z), `639 passed, 1 xfailed` (SDK), `433 passed` (CLI, 2026-11-27T16:47:08Z), and `25 passed in 2.55s` for the new race, control-character and propagation tests (2026-11-27T16:49:32Z).
+- `13f53acc` (frontend and docs):
+  - The Restore Backup dialog shows the description.
+  - Every role can expand a long description with a **Show more** button. The button appears when the description has a line break or is longer than 80 characters, so a short description on a wide screen can get a button it does not need.
+  - The Name placeholder shows `styrmin-<backup id>`.
+  - Client validation trims, counts code points and refuses control characters, as the server does.
+  - Field errors are linked to their inputs.
+  - Each Edit button's accessible name includes the backup name.
+  - A character counter appears from 1,800 characters.
+  - A duplicate-name error is titled "Name already in use".
+  - Evidence: `Tests  113 passed (113)` (`pnpm exec vitest run src/__tests__/deployment-detail/`, 2026-11-27T16:52:58Z, Node 22.18.0). All E2E test ids are unchanged, and `uv run pytest backend/tests/e2e --collect-only -q` collected 233 tests.
+
+Still deferred:
+
+- **Scheduled-backup name template follow-up (high).** Needs your decision (§3).
+- **Nullable `updateBackup` return and `null` versus `""`.** Follows the existing update pattern (research R4).
+- **Conventional commit title.** Set it when squash-merging.
+- **Machine-specific paths in `e2e-evidence.md`.** Kept, because constitution §V asks for the kubeconfig path.
+- **Name and description for environment backups.** Out of scope for #39.
+- **Success metric.** None defined.
+- **`test_infrahub_backup_restore.py` run.** CI runs it.
+
 ## 6. Autonomous decisions
 
 - **Chunking.** Phase 3 (17 tasks) was split into four chunks: service and GraphQL, SDK and CLI, frontend, and E2E. Phase 6 was split into documentation and verification. Phase 1 (one task) was kept as its own chunk, as the skill requires.
@@ -137,6 +169,5 @@ The project's `code-review` skill ran three independent reviewers over `4200d107
 
 1. Decide on the scheduled-backup name template (§3): file the follow-up issue, or agree with the author of #39 to close the issue without it.
 2. Review the downgrade change in `a2a102e37495` and the new `changelog/39.changed.md`.
-3. Optionally run `test_infrahub_backup_restore.py` in both variants (with `COMPOSE_PARALLEL_LIMIT=1` on this machine) and add it to `e2e-evidence.md`.
-4. Choose which deferred UX findings to address before merge. The description in the Restore dialog and full-description access for read-only users are the two most relevant to the issue's goal.
-5. Open a pull request with a conventional-commit title, then run `/speckit.opsmill.extract` if wanted.
+3. Check the E2E results in CI on the draft pull request: the `shard_backup` shard and the Infrahub shard cover `test_backup_and_restore_lifecycle`, `test_restore_lifecycle_transitions` and `test_infrahub_backup_restore.py`, which had not run locally. The local machine cannot run E2E tests.
+4. Mark the pull request ready for review when CI passes, then run `/speckit.opsmill.extract` if wanted.
