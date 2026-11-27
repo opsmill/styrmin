@@ -389,6 +389,20 @@ class ScenarioDriver(Protocol):
     async def get_backup(self, *, backup_id: str) -> BackupRef:
         """The backup with its steps, as ``wait_for_backup`` reads them."""
 
+    async def update_backup(
+        self,
+        *,
+        backup_id: str,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> BackupRef:
+        """Rename a backup or change its description; ``None`` leaves a field as it is.
+
+        API driver: ``client.backups.update_backup``. UI driver: the row's Edit
+        button, the Edit Backup dialog, then waits until the row shows the
+        new values. ``steps`` stays empty on the returned ref.
+        """
+
     async def list_backups(self, *, deployment_id: str) -> tuple[BackupRef, ...]:
         """The deployment's backup history: the backups of every instance it has had.
 

@@ -1009,6 +1009,37 @@ async def test_backup_and_restore_lifecycle(
         # 2d. Velero can kopia-prune the repository the backup just wrote to.
         await assert_backup_repository_maintenance_succeeds(kubeconfig_path)
 
+        # 2d'. Rename the backup and set its description (spec 034 / US1). The
+        #      restore below then proves a renamed backup still restores (SC-002).
+        #      The new name includes part of the id so reruns cannot collide.
+        new_backup_name = f"renamed-{backup.id[:8]}"
+        new_backup_description = "Counter state before the config edit and upgrade."
+        updated_backup = await scenario_driver.update_backup(
+            backup_id=backup.id,
+            name=new_backup_name,
+            description=new_backup_description,
+        )
+        assert (updated_backup.name, updated_backup.description) == (
+            new_backup_name,
+            new_backup_description,
+        ), f"update_backup should return the new values, got {updated_backup!r}"
+        reread_backup = await scenario_driver.get_backup(backup_id=backup.id)
+        assert (reread_backup.name, reread_backup.description) == (
+            new_backup_name,
+            new_backup_description,
+        ), f"The re-read backup should carry the new values, got {reread_backup!r}"
+
+        # The Velero object keeps its id-based name and id label after the
+        # rename (ADR-073), so the restore below still finds it.
+        velero_backup = await read_velero_backup(
+            kubeconfig_path, f"styrmin-{backup.id}"
+        )
+        velero_labels = velero_backup["metadata"].get("labels") or {}
+        assert velero_labels.get("styrmin.io/backup-id") == backup.id, (
+            f"Velero Backup styrmin-{backup.id} should carry the label "
+            f"styrmin.io/backup-id={backup.id}, got {velero_labels!r}"
+        )
+
         # 2e. A config edit gives the deployment a new instance; the backup of
         #     the earlier one stays in the deployment's backup history (#304).
         stored_config = (await client.deployments.get(deployment_id)).config or {}

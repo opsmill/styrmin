@@ -161,6 +161,7 @@ def _backup_ref(backup: GetBackupBackup) -> BackupRef:
         name=backup.name,
         status=backup.status,
         steps=tuple(_step_ref(step) for step in backup.steps),
+        description=backup.description,
     )
 
 
@@ -962,6 +963,26 @@ class ApiScenarioDriver:
             raise _normalise(exc) from exc
         return _backup_ref(backup)
 
+    async def update_backup(
+        self,
+        *,
+        backup_id: str,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> BackupRef:
+        try:
+            backup = await self._client.backups.update_backup(
+                backup_id, name=name, description=description
+            )
+        except StyrminError as exc:
+            raise _normalise(exc) from exc
+        return BackupRef(
+            id=str(backup.id),
+            name=backup.name,
+            status=backup.status,
+            description=backup.description,
+        )
+
     async def list_backups(self, *, deployment_id: str) -> tuple[BackupRef, ...]:
         try:
             backups = await self._client.backups.list_backups(
@@ -975,6 +996,7 @@ class ApiScenarioDriver:
                 name=b.name,
                 status=b.status,
                 application_version=b.instance.application_version,
+                description=b.description,
             )
             for b in backups
         )

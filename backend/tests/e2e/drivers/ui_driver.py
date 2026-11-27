@@ -589,6 +589,19 @@ class UiScenarioDriver:
             )
         return ref
 
+    async def update_backup(
+        self,
+        *,
+        backup_id: str,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> BackupRef:
+        async with _ui_errors(f"updating backup {backup_id}"):
+            await self._ensure_deployment_detail()
+            return await self._deployment_detail.update_backup(
+                backup_id=backup_id, name=name, description=description
+            )
+
     async def list_backups(self, *, deployment_id: str) -> tuple[BackupRef, ...]:
         self._deployment_id = deployment_id
         async with _ui_errors(f"listing backups of deployment {deployment_id}"):

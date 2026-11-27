@@ -162,10 +162,10 @@ description: "Task list for 034-backup-rename-description"
 
 ### E2E (dual-entrypoint)
 
-- [ ] T026 [US1] Add `update_backup(self, *, backup_id: str, name: str | None = None, description: str | None = None) -> BackupRef` to the scenario driver protocol `backend/tests/e2e/drivers/protocol.py`, and add `description: str | None` to `BackupRef`.
+- [X] T026 [US1] Add `update_backup(self, *, backup_id: str, name: str | None = None, description: str | None = None) -> BackupRef` to the scenario driver protocol `backend/tests/e2e/drivers/protocol.py`, and add `description: str | None` to `BackupRef`.
   - API driver (`backend/tests/e2e/drivers/api_driver.py`): call `client.backups.update_backup`.
   - UI driver (`backend/tests/e2e/drivers/ui_driver.py`) and page object (`backend/tests/e2e/pages/deployment_detail.py`): click `backup-edit` on the row, fill the dialog, save, then wait until the row's `data-backup-name` shows the new value.
-- [ ] T027 [US1] Extend `test_backup_and_restore_lifecycle` in `backend/tests/e2e/test_backup_restore.py`. After the backup completes and before the restore:
+- [X] T027 [US1] Extend `test_backup_and_restore_lifecycle` in `backend/tests/e2e/test_backup_restore.py`. After the backup completes and before the restore:
   - call `scenario_driver.update_backup(...)` to rename the backup and set its description;
   - assert that the returned and re-read backup has the new values;
   - assert, with kubectl or kr8s, that the Velero `Backup` object is named `styrmin-<backup id>` and has the label `styrmin.io/backup-id=<backup id>`.

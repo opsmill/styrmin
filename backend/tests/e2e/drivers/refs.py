@@ -54,6 +54,8 @@ class BackupRef:
     steps: tuple[StepRef, ...] = ()
     # The version of the instance the backup was taken of; set by ``list_backups``.
     application_version: str | None = None
+    # The free-text description (spec 034); ``None`` when the backup has none.
+    description: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
