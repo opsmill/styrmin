@@ -172,10 +172,10 @@ async def create_backup(
 
         metadata: BackupMetadata = {"timeout": timeout}
 
-        # The id is generated up front so the auto-generated name is final
-        # *before* the INSERT: ``Backup.name`` is unique, and writing a shared
-        # sentinel and renaming afterwards collides on that index as soon as two
-        # rows are created inside one transaction (the environment fan-out).
+        # The id is generated up front so the default name ``styrmin-<id>`` is
+        # final *before* the INSERT: ``Backup.name`` is unique per instance, and
+        # writing a shared sentinel and renaming afterwards would collide on that
+        # index. The Velero object is named after the id, not this name (#39).
         backup_id = uuid4()
         backup = Backup(
             id=backup_id,

@@ -145,7 +145,9 @@ async def _run_backup_workflow(
     run = WorkflowRun(backup_id=backup_uuid, logger=MagicMock())
 
     backup = MagicMock()
-    backup.name = "styrmin-backup-1"
+    # Not the Velero name: the Velero object is named after the id (#39).
+    backup.name = "nightly"
+    backup.id = uuid4()
     backup.instance_id = uuid4()
     backup.component_statuses = None
     backup.metadata_ = {"timeout": 1800}

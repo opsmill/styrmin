@@ -979,12 +979,12 @@ async def test_backup_and_restore_lifecycle(
         #     environment-scope retention (016 / FR-002).
         await assert_velero_backup_uses_bsl(
             kubeconfig_path=kubeconfig_path,
-            backup_name=backup.name,
+            backup_name=f"styrmin-{backup.id}",
             expected_bsl_id=str(styrmin_resources["bsl_id"]),
         )
         await assert_velero_backup_ttl(
             kubeconfig_path=kubeconfig_path,
-            backup_name=backup.name,
+            backup_name=f"styrmin-{backup.id}",
             expected_ttl=ENVIRONMENT_BACKUP_TTL,
         )
 
@@ -1002,7 +1002,7 @@ async def test_backup_and_restore_lifecycle(
         # 2c'. The size is the volume data Velero read, not an operation count (#136).
         await assert_backup_size_matches_pod_volume_backups(
             kubeconfig_path=kubeconfig_path,
-            backup_name=backup.name,
+            backup_name=f"styrmin-{backup.id}",
             recorded_size=recorded_backup.size_bytes,
         )
 
@@ -1999,7 +1999,7 @@ async def test_restore_of_removed_velero_backup_fails_velero_step(
         # Remove the Velero backup behind Styrmin's record, which stays completed.
         await remove_velero_backup(
             vcluster["kubeconfig_path"],
-            backup.name,
+            f"styrmin-{backup.id}",
             timeout=VELERO_BACKUP_REMOVAL_TIMEOUT_SECONDS,
         )
 
@@ -2037,7 +2037,7 @@ async def test_restore_of_removed_velero_backup_fails_velero_step(
             velero_step.error
         )
         # Velero's own error names the backup it cannot find.
-        assert backup.name in velero_step.error, velero_step.error
+        assert f"styrmin-{backup.id}" in velero_step.error, velero_step.error
         assert [(error.attempt, error.message) for error in velero_step.errors] == [
             (1, velero_step.error)
         ], velero_step.errors

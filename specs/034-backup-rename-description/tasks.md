@@ -33,13 +33,13 @@ description: "Task list for 034-backup-rename-description"
 
 **Purpose**: Add the description column, make names unique per instance, and name every new Velero `Backup` object after the backup's id (research R1–R4).
 
-- [ ] T002 In `backend/styrmin_backend/db/models.py`, class `Backup`:
+- [X] T002 In `backend/styrmin_backend/db/models.py`, class `Backup`:
   - change `name: str = Field(unique=True)` to `name: str`;
   - add `description: str | None = Field(default=None, sa_type=Text)`;
   - add `__table_args__ = (Index("ix_backup_instance_id_name", "instance_id", "name", unique=True),)`.
 
   Constraints, quoted from data-model.md: the name is "unique per `instance_id`"; the description is "`str | None`, text, nullable".
-- [ ] T003 Create the Alembic revision `backend/styrmin_backend/db/migrations/versions/<rev>_backup_description_and_instance_scoped_name.py`, with `down_revision` set to the head from T001. Copy the structure of `c9d0e1f2a3b4_deployment_name_scoped_uniqueness.py`. Upgrade steps:
+- [X] T003 Create the Alembic revision `backend/styrmin_backend/db/migrations/versions/<rev>_backup_description_and_instance_scoped_name.py`, with `down_revision` set to the head from T001. Copy the structure of `c9d0e1f2a3b4_deployment_name_scoped_uniqueness.py`. Upgrade steps:
   1. add the column `backup.description` (`sa.Text`, nullable);
   2. backfill: in a Python loop over `SELECT id, name, metadata FROM backup`, for each row where `name != f"styrmin-{id}"`, set `metadata["velero_backup_name"] = name`, and log the number of rows updated;
   3. drop the unique constraint on `backup.name`, found by `sa.inspect(bind).get_unique_constraints("backup")`. It is `backup_name_key` on PostgreSQL. On SQLite, use `batch_alter_table` with a naming convention;
@@ -53,19 +53,19 @@ description: "Task list for 034-backup-rename-description"
   5. drop the column.
 
   The docstring must state the downgrade limit from the plan's Risks section: backups created or renamed after the upgrade with a custom name cannot be restored by the older code.
-- [ ] T004 [P] Write the migration test `backend/tests/unit/db/test_backup_rename_migration.py`, modelled on `test_backup_history_index_migration.py`. Test cases:
+- [X] T004 [P] Write the migration test `backend/tests/unit/db/test_backup_rename_migration.py`, modelled on `test_backup_history_index_migration.py`. Test cases:
   - a row with a custom name gets `metadata.velero_backup_name`;
   - a row with the default name `styrmin-<id>` does not;
   - two backups of one instance cannot share a name;
   - two backups of different instances can;
   - the downgrade restores global uniqueness and refuses when names are duplicated.
-- [ ] T005 [P] In `backend/styrmin_backend/services/backup/metadata.py`:
+- [X] T005 [P] In `backend/styrmin_backend/services/backup/metadata.py`:
   - add the key `velero_backup_name: str` to `BackupMetadata`, documented as "written only by migration <rev> for rows created with a custom name before #39; never written by a request";
   - add `def velero_backup_name(backup: Backup) -> str`, which returns `read_backup_metadata(backup.metadata_).get("velero_backup_name") or f"styrmin-{backup.id}"`.
 
   Add unit tests for both branches in `backend/tests/unit/services/backup/test_backup_metadata.py` (create the file, or extend the existing metadata test module).
-- [ ] T006 [P] In `backend/styrmin_backend/agent/service/kubernetes/resources/builders/backup.py`, give `build_velero_backup` a `backup_id: str` argument and add the label `"styrmin.io/backup-id": backup_id`. Update the builder's unit tests to check the label.
-- [ ] T007 In `backend/styrmin_backend/workflows/templates/backup.py`:
+- [X] T006 [P] In `backend/styrmin_backend/agent/service/kubernetes/resources/builders/backup.py`, give `build_velero_backup` a `backup_id: str` argument and add the label `"styrmin.io/backup-id": backup_id`. Update the builder's unit tests to check the label.
+- [X] T007 In `backend/styrmin_backend/workflows/templates/backup.py`:
   - replace `velero_backup_name = backup.name` at about line 565 (backup flow) and at about line 971 (restore flow) with `velero_backup_name(backup)`;
   - pass `backup_id=str(backup.id)` to `build_velero_backup`;
   - update the comment at about line 968.
@@ -78,13 +78,13 @@ description: "Task list for 034-backup-rename-description"
   - `test_restore_workflow_failure_handler.py`.
 
   Add a test in which `backup.name` differs from `styrmin-<id>`: the backup flow must build a Velero `Backup` named `styrmin-<id>`, and the restore flow must pass `backupName=styrmin-<id>` (critique E1).
-- [ ] T008 In `backend/tests/e2e/test_backup_restore.py`, change the Velero helper calls that pass `backup.name` to pass `f"styrmin-{backup.id}"`, at about lines 982, 987, 1005, 2002 and 2040. Line 2040 asserts that the step error contains the Velero name. Do this in the same commit as T007, so the E2E tests never fail between tasks.
-- [ ] T009 [P] Update the comments that say `Backup.name` is unique across all backups:
+- [X] T008 In `backend/tests/e2e/test_backup_restore.py`, change the Velero helper calls that pass `backup.name` to pass `f"styrmin-{backup.id}"`, at about lines 982, 987, 1005, 2002 and 2040. Line 2040 asserts that the step error contains the Velero name. Do this in the same commit as T007, so the E2E tests never fail between tasks.
+- [X] T009 [P] Update the comments that say `Backup.name` is unique across all backups:
   - `backend/styrmin_backend/services/backup/service.py` at about lines 174–177;
   - `backend/styrmin_backend/services/backup/environment.py` at about line 494.
 
   The id is still generated before the write, so the default name `styrmin-<id>` is final at insert time.
-- [ ] T010 Run `uv run invoke format lint` and `uv run pytest backend/tests/unit -k "backup or restore or migration" -q`. All must pass.
+- [X] T010 Run `uv run invoke format lint` and `uv run pytest backend/tests/unit -k "backup or restore or migration" -q`. All must pass.
 
 **Checkpoint**: New Velero objects are named after the id. Old custom-named rows keep their Velero name. Names are unique per instance.
 

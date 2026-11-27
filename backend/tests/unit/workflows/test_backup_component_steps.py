@@ -716,7 +716,9 @@ async def _internal_backup_flow(
     velero_result: dict[str, Any] | None = None,
 ) -> AsyncIterator[SimpleNamespace]:
     backup = MagicMock()
-    backup.name = "styrmin-backup-1"
+    # Not the Velero name: the Velero object is named after the id (#39).
+    backup.name = "nightly"
+    backup.id = uuid4()
     backup.instance_id = uuid4()
     backup.component_statuses = {
         "db": {"status": "pending", "kind": "postgres"},
@@ -760,6 +762,7 @@ async def _internal_backup_flow(
     variable.unset = AsyncMock()
     built = MagicMock()
     built.render.return_value = {"kind": "Backup"}
+    build_backup = MagicMock(return_value=built)
 
     dispatch = AsyncMock(side_effect=_dispatch)
     status = AsyncMock()
@@ -770,13 +773,37 @@ async def _internal_backup_flow(
         patch(f"{MODULE}.get_backup", AsyncMock(return_value=backup)),
         patch(f"{MODULE}.update_backup_status", status),
         patch(f"{MODULE}.build_component_hooks", MagicMock(return_value=[])),
-        patch(f"{MODULE}.build_velero_backup", MagicMock(return_value=built)),
+        patch(f"{MODULE}.build_velero_backup", build_backup),
         patch(f"{MODULE}.arun_deployment", dispatch),
         patch(f"{MODULE}.Variable", variable),
         patch(f"{MODULE}.action_api_token", _action_api_token),
         patch(f"{MODULE}.fail_open_steps", fail_open),
     ):
-        yield SimpleNamespace(dispatch=dispatch, status=status, fail_open=fail_open)
+        yield SimpleNamespace(
+            dispatch=dispatch,
+            status=status,
+            fail_open=fail_open,
+            backup=backup,
+            build_backup=build_backup,
+        )
+
+
+async def test_backup_workflow_names_the_velero_backup_after_the_id(
+    events: list[Event],
+) -> None:
+    """The Velero object is ``styrmin-<id>``, not the backup's name (#39, ADR-073)."""
+    async with _internal_backup_flow(events) as flow:
+        await execute_backup_workflow.fn(
+            backup_id=str(uuid4()), deployment_id=str(uuid4())
+        )
+
+    backup = flow.backup
+    assert backup.name != f"styrmin-{backup.id}"
+    kwargs = flow.build_backup.call_args.kwargs
+    assert kwargs["name"] == f"styrmin-{backup.id}"
+    assert kwargs["backup_id"] == str(backup.id)
+    params = flow.dispatch.await_args.kwargs["parameters"]
+    assert params["velero_backup_name"] == f"styrmin-{backup.id}"
 
 
 async def test_backup_workflow_gives_the_user_flow_a_token_and_the_backup(

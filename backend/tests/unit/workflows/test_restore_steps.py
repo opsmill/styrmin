@@ -667,6 +667,7 @@ async def _internal_restore_flow(
     velero_result: dict[str, Any] | None = None,
     counterpart: Deployment | None = None,
     deployment_id: UUID = DEPLOYMENT_ID,
+    backup_metadata: dict[str, Any] | None = None,
 ) -> AsyncIterator[SimpleNamespace]:
     """Fake every boundary of ``execute_restore_workflow``.
 
@@ -675,7 +676,10 @@ async def _internal_restore_flow(
     otherwise. Pass the same deployment to ``_run_restore_workflow``.
     """
     backup = MagicMock()
-    backup.name = "styrmin-backup-1"
+    # Not the Velero name: the Velero object is named after the id (#39).
+    backup.name = "nightly"
+    backup.id = uuid4()
+    backup.metadata_ = backup_metadata
     backup.instance_id = uuid4()
     backup.component_statuses = None
     restore = MagicMock()
@@ -718,6 +722,7 @@ async def _internal_restore_flow(
     variable.unset = AsyncMock()
     built = MagicMock()
     built.render.return_value = {"kind": "Restore"}
+    build_restore = MagicMock(return_value=built)
     uow = MagicMock()
     uow.deployments.find = AsyncMock(return_value=counterpart)
 
@@ -732,7 +737,7 @@ async def _internal_restore_flow(
         patch(f"{MODULE}.get_backup", AsyncMock(return_value=backup)),
         patch(f"{SERVICE_MODULE}.get_restore", AsyncMock(return_value=restore)),
         patch(f"{MODULE}.update_restore_status", status),
-        patch(f"{MODULE}.build_velero_restore", MagicMock(return_value=built)),
+        patch(f"{MODULE}.build_velero_restore", build_restore),
         patch(f"{MODULE}.arun_deployment", dispatch),
         patch(f"{MODULE}.Variable", variable),
         patch(f"{MODULE}._set_deployment_status_running", deployment_running),
@@ -746,6 +751,8 @@ async def _internal_restore_flow(
             fail_open=fail_open,
             deployment_running=deployment_running,
             deployment_failed=deployment_failed,
+            backup=backup,
+            build_restore=build_restore,
         )
 
 
@@ -783,6 +790,32 @@ async def test_restore_workflow_gives_the_user_flow_a_token_and_the_restore(
         ("token revoked",),
     ]
     flow.fail_open.assert_not_awaited()
+
+
+async def test_restore_workflow_restores_the_velero_backup_named_after_the_id(
+    events: list[Event],
+) -> None:
+    """A renamed backup still restores from ``styrmin-<id>`` (#39, ADR-073)."""
+    async with _internal_restore_flow(events) as flow:
+        await _run_restore_workflow(uuid4())
+
+    assert flow.backup.name != f"styrmin-{flow.backup.id}"
+    assert (
+        flow.build_restore.call_args.kwargs["backup_name"]
+        == f"styrmin-{flow.backup.id}"
+    )
+
+
+async def test_restore_workflow_restores_a_legacy_backup_by_its_stored_name(
+    events: list[Event],
+) -> None:
+    """A backup created with a custom name before #39 keeps its Velero object name."""
+    async with _internal_restore_flow(
+        events, backup_metadata={"velero_backup_name": "before-upgrade"}
+    ) as flow:
+        await _run_restore_workflow(uuid4())
+
+    assert flow.build_restore.call_args.kwargs["backup_name"] == "before-upgrade"
 
 
 @pytest.mark.parametrize(

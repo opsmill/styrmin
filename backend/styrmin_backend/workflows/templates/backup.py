@@ -59,6 +59,9 @@ from styrmin_backend.services.backup.metadata import (
     BackupMetadata,
     read_backup_metadata,
 )
+from styrmin_backend.services.backup.metadata import (
+    velero_backup_name as velero_backup_name_of,
+)
 from styrmin_backend.services.backup.service import (
     get_backup,
     get_strategy,
@@ -559,10 +562,11 @@ async def execute_backup_workflow(
                 uow=uow,
             )
 
-        # Fetch backup record for names
+        # Fetch backup record for names. The Velero object is named after the
+        # backup's id, so a rename does not change it (ADR-073).
         async with get_unit_of_work() as uow:
             backup = await get_backup(backup_uuid, uow)
-        velero_backup_name = backup.name
+        velero_backup_name = velero_backup_name_of(backup)
         target_namespace = f"styrmin-{deployment_uuid}"
         velero_namespace = "styrmin"
 
@@ -702,6 +706,7 @@ async def execute_backup_workflow(
             velero_namespace=velero_namespace,
             target_namespace=target_namespace,
             instance_id=str(backup.instance_id),
+            backup_id=str(backup.id),
             driver_name="styrmin",
             ttl=ttl,
             hooks=hooks,
@@ -965,10 +970,11 @@ async def execute_restore_workflow(
                 uow=uow,
             )
 
-        # Fetch backup to get Velero backup name
+        # Fetch backup to get the name of its Velero object: ``styrmin-<id>``,
+        # or the custom name a backup created before #39 was given.
         async with get_unit_of_work() as uow:
             backup = await get_backup(backup_uuid, uow)
-        velero_backup_name = backup.name
+        velero_backup_name = velero_backup_name_of(backup)
 
         # Fetch restore for names
         from styrmin_backend.services.backup.service import get_restore

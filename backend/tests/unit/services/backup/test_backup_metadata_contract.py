@@ -22,13 +22,16 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
 from styrmin_backend.services.backup.metadata import (
     BackupMetadata,
     read_backup_metadata,
+    velero_backup_name,
 )
+from styrmin_backend.db.models import Backup
 
 # Repo root: .../backend/tests/unit/services/backup/<this file>
 REPO_ROOT = Path(__file__).resolve().parents[5]
@@ -36,7 +39,9 @@ REPO_ROOT = Path(__file__).resolve().parents[5]
 # Every key the backup pipeline writes or reads, and nothing else. Pinned so
 # adding a key is a deliberate edit here as well as in the TypedDict — the
 # point of the contract is that writer and reader agree on this exact set.
-PIPELINE_KEYS = frozenset({"timeout", "ttl", "ttl_source", "expires_at"})
+PIPELINE_KEYS = frozenset(
+    {"timeout", "ttl", "ttl_source", "expires_at", "velero_backup_name"}
+)
 
 # Velero's own spelling of the expiry, which is what reaches the workflow from
 # the Prefect Variable payload. It must NOT be a usable metadata key.
@@ -171,3 +176,18 @@ def test_ty_accepts_the_persisted_metadata_key(tmp_path: Path) -> None:
         f"ty rejected the persisted metadata key.\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
+
+
+def test_velero_backup_name_defaults_to_the_backup_id() -> None:
+    backup = Backup(name="renamed", status="completed", instance_id=uuid4())
+    assert velero_backup_name(backup) == f"styrmin-{backup.id}"
+
+
+def test_velero_backup_name_uses_the_name_stored_for_a_legacy_backup() -> None:
+    backup = Backup(
+        name="renamed",
+        status="completed",
+        instance_id=uuid4(),
+        metadata_={"velero_backup_name": "before-upgrade"},
+    )
+    assert velero_backup_name(backup) == "before-upgrade"

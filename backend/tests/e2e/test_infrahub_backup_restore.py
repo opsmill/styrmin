@@ -151,7 +151,7 @@ async def test_infrahub_backup_and_restore_lifecycle(
     # 2b. Verify backup targets the assigned BSL
     await assert_velero_backup_uses_bsl(
         kubeconfig_path=kubeconfig_path,
-        backup_name=backup.name,
+        backup_name=f"styrmin-{backup.id}",
         expected_bsl_id=str(load_infrahub["bsl_id"]),
     )
 
@@ -262,7 +262,7 @@ async def test_infrahub_enterprise_backup_and_restore_lifecycle(
     # 2b. Verify backup targets the assigned BSL
     await assert_velero_backup_uses_bsl(
         kubeconfig_path=kubeconfig_path,
-        backup_name=backup.name,
+        backup_name=f"styrmin-{backup.id}",
         expected_bsl_id=str(load_infrahub_enterprise["bsl_id"]),
     )
 

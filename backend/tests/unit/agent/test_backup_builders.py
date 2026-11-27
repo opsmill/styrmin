@@ -15,6 +15,7 @@ class TestBuildVeleroBackup:
             velero_namespace="velero",
             target_namespace="app-ns",
             instance_id="inst-123",
+            backup_id="backup-456",
             driver_name="mydriver",
             ttl="2160h",
         )
@@ -25,6 +26,8 @@ class TestBuildVeleroBackup:
         assert rendered["spec"]["includeClusterResources"] is False
         assert "labelSelector" not in rendered["spec"]
         assert rendered["metadata"]["labels"]["styrmin.io/driver"] == "mydriver"
+        # ADR-073: the object carries the id of its Backup record.
+        assert rendered["metadata"]["labels"]["styrmin.io/backup-id"] == "backup-456"
         # ``ttl`` is a required argument with no default (016): the builder
         # passes the caller's resolved retention straight through.
         assert rendered["spec"]["ttl"] == "2160h"
@@ -46,6 +49,7 @@ class TestBuildVeleroBackup:
             velero_namespace="velero",
             target_namespace="app-ns",
             instance_id="inst-123",
+            backup_id="backup-456",
             driver_name="mydriver",
             ttl="720h",
             hooks=[hook],
@@ -61,6 +65,7 @@ class TestBuildVeleroBackup:
             velero_namespace="velero",
             target_namespace="app-ns",
             instance_id="inst-123",
+            backup_id="backup-456",
             driver_name="mydriver",
             ttl="720h",
         )
