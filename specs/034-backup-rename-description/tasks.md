@@ -241,7 +241,7 @@ description: "Task list for 034-backup-rename-description"
   - `uv run pytest python_sdk/tests cli/tests -q`.
 
   Check that a fresh run of `uv run invoke generate` leaves no changes.
-- [ ] T040 Run the E2E test in both variants, following AGENTS.md:
+- [X] T040 Run the E2E test in both variants, following AGENTS.md:
   ```bash
   sleep infinity | uv run pytest "backend/tests/e2e/test_backup_restore.py::test_backup_and_restore_lifecycle" -v -s --pdb 2>&1 | tee /tmp/pdb.log
   ```
