@@ -2073,7 +2073,7 @@ export type ListBackupsQueryVariables = Exact<{
 }>;
 
 
-export type ListBackupsQuery = { __typename?: 'Query', backups: Array<{ __typename?: 'Backup', id: string, name: string, status: string, createdOn: any, completedAt?: any | null, sizeBytes?: number | null, errorMessage?: string | null, ttl?: string | null, expiresAt?: any | null, instance: { __typename?: 'ApplicationInstance', id: string, applicationVersion: string }, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, errors: Array<{ __typename?: 'StepError', attempt: number, message: string, occurredAt: any }> }> }> };
+export type ListBackupsQuery = { __typename?: 'Query', backups: Array<{ __typename?: 'Backup', id: string, name: string, description?: string | null, status: string, createdOn: any, completedAt?: any | null, sizeBytes?: number | null, errorMessage?: string | null, ttl?: string | null, expiresAt?: any | null, instance: { __typename?: 'ApplicationInstance', id: string, applicationVersion: string }, steps: Array<{ __typename?: 'Step', id: string, key: string, name: string, kind: StepKind, status: StepStatus, startedAt?: any | null, endedAt?: any | null, durationSeconds?: number | null, attemptCount: number, error?: string | null, errors: Array<{ __typename?: 'StepError', attempt: number, message: string, occurredAt: any }> }> }> };
 
 export type ListClustersQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2187,6 +2187,15 @@ export type UnassignBackupStorageLocationMutationVariables = Exact<{
 
 
 export type UnassignBackupStorageLocationMutation = { __typename?: 'Mutation', unassignBackupStorageLocation?: { __typename?: 'Environment', id: string, name: string, backupStorageLocation?: { __typename?: 'BackupStorageLocation', id: string, name: string } | null } | null };
+
+export type UpdateBackupMutationVariables = Exact<{
+  backupId: Scalars['UUID']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
+  description?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type UpdateBackupMutation = { __typename?: 'Mutation', updateBackup?: { __typename?: 'Backup', id: string, name: string, description?: string | null } | null };
 
 export type UpdateBackupStorageLocationMutationVariables = Exact<{
   backupStorageLocationId: Scalars['UUID']['input'];
@@ -3490,6 +3499,7 @@ export const ListBackupsDocument = `
   backups(deploymentId: $deploymentId) {
     id
     name
+    description
     status
     createdOn
     completedAt
@@ -4073,6 +4083,29 @@ export const useUnassignBackupStorageLocationMutation = <
       {
     mutationKey: ['UnassignBackupStorageLocation'],
     mutationFn: (variables?: UnassignBackupStorageLocationMutationVariables) => graphqlFetcher<UnassignBackupStorageLocationMutation, UnassignBackupStorageLocationMutationVariables>(UnassignBackupStorageLocationDocument, variables)(),
+    ...options
+  }
+    )};
+
+export const UpdateBackupDocument = `
+    mutation UpdateBackup($backupId: UUID!, $name: String, $description: String) {
+  updateBackup(backupId: $backupId, name: $name, description: $description) {
+    id
+    name
+    description
+  }
+}
+    `;
+
+export const useUpdateBackupMutation = <
+      TError = Error,
+      TContext = unknown
+    >(options?: UseMutationOptions<UpdateBackupMutation, TError, UpdateBackupMutationVariables, TContext>) => {
+    
+    return useMutation<UpdateBackupMutation, TError, UpdateBackupMutationVariables, TContext>(
+      {
+    mutationKey: ['UpdateBackup'],
+    mutationFn: (variables?: UpdateBackupMutationVariables) => graphqlFetcher<UpdateBackupMutation, UpdateBackupMutationVariables>(UpdateBackupDocument, variables)(),
     ...options
   }
     )};

@@ -146,15 +146,15 @@ description: "Task list for 034-backup-rename-description"
 
 ### Frontend
 
-- [ ] T022 [P] [US1] Add `frontend/src/graphql/update_backup.graphql` (`mutation UpdateBackup`) and add `description` to `frontend/src/graphql/list_backups.graphql`. Run `cd frontend && pnpm codegen`.
-- [ ] T023 [US1] Create `frontend/src/pages/deployments/BackupDetailsDialog.tsx`: a dialog with optional Name and Description fields, built with `@tanstack/react-form` in the same way as `frontend/src/pages/clusters/EditClusterDialog.tsx`. The dialog has a `mode: "create" | "edit"` prop and initial values. Client-side validation mirrors the server rules: name at most 255 characters, and not whitespace-only when non-empty in edit mode; description at most 2,000 characters. Server errors are shown in the dialog. In create mode the submit button has focus, so Enter submits the empty form (critique P4).
-- [ ] T024 [US1] In `frontend/src/pages/deployments/DeploymentDetailPage.tsx`, change `BackupRow` (about line 1126):
+- [X] T022 [P] [US1] Add `frontend/src/graphql/update_backup.graphql` (`mutation UpdateBackup`) and add `description` to `frontend/src/graphql/list_backups.graphql`. Run `cd frontend && pnpm codegen`.
+- [X] T023 [US1] Create `frontend/src/pages/deployments/BackupDetailsDialog.tsx`: a dialog with optional Name and Description fields, built with `@tanstack/react-form` in the same way as `frontend/src/pages/clusters/EditClusterDialog.tsx`. The dialog has a `mode: "create" | "edit"` prop and initial values. Client-side validation mirrors the server rules: name at most 255 characters, and not whitespace-only when non-empty in edit mode; description at most 2,000 characters. Server errors are shown in the dialog. In create mode the submit button has focus, so Enter submits the empty form (critique P4).
+- [X] T024 [US1] In `frontend/src/pages/deployments/DeploymentDetailPage.tsx`, change `BackupRow` (about line 1126):
   - show `description` under the name, in muted text, limited to two lines (`line-clamp-2`), with the full text in `title`, rendered as text only (critique P5, E4);
   - add an **Edit** action next to Restore and Delete that opens `BackupDetailsDialog` in edit mode and calls the `updateBackup` mutation;
   - invalidate the backups query on success;
   - keep the existing `data-testid="backup-row"`, `data-backup-id` and `data-backup-name` attributes;
   - add `data-testid="backup-edit"` to the action and `data-backup-description` to the row.
-- [ ] T025 [US1] Add `frontend/src/__tests__/deployment-detail/BackupDetailsDialog.test.tsx`. Test cases:
+- [X] T025 [US1] Add `frontend/src/__tests__/deployment-detail/BackupDetailsDialog.test.tsx`. Test cases:
   - edit mode pre-fills the values and submits only the changed fields;
   - a whitespace-only name is rejected;
   - a server `ALREADY_EXISTS` error is shown;

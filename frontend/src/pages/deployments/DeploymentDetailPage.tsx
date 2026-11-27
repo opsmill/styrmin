@@ -7,6 +7,7 @@ import {
   useGetDriverQuery,
   useCreateBackupMutation,
   useDeleteBackupMutation,
+  useUpdateBackupMutation,
   useDeleteDeploymentMutation,
   useListBackupsQuery,
   useCreateRestoreMutation,
@@ -52,6 +53,7 @@ import {
   Lock,
   RotateCcw,
 } from "lucide-react";
+import { BackupDetailsDialog } from "./BackupDetailsDialog";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { BackupRestoreSteps } from "@/components/deployment/BackupRestoreSteps";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
@@ -114,6 +116,8 @@ export default function DeploymentDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBackupId, setDeleteBackupId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const updateBackupMutation = useUpdateBackupMutation();
+  const [editBackupId, setEditBackupId] = useState<string | null>(null);
   const updateVersionMutation = useUpdateDeploymentVersionMutation();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [newVersion, setNewVersion] = useState("");
@@ -176,6 +180,7 @@ export default function DeploymentDetailPage() {
   const selectedBackup = backupsData?.backups?.find(
     (b) => b.id === selectedBackupId,
   );
+  const editBackup = backupsData?.backups?.find((b) => b.id === editBackupId);
   const deleteBackupName = backupsData?.backups?.find(
     (b) => b.id === deleteBackupId,
   )?.name;
@@ -692,7 +697,7 @@ export default function DeploymentDetailPage() {
                 <span className="w-[110px] shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Expires
                 </span>
-                <span className="w-[110px] shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                <span className="w-[150px] shrink-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                   Actions
                 </span>
               </div>
@@ -706,6 +711,7 @@ export default function DeploymentDetailPage() {
                     setRestoreError(null);
                     setRestoreOpen(true);
                   }}
+                  onEdit={setEditBackupId}
                   onDelete={(backupId) => {
                     setDeleteBackupId(backupId);
                     setDeleteError(null);
@@ -720,6 +726,26 @@ export default function DeploymentDetailPage() {
               ))}
             </>
           )}
+          <BackupDetailsDialog
+            key={editBackup?.id}
+            open={editBackup !== undefined}
+            onOpenChange={(open) => {
+              if (!open) setEditBackupId(null);
+            }}
+            mode="edit"
+            initialName={editBackup?.name}
+            initialDescription={editBackup?.description}
+            onSubmit={async (changes) => {
+              if (!editBackup) return;
+              await updateBackupMutation.mutateAsync({
+                backupId: editBackup.id,
+                ...changes,
+              });
+              await queryClient.invalidateQueries({
+                queryKey: ["ListBackups"],
+              });
+            }}
+          />
         </div>
       </TabPanel>
 
@@ -1127,6 +1153,7 @@ function BackupRow({
   backup,
   index,
   onRestore,
+  onEdit,
   onDelete,
   autoRefreshEnabled,
   deploymentTerminal,
@@ -1137,6 +1164,8 @@ function BackupRow({
   backup: {
     id: string;
     name: string;
+    /** Free-text note; shown as plain text, never as Markdown or HTML. */
+    description?: string | null;
     status: string;
     createdOn: string;
     sizeBytes?: number | null;
@@ -1152,6 +1181,7 @@ function BackupRow({
   };
   index: number;
   onRestore: (backupId: string) => void;
+  onEdit: (backupId: string) => void;
   onDelete: (backupId: string) => void;
   autoRefreshEnabled: boolean;
   /**
@@ -1220,6 +1250,7 @@ function BackupRow({
       data-testid="backup-row"
       data-backup-id={backup.id}
       data-backup-name={backup.name}
+      data-backup-description={backup.description ?? ""}
       data-backup-status={backup.status}
       data-backup-application-version={backup.instance.applicationVersion}
     >
@@ -1230,9 +1261,20 @@ function BackupRow({
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <div className={`h-2 w-2 flex-shrink-0 rounded-full ${bc.dot}`} />
-          <span className="min-w-0 break-all text-[13px] font-medium text-foreground">
-            {backup.name}
-          </span>
+          <div className="min-w-0">
+            <span className="block break-all text-[13px] font-medium text-foreground">
+              {backup.name}
+            </span>
+            {backup.description && (
+              <span
+                className="line-clamp-2 whitespace-pre-line break-words text-[12px] text-muted-foreground"
+                data-testid="backup-description"
+                title={backup.description}
+              >
+                {backup.description}
+              </span>
+            )}
+          </div>
         </div>
         <div className="w-[100px] shrink-0" data-testid="backup-status">
           <StatusBadge status={backup.status} />
@@ -1282,7 +1324,7 @@ function BackupRow({
           )}
           {retentionHint && <span className="sr-only"> ({retentionHint})</span>}
         </span>
-        <div className="flex w-[110px] shrink-0 items-center gap-2">
+        <div className="flex w-[150px] shrink-0 items-center gap-2">
           <IfRole minimum="READ_WRITE">
             <button
               disabled={isRestoreDisabled}
@@ -1291,6 +1333,16 @@ function BackupRow({
               title={restoreTitle}
             >
               Restore
+            </button>
+            <span className="text-muted-foreground/30">|</span>
+            <button
+              data-testid="backup-edit"
+              disabled={deploymentTerminal}
+              onClick={() => onEdit(backup.id)}
+              className="text-xs font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
+              title={deploymentTerminal ? terminalTitle : undefined}
+            >
+              Edit
             </button>
             <span className="text-muted-foreground/30">|</span>
             <button
