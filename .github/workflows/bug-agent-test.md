@@ -36,6 +36,20 @@ network:
     - python
     - node
     - playwright
+# The profile's `setup` and runner commands (`uv sync`, `pnpm install`, ...) run in
+# the agent's sandbox, which has only the tools of the runner image. `uv` and `pnpm`
+# are not part of it, so they are installed here, before the agent starts. Rule:
+# every overlay shipped in `.github/bug-pipeline/` has its tools installed here.
+runtimes:
+  uv:
+    version: "latest"
+  node:
+    version: "24"
+steps:
+  - name: Install pnpm
+    # A consumer that pins `packageManager` in package.json gets that pnpm version:
+    # pnpm switches to it by itself.
+    run: npm install --global pnpm@10
 permissions:
   contents: read
   issues: read
@@ -81,7 +95,7 @@ safe-outputs:
     max: 2
   report-missing-tool:
 source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-test.md@chore/gh-aw-1.2.2
-source-sha: "5066a46a209743da310a8db446d43524a10fcedf"
+source-sha: "8fb2ce18e13a5b556fc875e64ac733eabd8ec575"
 ---
 
 # Bug test-writer agent
