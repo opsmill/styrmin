@@ -596,11 +596,15 @@ class BackupNameAlreadyExistsError(ServiceError):
     """Another backup of the same application instance already has this name."""
 
     error_code = "ALREADY_EXISTS"
-    default_message = "A backup with that name already exists for this instance"
 
-    def __init__(self, existing_backup_id: str, message: str = "") -> None:
+    def __init__(self, name: str, existing_backup_id: str, message: str = "") -> None:
+        self.name = name
         self.existing_backup_id = existing_backup_id
-        super().__init__(message or self.default_message)
+        super().__init__(
+            message
+            or f'A backup named "{name}" already exists for this deployment. '
+            "Choose a different name."
+        )
 
     @property
     def error_metadata(self) -> dict[str, Any]:

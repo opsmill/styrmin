@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from styrmin_backend.db.models import (
     ApplicationInstance,
@@ -918,4 +919,109 @@ class TestUpdateBackupComponentStatus:
                 component_name="web",
                 component_status="completed",
                 uow=uow,
+            )
+
+
+def _unique_index_error() -> IntegrityError:
+    return IntegrityError(
+        "INSERT INTO backup ...",
+        {},
+        Exception("UNIQUE constraint failed: backup.instance_id, backup.name"),
+    )
+
+
+class TestNameRace:
+    """A write that loses a race on ``ix_backup_instance_id_name`` gives ``ALREADY_EXISTS``."""
+
+    @pytest.mark.anyio
+    async def test_create_translates_lost_race(self) -> None:
+        instance_id = uuid4()
+        rival = Backup(
+            name="nightly", status=BackupStatus.PENDING, instance_id=instance_id
+        )
+        uow = make_uow()
+
+        async def commit_after_rival_wrote() -> None:
+            # The rival committed between the check and this write; the rollback drops ours.
+            uow.backups.models[:] = [rival]
+            raise _unique_index_error()
+
+        uow.commit = commit_after_rival_wrote  # type: ignore[method-assign]
+
+        with pytest.raises(BackupNameAlreadyExistsError) as exc_info:
+            await create_backup(instance_id=instance_id, uow=uow, name="nightly")
+
+        assert exc_info.value.error_metadata == {"existing_backup_id": str(rival.id)}
+        assert str(exc_info.value) == (
+            'A backup named "nightly" already exists for this deployment. '
+            "Choose a different name."
+        )
+
+    @pytest.mark.anyio
+    async def test_update_translates_lost_race(self) -> None:
+        instance_id = uuid4()
+        backup = Backup(
+            name="old", status=BackupStatus.COMPLETED, instance_id=instance_id
+        )
+        rival = Backup(
+            name="nightly", status=BackupStatus.PENDING, instance_id=instance_id
+        )
+        uow = make_uow(backups=[backup])
+
+        async def commit_after_rival_wrote() -> None:
+            backup.name = "old"  # what the rollback restores
+            uow.backups.models.append(rival)
+            raise _unique_index_error()
+
+        uow.commit = commit_after_rival_wrote  # type: ignore[method-assign]
+
+        with pytest.raises(BackupNameAlreadyExistsError) as exc_info:
+            await update_backup(backup.id, uow, name="nightly")
+
+        assert exc_info.value.error_metadata == {"existing_backup_id": str(rival.id)}
+
+    @pytest.mark.anyio
+    async def test_other_integrity_error_is_not_masked(self) -> None:
+        uow = make_uow()
+
+        async def commit_fails() -> None:
+            uow.backups.models.clear()
+            raise _unique_index_error()
+
+        uow.commit = commit_fails  # type: ignore[method-assign]
+
+        with pytest.raises(IntegrityError):
+            await create_backup(instance_id=uuid4(), uow=uow, name="nightly")
+
+
+class TestControlCharacters:
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "name", ["two\nlines", "tab\there", "bell\x07", "del\x7f", "next\x85line"]
+    )
+    async def test_name_with_control_character_rejected(self, name: str) -> None:
+        with pytest.raises(ValidationError, match="control characters"):
+            await create_backup(instance_id=uuid4(), uow=make_uow(), name=name)
+
+        backup = Backup(
+            name="nightly", status=BackupStatus.COMPLETED, instance_id=uuid4()
+        )
+        with pytest.raises(ValidationError, match="control characters"):
+            await update_backup(backup.id, make_uow(backups=[backup]), name=name)
+
+    @pytest.mark.anyio
+    async def test_description_keeps_line_breaks_and_tabs(self) -> None:
+        backup = await create_backup(
+            instance_id=uuid4(), uow=make_uow(), description="line one\r\n\tline two"
+        )
+        assert backup.description == "line one\r\n\tline two"
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("description", ["bell\x07", "null\x00", "esc\x1b[31m"])
+    async def test_description_with_other_control_character_rejected(
+        self, description: str
+    ) -> None:
+        with pytest.raises(ValidationError, match="control characters"):
+            await create_backup(
+                instance_id=uuid4(), uow=make_uow(), description=description
             )

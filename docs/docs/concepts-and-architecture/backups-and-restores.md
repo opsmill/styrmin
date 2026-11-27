@@ -147,12 +147,15 @@ list` shows it in the `description` column, cut to 40 characters.
   backups of different instances, for example of two deployments, can
   have the same name. Creating or renaming a backup to a name that
   another backup of the same instance has fails with the error code
-  `ALREADY_EXISTS`, and the error's `existing_backup_id` is the id of
-  that other backup.
+  `ALREADY_EXISTS` and the message `A backup named "<name>" already
+  exists for this deployment. Choose a different name.` The error's
+  `existing_backup_id` is the id of that other backup.
 - Styrmin removes spaces at the start and end of a name. The name must
-  then be 1 to 255 characters long.
-- A description is at most 2,000 characters long. An empty description,
-  or one that contains only spaces, clears the description.
+  then be 1 to 255 characters long and cannot contain line breaks, tabs
+  or other control characters.
+- A description is at most 2,000 characters long. It can contain line
+  breaks and tabs, but no other control characters. An empty
+  description, or one that contains only spaces, clears the description.
 - A name or description that breaks these rules fails with the error
   code `VALIDATION_ERROR`. A backup id that does not exist fails with
   `NOT_FOUND`.

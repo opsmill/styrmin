@@ -120,12 +120,28 @@ async def test_update_backup_duplicate_name_returns_already_exists(
     )
     assert _error_code(payload) == "ALREADY_EXISTS"
     assert payload["errors"][0]["extensions"]["existing_backup_id"] == str(taken_id)
+    assert payload["errors"][0]["message"] == (
+        'A backup named "before-upgrade" already exists for this deployment. '
+        "Choose a different name."
+    )
 
 
 @pytest.mark.parametrize(
     "variables",
-    [{"name": "   "}, {"name": "a" * 256}, {"description": "a" * 2001}],
-    ids=["blank-name", "long-name", "long-description"],
+    [
+        {"name": "   "},
+        {"name": "a" * 256},
+        {"name": "two\nlines"},
+        {"description": "a" * 2001},
+        {"description": "bell\x07"},
+    ],
+    ids=[
+        "blank-name",
+        "long-name",
+        "control-character-name",
+        "long-description",
+        "control-character-description",
+    ],
 )
 @pytest.mark.asyncio
 async def test_update_backup_invalid_input_returns_validation_error(
@@ -224,3 +240,7 @@ async def test_create_backup_duplicate_name_returns_already_exists(
     )
     assert _error_code(payload) == "ALREADY_EXISTS"
     assert payload["errors"][0]["extensions"]["existing_backup_id"] == str(taken_id)
+    assert payload["errors"][0]["message"] == (
+        'A backup named "before-upgrade" already exists for this deployment. '
+        "Choose a different name."
+    )

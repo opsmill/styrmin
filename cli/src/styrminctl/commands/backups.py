@@ -44,6 +44,8 @@ NOT_RECORDED = "—"
 #: The longest description ``backups list`` shows; ``backups get`` prints it in full.
 DESCRIPTION_COLUMN_WIDTH = 40
 
+BACKUP_NOT_FOUND_HINT = "Run `styrminctl backups list` to find backup ids."
+
 
 def _cut_short(text: str | None, width: int = DESCRIPTION_COLUMN_WIDTH) -> str:
     """Return ``text`` cut to ``width`` characters, ending in an ellipsis when it was cut."""
@@ -97,7 +99,7 @@ async def create(
 @backups_app.command
 async def get(backup_id: BackupId) -> None:
     """Get backup details."""
-    with styrmin_error_handler():
+    with styrmin_error_handler(not_found_hint=BACKUP_NOT_FOUND_HINT):
         async with client.get_client() as sdk:
             backup = await sdk.backups.get_backup(backup_id)
 
@@ -201,7 +203,7 @@ async def update(
     description: Annotated[str | None, Parameter(help='New description. --description "" clears it.')] = None,
 ) -> None:
     """Rename a backup or change its description."""
-    with styrmin_error_handler():
+    with styrmin_error_handler(not_found_hint=BACKUP_NOT_FOUND_HINT):
         if name is None and description is None:
             raise ValueError("Provide --name, --description, or both.")
         async with client.get_client() as sdk:
@@ -213,7 +215,7 @@ async def update(
 @backups_app.command
 async def delete(backup_id: BackupId) -> None:
     """Delete a backup and all associated restores."""
-    with styrmin_error_handler():
+    with styrmin_error_handler(not_found_hint=BACKUP_NOT_FOUND_HINT):
         async with client.get_client() as sdk:
             await sdk.backups.delete_backup(backup_id)
 
@@ -458,7 +460,8 @@ async def restore(
     options choose which backups --last picks from, not where the backup is
     restored, and work only with --last.
     """
-    with styrmin_error_handler():
+    # With --last the backup id comes from the backup history, so a not-found error is not about an id the user typed.
+    with styrmin_error_handler(not_found_hint="" if last else BACKUP_NOT_FOUND_HINT):
         if last and backup_id is not None:
             raise ValueError("Provide either a backup_id or --last, not both")
         if backup_id is not None:

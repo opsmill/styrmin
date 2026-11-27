@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, NamedTuple, Sequence
+from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn, Sequence
 from uuid import UUID, uuid4
 
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
 from styrmin_backend.agent.service.kubernetes.utils import get_kubernetes_reference
 from styrmin_backend.agent.service.kubernetes.velero.resources import VeleroBackupHook
@@ -174,7 +176,9 @@ async def create_backup(
                 instance_id, cleaned_name
             )
             if same_name is not None:
-                raise BackupNameAlreadyExistsError(existing_backup_id=str(same_name.id))
+                raise BackupNameAlreadyExistsError(
+                    name=cleaned_name, existing_backup_id=str(same_name.id)
+                )
 
         hooks: list[VeleroBackupHook] = []
         component_statuses: dict[str, dict[str, str]] = {}
@@ -209,9 +213,12 @@ async def create_backup(
             environment_backup_id=environment_backup_id,
         )
 
-        backup = await uow.backups.create(backup)
-
-        await uow.commit()
+        # ``create`` flushes, so the unique index can fire there or at the commit.
+        try:
+            backup = await uow.backups.create(backup)
+            await uow.commit()
+        except IntegrityError as exc:
+            await _raise_name_conflict(uow, exc, instance_id, cleaned_name, backup_id)
         await uow.session.refresh(backup)  # Load server-generated fields
 
         logger.info(
@@ -220,24 +227,63 @@ async def create_backup(
         return backup
 
 
+async def _raise_name_conflict(
+    uow: UnitOfWork,
+    exc: IntegrityError,
+    instance_id: UUID,
+    name: str | None,
+    backup_id: UUID,
+) -> NoReturn:
+    """Turn a lost race on ``ix_backup_instance_id_name`` into ``ALREADY_EXISTS``.
+
+    Two writes of one name for one instance can both pass the check before the
+    write; the unique index rejects the second. After the rollback, the name is
+    looked up again: only when another backup holds it is the error translated,
+    so any other integrity error is raised unchanged.
+    """
+    await uow.rollback()
+    if name is not None:
+        existing = await uow.backups.get_by_instance_and_name(instance_id, name)
+        if existing is not None and existing.id != backup_id:
+            raise BackupNameAlreadyExistsError(
+                name=name, existing_backup_id=str(existing.id)
+            ) from exc
+    raise exc
+
+
+def _has_control_character(text: str, allowed: str = "") -> bool:
+    return any(
+        unicodedata.category(char) == "Cc" and char not in allowed for char in text
+    )
+
+
 def _clean_backup_name(name: str) -> str:
-    """Strip whitespace from a backup name and check its length."""
+    """Strip whitespace from a backup name and check its length and characters."""
     cleaned = name.strip()
     if not 1 <= len(cleaned) <= MAX_BACKUP_NAME_LENGTH:
         raise ValidationError(
             f"A backup name must be 1 to {MAX_BACKUP_NAME_LENGTH} characters after "
             "leading and trailing whitespace is removed"
         )
+    if _has_control_character(cleaned):
+        raise ValidationError(
+            "A backup name cannot contain line breaks, tabs or other control characters"
+        )
     return cleaned
 
 
 def _clean_backup_description(description: str) -> str | None:
-    """Check a description's length; empty or whitespace-only clears it."""
+    """Check a description's length and characters; empty or whitespace-only clears it."""
     cleaned = description.strip()
     if len(cleaned) > MAX_BACKUP_DESCRIPTION_LENGTH:
         raise ValidationError(
             f"A backup description must be at most {MAX_BACKUP_DESCRIPTION_LENGTH:,} "
             "characters"
+        )
+    if _has_control_character(cleaned, allowed="\n\r\t"):
+        raise ValidationError(
+            "A backup description cannot contain control characters other than "
+            "line breaks and tabs"
         )
     return cleaned or None
 
@@ -267,13 +313,18 @@ async def update_backup(
                 )
                 if existing is not None and existing.id != backup.id:
                     raise BackupNameAlreadyExistsError(
-                        existing_backup_id=str(existing.id)
+                        name=cleaned_name, existing_backup_id=str(existing.id)
                     )
                 backup.name = cleaned_name
         if description is not None:
             backup.description = _clean_backup_description(description)
 
-        await uow.commit()
+        # Read before the commit: a rollback expires ``backup``.
+        instance_id, new_name = backup.instance_id, backup.name
+        try:
+            await uow.commit()
+        except IntegrityError as exc:
+            await _raise_name_conflict(uow, exc, instance_id, new_name, backup_id)
         await uow.session.refresh(backup)  # Load server-generated fields
 
         logger.info(f"Updated backup {backup_id} ({backup.name})")

@@ -323,9 +323,15 @@ backup](../concepts-and-architecture/backups-and-restores.md#name-and-describe-a
 
 - `ALREADY_EXISTS` when another backup of the same instance has the name;
 - `VALIDATION_ERROR` when the name is empty or longer than 255
-  characters after spaces at the start and end are removed, or when the
-  description is longer than 2,000 characters;
+  characters after spaces at the start and end are removed, when the
+  name contains a line break, a tab or another control character, or
+  when the description is longer than 2,000 characters or contains a
+  control character other than a line break or a tab;
 - `NOT_FOUND` (`update` only) when the backup id does not exist.
+
+When `get`, `update`, `delete` or `restore` is given a backup id that
+does not exist, `styrminctl` prints the error and then the line
+"Run `styrminctl backups list` to find backup ids."
 
 ### `env-backups` — environment-level backup and restore
 

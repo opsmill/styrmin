@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from styrmin_sdk.exceptions import StyrminError
+from styrmin_sdk.exceptions import ResourceAlreadyExistsError, ResourceNotFoundError, StyrminError
 from styrminctl.cli import app
 from styrminctl.commands import backups as backups_commands
 
@@ -493,13 +493,43 @@ def test_backups_update_name_taken_prints_the_server_error(
     mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
 ) -> None:
     mock_client.backups.update_backup = AsyncMock(
-        side_effect=StyrminError("A backup named 'taken' already exists", "ALREADY_EXISTS")
+        side_effect=ResourceAlreadyExistsError(
+            'A backup named "taken" already exists for this deployment. Choose a different name.', "ALREADY_EXISTS"
+        )
     )
 
     with pytest.raises(SystemExit) as exc:
         app(["backups", "update", BACKUP_UUID, "--name", "taken"])
     assert exc.value.code == 1
-    assert "A backup named 'taken' already exists" in capsys.readouterr().out
+    out = " ".join(capsys.readouterr().out.split())  # undo Rich's line wrapping
+    assert 'A backup named "taken" already exists for this deployment. Choose a different name.' in out
+    assert "backups list" not in out
+
+
+@pytest.mark.parametrize(
+    ("argv", "method"),
+    [
+        (["get", BACKUP_UUID], "get_backup"),
+        (["update", BACKUP_UUID, "--name", "x"], "update_backup"),
+        (["delete", BACKUP_UUID], "delete_backup"),
+        (["restore", BACKUP_UUID], "create_restore"),
+    ],
+)
+def test_backups_unknown_backup_id_prints_list_hint(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], argv: list[str], method: str
+) -> None:
+    setattr(
+        mock_client.backups,
+        method,
+        AsyncMock(side_effect=ResourceNotFoundError(f"Backup {BACKUP_UUID} not found", "NOT_FOUND")),
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", *argv])
+    assert exc.value.code == 1
+    out = " ".join(capsys.readouterr().out.split())  # undo Rich's line wrapping
+    assert f"Backup {BACKUP_UUID} not found" in out
+    assert "Run `styrminctl backups list` to find backup ids." in out
 
 
 def test_backups_delete(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
