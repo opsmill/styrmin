@@ -51,10 +51,14 @@ class BackupResource(BaseResource):
         self,
         instance_id: str | UUID,
         name: str | None = None,
+        description: str | None = None,
     ) -> CreateBackupCreateBackup:
+        """Create a backup of an instance. Only the arguments that are set are sent."""
         variables: dict[str, Any] = {"instanceId": str(instance_id)}
         if name is not None:
             variables["name"] = name
+        if description is not None:
+            variables["description"] = description
 
         result = await self._transport.execute(load_query("create_backup"), variables)
         self._check_graphql_errors(result)

@@ -1,0 +1,7 @@
+mutation CreateBackupWithDescription($instanceId: UUID!, $name: String, $description: String) {
+    createBackup(instanceId: $instanceId, name: $name, description: $description) {
+        id
+        name
+        description
+    }
+}

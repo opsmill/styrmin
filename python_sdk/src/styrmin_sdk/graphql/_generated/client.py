@@ -249,13 +249,15 @@ class Client(AsyncBaseClient):
         self,
         instance_id: UUID,
         name: Union[Optional[str], UnsetType] = UNSET,
+        description: Union[Optional[str], UnsetType] = UNSET,
         **kwargs: Any,
     ) -> CreateBackup:
         query = gql("""
-            mutation CreateBackup($instanceId: UUID!, $name: String) {
-              createBackup(instanceId: $instanceId, name: $name) {
+            mutation CreateBackup($instanceId: UUID!, $name: String, $description: String) {
+              createBackup(instanceId: $instanceId, name: $name, description: $description) {
                 id
                 name
+                description
                 status
                 instanceId
                 errorMessage
@@ -269,7 +271,11 @@ class Client(AsyncBaseClient):
               }
             }
             """)
-        variables: dict[str, object] = {"instanceId": instance_id, "name": name}
+        variables: dict[str, object] = {
+            "instanceId": instance_id,
+            "name": name,
+            "description": description,
+        }
         response = await self.execute(
             query=query, operation_name="CreateBackup", variables=variables, **kwargs
         )

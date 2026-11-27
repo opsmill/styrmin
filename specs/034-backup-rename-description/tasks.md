@@ -182,7 +182,7 @@ description: "Task list for 034-backup-rename-description"
 
 **Independent Test**: Create a backup with a name and a description from the UI, the SDK and the CLI. Both values are stored. A duplicate name in the same instance is rejected.
 
-- [ ] T028 [US2] In `backend/styrmin_backend/services/backup/service.py`, change `create_backup` to take `description: str | None = None`. It must:
+- [X] T028 [US2] In `backend/styrmin_backend/services/backup/service.py`, change `create_backup` to take `description: str | None = None`. It must:
   - clean the name with `_clean_backup_name` when a name is given and is not whitespace-only (a whitespace-only name falls back to the default `styrmin-<id>`);
   - clean the description with `_clean_backup_description`;
   - before the insert, check `get_by_instance_and_name` and raise `BackupNameAlreadyExistsError`.
@@ -192,10 +192,10 @@ description: "Task list for 034-backup-rename-description"
   - default name with no description;
   - duplicate name in one instance is rejected;
   - the same name on two instances is allowed.
-- [ ] T029 [US2] In `backend/styrmin_backend/api/schema/mutation.py`, give `create_backup` a `description: str | None = None` argument and pass it to the service. Regenerate `schema.graphql`. In the same propagation test file as T018, add a create test with an operation file `backend/tests/functional/graphql/operations/create_backup_with_description.graphql`. It asserts that `description` reaches the database and that the duplicate name returns `ALREADY_EXISTS`.
-- [ ] T030 [P] [US2] Add `$description: String` and `description` to `python_sdk/src/styrmin_sdk/graphql/create_backup.graphql`, then regenerate. Give `BackupResource.create_backup` a `description` argument. Give `styrminctl backups create` a `--description` option. Test it in `python_sdk/tests/test_backups.py` and `cli/tests/test_backups.py`.
-- [ ] T031 [US2] Add `$name`, `$description` and `description` to `frontend/src/graphql/create_backup.graphql` and run codegen. In `DeploymentDetailPage.tsx`, make the **Create Backup** button (about lines 628–651, `handleBackup` about line 185) open `BackupDetailsDialog` in create mode, and send only the fields that are not empty. Add a create-mode test to `BackupDetailsDialog.test.tsx`.
-- [ ] T032 [US2] E2E support:
+- [X] T029 [US2] In `backend/styrmin_backend/api/schema/mutation.py`, give `create_backup` a `description: str | None = None` argument and pass it to the service. Regenerate `schema.graphql`. In the same propagation test file as T018, add a create test with an operation file `backend/tests/functional/graphql/operations/create_backup_with_description.graphql`. It asserts that `description` reaches the database and that the duplicate name returns `ALREADY_EXISTS`.
+- [X] T030 [P] [US2] Add `$description: String` and `description` to `python_sdk/src/styrmin_sdk/graphql/create_backup.graphql`, then regenerate. Give `BackupResource.create_backup` a `description` argument. Give `styrminctl backups create` a `--description` option. Test it in `python_sdk/tests/test_backups.py` and `cli/tests/test_backups.py`.
+- [X] T031 [US2] Add `$name`, `$description` and `description` to `frontend/src/graphql/create_backup.graphql` and run codegen. In `DeploymentDetailPage.tsx`, make the **Create Backup** button (about lines 628–651, `handleBackup` about line 185) open `BackupDetailsDialog` in create mode, and send only the fields that are not empty. Add a create-mode test to `BackupDetailsDialog.test.tsx`.
+- [X] T032 [US2] E2E support:
   - `create_backup(self, *, instance_id: str, name: str | None = None, description: str | None = None)` in `protocol.py`, `api_driver.py` and `ui_driver.py`;
   - the page object `create_backup()` in `pages/deployment_detail.py` clicks **Create Backup**, fills the dialog when values are given, and submits.
 

@@ -962,11 +962,23 @@ async def test_backup_and_restore_lifecycle(
                 )
                 pre_backup_count = resp.json()["counter"]  # 6
 
-        # 2. Create backup via scenario_driver, wait for completion
+        # 2. Create backup via scenario_driver with a name and a description
+        #    (spec 034 / US2), wait for completion. The uuid fragment keeps the
+        #    name unique per instance across reruns.
+        from uuid import uuid4
+
+        initial_backup_name = f"lifecycle-{uuid4().hex[:8]}"
+        initial_backup_description = "Counter state after five increments."
         created_backup = await scenario_driver.create_backup(
-            instance_id=backed_up_instance_id
+            instance_id=backed_up_instance_id,
+            name=initial_backup_name,
+            description=initial_backup_description,
         )
         assert created_backup.status in {"pending", "in_progress", "completed"}
+        assert (created_backup.name, created_backup.description) == (
+            initial_backup_name,
+            initial_backup_description,
+        ), f"create_backup should return the given values, got {created_backup!r}"
         backup = await scenario_driver.wait_for_backup(
             backup_id=created_backup.id, max_wait=180
         )

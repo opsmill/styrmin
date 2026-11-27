@@ -908,12 +908,25 @@ class ApiScenarioDriver:
 
     # --- Backup / Restore -------------------------------------------------
 
-    async def create_backup(self, *, instance_id: str) -> BackupRef:
+    async def create_backup(
+        self,
+        *,
+        instance_id: str,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> BackupRef:
         try:
-            backup = await self._client.backups.create_backup(instance_id=instance_id)
+            backup = await self._client.backups.create_backup(
+                instance_id=instance_id, name=name, description=description
+            )
         except StyrminError as exc:
             raise _normalise(exc) from exc
-        return BackupRef(id=str(backup.id), name=backup.name, status=backup.status)
+        return BackupRef(
+            id=str(backup.id),
+            name=backup.name,
+            status=backup.status,
+            description=backup.description,
+        )
 
     async def wait_for_backup(
         self, *, backup_id: str, max_wait: float = 300.0

@@ -170,3 +170,57 @@ async def test_update_backup_rejects_read_only_role(
     row = await session.get(Backup, backup_id)
     assert row is not None
     assert row.name == "nightly"
+
+
+async def _post_create(
+    client: AsyncClient, variables: dict[str, Any]
+) -> dict[str, Any]:
+    response = await client.post(
+        "/graphql",
+        json={
+            "query": load_query("create_backup_with_description"),
+            "variables": variables,
+        },
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+@pytest.mark.asyncio
+async def test_create_backup_persists_description(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    instance_id = (await seed_application_instance(session)).id
+
+    data = await gql(
+        client,
+        "create_backup_with_description",
+        {
+            "instanceId": str(instance_id),
+            "name": " before-upgrade ",
+            "description": "Taken before the 2.0 upgrade",
+        },
+    )
+    created = data["createBackup"]
+    assert created["name"] == "before-upgrade"
+    assert created["description"] == "Taken before the 2.0 upgrade"
+
+    session.expire_all()
+    row = await session.get(Backup, UUID(created["id"]))
+    assert row is not None
+    assert row.name == "before-upgrade"
+    assert row.description == "Taken before the 2.0 upgrade"
+
+
+@pytest.mark.asyncio
+async def test_create_backup_duplicate_name_returns_already_exists(
+    client: AsyncClient, session: AsyncSession
+) -> None:
+    taken = await _seed_backup(session, name="before-upgrade")
+    taken_id = taken.id
+
+    payload = await _post_create(
+        client, {"instanceId": str(taken.instance_id), "name": "before-upgrade"}
+    )
+    assert _error_code(payload) == "ALREADY_EXISTS"
+    assert payload["errors"][0]["extensions"]["existing_backup_id"] == str(taken_id)

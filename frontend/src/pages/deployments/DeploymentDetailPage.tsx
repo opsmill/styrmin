@@ -53,7 +53,10 @@ import {
   Lock,
   RotateCcw,
 } from "lucide-react";
-import { BackupDetailsDialog } from "./BackupDetailsDialog";
+import {
+  BackupDetailsDialog,
+  type BackupDetailsChanges,
+} from "./BackupDetailsDialog";
 import { AutoRefreshIndicator } from "@/components/AutoRefreshIndicator";
 import { BackupRestoreSteps } from "@/components/deployment/BackupRestoreSteps";
 import { DeploymentTimeline } from "@/components/deployment/DeploymentTimeline";
@@ -107,7 +110,7 @@ export default function DeploymentDetailPage() {
 
   // Mutations
   const createBackupMutation = useCreateBackupMutation();
-  const [backupError, setBackupError] = useState<string | null>(null);
+  const [createBackupOpen, setCreateBackupOpen] = useState(false);
   const createRestoreMutation = useCreateRestoreMutation();
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [selectedBackupId, setSelectedBackupId] = useState<string | null>(null);
@@ -188,19 +191,11 @@ export default function DeploymentDetailPage() {
   // its own deployment's namespace; the client never sends one (#532).
   const targetNamespace = deploymentId ? `styrmin-${deploymentId}` : "";
 
-  async function handleBackup() {
-    setBackupError(null);
-    if (!instanceId) {
-      setBackupError("Deployment has no instance yet");
-      return;
-    }
-    try {
-      await createBackupMutation.mutateAsync({ instanceId });
-      queryClient.invalidateQueries({ queryKey: ["ListBackups"] });
-    } catch (err) {
-      console.error("[create-backup] mutation failed", err);
-      setBackupError(err instanceof Error ? err.message : "Unknown error");
-    }
+  // Errors are thrown so the Create Backup dialog shows them.
+  async function handleBackup(changes: BackupDetailsChanges) {
+    if (!instanceId) throw new Error("Deployment has no instance yet");
+    await createBackupMutation.mutateAsync({ instanceId, ...changes });
+    queryClient.invalidateQueries({ queryKey: ["ListBackups"] });
   }
 
   async function handleRestore() {
@@ -438,12 +433,6 @@ export default function DeploymentDetailPage() {
         </Alert>
       )}
 
-      {backupError && (
-        <Alert variant="destructive">
-          <AlertDescription>{backupError}</AlertDescription>
-        </Alert>
-      )}
-
       {/* Tabs */}
       <Tabs
         tabs={DEPLOYMENT_TABS}
@@ -645,7 +634,7 @@ export default function DeploymentDetailPage() {
                   isRestoring ||
                   isTerminal
                 }
-                onClick={handleBackup}
+                onClick={() => setCreateBackupOpen(true)}
                 title={terminalTitle}
               >
                 <Archive className="h-4 w-4" />
@@ -726,6 +715,12 @@ export default function DeploymentDetailPage() {
               ))}
             </>
           )}
+          <BackupDetailsDialog
+            open={createBackupOpen}
+            onOpenChange={setCreateBackupOpen}
+            mode="create"
+            onSubmit={handleBackup}
+          />
           <BackupDetailsDialog
             key={editBackup?.id}
             open={editBackup !== undefined}

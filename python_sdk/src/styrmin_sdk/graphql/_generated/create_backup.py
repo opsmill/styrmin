@@ -17,6 +17,7 @@ class CreateBackup(BaseModel):
 class CreateBackupCreateBackup(BaseModel):
     id: UUID
     name: str
+    description: Optional[str]
     status: str
     instance_id: UUID = Field(alias="instanceId")
     error_message: Optional[str] = Field(alias="errorMessage")

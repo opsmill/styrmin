@@ -356,7 +356,14 @@ class ScenarioDriver(Protocol):
 
     # --- Backup / Restore -------------------------------------------------
 
-    async def create_backup(self, *, instance_id: str) -> BackupRef: ...
+    async def create_backup(
+        self,
+        *,
+        instance_id: str,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> BackupRef:
+        """Create a backup; ``None`` fields are left out (default name, no description)."""
 
     async def wait_for_backup(
         self, *, backup_id: str, max_wait: float = 300.0

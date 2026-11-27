@@ -91,7 +91,7 @@ def test_backups_create_by_deployment_name(mock_client: MagicMock, capsys: pytes
     with pytest.raises(SystemExit) as exc:
         app(["backups", "create", "demo"])
     assert exc.value.code == 0
-    mock_client.backups.create_backup.assert_called_once_with(instance_id=INSTANCE_UUID, name=None)
+    mock_client.backups.create_backup.assert_called_once_with(instance_id=INSTANCE_UUID, name=None, description=None)
     assert "backup-1" in capsys.readouterr().out
 
 
@@ -108,7 +108,7 @@ def test_backups_create_by_deployment_name_scoped_to_environment(mock_client: Ma
     assert exc.value.code == 0
     # Only the matching environment is queried for deployments.
     mock_client.deployments.list.assert_called_once_with(ENV_UUID)
-    mock_client.backups.create_backup.assert_called_once_with(instance_id=INSTANCE_UUID, name=None)
+    mock_client.backups.create_backup.assert_called_once_with(instance_id=INSTANCE_UUID, name=None, description=None)
 
 
 def test_backups_create_by_deployment_id(mock_client: MagicMock) -> None:
@@ -119,7 +119,7 @@ def test_backups_create_by_deployment_id(mock_client: MagicMock) -> None:
         app(["backups", "create", "--id", DEPLOYMENT_UUID])
     assert exc.value.code == 0
     mock_client.deployments.get.assert_called_once_with(DEPLOYMENT_UUID)
-    mock_client.backups.create_backup.assert_called_once_with(instance_id=INSTANCE_UUID, name=None)
+    mock_client.backups.create_backup.assert_called_once_with(instance_id=INSTANCE_UUID, name=None, description=None)
 
 
 def test_backups_create_by_instance_id_escape_hatch(mock_client: MagicMock) -> None:
@@ -130,7 +130,31 @@ def test_backups_create_by_instance_id_escape_hatch(mock_client: MagicMock) -> N
     assert exc.value.code == 0
     # The escape hatch bypasses deployment resolution entirely.
     mock_client.deployments.get.assert_not_called()
-    mock_client.backups.create_backup.assert_called_once_with(instance_id=INSTANCE_UUID, name="my-backup")
+    mock_client.backups.create_backup.assert_called_once_with(
+        instance_id=INSTANCE_UUID, name="my-backup", description=None
+    )
+
+
+def test_backups_create_passes_description(mock_client: MagicMock) -> None:
+    mock_client.backups.create_backup = AsyncMock(return_value=MagicMock(id=BACKUP_UUID, status="pending"))
+
+    with pytest.raises(SystemExit) as exc:
+        app(
+            [
+                "backups",
+                "create",
+                "--instance-id",
+                INSTANCE_UUID,
+                "--name",
+                "before-upgrade",
+                "--description",
+                "Taken before 2.0",
+            ]
+        )
+    assert exc.value.code == 0
+    mock_client.backups.create_backup.assert_called_once_with(
+        instance_id=INSTANCE_UUID, name="before-upgrade", description="Taken before 2.0"
+    )
 
 
 def test_backups_create_without_target_is_rejected(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:

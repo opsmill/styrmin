@@ -21,6 +21,7 @@ import { BackupDetailsDialog } from "@/pages/deployments/BackupDetailsDialog";
 import type { GetDeploymentQuery, ListBackupsQuery } from "@/generated/graphql";
 
 const updateBackupMock = vi.fn();
+const createBackupMock = vi.fn();
 const noopQueryResult = {
   data: undefined,
   isLoading: false,
@@ -111,7 +112,10 @@ vi.mock("@/generated/graphql", async () => {
       ...noopMutationResult,
       mutateAsync: updateBackupMock,
     }),
-    useCreateBackupMutation: () => noopMutationResult,
+    useCreateBackupMutation: () => ({
+      ...noopMutationResult,
+      mutateAsync: createBackupMock,
+    }),
     useDeleteBackupMutation: () => noopMutationResult,
     useCreateRestoreMutation: () => noopMutationResult,
     useDeleteDeploymentMutation: () => noopMutationResult,
@@ -190,6 +194,58 @@ describe("BackupDetailsDialog", () => {
   beforeEach(() => {
     updateBackupMock.mockReset();
     updateBackupMock.mockResolvedValue({});
+    createBackupMock.mockReset();
+    createBackupMock.mockResolvedValue({});
+  });
+
+  it("opens the dialog from Create Backup and sends only the filled fields", async () => {
+    await renderBackupsTab();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /Create Backup/ }),
+    );
+    expect(screen.getByTestId("backup-details-dialog")).toBeInTheDocument();
+    expect(createBackupMock).not.toHaveBeenCalled();
+
+    await userEvent.type(
+      screen.getByTestId("backup-details-description"),
+      "Before the 2.6 upgrade",
+    );
+    await userEvent.click(screen.getByTestId("backup-details-submit"));
+
+    expect(createBackupMock).toHaveBeenCalledWith({
+      instanceId: "inst-1",
+      description: "Before the 2.6 upgrade",
+    });
+    await vi.waitFor(() =>
+      expect(
+        screen.queryByTestId("backup-details-dialog"),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("shows a create error in the Create Backup dialog", async () => {
+    createBackupMock.mockRejectedValue(
+      new GraphQLOperationError(
+        "ALREADY_EXISTS",
+        "A backup with that name already exists for this instance",
+      ),
+    );
+    await renderBackupsTab();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /Create Backup/ }),
+    );
+    await userEvent.type(screen.getByTestId("backup-details-name"), "taken");
+    await userEvent.click(screen.getByTestId("backup-details-submit"));
+
+    expect(createBackupMock).toHaveBeenCalledWith({
+      instanceId: "inst-1",
+      name: "taken",
+    });
+    expect(screen.getByTestId("backup-details-error")).toHaveTextContent(
+      "A backup with that name already exists for this instance",
+    );
   });
 
   it("shows the description in the backup row as plain text", async () => {

@@ -1052,7 +1052,7 @@ type Mutation {
   deploy(driver: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, version: String = null, name: String = null, config: DeploymentConfigInput = null, parameters: [ParameterValueInput!] = null, serviceNameOverrides: [ServiceNameOverride!] = null, driverVersionId: UUID = null): Task @requiresRole
   updateDeployment(deploymentId: UUID!, input: UpdateDeploymentInput!): Task @requiresRole
   deleteDeployment(deploymentId: UUID!): Task! @requiresRole
-  createBackup(instanceId: UUID!, name: String = null): Backup @requiresRole
+  createBackup(instanceId: UUID!, name: String = null, description: String = null): Backup @requiresRole
 
   """
   Rename a backup or change its description. An argument that is not sent leaves its field unchanged; an empty description clears it. Does not change any Kubernetes object.

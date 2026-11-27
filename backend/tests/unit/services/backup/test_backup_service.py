@@ -194,6 +194,61 @@ class TestCreateBackup:
 
         assert backup.name == "new-backup"
 
+    @pytest.mark.anyio
+    async def test_create_backup_with_description(self) -> None:
+        uow = make_uow()
+
+        backup = await create_backup(
+            instance_id=uuid4(),
+            uow=uow,
+            name="  before-upgrade  ",
+            description="  Taken before 2.0  ",
+        )
+
+        assert backup.name == "before-upgrade"
+        assert backup.description == "Taken before 2.0"
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("name", [None, "", "   "])
+    async def test_create_backup_default_name_without_description(
+        self, name: str | None
+    ) -> None:
+        uow = make_uow()
+
+        backup = await create_backup(instance_id=uuid4(), uow=uow, name=name)
+
+        assert backup.name == f"styrmin-{backup.id}"
+        assert backup.description is None
+
+    @pytest.mark.anyio
+    async def test_create_backup_rejects_too_long_description(self) -> None:
+        with pytest.raises(ValidationError):
+            await create_backup(
+                instance_id=uuid4(), uow=make_uow(), description="x" * 2001
+            )
+
+    @pytest.mark.anyio
+    async def test_create_backup_duplicate_name_in_instance_rejected(self) -> None:
+        instance_id = uuid4()
+        existing = Backup(
+            name="nightly", status=BackupStatus.COMPLETED, instance_id=instance_id
+        )
+        uow = make_uow(backups=[existing])
+
+        with pytest.raises(BackupNameAlreadyExistsError):
+            await create_backup(instance_id=instance_id, uow=uow, name=" nightly ")
+
+    @pytest.mark.anyio
+    async def test_create_backup_same_name_on_two_instances_allowed(self) -> None:
+        existing = Backup(
+            name="nightly", status=BackupStatus.COMPLETED, instance_id=uuid4()
+        )
+        uow = make_uow(backups=[existing])
+
+        backup = await create_backup(instance_id=uuid4(), uow=uow, name="nightly")
+
+        assert backup.name == "nightly"
+
 
 class TestGetBackup:
     @pytest.mark.anyio

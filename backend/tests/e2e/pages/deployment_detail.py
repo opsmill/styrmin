@@ -1227,8 +1227,14 @@ class DeploymentDetailPage:
     async def open_backups_tab(self) -> None:
         await self._page.get_by_role("button", name="Backups", exact=True).click()
 
-    async def create_backup(self) -> BackupRef:
-        """Click 'Create Backup' and return the newly-added row as a ref."""
+    async def create_backup(
+        self, *, name: str | None = None, description: str | None = None
+    ) -> BackupRef:
+        """Click 'Create Backup', fill the dialog, submit, and return the new row.
+
+        Only the given fields are filled; an empty dialog creates a backup
+        with the default name ``styrmin-<id>``.
+        """
         await self.open_backups_tab()
 
         existing_ids: set[str] = set()
@@ -1239,6 +1245,19 @@ class DeploymentDetailPage:
             )
 
         await self._page.get_by_role("button", name="Create Backup").click()
+        dialog = self._page.get_by_test_id("backup-details-dialog")
+        await wait_for_dialog_open(dialog)
+        for test_id, value in (
+            ("backup-details-name", name),
+            ("backup-details-description", description),
+        ):
+            if value is not None:
+                await enter_text(
+                    dialog.get_by_test_id(test_id),
+                    value,
+                    keystroke_delay_ms=self._keystroke_delay_ms,
+                )
+        await submit_dialog(dialog, button="Create backup")
 
         async def _first_new_row() -> BackupRef | None:
             rows = self._page.locator("[data-testid=backup-row]")
@@ -1257,6 +1276,8 @@ class DeploymentDetailPage:
                     status=await _required_attr(
                         row, "data-backup-status", context=f"backup row {row_id}"
                     ),
+                    description=await row.get_attribute("data-backup-description")
+                    or None,
                 )
             return None
 

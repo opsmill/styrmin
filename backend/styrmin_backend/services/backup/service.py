@@ -144,21 +144,37 @@ async def create_backup(
     component_configs: dict[str, dict[str, Any]] | None = None,
     timeout: int = DEFAULT_BACKUP_TIMEOUT,
     environment_backup_id: UUID | None = None,
+    description: str | None = None,
 ) -> Backup:
     """Create a new on-demand backup for an application instance.
 
     Args:
+        name: The backup name, unique per instance. ``None`` or a
+            whitespace-only name gives the default ``styrmin-<id>``.
+        description: Free-text notes. Empty or whitespace-only stores none.
         environment_backup_id: Links the backup to an environment backup as
             one of its constituents. ``None`` (the default) for a standalone
             per-instance backup; the constituent's own lifecycle is otherwise
             identical (spec FR-014).
     """
+    cleaned_name = _clean_backup_name(name) if name and name.strip() else None
+    cleaned_description = (
+        _clean_backup_description(description) if description is not None else None
+    )
+
     async with uow:
         existing = await uow.backups.has_in_progress_backup(instance_id)
         if existing:
             raise BackupAlreadyInProgressError(
                 existing_backup_id=str(existing.id),
             )
+
+        if cleaned_name is not None:
+            same_name = await uow.backups.get_by_instance_and_name(
+                instance_id, cleaned_name
+            )
+            if same_name is not None:
+                raise BackupNameAlreadyExistsError(existing_backup_id=str(same_name.id))
 
         hooks: list[VeleroBackupHook] = []
         component_statuses: dict[str, dict[str, str]] = {}
@@ -184,7 +200,8 @@ async def create_backup(
         backup_id = uuid4()
         backup = Backup(
             id=backup_id,
-            name=name or f"styrmin-{backup_id}",
+            name=cleaned_name or f"styrmin-{backup_id}",
+            description=cleaned_description,
             status=BackupStatus.PENDING,
             instance_id=instance_id,
             component_statuses=component_statuses or None,

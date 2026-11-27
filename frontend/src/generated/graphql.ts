@@ -859,6 +859,7 @@ export type MutationCloneEnvironmentArgs = {
 
 
 export type MutationCreateBackupArgs = {
+  description?: InputMaybe<Scalars['String']['input']>;
   instanceId: Scalars['UUID']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
 };
@@ -1844,10 +1845,11 @@ export type CloneEnvironmentMutation = { __typename?: 'Mutation', cloneEnvironme
 export type CreateBackupMutationVariables = Exact<{
   instanceId: Scalars['UUID']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
+  description?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 
-export type CreateBackupMutation = { __typename?: 'Mutation', createBackup?: { __typename?: 'Backup', id: string, name: string, status: string, createdOn: any } | null };
+export type CreateBackupMutation = { __typename?: 'Mutation', createBackup?: { __typename?: 'Backup', id: string, name: string, description?: string | null, status: string, createdOn: any } | null };
 
 export type CreateBackupStorageLocationMutationVariables = Exact<{
   name: Scalars['String']['input'];
@@ -2343,10 +2345,11 @@ export const useCloneEnvironmentMutation = <
     )};
 
 export const CreateBackupDocument = `
-    mutation CreateBackup($instanceId: UUID!, $name: String) {
-  createBackup(instanceId: $instanceId, name: $name) {
+    mutation CreateBackup($instanceId: UUID!, $name: String, $description: String) {
+  createBackup(instanceId: $instanceId, name: $name, description: $description) {
     id
     name
+    description
     status
     createdOn
   }

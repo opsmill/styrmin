@@ -37,6 +37,7 @@ class TestBackupResource:
                 "createBackup": {
                     "id": "00000000-0000-0000-0000-000000000001",
                     "name": "test-backup",
+                    "description": None,
                     "status": "pending",
                     "instanceId": "00000000-0000-0000-0000-000000000010",
                     "errorMessage": None,
@@ -58,6 +59,51 @@ class TestBackupResource:
         # resolves the TTL and Velero reports the expiration only once it runs.
         assert backup.ttl is None
         assert backup.expires_at is None
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_backup_sends_name_and_description(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {
+            "data": {
+                "createBackup": {
+                    "id": "00000000-0000-0000-0000-000000000001",
+                    "name": "before-upgrade",
+                    "description": "Taken before 2.0",
+                    "status": "pending",
+                    "instanceId": "00000000-0000-0000-0000-000000000010",
+                    "errorMessage": None,
+                    "startedAt": None,
+                    "completedAt": None,
+                    "sizeBytes": None,
+                    "ttl": None,
+                    "expiresAt": None,
+                    "createdOn": "2026-01-01T00:00:00",
+                    "updatedOn": None,
+                }
+            }
+        }
+
+        backup = await client.backups.create_backup(
+            instance_id="00000000-0000-0000-0000-000000000010",
+            name="before-upgrade",
+            description="Taken before 2.0",
+        )
+
+        assert backup.description == "Taken before 2.0"
+        variables = mock_transport.execute.call_args.args[1]
+        assert variables == {
+            "instanceId": "00000000-0000-0000-0000-000000000010",
+            "name": "before-upgrade",
+            "description": "Taken before 2.0",
+        }
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_create_backup_omits_unset_arguments(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        await TestBackupResource.test_create_backup(client, mock_transport)
+
+        variables = mock_transport.execute.call_args.args[1]
+        assert variables == {"instanceId": "00000000-0000-0000-0000-000000000010"}
 
     @staticmethod
     @pytest.mark.asyncio

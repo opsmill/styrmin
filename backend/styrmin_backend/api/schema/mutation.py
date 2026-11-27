@@ -960,6 +960,7 @@ class Mutation:
         instance_id: UUID,
         info: strawberry.Info,
         name: str | None = None,
+        description: str | None = None,
     ) -> BackupType | None:
         """Create a new on-demand backup for an instance."""
         uow = info.context["uow"]
@@ -977,6 +978,7 @@ class Mutation:
         backup = await create_backup_service(
             instance_id=instance_id,
             name=name,
+            description=description,
             uow=uow,
             target_namespace=target_namespace,
             component_configs=component_configs,

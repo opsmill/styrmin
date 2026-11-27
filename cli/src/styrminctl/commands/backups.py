@@ -60,6 +60,7 @@ async def create(
     environment: EnvironmentContextName = None,
     instance_id: InstanceIdOption = None,
     name: Annotated[str | None, Parameter(help="Optional backup name.")] = None,
+    description: Annotated[str | None, Parameter(help="Optional backup description.")] = None,
     wait: Annotated[bool, Parameter(help="Wait for backup to complete.")] = False,
     max_wait: MaxWait = 300,
     interval: PollInterval = 5,
@@ -78,7 +79,7 @@ async def create(
                 instance_id=instance_id,
                 environment=environment,
             )
-            backup = await sdk.backups.create_backup(instance_id=target.instance_id, name=name)
+            backup = await sdk.backups.create_backup(instance_id=target.instance_id, name=name, description=description)
 
             print_success(f"Backup '{backup.name}' created (id: {backup.id}, status: {backup.status})")
 
