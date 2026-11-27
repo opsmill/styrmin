@@ -21,6 +21,7 @@ from styrmin_backend.services.backup.service import (
     get_backup,
     get_backups,
     get_strategy,
+    update_backup,
     update_backup_component_status,
     update_backup_status,
 )
@@ -33,7 +34,9 @@ from styrmin_backend.services.backup.strategies.postgres import PostgresBackupSt
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
     BackupAlreadyInProgressError,
+    BackupNameAlreadyExistsError,
     BackupNotFoundError,
+    ValidationError,
 )
 from tests.unit.services.fakes import (
     FakeActionRepository,
@@ -212,6 +215,136 @@ class TestGetBackup:
 
         with pytest.raises(BackupNotFoundError):
             await get_backup(backup_id=uuid4(), uow=uow)
+
+
+class TestUpdateBackup:
+    @staticmethod
+    def _backup(
+        name: str = "nightly",
+        instance_id=None,
+        status: BackupStatus = BackupStatus.COMPLETED,
+        description: str | None = None,
+    ) -> Backup:
+        return Backup(
+            name=name,
+            status=status,
+            instance_id=instance_id or uuid4(),
+            description=description,
+        )
+
+    @pytest.mark.anyio
+    async def test_renames(self) -> None:
+        backup = self._backup()
+        uow = make_uow(backups=[backup])
+
+        result = await update_backup(backup.id, uow, name="  before-upgrade  ")
+
+        assert result.name == "before-upgrade"
+        assert uow.committed
+
+    @pytest.mark.anyio
+    async def test_sets_then_clears_description(self) -> None:
+        backup = self._backup()
+        uow = make_uow(backups=[backup])
+
+        result = await update_backup(backup.id, uow, description="Taken before 2.0")
+        assert result.description == "Taken before 2.0"
+
+        result = await update_backup(backup.id, uow, description="")
+        assert result.description is None
+
+    @pytest.mark.anyio
+    async def test_only_one_field_sent_leaves_the_other(self) -> None:
+        backup = self._backup(description="keep me")
+        uow = make_uow(backups=[backup])
+
+        result = await update_backup(backup.id, uow, name="renamed")
+        assert result.name == "renamed"
+        assert result.description == "keep me"
+
+        result = await update_backup(backup.id, uow, description="new note")
+        assert result.name == "renamed"
+        assert result.description == "new note"
+
+    @pytest.mark.anyio
+    async def test_same_name_again_does_nothing(self) -> None:
+        backup = self._backup(name="nightly")
+        uow = make_uow(backups=[backup])
+
+        result = await update_backup(backup.id, uow, name="nightly")
+        assert result.name == "nightly"
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("name", ["", "   "])
+    async def test_empty_name_rejected(self, name: str) -> None:
+        backup = self._backup()
+        uow = make_uow(backups=[backup])
+
+        with pytest.raises(ValidationError):
+            await update_backup(backup.id, uow, name=name)
+        assert backup.name == "nightly"
+
+    @pytest.mark.anyio
+    async def test_name_too_long_rejected(self) -> None:
+        backup = self._backup()
+        uow = make_uow(backups=[backup])
+
+        with pytest.raises(ValidationError):
+            await update_backup(backup.id, uow, name="a" * 256)
+
+    @pytest.mark.anyio
+    async def test_name_of_255_characters_accepted(self) -> None:
+        backup = self._backup()
+        uow = make_uow(backups=[backup])
+
+        result = await update_backup(backup.id, uow, name="a" * 255)
+        assert result.name == "a" * 255
+
+    @pytest.mark.anyio
+    async def test_description_too_long_rejected(self) -> None:
+        backup = self._backup()
+        uow = make_uow(backups=[backup])
+
+        with pytest.raises(ValidationError):
+            await update_backup(backup.id, uow, description="a" * 2001)
+
+    @pytest.mark.anyio
+    async def test_duplicate_name_in_same_instance_rejected(self) -> None:
+        instance_id = uuid4()
+        taken = self._backup(name="before-upgrade", instance_id=instance_id)
+        backup = self._backup(name="nightly", instance_id=instance_id)
+        uow = make_uow(backups=[taken, backup])
+
+        with pytest.raises(BackupNameAlreadyExistsError) as exc_info:
+            await update_backup(backup.id, uow, name="before-upgrade")
+
+        assert exc_info.value.error_metadata == {"existing_backup_id": str(taken.id)}
+        assert backup.name == "nightly"
+
+    @pytest.mark.anyio
+    async def test_same_name_in_other_instance_allowed(self) -> None:
+        other = self._backup(name="before-upgrade")
+        backup = self._backup(name="nightly")
+        uow = make_uow(backups=[other, backup])
+
+        result = await update_backup(backup.id, uow, name="before-upgrade")
+        assert result.name == "before-upgrade"
+
+    @pytest.mark.anyio
+    async def test_in_progress_backup_can_be_renamed(self) -> None:
+        backup = self._backup(status=BackupStatus.IN_PROGRESS)
+        uow = make_uow(backups=[backup])
+
+        result = await update_backup(backup.id, uow, name="renamed")
+        assert result.name == "renamed"
+        assert result.status == BackupStatus.IN_PROGRESS
+
+    @pytest.mark.anyio
+    async def test_unknown_backup_raises_not_found(self) -> None:
+        uow = make_uow()
+
+        with pytest.raises(BackupNotFoundError):
+            await update_backup(uuid4(), uow, name="x")
 
 
 class TestGetBackups:

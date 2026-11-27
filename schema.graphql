@@ -117,6 +117,9 @@ type ApplicationInstance {
 type Backup {
   id: UUID!
   name: String!
+
+  """Optional free-text note about the backup. Null when not set."""
+  description: String
   status: String!
   createdOn: DateTime!
   updatedOn: DateTime
@@ -1050,6 +1053,11 @@ type Mutation {
   updateDeployment(deploymentId: UUID!, input: UpdateDeploymentInput!): Task @requiresRole
   deleteDeployment(deploymentId: UUID!): Task! @requiresRole
   createBackup(instanceId: UUID!, name: String = null): Backup @requiresRole
+
+  """
+  Rename a backup or change its description. An argument that is not sent leaves its field unchanged; an empty description clears it. Does not change any Kubernetes object.
+  """
+  updateBackup(backupId: UUID!, name: String = null, description: String = null): Backup @requiresRole
   createEnvironmentBackup(environmentId: UUID!, name: String = null): EnvironmentBackup! @requiresRole
   restoreEnvironmentBackup(environmentBackupId: UUID!): EnvironmentRestore! @requiresRole
   cloneEnvironment(name: String!, environmentId: UUID = null, environmentName: String = null, clusterId: UUID = null, clusterName: String = null, deploymentIds: [UUID!] = null, configOverride: UpdateEnvironmentInput = null, clearConfigFields: [String!] = null): EnvironmentClone! @requiresRole

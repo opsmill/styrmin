@@ -152,6 +152,7 @@ from styrmin_backend.services.backup.service import (
     create_restore as create_restore_service,
     delete_backup as delete_backup_service,
     resolve_backup_target,
+    update_backup as update_backup_service,
     settle_undispatched_restore,
 )
 from styrmin_backend.services.deployment import get_deployment
@@ -999,6 +1000,30 @@ class Mutation:
                 exc_info=exc,
             )
 
+        return BackupType.from_instance(backup)
+
+    @strawberry.mutation(
+        extensions=[_requires(Role.READ_WRITE)],
+        description=(
+            "Rename a backup or change its description. An argument that is not "
+            "sent leaves its field unchanged; an empty description clears it. "
+            "Does not change any Kubernetes object."
+        ),
+    )
+    async def update_backup(
+        self,
+        backup_id: UUID,
+        info: strawberry.Info,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> BackupType | None:
+        """Rename a backup or change its description."""
+        backup = await update_backup_service(
+            backup_id=backup_id,
+            uow=info.context["uow"],
+            name=name,
+            description=description,
+        )
         return BackupType.from_instance(backup)
 
     @strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])

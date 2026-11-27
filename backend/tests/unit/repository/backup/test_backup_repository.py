@@ -122,6 +122,25 @@ async def test_get_backup(
 
 
 @pytest.mark.asyncio
+async def test_get_by_instance_and_name(
+    repository: SQLModelBackupRepository,
+    instance: ApplicationInstance,
+):
+    created = await repository.create(
+        Backup(
+            name="before-upgrade",
+            status=BackupStatus.COMPLETED,
+            instance_id=instance.id,
+        )
+    )
+    found = await repository.get_by_instance_and_name(instance.id, "before-upgrade")
+    assert found is not None
+    assert found.id == created.id
+    assert await repository.get_by_instance_and_name(instance.id, "other") is None
+    assert await repository.get_by_instance_and_name(uuid4(), "before-upgrade") is None
+
+
+@pytest.mark.asyncio
 async def test_get_by_instance_id(
     repository: SQLModelBackupRepository,
     instance: ApplicationInstance,

@@ -1,0 +1,7 @@
+query GetBackupDescription($backupId: UUID!) {
+    backup(backupId: $backupId) {
+        id
+        name
+        description
+    }
+}

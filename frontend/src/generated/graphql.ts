@@ -114,6 +114,8 @@ export type Backup = {
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   componentStatuses?: Maybe<Array<ComponentBackupStatus>>;
   createdOn: Scalars['DateTime']['output'];
+  /** Optional free-text note about the backup. Null when not set. */
+  description?: Maybe<Scalars['String']['output']>;
   errorMessage?: Maybe<Scalars['String']['output']>;
   /** Expiration reported by Velero for this backup. Null when no expiration was recorded — a backup Velero stored nothing for, or a backup taken before expiry was recorded. A backup whose status is FAILED can still carry an expiration: Velero's PartiallyFailed phase is stored, does expire, and is reported as FAILED here. */
   expiresAt?: Maybe<Scalars['DateTime']['output']>;
@@ -810,6 +812,8 @@ export type Mutation = {
   startComponents?: Maybe<Task>;
   stopComponents?: Maybe<Task>;
   unassignBackupStorageLocation?: Maybe<Environment>;
+  /** Rename a backup or change its description. An argument that is not sent leaves its field unchanged; an empty description clears it. Does not change any Kubernetes object. */
+  updateBackup?: Maybe<Backup>;
   updateBackupSchedule?: Maybe<BackupSchedule>;
   updateBackupStorageLocation?: Maybe<BackupStorageLocation>;
   /** Replace a cluster's config and redeploy every deployment whose resolved config changes. Requires the ADMIN role. Identify the cluster by id or name. With dryRun, nothing is saved and the result lists what saving would do. */
@@ -1046,6 +1050,13 @@ export type MutationStopComponentsArgs = {
 
 export type MutationUnassignBackupStorageLocationArgs = {
   environmentId: Scalars['UUID']['input'];
+};
+
+
+export type MutationUpdateBackupArgs = {
+  backupId: Scalars['UUID']['input'];
+  description?: InputMaybe<Scalars['String']['input']>;
+  name?: InputMaybe<Scalars['String']['input']>;
 };
 
 

@@ -30,17 +30,22 @@ from styrmin_backend.services.backup.strategies.postgres import PostgresBackupSt
 from styrmin_backend.services.exceptions import (
     AmbiguousIdentifierError,
     BackupAlreadyInProgressError,
+    BackupNameAlreadyExistsError,
     BackupNotFoundError,
     DeletedDeploymentRestoreError,
     DeploymentNotFoundError,
     InternalDeploymentError,
     RestoreAlreadyInProgressError,
     RestoreNotFoundError,
+    ValidationError,
 )
 
 if TYPE_CHECKING:
     from styrmin_backend.domain.models import Deployment as DeploymentEntity
     from styrmin_backend.services.unit_of_work import UnitOfWork
+
+MAX_BACKUP_NAME_LENGTH = 255
+MAX_BACKUP_DESCRIPTION_LENGTH = 2000
 
 # Default timeout values (seconds)
 DEFAULT_BACKUP_TIMEOUT: int = 3600  # 1 hour
@@ -195,6 +200,66 @@ async def create_backup(
         logger.info(
             f"Created backup {backup.id} ({backup.name}) for instance {instance_id}"
         )
+        return backup
+
+
+def _clean_backup_name(name: str) -> str:
+    """Strip whitespace from a backup name and check its length."""
+    cleaned = name.strip()
+    if not 1 <= len(cleaned) <= MAX_BACKUP_NAME_LENGTH:
+        raise ValidationError(
+            f"A backup name must be 1 to {MAX_BACKUP_NAME_LENGTH} characters after "
+            "leading and trailing whitespace is removed"
+        )
+    return cleaned
+
+
+def _clean_backup_description(description: str) -> str | None:
+    """Check a description's length; empty or whitespace-only clears it."""
+    cleaned = description.strip()
+    if len(cleaned) > MAX_BACKUP_DESCRIPTION_LENGTH:
+        raise ValidationError(
+            f"A backup description must be at most {MAX_BACKUP_DESCRIPTION_LENGTH:,} "
+            "characters"
+        )
+    return cleaned or None
+
+
+async def update_backup(
+    backup_id: UUID,
+    uow: UnitOfWork,
+    name: str | None = None,
+    description: str | None = None,
+) -> Backup:
+    """Rename a backup or change its description.
+
+    An argument that is ``None`` leaves its field unchanged; an empty
+    description clears it. Allowed in every status, and never touches a
+    Kubernetes object, because the Velero objects are named after the backup id.
+    """
+    async with uow:
+        backup = await uow.backups.get(backup_id)
+        if backup is None:
+            raise BackupNotFoundError(f"Backup {backup_id} not found")
+
+        if name is not None:
+            cleaned_name = _clean_backup_name(name)
+            if cleaned_name != backup.name:
+                existing = await uow.backups.get_by_instance_and_name(
+                    backup.instance_id, cleaned_name
+                )
+                if existing is not None and existing.id != backup.id:
+                    raise BackupNameAlreadyExistsError(
+                        existing_backup_id=str(existing.id)
+                    )
+                backup.name = cleaned_name
+        if description is not None:
+            backup.description = _clean_backup_description(description)
+
+        await uow.commit()
+        await uow.session.refresh(backup)  # Load server-generated fields
+
+        logger.info(f"Updated backup {backup_id} ({backup.name})")
         return backup
 
 

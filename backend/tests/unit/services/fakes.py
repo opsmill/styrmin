@@ -369,6 +369,14 @@ class FakeBackupRepository(FakeRepository[Backup], BackupRepository):
             results, key=lambda b: (b.created_on or _NO_TIME, b.id), reverse=True
         )
 
+    async def get_by_instance_and_name(
+        self, instance_id: UUID, name: str
+    ) -> Backup | None:
+        return next(
+            (b for b in self.models if b.instance_id == instance_id and b.name == name),
+            None,
+        )
+
     async def has_in_progress_backup(self, instance_id: UUID) -> Backup | None:
         for b in self.models:
             if b.instance_id == instance_id and b.status == BackupStatus.IN_PROGRESS:

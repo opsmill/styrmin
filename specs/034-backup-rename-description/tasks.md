@@ -98,9 +98,9 @@ description: "Task list for 034-backup-rename-description"
 
 ### Service, repository and errors
 
-- [ ] T011 [P] [US1] In `backend/styrmin_backend/services/exceptions.py`, add `BackupNameAlreadyExistsError(ServiceError)` with `error_code = "ALREADY_EXISTS"`, the default message "A backup with that name already exists for this instance", `__init__(self, existing_backup_id: str, message: str = "")`, and `error_metadata` that returns `{"existing_backup_id": ...}`. Copy the shape of `BackupScheduleAlreadyExistsError`.
-- [ ] T012 [P] [US1] In `backend/styrmin_backend/repository/backup.py`, add `get_by_instance_and_name(instance_id: UUID, name: str) -> Backup | None` to the abstract `BackupRepository` and to `SQLModelBackupRepository`. Test it in `backend/tests/unit/repository/backup/test_backup_repository.py`.
-- [ ] T013 [US1] In `backend/styrmin_backend/services/backup/service.py`, add two private helpers:
+- [X] T011 [P] [US1] In `backend/styrmin_backend/services/exceptions.py`, add `BackupNameAlreadyExistsError(ServiceError)` with `error_code = "ALREADY_EXISTS"`, the default message "A backup with that name already exists for this instance", `__init__(self, existing_backup_id: str, message: str = "")`, and `error_metadata` that returns `{"existing_backup_id": ...}`. Copy the shape of `BackupScheduleAlreadyExistsError`.
+- [X] T012 [P] [US1] In `backend/styrmin_backend/repository/backup.py`, add `get_by_instance_and_name(instance_id: UUID, name: str) -> Backup | None` to the abstract `BackupRepository` and to `SQLModelBackupRepository`. Test it in `backend/tests/unit/repository/backup/test_backup_repository.py`.
+- [X] T013 [US1] In `backend/styrmin_backend/services/backup/service.py`, add two private helpers:
   - `_clean_backup_name(name: str) -> str`: strip whitespace, then raise `ValidationError` unless "1 to 255 characters after leading and trailing whitespace is removed";
   - `_clean_backup_description(description: str) -> str | None`: raise `ValidationError` if the description is longer than "at most 2,000 characters"; return `None` for empty or whitespace-only input.
 
@@ -110,7 +110,7 @@ description: "Task list for 034-backup-rename-description"
   - when the new name differs from the current one, call `get_by_instance_and_name` and raise `BackupNameAlreadyExistsError` if another backup of the instance has the name;
   - commit, refresh, log, and never touch Kubernetes (FR-007);
   - allow every status (FR-010).
-- [ ] T014 [US1] Add unit tests in `backend/tests/unit/services/backup/test_backup_service.py` for `update_backup`:
+- [X] T014 [US1] Add unit tests in `backend/tests/unit/services/backup/test_backup_service.py` for `update_backup`:
   - renames;
   - description set, then cleared with `""`;
   - only one field sent;
@@ -125,10 +125,10 @@ description: "Task list for 034-backup-rename-description"
 
 ### GraphQL
 
-- [ ] T015 [US1] In `backend/styrmin_backend/api/definitions/backup/backup.py`, add `description: str | None = None` to the strawberry `Backup` type, with the docstring from contracts/graphql.md, and set it in `from_instance`.
-- [ ] T016 [US1] In `backend/styrmin_backend/api/schema/mutation.py`, add the `update_backup(self, backup_id: UUID, info: strawberry.Info, name: str | None = None, description: str | None = None) -> BackupType | None` mutation with `@strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])` and the docstring from contracts/graphql.md. It calls `update_backup` from the service, imported under an alias next to `create_backup as create_backup_service`.
-- [ ] T017 [US1] Regenerate the schema with `uv run styrmin export graphql-schema schema.graphql`. Check that the `schema.graphql` diff contains only the changes in contracts/graphql.md.
-- [ ] T018 [US1] Add the propagation test `backend/tests/functional/graphql/test_backup_update_propagation.py` with the operation file `backend/tests/functional/graphql/operations/update_backup.graphql` (`mutation UpdateBackup`), following `dev/guides/graphql-propagation-tests.md` and `test_backup_schedule.py`. The test must:
+- [X] T015 [US1] In `backend/styrmin_backend/api/definitions/backup/backup.py`, add `description: str | None = None` to the strawberry `Backup` type, with the docstring from contracts/graphql.md, and set it in `from_instance`.
+- [X] T016 [US1] In `backend/styrmin_backend/api/schema/mutation.py`, add the `update_backup(self, backup_id: UUID, info: strawberry.Info, name: str | None = None, description: str | None = None) -> BackupType | None` mutation with `@strawberry.mutation(extensions=[_requires(Role.READ_WRITE)])` and the docstring from contracts/graphql.md. It calls `update_backup` from the service, imported under an alias next to `create_backup as create_backup_service`.
+- [X] T017 [US1] Regenerate the schema with `uv run styrmin export graphql-schema schema.graphql`. Check that the `schema.graphql` diff contains only the changes in contracts/graphql.md.
+- [X] T018 [US1] Add the propagation test `backend/tests/functional/graphql/test_backup_update_propagation.py` with the operation file `backend/tests/functional/graphql/operations/update_backup.graphql` (`mutation UpdateBackup`), following `dev/guides/graphql-propagation-tests.md` and `test_backup_schedule.py`. The test must:
   - call `updateBackup` and read the row back from the database to assert `name` and `description`;
   - query a seeded `Backup.description` and assert it is returned;
   - assert `extensions.code` for `ALREADY_EXISTS`, `VALIDATION_ERROR` and `NOT_FOUND`;
