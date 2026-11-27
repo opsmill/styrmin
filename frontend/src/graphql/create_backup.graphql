@@ -1,8 +1,4 @@
-mutation CreateBackup(
-  $instanceId: UUID!
-  $name: String
-  $description: String
-) {
+mutation CreateBackup($instanceId: UUID!, $name: String, $description: String) {
   createBackup(
     instanceId: $instanceId
     name: $name

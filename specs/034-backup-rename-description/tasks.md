@@ -233,7 +233,7 @@ description: "Task list for 034-backup-rename-description"
   - the description is optional;
   - the Velero `Backup` object is named after the backup's id and is found by it (ADR-073), and backups created with a custom name before #39 keep their original Velero name.
 - [X] T038 [P] Add the changelog fragment `changelog/39.added.md` with `uv run towncrier create -c "..." 39.added.md`. It states that backups can be given a description, renamed and re-described after creation, that names are unique per deployment instance, and that Velero objects are now always named after the backup's id.
-- [ ] T039 Run the checks from quickstart.md:
+- [X] T039 Run the checks from quickstart.md:
   - `uv run invoke format lint`;
   - `uv run invoke validate-graphql`;
   - `uv run invoke test`;
@@ -251,7 +251,7 @@ description: "Task list for 034-backup-rename-description"
   - the ISO 8601 timestamp;
   - the vcluster id and kubeconfig path;
   - the verbatim `PASSED` line.
-- [ ] T041 Record in the implementation report the follow-up for the deferred scheduled-backup name template (research R10). Do not file the issue automatically; the user decides.
+- [X] T041 Record in the implementation report the follow-up for the deferred scheduled-backup name template (research R10). Do not file the issue automatically; the user decides.
 
 ---
 
