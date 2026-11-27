@@ -96,6 +96,7 @@ jobs:
           # 4) For the test-writer, resolve the base branch from the composed test
           #    profile (falls back to the repo default branch).
           base_branch=""
+          issue_number=""
           if [ "$kind" = "bug-tdd" ]; then
             profile_value="$(gh api "repos/$REPO/contents/.github/bug-pipeline/profile.yml" \
               --jq '.content' 2>/dev/null | base64 -d 2>/dev/null \
@@ -115,12 +116,30 @@ jobs:
             fi
           fi
 
+          # The fixer writes comments and labels to the linked bug issue. Resolve
+          # that number from the pipeline branch instead of granting wildcard
+          # safe-output targets. The worker prompt uses this same branch contract.
+          if [ "$kind" = "bug-fix" ]; then
+            if [ "$IS_PR" != "true" ]; then
+              echo "::error::/bug-fix must be run on the pipeline pull request, not on an issue."
+              exit 1
+            fi
+            head_ref="$(gh api "repos/$REPO/pulls/$NUMBER" --jq '.head.ref')"
+            if [[ "$head_ref" =~ ^ai-bug-pipeline-([0-9]+)- ]]; then
+              issue_number="${BASH_REMATCH[1]}"
+            else
+              echo "::error::Could not resolve the linked issue from pipeline branch '$head_ref'."
+              exit 1
+            fi
+          fi
+
           {
             echo "kind=$kind"
             echo "workflow=$workflow"
             echo "is_pr=$IS_PR"
             echo "number=$NUMBER"
             echo "base_branch=$base_branch"
+            echo "issue_number=$issue_number"
             echo "authorized=true"
           } >> "$GITHUB_OUTPUT"
 
@@ -134,6 +153,7 @@ jobs:
           IS_PR: ${{ steps.gate.outputs.is_pr }}
           NUMBER: ${{ steps.gate.outputs.number }}
           BASE_BRANCH: ${{ steps.gate.outputs.base_branch }}
+          ISSUE_NUMBER: ${{ steps.gate.outputs.issue_number }}
         run: |
           set -euo pipefail
           case "$KIND" in
@@ -148,12 +168,7 @@ jobs:
               fi
               ;;
             bug-fix)
-              # The fixer operates on the pipeline PR; a PR number is required.
-              if [ "$IS_PR" != "true" ]; then
-                echo "::error::/bug-fix must be run on the pipeline pull request, not on an issue."
-                exit 1
-              fi
-              gh workflow run "$WORKFLOW" -f pr_number="$NUMBER"
+              gh workflow run "$WORKFLOW" -f pr_number="$NUMBER" -f issue_number="$ISSUE_NUMBER"
               ;;
           esac
           echo "::notice::Dispatched '$KIND' locally (#$NUMBER)."

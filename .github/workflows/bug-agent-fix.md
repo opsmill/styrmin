@@ -13,6 +13,10 @@ on:
         description: 'Pipeline PR number to fix'
         required: true
         type: string
+      issue_number:
+        description: 'Bug issue linked to the pipeline PR'
+        required: true
+        type: string
 run-name: "Bug fixer PR #${{ github.event.inputs.pr_number }}"
 engine: claude
 timeout-minutes: 60
@@ -68,8 +72,7 @@ checkout:
 safe-outputs:
   # These workers run on `workflow_dispatch`, so no issue or pull request triggers
   # them and the default `target: triggering` resolves nothing. gh-aw v1.2.2 rejects
-  # such a call. A fixed number limits the output to the dispatched item; `"*"` is
-  # used only where the worker writes to both the issue and its pull request.
+  # such a call. Writes are scoped to the dispatched PR or its linked bug issue.
   github-app:
     client-id: ${{ secrets.BUG_PIPELINE_APP_ID }}
     private-key: ${{ secrets.BUG_PIPELINE_APP_PRIVATE_KEY }}
@@ -80,14 +83,14 @@ safe-outputs:
     target: "${{ github.event.inputs.pr_number }}"
     max: 3
   add-comment:
-    target: "*"
+    target: "${{ github.event.inputs.issue_number }}"
     max: 3
   add-labels:
-    target: "${{ github.event.inputs.pr_number }}"
+    target: "${{ github.event.inputs.issue_number }}"
     max: 2
   report-missing-tool:
 source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-fix.md@chore/gh-aw-1.2.2
-source-sha: "8fb2ce18e13a5b556fc875e64ac733eabd8ec575"
+source-sha: "509afc42cc6656e3e9ccfd8fd6c1fcca8878f6c4"
 ---
 
 # Bug fixer agent
@@ -135,10 +138,12 @@ Read the PR (#`${{ github.event.inputs.pr_number }}`) body and its bot-authored
 comments:
 - **Initial fix** — PR has `AGENT_TEST_COMPLETE` AND a `TEST_APPROVED` verdict,
   and NO `AGENT_FIX_COMPLETE` yet. If `TEST_APPROVED` is absent, post a comment
-  that the test must be approved first and **STOP**.
+  on the linked bug issue (including the PR number) that the test must be approved
+  first and **STOP**.
 - **Revision** — PR already has `AGENT_FIX_COMPLETE` and a latest
   `FIX_CHANGES_REQUESTED` verdict. Address the reviewer's requested changes only.
-  If neither initial nor revision conditions hold, post a comment and STOP.
+  If neither initial nor revision conditions hold, post a comment on the linked
+  bug issue (including the PR number) and STOP.
 
 Check out the PR branch: parse the issue number from the head ref
 `ai-bug-pipeline-<issue>-...`; read the analyst's `AGENT_ANALYSIS_COMPLETE`

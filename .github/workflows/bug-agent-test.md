@@ -75,8 +75,7 @@ checkout:
 safe-outputs:
   # These workers run on `workflow_dispatch`, so no issue or pull request triggers
   # them and the default `target: triggering` resolves nothing. gh-aw v1.2.2 rejects
-  # such a call. A fixed number limits the output to the dispatched item; `"*"` is
-  # used only where the worker writes to both the issue and its pull request.
+  # such a call. Targets use the dispatch inputs to scope writes to that issue or PR.
   github-app:
     client-id: ${{ secrets.BUG_PIPELINE_APP_ID }}
     private-key: ${{ secrets.BUG_PIPELINE_APP_PRIVATE_KEY }}
@@ -88,14 +87,14 @@ safe-outputs:
     target: "${{ github.event.inputs.pr_number }}"
     max: 3
   add-comment:
-    target: "*"
+    target: "${{ github.event.inputs.issue_number || github.event.inputs.pr_number }}"
     max: 3
   add-labels:
-    target: "*"
+    target: "${{ github.event.inputs.issue_number || github.event.inputs.pr_number }}"
     max: 2
   report-missing-tool:
 source: opsmill/opsmill-cicd-workflows/workflows/bug-agent-test.md@chore/gh-aw-1.2.2
-source-sha: "8fb2ce18e13a5b556fc875e64ac733eabd8ec575"
+source-sha: "509afc42cc6656e3e9ccfd8fd6c1fcca8878f6c4"
 ---
 
 # Bug test-writer agent
