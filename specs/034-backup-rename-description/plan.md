@@ -133,6 +133,8 @@ changelog/39.added.md
 
 - **The E2E test reads the Velero name from `backup.name` today.** Update every call site listed in research R9 in the same change, or the backup E2E tests fail.
 - **The constraint name on SQLite.** Test fixtures build the schema with `create_all()`, so the migration test has to drop the unnamed constraint with `batch_alter_table` and a naming convention, as `c9d0e1f2a3b4` does.
+- **Downgrade.** The older code uses `backup.name` as the Velero name. After a downgrade, backups that were created after the upgrade with a custom name, or renamed after it, cannot be restored, because their Velero object is `styrmin-<id>`. The downgrade cannot repair this. The migration's docstring and its downgrade function state this limit.
+- **Two writes of the same name at the same moment.** The second write fails on the unique index and returns `INTERNAL_ERROR` instead of `ALREADY_EXISTS`. No data is damaged. Upgrade path: catch `IntegrityError` at commit (critique E3).
 - **A backup that is running during the upgrade.** The migration backfills its `velero_backup_name` before the flow next reads the row. The backup flow reads the name once, when it starts, so a backup that started before the upgrade keeps the name it already used.
 
 ## Complexity Tracking

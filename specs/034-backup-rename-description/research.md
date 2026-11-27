@@ -65,7 +65,7 @@ Source spec: [spec.md](spec.md). Each decision lists what was chosen, why, and t
 - The **Create Backup** button opens it in create mode. Submitting with both fields empty creates a backup with the default name, as the button does today.
 - A new **Edit** action in each `BackupRow` opens it in edit mode, filled with the current values, and calls `updateBackup`.
 
-`BackupRow` shows the description under the name, in muted text. The restore dialog already shows the backup's current `name`, so it needs no change.
+`BackupRow` shows the description under the name, in muted text, limited to two lines, with the full text in a `title` tooltip. The description is rendered as plain text, never as Markdown or HTML. In create mode the submit button has focus, so pressing Enter in the empty dialog creates a backup with the default name, which keeps the old one-click flow close to one keystroke. The restore dialog already shows the backup's current `name`, so it needs no change.
 
 **Rationale**: One dialog covers FR-001 and FR-012. An edit dialog is simpler than inline editing and works the same way for the name and the description.
 
