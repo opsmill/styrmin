@@ -1332,10 +1332,8 @@ function BackupRow({
             <span className="text-muted-foreground/30">|</span>
             <button
               data-testid="backup-edit"
-              disabled={deploymentTerminal}
               onClick={() => onEdit(backup.id)}
-              className="text-xs font-medium text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
-              title={deploymentTerminal ? terminalTitle : undefined}
+              className="text-xs font-medium text-primary hover:underline"
             >
               Edit
             </button>

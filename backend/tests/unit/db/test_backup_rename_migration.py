@@ -134,6 +134,39 @@ def test_downgrade_refuses_when_names_are_duplicated(upgraded) -> None:
         command.downgrade(alembic_config, PREVIOUS_REVISION)
 
 
+def _names(url: str) -> dict[uuid.UUID, str]:
+    return dict(_run(url, [sa.select(BACKUP.c.id, BACKUP.c.name)])[-1])
+
+
+def test_downgrade_restores_the_velero_name_of_a_renamed_legacy_backup(
+    upgraded,
+) -> None:
+    url, alembic_config = upgraded
+    _run(url, [sa.update(BACKUP).where(BACKUP.c.id == CUSTOM).values(name="renamed")])
+
+    command.downgrade(alembic_config, PREVIOUS_REVISION)
+
+    assert _names(url)[CUSTOM] == "before-upgrade"
+    assert _metadata(url)[CUSTOM] == {"velero_phase": "Done"}
+
+
+def test_downgrade_refuses_a_duplicate_produced_by_the_velero_name_rewrite(
+    upgraded,
+) -> None:
+    url, alembic_config = upgraded
+    _run(
+        url,
+        [
+            sa.update(BACKUP).where(BACKUP.c.id == CUSTOM).values(name="renamed"),
+            _backup(uuid.uuid4(), "before-upgrade", INSTANCE_B),
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="before-upgrade"):
+        command.downgrade(alembic_config, PREVIOUS_REVISION)
+    assert _names(url)[CUSTOM] == "renamed"
+
+
 def test_the_model_declares_the_index_the_revision_creates() -> None:
     index = next(
         index

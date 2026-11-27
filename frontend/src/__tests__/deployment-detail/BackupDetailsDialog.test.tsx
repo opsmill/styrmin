@@ -37,6 +37,8 @@ const noopMutationResult = {
   error: null,
 };
 
+let deploymentStatus = "active";
+
 const DEPLOYMENT = {
   id: "dep-1",
   name: "web",
@@ -93,7 +95,7 @@ vi.mock("@/generated/graphql", async () => {
     ...actual,
     useGetDeploymentQuery: () => ({
       ...noopQueryResult,
-      data: { deployment: DEPLOYMENT },
+      data: { deployment: { ...DEPLOYMENT, status: deploymentStatus } },
     }),
     useGetDeploymentTimelineQuery: () => ({
       ...noopQueryResult,
@@ -192,6 +194,7 @@ function renderDialog(
 
 describe("BackupDetailsDialog", () => {
   beforeEach(() => {
+    deploymentStatus = "active";
     updateBackupMock.mockReset();
     updateBackupMock.mockResolvedValue({});
     createBackupMock.mockReset();
@@ -259,6 +262,15 @@ describe("BackupDetailsDialog", () => {
     expect(description.textContent).toBe(BACKUP.description);
     expect(description.getAttribute("title")).toBe(BACKUP.description);
     expect(description.className).toContain("line-clamp-2");
+  });
+
+  it("keeps Edit enabled while the deployment is being deleted", async () => {
+    deploymentStatus = "deleting";
+    await renderBackupsTab();
+
+    const row = screen.getByTestId("backup-row");
+    expect(within(row).getByTestId("backup-edit")).toBeEnabled();
+    expect(within(row).getByRole("button", { name: "Delete" })).toBeDisabled();
   });
 
   it("pre-fills edit mode and sends only the changed fields", async () => {

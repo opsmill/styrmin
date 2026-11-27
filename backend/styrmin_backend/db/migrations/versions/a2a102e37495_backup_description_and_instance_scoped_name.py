@@ -10,13 +10,18 @@ rename does not change it. Rows that an earlier version created with a custom
 name already have a Velero object with that name, so the upgrade stores it in
 ``metadata.velero_backup_name`` for those rows only.
 
-Downgrade limit: the older code uses ``backup.name`` as the Velero object
-name. After a downgrade, a backup that was created after the upgrade with a
-custom name, or renamed after the upgrade, cannot be restored by the older
-code, because its Velero object is ``styrmin-<id>``. The downgrade cannot
-repair this.
+The older code uses ``backup.name`` as the Velero object name, so the
+downgrade sets ``name`` back to ``metadata.velero_backup_name`` wherever that
+key is set. A row created with a custom name before the upgrade and renamed
+after it therefore stays restorable.
+
+Downgrade limit: a backup created after the upgrade with a custom name, or a
+default-named backup renamed after the upgrade, has a Velero object named
+``styrmin-<id>``. The older code cannot find that object unless the backup's
+name is ``styrmin-<id>``. The downgrade cannot repair this.
 """
 
+from collections import Counter
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -103,19 +108,31 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Restore ``UNIQUE (name)`` across all backups.
 
-    See the module docstring: backups created or renamed after the upgrade with
-    a custom name cannot be restored by the older code after this downgrade.
+    See the module docstring: names come back from ``metadata.velero_backup_name``,
+    and backups created or renamed after the upgrade without that key cannot be
+    restored by the older code after this downgrade.
     """
     bind = op.get_bind()
 
-    # Checked before any change, so a refused downgrade leaves the schema as it is.
-    duplicates = bind.execute(
-        sa.text(
-            "SELECT name, COUNT(*) AS n FROM backup GROUP BY name HAVING COUNT(*) > 1"
-        )
+    # Compute the names the rows will have first, so the duplicate check covers
+    # names the rewrite produces and a refused downgrade changes nothing.
+    rows = bind.execute(
+        sa.select(_backup.c.id, _backup.c.name, _backup.c.metadata)
     ).all()
+    rewrites = {}
+    names = Counter()
+    for backup_id, name, metadata in rows:
+        if isinstance(metadata, dict) and _VELERO_NAME_KEY in metadata:
+            rest = {k: v for k, v in metadata.items() if k != _VELERO_NAME_KEY}
+            name = metadata[_VELERO_NAME_KEY]
+            rewrites[backup_id] = (name, rest or None)
+        names[name] += 1
+
+    duplicates = {name: n for name, n in names.items() if n > 1}
     if duplicates:
-        offenders = ", ".join(f"{row.name!r} ({row.n} backups)" for row in duplicates)
+        offenders = ", ".join(
+            f"{name!r} ({n} backups)" for name, n in duplicates.items()
+        )
         raise RuntimeError(
             "Refusing to downgrade: the older schema requires backup names to be "
             f"unique across all backups, and these names are used more than once: "
@@ -124,12 +141,12 @@ def downgrade() -> None:
 
     op.drop_index(_INDEX_NAME, table_name="backup")
 
-    for backup_id, metadata in bind.execute(
-        sa.select(_backup.c.id, _backup.c.metadata)
-    ).all():
-        if isinstance(metadata, dict) and _VELERO_NAME_KEY in metadata:
-            rest = {k: v for k, v in metadata.items() if k != _VELERO_NAME_KEY}
-            _set_metadata(bind, backup_id, rest or None)
+    for backup_id, (name, metadata) in rewrites.items():
+        bind.execute(
+            sa.update(_backup)
+            .where(_backup.c.id == backup_id)
+            .values(name=name, metadata=metadata)
+        )
 
     if bind.dialect.name == "postgresql":
         op.create_unique_constraint(_POSTGRES_CONSTRAINT_NAME, "backup", ["name"])
