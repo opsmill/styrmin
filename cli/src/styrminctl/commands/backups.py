@@ -41,6 +41,16 @@ backups_app = App(name="backups", help="Manage backups and restores.")
 #: An em-dash reads as "nothing here" rather than "zero"/"now".
 NOT_RECORDED = "—"
 
+#: The longest description ``backups list`` shows; ``backups get`` prints it in full.
+DESCRIPTION_COLUMN_WIDTH = 40
+
+
+def _cut_short(text: str | None, width: int = DESCRIPTION_COLUMN_WIDTH) -> str:
+    """Return ``text`` cut to ``width`` characters, ending in an ellipsis when it was cut."""
+    if not text:
+        return ""
+    return text if len(text) <= width else text[: width - 1] + "…"
+
 
 @backups_app.command
 async def create(
@@ -92,6 +102,7 @@ async def get(backup_id: BackupId) -> None:
 
     console.print(f"  ID: {backup.id}")
     console.print(f"  Name: {backup.name}")
+    console.print(f"  Description: {backup.description or ''}")
     console.print(f"  Status: {backup.status}")
     console.print(f"  Instance ID: {backup.instance_id}")
     console.print(f"  Application version: {backup.instance.application_version}")
@@ -154,6 +165,7 @@ async def list_backups(
         {
             "id": str(b.id),
             "name": b.name,
+            "description": _cut_short(b.description),
             "status": b.status,
             "application_version": b.instance.application_version,
             "started_at": str(b.started_at or ""),
@@ -168,6 +180,7 @@ async def list_backups(
         columns=[
             "id",
             "name",
+            "description",
             "status",
             "application_version",
             "started_at",
@@ -177,6 +190,23 @@ async def list_backups(
         ],
         title="Backups",
     )
+
+
+@backups_app.command
+async def update(
+    backup_id: BackupId,
+    *,
+    name: Annotated[str | None, Parameter(help="New backup name, unique among the backups of its instance.")] = None,
+    description: Annotated[str | None, Parameter(help='New description. --description "" clears it.')] = None,
+) -> None:
+    """Rename a backup or change its description."""
+    with styrmin_error_handler():
+        if name is None and description is None:
+            raise ValueError("Provide --name, --description, or both.")
+        async with client.get_client() as sdk:
+            backup = await sdk.backups.update_backup(backup_id, name=name, description=description)
+
+    print_success(f"Backup '{backup.name}' updated (id: {backup.id})")
 
 
 @backups_app.command

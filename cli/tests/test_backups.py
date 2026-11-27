@@ -73,6 +73,7 @@ def test_backups_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert "get" in output
     assert "list" in output
     assert "delete" in output
+    assert "update" in output
     assert "restore" in output
     assert "restore-get" in output
     assert "restore-list" in output
@@ -366,6 +367,115 @@ def test_backups_get_without_retention_metadata(mock_client: MagicMock, capsys: 
     output = capsys.readouterr().out
     assert "TTL: —" in output
     assert "Expires at: —" in output
+
+
+def test_backups_get_shows_description(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:
+    mock_backup = MagicMock(
+        id=BACKUP_UUID,
+        status="completed",
+        instance_id=INSTANCE_UUID,
+        description="Taken before the 2.0 upgrade",
+        error_message=None,
+    )
+    mock_backup.name = "pre-upgrade"
+    mock_client.backups.get_backup = AsyncMock(return_value=mock_backup)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "get", BACKUP_UUID])
+    assert exc.value.code == 0
+    assert "Description: Taken before the 2.0 upgrade" in capsys.readouterr().out
+
+
+def test_backups_list_shows_description_cut_short(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "250")
+    long_text = "x" * 60
+    long_backup = MagicMock(
+        id=BACKUP_UUID, status="completed", started_at="x", completed_at="y", size_bytes=1, expires_at=None
+    )
+    long_backup.name = "backup-long"
+    long_backup.description = long_text
+    long_backup.instance.application_version = APP_VERSION
+    short_backup = MagicMock(
+        id="11111111-2222-3333-4444-555555555555",
+        status="completed",
+        started_at="x",
+        completed_at="y",
+        size_bytes=1,
+        expires_at=None,
+        description="short notes",
+    )
+    short_backup.name = "backup-short"
+    short_backup.instance.application_version = APP_VERSION
+    mock_client.backups.list_backups = AsyncMock(return_value=[long_backup, short_backup])
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "list", "--instance-id", INSTANCE_UUID])
+    assert exc.value.code == 0
+    lines = capsys.readouterr().out.splitlines()
+    header = next(line for line in lines if "application_version" in line)
+    assert header.index("name") < header.index("description") < header.index("status")
+    long_row = next(line for line in lines if "backup-long" in line)
+    assert "x" * (backups_commands.DESCRIPTION_COLUMN_WIDTH - 1) + "…" in long_row
+    assert long_text not in long_row
+    assert "short notes" in next(line for line in lines if "backup-short" in line)
+
+
+# --- update ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        pytest.param(["--name", "pre-upgrade"], {"name": "pre-upgrade", "description": None}, id="name"),
+        pytest.param(["--description", "notes"], {"name": None, "description": "notes"}, id="description"),
+        pytest.param(["--description", ""], {"name": None, "description": ""}, id="clear-description"),
+        pytest.param(
+            ["--name", "pre-upgrade", "--description", "notes"],
+            {"name": "pre-upgrade", "description": "notes"},
+            id="both",
+        ),
+    ],
+)
+def test_backups_update(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str], args: list[str], expected: dict[str, str | None]
+) -> None:
+    updated = MagicMock(id=BACKUP_UUID)
+    updated.name = expected["name"] or "backup-1"
+    mock_client.backups.update_backup = AsyncMock(return_value=updated)
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "update", BACKUP_UUID, *args])
+    assert exc.value.code == 0
+    mock_client.backups.update_backup.assert_called_once_with(BACKUP_UUID, **expected)
+    assert f"Backup '{updated.name}' updated" in capsys.readouterr().out
+
+
+def test_backups_update_without_options_is_a_usage_error(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mock_client.backups.update_backup = AsyncMock()
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "update", BACKUP_UUID])
+    assert exc.value.code == 1
+    mock_client.__aenter__.assert_not_awaited()
+    mock_client.backups.update_backup.assert_not_called()
+    assert "Provide --name, --description, or both." in capsys.readouterr().out
+
+
+def test_backups_update_name_taken_prints_the_server_error(
+    mock_client: MagicMock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    mock_client.backups.update_backup = AsyncMock(
+        side_effect=StyrminError("A backup named 'taken' already exists", "ALREADY_EXISTS")
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        app(["backups", "update", BACKUP_UUID, "--name", "taken"])
+    assert exc.value.code == 1
+    assert "A backup named 'taken' already exists" in capsys.readouterr().out
 
 
 def test_backups_delete(mock_client: MagicMock, capsys: pytest.CaptureFixture[str]) -> None:

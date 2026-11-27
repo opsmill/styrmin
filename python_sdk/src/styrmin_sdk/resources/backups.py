@@ -15,6 +15,7 @@ from styrmin_sdk.graphql._generated.get_backup import GetBackup, GetBackupBackup
 from styrmin_sdk.graphql._generated.get_restore import GetRestore, GetRestoreRestore
 from styrmin_sdk.graphql._generated.list_backups import ListBackups, ListBackupsBackups
 from styrmin_sdk.graphql._generated.list_restores import ListRestores, ListRestoresRestores
+from styrmin_sdk.graphql._generated.update_backup import UpdateBackup, UpdateBackupUpdateBackup
 from styrmin_sdk.resources._base import BaseResource
 
 #: How a server from before #532 refuses a restore that names only the backup.
@@ -63,6 +64,26 @@ class BackupResource(BaseResource):
         result = await self._transport.execute(load_query("get_backup"), {"backupId": str(backup_id)})
         self._check_graphql_errors(result)
         return self._parse(GetBackup, result["data"], "backup", GetBackupBackup)
+
+    async def update_backup(
+        self,
+        backup_id: str | UUID,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> UpdateBackupUpdateBackup:
+        """Rename a backup or change its description.
+
+        Only the arguments that are set are sent. ``description=""`` clears the description.
+        """
+        variables: dict[str, Any] = {"backupId": str(backup_id)}
+        if name is not None:
+            variables["name"] = name
+        if description is not None:
+            variables["description"] = description
+
+        result = await self._transport.execute(load_query("update_backup"), variables)
+        self._check_graphql_errors(result)
+        return self._parse(UpdateBackup, result["data"], "update_backup", UpdateBackupUpdateBackup)
 
     async def list_backups(
         self,

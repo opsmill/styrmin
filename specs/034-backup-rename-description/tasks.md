@@ -136,9 +136,9 @@ description: "Task list for 034-backup-rename-description"
 
 ### SDK and CLI
 
-- [ ] T019 [P] [US1] Add `python_sdk/src/styrmin_sdk/graphql/update_backup.graphql` (`mutation UpdateBackup($backupId: UUID!, $name: String, $description: String)`, selecting the same fields as `create_backup.graphql` plus `description`). Add `description` to `get_backup.graphql` and `list_backups.graphql`. Run `uv run invoke validate-graphql` and `uv run invoke generate`.
-- [ ] T020 [US1] In `python_sdk/src/styrmin_sdk/resources/backups.py`, add `update_backup(self, backup_id: UUID | str, name: str | None = None, description: str | None = None)`. It sends only the arguments that are set, so `description=""` is sent. Follow `resources/schedules.py`. Test it in `python_sdk/tests/test_backups.py`.
-- [ ] T021 [US1] In `cli/src/styrminctl/commands/backups.py`:
+- [X] T019 [P] [US1] Add `python_sdk/src/styrmin_sdk/graphql/update_backup.graphql` (`mutation UpdateBackup($backupId: UUID!, $name: String, $description: String)`, selecting the same fields as `create_backup.graphql` plus `description`). Add `description` to `get_backup.graphql` and `list_backups.graphql`. Run `uv run invoke validate-graphql` and `uv run invoke generate`.
+- [X] T020 [US1] In `python_sdk/src/styrmin_sdk/resources/backups.py`, add `update_backup(self, backup_id: UUID | str, name: str | None = None, description: str | None = None)`. It sends only the arguments that are set, so `description=""` is sent. Follow `resources/schedules.py`. Test it in `python_sdk/tests/test_backups.py`.
+- [X] T021 [US1] In `cli/src/styrminctl/commands/backups.py`:
   - add the command `update <backup-id> [--name NAME] [--description TEXT]`, which exits with a usage error when neither option is given;
   - show the description in `get`, and as a Description column, cut short to fit, in `list`.
 

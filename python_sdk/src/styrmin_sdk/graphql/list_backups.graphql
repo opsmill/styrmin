@@ -2,6 +2,7 @@ query ListBackups($deploymentId: UUID, $instanceId: UUID, $status: BackupStatus)
     backups(deploymentId: $deploymentId, instanceId: $instanceId, status: $status) {
         id
         name
+        description
         status
         instanceId
         instance {

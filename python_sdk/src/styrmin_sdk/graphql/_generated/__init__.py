@@ -386,6 +386,7 @@ from .unassign_backup_storage_location import (
     UnassignBackupStorageLocation,
     UnassignBackupStorageLocationUnassignBackupStorageLocation,
 )
+from .update_backup import UpdateBackup, UpdateBackupUpdateBackup
 from .update_backup_schedule import (
     UpdateBackupSchedule,
     UpdateBackupScheduleUpdateBackupSchedule,
@@ -731,10 +732,12 @@ __all__ = [
     "TopologySpreadConstraintInput",
     "UnassignBackupStorageLocation",
     "UnassignBackupStorageLocationUnassignBackupStorageLocation",
+    "UpdateBackup",
     "UpdateBackupSchedule",
     "UpdateBackupScheduleUpdateBackupSchedule",
     "UpdateBackupStorageLocation",
     "UpdateBackupStorageLocationUpdateBackupStorageLocation",
+    "UpdateBackupUpdateBackup",
     "UpdateCluster",
     "UpdateClusterInput",
     "UpdateClusterUpdateCluster",

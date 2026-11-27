@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from styrmin_sdk.exceptions import IncompatibleServerError, OperationFailedError, ResourceNotFoundError
+from styrmin_sdk.exceptions import (
+    IncompatibleServerError,
+    OperationFailedError,
+    ResourceAlreadyExistsError,
+    ResourceNotFoundError,
+)
 from styrmin_sdk.graphql._generated.enums import BackupStatus  # noqa: PLC2701 — not re-exported
 
 if TYPE_CHECKING:
@@ -81,6 +86,7 @@ class TestBackupResource:
                 "backup": {
                     "id": "00000000-0000-0000-0000-000000000001",
                     "name": "test-backup",
+                    "description": "Before the 2.0 upgrade",
                     "status": "completed",
                     "instanceId": "00000000-0000-0000-0000-000000000010",
                     "instance": LISTED_INSTANCE,
@@ -101,6 +107,7 @@ class TestBackupResource:
         assert backup.status == "completed"
         assert backup.instance.application_version == "0.1.0"
         assert backup.size_bytes == 1024
+        assert backup.description == "Before the 2.0 upgrade"
         assert backup.ttl == "2160h"
         assert backup.expires_at is not None
         assert backup.expires_at.isoformat() == "2026-04-01T00:00:00"
@@ -125,6 +132,7 @@ class TestBackupResource:
                     {
                         "id": "00000000-0000-0000-0000-000000000001",
                         "name": "backup-1",
+                        "description": None,
                         "status": "completed",
                         "instanceId": "00000000-0000-0000-0000-000000000010",
                         "instance": LISTED_INSTANCE,
@@ -141,6 +149,7 @@ class TestBackupResource:
                     {
                         "id": "00000000-0000-0000-0000-000000000002",
                         "name": "backup-2",
+                        "description": None,
                         "status": "failed",
                         "instanceId": "00000000-0000-0000-0000-000000000010",
                         "instance": LISTED_INSTANCE,
@@ -173,6 +182,64 @@ class TestBackupResource:
         mock_transport.execute.return_value = {"data": {"deleteBackup": "Backup deleted"}}
 
         await client.backups.delete_backup("00000000-0000-0000-0000-000000000001")
+
+    @staticmethod
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("kwargs", "expected"),
+        [
+            pytest.param({"name": "pre-upgrade"}, {"name": "pre-upgrade"}, id="name-only"),
+            pytest.param({"description": "notes"}, {"description": "notes"}, id="description-only"),
+            pytest.param({"description": ""}, {"description": ""}, id="empty-description-clears"),
+            pytest.param(
+                {"name": "pre-upgrade", "description": "notes"},
+                {"name": "pre-upgrade", "description": "notes"},
+                id="both",
+            ),
+        ],
+    )
+    async def test_update_backup_sends_only_the_arguments_that_are_set(
+        client: StyrminClient, mock_transport: AsyncMock, kwargs: dict[str, str], expected: dict[str, str]
+    ) -> None:
+        backup_id = "00000000-0000-0000-0000-000000000001"
+        mock_transport.execute.return_value = {
+            "data": {
+                "updateBackup": {
+                    "id": backup_id,
+                    "name": kwargs.get("name", "test-backup"),
+                    "description": kwargs.get("description"),
+                    "status": "completed",
+                    "instanceId": "00000000-0000-0000-0000-000000000010",
+                    "errorMessage": None,
+                    "startedAt": None,
+                    "completedAt": None,
+                    "sizeBytes": None,
+                    "ttl": None,
+                    "expiresAt": None,
+                    "createdOn": "2026-01-01T00:00:00",
+                    "updatedOn": None,
+                }
+            }
+        }
+
+        backup = await client.backups.update_backup(UUID(backup_id), **kwargs)
+
+        query, variables = mock_transport.execute.call_args.args
+        assert "mutation UpdateBackup" in query
+        assert variables == {"backupId": backup_id, **expected}
+        assert backup.name == kwargs.get("name", "test-backup")
+        assert backup.description == kwargs.get("description")
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_update_backup_name_taken_raises(client: StyrminClient, mock_transport: AsyncMock) -> None:
+        mock_transport.execute.return_value = {
+            "data": None,
+            "errors": [{"message": "Backup name already exists", "extensions": {"code": "ALREADY_EXISTS"}}],
+        }
+
+        with pytest.raises(ResourceAlreadyExistsError):
+            await client.backups.update_backup("00000000-0000-0000-0000-000000000001", name="taken")
 
     @staticmethod
     @pytest.mark.asyncio
@@ -352,6 +419,7 @@ def _backup(backup_id: str, steps: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "id": backup_id,
         "name": f"backup-{backup_id[-1]}",
+        "description": None,
         "status": "failed",
         "instanceId": "00000000-0000-0000-0000-000000000010",
         "instance": LISTED_INSTANCE,
